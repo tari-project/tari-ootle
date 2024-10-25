@@ -811,7 +811,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError> {
-        todo!()
+        let key = format!("blocks_{}", block_id.to_string());
+
+        let value = self.tx.get(&key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation: "blocks_get",
+                source: e,
+            })?;
+
+        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation: "blocks_get" })?;
+
+        let config = bincode::config::standard();
+        let (block, _): (Block, usize) = bincode::serde::decode_from_slice(&bytes, config).unwrap();
+
+        Ok(block)
+
         /*
         use crate::schema::{blocks, quorum_certificates};
 

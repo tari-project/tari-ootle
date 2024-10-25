@@ -31,6 +31,8 @@ pub enum RocksDbStorageError {
         source: rocksdb::Error,
         operation: &'static str,
     },
+    #[error("Entry {key} not found during operation {operation}")]
+    NotFound { key: String, operation: &'static str },
     /*
     #[error("Could not connect to database: {source}")]
     ConnectionError {
@@ -70,6 +72,7 @@ impl From<RocksDbStorageError> for StorageError {
             RocksDbStorageError::RocksDbError { .. } => StorageError::QueryError {
                 reason: source.to_string(),
             },
+            RocksDbStorageError::NotFound { key, operation } => StorageError::NotFound { item: operation.to_owned(), key },
             /*
             RocksDbStorageError::ConnectionError { .. } => StorageError::ConnectionError {
                 reason: source.to_string(),

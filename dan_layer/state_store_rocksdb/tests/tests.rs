@@ -17,11 +17,12 @@ use tempfile::tempdir;
 
 fn create_db() -> RocksDbStateStore<String> {
     let temp_dir = tempdir().unwrap();
-    let temp_dir = temp_dir
-        .path()
+    let db_file = temp_dir.path().join("rocksdb");
+    let db_file = db_file
         .as_os_str()
         .to_str().unwrap();
-    RocksDbStateStore::connect(temp_dir).unwrap()
+
+    RocksDbStateStore::connect(db_file).unwrap()
 }
 
 fn create_tx_atom() -> TransactionAtom {
@@ -53,6 +54,8 @@ mod confirm_all_transitions {
         let network = Default::default();
         let zero_block = Block::zero_block(network, NumPreshards::P64, None).unwrap();
         zero_block.insert(&mut tx).unwrap();
+        let res = tx.blocks_get(zero_block.id());
+        eprintln!("{:?}", res);
         /*
         let block1 = Block::new(
             network,

@@ -83,6 +83,8 @@ use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeNode, Version};
 use tari_transaction::TransactionId;
 use tari_utilities::ByteArray;
 use time::{OffsetDateTime, PrimitiveDateTime};
+use tari_common_types::types::PublicKey;
+use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
 use crate::{reader::RocksDbStateStoreReadTransaction};
 
@@ -439,6 +441,40 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "quorum_certificates_insert",
+                source: e,
+            })?;
+
+        Ok(())
+        */
+    }
+
+    fn quorum_certificates_set_shares_processed(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
+        todo!()
+        /*
+        use crate::schema::quorum_certificates;
+
+        let qc_id = serialize_hex(qc_id);
+        let qc_json = quorum_certificates::table
+            .select(quorum_certificates::json)
+            .filter(quorum_certificates::qc_id.eq(&qc_id))
+            .get_result::<String>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "quorum_certificates_set_shares_processed",
+                source: e,
+            })?;
+
+        let mut json = deserialize_json::<serde_json::Value>(&qc_json)?;
+        json["is_shares_processed"] = serde_json::Value::Bool(true);
+
+        diesel::update(quorum_certificates::table)
+            .filter(quorum_certificates::qc_id.eq(qc_id))
+            .set((
+                quorum_certificates::is_shares_processed.eq(true),
+                quorum_certificates::json.eq(serialize_json(&json)?),
+            ))
+            .execute(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "quorum_certificates_set_shares_processed",
                 source: e,
             })?;
 
@@ -2282,6 +2318,242 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 operation: "lock_conflicts_insert_all",
                 source: e,
             })?;
+
+        Ok(())
+        */
+    }
+
+    fn validator_epoch_stats_add_participation_share(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
+        todo!()
+        /*
+        use crate::schema::{quorum_certificates, validator_epoch_stats};
+
+        let qc_id = serialize_hex(qc_id);
+        let qc_json = quorum_certificates::table
+            .select(quorum_certificates::json)
+            .filter(quorum_certificates::qc_id.eq(&qc_id))
+            .filter(quorum_certificates::is_shares_processed.eq(false))
+            .first::<String>(self.connection())
+            .optional()
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "validator_epoch_stats_add_participation_share",
+                source: e,
+            })?;
+        let Some(qc_json) = qc_json else {
+            return Ok(());
+        };
+
+        let qc = deserialize_json::<QuorumCertificate>(&qc_json)?;
+        let epoch = qc.epoch().as_u64() as i64;
+
+        for sig in qc.signatures() {
+            let values = (
+                validator_epoch_stats::epoch.eq(epoch),
+                validator_epoch_stats::public_key.eq(serialize_hex(sig.public_key().as_bytes())),
+                validator_epoch_stats::participation_shares.eq(1),
+            );
+
+            diesel::insert_into(validator_epoch_stats::table)
+                .values(values)
+                .on_conflict((validator_epoch_stats::epoch, validator_epoch_stats::public_key))
+                .do_update()
+                .set(validator_epoch_stats::participation_shares.eq(validator_epoch_stats::participation_shares + 1))
+                .execute(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "validator_epoch_stats_add_participation_share",
+                    source: e,
+                })?;
+        }
+
+        // Mark QC shares as processed
+        diesel::update(quorum_certificates::table)
+            .filter(quorum_certificates::qc_id.eq(qc_id))
+            .set(quorum_certificates::is_shares_processed.eq(true))
+            .execute(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "validator_epoch_stats_add_participation_share",
+                source: e,
+            })?;
+
+        Ok(())
+        */
+    }
+
+    fn validator_epoch_stats_updates<'a, I: IntoIterator<Item = ValidatorStatsUpdate<'a>>>(
+        &mut self,
+        epoch: Epoch,
+        updates: I,
+    ) -> Result<(), StorageError> {
+        todo!()
+        /*
+        use crate::schema::validator_epoch_stats;
+
+        let epoch = epoch.as_u64() as i64;
+
+        for update in updates {
+            let existing = validator_epoch_stats::table
+                .select((
+                    validator_epoch_stats::participation_shares,
+                    validator_epoch_stats::missed_proposals,
+                ))
+                .filter(validator_epoch_stats::epoch.eq(epoch))
+                .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
+                .first::<(i64, i64)>(self.connection())
+                .optional()
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "validator_epoch_stats_updates",
+                    source: e,
+                })?;
+
+            match existing {
+                Some((participation_shares, missed_proposals)) => match update.missed_proposal_change() {
+                    Some(0) => {
+                        diesel::update(validator_epoch_stats::table)
+                            .filter(validator_epoch_stats::epoch.eq(epoch))
+                            .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
+                            .set((
+                                validator_epoch_stats::participation_shares
+                                    .eq(participation_shares + update.participation_shares_increment() as i64),
+                                validator_epoch_stats::missed_proposals.eq(0),
+                            ))
+                            .execute(self.connection())
+                            .map_err(|e| SqliteStorageError::DieselError {
+                                operation: "validator_epoch_stats_updates",
+                                source: e,
+                            })?;
+                    },
+                    Some(n) => {
+                        let missed_proposal_count = update
+                            .max_total_missed_proposals()
+                            .min(cmp::max(missed_proposals + n, 0));
+                        diesel::update(validator_epoch_stats::table)
+                            .filter(validator_epoch_stats::epoch.eq(epoch))
+                            .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
+                            .set((
+                                validator_epoch_stats::participation_shares
+                                    .eq(participation_shares + update.participation_shares_increment() as i64),
+                                validator_epoch_stats::missed_proposals.eq(missed_proposal_count),
+                            ))
+                            .execute(self.connection())
+                            .map_err(|e| SqliteStorageError::DieselError {
+                                operation: "validator_epoch_stats_updates",
+                                source: e,
+                            })?;
+                    },
+
+                    None => {
+                        diesel::update(validator_epoch_stats::table)
+                            .filter(validator_epoch_stats::epoch.eq(epoch))
+                            .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
+                            .set(
+                                validator_epoch_stats::participation_shares
+                                    .eq(participation_shares + update.participation_shares_increment() as i64),
+                            )
+                            .execute(self.connection())
+                            .map_err(|e| SqliteStorageError::DieselError {
+                                operation: "validator_epoch_stats_updates",
+                                source: e,
+                            })?;
+                    },
+                },
+                None => {
+                    let leader_failure_inc = update.missed_proposal_change().map_or(0i64, |set| set.max(0));
+                    let values = (
+                        validator_epoch_stats::epoch.eq(epoch),
+                        validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())),
+                        validator_epoch_stats::participation_shares.eq(update.participation_shares_increment() as i64),
+                        validator_epoch_stats::missed_proposals.eq(leader_failure_inc),
+                    );
+
+                    diesel::insert_into(validator_epoch_stats::table)
+                        .values(values)
+                        .execute(self.connection())
+                        .map_err(|e| SqliteStorageError::DieselError {
+                            operation: "validator_epoch_stats_updates",
+                            source: e,
+                        })?;
+                },
+            }
+        }
+
+        Ok(())
+        */
+    }
+
+    fn suspended_nodes_insert(
+        &mut self,
+        public_key: &PublicKey,
+        suspended_in_block: BlockId,
+    ) -> Result<(), StorageError> {
+        todo!()
+        /*
+        let suspended_in_block = serialize_hex(suspended_in_block);
+        sql_query(
+            r#"
+            INSERT INTO
+                suspended_nodes (public_key, epoch, suspended_in_block, suspended_in_block_height)
+                SELECT ?, epoch, block_id, height FROM blocks where block_id = ?"#,
+        )
+        .bind::<Text, _>(public_key.to_hex())
+        .bind::<Text, _>(suspended_in_block)
+        .execute(self.connection())
+        .map_err(|e| SqliteStorageError::DieselError {
+            operation: "suspended_nodes_insert",
+            source: e,
+        })?;
+
+        Ok(())
+        */
+    }
+
+    fn suspended_nodes_mark_for_removal(
+        &mut self,
+        public_key: &PublicKey,
+        resumed_in_block: BlockId,
+    ) -> Result<(), StorageError> {
+        todo!()
+        /*
+        use crate::schema::{blocks, suspended_nodes};
+        let resumed_in_block = serialize_hex(resumed_in_block);
+
+        diesel::update(suspended_nodes::table)
+            .set((
+                suspended_nodes::resumed_in_block.eq(&resumed_in_block),
+                suspended_nodes::resumed_in_block_height.eq(blocks::table
+                    .select(blocks::height)
+                    .filter(blocks::block_id.eq(&resumed_in_block))
+                    .single_value()),
+            ))
+            .filter(suspended_nodes::public_key.eq(public_key.to_hex()))
+            .execute(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "suspended_nodes_mark_for_removal",
+                source: e,
+            })?;
+
+        Ok(())
+        */
+    }
+
+    fn suspended_nodes_delete(&mut self, public_key: &PublicKey) -> Result<(), StorageError> {
+        todo!()
+        /*
+        use crate::schema::suspended_nodes;
+
+        let num_affected = diesel::delete(suspended_nodes::table)
+            .filter(suspended_nodes::public_key.eq(public_key.to_hex()))
+            .execute(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "suspended_nodes_delete",
+                source: e,
+            })?;
+
+        if num_affected == 0 {
+            return Err(StorageError::NotFound {
+                item: "suspended_node",
+                key: public_key.to_string(),
+            });
+        }
 
         Ok(())
         */

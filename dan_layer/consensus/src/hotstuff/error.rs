@@ -5,7 +5,7 @@ use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{Epoch, NodeHeight, VersionedSubstateIdError};
 use tari_dan_storage::{
-    consensus_models::{BlockError, BlockId, LeafBlock, LockedBlock, QuorumCertificate, TransactionPoolError},
+    consensus_models::{BlockError, BlockId, LeafBlock, LockedBlock, QcId, TransactionPoolError},
     StorageError,
 };
 use tari_epoch_manager::EpochManagerError;
@@ -188,12 +188,10 @@ pub enum ProposalValidationError {
     MissingSignature { block_id: BlockId, height: NodeHeight },
     #[error("Proposed block {block_id} {height} has invalid signature")]
     InvalidSignature { block_id: BlockId, height: NodeHeight },
-    #[error("QC is not valid: {qc}")]
-    QCisNotValid { qc: QuorumCertificate },
     #[error("QC has invalid signature: {qc}")]
-    QCInvalidSignature { qc: QuorumCertificate },
+    QCInvalidSignature { qc: QcId },
     #[error("Quorum was not reached: {qc}")]
-    QuorumWasNotReached { qc: QuorumCertificate },
+    QuorumWasNotReached { qc: QcId },
     #[error("Invalid network in block {block_id}: expected {expected_network}, given {block_network}")]
     InvalidNetwork {
         expected_network: String,
@@ -208,12 +206,8 @@ pub enum ProposalValidationError {
     },
     #[error("Problem converting values")]
     QCConversionError,
-    #[error("Validator {validator} is not in committee for shard {expected_shard}. Actual shard: {actual_shard}")]
-    ValidatorNotInCommittee {
-        validator: String,
-        expected_shard: String,
-        actual_shard: String,
-    },
+    #[error("Validator {validator} is not in the expected committee: {details}")]
+    ValidatorNotInCommittee { validator: String, details: String },
     #[error("Base layer block hash for block with height {proposed} too high, current height {current}")]
     BlockHeightTooHigh { proposed: u64, current: u64 },
     #[error("Base layer block hash for block with height {proposed} too small, current height {current}")]
@@ -250,5 +244,11 @@ pub enum ProposalValidationError {
         block_id: BlockId,
         expected_sidechain_id: RistrettoPublicKey,
         sidechain_id: RistrettoPublicKey,
+    },
+    #[error("Invalid epoch in block {block_id}. Expected: {current_epoch}, given: {block_epoch}")]
+    InvalidEpochInBlock {
+        block_id: BlockId,
+        block_epoch: Epoch,
+        current_epoch: Epoch,
     },
 }

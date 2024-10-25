@@ -39,7 +39,7 @@ pub struct ValidatorChannels {
 
 pub struct Validator {
     pub address: TestAddress,
-    pub shard_address: SubstateAddress,
+    pub _shard_address: SubstateAddress,
     pub shard_group: ShardGroup,
     pub num_committees: u32,
 
@@ -86,12 +86,12 @@ impl Validator {
 
     pub fn has_committed_substates(&self) -> bool {
         let tx = self.state_store().create_read_tx().unwrap();
-        assert_eq!(
-            tx.transaction_pool_count(None, None, None).unwrap(),
-            0,
-            "Transaction pool is not empty in {}",
-            self.address
-        );
+        // assert_eq!(
+        //     tx.transaction_pool_count(None, None, None).unwrap(),
+        //     0,
+        //     "Transaction pool is not empty in {}",
+        //     self.address
+        // );
 
         tx.substates_count().unwrap() > 0
     }

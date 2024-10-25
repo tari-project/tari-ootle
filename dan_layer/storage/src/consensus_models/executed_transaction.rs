@@ -223,7 +223,7 @@ impl ExecutedTransaction {
         let rec = tx.transactions_get(tx_id)?;
         if rec.execution_result.is_none() {
             return Err(StorageError::NotFound {
-                item: "ExecutedTransaction".to_string(),
+                item: "ExecutedTransaction",
                 key: tx_id.to_string(),
             });
         }
@@ -240,7 +240,7 @@ impl ExecutedTransaction {
         let rec = tx.transactions_get(tx_id)?;
         let Some(result) = rec.execution_result else {
             return Err(StorageError::NotFound {
-                item: "ExecutedTransaction result".to_string(),
+                item: "ExecutedTransaction result",
                 key: tx_id.to_string(),
             });
         };
@@ -269,10 +269,7 @@ impl ExecutedTransaction {
         Ok(exec.into_execution().for_block(*block_id))
     }
 
-    pub fn exists<TTx: StateStoreReadTransaction + ?Sized>(
-        tx: &TTx,
-        tx_id: &TransactionId,
-    ) -> Result<bool, StorageError> {
+    pub fn exists<TTx: StateStoreReadTransaction>(tx: &TTx, tx_id: &TransactionId) -> Result<bool, StorageError> {
         match tx.transactions_get(tx_id).optional()? {
             Some(rec) => Ok(rec.execution_result.is_some()),
             None => Ok(false),
@@ -300,7 +297,7 @@ impl ExecutedTransaction {
         let (recs, missing) = Self::get_any(tx, tx_ids)?;
         if !missing.is_empty() {
             return Err(StorageError::NotFound {
-                item: "ExecutedTransaction".to_string(),
+                item: "ExecutedTransaction",
                 key: missing
                     .into_iter()
                     .map(|id| id.to_string())

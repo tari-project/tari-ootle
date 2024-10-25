@@ -72,7 +72,7 @@ impl From<RocksDbStorageError> for StorageError {
             RocksDbStorageError::RocksDbError { .. } => StorageError::QueryError {
                 reason: source.to_string(),
             },
-            RocksDbStorageError::NotFound { key, operation } => StorageError::NotFound { item: operation.to_owned(), key },
+            RocksDbStorageError::NotFound { key, operation } => StorageError::NotFound { item: operation, key },
             /*
             RocksDbStorageError::ConnectionError { .. } => StorageError::ConnectionError {
                 reason: source.to_string(),

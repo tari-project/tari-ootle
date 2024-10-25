@@ -77,11 +77,7 @@ where
 {
     let swarm = SwarmBuilder::with_existing_identity(identity)
         .with_tokio()
-        .with_tcp(
-            tcp::Config::new().nodelay(true).port_reuse(true),
-            noise_config,
-            yamux::Config::default,
-        )?
+        .with_tcp(tcp::Config::new().nodelay(true), noise_config, yamux::Config::default)?
         .with_quic()
         .with_relay_client(noise_config, yamux::Config::default)?
         .with_behaviour(|keypair, relay_client| {
@@ -89,6 +85,7 @@ where
 
             // Gossipsub
             let gossipsub_config = gossipsub::ConfigBuilder::default()
+                .max_transmit_size(config.gossip_sub_max_message_size)
                 .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message signing)
                 .validate_messages()
                 .message_id_fn(get_message_id) // content-address messages. No two messages of the same content will be propagated.

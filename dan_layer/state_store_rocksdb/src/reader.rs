@@ -90,7 +90,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::ByteArray;
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError};
+use crate::{error::RocksDbStorageError, model::BlockModel};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -812,21 +812,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError> {
-        let key = format!("blocks_{}", block_id.to_string());
-
-        let value = self.tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation: "blocks_get",
-                source: e,
-            })?;
-
-        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation: "blocks_get" })?;
-
-        let config = bincode::config::standard();
-        let (block, _): (Block, usize) = bincode::serde::decode_from_slice(&bytes, config).unwrap();
-
-        Ok(block)
-
+        Ok(BlockModel::get(&self.tx, "blocks_get", block_id)?)
         /*
         use crate::schema::{blocks, quorum_certificates};
 

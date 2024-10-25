@@ -20,6 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::default;
+
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_storage::StorageError;
 use thiserror::Error;
@@ -33,6 +35,17 @@ pub enum RocksDbStorageError {
     },
     #[error("Entry {key} not found during operation {operation}")]
     NotFound { key: String, operation: &'static str },
+    #[error("Encode error: {source}")]
+    EncodeError {
+        #[from]
+        source: bincode::error::EncodeError,
+    },
+    #[error("Encode error: {source}")]
+    DecodeError {
+        #[from]
+        source: bincode::error::DecodeError,
+    },
+
     /*
     #[error("Could not connect to database: {source}")]
     ConnectionError {
@@ -73,6 +86,8 @@ impl From<RocksDbStorageError> for StorageError {
                 reason: source.to_string(),
             },
             RocksDbStorageError::NotFound { key, operation } => StorageError::NotFound { item: operation, key },
+            RocksDbStorageError::EncodeError { source } => StorageError::EncodingError { operation: "", item: "", details: source.to_string() },
+            RocksDbStorageError::DecodeError { source } => StorageError::DecodingError { operation: "", item: "", details: source.to_string() },
             /*
             RocksDbStorageError::ConnectionError { .. } => StorageError::ConnectionError {
                 reason: source.to_string(),

@@ -21,11 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    time::Duration,
+    fmt::{self, Display}, net::SocketAddr, path::{Path, PathBuf}, str::FromStr, time::Duration
 };
-
+use anyhow::anyhow;
 use config::Config;
 use libp2p::Multiaddr;
 use serde::{Deserialize, Serialize};
@@ -82,6 +80,8 @@ pub struct ValidatorNodeConfig {
     pub base_layer_scanning_interval: Duration,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
+    /// The type of database to use
+    pub database_type: DatabaseType, 
     /// The p2p configuration settings
     pub p2p: P2pConfig,
     /// P2P RPC configuration
@@ -137,6 +137,7 @@ impl Default for ValidatorNodeConfig {
             scan_base_layer: true,
             base_layer_scanning_interval: Duration::from_secs(10),
             data_dir: PathBuf::from("data/validator_node"),
+            database_type: DatabaseType::default(),
             p2p: P2pConfig::default(),
             rpc: RpcConfig::default(),
             grpc_address: Some("/ip4/127.0.0.1/tcp/18144".parse().unwrap()),
@@ -157,5 +158,33 @@ impl Default for ValidatorNodeConfig {
 impl SubConfigPath for ValidatorNodeConfig {
     fn main_key_prefix() -> &'static str {
         "validator_node"
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatabaseType {
+    #[default]
+    RocksDB,
+    SQLite,
+}
+
+impl FromStr for DatabaseType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "rocksdb" => Ok(DatabaseType::RocksDB),
+            "sqlite" => Ok(DatabaseType::RocksDB),
+            _ => Err(anyhow!("Invalid database type '{}'", s)),
+        }
+    }
+}
+
+impl Display for DatabaseType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DatabaseType::RocksDB => write!(f, "rocksdb"),
+            DatabaseType::SQLite => write!(f, "sqlite"),
+        }
     }
 }

@@ -20,64 +20,56 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use log::*;
 use tari_consensus::messages::HotstuffMessage;
 use tari_dan_common_types::ShardGroup;
-use tokio::sync::{mpsc, oneshot};
+use tari_dan_p2p::{proto, TariMessagingSpec};
+use tari_networking::{NetworkingHandle, NetworkingService};
+use tari_swarm::messaging::{
+    prost::{Message, ProstCodec},
+    Codec,
+};
 
 use super::ConsensusGossipError;
+use crate::p2p::services::consensus_gossip::service::shard_group_to_topic;
 
-pub enum ConsensusGossipRequest {
-    Multicast {
-        shard_group: ShardGroup,
-        message: HotstuffMessage,
-        reply: oneshot::Sender<Result<(), ConsensusGossipError>>,
-    },
-    GetLocalShardGroup {
-        reply: oneshot::Sender<Result<Option<ShardGroup>, ConsensusGossipError>>,
-    },
-}
+const LOG_TARGET: &str = "tari::validator_node::consensus_gossip";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConsensusGossipHandle {
-    tx_consensus_request: mpsc::Sender<ConsensusGossipRequest>,
-}
-
-impl Clone for ConsensusGossipHandle {
-    fn clone(&self) -> Self {
-        ConsensusGossipHandle {
-            tx_consensus_request: self.tx_consensus_request.clone(),
-        }
-    }
+    networking: NetworkingHandle<TariMessagingSpec>,
+    codec: ProstCodec<proto::consensus::HotStuffMessage>,
 }
 
 impl ConsensusGossipHandle {
-    pub(super) fn new(tx_consensus_request: mpsc::Sender<ConsensusGossipRequest>) -> Self {
-        Self { tx_consensus_request }
+    pub(super) fn new(networking: NetworkingHandle<TariMessagingSpec>) -> Self {
+        Self {
+            networking,
+            codec: ProstCodec::default(),
+        }
     }
 
     pub async fn multicast(
-        &self,
+        &mut self,
         shard_group: ShardGroup,
         message: HotstuffMessage,
     ) -> Result<(), ConsensusGossipError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_consensus_request
-            .send(ConsensusGossipRequest::Multicast {
-                shard_group,
-                message,
-                reply: tx,
-            })
-            .await?;
+        let topic = shard_group_to_topic(shard_group);
 
-        rx.await?
-    }
+        let message = proto::consensus::HotStuffMessage::from(&message);
+        let mut buf = Vec::with_capacity(message.encoded_len());
 
-    pub async fn get_local_shard_group(&self) -> Result<Option<ShardGroup>, ConsensusGossipError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_consensus_request
-            .send(ConsensusGossipRequest::GetLocalShardGroup { reply: tx })
-            .await?;
+        debug!(
+            target: LOG_TARGET,
+            "multicast: topic: {} Message size: {}bytes", topic, buf.len()
+        );
+        self.codec
+            .encode_to(&mut buf, message)
+            .await
+            .map_err(|e| ConsensusGossipError::InvalidMessage(e.into()))?;
 
-        rx.await?
+        self.networking.publish_gossip(topic, buf).await?;
+
+        Ok(())
     }
 }

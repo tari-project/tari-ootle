@@ -33,7 +33,7 @@ where TSpec: ConsensusSpec
         context: &mut ConsensusWorkerContext<TSpec>,
     ) -> Result<ConsensusStateEvent, HotStuffError> {
         // Subscribe before checking if we're registered to eliminate the chance that we miss the epoch event
-        let mut epoch_events = context.epoch_manager.subscribe().await?;
+        let mut epoch_events = context.epoch_manager.subscribe();
         context.epoch_manager.wait_for_initial_scanning_to_complete().await?;
         let current_epoch = context.epoch_manager.current_epoch().await?;
         if self.is_registered_for_epoch(context, current_epoch).await? {

@@ -47,7 +47,6 @@ const LOG_TARGET: &str = "tari::validator_node::epoch_manager";
 pub struct EpochManagerService<TAddr, TGlobalStore, TBaseNodeClient> {
     rx_request: Receiver<EpochManagerRequest<TAddr>>,
     inner: BaseLayerEpochManager<TGlobalStore, TBaseNodeClient>,
-    events: broadcast::Sender<EpochManagerEvent>,
 }
 
 impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
@@ -55,6 +54,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
 {
     pub fn spawn(
         config: EpochManagerConfig,
+        events: broadcast::Sender<EpochManagerEvent>,
         rx_request: Receiver<EpochManagerRequest<TAddr>>,
         shutdown: ShutdownSignal,
         global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
@@ -62,11 +62,9 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
         node_public_key: PublicKey,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {
-            let (tx, _) = broadcast::channel(100);
             EpochManagerService {
                 rx_request,
-                inner: BaseLayerEpochManager::new(config, global_db, base_node_client, tx.clone(), node_public_key),
-                events: tx,
+                inner: BaseLayerEpochManager::new(config, global_db, base_node_client, events, node_public_key),
             }
             .run(shutdown)
             .await?;
@@ -191,7 +189,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
                     context,
                 );
             },
-            EpochManagerRequest::Subscribe { reply } => handle(reply, Ok(self.events.subscribe()), context),
             EpochManagerRequest::GetValidatorNodesPerEpoch { epoch, reply } => {
                 handle(reply, self.inner.get_validator_nodes_per_epoch(epoch), context)
             },

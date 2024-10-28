@@ -152,6 +152,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         if let Some(vn) = vns.iter().find(|vn| vn.public_key == self.node_public_key) {
             self.publish_event(EpochManagerEvent::ThisValidatorIsRegistered {
                 epoch,
+                shard_group: vn.shard_key.to_shard_group(self.config.num_preshards, num_committees),
                 shard_key: vn.shard_key,
             });
         }

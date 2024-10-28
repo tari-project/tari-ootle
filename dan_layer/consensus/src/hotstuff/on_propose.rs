@@ -238,17 +238,18 @@ where TConsensusSpec: ConsensusSpec
             "🌿 Broadcasting local proposal {} to local committee",
             next_block,
         );
-
+        let msg = HotstuffMessage::Proposal(ProposalMessage {
+            block: next_block,
+            foreign_proposals,
+        });
         // Broadcast to local and foreign committees
-        self.outbound_messaging
-            .multicast(
-                local_committee_info.shard_group(),
-                HotstuffMessage::Proposal(ProposalMessage {
-                    block: next_block,
-                    foreign_proposals,
-                }),
-            )
-            .await?;
+        self.outbound_messaging.send_self(msg.clone()).await?;
+        // If we are the only VN in this committee, no need to multicast
+        if local_committee_info.num_shard_group_members() > 1 {
+            self.outbound_messaging
+                .multicast(local_committee_info.shard_group(), msg)
+                .await?;
+        }
 
         Ok(())
     }

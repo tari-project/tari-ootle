@@ -27,11 +27,15 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct EpochManagerHandle<TAddr> {
     tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
+    events: broadcast::Sender<EpochManagerEvent>,
 }
 
 impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
-    pub fn new(tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>) -> Self {
-        Self { tx_request }
+    pub fn new(
+        tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
+        events: broadcast::Sender<EpochManagerEvent>,
+    ) -> Self {
+        Self { tx_request, events }
     }
 
     pub async fn add_block_hash(&self, block_height: u64, block_hash: FixedHash) -> Result<(), EpochManagerError> {
@@ -175,13 +179,8 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
 impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
     type Addr = TAddr;
 
-    async fn subscribe(&self) -> Result<broadcast::Receiver<EpochManagerEvent>, EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::Subscribe { reply: tx })
-            .await
-            .map_err(|_| EpochManagerError::SendError)?;
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent> {
+        self.events.subscribe()
     }
 
     async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EpochManagerError> {

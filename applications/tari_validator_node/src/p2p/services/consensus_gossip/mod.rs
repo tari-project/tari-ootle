@@ -24,7 +24,7 @@ mod error;
 pub use error::*;
 
 mod handle;
-pub use handle::{ConsensusGossipHandle, ConsensusGossipRequest};
+pub use handle::ConsensusGossipHandle;
 
 mod initializer;
 pub use initializer::spawn;

@@ -149,8 +149,8 @@ impl TestEpochManager {
 impl EpochManagerReader for TestEpochManager {
     type Addr = TestAddress;
 
-    async fn subscribe(&self) -> Result<broadcast::Receiver<EpochManagerEvent>, EpochManagerError> {
-        Ok(self.tx_epoch_events.subscribe())
+    fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent> {
+        self.tx_epoch_events.subscribe()
     }
 
     async fn get_committee_for_substate(

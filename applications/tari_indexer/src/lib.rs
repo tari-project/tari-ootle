@@ -96,12 +96,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     )
     .await?;
 
-    let mut epoch_manager_events = services.epoch_manager.subscribe().await.map_err(|e| {
-        ExitError::new(
-            ExitCode::ConfigError,
-            format!("Epoch manager crashed on startup: {}", e),
-        )
-    })?;
+    let mut epoch_manager_events = services.epoch_manager.subscribe();
 
     let substate_cache_dir = config.common.base_path.join("substate_cache");
     let substate_cache = SubstateFileCache::new(substate_cache_dir)

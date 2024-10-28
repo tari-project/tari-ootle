@@ -914,6 +914,9 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
             shard_group,
         );
 
+        // TODO: This message can be much larger than the default maximum for gossipsub (16KiB) For now, the limit is
+        //       increased. We also need to allow committees that are stuck on LocalAccept/LocalPrepare to request the
+        //       foreign proposal through messaging.
         outbound_messaging
             .multicast(
                 shard_group,

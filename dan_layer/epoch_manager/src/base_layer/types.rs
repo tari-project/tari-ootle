@@ -13,9 +13,9 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_storage::global::models::ValidatorNode;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::oneshot;
 
-use crate::{error::EpochManagerError, EpochManagerEvent};
+use crate::error::EpochManagerError;
 
 type Reply<T> = oneshot::Sender<Result<T, EpochManagerError>>;
 
@@ -92,9 +92,6 @@ pub enum EpochManagerRequest<TAddr> {
     GetValidatorNodesPerEpoch {
         epoch: Epoch,
         reply: Reply<Vec<ValidatorNode<TAddr>>>,
-    },
-    Subscribe {
-        reply: Reply<broadcast::Receiver<EpochManagerEvent>>,
     },
     NotifyScanningComplete {
         reply: Reply<()>,

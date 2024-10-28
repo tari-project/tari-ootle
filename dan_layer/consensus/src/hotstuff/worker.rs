@@ -258,7 +258,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let mut on_force_beat = self.pacemaker.get_on_force_beat();
         let mut on_leader_timeout = self.pacemaker.get_on_leader_timeout();
 
-        let mut epoch_manager_events = self.epoch_manager.subscribe().await?;
+        let mut epoch_manager_events = self.epoch_manager.subscribe();
 
         let mut prev_height = self.pacemaker.current_view().get_height();
         let current_epoch = self.pacemaker.current_view().get_epoch();

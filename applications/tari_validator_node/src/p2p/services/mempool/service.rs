@@ -90,7 +90,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let mut events = self.epoch_manager.subscribe().await?;
+        let mut events = self.epoch_manager.subscribe();
 
         loop {
             tokio::select! {

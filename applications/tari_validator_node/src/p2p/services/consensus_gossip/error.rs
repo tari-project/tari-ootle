@@ -22,9 +22,7 @@
 
 use tari_epoch_manager::EpochManagerError;
 use tari_networking::NetworkingError;
-use tokio::sync::{mpsc, oneshot};
-
-use super::ConsensusGossipRequest;
+use tokio::sync::oneshot;
 
 #[derive(thiserror::Error, Debug)]
 pub enum ConsensusGossipError {
@@ -36,12 +34,6 @@ pub enum ConsensusGossipError {
     RequestCancelled,
     #[error("Network error: {0}")]
     NetworkingError(#[from] NetworkingError),
-}
-
-impl From<mpsc::error::SendError<ConsensusGossipRequest>> for ConsensusGossipError {
-    fn from(_: mpsc::error::SendError<ConsensusGossipRequest>) -> Self {
-        Self::RequestCancelled
-    }
 }
 
 impl From<oneshot::error::RecvError> for ConsensusGossipError {

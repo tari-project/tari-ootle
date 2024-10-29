@@ -90,7 +90,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::ByteArray;
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::BlockModel};
+use crate::{error::RocksDbStorageError, model::{BlockModel, TransactionPoolModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1628,7 +1628,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError> {
-        todo!()
+        let txs = TransactionPoolModel::get_all(&self.tx, "transaction_pool_get_all")?;
+        Ok(txs)
         /*
         use crate::schema::transaction_pool;
         let txs = transaction_pool::table

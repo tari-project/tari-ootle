@@ -10,7 +10,7 @@ use std::{
 };
 
 use log::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
     committee::CommitteeInfo,
     optional::{IsNotFoundError, Optional},
@@ -189,7 +189,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 }
 
 // Ord: ensure that the enum variants are ordered in the order of their progression
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -319,7 +319,7 @@ impl FromStr for TransactionPoolConfirmedStage {
 #[error("Invalid TransactionPoolConfirmedStage string '{0}'")]
 pub struct TransactionPoolConfirmedStageFromStrErr(String);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

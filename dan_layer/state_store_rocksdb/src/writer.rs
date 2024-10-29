@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{iter::Peekable, ops::Deref, sync::{Arc, Mutex}};
+use std::{iter::Peekable, ops::Deref, sync::{Arc, Mutex}, time::{SystemTime, UNIX_EPOCH}};
 
 use indexmap::IndexMap;
 use log::*;
@@ -38,41 +38,7 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::{
     consensus_models::{
-        Block,
-        BlockId,
-        BlockTransactionExecution,
-        BurntUtxo,
-        Decision,
-        EpochCheckpoint,
-        ForeignParkedProposal,
-        ForeignProposal,
-        ForeignProposalStatus,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
-        HighQc,
-        LastExecuted,
-        LastProposed,
-        LastSentVote,
-        LastVoted,
-        LeafBlock,
-        LockConflict,
-        LockedBlock,
-        NoVoteReason,
-        PendingShardStateTreeDiff,
-        QcId,
-        QuorumCertificate,
-        SubstateChange,
-        SubstateLock,
-        SubstatePledge,
-        SubstatePledges,
-        SubstateRecord,
-        TransactionPoolConfirmedStage,
-        TransactionPoolRecord,
-        TransactionPoolStage,
-        TransactionPoolStatusUpdate,
-        TransactionRecord,
-        VersionedStateHashTreeDiff,
-        Vote,
+        Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, SubstateChange, SubstateLock, SubstatePledge, SubstatePledges, SubstateRecord, TransactionPool, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
     },
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -86,7 +52,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::BlockModel, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{BlockModel, TransactionPoolModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -228,63 +194,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn blocks_insert(&mut self, block: &Block) -> Result<(), StorageError> {
+        let now: u64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| StorageError::General { details: e.to_string() })?
+            .as_millis()
+            .try_into()
+            .unwrap();
+        let block_time= Some(now - block.timestamp());
+        let mut block = block.clone();
+        block.set_block_time(block_time);
+        
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        Ok(BlockModel::put(tx, "blocks_insert", block)?)
-
-        /*
-        use crate::schema::blocks;
-
-        let insert = (
-            blocks::block_id.eq(serialize_hex(block.id())),
-            blocks::parent_block_id.eq(serialize_hex(block.parent())),
-            blocks::merkle_root.eq(block.merkle_root().to_string()),
-            blocks::network.eq(block.network().to_string()),
-            blocks::height.eq(block.height().as_u64() as i64),
-            blocks::epoch.eq(block.epoch().as_u64() as i64),
-            blocks::shard_group.eq(block.shard_group().encode_as_u32() as i32),
-            blocks::proposed_by.eq(serialize_hex(block.proposed_by().as_bytes())),
-            blocks::command_count.eq(block.commands().len() as i64),
-            blocks::commands.eq(serialize_json(block.commands())?),
-            blocks::total_leader_fee.eq(block.total_leader_fee() as i64),
-            blocks::qc_id.eq(serialize_hex(block.justify().id())),
-            blocks::qc_height.eq(block.justify().block_height().as_u64() as i64),
-            blocks::is_dummy.eq(block.is_dummy()),
-            blocks::is_justified.eq(block.is_justified()),
-            blocks::signature.eq(block.signature().map(serialize_json).transpose()?),
-            blocks::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
-            blocks::timestamp.eq(block.timestamp() as i64),
-            blocks::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-            blocks::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
-            blocks::extra_data.eq(block.extra_data().map(serialize_json).transpose()?),
-        );
-
-        diesel::insert_into(blocks::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_insert",
-                source: e,
-            })?;
-
-        diesel::sql_query(
-            r#"
-            UPDATE blocks
-            SET block_time = timestamp -
-                             (SELECT timestamp
-                              FROM blocks
-                              WHERE block_id == ?)
-            WHERE block_id = ?"#,
-        )
-        .bind::<Text, _>(serialize_hex(block.justify().block_id()))
-        .bind::<Text, _>(serialize_hex(block.id()))
-        .execute(self.connection())
-        .map_err(|e| SqliteStorageError::DieselError {
-            operation: "blocks_insert_set_delta_time",
-            source: e,
-        })?;
-
-        Ok(())
-        */
+        Ok(BlockModel::put(tx, "blocks_insert", &block)?)
     }
 
     fn blocks_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
@@ -1134,27 +1055,22 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         decision: Decision,
         is_ready: bool,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::transaction_pool;
-
-        let insert = (
-            transaction_pool::transaction_id.eq(serialize_hex(tx_id)),
-            transaction_pool::original_decision.eq(decision.to_string()),
-            transaction_pool::stage.eq(TransactionPoolStage::New.to_string()),
-            transaction_pool::is_ready.eq(is_ready),
+        let value = TransactionPoolRecord::load(
+            tx_id,
+            Evidence::default(),
+            0,
+            None,
+            TransactionPoolStage::New,
+             None,
+            decision,
+            None,
+            None,
+            is_ready,
         );
 
-        diesel::insert_into(transaction_pool::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_insert",
-                source: e,
-            })?;
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        Ok(())
-        */
+        Ok(TransactionPoolModel::put(tx, "transaction_pool_insert_new", &value)?)
     }
 
     fn transaction_pool_add_pending_update(

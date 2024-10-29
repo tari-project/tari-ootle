@@ -561,6 +561,10 @@ impl Block {
         self.block_time
     }
 
+    pub fn set_block_time(&mut self, block_time: Option<u64>) {
+        self.block_time = block_time;
+    }
+
     pub fn timestamp(&self) -> u64 {
         self.timestamp
     }

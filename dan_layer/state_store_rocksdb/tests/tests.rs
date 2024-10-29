@@ -54,9 +54,8 @@ mod confirm_all_transitions {
         let network = Default::default();
         let zero_block = Block::zero_block(network, NumPreshards::P64, None).unwrap();
         zero_block.insert(&mut tx).unwrap();
-        let res = tx.blocks_get(zero_block.id());
-        eprintln!("{:?}", res);
-        /*
+        //let res = tx.blocks_get(zero_block.id());
+        //eprintln!("{:?}", res);
         let block1 = Block::new(
             network,
             *zero_block.id(),
@@ -78,12 +77,11 @@ mod confirm_all_transitions {
             None,
         );
         block1.insert(&mut tx).unwrap();
-
+        
         tx.transaction_pool_insert_new(atom1.id, atom1.decision, true).unwrap();
         tx.transaction_pool_insert_new(atom2.id, atom2.decision, true).unwrap();
         tx.transaction_pool_insert_new(atom3.id, atom3.decision, true).unwrap();
         let block_id = *block1.id();
-
         let transactions = tx.transaction_pool_get_all().unwrap();
         let mut tx_1 = transactions
             .iter()
@@ -100,13 +98,14 @@ mod confirm_all_transitions {
             .find(|tx| *tx.transaction_id() == atom3.id)
             .unwrap()
             .clone();
-
+       
         tx_1.set_next_stage(TransactionPoolStage::Prepared).unwrap();
         tx_1.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
 
         tx_2.set_next_stage(TransactionPoolStage::Prepared).unwrap();
         tx_3.set_next_stage(TransactionPoolStage::Prepared).unwrap();
 
+        /*
         tx.transaction_pool_add_pending_update(&block_id, &TransactionPoolStatusUpdate::new(tx_1, true))
             .unwrap();
         tx.transaction_pool_add_pending_update(&block_id, &TransactionPoolStatusUpdate::new(tx_2, true))

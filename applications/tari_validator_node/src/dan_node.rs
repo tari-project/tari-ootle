@@ -75,13 +75,12 @@ impl DanNode {
     }
 
     async fn handle_epoch_manager_event(&mut self, event: EpochManagerEvent) -> Result<(), anyhow::Error> {
-        if let EpochManagerEvent::EpochChanged(epoch) = event {
-            let all_vns = self.services.epoch_manager.get_all_validator_nodes(epoch).await?;
-            self.services
-                .networking
-                .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
-                .await?;
-        }
+        let EpochManagerEvent::EpochChanged { epoch, .. } = event;
+        let all_vns = self.services.epoch_manager.get_all_validator_nodes(epoch).await?;
+        self.services
+            .networking
+            .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
+            .await?;
 
         Ok(())
     }

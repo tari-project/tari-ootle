@@ -224,13 +224,12 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 }
 
 async fn handle_epoch_manager_event(services: &Services, event: EpochManagerEvent) -> Result<(), anyhow::Error> {
-    if let EpochManagerEvent::EpochChanged(epoch) = event {
-        let all_vns = services.epoch_manager.get_all_validator_nodes(epoch).await?;
-        services
-            .networking
-            .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
-            .await?;
-    }
+    let EpochManagerEvent::EpochChanged { epoch, .. } = event;
+    let all_vns = services.epoch_manager.get_all_validator_nodes(epoch).await?;
+    services
+        .networking
+        .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
+        .await?;
 
     Ok(())
 }

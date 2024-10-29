@@ -139,7 +139,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         let vns = validator_nodes.get_all_within_epoch(epoch, self.config.validator_node_sidechain_id.as_ref())?;
 
         let num_committees = calculate_num_committees(vns.len() as u64, self.config.committee_size);
-        for vn in &vns {
+        for vn in vns {
             validator_nodes.set_committee_shard(
                 vn.shard_key,
                 vn.shard_key.to_shard_group(self.config.num_preshards, num_committees),
@@ -149,13 +149,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         }
 
         tx.commit()?;
-        if let Some(vn) = vns.iter().find(|vn| vn.public_key == self.node_public_key) {
-            self.publish_event(EpochManagerEvent::ThisValidatorIsRegistered {
-                epoch,
-                shard_group: vn.shard_key.to_shard_group(self.config.num_preshards, num_committees),
-                shard_key: vn.shard_key,
-            });
-        }
 
         Ok(())
     }
@@ -550,7 +543,16 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
             }
         }
 
-        self.publish_event(EpochManagerEvent::EpochChanged(self.current_epoch));
+        let num_committees = self.get_number_of_committees(self.current_epoch)?;
+        let shard_group = self
+            .get_our_validator_node(self.current_epoch)
+            .optional()?
+            .map(|vn| vn.shard_key.to_shard_group(self.config.num_preshards, num_committees));
+
+        self.publish_event(EpochManagerEvent::EpochChanged {
+            epoch: self.current_epoch,
+            registered_shard_group: shard_group,
+        });
 
         Ok(())
     }

@@ -37,7 +37,7 @@ impl TestEpochManager {
         }
     }
 
-    pub async fn set_current_epoch(&mut self, current_epoch: Epoch) -> &Self {
+    pub async fn set_current_epoch(&mut self, current_epoch: Epoch, shard_group: ShardGroup) -> &Self {
         self.current_epoch = current_epoch;
         {
             let mut lock = self.inner.lock().await;
@@ -45,9 +45,10 @@ impl TestEpochManager {
             lock.is_epoch_active = true;
         }
 
-        let _ = self
-            .tx_epoch_events
-            .send(EpochManagerEvent::EpochChanged(current_epoch));
+        let _ = self.tx_epoch_events.send(EpochManagerEvent::EpochChanged {
+            epoch: current_epoch,
+            registered_shard_group: Some(shard_group),
+        });
 
         self
     }

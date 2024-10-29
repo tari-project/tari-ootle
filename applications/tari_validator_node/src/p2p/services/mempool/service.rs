@@ -101,11 +101,10 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
                     }
                 }
                 Ok(event) = events.recv() => {
-                    if let EpochManagerEvent::EpochChanged(epoch) = event {
-                        if self.epoch_manager.is_this_validator_registered_for_epoch(epoch).await?{
-                            info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for epoch {}", epoch);
-                            self.gossip.subscribe(epoch).await?;
-                        }
+                    let EpochManagerEvent::EpochChanged { epoch, registered_shard_group} = event;
+                    if let Some(shard_group) = registered_shard_group {
+                        info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
+                        self.gossip.subscribe(shard_group).await?;
                     }
                 },
 

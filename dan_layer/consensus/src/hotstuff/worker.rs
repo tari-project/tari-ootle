@@ -534,8 +534,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
     async fn on_epoch_manager_event(&mut self, event: EpochManagerEvent) -> Result<(), HotStuffError> {
         match event {
-            EpochManagerEvent::EpochChanged(epoch) => {
-                if !self.epoch_manager.is_this_validator_registered_for_epoch(epoch).await? {
+            EpochManagerEvent::EpochChanged {
+                epoch,
+                registered_shard_group,
+            } => {
+                if registered_shard_group.is_none() {
                     info!(
                         target: LOG_TARGET,
                         "💤 This validator is not registered for epoch {}. Going to sleep.", epoch
@@ -554,7 +557,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // If we can propose a block end, let's not wait for the block time to do it
                 // self.pacemaker.beat();
             },
-            EpochManagerEvent::ThisValidatorIsRegistered { .. } => {},
         }
 
         Ok(())

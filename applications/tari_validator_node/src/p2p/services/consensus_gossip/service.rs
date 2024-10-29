@@ -71,7 +71,8 @@ impl ConsensusGossipService {
                     }
                 },
                 Ok(event) = self.epoch_manager_events.recv() => {
-                    if let EpochManagerEvent::ThisValidatorIsRegistered{shard_group, ..} = event {
+                    let EpochManagerEvent::EpochChanged{ registered_shard_group, ..} = event ;
+                    if let Some(shard_group) = registered_shard_group{
                         self.subscribe(shard_group).await?;
                     }
                 },

@@ -81,6 +81,7 @@ use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
+use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::{
     auth::ResourceAccessRules,
@@ -101,9 +102,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
-    consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor},
-    dry_run_transaction_processor::DryRunTransactionProcessor,
-    p2p::{
+    config::DatabaseType, consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor}, dry_run_transaction_processor::DryRunTransactionProcessor, p2p::{
         create_tari_validator_node_rpc_service,
         services::{
             consensus_gossip::{self},
@@ -111,13 +110,7 @@ use crate::{
             messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         },
         NopLogger,
-    },
-    substate_resolver::TariSubstateResolver,
-    transaction_validators::{FeeTransactionValidator, HasInputs, TemplateExistsValidator, TransactionValidationError},
-    validator::Validator,
-    validator_registration_file::ValidatorRegistrationFile,
-    virtual_substate::VirtualSubstateManager,
-    ApplicationConfig,
+    }, state_store::ValidatorNodeStateStore, substate_resolver::TariSubstateResolver, transaction_validators::{FeeTransactionValidator, HasInputs, TemplateExistsValidator, TransactionValidationError}, validator::Validator, validator_registration_file::ValidatorRegistrationFile, virtual_substate::VirtualSubstateManager, ApplicationConfig
 };
 
 const LOG_TARGET: &str = "tari::validator_node::bootstrap";
@@ -196,10 +189,11 @@ pub async fn spawn_services(
     info!(target: LOG_TARGET, "Message logging initializing");
 
     info!(target: LOG_TARGET, "State store initializing");
-    // Connect to shard db
-    let state_store =
-        SqliteStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path().display()))?;
+
     let sidechain_id = config.validator_node.validator_node_sidechain_id.clone();
+
+    // Connect to shard db
+    let state_store = ValidatorNodeStateStore::connect(config)?;
     state_store.with_write_tx(|tx| {
         bootstrap_state(
             tx,
@@ -386,6 +380,7 @@ pub async fn spawn_services(
     })
 }
 
+
 async fn create_registration_file(
     config: &ApplicationConfig,
     epoch_manager: &EpochManagerHandle<PeerAddress>,
@@ -435,7 +430,7 @@ pub struct Services {
     pub dry_run_transaction_processor: DryRunTransactionProcessor,
     // pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     // pub consensus_gossip_service: ConsensusGossipHandle,
-    pub state_store: SqliteStateStore<PeerAddress>,
+    pub state_store: ValidatorNodeStateStore,
 
     pub handles: Vec<JoinHandle<Result<(), anyhow::Error>>>,
 }
@@ -453,9 +448,9 @@ async fn spawn_p2p_rpc(
     config: &ApplicationConfig,
     networking: &mut NetworkingHandle<TariMessagingSpec>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    shard_store_store: SqliteStateStore<PeerAddress>,
+    shard_store_store: ValidatorNodeStateStore,
     mempool: MempoolHandle,
-    virtual_substate_manager: VirtualSubstateManager<SqliteStateStore<PeerAddress>, EpochManagerHandle<PeerAddress>>,
+    virtual_substate_manager: VirtualSubstateManager<ValidatorNodeStateStore, EpochManagerHandle<PeerAddress>>,
     consensus: ConsensusHandle,
 ) -> anyhow::Result<()> {
     let rpc_server = RpcServer::builder()

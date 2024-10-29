@@ -66,14 +66,14 @@ use crate::template_manager::interface::{TemplateManagerError, TemplateManagerHa
 
 const LOG_TARGET: &str = "tari::dan::base_layer_scanner";
 
-pub fn spawn<TAddr: NodeAddressable + 'static>(
+pub fn spawn<TAddr: NodeAddressable + 'static, TStore: StateStore + Send + 'static>(
     global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
     base_node_client: GrpcBaseNodeClient,
     epoch_manager: EpochManagerHandle<TAddr>,
     template_manager: TemplateManagerHandle,
     shutdown: ShutdownSignal,
     consensus_constants: ConsensusConstants,
-    shard_store: SqliteStateStore<TAddr>,
+    shard_store: TStore,
     scan_base_layer: bool,
     base_layer_scanning_interval: Duration,
     validator_node_sidechain_id: Option<RistrettoPublicKey>,
@@ -101,7 +101,7 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
     })
 }
 
-pub struct BaseLayerScanner<TAddr> {
+pub struct BaseLayerScanner<TAddr, TStore> {
     global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
     last_scanned_height: u64,
     last_scanned_tip: Option<FixedHash>,
@@ -112,7 +112,7 @@ pub struct BaseLayerScanner<TAddr> {
     template_manager: TemplateManagerHandle,
     shutdown: ShutdownSignal,
     consensus_constants: ConsensusConstants,
-    state_store: SqliteStateStore<TAddr>,
+    state_store: TStore,
     scan_base_layer: bool,
     base_layer_scanning_interval: Duration,
     has_attempted_scan: bool,
@@ -121,7 +121,7 @@ pub struct BaseLayerScanner<TAddr> {
     burnt_utxo_sidechain_id: Option<PublicKey>,
 }
 
-impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
+impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAddr, TStore> {
     pub fn new(
         global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
         base_node_client: GrpcBaseNodeClient,
@@ -129,7 +129,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         template_manager: TemplateManagerHandle,
         shutdown: ShutdownSignal,
         consensus_constants: ConsensusConstants,
-        state_store: SqliteStateStore<TAddr>,
+        state_store: TStore,
         scan_base_layer: bool,
         base_layer_scanning_interval: Duration,
         validator_node_sidechain_id: Option<PublicKey>,

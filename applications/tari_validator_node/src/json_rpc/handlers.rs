@@ -91,10 +91,7 @@ use tari_validator_node_client::types::{
 };
 
 use crate::{
-    dry_run_transaction_processor::DryRunTransactionProcessor,
-    json_rpc::jrpc_errors::{internal_error, not_found},
-    p2p::services::mempool::MempoolHandle,
-    Services,
+    dry_run_transaction_processor::DryRunTransactionProcessor, json_rpc::jrpc_errors::{internal_error, not_found}, p2p::services::mempool::MempoolHandle, state_store::ValidatorNodeStateStore, Services
 };
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
@@ -106,7 +103,7 @@ pub struct JsonRpcHandlers {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     networking: NetworkingHandle<TariMessagingSpec>,
     base_node_client: GrpcBaseNodeClient,
-    state_store: SqliteStateStore<PeerAddress>,
+    state_store: ValidatorNodeStateStore,
     dry_run_transaction_processor: DryRunTransactionProcessor,
 }
 

@@ -32,6 +32,7 @@ mod json_rpc;
 #[cfg(feature = "metrics")]
 mod metrics;
 mod p2p;
+mod state_store;
 mod substate_resolver;
 mod virtual_substate;
 

@@ -33,10 +33,7 @@ use tokio::{sync::mpsc, task, task::JoinHandle};
 #[cfg(feature = "metrics")]
 use super::metrics::PrometheusMempoolMetrics;
 use crate::{
-    consensus::ConsensusHandle,
-    p2p::services::mempool::{handle::MempoolHandle, service::MempoolService},
-    transaction_validators::TransactionValidationError,
-    validator::Validator,
+    consensus::ConsensusHandle, p2p::services::mempool::{handle::MempoolHandle, service::MempoolService}, state_store::ValidatorNodeStateStore, transaction_validators::TransactionValidationError, validator::Validator
 };
 
 const LOG_TARGET: &str = "tari::dan::validator_node::mempool";
@@ -45,7 +42,7 @@ pub fn spawn<TValidator>(
     num_preshards: NumPreshards,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     transaction_validator: TValidator,
-    state_store: SqliteStateStore<PeerAddress>,
+    state_store: ValidatorNodeStateStore,
     consensus_handle: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
     rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,

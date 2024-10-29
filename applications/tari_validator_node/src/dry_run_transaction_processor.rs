@@ -40,9 +40,7 @@ use thiserror::Error;
 use tokio::task;
 
 use crate::{
-    p2p::services::mempool::{ResolvedSubstates, SubstateResolver},
-    substate_resolver::{SubstateResolverError, TariSubstateResolver},
-    virtual_substate::VirtualSubstateError,
+    p2p::services::mempool::{ResolvedSubstates, SubstateResolver}, state_store::ValidatorNodeStateStore, substate_resolver::{SubstateResolverError, TariSubstateResolver}, virtual_substate::VirtualSubstateError
 };
 
 const LOG_TARGET: &str = "tari::dan::validator_node::dry_run_transaction_processor";
@@ -72,7 +70,7 @@ pub enum DryRunTransactionProcessorError {
 #[derive(Clone, Debug)]
 pub struct DryRunTransactionProcessor {
     substate_resolver: TariSubstateResolver<
-        SqliteStateStore<PeerAddress>,
+        ValidatorNodeStateStore,
         EpochManagerHandle<PeerAddress>,
         TariValidatorNodeRpcClientFactory,
         SubstateFileCache,
@@ -86,7 +84,7 @@ impl DryRunTransactionProcessor {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         payload_processor: TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
         substate_resolver: TariSubstateResolver<
-            SqliteStateStore<PeerAddress>,
+            ValidatorNodeStateStore,
             EpochManagerHandle<PeerAddress>,
             TariValidatorNodeRpcClientFactory,
             SubstateFileCache,

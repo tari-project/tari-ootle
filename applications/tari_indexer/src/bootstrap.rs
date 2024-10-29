@@ -147,7 +147,7 @@ pub async fn spawn_services(
         shutdown.clone(),
         consensus_constants,
         // TODO: Remove coupling between scanner and shard store
-        SqliteStateStore::connect(&format!(
+        SqliteStateStore::<PeerAddress>::connect(&format!(
             "sqlite://{}",
             config.indexer.data_dir.join("unused-shard-store.sqlite").display()
         ))?,

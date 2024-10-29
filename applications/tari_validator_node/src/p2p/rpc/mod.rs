@@ -31,16 +31,14 @@ use tari_state_store_sqlite::SqliteStateStore;
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcServer;
 
 use crate::{
-    consensus::ConsensusHandle,
-    p2p::services::mempool::MempoolHandle,
-    virtual_substate::VirtualSubstateManager,
+    consensus::ConsensusHandle, p2p::services::mempool::MempoolHandle, state_store::ValidatorNodeStateStore, virtual_substate::VirtualSubstateManager
 };
 
 pub fn create_tari_validator_node_rpc_service(
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    shard_store_store: SqliteStateStore<PeerAddress>,
+    shard_store_store: ValidatorNodeStateStore,
     mempool: MempoolHandle,
-    virtual_substate_manager: VirtualSubstateManager<SqliteStateStore<PeerAddress>, EpochManagerHandle<PeerAddress>>,
+    virtual_substate_manager: VirtualSubstateManager<ValidatorNodeStateStore, EpochManagerHandle<PeerAddress>>,
     consensus: ConsensusHandle,
 ) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl> {
     ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(

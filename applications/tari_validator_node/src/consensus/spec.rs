@@ -25,7 +25,7 @@ use crate::{
     p2p::{
         services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         NopLogger,
-    },
+    }, state_store::ValidatorNodeStateStore,
 };
 
 #[derive(Clone)]
@@ -42,7 +42,7 @@ impl ConsensusSpec for TariConsensusSpec {
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
     type SignatureService = TariSignatureService;
-    type StateStore = SqliteStateStore<Self::Addr>;
+    type StateStore = ValidatorNodeStateStore;
     type SyncManager = RpcStateSyncManager<Self>;
     type TransactionExecutor = TariDanBlockTransactionExecutor<
         TariDanTransactionProcessor<TemplateManager<PeerAddress>>,

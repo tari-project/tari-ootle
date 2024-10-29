@@ -25,10 +25,7 @@ use tokio::{
 };
 
 use crate::{
-    consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec},
-    event_subscription::EventSubscription,
-    p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
-    transaction_validators::{
+    consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec}, event_subscription::EventSubscription, p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging}, state_store::ValidatorNodeStateStore, transaction_validators::{
         ClaimFeeTransactionValidator,
         EpochRangeValidator,
         FeeTransactionValidator,
@@ -36,8 +33,7 @@ use crate::{
         TemplateExistsValidator,
         TransactionSignatureValidator,
         TransactionValidationError,
-    },
-    validator::{BoxedValidator, Validator},
+    }, validator::{BoxedValidator, Validator}
 };
 
 mod block_transaction_executor;
@@ -60,7 +56,7 @@ pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Trans
 pub async fn spawn(
     network: Network,
     sidechain_id: Option<RistrettoPublicKey>,
-    store: SqliteStateStore<PeerAddress>,
+    store: ValidatorNodeStateStore,
     local_addr: PeerAddress,
     signing_service: TariSignatureService,
     epoch_manager: EpochManagerHandle<PeerAddress>,

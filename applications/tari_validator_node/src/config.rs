@@ -164,8 +164,8 @@ impl SubConfigPath for ValidatorNodeConfig {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DatabaseType {
     #[default]
-    RocksDB,
-    SQLite,
+    Rocksdb,
+    Sqlite,
 }
 
 impl FromStr for DatabaseType {
@@ -173,8 +173,8 @@ impl FromStr for DatabaseType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
-            "rocksdb" => Ok(DatabaseType::RocksDB),
-            "sqlite" => Ok(DatabaseType::RocksDB),
+            "rocksdb" => Ok(DatabaseType::Rocksdb),
+            "sqlite" => Ok(DatabaseType::Sqlite),
             _ => Err(anyhow!("Invalid database type '{}'", s)),
         }
     }
@@ -183,8 +183,8 @@ impl FromStr for DatabaseType {
 impl Display for DatabaseType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DatabaseType::RocksDB => write!(f, "rocksdb"),
-            DatabaseType::SQLite => write!(f, "sqlite"),
+            DatabaseType::Rocksdb => write!(f, "rocksdb"),
+            DatabaseType::Sqlite => write!(f, "sqlite"),
         }
     }
 }

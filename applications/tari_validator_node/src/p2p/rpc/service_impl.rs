@@ -66,31 +66,29 @@ use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
 
 use crate::{
-    consensus::ConsensusHandle,
-    p2p::{
+    consensus::ConsensusHandle, p2p::{
         rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
         services::mempool::MempoolHandle,
-    },
-    virtual_substate::VirtualSubstateManager,
+    }, state_store::ValidatorNodeStateStore, virtual_substate::VirtualSubstateManager
 };
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";
 
 pub struct ValidatorNodeRpcServiceImpl {
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    shard_state_store: SqliteStateStore<PeerAddress>,
+    shard_state_store: ValidatorNodeStateStore,
     mempool: MempoolHandle,
-    virtual_substate_manager: VirtualSubstateManager<SqliteStateStore<PeerAddress>, EpochManagerHandle<PeerAddress>>,
+    virtual_substate_manager: VirtualSubstateManager<ValidatorNodeStateStore, EpochManagerHandle<PeerAddress>>,
     consensus: ConsensusHandle,
 }
 
 impl ValidatorNodeRpcServiceImpl {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
-        shard_state_store: SqliteStateStore<PeerAddress>,
+        shard_state_store: ValidatorNodeStateStore,
         mempool: MempoolHandle,
         virtual_substate_manager: VirtualSubstateManager<
-            SqliteStateStore<PeerAddress>,
+            ValidatorNodeStateStore,
             EpochManagerHandle<PeerAddress>,
         >,
         consensus: ConsensusHandle,

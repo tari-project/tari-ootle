@@ -38,13 +38,10 @@ use tokio::sync::{mpsc, oneshot};
 use super::metrics::PrometheusMempoolMetrics;
 use super::MempoolError;
 use crate::{
-    consensus::ConsensusHandle,
-    p2p::services::mempool::{
+    consensus::ConsensusHandle, p2p::services::mempool::{
         gossip::{IncomingMessage, MempoolGossip},
         handle::MempoolRequest,
-    },
-    transaction_validators::TransactionValidationError,
-    validator::Validator,
+    }, state_store::ValidatorNodeStateStore, transaction_validators::TransactionValidationError, validator::Validator
 };
 
 const LOG_TARGET: &str = "tari::validator_node::mempool::service";
@@ -55,7 +52,7 @@ pub struct MempoolService<TValidator> {
     mempool_requests: mpsc::Receiver<MempoolRequest>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     before_execute_validator: TValidator,
-    state_store: SqliteStateStore<PeerAddress>,
+    state_store: ValidatorNodeStateStore,
     gossip: MempoolGossip<PeerAddress>,
     consensus_handle: ConsensusHandle,
     #[cfg(feature = "metrics")]
@@ -70,7 +67,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
         mempool_requests: mpsc::Receiver<MempoolRequest>,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         before_execute_validator: TValidator,
-        state_store: SqliteStateStore<PeerAddress>,
+        state_store: ValidatorNodeStateStore,
         consensus_handle: ConsensusHandle,
         networking: NetworkingHandle<TariMessagingSpec>,
         rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,

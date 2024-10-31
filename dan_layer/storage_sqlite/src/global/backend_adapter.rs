@@ -368,7 +368,6 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         shard_key: SubstateAddress,
         registered_at_base_height: u64,
         start_epoch: Epoch,
-        end_epoch: Epoch,
         fee_claim_public_key: PublicKey,
         sidechain_id: Option<PublicKey>,
     ) -> Result<(), Self::Error> {
@@ -382,7 +381,6 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 validator_nodes::shard_key.eq(shard_key.as_bytes()),
                 validator_nodes::registered_at_base_height.eq(registered_at_base_height as i64),
                 validator_nodes::start_epoch.eq(start_epoch.as_u64() as i64),
-                validator_nodes::end_epoch.eq(end_epoch.as_u64() as i64),
                 validator_nodes::fee_claim_public_key.eq(ByteArray::as_bytes(&fee_claim_public_key)),
                 validator_nodes::sidechain_id.eq(sidechain_id.as_ref().map(|id| id.as_bytes()).unwrap_or(&[0u8; 32])),
             ))
@@ -468,14 +466,14 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             "SELECT COUNT(distinct public_key) as cnt FROM validator_nodes WHERE start_epoch <= ? AND end_epoch >= ? \
              AND sidechain_id = ?",
         )
-        .bind::<BigInt, _>(epoch.as_u64() as i64)
-        .bind::<BigInt, _>(epoch.as_u64() as i64)
-        .bind::<diesel::sql_types::Binary, _>(db_sidechain_id)
-        .get_result::<Count>(tx.connection())
-        .map_err(|source| SqliteStorageError::DieselError {
-            source,
-            operation: "count_validator_nodes".to_string(),
-        })?;
+            .bind::<BigInt, _>(epoch.as_u64() as i64)
+            .bind::<BigInt, _>(epoch.as_u64() as i64)
+            .bind::<diesel::sql_types::Binary, _>(db_sidechain_id)
+            .get_result::<Count>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "count_validator_nodes".to_string(),
+            })?;
 
         Ok(count.cnt as u64)
     }
@@ -491,13 +489,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         let count = sql_query(
             "SELECT COUNT(distinct public_key) as cnt FROM validator_nodes WHERE start_epoch = ? AND sidechain_id = ?",
         )
-        .bind::<BigInt, _>(epoch.as_u64() as i64)
-        .bind::<diesel::sql_types::Binary, _>(db_sidechain_id)
-        .get_result::<Count>(tx.connection())
-        .map_err(|source| SqliteStorageError::DieselError {
-            source,
-            operation: "count_validator_nodes_by_start_epoch".to_string(),
-        })?;
+            .bind::<BigInt, _>(epoch.as_u64() as i64)
+            .bind::<diesel::sql_types::Binary, _>(db_sidechain_id)
+            .get_result::<Count>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "count_validator_nodes_by_start_epoch".to_string(),
+            })?;
 
         Ok(count.cnt as u64)
     }

@@ -44,7 +44,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         shard_key: SubstateAddress,
         registered_at_base_height: u64,
         start_epoch: Epoch,
-        end_epoch: Epoch,
         fee_claim_public_key: PublicKey,
         sidechain_id: Option<PublicKey>,
     ) -> Result<(), TGlobalDbAdapter::Error> {
@@ -56,7 +55,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
                 shard_key,
                 registered_at_base_height,
                 start_epoch,
-                end_epoch,
                 fee_claim_public_key,
                 sidechain_id,
             )

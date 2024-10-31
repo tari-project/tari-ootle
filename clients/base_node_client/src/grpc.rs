@@ -79,14 +79,14 @@ impl GrpcBaseNodeClient {
             match stream.message().await {
                 Ok(Some(_val)) => {
                     count += 1;
-                },
+                }
                 Ok(None) => {
                     break;
-                },
+                }
                 Err(e) => {
                     warn!(target: LOG_TARGET, "Error getting mempool transaction count: {}", e);
                     return Err(BaseNodeClientError::ConnectionError);
-                },
+                }
             }
         }
         Ok(count)
@@ -150,18 +150,18 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                                 )
                             }))
                         }
-                        .transpose()?,
+                            .transpose()?,
                     });
-                },
+                }
                 Ok(None) => {
                     break;
-                },
+                }
                 Err(e) => {
                     return Err(BaseNodeClientError::InvalidPeerMessage(format!(
                         "Error reading stream: {}",
                         e
                     )));
-                },
+                }
             }
         }
 
@@ -221,16 +221,16 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                             BaseNodeClientError::InvalidPeerMessage("invalid template registration".to_string())
                         })?;
                     templates.push(template_registration);
-                },
+                }
                 Ok(None) => {
                     break;
-                },
+                }
                 Err(e) => {
                     return Err(BaseNodeClientError::InvalidPeerMessage(format!(
                         "Error reading stream: {}",
                         e
                     )));
-                },
+                }
             }
         }
         Ok(templates)
@@ -259,7 +259,6 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         let result = inner.get_constants(request).await?.into_inner();
 
         let consensus_constants = BaseLayerConsensusConstants {
-            validator_node_registration_expiry: result.validator_node_validity_period,
             epoch_length: result.epoch_length,
             validator_node_registration_min_deposit_amount: result
                 .validator_node_registration_min_deposit_amount
@@ -303,16 +302,16 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                             .map_err(BaseNodeClientError::InvalidPeerMessage)?,
                     };
                     responses.push(resp);
-                },
+                }
                 Ok(None) => {
                     break;
-                },
+                }
                 Err(e) => {
                     return Err(BaseNodeClientError::InvalidPeerMessage(format!(
                         "Error reading stream: {}",
                         e
                     )));
-                },
+                }
             }
         }
 

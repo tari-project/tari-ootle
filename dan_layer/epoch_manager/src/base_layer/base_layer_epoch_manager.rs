@@ -60,7 +60,7 @@ pub struct BaseLayerEpochManager<TGlobalStore, TBaseNodeClient> {
 }
 
 impl<TAddr: NodeAddressable + DerivableFromPublicKey>
-    BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
+BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
 {
     pub fn new(
         config: EpochManagerConfig,
@@ -214,7 +214,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
 
         let constants = self.base_layer_consensus_constants().await?;
         let mut next_epoch = constants.height_to_epoch(block_height) + Epoch(1);
-        let validator_node_expiry = constants.validator_node_registration_expiry;
 
         // find the next available epoch
         let mut next_epoch_vn_count = self.validator_nodes_count(next_epoch, registration.sidechain_id())?;
@@ -243,7 +242,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
             shard_key,
             block_height,
             next_epoch,
-            next_epoch + Epoch(validator_node_expiry),
             registration.claim_public_key().clone(),
             registration.sidechain_id().cloned(),
         )?;

@@ -84,7 +84,6 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         shard_key: SubstateAddress,
         registered_at_base_height: u64,
         start_epoch: Epoch,
-        end_epoch: Epoch,
         fee_claim_public_key: PublicKey,
         sidechain_id: Option<PublicKey>,
     ) -> Result<(), Self::Error>;

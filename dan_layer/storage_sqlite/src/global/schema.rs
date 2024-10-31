@@ -63,7 +63,6 @@ diesel::table! {
         shard_key -> Binary,
         registered_at_base_height -> BigInt,
         start_epoch -> BigInt,
-        end_epoch -> BigInt,
         fee_claim_public_key -> Binary,
         address -> Text,
         sidechain_id -> Binary,

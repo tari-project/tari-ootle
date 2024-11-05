@@ -633,22 +633,16 @@ where
                 },
             }
         } else {
-            match self.messaging_mode.send_gossip_message(source, message) {
-                Ok(_) => {
-                    self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
-                        &message_id,
-                        &propagation_source,
-                        gossipsub::MessageAcceptance::Accept,
-                    )?;
-                },
-                Err(e) => {
-                    warn!(target: LOG_TARGET, "📢 Gossipsub message failed to be handled: {}", e);
-                    self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
-                        &message_id,
-                        &propagation_source,
-                        gossipsub::MessageAcceptance::Reject,
-                    )?;
-                },
+            // We accept all messages as we cannot validate them in this service.
+            // We could allow users to report back the validation result e.g. if a proposal is valid, however a naive
+            // implementation would likely incur a substantial cost for many messages.
+            self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                &message_id,
+                &propagation_source,
+                gossipsub::MessageAcceptance::Accept,
+            )?;
+            if let Err(e) = self.messaging_mode.send_gossip_message(source, message) {
+                warn!(target: LOG_TARGET, "📢 Gossipsub message failed to be handled: {}", e);
             }
         }
         Ok(())

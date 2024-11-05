@@ -19,7 +19,8 @@ pub struct Block {
     pub id: i32,
     pub block_id: String,
     pub parent_block_id: String,
-    pub merkle_root: String,
+    pub state_merkle_root: String,
+    pub command_merkle_root: String,
     pub network: String,
     pub height: i64,
     pub epoch: i64,
@@ -72,8 +73,9 @@ impl Block {
                     details: format!("Block #{} proposed_by is malformed", self.id),
                 }
             })?,
+            deserialize_hex_try_from(&self.state_merkle_root)?,
             deserialize_json(&self.commands)?,
-            deserialize_hex_try_from(&self.merkle_root)?,
+            deserialize_hex_try_from(&self.command_merkle_root)?,
             self.total_leader_fee as u64,
             self.is_dummy,
             self.is_justified,
@@ -85,7 +87,10 @@ impl Block {
             self.timestamp as u64,
             self.base_layer_block_height as u64,
             deserialize_hex_try_from(&self.base_layer_block_hash)?,
-            self.extra_data.map(|val| deserialize_json(&val)).transpose()?,
+            self.extra_data
+                .map(|val| deserialize_json(&val))
+                .transpose()?
+                .unwrap_or_default(),
         ))
     }
 }
@@ -95,7 +100,8 @@ pub struct ParkedBlock {
     pub id: i32,
     pub block_id: String,
     pub parent_block_id: String,
-    pub merkle_root: String,
+    pub state_merkle_root: String,
+    pub command_merkle_root: String,
     pub network: String,
     pub height: i64,
     pub epoch: i64,
@@ -144,8 +150,9 @@ impl TryFrom<ParkedBlock> for (consensus_models::Block, Vec<consensus_models::Fo
                     details: format!("Block #{} proposed_by is malformed", value.id),
                 }
             })?,
+            deserialize_hex_try_from(&value.state_merkle_root)?,
             deserialize_json(&value.commands)?,
-            deserialize_hex_try_from(&value.merkle_root)?,
+            deserialize_hex_try_from(&value.command_merkle_root)?,
             value.total_leader_fee as u64,
             false,
             false,
@@ -157,7 +164,11 @@ impl TryFrom<ParkedBlock> for (consensus_models::Block, Vec<consensus_models::Fo
             value.timestamp as u64,
             value.base_layer_block_height as u64,
             deserialize_hex_try_from(&value.base_layer_block_hash)?,
-            value.extra_data.map(|val| deserialize_json(&val)).transpose()?,
+            value
+                .extra_data
+                .map(|val| deserialize_json(&val))
+                .transpose()?
+                .unwrap_or_default(),
         );
         let foreign_proposals = deserialize_json(&value.foreign_proposals)?;
         Ok((block, foreign_proposals))

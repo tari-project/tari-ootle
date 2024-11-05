@@ -139,7 +139,8 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
                 },
             };
         }
-        root_tree.put_root_hash_changes(None, 1, hashes)
+        let (hash, _) = root_tree.compute_update_batch(None, 1, hashes)?;
+        Ok(hash)
     }
 
     fn get_state_root_for_shard(&self, shard: Shard) -> Result<Hash, StateTreeError> {

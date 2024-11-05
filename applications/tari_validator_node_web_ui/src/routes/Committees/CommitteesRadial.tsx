@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { fromHexString } from "../VN/Components/helpers";
 import EChartsReact from "echarts-for-react";
 import { ICommitteeChart } from "../../utils/interfaces";
@@ -113,7 +114,7 @@ export default function CommitteesRadial({ committees }: { committees: GetNetwor
             ${end}<br />
             <b>${validators.length} Members:</b> <br />
             <ul>${memberList}</ul>
-            <a class="tooltip-btn" href="committees/${start},${end}">View Committee</a>`;
+            <Link class="tooltip-btn" to="committees/${start},${end}">View Committee</Link>`;
   }
 
   const option = {
@@ -141,7 +142,7 @@ export default function CommitteesRadial({ committees }: { committees: GetNetwor
       enterable: true,
       trigger: "axis",
       formatter: tooltipFormatter,
-      position: function (point: any) {
+      position: function(point: any) {
         const left = point[0] + 10;
         const top = point[1] - 10;
         return [left, top];

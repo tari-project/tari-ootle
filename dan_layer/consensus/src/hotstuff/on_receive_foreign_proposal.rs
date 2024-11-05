@@ -158,9 +158,9 @@ where TConsensusSpec: ConsensusSpec
 
         let calculated_hash = candidate_block.calculate_hash().into();
         if calculated_hash != *candidate_block.id() {
-            return Err(ProposalValidationError::NodeHashMismatch {
+            return Err(ProposalValidationError::BlockIdMismatch {
                 proposed_by: candidate_block.proposed_by().to_string(),
-                hash: *candidate_block.id(),
+                block_id: *candidate_block.id(),
                 calculated_hash,
             });
         }

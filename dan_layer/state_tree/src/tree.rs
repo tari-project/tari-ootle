@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::marker::PhantomData;
+use std::{iter::Peekable, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
@@ -10,12 +10,14 @@ use crate::{
     error::StateTreeError,
     jellyfish::{Hash, JellyfishMerkleTree, SparseMerkleProofExt, TreeStore, Version},
     key_mapper::{DbKeyMapper, HashIdentityKeyMapper, SpreadPrefixKeyMapper},
+    memory_store::MemoryTreeStore,
     Node,
     NodeKey,
     ProofValue,
     StaleTreeNode,
     TreeStoreReader,
     TreeUpdateBatch,
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
 };
 
 pub type SpreadPrefixStateTree<'a, S> = StateTree<'a, S, SpreadPrefixKeyMapper>;
@@ -94,19 +96,13 @@ impl<'a, S: TreeStore<Version>, M: DbKeyMapper<SubstateId>> StateTree<'a, S, M> 
 }
 
 impl<'a, S: TreeStore<()>, M: DbKeyMapper<Hash>> StateTree<'a, S, M> {
-    pub fn put_root_hash_changes<I: IntoIterator<Item = Hash>>(
+    pub fn put_changes<I: IntoIterator<Item = Hash>>(
         &mut self,
         current_version: Option<Version>,
         next_version: Version,
         changes: I,
     ) -> Result<Hash, StateTreeError> {
-        let jmt = JellyfishMerkleTree::<_, ()>::new(self.store);
-
-        let changes = changes
-            .into_iter()
-            .map(|hash| (M::map_to_leaf_key(&hash), Some((hash, ()))));
-
-        let (root_hash, update_result) = jmt.batch_put_value_set(changes, None, current_version, next_version)?;
+        let (root_hash, update_result) = self.compute_update_batch(current_version, next_version, changes)?;
 
         for (k, node) in update_result.node_batch {
             self.store.insert_node(k, node)?;
@@ -118,6 +114,22 @@ impl<'a, S: TreeStore<()>, M: DbKeyMapper<Hash>> StateTree<'a, S, M> {
         }
 
         Ok(root_hash)
+    }
+
+    pub fn compute_update_batch<I: IntoIterator<Item = Hash>>(
+        &mut self,
+        current_version: Option<Version>,
+        next_version: Version,
+        changes: I,
+    ) -> Result<(Hash, TreeUpdateBatch<()>), StateTreeError> {
+        let jmt = JellyfishMerkleTree::<_, ()>::new(self.store);
+
+        let changes = changes
+            .into_iter()
+            .map(|hash| (M::map_to_leaf_key(&hash), Some((hash, ()))));
+
+        let (root, update) = jmt.batch_put_value_set(changes, None, current_version, next_version)?;
+        Ok((root, update))
     }
 }
 
@@ -184,4 +196,16 @@ impl<P> From<TreeUpdateBatch<P>> for StateHashTreeDiff<P> {
                 .collect(),
         }
     }
+}
+
+pub fn compute_merkle_root_for_hashes<I: Iterator<Item = Hash>>(
+    mut hashes: Peekable<I>,
+) -> Result<Hash, StateTreeError> {
+    if hashes.peek().is_none() {
+        return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
+    }
+    let mut mem_store = MemoryTreeStore::new();
+    let mut root_tree = RootStateTree::new(&mut mem_store);
+    let (hash, _) = root_tree.compute_update_batch(None, 1, hashes)?;
+    Ok(hash)
 }

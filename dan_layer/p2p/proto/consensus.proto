@@ -81,24 +81,28 @@ message VoteMessage {
   tari.dan.common.SignatureAndPublicKey signature = 5;
 }
 
-message Block {
+message BlockHeader {
   bytes parent_id = 1;
   int32 network = 2;
-  QuorumCertificate justify = 3;
-  uint64 height = 4;
-  uint64 epoch = 5;
-  uint32 shard_group = 6;
-  bytes proposed_by = 7;
-  bytes merkle_root = 8;
-  repeated Command commands = 9;
-  uint64 total_leader_fee = 10;
-  bytes foreign_indexes = 11;
-  tari.dan.common.Signature signature = 12;
-  uint64 timestamp = 13;
-  uint64 base_layer_block_height = 14;
-  bytes base_layer_block_hash = 15;
-  bool is_dummy = 16;
-  ExtraData extra_data = 17;
+  uint64 height = 3;
+  uint64 epoch = 4;
+  uint32 shard_group = 5;
+  bytes proposed_by = 6;
+  bytes state_merkle_root = 7;
+  uint64 total_leader_fee = 8;
+  bytes foreign_indexes = 9;
+  tari.dan.common.Signature signature = 10;
+  uint64 timestamp = 11;
+  uint64 base_layer_block_height = 12;
+  bytes base_layer_block_hash = 13;
+  bool is_dummy = 14;
+  ExtraData extra_data = 15;
+}
+
+message Block {
+  BlockHeader header = 1;
+  QuorumCertificate justify = 2;
+  repeated Command commands = 3;
 }
 
 message ExtraData {

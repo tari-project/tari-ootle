@@ -34,6 +34,7 @@ use tari_common::{
     configuration::Network,
     exit_codes::{ExitCode, ExitError},
 };
+use tari_common_types::types::FixedHash;
 use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
@@ -603,8 +604,9 @@ where
         network,
         Epoch(0),
         ShardGroup::all_shards(num_preshards),
+        FixedHash::default(),
         sidechain_id.clone(),
-    )?;
+    );
     let substate_id = substate_id.into();
     let id = VersionedSubstateId::new(substate_id, 0);
     SubstateRecord {

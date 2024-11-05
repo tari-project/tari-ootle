@@ -15,6 +15,7 @@ use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
     Epoch,
+    ExtraData,
     NodeHeight,
     ToSubstateAddress,
     VersionedSubstateId,
@@ -641,7 +642,7 @@ where TConsensusSpec: ConsensusSpec
         // Ensure that foreign indexes are canonically ordered
         foreign_indexes.sort_keys();
 
-        let mut next_block = Block::new(
+        let mut next_block = Block::create(
             self.config.network,
             *parent_block.block_id(),
             high_qc_certificate,
@@ -657,8 +658,8 @@ where TConsensusSpec: ConsensusSpec
             EpochTime::now().as_u64(),
             base_layer_block_height,
             base_layer_block_hash,
-            None,
-        );
+            ExtraData::new(),
+        )?;
 
         let signature = self.signing_service.sign(next_block.id());
         next_block.set_signature(signature);

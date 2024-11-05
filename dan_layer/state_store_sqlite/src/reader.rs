@@ -140,7 +140,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> SqliteState
 
         // Blocks without commands may change pending transaction state because they justify a
         // block that proposes a change. So we cannot only use blocks that have commands.
-        let applicable_block_ids = self.get_block_ids_between(from_block_id, to_block_id)?;
+        let applicable_block_ids = self.get_block_ids_between(from_block_id, to_block_id, 1000)?;
 
         debug!(
             target: LOG_TARGET,
@@ -254,6 +254,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> SqliteState
         &self,
         start_block: &BlockId,
         end_block: &BlockId,
+        limit: u64,
     ) -> Result<Vec<String>, SqliteStorageError> {
         debug!(target: LOG_TARGET, "get_block_ids_between: start: {start_block}, end: {end_block}");
         let block_ids = sql_query(
@@ -266,12 +267,13 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> SqliteState
                     block_id = tree.parent
                     AND tree.bid != ?
                     AND tree.parent != '0000000000000000000000000000000000000000000000000000000000000000'
-                LIMIT 1000
+                LIMIT ?
             )
             SELECT bid FROM tree"#,
         )
         .bind::<Text, _>(serialize_hex(end_block))
         .bind::<Text, _>(serialize_hex(start_block))
+        .bind::<BigInt, _>(limit as i64)
         .load_iter::<BlockIdSqlValue, _>(self.connection())
         .map_err(|e| SqliteStorageError::DieselError {
             operation: "get_block_ids_that_change_state_between",
@@ -811,7 +813,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         let commit_block = self.get_commit_block()?;
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), from_block_id)?;
+        let block_ids = self.get_block_ids_between(commit_block.block_id(), from_block_id, 1000)?;
         let tx_id = serialize_hex(tx_id);
 
         let execution = transaction_executions::table
@@ -953,33 +955,24 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
-        start_block_id: &BlockId,
-        end_block_id: &BlockId,
+        start_block_height: NodeHeight,
+        end_block_height: NodeHeight,
         include_dummy_blocks: bool,
+        limit: u64,
     ) -> Result<Vec<Block>, StorageError> {
         use crate::schema::{blocks, quorum_certificates};
 
-        if !self.blocks_exists(start_block_id)? {
+        if start_block_height > end_block_height {
             return Err(StorageError::QueryError {
-                reason: format!("blocks_all_between: Start block {} does not exist", start_block_id),
+                reason: format!(
+                    "Start block height {start_block_height} must be less than end block height {end_block_height}"
+                ),
             });
-        }
-
-        if !self.blocks_exists(end_block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("blocks_all_between: End block {} does not exist", end_block_id),
-            });
-        }
-
-        let block_ids = self.get_block_ids_between(start_block_id, end_block_id)?;
-        if block_ids.is_empty() {
-            return Ok(vec![]);
         }
 
         let mut query = blocks::table
             .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
             .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::block_id.eq_any(block_ids))
             .into_boxed();
 
         if !include_dummy_blocks {
@@ -989,7 +982,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let results = query
             .filter(blocks::epoch.eq(epoch.as_u64() as i64))
             .filter(blocks::shard_group.eq(shard_group.encode_as_u32() as i32))
+            .filter(blocks::height.ge(start_block_height.as_u64() as i64))
+            .filter(blocks::height.le(end_block_height.as_u64() as i64))
             .order_by(blocks::height.asc())
+            .limit(limit as i64)
             .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "blocks_all_after_height",
@@ -2186,7 +2182,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let commit_block = self.get_commit_block()?;
 
         // Block may modify state with zero commands because the justify a block that changes state
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id)?;
+        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 1000)?;
 
         if block_ids.is_empty() {
             return Ok(HashMap::new());
@@ -2503,7 +2499,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
         let commit_block = self.get_commit_block()?;
 
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id)?;
+        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 1000)?;
 
         let pks = validator_epoch_stats::table
             .select(validator_epoch_stats::public_key)
@@ -2550,7 +2546,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let commit_block = self.get_commit_block()?;
 
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id)?;
+        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 1000)?;
 
         let pks = validator_epoch_stats::table
             .select(validator_epoch_stats::public_key)
@@ -2566,7 +2562,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     ),
                 ),
             )
-            .filter(validator_epoch_stats::missed_proposals.eq(0i64))
+            .filter(validator_epoch_stats::missed_proposals_capped.eq(0i64))
             .filter(validator_epoch_stats::epoch.eq(commit_block.epoch().as_u64() as i64))
             .limit(limit as i64)
             .get_results::<String>(self.connection())
@@ -2596,7 +2592,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         let commit_block = self.get_commit_block()?;
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id)?;
+        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 1000)?;
 
         let count = suspended_nodes::table
             .count()

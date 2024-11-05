@@ -20,7 +20,10 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::convert::{TryFrom, TryInto};
+use std::{
+    collections::BTreeSet,
+    convert::{TryFrom, TryInto},
+};
 
 use anyhow::anyhow;
 use tari_bor::{decode_exact, encode};
@@ -48,27 +51,30 @@ use tari_dan_common_types::{
     ValidatorMetadata,
     VersionedSubstateId,
 };
-use tari_dan_storage::consensus_models::{
-    AbortReason,
-    BlockId,
-    Command,
-    Decision,
-    Evidence,
-    ForeignProposal,
-    ForeignProposalAtom,
-    HighQc,
-    LeaderFee,
-    MintConfidentialOutputAtom,
-    QcId,
-    QuorumCertificate,
-    QuorumDecision,
-    ResumeNodeAtom,
-    SubstateDestroyed,
-    SubstatePledge,
-    SubstatePledges,
-    SubstateRecord,
-    SuspendNodeAtom,
-    TransactionAtom,
+use tari_dan_storage::{
+    consensus_models,
+    consensus_models::{
+        AbortReason,
+        BlockId,
+        Command,
+        Decision,
+        Evidence,
+        ForeignProposal,
+        ForeignProposalAtom,
+        HighQc,
+        LeaderFee,
+        MintConfidentialOutputAtom,
+        QcId,
+        QuorumCertificate,
+        QuorumDecision,
+        ResumeNodeAtom,
+        SubstateDestroyed,
+        SubstatePledge,
+        SubstatePledges,
+        SubstateRecord,
+        SuspendNodeAtom,
+        TransactionAtom,
+    },
 };
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
@@ -447,10 +453,9 @@ impl TryFrom<proto::consensus::MissingTransactionsResponse> for MissingTransacti
         })
     }
 }
-//---------------------------------- Block --------------------------------------------//
 
-impl From<&tari_dan_storage::consensus_models::Block> for proto::consensus::Block {
-    fn from(value: &tari_dan_storage::consensus_models::Block) -> Self {
+impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
+    fn from(value: &consensus_models::BlockHeader) -> Self {
         Self {
             network: value.network().as_byte().into(),
             height: value.height().as_u64(),
@@ -458,79 +463,109 @@ impl From<&tari_dan_storage::consensus_models::Block> for proto::consensus::Bloc
             shard_group: value.shard_group().encode_as_u32(),
             parent_id: value.parent().as_bytes().to_vec(),
             proposed_by: ByteArray::as_bytes(value.proposed_by()).to_vec(),
-            merkle_root: value.merkle_root().as_slice().to_vec(),
-            justify: Some(value.justify().into()),
+            state_merkle_root: value.state_merkle_root().as_slice().to_vec(),
             total_leader_fee: value.total_leader_fee(),
-            commands: value.commands().iter().map(Into::into).collect(),
             foreign_indexes: encode(value.foreign_indexes()).unwrap(),
             signature: value.signature().map(Into::into),
             timestamp: value.timestamp(),
             base_layer_block_height: value.base_layer_block_height(),
             base_layer_block_hash: value.base_layer_block_hash().as_bytes().to_vec(),
             is_dummy: value.is_dummy(),
-            extra_data: value.extra_data().map(Into::into),
+            extra_data: Some(value.extra_data().into()),
         }
     }
 }
 
-impl TryFrom<proto::consensus::Block> for tari_dan_storage::consensus_models::Block {
+fn try_convert_proto_block_header(
+    value: proto::consensus::BlockHeader,
+    justify_id: QcId,
+    commands: &BTreeSet<Command>,
+) -> Result<consensus_models::BlockHeader, anyhow::Error> {
+    let network = u8::try_from(value.network)
+        .map_err(|_| anyhow!("Block conversion: Invalid network byte {}", value.network))?
+        .try_into()?;
+
+    let shard_group = ShardGroup::decode_from_u32(value.shard_group)
+        .ok_or_else(|| anyhow!("Block shard_group ({}) is not a valid", value.shard_group))?;
+
+    let proposed_by = PublicKey::from_canonical_bytes(&value.proposed_by)
+        .map_err(|_| anyhow!("Block conversion: Invalid proposed_by"))?;
+
+    let extra_data = value
+        .extra_data
+        .ok_or_else(|| anyhow!("ExtraData not provided"))?
+        .try_into()?;
+
+    if value.is_dummy {
+        Ok(consensus_models::BlockHeader::dummy_block(
+            network,
+            value.parent_id.try_into()?,
+            proposed_by,
+            NodeHeight(value.height),
+            justify_id,
+            Epoch(value.epoch),
+            shard_group,
+            value.state_merkle_root.try_into()?,
+            value.timestamp,
+            value.base_layer_block_height,
+            value.base_layer_block_hash.try_into()?,
+        ))
+    } else {
+        // We calculate the BlockId and command MR locally from remote data. This means that they will
+        // always be valid, therefore do not need to be explicitly validated.
+        // If there were a mismatch (perhaps due modified data over the wire) the signature verification will fail.
+        Ok(consensus_models::BlockHeader::create(
+            network,
+            value.parent_id.try_into()?,
+            justify_id,
+            NodeHeight(value.height),
+            Epoch(value.epoch),
+            shard_group,
+            proposed_by,
+            value.state_merkle_root.try_into()?,
+            commands,
+            value.total_leader_fee,
+            decode_exact(&value.foreign_indexes)?,
+            value.signature.map(TryInto::try_into).transpose()?,
+            value.timestamp,
+            value.base_layer_block_height,
+            value.base_layer_block_hash.try_into()?,
+            extra_data,
+        )?)
+    }
+}
+
+//---------------------------------- Block --------------------------------------------//
+
+impl From<&consensus_models::Block> for proto::consensus::Block {
+    fn from(value: &consensus_models::Block) -> Self {
+        Self {
+            header: Some(value.header().into()),
+            justify: Some(value.justify().into()),
+            commands: value.commands().iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::Block> for consensus_models::Block {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::Block) -> Result<Self, Self::Error> {
-        let network = u8::try_from(value.network)
-            .map_err(|_| anyhow!("Block conversion: Invalid network byte {}", value.network))?
-            .try_into()?;
+        let commands = value
+            .commands
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?;
 
-        let shard_group = ShardGroup::decode_from_u32(value.shard_group)
-            .ok_or_else(|| anyhow!("Block shard_group ({}) is not a valid", value.shard_group))?;
-
-        let proposed_by = PublicKey::from_canonical_bytes(&value.proposed_by)
-            .map_err(|_| anyhow!("Block conversion: Invalid proposed_by"))?;
         let justify = value
             .justify
-            .ok_or_else(|| anyhow!("Block conversion: QC not provided"))?
-            .try_into()?;
+            .ok_or_else(|| anyhow!("Block conversion: QC not provided"))?;
+        let justify = consensus_models::QuorumCertificate::try_from(justify)?;
 
-        let extra_data = value.extra_data.map(TryInto::try_into).transpose()?;
+        let header = value.header.ok_or_else(|| anyhow!("BlockHeader not provided"))?;
+        let header = try_convert_proto_block_header(header, *justify.id(), &commands)?;
 
-        if value.is_dummy {
-            Ok(Self::dummy_block(
-                network,
-                value.parent_id.try_into()?,
-                proposed_by,
-                NodeHeight(value.height),
-                justify,
-                Epoch(value.epoch),
-                shard_group,
-                value.merkle_root.try_into()?,
-                value.timestamp,
-                value.base_layer_block_height,
-                value.base_layer_block_hash.try_into()?,
-            ))
-        } else {
-            Ok(Self::new(
-                network,
-                value.parent_id.try_into()?,
-                justify,
-                NodeHeight(value.height),
-                Epoch(value.epoch),
-                shard_group,
-                proposed_by,
-                value
-                    .commands
-                    .into_iter()
-                    .map(TryInto::try_into)
-                    .collect::<Result<_, _>>()?,
-                value.merkle_root.try_into()?,
-                value.total_leader_fee,
-                decode_exact(&value.foreign_indexes)?,
-                value.signature.map(TryInto::try_into).transpose()?,
-                value.timestamp,
-                value.base_layer_block_height,
-                value.base_layer_block_hash.try_into()?,
-                extra_data,
-            ))
-        }
+        Ok(Self::new(header, justify, commands))
     }
 }
 

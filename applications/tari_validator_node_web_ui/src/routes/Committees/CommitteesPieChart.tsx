@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import EChartsReact from "echarts-for-react";
 import "../../theme/echarts.css";
 import type {
@@ -73,7 +74,7 @@ const MyChartComponent = ({ chartData }: MyChartComponentProps) => {
       .map((item: any) => `<li>Address: ${item.address}</li>`)
       .slice(0, 5)
       .join(" ")}</ul><br />
-      <a class="tooltip-btn" href="${link}">View All Members</a><br />`;
+      <Link class="tooltip-btn" to={link}>View All Members</Link><br />`;
   };
 
   const option = {

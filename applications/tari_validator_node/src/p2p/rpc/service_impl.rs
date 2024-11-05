@@ -24,7 +24,7 @@ use std::convert::{TryFrom, TryInto};
 
 use log::*;
 use tari_bor::{decode_exact, encode};
-use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, PeerAddress, SubstateAddress};
+use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateAddress};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{
@@ -45,16 +45,7 @@ use tari_dan_p2p::{
     },
 };
 use tari_dan_storage::{
-    consensus_models::{
-        Block,
-        BlockId,
-        EpochCheckpoint,
-        HighQc,
-        LockedBlock,
-        StateTransitionId,
-        SubstateRecord,
-        TransactionRecord,
-    },
+    consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
 use tari_engine_types::virtual_substate::VirtualSubstateId;
@@ -279,41 +270,53 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             .await
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        let (sender, receiver) = mpsc::channel(10);
-
-        let start_block_id = BlockId::try_from(req.start_block_id)
+        let start_block_id = Some(req.start_block_id)
+            .filter(|i| !i.is_empty())
+            .map(BlockId::try_from)
+            .transpose()
             .map_err(|e| RpcStatus::bad_request(format!("Invalid encoded block id: {}", e)))?;
-        // Check if we have the blocks
-        let start_block = store
-            .with_read_tx(|tx| Block::get(tx, &start_block_id).optional())
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
-            .ok_or_else(|| RpcStatus::not_found(format!("start_block_id {start_block_id} not found")))?;
 
-        // Check that the start block is not after the locked block
-        let locked_block = store
-            .with_read_tx(|tx| LockedBlock::get(tx, current_epoch).optional())
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
-            .ok_or_else(|| RpcStatus::not_found("No locked block"))?;
-        let epoch_is_after = start_block.epoch() > locked_block.epoch();
-        let height_is_after =
-            (start_block.epoch() == locked_block.epoch) && (start_block.height() > locked_block.height());
+        let start_block_id = {
+            let tx = store
+                .create_read_tx()
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        if epoch_is_after || height_is_after {
-            return Err(RpcStatus::not_found(format!(
-                "start_block_id {} is after locked block {}",
-                start_block_id, locked_block
-            )));
-        }
+            match start_block_id {
+                Some(id) => {
+                    if !Block::record_exists(&tx, &id).map_err(RpcStatus::log_internal_error(LOG_TARGET))? {
+                        return Err(RpcStatus::not_found(format!("start_block_id {id} not found",)));
+                    }
+                    id
+                },
+                None => {
+                    let epoch = req
+                        .epoch
+                        .map(Epoch::from)
+                        .map(|end| end.min(current_epoch))
+                        .unwrap_or(current_epoch);
 
-        task::spawn(
-            BlockSyncTask::new(
-                self.shard_state_store.clone(),
-                start_block,
-                req.up_to_epoch.map(|epoch| epoch.into()),
-                sender,
-            )
-            .run(),
-        );
+                    let mut block_ids = Block::get_ids_by_epoch_and_height(&tx, epoch, NodeHeight::zero())
+                        .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
+                    let Some(block_id) = block_ids.pop() else {
+                        return Err(RpcStatus::not_found(
+                            "Block not found with epoch={epoch},height={height}",
+                        ));
+                    };
+                    if !block_ids.is_empty() {
+                        return Err(RpcStatus::conflict(format!(
+                            "Multiple applicable blocks for epoch={} and height=0",
+                            current_epoch
+                        )));
+                    }
+
+                    block_id
+                },
+            }
+        };
+
+        let (sender, receiver) = mpsc::channel(10);
+        task::spawn(BlockSyncTask::new(self.shard_state_store.clone(), start_block_id, None, sender).run());
 
         Ok(Streaming::new(receiver))
     }

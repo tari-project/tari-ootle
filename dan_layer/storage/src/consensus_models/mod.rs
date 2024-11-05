@@ -3,6 +3,7 @@
 
 mod block;
 mod block_diff;
+mod block_header;
 mod block_pledges;
 mod burnt_utxo;
 mod command;
@@ -43,6 +44,7 @@ mod vote_signature;
 
 pub use block::*;
 pub use block_diff::*;
+pub use block_header::*;
 pub use block_pledges::*;
 pub use burnt_utxo::*;
 pub use command::*;

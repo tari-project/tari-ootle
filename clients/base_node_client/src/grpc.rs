@@ -26,7 +26,12 @@ use std::convert::TryInto;
 
 use async_trait::async_trait;
 use log::*;
-use minotari_app_grpc::tari_rpc::{self as grpc, GetShardKeyRequest};
+use minotari_app_grpc::tari_rpc::{
+    self as grpc,
+    GetShardKeyRequest,
+    GetValidatorNodeChangesRequest,
+    ValidatorNodeChange,
+};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_core::{blocks::BlockHeader, transactions::transaction_components::CodeTemplateRegistration};
@@ -79,14 +84,14 @@ impl GrpcBaseNodeClient {
             match stream.message().await {
                 Ok(Some(_val)) => {
                     count += 1;
-                }
+                },
                 Ok(None) => {
                     break;
-                }
+                },
                 Err(e) => {
                     warn!(target: LOG_TARGET, "Error getting mempool transaction count: {}", e);
                     return Err(BaseNodeClientError::ConnectionError);
-                }
+                },
             }
         }
         Ok(count)
@@ -113,6 +118,28 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                 BaseNodeClientError::InvalidPeerMessage("best_block was not a valid fixed hash".to_string())
             })?,
         })
+    }
+
+    async fn get_validator_node_changes(
+        &mut self,
+        start_height: u64,
+        end_height: u64,
+        sidechain_id: Option<&PublicKey>,
+    ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError> {
+        let client = self.connection().await?;
+        let result = client
+            .get_validator_node_changes(GetValidatorNodeChangesRequest {
+                start_height,
+                end_height,
+                sidechain_id: match sidechain_id {
+                    None => vec![],
+                    Some(sidechain_id) => sidechain_id.to_vec(),
+                },
+            })
+            .await?
+            .into_inner();
+
+        Ok(result.changes)
     }
 
     async fn get_validator_nodes(&mut self, height: u64) -> Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError> {
@@ -150,18 +177,18 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                                 )
                             }))
                         }
-                            .transpose()?,
+                        .transpose()?,
                     });
-                }
+                },
                 Ok(None) => {
                     break;
-                }
+                },
                 Err(e) => {
                     return Err(BaseNodeClientError::InvalidPeerMessage(format!(
                         "Error reading stream: {}",
                         e
                     )));
-                }
+                },
             }
         }
 
@@ -221,16 +248,16 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                             BaseNodeClientError::InvalidPeerMessage("invalid template registration".to_string())
                         })?;
                     templates.push(template_registration);
-                }
+                },
                 Ok(None) => {
                     break;
-                }
+                },
                 Err(e) => {
                     return Err(BaseNodeClientError::InvalidPeerMessage(format!(
                         "Error reading stream: {}",
                         e
                     )));
-                }
+                },
             }
         }
         Ok(templates)
@@ -302,16 +329,16 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                             .map_err(BaseNodeClientError::InvalidPeerMessage)?,
                     };
                     responses.push(resp);
-                }
+                },
                 Ok(None) => {
                     break;
-                }
+                },
                 Err(e) => {
                     return Err(BaseNodeClientError::InvalidPeerMessage(format!(
                         "Error reading stream: {}",
                         e
                     )));
-                }
+                },
             }
         }
 

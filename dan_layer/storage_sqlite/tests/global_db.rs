@@ -49,7 +49,6 @@ fn insert_vn_with_public_key(
     validator_nodes: &mut ValidatorNodeDb<'_, '_, SqliteGlobalDbAdapter<PeerAddress>>,
     public_key: PublicKey,
     start_epoch: Epoch,
-    end_epoch: Epoch,
     sidechain_id: Option<PublicKey>,
 ) {
     validator_nodes
@@ -59,7 +58,6 @@ fn insert_vn_with_public_key(
             derived_substate_address(&public_key),
             0,
             start_epoch,
-            end_epoch,
             public_key,
             sidechain_id,
         )

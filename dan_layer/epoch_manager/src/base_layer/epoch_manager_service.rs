@@ -211,9 +211,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
             EpochManagerRequest::WaitForInitialScanningToComplete { reply } => {
                 self.inner.add_notify_on_scanning_complete(reply);
             },
-            EpochManagerRequest::RemainingRegistrationEpochs { reply } => {
-                handle(reply, self.inner.remaining_registration_epochs().await, context)
-            },
             EpochManagerRequest::GetBaseLayerConsensusConstants { reply } => handle(
                 reply,
                 self.inner.get_base_layer_consensus_constants().await.cloned(),

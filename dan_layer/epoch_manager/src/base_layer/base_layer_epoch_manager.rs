@@ -60,7 +60,7 @@ pub struct BaseLayerEpochManager<TGlobalStore, TBaseNodeClient> {
 }
 
 impl<TAddr: NodeAddressable + DerivableFromPublicKey>
-BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
+    BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
 {
     pub fn new(
         config: EpochManagerConfig,
@@ -561,22 +561,6 @@ BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
         } else {
             self.waiting_for_scanning_complete.push(reply);
         }
-    }
-
-    pub async fn remaining_registration_epochs(&mut self) -> Result<Option<Epoch>, EpochManagerError> {
-        let last_registration_epoch = match self.last_registration_epoch()? {
-            Some(epoch) => epoch,
-            None => return Ok(None),
-        };
-
-        let constants = self.get_base_layer_consensus_constants().await?;
-        let expiry = constants.validator_node_registration_expiry();
-
-        // Note this can be negative in some cases
-        let num_blocks_since_last_reg = self.current_epoch.saturating_sub(last_registration_epoch);
-
-        // None indicates that we are not registered, or a previous registration has expired
-        Ok(expiry.checked_sub(num_blocks_since_last_reg))
     }
 
     pub fn get_our_validator_node(&self, epoch: Epoch) -> Result<ValidatorNode<TAddr>, EpochManagerError> {

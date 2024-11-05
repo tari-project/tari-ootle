@@ -66,7 +66,6 @@ impl TestEpochManager {
                 shard_key,
                 registered_at_base_height: our_validator_node.registered_at_base_height,
                 start_epoch: our_validator_node.start_epoch,
-                end_epoch: our_validator_node.end_epoch,
                 fee_claim_public_key: PublicKey::default(),
                 sidechain_id: None,
             });
@@ -77,7 +76,6 @@ impl TestEpochManager {
                 shard_key,
                 registered_at_base_height: 0,
                 start_epoch: Epoch(0),
-                end_epoch: Epoch(1),
                 fee_claim_public_key: PublicKey::default(),
                 sidechain_id: None,
             });

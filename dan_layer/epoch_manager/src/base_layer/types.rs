@@ -99,9 +99,6 @@ pub enum EpochManagerRequest<TAddr> {
     WaitForInitialScanningToComplete {
         reply: Reply<()>,
     },
-    RemainingRegistrationEpochs {
-        reply: Reply<Option<Epoch>>,
-    },
     GetBaseLayerConsensusConstants {
         reply: Reply<BaseLayerConsensusConstants>,
     },

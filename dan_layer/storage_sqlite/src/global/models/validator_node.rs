@@ -38,7 +38,6 @@ pub struct DbValidatorNode {
     pub shard_key: Vec<u8>,
     pub registered_at_base_height: i64,
     pub start_epoch: i64,
-    pub end_epoch: i64,
     pub fee_claim_public_key: Vec<u8>,
     pub address: String,
     pub sidechain_id: Vec<u8>,
@@ -57,7 +56,6 @@ impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
             })?,
             registered_at_base_height: vn.registered_at_base_height as u64,
             start_epoch: Epoch(vn.start_epoch as u64),
-            end_epoch: Epoch(vn.end_epoch as u64),
             fee_claim_public_key: PublicKey::from_canonical_bytes(&vn.fee_claim_public_key).map_err(|_| {
                 SqliteStorageError::MalformedDbData(format!(
                     "Invalid fee claim public key in validator node record id={}",

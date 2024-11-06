@@ -41,8 +41,10 @@ tari_transaction_manifest = { workspace = true }
 tari_key_manager = { workspace = true }
 tari_dan_wallet_sdk = { workspace = true }
 
-tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_comms_dht = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
+tari_comms = { git = "https://github.com/ksrichard/tari.git", branch = "feature/trickle-validators" }
+#tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
+tari_comms_dht = { git = "https://github.com/ksrichard/tari.git", branch = "feature/trickle-validators" }
+#tari_comms_dht = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 
 anyhow = { workspace = true }
 # if we set this version in the workspace it would break other crates

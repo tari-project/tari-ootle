@@ -60,7 +60,7 @@ pub struct BaseLayerEpochManager<TGlobalStore, TBaseNodeClient> {
 }
 
 impl<TAddr: NodeAddressable + DerivableFromPublicKey>
-    BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
+BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
 {
     pub fn new(
         config: EpochManagerConfig,
@@ -186,20 +186,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         Ok(())
     }
 
-    fn validator_nodes_count(
-        &self,
-        next_epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
-    ) -> Result<u64, EpochManagerError> {
-        let mut tx = self.global_db.create_transaction()?;
-        let result = self
-            .global_db
-            .validator_nodes(&mut tx)
-            .count_by_epoch(next_epoch, sidechain_id)?;
-        tx.commit()?;
-        Ok(result)
-    }
-
     pub async fn add_validator_node_registration(
         &mut self,
         block_height: u64,
@@ -213,14 +199,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         }
 
         let constants = self.base_layer_consensus_constants().await?;
-        let mut next_epoch = constants.height_to_epoch(block_height) + Epoch(1);
-
-        // find the next available epoch
-        let mut next_epoch_vn_count = self.validator_nodes_count(next_epoch, registration.sidechain_id())?;
-        while next_epoch_vn_count >= self.config.max_vns_per_epoch_activated {
-            next_epoch += Epoch(1);
-            next_epoch_vn_count = self.validator_nodes_count(next_epoch, registration.sidechain_id())?;
-        }
+        let next_epoch = constants.height_to_epoch(block_height) + Epoch(1);
 
         let next_epoch_height = constants.epoch_to_height(next_epoch);
 

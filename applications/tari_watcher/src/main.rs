@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
             config.write(file).await.context("Writing config failed")?;
 
             log::info!("Config file created at {}", config_path.display());
-        },
+        }
         Commands::Start(ref args) => {
             log::info!("Starting watcher using config {}", config_path.display());
             let mut cfg = read_config_file(config_path).await.context("read config file")?;
@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
             // optionally override config values
             args.apply(&mut cfg);
             start(cfg).await?;
-        },
+        }
     }
 
     Ok(())
@@ -81,7 +81,7 @@ async fn start(config: Config) -> anyhow::Result<()> {
         config.base_dir.join(DEFAULT_WATCHER_BASE_PATH).join("watcher.pid"),
         std::process::id(),
     )
-    .await?;
+        .await?;
     let handlers = spawn_manager(config.clone(), shutdown.to_signal(), shutdown).await?;
     let manager_handle = handlers.manager;
     let task_handle = handlers.task;
@@ -108,12 +108,9 @@ struct Handlers {
 }
 
 async fn spawn_manager(config: Config, shutdown: ShutdownSignal, trigger: Shutdown) -> anyhow::Result<Handlers> {
-    let (manager, mut manager_handle) = ProcessManager::new(config, shutdown, trigger);
+    let (manager, manager_handle) = ProcessManager::new(config, shutdown, trigger);
     let cr = manager.start_request_handler().await?;
-    let status = manager_handle.get_tip_info().await?;
-    // in the case the consensus constants have changed since the genesis block, use the latest ones
-    let constants = manager_handle.get_consensus_constants(status.height()).await?;
-    start_receivers(cr.rx_log, cr.rx_alert, cr.cfg_alert, constants).await;
+    start_receivers(cr.rx_log, cr.rx_alert, cr.cfg_alert).await;
 
     Ok(Handlers {
         manager: manager_handle,

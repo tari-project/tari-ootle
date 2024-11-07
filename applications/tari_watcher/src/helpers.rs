@@ -45,12 +45,12 @@ pub async fn read_registration_file<P: AsRef<Path>>(
         Ok(info) => {
             let reg = json5::from_str(&info)?;
             Ok(Some(reg))
-        }
+        },
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => {
             log::error!("Failed to read VN registration file: {}", e);
             Err(e.into())
-        }
+        },
     }
 }
 

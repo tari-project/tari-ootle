@@ -70,8 +70,7 @@ pub async fn registration_loop(config: Config, mut handle: ManagerHandle) -> any
         }
 
         // if the node is already registered and not close to expiring in the next epoch, skip registration
-        if contains_key(active_keys.clone(), public_key.clone()) || recently_registered
-        {
+        if contains_key(active_keys.clone(), public_key.clone()) || recently_registered {
             info!("VN has an active registration and will not expire in the next epoch, skip");
             recently_registered = false;
             continue;
@@ -94,7 +93,7 @@ pub async fn registration_loop(config: Config, mut handle: ManagerHandle) -> any
             "Registered VN at block {} with transaction id: {}",
             current_block, tx.transaction_id
         );
-        
+
         // give the network another tick to process the registration
         recently_registered = true;
     }

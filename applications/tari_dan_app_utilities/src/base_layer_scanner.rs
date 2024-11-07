@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use log::*;
 use minotari_app_grpc::tari_rpc::ValidatorNodeChangeState;
@@ -41,10 +41,9 @@ use tari_core::transactions::{
         ValidatorNodeRegistration,
     },
 };
-use tari_crypto::tari_utilities::ByteArrayError;
 use tari_crypto::{
     ristretto::RistrettoPublicKey,
-    tari_utilities::{hex::Hex, ByteArray},
+    tari_utilities::{hex::Hex, ByteArray, ByteArrayError},
 };
 use tari_dan_common_types::{optional::Optional, NodeAddressable, VersionedSubstateId};
 use tari_dan_storage::{
@@ -219,7 +218,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                         .saturating_sub(self.consensus_constants.base_layer_confirmations)
                 );
                 self.sync_blockchain().await?;
-            }
+            },
             BlockchainProgression::Reorged => {
                 error!(
                     target: LOG_TARGET,
@@ -230,7 +229,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 self.last_scanned_validator_node_mr = None;
                 self.last_scanned_height = 0;
                 self.sync_blockchain().await?;
-            }
+            },
             BlockchainProgression::NoProgress => {
                 trace!(target: LOG_TARGET, "No new blocks to scan.");
                 // If no progress has been made since restarting, we still need to tell the epoch manager that scanning
@@ -238,7 +237,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 if !self.has_attempted_scan {
                     self.epoch_manager.notify_scanning_complete().await?;
                 }
-            }
+            },
         }
 
         self.has_attempted_scan = true;
@@ -259,7 +258,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 } else {
                     Ok(BlockchainProgression::Reorged)
                 }
-            }
+            },
             None => Ok(BlockchainProgression::Progressed),
         }
     }
@@ -279,7 +278,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                     "Base layer blockchain is not yet at the required height to start scanning it"
                 );
                 return Ok(());
-            }
+            },
             Some(end_height) => end_height,
         };
         let mut scan = tip.tip_hash;
@@ -302,7 +301,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         }
 
         // syncing validator node changes
-        let mut validator_nodes_to_register: Vec<PublicKey> = vec![];
+        let mut validator_nodes_to_register = HashMap::new();
         if current_last_validator_nodes_mr != self.last_scanned_validator_node_mr {
             info!(target: LOG_TARGET,
                 "⛓️ Syncing validator nodes (sidechain ID: {:?}) from base node (height range: {}-{})",
@@ -320,15 +319,15 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             for node_change in node_changes {
                 match node_change.state() {
                     ValidatorNodeChangeState::Add => {
-                        // TODO: check on layer 1 if all the details could be fetched and received from `get_validator_node_changes` call
-                        let node_public_key =
-                            PublicKey::from_canonical_bytes(&node_change.public_key)
-                                .map_err(BaseLayerScannerError::PublicKeyConversion)?;
-                        validator_nodes_to_register.push(node_public_key);
-                    }
+                        // TODO: check on layer 1 if all the details could be fetched and received from
+                        // `get_validator_node_changes` call
+                        let node_public_key = PublicKey::from_canonical_bytes(&node_change.public_key)
+                            .map_err(BaseLayerScannerError::PublicKeyConversion)?;
+                        validator_nodes_to_register.insert(node_public_key, node_change.start_height);
+                    },
                     ValidatorNodeChangeState::Remove => {
                         // TODO: implement
-                    }
+                    },
                 }
             }
 
@@ -371,7 +370,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 };
                 match sidechain_feature {
                     SideChainFeature::ValidatorNodeRegistration(reg) => {
-                        if validator_nodes_to_register.contains(reg.public_key()) {
+                        if let Some(node_register_height) = validator_nodes_to_register.get(reg.public_key()) {
                             info!(
                                 target: LOG_TARGET,
                                 "⛓️ Validator node registration UTXO for {} sidechain {} found at height {}",
@@ -380,13 +379,13 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                                 current_height,
                             );
                             self.register_validator_node_registration(
-                                current_height,
+                                *node_register_height,
                                 reg.clone(),
                                 output.minimum_value_promise,
                             )
-                                .await?;
+                            .await?;
                         }
-                    }
+                    },
                     SideChainFeature::CodeTemplateRegistration(reg) => {
                         if reg.sidechain_id != self.template_sidechain_id {
                             warn!(
@@ -402,8 +401,8 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                             reg.clone(),
                             &block_info,
                         )
-                            .await?;
-                    }
+                        .await?;
+                    },
                     SideChainFeature::ConfidentialOutput(data) => {
                         // Should be checked by the base layer
                         if !output.is_burned() {
@@ -430,7 +429,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                             output.commitment.as_public_key()
                         );
                         self.register_burnt_utxo(output, &block_info).await?;
-                    }
+                    },
                 }
             }
 
@@ -444,7 +443,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             match block_info.next_block_hash {
                 Some(next_hash) => {
                     current_hash = Some(next_hash);
-                }
+                },
                 None => {
                     info!(
                         target: LOG_TARGET,
@@ -457,7 +456,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                         )));
                     }
                     break;
-                }
+                },
             }
         }
 

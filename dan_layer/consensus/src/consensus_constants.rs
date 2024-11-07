@@ -68,7 +68,7 @@ impl From<Network> for ConsensusConstants {
             Network::MainNet => unimplemented!("Mainnet consensus constants not implemented"),
             Network::StageNet | Network::NextNet | Network::LocalNet | Network::Igor | Network::Esmeralda => {
                 Self::devnet()
-            }
+            },
         }
     }
 }

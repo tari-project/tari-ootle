@@ -80,7 +80,7 @@ pub async fn monitor_child(
                     .expect("Failed to send status to alerting");
                 tx_restart.send(()).await.expect("Failed to send restart node signal");
             }
-        }
+        },
         // if the child process encountered an unexpected error, not related to the process itself
         Err(err) => {
             error!("Child process encountered an error: {}", err);
@@ -94,7 +94,7 @@ pub async fn monitor_child(
                 .await
                 .expect("Failed to send internal error status to alerting");
             tx_restart.send(()).await.expect("Failed to send restart node signal");
-        }
+        },
     }
 }
 
@@ -106,26 +106,26 @@ pub async fn process_status_log(mut rx: mpsc::Receiver<ProcessStatus>) {
                     error!("Validator node process exited with code {}", code);
                     info!("Pauses process logging for 5 seconds to allow the validator node to restart");
                     sleep(Duration::from_secs(5)).await;
-                }
+                },
                 ProcessStatus::InternalError(err) => {
                     error!("Validator node process exited with error: {}", err);
                     info!("Pausing process logging 5 seconds to allow the validator node to restart");
                     sleep(Duration::from_secs(5)).await;
-                }
+                },
                 ProcessStatus::Crashed => {
                     error!("Validator node process crashed");
                     info!("Pausing process logging for 5 seconds to allow the validator node to restart");
                     sleep(Duration::from_secs(5)).await;
-                }
+                },
                 ProcessStatus::Running => {
                     // all good, process is still running
-                }
+                },
                 ProcessStatus::Submitted(tx) => {
                     info!(
                         "Validator node registration submitted (tx: {}, block: {})",
                         tx.id, tx.block
                     );
-                }
+                },
             }
         }
     }
@@ -181,7 +181,7 @@ pub async fn process_status_alert(mut rx: mpsc::Receiver<ProcessStatus>, cfg: Ch
                             .await
                             .expect("Failed to send alert to Telegram");
                     }
-                }
+                },
                 ProcessStatus::InternalError(err) => {
                     if let Some(mm) = &mut mattermost {
                         mm.alert(&format!("Validator node process internal error: {}", err))
@@ -193,7 +193,7 @@ pub async fn process_status_alert(mut rx: mpsc::Receiver<ProcessStatus>, cfg: Ch
                             .await
                             .expect("Failed to send alert to Telegram");
                     }
-                }
+                },
                 ProcessStatus::Crashed => {
                     if let Some(mm) = &mut mattermost {
                         mm.alert("Validator node process crashed")
@@ -205,7 +205,7 @@ pub async fn process_status_alert(mut rx: mpsc::Receiver<ProcessStatus>, cfg: Ch
                             .await
                             .expect("Failed to send alert to Telegram");
                     }
-                }
+                },
                 ProcessStatus::Running => {
                     // all good, process is still running, send heartbeat to channel(s)
                     if let Some(mm) = &mut mattermost {
@@ -218,25 +218,25 @@ pub async fn process_status_alert(mut rx: mpsc::Receiver<ProcessStatus>, cfg: Ch
                             warn!("Failed to send heartbeat to Telegram");
                         }
                     }
-                }
+                },
                 ProcessStatus::Submitted(tx) => {
                     if let Some(mm) = &mut mattermost {
                         mm.alert(&format!(
                             "Validator node registration submitted (tx: {}, block: {})",
                             tx.id, tx.block
                         ))
-                            .await
-                            .expect("Failed to send alert to MatterMost");
+                        .await
+                        .expect("Failed to send alert to MatterMost");
                     }
                     if let Some(tg) = &mut telegram {
                         tg.alert(&format!(
                             "Validator node registration submitted (tx: {}, block: {})",
                             tx.id, tx.block
                         ))
-                            .await
-                            .expect("Failed to send alert to Telegram");
+                        .await
+                        .expect("Failed to send alert to Telegram");
                     }
-                }
+                },
             }
         }
     }

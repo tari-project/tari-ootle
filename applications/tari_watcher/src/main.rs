@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
             config.write(file).await.context("Writing config failed")?;
 
             log::info!("Config file created at {}", config_path.display());
-        }
+        },
         Commands::Start(ref args) => {
             log::info!("Starting watcher using config {}", config_path.display());
             let mut cfg = read_config_file(config_path).await.context("read config file")?;
@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
             // optionally override config values
             args.apply(&mut cfg);
             start(cfg).await?;
-        }
+        },
     }
 
     Ok(())
@@ -81,7 +81,7 @@ async fn start(config: Config) -> anyhow::Result<()> {
         config.base_dir.join(DEFAULT_WATCHER_BASE_PATH).join("watcher.pid"),
         std::process::id(),
     )
-        .await?;
+    .await?;
     let handlers = spawn_manager(config.clone(), shutdown.to_signal(), shutdown).await?;
     let manager_handle = handlers.manager;
     let task_handle = handlers.task;

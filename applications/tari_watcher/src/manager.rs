@@ -155,7 +155,7 @@ impl ProcessManager {
             self.config.auto_restart,
             self.trigger_signal.clone(),
         )
-            .await;
+        .await;
         if cc.is_none() {
             todo!("Create new validator node process event listener for fetched existing PID from OS");
         }

@@ -539,6 +539,16 @@ impl TransactionPoolRecord {
         self
     }
 
+    pub fn set_is_ready(&mut self, is_ready: bool) -> &mut Self {
+        self.is_ready = is_ready;
+        self
+    }
+
+    pub fn set_pending_stage(&mut self, pending_stage: Option<TransactionPoolStage>) -> &mut Self {
+        self.pending_stage = pending_stage;
+        self
+    }
+
     pub fn update_from_execution(
         &mut self,
         num_preshards: NumPreshards,

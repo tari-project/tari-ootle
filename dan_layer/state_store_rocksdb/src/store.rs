@@ -21,19 +21,16 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    fmt,
-    marker::PhantomData,
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
-    time::{Duration, Instant},
+    collections::HashMap, fmt, marker::PhantomData, ops::Deref, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::{Duration, Instant}
 };
 
 use log::log;
-use rocksdb::TransactionDB;
+use rocksdb::{ColumnFamily, SingleThreaded, TransactionDB, TransactionDBOptions};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
 use tari_dan_storage::{StateStore, StorageError};
 
-use crate::{reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
+use crate::{model::BlockModel, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 
@@ -44,7 +41,17 @@ pub struct RocksDbStateStore<TAddr> {
 
 impl<TAddr> RocksDbStateStore<TAddr> {
     pub fn connect(path: &str) -> Result<Self, StorageError> {
-        let db = TransactionDB::open_default(path).unwrap();
+        let mut options = rocksdb::Options::default();
+        options.set_error_if_exists(false);
+        options.create_if_missing(true);
+        options.create_missing_column_families(true);
+
+        let cf_names = [
+            BlockModel::cfs()
+        ].concat();
+
+        let db = TransactionDB::<SingleThreaded>::open_cf(&options, &TransactionDBOptions::default(), path, cf_names.clone())
+            .map_err(|e| StorageError::ConnectionError { reason: e.into_string() })?;
 
         Ok(Self {
             db: Arc::new(db),
@@ -71,13 +78,13 @@ impl<TAddr: NodeAddressable + Serialize + DeserializeOwned> StateStore for Rocks
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
         let tx = self.db.transaction();
-        Ok(RocksDbStateStoreReadTransaction::new(tx))
+        Ok(RocksDbStateStoreReadTransaction::new(self.db.clone(), tx))
     }
 
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
         let timer = Instant::now();
         let tx = self.db.transaction();
-        let tx = RocksDbStateStoreWriteTransaction::new(tx);
+        let tx = RocksDbStateStoreWriteTransaction::new(self.db.clone(), tx);
         let elapsed = timer.elapsed();
         let level = if elapsed > Duration::from_secs(1) {
             log::Level::Warn

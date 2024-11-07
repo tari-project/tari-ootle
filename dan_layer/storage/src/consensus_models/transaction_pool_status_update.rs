@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use serde::{Deserialize, Serialize};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -8,7 +9,7 @@ use crate::{
     StateStoreWriteTransaction,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionPoolStatusUpdate {
     transaction: TransactionPoolRecord,
     ready_now: bool,

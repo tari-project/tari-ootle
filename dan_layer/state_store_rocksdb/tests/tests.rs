@@ -105,7 +105,6 @@ mod confirm_all_transitions {
         tx_2.set_next_stage(TransactionPoolStage::Prepared).unwrap();
         tx_3.set_next_stage(TransactionPoolStage::Prepared).unwrap();
 
-        /*
         tx.transaction_pool_add_pending_update(&block_id, &TransactionPoolStatusUpdate::new(tx_1, true))
             .unwrap();
         tx.transaction_pool_add_pending_update(&block_id, &TransactionPoolStatusUpdate::new(tx_2, true))
@@ -113,6 +112,7 @@ mod confirm_all_transitions {
         tx.transaction_pool_add_pending_update(&block_id, &TransactionPoolStatusUpdate::new(tx_3, true))
             .unwrap();
 
+        /*
         let rec = tx
             .transaction_pool_get_for_blocks(zero_block.id(), &block_id, &atom1.id)
             .unwrap();

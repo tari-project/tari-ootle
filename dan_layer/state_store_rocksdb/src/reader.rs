@@ -90,7 +90,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::ByteArray;
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{BlockModel, TransactionPoolModel}};
+use crate::{error::RocksDbStorageError, model::{BlockModel, TransactionPoolModel, TransactionPoolPendingUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -99,13 +99,15 @@ pub struct RocksDbStateStoreReadTransaction<'a, TAddr> {
     //db: MutexGuard<'a, TransactionDB>,
     //tx: UnsafeCell<MutexGuard<'a, Transaction<'a, TransactionDB>>>,
     tx:  Transaction<'a, TransactionDB>,
+    db: Arc<TransactionDB>,
     _addr: PhantomData<TAddr>,
 }
 
 impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
-    pub(crate) fn new(tx: Transaction<'a, TransactionDB>) -> Self {
+    pub(crate) fn new(db: Arc<TransactionDB>, tx: Transaction<'a, TransactionDB>) -> Self {
         Self {
             tx,
+            db,
             _addr: PhantomData,
         }
     }
@@ -134,6 +136,81 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
 }
 
 impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStateStoreReadTransaction<'a, TAddr> {
+    pub(crate) fn get_transaction_atom_state_updates_between_blocks<'i, ITx>(
+        &self,
+        from_block_id: &BlockId,
+        to_block_id: &BlockId,
+        transaction_ids: ITx,
+    ) -> Result<IndexMap<String, TransactionPoolPendingUpdateModel>, RocksDbStorageError>
+    where
+        ITx: Iterator<Item = &'i str> + ExactSizeIterator,
+    {
+        if transaction_ids.len() == 0 {
+            return Ok(IndexMap::new());
+        }
+
+        // Blocks without commands may change pending transaction state because they justify a
+        // block that proposes a change. So we cannot only use blocks that have commands.
+        let applicable_block_ids = self.get_block_ids_between(from_block_id, to_block_id)?;
+
+        // TODO
+        Ok(IndexMap::new())
+
+        /*
+        if transaction_ids.len() == 0 {
+            return Ok(IndexMap::new());
+        }
+
+        // Blocks without commands may change pending transaction state because they justify a
+        // block that proposes a change. So we cannot only use blocks that have commands.
+        let applicable_block_ids = self.get_block_ids_between(from_block_id, to_block_id)?;
+
+        debug!(
+            target: LOG_TARGET,
+            "get_transaction_atom_state_updates_between_blocks: from_block_id={}, to_block_id={}, len(applicable_block_ids)={}",
+            from_block_id,
+            to_block_id,
+            applicable_block_ids.len());
+
+        if applicable_block_ids.is_empty() {
+            return Ok(IndexMap::new());
+        }
+
+        self.create_transaction_atom_updates_query(transaction_ids, applicable_block_ids.iter().map(|s| s.as_str()))
+            .load_iter::<sql_models::TransactionPoolStateUpdate, _>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "transaction_pool_get_many_ready",
+                source: e,
+            })?
+            .map(|update| update.map(|u| (u.transaction_id.clone(), u)))
+            .collect::<diesel::QueryResult<_>>()
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "transaction_pool_get_many_ready",
+                source: e,
+            })
+            */
+    }
+
+    fn sql_frag_for_in_statement<'i, I: Iterator<Item = &'i str> + ExactSizeIterator>(
+        &self,
+        values: I,
+        item_size: usize,
+    ) -> String {
+        todo!()
+        /*
+        let len = values.len();
+        let mut sql_frag = String::with_capacity((len * item_size + len * 3 + len).saturating_sub(1));
+        for (i, value) in values.enumerate() {
+            sql_frag.push('"');
+            sql_frag.push_str(value);
+            sql_frag.push('"');
+            if i < len - 1 {
+                sql_frag.push(',');
+            }
+        }
+        sql_frag
+        */
+    }
 
     /// Returns the blocks from the start_block (inclusive) to the end_block (inclusive).
     fn get_block_ids_between(
@@ -141,7 +218,22 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         start_block: &BlockId,
         end_block: &BlockId,
     ) -> Result<Vec<String>, RocksDbStorageError> {
-        todo!()
+        debug!(target: LOG_TARGET, "get_block_ids_between: start: {start_block}, end: {end_block}");
+
+        // TODO
+        Ok(vec![])
+        /*
+        let mut block_ids = vec![];
+        {
+            let block = BlockModel::get_cf(&self.tx, "blocks_parent_id", "get_block_ids_between", start_block)?;
+
+            block_ids.push(block.id().to_string());
+        }
+
+        Ok(block_ids)
+        */
+
+
         /* 
         debug!(target: LOG_TARGET, "get_block_ids_between: start: {start_block}, end: {end_block}");
         let block_ids = sql_query(
@@ -990,22 +1082,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
-        todo!()
-        /*
-        use crate::schema::blocks;
-
-        let count = blocks::table
-            .filter(blocks::block_id.eq(serialize_hex(block_id)))
-            .count()
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_exists",
-                source: e,
-            })?;
-
-        Ok(count > 0)
-        */
+        Ok(BlockModel::key_exists(&self.tx, "blocks_exists", block_id)?)
     }
 
     fn blocks_is_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError> {
@@ -1561,10 +1638,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         to_block_id: &BlockId,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, StorageError> {
-        todo!()
-        /*
-        use crate::schema::transaction_pool;
-
         if !self.blocks_exists(from_block_id)? {
             return Err(StorageError::QueryError {
                 reason: format!(
@@ -1579,6 +1652,33 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 reason: format!("transaction_pool_get_for_blocks: Block {} does not exist", to_block_id),
             });
         }
+
+        let mut updates = self.get_transaction_atom_state_updates_between_blocks(
+            from_block_id,
+            to_block_id,
+            std::iter::once(transaction_id.to_string().as_str()),
+        )?;
+
+        debug!(
+            target: LOG_TARGET,
+            "transaction_pool_get: from_block_id={}, to_block_id={}, transaction_id={}, updates={} [{:?}]",
+            from_block_id,
+            to_block_id,
+            transaction_id,
+            updates.len(),
+            updates.values().map(|v| v.block_id).collect::<Vec<_>>(),
+        );
+
+        let rec = TransactionPoolModel::get(&self.tx, "transaction_pool_get_for_blocks", transaction_id)?;
+
+        // TODO
+        //rec.try_convert(updates.swap_remove(&transaction_id))
+
+        Ok(rec)
+
+
+        /*
+        use crate::schema::transaction_pool;
 
         let transaction_id = serialize_hex(transaction_id);
         let mut updates = self.get_transaction_atom_state_updates_between_blocks(

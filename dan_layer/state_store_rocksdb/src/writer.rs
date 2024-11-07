@@ -52,7 +52,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{BlockModel, TransactionPoolModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{BlockModel, TransactionPoolModel, TransactionPoolPendingUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -61,12 +61,14 @@ const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::writer";
 pub struct RocksDbStateStoreWriteTransaction<'a, TAddr> {
     /// None indicates if the transaction has been explicitly committed/rolled back
     transaction: Option<RocksDbStateStoreReadTransaction<'a, TAddr>>,
+    db: Arc<TransactionDB>,
 }
 
 impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
-    pub fn new(tx: Transaction<'a, TransactionDB>) -> Self {
+    pub fn new(db: Arc<TransactionDB>, tx: Transaction<'a, TransactionDB>) -> Self {
         Self {
-            transaction: Some(RocksDbStateStoreReadTransaction::new(tx)),
+            db: db.clone(),
+            transaction: Some(RocksDbStateStoreReadTransaction::new(db, tx)),
         }
     }
 
@@ -205,7 +207,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block.set_block_time(block_time);
         
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        Ok(BlockModel::put(tx, "blocks_insert", &block)?)
+        Ok(BlockModel::put(self.db.clone(), tx, "blocks_insert", &block)?)
     }
 
     fn blocks_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
@@ -1078,7 +1080,37 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: &BlockId,
         update: &TransactionPoolStatusUpdate,
     ) -> Result<(), StorageError> {
-        todo!()
+        let operation = "transaction_pool_add_pending_update";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        // fetch the related block
+        let block = BlockModel::get(tx, operation, block_id)?;
+
+        // insert the pending update
+        let value = TransactionPoolPendingUpdateModel {
+            transaction: update.transaction().clone(),
+            block_id: *block_id,
+            block_height: block.height(),
+            is_applied: false,
+        };
+        TransactionPoolPendingUpdateModel::put(tx, operation, &value)?;
+
+        // Set is_ready and pending_stage to the updated values. This allows has_uncommitted_transactions to return an
+        // accurate value without querying records in the updates table.
+        // TODO: is it better to use a RocksDB merge operator?
+        let transaction_id = update.transaction().transaction_id();
+        let mut transaction_pool_value = TransactionPoolModel::get(tx, operation, transaction_id)?;
+        transaction_pool_value.set_is_ready(update.is_ready_now());
+        transaction_pool_value.set_pending_stage(Some(update.stage()));
+        TransactionPoolModel::put(tx, operation, &transaction_pool_value)?;
+
+        Ok(())
+
+        
+
+
+
+
         /*
         use crate::schema::{blocks, transaction_pool, transaction_pool_state_updates};
 

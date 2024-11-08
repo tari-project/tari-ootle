@@ -877,7 +877,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
     fn create_genesis_block_if_required(&self, epoch: Epoch, shard_group: ShardGroup) -> Result<(), HotStuffError> {
         self.state_store.with_write_tx(|tx| {
-            let checkpoint = EpochCheckpoint::get(&**tx, epoch).optional()?;
+            let previous_epoch = epoch.saturating_sub(Epoch(1));
+            let checkpoint = EpochCheckpoint::get(&**tx, previous_epoch).optional()?;
             let state_merkle_root = checkpoint
                 .map(|cp| cp.compute_state_merkle_root())
                 .transpose()?
@@ -889,11 +890,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 zero_block.justify().insert(tx)?;
                 zero_block.insert(tx)?;
                 zero_block.set_as_justified(tx)?;
-                zero_block.as_locked_block().set(tx)?;
-                // zero_block.as_leaf_block().set(tx)?;
-                zero_block.as_last_executed().set(tx)?;
-                zero_block.as_last_voted().set(tx)?;
-                zero_block.justify().as_high_qc().set(tx)?;
                 zero_block.commit_diff(tx, BlockDiff::empty(*zero_block.id()))?;
             }
 
@@ -906,7 +902,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             );
             if !genesis.exists(&**tx)? {
                 info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");
-                genesis.justify().insert(tx)?;
+                genesis.justify().save(tx)?;
                 genesis.insert(tx)?;
                 genesis.set_as_justified(tx)?;
                 genesis.as_locked_block().set(tx)?;

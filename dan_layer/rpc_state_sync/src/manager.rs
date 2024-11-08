@@ -437,6 +437,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                     info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
 
                     self.validate_checkpoint(&checkpoint)?;
+                    self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
 
                     match self.start_state_sync(&mut client, shard, &checkpoint).await {
                         Ok(current_version) => {

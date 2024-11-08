@@ -705,6 +705,15 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         };
 
+        if candidate_block.justifies_parent() && !candidate_block.parent_exists(tx)? {
+            return Err(ProposalValidationError::ParentNotFound {
+                proposed_by: candidate_block.proposed_by().to_string(),
+                parent_id: *candidate_block.parent(),
+                block_id: *candidate_block.id(),
+            }
+            .into());
+        }
+
         if justify_block.height() != candidate_block.justify().block_height() {
             return Err(ProposalValidationError::JustifyBlockInvalid {
                 proposed_by: candidate_block.proposed_by().to_string(),

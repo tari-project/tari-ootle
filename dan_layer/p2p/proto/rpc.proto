@@ -192,8 +192,11 @@ message SubstateDestroyedProof {
 }
 
 message SyncBlocksRequest {
+  // Optional (empty for None). Must be provided if the epoch is not provided
   bytes start_block_id = 1;
-  tari.dan.common.Epoch up_to_epoch = 2;
+  // Optional - If start_block_id is provided, this is ignored. Must be provided if start_block_id is not provided. 
+  // In which case, start block is implicitly the first block of the epoch.
+  tari.dan.common.Epoch epoch = 2;
 }
 
 message SyncBlocksResponse {

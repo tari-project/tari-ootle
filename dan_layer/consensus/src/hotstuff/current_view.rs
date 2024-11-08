@@ -50,6 +50,12 @@ impl CurrentView {
         is_updated
     }
 
+    // /// Sets the epoch to epoch + 1
+    // pub(crate) fn next_epoch(&self) {
+    //     let epoch = self.epoch.fetch_add(1, atomic::Ordering::SeqCst);
+    //     info!(target: LOG_TARGET, "🧿 PACEMAKER SET EPOCH: {}", epoch + 1);
+    // }
+
     /// Resets the height and epoch. Prefer update.
     pub(crate) fn reset(&self, epoch: Epoch, height: NodeHeight) {
         self.epoch.store(epoch.as_u64(), atomic::Ordering::SeqCst);

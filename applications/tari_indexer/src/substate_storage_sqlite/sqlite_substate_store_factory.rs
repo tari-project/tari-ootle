@@ -847,7 +847,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
         use crate::substate_storage_sqlite::schema::scanned_block_ids;
 
         diesel::delete(scanned_block_ids::table)
-            .filter(scanned_block_ids::epoch.lt(epoch.0 as i64))
+            .filter(scanned_block_ids::epoch.lt(epoch.as_u64() as i64))
             .execute(&mut *self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("delete_scanned_epochs_older_than: {}", e),

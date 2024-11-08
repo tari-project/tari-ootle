@@ -18,7 +18,8 @@ create table blocks
     id                      integer   not null primary key AUTOINCREMENT,
     block_id                text      not NULL,
     parent_block_id         text      not NULL REFERENCES blocks (block_id),
-    merkle_root             text      not NULL,
+    state_merkle_root       text      not NULL,
+    command_merkle_root     text      not NULL,
     network                 text      not NULL,
     height                  bigint    not NULL,
     epoch                   bigint    not NULL,
@@ -53,7 +54,8 @@ create table parked_blocks
     id                      integer   not null primary key AUTOINCREMENT,
     block_id                text      not NULL,
     parent_block_id         text      not NULL,
-    merkle_root             text      not NULL,
+    state_merkle_root       text      not NULL,
+    command_merkle_root     text      not NULL,
     network                 text      not NULL,
     height                  bigint    not NULL,
     epoch                   bigint    not NULL,
@@ -382,7 +384,8 @@ CREATE TABLE foreign_proposals
     id                       integer   not null primary key AUTOINCREMENT,
     block_id                 text      not NULL,
     parent_block_id          text      not NULL,
-    merkle_root              text      not NULL,
+    state_merkle_root        text      not NULL,
+    command_merkle_root      text      not NULL,
     network                  text      not NULL,
     height                   bigint    not NULL,
     epoch                    bigint    not NULL,
@@ -506,12 +509,13 @@ CREATE INDEX state_transitions_epoch on state_transitions (epoch);
 
 CREATE TABLE validator_epoch_stats
 (
-    id                   integer   not NULL primary key AUTOINCREMENT,
-    epoch                bigint    not NULL,
-    public_key           text      not NULL,
-    participation_shares bigint    not NULL DEFAULT '0',
-    missed_proposals     bigint    not NULL DEFAULT '0',
-    created_at           timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                      integer   not NULL primary key AUTOINCREMENT,
+    epoch                   bigint    not NULL,
+    public_key              text      not NULL,
+    participation_shares    bigint    not NULL DEFAULT '0',
+    missed_proposals        bigint    not NULL DEFAULT '0',
+    missed_proposals_capped bigint    not NULL DEFAULT '0',
+    created_at              timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX participation_shares_uniq_idx_epoch_public_key on validator_epoch_stats (epoch, public_key);
@@ -547,7 +551,8 @@ create table diagnostic_deleted_blocks
     id                      integer   not null primary key AUTOINCREMENT,
     block_id                text      not NULL,
     parent_block_id         text      not NULL,
-    merkle_root             text      not NULL,
+    state_merkle_root       text      not NULL,
+    command_merkle_root     text      not NULL,
     network                 text      not NULL,
     height                  bigint    not NULL,
     epoch                   bigint    not NULL,

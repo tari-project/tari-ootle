@@ -109,10 +109,10 @@ impl<TMsg: MessageSpec> MessagingMode<TMsg> {
                 .topic
                 .as_str()
                 .split_once(TOPIC_DELIMITER)
-                .ok_or(GossipSendError::InvalidToken(msg.topic.clone().into_string()))?;
+                .ok_or_else(|| GossipSendError::InvalidToken(msg.topic.clone().into_string()))?;
             let tx_gossip_messages = tx_gossip_messages_by_topic
                 .get(prefix)
-                .ok_or(GossipSendError::InvalidToken(msg.topic.clone().into_string()))?;
+                .ok_or_else(|| GossipSendError::InvalidToken(msg.topic.clone().into_string()))?;
             tx_gossip_messages.send((peer_id, msg))?;
         }
         Ok(())

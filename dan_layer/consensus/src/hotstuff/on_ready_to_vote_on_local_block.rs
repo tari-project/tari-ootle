@@ -566,15 +566,15 @@ where TConsensusSpec: ConsensusSpec
                 // Calculate for local shards only
                 .filter(|ch| block.shard_group().contains(&ch.shard())),
         )?;
-        if expected_merkle_root != *block.merkle_root() {
+        if expected_merkle_root != *block.state_merkle_root() {
             warn!(
                 target: LOG_TARGET,
                 "❌ Merkle root disagreement for block {}. Leader proposed {}, we calculated {}",
                 block,
-                block.merkle_root(),
+                block.state_merkle_root(),
                 expected_merkle_root
             );
-            proposed_block_change_set.no_vote(NoVoteReason::MerkleRootMismatch);
+            proposed_block_change_set.no_vote(NoVoteReason::StateMerkleRootMismatch);
             return Ok(());
         }
 
@@ -1752,7 +1752,10 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
         if block.is_dummy() {
-            block.increment_leader_failure_count(tx, self.config.consensus_constants.missed_proposal_count_cap)?;
+            block.increment_leader_failure_count(
+                tx,
+                self.config.consensus_constants.missed_proposal_recovery_threshold,
+            )?;
 
             // Nothing to do here for empty dummy blocks. Just mark the block as committed.
             block.commit_diff(tx, BlockDiff::empty(*block.id()))?;
@@ -1803,7 +1806,7 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        let total_transaction_fee = block.total_transaction_fee();
+        let total_transaction_fee = block.calculate_total_transaction_fee();
         if total_transaction_fee > 0 {
             info!(
                 target: LOG_TARGET,

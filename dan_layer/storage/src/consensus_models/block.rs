@@ -4,7 +4,6 @@
 use std::{
     collections::{BTreeSet, HashSet},
     fmt::{Debug, Display, Formatter},
-    hash::Hash,
     iter,
     ops::{Deref, RangeInclusive},
 };
@@ -14,22 +13,21 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::{FixedHash, FixedHashSizeError, PublicKey};
-use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::epoch_time::EpochTime};
+use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    hashing,
     optional::Optional,
     serde_with,
     shard::Shard,
     Epoch,
     ExtraData,
-    MaxSizeBytesError,
-    NodeAddressable,
+    ExtraFieldKey,
     NodeHeight,
     NumPreshards,
     ShardGroup,
     SubstateAddress,
 };
+use tari_state_tree::StateTreeError;
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 #[cfg(feature = "ts")]
@@ -56,6 +54,7 @@ use super::{
 };
 use crate::{
     consensus_models::{
+        block_header::{compute_command_merkle_root, BlockHeader},
         Command,
         LastExecuted,
         LastProposed,
@@ -76,62 +75,34 @@ const LOG_TARGET: &str = "tari::dan::storage::consensus_models::block";
 
 #[derive(Debug, thiserror::Error)]
 pub enum BlockError {
-    #[error("Extra data size error: {0}")]
-    ExtraDataSizeError(#[from] MaxSizeBytesError),
+    #[error("Error computing command merkle hash: {0}")]
+    StateTreeError(#[from] StateTreeError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub struct Block {
-    // Header
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    id: BlockId,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    network: Network,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    parent: BlockId,
+    header: BlockHeader,
     justify: QuorumCertificate,
-    height: NodeHeight,
-    epoch: Epoch,
-    shard_group: ShardGroup,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    proposed_by: PublicKey,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    total_leader_fee: u64,
-    // Body
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    merkle_root: FixedHash,
-    /// Ordered commands that help ensure a deterministic block hash.
+    /// Commands in the block. These are in canonical order to ensure a deterministic block hash.
     commands: BTreeSet<Command>,
-    /// If the block is a dummy block. This is metadata and not sent over
-    /// the wire or part of the block hash.
-    is_dummy: bool,
+    // Metadata - not included in the block hash
     /// Flag that indicates that the block has been justified by a new high QC.
     is_justified: bool,
     /// Flag that indicates that the block has been committed.
     is_committed: bool,
-    /// Counter for each foreign shard for reliable broadcast.
-    foreign_indexes: IndexMap<Shard, u64>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    block_time: Option<u64>,
     /// Timestamp when was this stored.
     #[cfg_attr(feature = "ts", ts(type = "Array<number>| null"))]
     stored_at: Option<PrimitiveDateTime>,
-    /// Signature of block by the proposer.
-    #[cfg_attr(feature = "ts", ts(type = "{public_nonce : string, signature: string} | null"))]
-    signature: Option<ValidatorSchnorrSignature>,
-    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
-    block_time: Option<u64>,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    timestamp: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    base_layer_block_height: u64,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    base_layer_block_hash: FixedHash,
-    extra_data: Option<ExtraData>,
 }
 
 impl Block {
+    /// Creates a new block from the provided params. Returns an error if the command merkle root fails to construct.
+    /// This is infallible for empty commands.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn create(
         network: Network,
         parent: BlockId,
         justify: QuorumCertificate,
@@ -140,41 +111,46 @@ impl Block {
         shard_group: ShardGroup,
         proposed_by: PublicKey,
         commands: BTreeSet<Command>,
-        merkle_root: FixedHash,
+        state_merkle_root: FixedHash,
         total_leader_fee: u64,
         sorted_foreign_indexes: IndexMap<Shard, u64>,
         signature: Option<ValidatorSchnorrSignature>,
         timestamp: u64,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
-        extra_data: Option<ExtraData>,
-    ) -> Self {
-        let mut block = Self {
-            id: BlockId::zero(),
+        extra_data: ExtraData,
+    ) -> Result<Self, BlockError> {
+        let header = BlockHeader::create(
             network,
             parent,
-            justify,
+            *justify.id(),
             height,
             epoch,
             shard_group,
             proposed_by,
-            merkle_root,
-            commands,
+            state_merkle_root,
+            &commands,
             total_leader_fee,
-            is_dummy: false,
-            is_justified: false,
-            is_committed: false,
-            foreign_indexes: sorted_foreign_indexes,
-            stored_at: None,
+            sorted_foreign_indexes,
             signature,
-            block_time: None,
             timestamp,
             base_layer_block_height,
             base_layer_block_hash,
             extra_data,
-        };
-        block.id = block.calculate_hash().into();
-        block
+        )?;
+        Ok(Self::new(header, justify, commands))
+    }
+
+    pub fn new(header: BlockHeader, justify: QuorumCertificate, commands: BTreeSet<Command>) -> Self {
+        Self {
+            header,
+            justify,
+            commands,
+            is_justified: false,
+            is_committed: false,
+            block_time: None,
+            stored_at: None,
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -187,8 +163,9 @@ impl Block {
         epoch: Epoch,
         shard_group: ShardGroup,
         proposed_by: PublicKey,
+        state_merkle_root: FixedHash,
         commands: BTreeSet<Command>,
-        merkle_root: FixedHash,
+        command_merkle_root: FixedHash,
         total_leader_fee: u64,
         is_dummy: bool,
         is_justified: bool,
@@ -200,31 +177,36 @@ impl Block {
         timestamp: u64,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
-        extra_data: Option<ExtraData>,
+        extra_data: ExtraData,
     ) -> Self {
-        Self {
+        let header = BlockHeader::load(
             id,
             network,
             parent,
-            justify,
+            *justify.id(),
             height,
             epoch,
             shard_group,
             proposed_by,
-            merkle_root,
-            commands,
+            state_merkle_root,
             total_leader_fee,
             is_dummy,
-            is_justified,
-            is_committed,
-            foreign_indexes: sorted_foreign_indexes,
-            stored_at: Some(created_at),
+            sorted_foreign_indexes,
             signature,
-            block_time,
             timestamp,
             base_layer_block_height,
             base_layer_block_hash,
             extra_data,
+            command_merkle_root,
+        );
+        Self {
+            header,
+            justify,
+            commands,
+            is_justified,
+            is_committed,
+            block_time,
+            stored_at: Some(created_at),
         }
     }
 
@@ -232,9 +214,22 @@ impl Block {
         network: Network,
         epoch: Epoch,
         shard_group: ShardGroup,
+        state_merkle_root: FixedHash,
         sidechain_id: Option<RistrettoPublicKey>,
-    ) -> Result<Self, BlockError> {
-        Ok(Self::new(
+    ) -> Self {
+        let mut extra_data = ExtraData::new();
+        if let Some(sidechain_id) = sidechain_id {
+            extra_data.insert(
+                ExtraFieldKey::SidechainId,
+                sidechain_id
+                    .as_bytes()
+                    .to_vec()
+                    .try_into()
+                    .expect("RistrettoPublicKey is 32 bytes"),
+            );
+        }
+
+        Self::create(
             network,
             BlockId::zero(),
             QuorumCertificate::genesis(epoch, shard_group),
@@ -243,139 +238,41 @@ impl Block {
             shard_group,
             PublicKey::default(),
             Default::default(),
-            // TODO: the merkle hash should be initialized to something committing to the previous state.
-            FixedHash::zero(),
+            state_merkle_root,
             0,
             IndexMap::new(),
             None,
             0,
             0,
             FixedHash::zero(),
-            Self::extra_data_from_sidechain_id(sidechain_id)?,
-        ))
+            extra_data,
+        )
+        .expect("Infallible with empty commands")
     }
 
     /// This is the parent block for all genesis blocks. Its block ID is always zero.
-    pub fn zero_block(
-        network: Network,
-        num_preshards: NumPreshards,
-        sidechain_id: Option<RistrettoPublicKey>,
-    ) -> Result<Self, BlockError> {
-        Ok(Self {
-            network,
-            id: BlockId::zero(),
-            parent: BlockId::zero(),
+    pub fn zero_block(network: Network, num_preshards: NumPreshards) -> Self {
+        Self {
+            header: BlockHeader::zero_block(network, num_preshards),
             justify: QuorumCertificate::genesis(Epoch::zero(), ShardGroup::all_shards(num_preshards)),
-            height: NodeHeight::zero(),
-            epoch: Epoch::zero(),
-            shard_group: ShardGroup::all_shards(num_preshards),
-            proposed_by: PublicKey::default(),
-            merkle_root: FixedHash::zero(),
             commands: Default::default(),
-            total_leader_fee: 0,
-            is_dummy: false,
             is_justified: false,
             is_committed: true,
-            foreign_indexes: IndexMap::new(),
             stored_at: None,
-            signature: None,
             block_time: None,
-            timestamp: EpochTime::now().as_u64(),
-            base_layer_block_height: 0,
-            base_layer_block_hash: FixedHash::zero(),
-            extra_data: Self::extra_data_from_sidechain_id(sidechain_id)?,
-        })
-    }
-
-    pub fn dummy_block(
-        network: Network,
-        parent: BlockId,
-        proposed_by: PublicKey,
-        height: NodeHeight,
-        high_qc: QuorumCertificate,
-        epoch: Epoch,
-        shard_group: ShardGroup,
-        parent_merkle_root: FixedHash,
-        parent_timestamp: u64,
-        parent_base_layer_block_height: u64,
-        parent_base_layer_block_hash: FixedHash,
-    ) -> Self {
-        let mut block = Self {
-            id: BlockId::zero(),
-            network,
-            parent,
-            justify: high_qc,
-            height,
-            epoch,
-            shard_group,
-            proposed_by,
-            merkle_root: parent_merkle_root,
-            commands: BTreeSet::new(),
-            total_leader_fee: 0,
-            is_dummy: true,
-            is_justified: false,
-            is_committed: false,
-            foreign_indexes: IndexMap::new(),
-            stored_at: None,
-            signature: None,
-            block_time: None,
-            timestamp: parent_timestamp,
-            base_layer_block_height: parent_base_layer_block_height,
-            base_layer_block_hash: parent_base_layer_block_hash,
-            extra_data: None,
-        };
-        block.id = block.calculate_hash().into();
-        block.is_justified = false;
-        block
-    }
-
-    fn extra_data_from_sidechain_id(sidechain_id: Option<RistrettoPublicKey>) -> Result<Option<ExtraData>, BlockError> {
-        let extra_data = sidechain_id
-            .map(|id| ExtraData::new().insert_sidechain_id(id).cloned())
-            .transpose()?;
-        Ok(extra_data)
+        }
     }
 
     pub fn calculate_hash(&self) -> FixedHash {
-        // Hash is created from the hash of the "body" and
-        // then hashed with the parent, so that you can
-        // create a merkle proof of a chain of blocks
-        // ```pre
-        // root
-        // |\
-        // |  block1
-        // |\
-        // |  block2
-        // |
-        // blockbody
-        // ```
-
-        let inner_hash = hashing::block_hasher()
-            .chain(&self.network)
-            // This allows us to exclude the justify and still validate the block
-            .chain(self.justify.id())
-            .chain(&self.height)
-            .chain(&self.total_leader_fee)
-            .chain(&self.epoch)
-            .chain(&self.shard_group)
-            .chain(&self.proposed_by)
-            .chain(&self.merkle_root)
-            .chain(&self.is_dummy)
-            .chain(&self.commands)
-            .chain(&self.foreign_indexes)
-            .chain(&self.timestamp)
-            .chain(&self.base_layer_block_height)
-            .chain(&self.base_layer_block_hash)
-            .chain(&self.extra_data)
-            .result();
-
-        hashing::block_hasher().chain(&self.parent).chain(&inner_hash).result()
+        self.header.calculate_hash()
     }
-}
 
-impl Block {
+    pub fn header(&self) -> &BlockHeader {
+        &self.header
+    }
+
     pub fn is_genesis(&self) -> bool {
-        self.height.is_zero()
+        self.header().is_genesis()
     }
 
     pub fn is_epoch_end(&self) -> bool {
@@ -430,55 +327,35 @@ impl Block {
     }
 
     pub fn as_locked_block(&self) -> LockedBlock {
-        LockedBlock {
-            height: self.height,
-            block_id: self.id,
-            epoch: self.epoch,
-        }
+        self.header().as_locked_block()
     }
 
     pub fn as_last_executed(&self) -> LastExecuted {
-        LastExecuted {
-            height: self.height,
-            block_id: self.id,
-            epoch: self.epoch,
-        }
+        self.header().as_last_executed()
     }
 
     pub fn as_last_voted(&self) -> LastVoted {
-        LastVoted {
-            height: self.height,
-            block_id: self.id,
-            epoch: self.epoch,
-        }
+        self.header().as_last_voted()
     }
 
     pub fn as_leaf_block(&self) -> LeafBlock {
-        LeafBlock {
-            height: self.height,
-            block_id: self.id,
-            epoch: self.epoch,
-        }
+        self.header().as_leaf_block()
     }
 
     pub fn as_last_proposed(&self) -> LastProposed {
-        LastProposed {
-            height: self.height,
-            block_id: self.id,
-            epoch: self.epoch,
-        }
+        self.header().as_last_proposed()
     }
 
     pub fn id(&self) -> &BlockId {
-        &self.id
+        self.header.id()
     }
 
     pub fn network(&self) -> Network {
-        self.network
+        self.header.network()
     }
 
     pub fn parent(&self) -> &BlockId {
-        &self.parent
+        self.header.parent()
     }
 
     pub fn justify(&self) -> &QuorumCertificate {
@@ -490,30 +367,26 @@ impl Block {
     }
 
     pub fn justifies_parent(&self) -> bool {
-        *self.justify.block_id() == self.parent
+        self.justify.block_id() == self.parent()
     }
 
     pub fn height(&self) -> NodeHeight {
-        self.height
-    }
-
-    pub fn is_zero(&self) -> bool {
-        self.id.is_zero()
+        self.header.height()
     }
 
     pub fn epoch(&self) -> Epoch {
-        self.epoch
+        self.header.epoch()
     }
 
     pub fn shard_group(&self) -> ShardGroup {
-        self.shard_group
+        self.header.shard_group()
     }
 
     pub fn total_leader_fee(&self) -> u64 {
-        self.total_leader_fee
+        self.header.total_leader_fee()
     }
 
-    pub fn total_transaction_fee(&self) -> u64 {
+    pub fn calculate_total_transaction_fee(&self) -> u64 {
         self.commands
             .iter()
             .filter_map(|c| c.committing())
@@ -522,11 +395,19 @@ impl Block {
     }
 
     pub fn proposed_by(&self) -> &PublicKey {
-        &self.proposed_by
+        self.header.proposed_by()
     }
 
-    pub fn merkle_root(&self) -> &FixedHash {
-        &self.merkle_root
+    pub fn state_merkle_root(&self) -> &FixedHash {
+        self.header.state_merkle_root()
+    }
+
+    pub fn command_merkle_root(&self) -> &FixedHash {
+        self.header.command_merkle_root()
+    }
+
+    pub fn compute_command_merkle_root(&self) -> Result<FixedHash, StateTreeError> {
+        compute_command_merkle_root(&self.commands)
     }
 
     pub fn commands(&self) -> &BTreeSet<Command> {
@@ -538,7 +419,7 @@ impl Block {
     }
 
     pub fn is_dummy(&self) -> bool {
-        self.is_dummy
+        self.header.is_dummy()
     }
 
     pub fn is_justified(&self) -> bool {
@@ -549,12 +430,12 @@ impl Block {
         self.is_committed
     }
 
-    pub fn get_foreign_counter(&self, bucket: &Shard) -> Option<u64> {
-        self.foreign_indexes.get(bucket).copied()
+    pub fn get_foreign_counter(&self, shard: &Shard) -> Option<u64> {
+        self.header.get_foreign_counter(shard)
     }
 
     pub fn foreign_indexes(&self) -> &IndexMap<Shard, u64> {
-        &self.foreign_indexes
+        self.header.foreign_indexes()
     }
 
     pub fn block_time(&self) -> Option<u64> {
@@ -562,31 +443,27 @@ impl Block {
     }
 
     pub fn timestamp(&self) -> u64 {
-        self.timestamp
+        self.header.timestamp()
     }
 
     pub fn signature(&self) -> Option<&ValidatorSchnorrSignature> {
-        self.signature.as_ref()
+        self.header.signature()
     }
 
     pub fn set_signature(&mut self, signature: ValidatorSchnorrSignature) {
-        self.signature = Some(signature);
-    }
-
-    pub fn is_proposed_by_addr<A: NodeAddressable + PartialEq<A>>(&self, address: &A) -> Option<bool> {
-        Some(A::try_from_public_key(&self.proposed_by)? == *address)
+        self.header.set_signature(signature);
     }
 
     pub fn base_layer_block_height(&self) -> u64 {
-        self.base_layer_block_height
+        self.header.base_layer_block_height()
     }
 
     pub fn base_layer_block_hash(&self) -> &FixedHash {
-        &self.base_layer_block_hash
+        self.header.base_layer_block_hash()
     }
 
-    pub fn extra_data(&self) -> Option<&ExtraData> {
-        self.extra_data.as_ref()
+    pub fn extra_data(&self) -> &ExtraData {
+        self.header.extra_data()
     }
 }
 
@@ -595,16 +472,32 @@ impl Block {
         tx.blocks_get(id)
     }
 
+    pub fn get_ids_by_epoch_and_height<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        epoch: Epoch,
+        height: NodeHeight,
+    ) -> Result<Vec<BlockId>, StorageError> {
+        tx.blocks_get_all_ids_by_height(epoch, height)
+    }
+
     /// Returns all blocks from and excluding the start block (lower height) to the end block (inclusive)
     pub fn get_all_blocks_between<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         epoch: Epoch,
         shard_group: ShardGroup,
-        start_block_id: &BlockId,
-        end_block_id: &BlockId,
+        start_block_height: NodeHeight,
+        end_block_height: NodeHeight,
         include_dummy_blocks: bool,
+        limit: u64,
     ) -> Result<Vec<Self>, StorageError> {
-        tx.blocks_get_all_between(epoch, shard_group, start_block_id, end_block_id, include_dummy_blocks)
+        tx.blocks_get_all_between(
+            epoch,
+            shard_group,
+            start_block_height,
+            end_block_height,
+            include_dummy_blocks,
+            limit,
+        )
     }
 
     pub fn get_last_n_in_epoch<TTx: StateStoreReadTransaction>(
@@ -673,7 +566,7 @@ impl Block {
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
     {
-        let other_blocks = tx.blocks_get_all_ids_by_height(self.epoch(), self.height())?;
+        let other_blocks = Self::get_ids_by_epoch_and_height(&**tx, self.epoch(), self.height())?;
         for block_id in other_blocks {
             if block_id == *self.id() {
                 continue;
@@ -807,10 +700,10 @@ impl Block {
     }
 
     pub fn extends<TTx: StateStoreReadTransaction>(&self, tx: &TTx, ancestor: &BlockId) -> Result<bool, StorageError> {
-        if self.id == *ancestor {
+        if self.id() == ancestor {
             return Ok(false);
         }
-        if self.parent == *ancestor {
+        if self.parent() == ancestor {
             return Ok(true);
         }
         // First check the parent here, if it does not exist, then this block cannot extend anything.
@@ -822,14 +715,14 @@ impl Block {
     }
 
     pub fn get_parent<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<Block, StorageError> {
-        if self.id.is_zero() && self.parent.is_zero() {
+        if self.id().is_zero() && self.parent().is_zero() {
             return Err(StorageError::NotFound {
                 item: "Block parent",
-                key: self.parent.to_string(),
+                key: self.parent().to_string(),
             });
         }
 
-        Block::get(tx, &self.parent)
+        Block::get(tx, self.parent())
     }
 
     pub fn get_parent_chain<TTx: StateStoreReadTransaction>(
@@ -841,7 +734,7 @@ impl Block {
     }
 
     pub fn get_votes<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<Vec<Vote>, StorageError> {
-        Vote::get_for_block(tx, &self.id)
+        Vote::get_for_block(tx, self.id())
     }
 
     pub fn get_child_block_ids<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<Vec<BlockId>, StorageError> {
@@ -955,7 +848,7 @@ impl Block {
             return Ok(high_qc);
         }
 
-        let current_locked = LockedBlock::get(&**tx, self.epoch)?;
+        let current_locked = LockedBlock::get(&**tx, self.epoch())?;
         if prepared_node.height() > current_locked.height {
             on_locked_block_recurse(
                 tx,
@@ -1040,7 +933,7 @@ impl Block {
     {
         let mut counters = ForeignSendCounters::get_or_default(&**tx, self.justify().block_id())?;
         // Add counters for this block and carry over the counters from the justify block, if any
-        for shard in self.foreign_indexes.keys() {
+        for shard in self.foreign_indexes().keys() {
             counters.increment_counter(*shard);
         }
         if !counters.is_empty() {
@@ -1061,7 +954,7 @@ impl Block {
                 continue;
             }
 
-            let Some(evidence) = atom.evidence.get(&self.shard_group) else {
+            let Some(evidence) = atom.evidence.get(&self.shard_group()) else {
                 // CASE: The output-only shard group has sequenced this transaction
                 debug!(
                     "get_block_pledge: Local evidence for atom {} is missing in block {}",

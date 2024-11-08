@@ -21,6 +21,7 @@ use tari_dan_common_types::{
 use tari_dan_storage::{
     consensus_models::{
         Block,
+        BlockHeader,
         BlockId,
         EpochCheckpoint,
         LeafBlock,
@@ -149,7 +150,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         *candidate_block.justify().block_id(),
         candidate_block.justify(),
         candidate_block.parent(),
-        *justify_block.merkle_root(),
+        *justify_block.state_merkle_root(),
         leader_strategy,
         local_committee,
         justify_block.timestamp(),
@@ -201,13 +202,12 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
             break;
         }
         let (_, leader) = leader_strategy.get_leader(local_committee, current_height);
-
-        let dummy_block = Block::dummy_block(
+        let dummy_header = BlockHeader::dummy_block(
             network,
             parent_block_id,
             leader.clone(),
             current_height,
-            qc.clone(),
+            *qc.id(),
             epoch,
             shard_group,
             parent_merkle_root,
@@ -215,6 +215,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
             parent_base_layer_block_height,
             parent_base_layer_block_hash,
         );
+        let dummy_block = Block::new(dummy_header, qc.clone(), Default::default());
         debug!(
             target: LOG_TARGET,
             "🍼 new dummy block: {}",

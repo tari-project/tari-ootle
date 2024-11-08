@@ -177,7 +177,8 @@ impl<'a, TAddr: NodeAddressable> SqliteStateStoreWriteTransaction<'a, TAddr> {
             parked_blocks::block_id.eq(&block_id),
             parked_blocks::parent_block_id.eq(serialize_hex(block.parent())),
             parked_blocks::network.eq(block.network().to_string()),
-            parked_blocks::merkle_root.eq(block.merkle_root().to_string()),
+            parked_blocks::state_merkle_root.eq(block.state_merkle_root().to_string()),
+            parked_blocks::command_merkle_root.eq(block.command_merkle_root().to_string()),
             parked_blocks::height.eq(block.height().as_u64() as i64),
             parked_blocks::epoch.eq(block.epoch().as_u64() as i64),
             parked_blocks::shard_group.eq(block.shard_group().encode_as_u32() as i32),
@@ -192,7 +193,7 @@ impl<'a, TAddr: NodeAddressable> SqliteStateStoreWriteTransaction<'a, TAddr> {
             parked_blocks::base_layer_block_height.eq(block.base_layer_block_height() as i64),
             parked_blocks::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
             parked_blocks::foreign_proposals.eq(serialize_json(foreign_proposals)?),
-            parked_blocks::extra_data.eq(block.extra_data().map(serialize_json).transpose()?),
+            parked_blocks::extra_data.eq(serialize_json(block.extra_data())?),
         );
 
         diesel::insert_into(parked_blocks::table)
@@ -228,7 +229,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         let insert = (
             blocks::block_id.eq(serialize_hex(block.id())),
             blocks::parent_block_id.eq(serialize_hex(block.parent())),
-            blocks::merkle_root.eq(block.merkle_root().to_string()),
+            blocks::state_merkle_root.eq(block.state_merkle_root().to_string()),
+            blocks::command_merkle_root.eq(block.command_merkle_root().to_string()),
             blocks::network.eq(block.network().to_string()),
             blocks::height.eq(block.height().as_u64() as i64),
             blocks::epoch.eq(block.epoch().as_u64() as i64),
@@ -246,7 +248,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             blocks::timestamp.eq(block.timestamp() as i64),
             blocks::base_layer_block_height.eq(block.base_layer_block_height() as i64),
             blocks::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
-            blocks::extra_data.eq(block.extra_data().map(serialize_json).transpose()?),
+            blocks::extra_data.eq(serialize_json(block.extra_data())?),
         );
 
         diesel::insert_into(blocks::table)
@@ -625,7 +627,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         let values = (
             foreign_proposals::block_id.eq(serialize_hex(block.id())),
             foreign_proposals::parent_block_id.eq(serialize_hex(block.parent())),
-            foreign_proposals::merkle_root.eq(block.merkle_root().to_string()),
+            foreign_proposals::state_merkle_root.eq(block.state_merkle_root().to_string()),
+            foreign_proposals::command_merkle_root.eq(block.command_merkle_root().to_string()),
             foreign_proposals::network.eq(block.network().to_string()),
             foreign_proposals::height.eq(block.height().as_u64() as i64),
             foreign_proposals::epoch.eq(block.epoch().as_u64() as i64),
@@ -643,7 +646,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
             foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
             foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
-            foreign_proposals::extra_data.eq(foreign_proposal.block().extra_data().map(serialize_json).transpose()?),
+            foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
         );
 
         diesel::insert_into(foreign_proposals::table)
@@ -2184,10 +2187,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 .select((
                     validator_epoch_stats::participation_shares,
                     validator_epoch_stats::missed_proposals,
+                    validator_epoch_stats::missed_proposals_capped,
                 ))
                 .filter(validator_epoch_stats::epoch.eq(epoch))
                 .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
-                .first::<(i64, i64)>(self.connection())
+                .first::<(i64, i64, i64)>(self.connection())
                 .optional()
                 .map_err(|e| SqliteStorageError::DieselError {
                     operation: "validator_epoch_stats_updates",
@@ -2195,7 +2199,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 })?;
 
             match existing {
-                Some((participation_shares, missed_proposals)) => match update.missed_proposal_change() {
+                Some((participation_shares, missed_proposals, missed_proposals_capped)) => match update
+                    .missed_proposal_change()
+                {
                     Some(0) => {
                         diesel::update(validator_epoch_stats::table)
                             .filter(validator_epoch_stats::epoch.eq(epoch))
@@ -2204,6 +2210,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                                 validator_epoch_stats::participation_shares
                                     .eq(participation_shares + update.participation_shares_increment() as i64),
                                 validator_epoch_stats::missed_proposals.eq(0),
+                                validator_epoch_stats::missed_proposals_capped.eq(0),
                             ))
                             .execute(self.connection())
                             .map_err(|e| SqliteStorageError::DieselError {
@@ -2212,9 +2219,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                             })?;
                     },
                     Some(n) => {
-                        let missed_proposal_count = update
+                        // NOTE: n can be negative
+                        let missed_proposal_count = cmp::max(missed_proposals + n, 0);
+                        let capped_missed_proposal_count = update
                             .max_total_missed_proposals()
-                            .min(cmp::max(missed_proposals + n, 0));
+                            .min(cmp::max(missed_proposals_capped + n, 0));
                         diesel::update(validator_epoch_stats::table)
                             .filter(validator_epoch_stats::epoch.eq(epoch))
                             .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
@@ -2222,6 +2231,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                                 validator_epoch_stats::participation_shares
                                     .eq(participation_shares + update.participation_shares_increment() as i64),
                                 validator_epoch_stats::missed_proposals.eq(missed_proposal_count),
+                                validator_epoch_stats::missed_proposals_capped.eq(capped_missed_proposal_count),
                             ))
                             .execute(self.connection())
                             .map_err(|e| SqliteStorageError::DieselError {
@@ -2252,6 +2262,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                         validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())),
                         validator_epoch_stats::participation_shares.eq(update.participation_shares_increment() as i64),
                         validator_epoch_stats::missed_proposals.eq(leader_failure_inc),
+                        validator_epoch_stats::missed_proposals_capped.eq(leader_failure_inc),
                     );
 
                     diesel::insert_into(validator_epoch_stats::table)

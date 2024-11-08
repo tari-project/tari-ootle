@@ -174,9 +174,10 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
-        start_block_id: &BlockId,
-        end_block_id: &BlockId,
+        start_block_height: NodeHeight,
+        end_block_height: NodeHeight,
         include_dummy_blocks: bool,
+        limit: u64,
     ) -> Result<Vec<Block>, StorageError>;
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
     fn blocks_is_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError>;

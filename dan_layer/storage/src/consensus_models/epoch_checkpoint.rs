@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use indexmap::IndexMap;
 use tari_dan_common_types::{shard::Shard, Epoch};
-use tari_state_tree::{Hash, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{compute_merkle_root_for_hashes, Hash, StateTreeError, SPARSE_MERKLE_PLACEHOLDER_HASH};
 
 use crate::{
     consensus_models::{Block, QuorumCertificate},
@@ -47,6 +47,15 @@ impl EpochCheckpoint {
             .get(&shard)
             .copied()
             .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH)
+    }
+
+    pub fn compute_state_merkle_root(&self) -> Result<Hash, StateTreeError> {
+        let shard_group = self.block().shard_group();
+        let hashes = shard_group
+            .shard_iter()
+            .map(|shard| self.get_shard_root(shard))
+            .peekable();
+        compute_merkle_root_for_hashes(hashes)
     }
 }
 

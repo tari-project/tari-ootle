@@ -9,6 +9,7 @@ use std::{
 use log::*;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
+    optional::Optional,
     Epoch,
     NodeHeight,
     ShardGroup,
@@ -18,6 +19,7 @@ use tari_dan_storage::{
         Block,
         BlockDiff,
         BurntUtxo,
+        EpochCheckpoint,
         ForeignProposal,
         HighQc,
         LeafBlock,
@@ -42,6 +44,7 @@ use crate::{
         error::HotStuffError,
         event::HotstuffEvent,
         on_catch_up_sync::OnCatchUpSync,
+        on_catch_up_sync_request::OnSyncRequest,
         on_inbound_message::OnInboundMessage,
         on_message_validate::{MessageValidationResult, OnMessageValidate},
         on_next_sync_view::OnNextSyncViewHandler,
@@ -51,7 +54,6 @@ use crate::{
         on_receive_new_view::OnReceiveNewViewHandler,
         on_receive_request_missing_transactions::OnReceiveRequestMissingTransactions,
         on_receive_vote::OnReceiveVoteHandler,
-        on_sync_request::OnSyncRequest,
         pacemaker::PaceMaker,
         pacemaker_handle::PaceMakerHandle,
         transaction_manager::ConsensusTransactionManager,
@@ -218,7 +220,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let current_epoch = self.epoch_manager.current_epoch().await?;
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
-        self.create_zero_block_if_required(current_epoch, local_committee_info.shard_group())?;
+        self.create_genesis_block_if_required(current_epoch, local_committee_info.shard_group())?;
 
         // Resume pacemaker from the last epoch/height
         let (current_height, high_qc) = self.state_store.with_read_tx(|tx| {
@@ -749,7 +751,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 block.shard_group(),
                 *block.id(),
                 &high_qc,
-                *block.merkle_root(),
+                *block.state_merkle_root(),
                 &self.leader_strategy,
                 local_committee,
                 block.timestamp(),
@@ -873,24 +875,21 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
     }
 
-    fn create_zero_block_if_required(&self, epoch: Epoch, shard_group: ShardGroup) -> Result<(), HotStuffError> {
+    fn create_genesis_block_if_required(&self, epoch: Epoch, shard_group: ShardGroup) -> Result<(), HotStuffError> {
         self.state_store.with_write_tx(|tx| {
+            let previous_epoch = epoch.saturating_sub(Epoch(1));
+            let checkpoint = EpochCheckpoint::get(&**tx, previous_epoch).optional()?;
+            let state_merkle_root = checkpoint
+                .map(|cp| cp.compute_state_merkle_root())
+                .transpose()?
+                .unwrap_or_default();
             // The parent for genesis blocks refer to this zero block
-            let mut zero_block = Block::zero_block(
-                self.config.network,
-                self.config.consensus_constants.num_preshards,
-                self.config.sidechain_id.clone(),
-            )?;
+            let mut zero_block = Block::zero_block(self.config.network, self.config.consensus_constants.num_preshards);
             if !zero_block.exists(&**tx)? {
                 debug!(target: LOG_TARGET, "Creating zero block");
                 zero_block.justify().insert(tx)?;
                 zero_block.insert(tx)?;
                 zero_block.set_as_justified(tx)?;
-                zero_block.as_locked_block().set(tx)?;
-                // zero_block.as_leaf_block().set(tx)?;
-                zero_block.as_last_executed().set(tx)?;
-                zero_block.as_last_voted().set(tx)?;
-                zero_block.justify().as_high_qc().set(tx)?;
                 zero_block.commit_diff(tx, BlockDiff::empty(*zero_block.id()))?;
             }
 
@@ -898,11 +897,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 self.config.network,
                 epoch,
                 shard_group,
+                state_merkle_root,
                 self.config.sidechain_id.clone(),
-            )?;
+            );
             if !genesis.exists(&**tx)? {
                 info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");
-                genesis.justify().insert(tx)?;
+                genesis.justify().save(tx)?;
                 genesis.insert(tx)?;
                 genesis.set_as_justified(tx)?;
                 genesis.as_locked_block().set(tx)?;

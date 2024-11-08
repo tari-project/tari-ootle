@@ -42,15 +42,7 @@ use tari_dan_storage::{
 use tari_engine_types::substate::hash_substate;
 use tari_epoch_manager::EpochManagerReader;
 use tari_rpc_framework::RpcError;
-use tari_state_tree::{
-    memory_store::MemoryTreeStore,
-    Hash,
-    RootStateTree,
-    SpreadPrefixStateTree,
-    SubstateTreeChange,
-    Version,
-    SPARSE_MERKLE_PLACEHOLDER_HASH,
-};
+use tari_state_tree::{Hash, SpreadPrefixStateTree, SubstateTreeChange, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service::ValidatorNodeRpcClient,
@@ -338,16 +330,20 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     fn validate_checkpoint(&self, checkpoint: &EpochCheckpoint) -> Result<(), CommsRpcConsensusSyncError> {
         // TODO: validate checkpoint
 
-        // Check the merkle root matches the provided shard roots
-        let mut mem_store = MemoryTreeStore::new();
-        let mut root_tree = RootStateTree::new(&mut mem_store);
-        let shard_group = checkpoint.block().shard_group();
-        let hashes = shard_group.shard_iter().map(|shard| checkpoint.get_shard_root(shard));
-        let calculated_root = root_tree.put_root_hash_changes(None, 1, hashes)?;
-        if calculated_root != *checkpoint.block().merkle_root() {
+        if !checkpoint.block().is_epoch_end() {
+            return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
+                "Checkpoint block is not an Epoch End block"
+            )));
+        }
+
+        // Sanity check that the calculated merkle root matches the provided shard roots
+        // Note this allows us to use each of the provided shard MRs assuming we trust the provided block that has been
+        // signed by a BFT majority of registered VNs
+        let calculated_root = checkpoint.compute_state_merkle_root()?;
+        if calculated_root != *checkpoint.block().state_merkle_root() {
             return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
                 "Checkpoint merkle root mismatch. Expected {expected} but got {actual}",
-                expected = checkpoint.block().merkle_root(),
+                expected = checkpoint.block().state_merkle_root(),
                 actual = calculated_root,
             )));
         }
@@ -441,6 +437,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                     info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
 
                     self.validate_checkpoint(&checkpoint)?;
+                    self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
 
                     match self.start_state_sync(&mut client, shard, &checkpoint).await {
                         Ok(current_version) => {
@@ -454,7 +451,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                                     actual = state_root,
                                 );
                                 last_error = Some(CommsRpcConsensusSyncError::StateRootMismatch {
-                                    expected: *checkpoint.block().merkle_root(),
+                                    expected: *checkpoint.block().state_merkle_root(),
                                     actual: state_root,
                                 });
                                 // TODO: rollback state

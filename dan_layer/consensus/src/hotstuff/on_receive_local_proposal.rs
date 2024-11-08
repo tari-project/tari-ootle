@@ -15,7 +15,6 @@ use tari_dan_common_types::{
 use tari_dan_storage::{
     consensus_models::{
         Block,
-        ForeignProposal,
         HighQc,
         LastSentVote,
         QuorumCertificate,
@@ -174,6 +173,19 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         self.store.with_write_tx(|tx| {
+            // TODO: Implement guaranteed finality in the face of a non-cooperating remote shard group.
+            // Suggested strategy:
+            // Given a transaction that is awaiting a foreign proposal for REQUEST_FOREIGN_PROPOSAL_TIMEOUT (e.g. 50)
+            // blocks
+            // - Load pending transactions that are awaiting foreign proposal for >= REQUEST_FOREIGN_PROPOSAL_TIMEOUT
+            // - Request foreign proposal from remote shard group [END]
+            //
+            // Given a transaction that is awaiting a foreign proposal for MISSING_FOREIGN_PROPOSAL_TIMEOUT (e.g. 100)
+            // blocks
+            // - Load pending transactions that are awaiting foreign proposal for >= MISSING_FOREIGN_PROPOSAL_TIMEOUT
+            // - Set abort and ready = true
+            // self.update_foreign_proposal_transactions(tx, valid_block.block())?;
+
             for foreign_proposal in foreign_proposals {
                 if foreign_proposal.exists(&**tx)? {
                     // This is expected behaviour, we may receive the same foreign proposal multiple times
@@ -334,8 +346,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         self.config.network,
                         next_epoch,
                         next_shard_group,
+                        *valid_block.block().state_merkle_root(),
                         self.config.sidechain_id.clone(),
-                    )?;
+                    );
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
                     genesis.justify().insert(tx)?;
                     genesis.insert(tx)?;
@@ -513,10 +526,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     ) -> Result<Option<ValidBlock>, HotStuffError> {
         let result =
             self.validate_local_proposed_block(tx, current_epoch, block, local_committee, local_committee_info);
-        // .and_then(|valid_block| {
-        //     self.update_foreign_proposal_transactions(tx, valid_block.block())?;
-        //     Ok(valid_block)
-        // });
 
         match result {
             Ok(validated) => Ok(Some(validated)),
@@ -695,6 +704,15 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             }
             .into());
         };
+
+        if candidate_block.justifies_parent() && !candidate_block.parent_exists(tx)? {
+            return Err(ProposalValidationError::ParentNotFound {
+                proposed_by: candidate_block.proposed_by().to_string(),
+                parent_id: *candidate_block.parent(),
+                block_id: *candidate_block.id(),
+            }
+            .into());
+        }
 
         if justify_block.height() != candidate_block.justify().block_height() {
             return Err(ProposalValidationError::JustifyBlockInvalid {
@@ -932,8 +950,8 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     Ok(())
 }
 
-fn cleanup_epoch<TTx: StateStoreWriteTransaction>(tx: &mut TTx, epoch: Epoch) -> Result<(), HotStuffError> {
+fn cleanup_epoch<TTx: StateStoreWriteTransaction>(tx: &mut TTx, _epoch: Epoch) -> Result<(), HotStuffError> {
     Vote::delete_all(tx)?;
-    ForeignProposal::delete_in_epoch(tx, epoch)?;
+    // ForeignProposal::delete_in_epoch(tx, epoch)?;
     Ok(())
 }

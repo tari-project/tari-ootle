@@ -26,18 +26,16 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use log::*;
 use tari_bor::decode;
-use tari_common::configuration::Network;
-use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::message_format::MessageFormat};
-use tari_dan_common_types::{committee::Committee, Epoch, NumPreshards, PeerAddress, ShardGroup};
+use tari_crypto::tari_utilities::message_format::MessageFormat;
+use tari_dan_common_types::{committee::Committee, Epoch, PeerAddress, ShardGroup};
 use tari_dan_p2p::proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SyncBlocksRequest};
-use tari_dan_storage::consensus_models::{Block, BlockError, BlockId, Decision, TransactionRecord};
+use tari_dan_storage::consensus_models::{Block, BlockId, Decision, TransactionRecord};
 use tari_engine_types::{
     commit_result::{ExecuteResult, TransactionResult},
     events::Event,
     substate::{Substate, SubstateId, SubstateValue},
 };
-use tari_epoch_manager::EpochManagerReader;
+use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_template_lib::models::{EntityId, TemplateAddress};
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
@@ -96,33 +94,24 @@ struct TransactionMetadata {
 }
 
 pub struct EventScanner {
-    network: Network,
-    sidechain_id: Option<RistrettoPublicKey>,
-    epoch_manager: Box<dyn EpochManagerReader<Addr = PeerAddress>>,
+    epoch_manager: EpochManagerHandle<PeerAddress>,
     client_factory: TariValidatorNodeRpcClientFactory,
     substate_store: SqliteSubstateStore,
     event_filters: Vec<EventFilter>,
-    consensus_constants: ConsensusConstants,
 }
 
 impl EventScanner {
     pub fn new(
-        network: Network,
-        sidechain_id: Option<RistrettoPublicKey>,
-        epoch_manager: Box<dyn EpochManagerReader<Addr = PeerAddress>>,
+        epoch_manager: EpochManagerHandle<PeerAddress>,
         client_factory: TariValidatorNodeRpcClientFactory,
         substate_store: SqliteSubstateStore,
         event_filters: Vec<EventFilter>,
-        consensus_constants: ConsensusConstants,
     ) -> Self {
         Self {
-            network,
-            sidechain_id,
             epoch_manager,
             client_factory,
             substate_store,
             event_filters,
-            consensus_constants,
         }
     }
 
@@ -151,7 +140,7 @@ impl EventScanner {
             },
             None => {
                 // by default we start scanning since the current epoch
-                // TODO: it would be nice a new parameter in the indexer to spcify a custom starting epoch
+                // TODO: it would be nice a new parameter in the indexer to specify a custom starting epoch
                 event_count += self.scan_events_of_epoch(newest_epoch).await?;
             },
         }
@@ -454,12 +443,6 @@ impl EventScanner {
             .collect()
     }
 
-    fn build_genesis_block_id(&self, num_preshards: NumPreshards) -> Result<BlockId, BlockError> {
-        // TODO: this should return the actual genesis for the shard group and epoch
-        let start_block = Block::zero_block(self.network, num_preshards, self.sidechain_id.clone())?;
-        Ok(*start_block.id())
-    }
-
     async fn get_oldest_scanned_epoch(&self) -> Result<Option<Epoch>, anyhow::Error> {
         self.substate_store
             .with_read_tx(|tx| tx.get_oldest_scanned_epoch())
@@ -473,23 +456,18 @@ impl EventScanner {
         committee: &mut Committee<PeerAddress>,
         epoch: Epoch,
     ) -> Result<Vec<Block>, anyhow::Error> {
-        // We start scanning from the last scanned block for this commitee
+        // We start scanning from the last scanned block for this committee
         let start_block_id = self
             .substate_store
             .with_read_tx(|tx| tx.get_last_scanned_block_id(epoch, shard_group))?;
-
-        let start_block_id = match start_block_id {
-            Some(block_id) => block_id,
-            None => self.build_genesis_block_id(self.consensus_constants.num_preshards)?,
-        };
 
         committee.shuffle();
         let mut last_block_id = start_block_id;
 
         info!(
             target: LOG_TARGET,
-            "Scanning new blocks since {} from (epoch={}, shard={})",
-            last_block_id,
+            "Scanning new blocks from (start_id={}, epoch={}, shard={})",
+            last_block_id.map(|id| id.to_string()).unwrap_or_else(|| "None".to_string()),
             epoch,
             shard_group
         );
@@ -502,7 +480,7 @@ impl EventScanner {
                 epoch,
                 shard_group
             );
-            let resp = self.get_blocks_from_vn(member, start_block_id, Some(epoch)).await;
+            let resp = self.get_blocks_from_vn(member, last_block_id, epoch).await;
 
             match resp {
                 Ok(blocks) => {
@@ -520,9 +498,9 @@ impl EventScanner {
                     let last_block = blocks.iter().max_by_key(|b| (b.epoch(), b.height()));
 
                     if let Some(block) = last_block {
-                        last_block_id = *block.id();
+                        last_block_id = Some(*block.id());
                         // Store the latest scanned block id in the database for future scans
-                        self.save_scanned_block_id(epoch, shard_group, last_block_id)?;
+                        self.save_scanned_block_id(epoch, shard_group, *block.id())?;
                     }
                     return Ok(blocks);
                 },
@@ -578,8 +556,8 @@ impl EventScanner {
     async fn get_blocks_from_vn(
         &self,
         vn_addr: &PeerAddress,
-        start_block_id: BlockId,
-        up_to_epoch: Option<Epoch>,
+        start_block_id: Option<BlockId>,
+        up_to_epoch: Epoch,
     ) -> Result<Vec<Block>, anyhow::Error> {
         let mut blocks = vec![];
 
@@ -588,8 +566,8 @@ impl EventScanner {
 
         let mut stream = client
             .sync_blocks(SyncBlocksRequest {
-                start_block_id: start_block_id.as_bytes().to_vec(),
-                up_to_epoch: up_to_epoch.map(|epoch| epoch.into()),
+                start_block_id: start_block_id.map(|id| id.as_bytes().to_vec()).unwrap_or_default(),
+                epoch: Some(up_to_epoch.into()),
             })
             .await?;
         while let Some(resp) = stream.next().await {

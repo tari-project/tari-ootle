@@ -36,6 +36,10 @@ pub fn block_hasher() -> TariHasher {
     dan_hasher("Block")
 }
 
+pub fn command_hasher() -> TariHasher {
+    dan_hasher("Command")
+}
+
 pub fn quorum_certificate_hasher() -> TariHasher {
     dan_hasher("QuorumCertificate")
 }

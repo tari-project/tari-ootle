@@ -1,4 +1,4 @@
-//   Copyright 2024. The Tari Project
+//   Copyright 2022. The Tari Project
 //
 //   Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //   following conditions are met:
@@ -20,42 +20,67 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::BTreeMap;
+use std::fmt::Display;
 
+use newtype_ops::newtype_ops;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-use crate::MaxSizeBytes;
-
-const MAX_DATA_SIZE: usize = 256;
-type ExtraFieldValue = MaxSizeBytes<MAX_DATA_SIZE>;
-
-#[repr(u8)]
-#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ExtraFieldKey {
-    SidechainId = 0x00,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
-pub struct ExtraData(#[cfg_attr(feature = "ts", ts(type = "string"))] BTreeMap<ExtraFieldKey, ExtraFieldValue>);
+pub struct Era(#[cfg_attr(feature = "ts", ts(type = "number"))] pub u64);
 
-impl ExtraData {
-    pub const fn new() -> Self {
-        Self(BTreeMap::new())
+impl Era {
+    pub const fn zero() -> Self {
+        Self(0)
     }
 
-    pub fn insert(&mut self, key: ExtraFieldKey, value: ExtraFieldValue) -> &mut Self {
-        self.0.insert(key, value);
-        self
+    pub const fn as_u64(self) -> u64 {
+        self.0
     }
 
-    pub fn get(&self, key: &ExtraFieldKey) -> Option<&ExtraFieldValue> {
-        self.0.get(key)
+    pub fn is_zero(&self) -> bool {
+        self.0 == 0
     }
 
-    pub fn contains_key(&self, key: &ExtraFieldKey) -> bool {
-        self.0.contains_key(key)
+    pub fn to_le_bytes(self) -> [u8; 8] {
+        self.0.to_le_bytes()
+    }
+
+    pub fn saturating_sub<T: Into<Era>>(&self, other: T) -> Self {
+        Self(self.0.saturating_sub(other.into().0))
+    }
+
+    pub fn checked_sub(&self, other: Self) -> Option<Self> {
+        self.0.checked_sub(other.0).map(Self)
     }
 }
+
+impl From<u64> for Era {
+    fn from(e: u64) -> Self {
+        Self(e)
+    }
+}
+
+impl PartialEq<u64> for Era {
+    fn eq(&self, other: &u64) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<Era> for u64 {
+    fn eq(&self, other: &Era) -> bool {
+        *self == other.0
+    }
+}
+
+impl Display for Era {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Era({})", self.0)
+    }
+}
+
+newtype_ops! { [Era] {add sub mul div} {:=} Self Self }
+newtype_ops! { [Era] {add sub mul div} {:=} &Self &Self }
+newtype_ops! { [Era] {add sub mul div} {:=} Self &Self }

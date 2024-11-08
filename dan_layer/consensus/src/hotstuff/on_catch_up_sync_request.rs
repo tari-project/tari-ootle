@@ -90,9 +90,10 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     tx,
                     leaf_block.epoch(),
                     local_committee_info.shard_group(),
-                    msg.high_qc.block_id(),
-                    leaf_block.block_id(),
+                    msg.high_qc.block_height(),
+                    leaf_block.height(),
                     true,
+                    1000,
                 )?;
 
                 Ok::<_, HotStuffError>(blocks)

@@ -354,8 +354,8 @@ checksum = "30ca9a001c1e8ba5149f91a74362376cc6bc5b919d92d988668657bd570bdcec"
 dependencies = [
  "async-task",
  "concurrent-queue",
- "fastrand 2.1.1",
- "futures-lite 2.4.0",
+ "fastrand 2.2.0",
+ "futures-lite 2.5.0",
  "slab",
 ]
 
@@ -370,7 +370,7 @@ dependencies = [
  "async-io",
  "async-lock",
  "blocking",
- "futures-lite 2.4.0",
+ "futures-lite 2.5.0",
  "once_cell",
 ]
 
@@ -466,17 +466,17 @@ dependencies = [
 
 [[package]]
 name = "async-io"
-version = "2.3.4"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "444b0228950ee6501b3568d3c93bf1176a1fdbc3b758dcd9475046d30f4dc7e8"
+checksum = "43a2b323ccce0a1d90b449fd71f2a06ca7faa7c54c2751f06c9bd851fc061059"
 dependencies = [
  "async-lock",
  "cfg-if",
  "concurrent-queue",
  "futures-io",
- "futures-lite 2.4.0",
+ "futures-lite 2.5.0",
  "parking",
- "polling 3.7.3",
+ "polling 3.7.4",
  "rustix",
  "slab",
  "tracing",
@@ -517,7 +517,7 @@ dependencies = [
  "blocking",
  "cfg-if",
  "event-listener 5.3.1",
- "futures-lite 2.4.0",
+ "futures-lite 2.5.0",
  "rustix",
  "tracing",
 ]
@@ -575,7 +575,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-io",
- "futures-lite 2.4.0",
+ "futures-lite 2.5.0",
  "gloo-timers",
  "kv-log-macro",
  "log",
@@ -1011,7 +1011,7 @@ dependencies = [
  "async-channel 2.3.1",
  "async-task",
  "futures-io",
- "futures-lite 2.4.0",
+ "futures-lite 2.5.0",
  "piper",
 ]
 
@@ -1027,9 +1027,9 @@ dependencies = [
 
 [[package]]
 name = "borsh"
-version = "1.5.1"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6362ed55def622cddc70a4746a68554d7b687713770de539e59a739b249f8ed"
+checksum = "f5327f6c99920069d1fe374aa743be1af0031dea9f250852cdf1ae6a0861ee24"
 dependencies = [
  "borsh-derive",
  "cfg_aliases 0.2.1",
@@ -1037,16 +1037,15 @@ dependencies = [
 
 [[package]]
 name = "borsh-derive"
-version = "1.5.1"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3ef8005764f53cd4dca619f5bf64cafd4664dada50ece25e4d81de54c80cc0b"
+checksum = "10aedd8f1a81a8aafbfde924b0e3061cd6fedd6f6bbcfc6a76e6fd426d7bfe26"
 dependencies = [
  "once_cell",
  "proc-macro-crate 3.2.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
- "syn_derive",
 ]
 
 [[package]]
@@ -1259,9 +1258,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.1.36"
+version = "1.1.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baee610e9452a8f6f0a1b6194ec09ff9e2d85dea54432acdae41aa0761c95d70"
+checksum = "40545c26d092346d8a8dab71ee48e7685a7a9cba76e634790c215b41a4a7b4cf"
 dependencies = [
  "jobserver",
  "libc",
@@ -2867,9 +2866,9 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "2.1.1"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8c02a5121d4ea3eb16a80748c74f5549a5665e4c21333c6098f283870fbdea6"
+checksum = "486f806e73c5707928240ddc295403b1b93c96a02038563881c4a2fd84b81ac4"
 
 [[package]]
 name = "fd-lock"
@@ -3076,11 +3075,11 @@ dependencies = [
 
 [[package]]
 name = "futures-lite"
-version = "2.4.0"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f1fa2f9765705486b33fd2acf1577f8ec449c2ba1f318ae5447697b7c08d210"
+checksum = "cef40d21ae2c515b51041df9ed313ed21e572df340ea58a922a0aefe7e8891a1"
 dependencies = [
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "futures-core",
  "futures-io",
  "parking",
@@ -5710,7 +5709,7 @@ dependencies = [
 [[package]]
 name = "minotari_app_grpc"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "argon2",
  "base64 0.13.1",
@@ -5740,7 +5739,7 @@ dependencies = [
 [[package]]
 name = "minotari_app_utilities"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "clap 3.2.25",
  "dialoguer 0.10.4",
@@ -5762,7 +5761,7 @@ dependencies = [
 [[package]]
 name = "minotari_console_wallet"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "blake2",
  "chrono",
@@ -5819,7 +5818,7 @@ dependencies = [
 [[package]]
 name = "minotari_ledger_wallet_common"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "bs58 0.5.1",
 ]
@@ -5827,7 +5826,7 @@ dependencies = [
 [[package]]
 name = "minotari_ledger_wallet_comms"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "borsh",
  "dialoguer 0.11.0",
@@ -5850,7 +5849,7 @@ dependencies = [
 [[package]]
 name = "minotari_node"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5898,7 +5897,7 @@ dependencies = [
 [[package]]
 name = "minotari_node_grpc_client"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "minotari_app_grpc",
 ]
@@ -5906,7 +5905,7 @@ dependencies = [
 [[package]]
 name = "minotari_wallet"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "argon2",
  "async-trait",
@@ -5956,7 +5955,7 @@ dependencies = [
 [[package]]
 name = "minotari_wallet_grpc_client"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "minotari_app_grpc",
  "tari_common_types",
@@ -6968,7 +6967,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96c8c490f422ef9a4efd2cb5b42b76c8613d7e7dfc1caf667b8a3350a5acc066"
 dependencies = [
  "atomic-waker",
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "futures-io",
 ]
 
@@ -7017,9 +7016,9 @@ dependencies = [
 
 [[package]]
 name = "polling"
-version = "3.7.3"
+version = "3.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc2790cd301dec6cd3b7a025e4815cf825724a51c98dccfe6a3e55f05ffb6511"
+checksum = "a604568c3202727d1507653cb121dbd627a58684eb09a820fd746bee38b4442f"
 dependencies = [
  "cfg-if",
  "concurrent-queue",
@@ -9045,18 +9044,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "syn_derive"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1329189c02ff984e9736652b1631330da25eaa6bc639089ed4915d25446cbe7b"
-dependencies = [
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 2.0.87",
-]
-
-[[package]]
 name = "sync_wrapper"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9226,7 +9213,7 @@ dependencies = [
 [[package]]
 name = "tari_common"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "anyhow",
  "cargo_toml",
@@ -9252,7 +9239,7 @@ dependencies = [
 [[package]]
 name = "tari_common_sqlite"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -9266,7 +9253,7 @@ dependencies = [
 [[package]]
 name = "tari_common_types"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "base64 0.21.7",
  "bitflags 2.6.0",
@@ -9292,7 +9279,7 @@ dependencies = [
 [[package]]
 name = "tari_comms"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9336,7 +9323,7 @@ dependencies = [
 [[package]]
 name = "tari_comms_dht"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "anyhow",
  "bitflags 2.6.0",
@@ -9371,7 +9358,7 @@ dependencies = [
 [[package]]
 name = "tari_comms_rpc_macros"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9404,7 +9391,7 @@ dependencies = [
 [[package]]
 name = "tari_contacts"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "chrono",
  "diesel",
@@ -9437,7 +9424,7 @@ dependencies = [
 [[package]]
 name = "tari_core"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "async-trait",
  "bincode 1.3.3",
@@ -9896,7 +9883,7 @@ dependencies = [
 [[package]]
 name = "tari_features"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 
 [[package]]
 name = "tari_generate"
@@ -9918,7 +9905,7 @@ dependencies = [
 [[package]]
 name = "tari_hashing"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "borsh",
  "digest",
@@ -10021,7 +10008,7 @@ dependencies = [
 [[package]]
 name = "tari_key_manager"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "argon2",
  "async-trait",
@@ -10054,7 +10041,7 @@ dependencies = [
 [[package]]
 name = "tari_libtor"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "derivative",
  "libtor",
@@ -10069,7 +10056,7 @@ dependencies = [
 [[package]]
 name = "tari_max_size"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "borsh",
  "serde",
@@ -10080,7 +10067,7 @@ dependencies = [
 [[package]]
 name = "tari_metrics"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "once_cell",
  "prometheus",
@@ -10090,7 +10077,7 @@ dependencies = [
 [[package]]
 name = "tari_mmr"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "borsh",
  "digest",
@@ -10120,7 +10107,7 @@ dependencies = [
 [[package]]
 name = "tari_p2p"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "anyhow",
  "fs2",
@@ -10224,7 +10211,7 @@ dependencies = [
 [[package]]
 name = "tari_script"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "blake2",
  "borsh",
@@ -10242,7 +10229,7 @@ dependencies = [
 [[package]]
 name = "tari_service_framework"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10257,7 +10244,7 @@ dependencies = [
 [[package]]
 name = "tari_shutdown"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "futures 0.3.31",
 ]
@@ -10330,7 +10317,7 @@ dependencies = [
 [[package]]
 name = "tari_storage"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "bincode 1.3.3",
  "lmdb-zero",
@@ -10459,7 +10446,7 @@ dependencies = [
 [[package]]
 name = "tari_test_utils"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#31cc467a2a72e917e6decc70373f7a83f593e37d"
+source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#af9b02ad06df27214fa2a1cd60fba37c580ce010"
 dependencies = [
  "futures 0.3.31",
  "rand",
@@ -10714,12 +10701,12 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.13.0"
+version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0f2c9fc62d0beef6951ccffd757e241266a2c833136efbe35af6cd2567dca5b"
+checksum = "28cce251fcbc87fac86a866eeb0d6c2d536fc16d06f184bb61aeae11aa4cee0c"
 dependencies = [
  "cfg-if",
- "fastrand 2.1.1",
+ "fastrand 2.2.0",
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",

@@ -204,6 +204,17 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
                     .await,
                 context,
             ),
+            EpochManagerRequest::RemoveValidatorNodeRegistration {
+                public_key,
+                sidechain_id,
+                reply,
+            } => handle(
+                reply,
+                self.inner
+                    .remove_validator_node_registration(public_key, sidechain_id)
+                    .await,
+                context,
+            ),
             // TODO: This should be rather be a state machine event
             EpochManagerRequest::NotifyScanningComplete { reply } => {
                 handle(reply, self.inner.on_scanning_complete().await, context)

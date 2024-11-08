@@ -87,6 +87,14 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         fee_claim_public_key: PublicKey,
         sidechain_id: Option<PublicKey>,
     ) -> Result<(), Self::Error>;
+
+    fn remove_validator_node(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), Self::Error>;
+
     fn get_validator_nodes_within_epoch(
         &self,
         tx: &mut Self::DbTransaction<'_>,

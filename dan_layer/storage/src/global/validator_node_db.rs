@@ -61,6 +61,16 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
+    pub fn remove(
+        &mut self,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), TGlobalDbAdapter::Error> {
+        self.backend
+            .remove_validator_node(self.tx, public_key, sidechain_id)
+            .map_err(TGlobalDbAdapter::Error::into)
+    }
+
     pub fn count(&mut self, epoch: Epoch, sidechain_id: Option<&PublicKey>) -> Result<u64, TGlobalDbAdapter::Error> {
         self.backend
             .validator_nodes_count(self.tx, epoch, sidechain_id)

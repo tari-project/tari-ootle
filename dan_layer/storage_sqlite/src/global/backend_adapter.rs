@@ -79,7 +79,7 @@ use crate::{
             TemplateModel,
             TemplateUpdateModel,
         },
-        schema::templates,
+        schema::{templates, validator_nodes::dsl::validator_nodes},
         serialization::serialize_json,
     },
     SqliteTransaction,
@@ -389,6 +389,30 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 source,
                 operation: "insert::validator_nodes".to_string(),
             })?;
+
+        Ok(())
+    }
+
+    fn remove_validator_node(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), Self::Error> {
+        use crate::global::schema::validator_nodes;
+        diesel::delete(
+            validator_nodes
+                .filter(
+                    validator_nodes::sidechain_id
+                        .eq(sidechain_id.as_ref().map(|id| id.as_bytes()).unwrap_or(&[0u8; 32])),
+                )
+                .filter(validator_nodes::public_key.eq(ByteArray::as_bytes(&public_key))),
+        )
+        .execute(tx.connection())
+        .map_err(|source| SqliteStorageError::DieselError {
+            source,
+            operation: "remove::validator_nodes".to_string(),
+        })?;
 
         Ok(())
     }

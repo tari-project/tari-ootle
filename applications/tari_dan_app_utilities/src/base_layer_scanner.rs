@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use log::*;
 use minotari_app_grpc::tari_rpc::ValidatorNodeChangeState;
@@ -218,7 +218,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                         .saturating_sub(self.consensus_constants.base_layer_confirmations)
                 );
                 self.sync_blockchain().await?;
-            }
+            },
             BlockchainProgression::Reorged => {
                 error!(
                     target: LOG_TARGET,
@@ -229,7 +229,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 self.last_scanned_validator_node_mr = None;
                 self.last_scanned_height = 0;
                 self.sync_blockchain().await?;
-            }
+            },
             BlockchainProgression::NoProgress => {
                 trace!(target: LOG_TARGET, "No new blocks to scan.");
                 // If no progress has been made since restarting, we still need to tell the epoch manager that scanning
@@ -237,7 +237,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 if !self.has_attempted_scan {
                     self.epoch_manager.notify_scanning_complete().await?;
                 }
-            }
+            },
         }
 
         self.has_attempted_scan = true;
@@ -258,7 +258,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 } else {
                     Ok(BlockchainProgression::Reorged)
                 }
-            }
+            },
             None => Ok(BlockchainProgression::Progressed),
         }
     }
@@ -278,7 +278,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                     "Base layer blockchain is not yet at the required height to start scanning it"
                 );
                 return Ok(());
-            }
+            },
             Some(end_height) => end_height,
         };
         let mut scan = tip.tip_hash;
@@ -316,20 +316,31 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 .map_err(BaseLayerScannerError::BaseNodeError)?;
 
             for node_change in node_changes {
+                if node_change.registration.is_none() {
+                    warn!(target: LOG_TARGET,
+                                    "Can't register validator node \"{}\" because it has empty registration!",
+                                    node_change.public_key.to_hex());
+                    continue;
+                }
+                let registration = ValidatorNodeRegistration::try_from(node_change.registration.clone().unwrap())
+                    .map_err(BaseLayerScannerError::GrpcConversion)?;
                 match node_change.state() {
                     ValidatorNodeChangeState::Add => {
-                        // TODO: implement
-                        // TODO: add minimum_value_promise to tari_rpc::ValidatorNodeChange
-                        // self.register_validator_node_registration(
-                        //     *node_register_height,
-                        //     reg.clone(),
-                        //     output.minimum_value_promise,
-                        // )
-                        //     .await?;
-                    }
+                        self.register_validator_node_registration(
+                            node_change.start_height,
+                            registration,
+                            node_change.minimum_value_promise.into(),
+                        )
+                        .await?;
+                    },
                     ValidatorNodeChangeState::Remove => {
-                        // TODO: implement
-                    }
+                        self.remove_validator_node_registration(
+                            PublicKey::from_canonical_bytes(node_change.public_key.as_slice())
+                                .map_err(BaseLayerScannerError::PublicKeyConversion)?,
+                            registration.sidechain_id().cloned(),
+                        )
+                        .await?;
+                    },
                 }
             }
 
@@ -373,7 +384,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 match sidechain_feature {
                     SideChainFeature::ValidatorNodeRegistration(reg) => {
                         trace!(target: LOG_TARGET, "New validator node registration scanned: {reg:?}");
-                    }
+                    },
                     SideChainFeature::CodeTemplateRegistration(reg) => {
                         if reg.sidechain_id != self.template_sidechain_id {
                             warn!(
@@ -389,8 +400,8 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                             reg.clone(),
                             &block_info,
                         )
-                            .await?;
-                    }
+                        .await?;
+                    },
                     SideChainFeature::ConfidentialOutput(data) => {
                         // Should be checked by the base layer
                         if !output.is_burned() {
@@ -417,7 +428,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                             output.commitment.as_public_key()
                         );
                         self.register_burnt_utxo(output, &block_info).await?;
-                    }
+                    },
                 }
             }
 
@@ -431,7 +442,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             match block_info.next_block_hash {
                 Some(next_hash) => {
                     current_hash = Some(next_hash);
-                }
+                },
                 None => {
                     info!(
                         target: LOG_TARGET,
@@ -444,7 +455,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                         )));
                     }
                     break;
-                }
+                },
             }
         }
 
@@ -539,6 +550,25 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         Ok(())
     }
 
+    async fn remove_validator_node_registration(
+        &mut self,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), BaseLayerScannerError> {
+        info!(
+            target: LOG_TARGET,
+            "⛓️ Remove validator node registration for {}(side chain ID: {:?})",
+            public_key,
+            sidechain_id
+        );
+
+        self.epoch_manager
+            .remove_validator_node_registration(public_key, sidechain_id)
+            .await?;
+
+        Ok(())
+    }
+
     async fn register_code_template_registration(
         &mut self,
         template_name: String,
@@ -599,6 +629,8 @@ pub enum BaseLayerScannerError {
     },
     #[error("Public key conversion error: {0}")]
     PublicKeyConversion(ByteArrayError),
+    #[error("GRPC conversion error: {0}")]
+    GrpcConversion(String),
 }
 
 enum BlockchainProgression {

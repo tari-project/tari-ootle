@@ -246,6 +246,28 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         Ok(())
     }
 
+    pub async fn remove_validator_node_registration(
+        &mut self,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), EpochManagerError> {
+        if sidechain_id != self.config.validator_node_sidechain_id {
+            return Err(EpochManagerError::ValidatorNodeRegistrationSidechainIdMismatch {
+                expected: self.config.validator_node_sidechain_id.as_ref().map(|v| v.to_hex()),
+                actual: sidechain_id.map(|v| v.to_hex()),
+            });
+        }
+        info!(target: LOG_TARGET, "Remove validator node({}) registration", public_key);
+
+        let mut tx = self.global_db.create_transaction()?;
+        self.global_db
+            .validator_nodes(&mut tx)
+            .remove(public_key, sidechain_id)?;
+        tx.commit()?;
+
+        Ok(())
+    }
+
     fn insert_current_epoch(&mut self, epoch: Epoch, header: BlockHeader) -> Result<(), EpochManagerError> {
         let epoch_height = epoch.0;
         let db_epoch = DbEpoch {

@@ -784,42 +784,69 @@ impl<'tx> StateStoreReadTransaction
     }
     
     fn last_voted_get(&self) -> Result<tari_dan_storage::consensus_models::LastVoted, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.last_voted_get(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.last_voted_get(),
+        }
     }
     
     fn last_executed_get(&self) -> Result<tari_dan_storage::consensus_models::LastExecuted, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.last_executed_get(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.last_executed_get(),
+        }
     }
     
     fn last_proposed_get(&self) -> Result<tari_dan_storage::consensus_models::LastProposed, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.last_proposed_get(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.last_proposed_get(),
+        }
     }
     
     fn locked_block_get(&self, epoch: tari_dan_common_types::Epoch) -> Result<tari_dan_storage::consensus_models::LockedBlock, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.locked_block_get(epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.locked_block_get(epoch),
+        }
     }
     
     fn leaf_block_get(&self, epoch: tari_dan_common_types::Epoch) -> Result<tari_dan_storage::consensus_models::LeafBlock, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.leaf_block_get(epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.leaf_block_get(epoch),
+        }
     }
     
     fn high_qc_get(&self, epoch: tari_dan_common_types::Epoch) -> Result<tari_dan_storage::consensus_models::HighQc, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.high_qc_get(epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.high_qc_get(epoch),
+        }
     }
     
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a tari_dan_storage::consensus_models::BlockId>>(
         &self,
         block_ids: I,
     ) -> Result<Vec<tari_dan_storage::consensus_models::ForeignProposal>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_proposals_get_any(block_ids),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_proposals_get_any(block_ids),
+        }
     }
     
     fn foreign_proposals_exists(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_proposals_exists(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_proposals_exists(block_id),
+        }
     }
     
     fn foreign_proposals_has_unconfirmed(&self, epoch: tari_dan_common_types::Epoch) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_proposals_has_unconfirmed(epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_proposals_has_unconfirmed(epoch),
+        }
     }
     
     fn foreign_proposals_get_all_new(
@@ -827,7 +854,10 @@ impl<'tx> StateStoreReadTransaction
         block_id: &tari_dan_storage::consensus_models::BlockId,
         limit: usize,
     ) -> Result<Vec<tari_dan_storage::consensus_models::ForeignProposal>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_proposals_get_all_new(block_id, limit),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_proposals_get_all_new(block_id, limit),
+        }
     }
     
     fn foreign_proposal_get_all_pending(
@@ -835,30 +865,48 @@ impl<'tx> StateStoreReadTransaction
         from_block_id: &tari_dan_storage::consensus_models::BlockId,
         to_block_id: &tari_dan_storage::consensus_models::BlockId,
     ) -> Result<Vec<tari_dan_storage::consensus_models::ForeignProposalAtom>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_proposal_get_all_pending(from_block_id, to_block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_proposal_get_all_pending(from_block_id, to_block_id),
+        }
     }
     
     fn foreign_send_counters_get(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<tari_dan_storage::consensus_models::ForeignSendCounters, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_send_counters_get(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_send_counters_get(block_id),
+        }
     }
     
     fn foreign_receive_counters_get(&self) -> Result<tari_dan_storage::consensus_models::ForeignReceiveCounters, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_receive_counters_get(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_receive_counters_get(),
+        }
     }
     
     fn transactions_get(&self, tx_id: &tari_transaction::TransactionId) -> Result<tari_dan_storage::consensus_models::TransactionRecord, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transactions_get(tx_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transactions_get(tx_id),
+        }
     }
     
     fn transactions_exists(&self, tx_id: &tari_transaction::TransactionId) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transactions_exists(tx_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transactions_exists(tx_id),
+        }
     }
     
     fn transactions_get_any<'a, I: IntoIterator<Item = &'a tari_transaction::TransactionId>>(
         &self,
         tx_ids: I,
     ) -> Result<Vec<tari_dan_storage::consensus_models::TransactionRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transactions_get_any(tx_ids),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transactions_get_any(tx_ids),
+        }
     }
     
     fn transactions_get_paginated(
@@ -867,7 +915,10 @@ impl<'tx> StateStoreReadTransaction
         offset: u64,
         asc_desc_created_at: Option<tari_dan_storage::Ordering>,
     ) -> Result<Vec<tari_dan_storage::consensus_models::TransactionRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transactions_get_paginated(limit, offset, asc_desc_created_at),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transactions_get_paginated(limit, offset, asc_desc_created_at),
+        }
     }
     
     fn transaction_executions_get(
@@ -875,7 +926,10 @@ impl<'tx> StateStoreReadTransaction
         tx_id: &tari_transaction::TransactionId,
         block: &tari_dan_storage::consensus_models::BlockId,
     ) -> Result<tari_dan_storage::consensus_models::BlockTransactionExecution, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_executions_get(tx_id, block),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_executions_get(tx_id, block),
+        }
     }
     
     fn transaction_executions_get_pending_for_block(
@@ -883,23 +937,38 @@ impl<'tx> StateStoreReadTransaction
         tx_id: &tari_transaction::TransactionId,
         from_block_id: &tari_dan_storage::consensus_models::BlockId,
     ) -> Result<tari_dan_storage::consensus_models::BlockTransactionExecution, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_executions_get_pending_for_block(tx_id, from_block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_executions_get_pending_for_block(tx_id, from_block_id),
+        }
     }
     
     fn blocks_get(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<tari_dan_storage::consensus_models::Block, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get(block_id),
+        }
     }
     
     fn blocks_get_all_ids_by_height(&self, epoch: tari_dan_common_types::Epoch, height: tari_dan_common_types::NodeHeight) -> Result<Vec<tari_dan_storage::consensus_models::BlockId>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_all_ids_by_height(epoch, height),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_all_ids_by_height(epoch, height),
+        }
     }
     
     fn blocks_get_genesis_for_epoch(&self, epoch: tari_dan_common_types::Epoch) -> Result<tari_dan_storage::consensus_models::Block, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_genesis_for_epoch(epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_genesis_for_epoch(epoch),
+        }
     }
     
     fn blocks_get_last_n_in_epoch(&self, n: usize, epoch: tari_dan_common_types::Epoch) -> Result<Vec<tari_dan_storage::consensus_models::Block>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_last_n_in_epoch(n, epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_last_n_in_epoch(n, epoch),
+        }
     }
     
     fn blocks_get_all_between(
@@ -910,31 +979,52 @@ impl<'tx> StateStoreReadTransaction
         end_block_id: &tari_dan_storage::consensus_models::BlockId,
         include_dummy_blocks: bool,
     ) -> Result<Vec<tari_dan_storage::consensus_models::Block>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_all_between(epoch, shard_group, start_block_id, end_block_id, include_dummy_blocks),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_all_between(epoch, shard_group, start_block_id, end_block_id, include_dummy_blocks),
+        }
     }
     
     fn blocks_exists(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_exists(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_exists(block_id),
+        }
     }
     
     fn blocks_is_ancestor(&self, descendant: &tari_dan_storage::consensus_models::BlockId, ancestor: &tari_dan_storage::consensus_models::BlockId) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_is_ancestor(descendant, ancestor),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_is_ancestor(descendant, ancestor),
+        }
     }
     
     fn blocks_get_all_by_parent(&self, parent: &tari_dan_storage::consensus_models::BlockId) -> Result<Vec<tari_dan_storage::consensus_models::Block>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_all_by_parent(parent),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_all_by_parent(parent),
+        }
     }
     
     fn blocks_get_ids_by_parent(&self, parent: &tari_dan_storage::consensus_models::BlockId) -> Result<Vec<tari_dan_storage::consensus_models::BlockId>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_ids_by_parent(parent),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_ids_by_parent(parent),
+        }
     }
     
     fn blocks_get_parent_chain(&self, block_id: &tari_dan_storage::consensus_models::BlockId, limit: usize) -> Result<Vec<tari_dan_storage::consensus_models::Block>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_parent_chain(block_id, limit),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_parent_chain(block_id, limit),
+        }
     }
     
     fn blocks_get_pending_transactions(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<Vec<tari_transaction::TransactionId>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_pending_transactions(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_pending_transactions(block_id),
+        }
     }
     
     fn blocks_get_total_leader_fee_for_epoch(
@@ -942,7 +1032,10 @@ impl<'tx> StateStoreReadTransaction
         epoch: tari_dan_common_types::Epoch,
         validator_public_key: &tari_common_types::types::PublicKey,
     ) -> Result<u64, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_total_leader_fee_for_epoch(epoch, validator_public_key),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_total_leader_fee_for_epoch(epoch, validator_public_key),
+        }
     }
     
     fn blocks_get_any_with_epoch_range(
@@ -950,7 +1043,10 @@ impl<'tx> StateStoreReadTransaction
         epoch_range: std::ops::RangeInclusive<tari_dan_common_types::Epoch>,
         validator_public_key: Option<&tari_common_types::types::PublicKey>,
     ) -> Result<Vec<tari_dan_storage::consensus_models::Block>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_any_with_epoch_range(epoch_range, validator_public_key),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_any_with_epoch_range(epoch_range, validator_public_key),
+        }
     }
     
     fn blocks_get_paginated(
@@ -962,11 +1058,17 @@ impl<'tx> StateStoreReadTransaction
         ordering_index: Option<usize>,
         ordering: Option<tari_dan_storage::Ordering>,
     ) -> Result<Vec<tari_dan_storage::consensus_models::Block>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_paginated(limit, offset, filter_index, filter, ordering_index, ordering),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_paginated(limit, offset, filter_index, filter, ordering_index, ordering),
+        }
     }
     
     fn blocks_get_count(&self) -> Result<i64, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_count(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_count(),
+        }
     }
     
     fn filtered_blocks_get_count(
@@ -974,15 +1076,24 @@ impl<'tx> StateStoreReadTransaction
         filter_index: Option<usize>,
         filter: Option<String>,
     ) -> Result<i64, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.filtered_blocks_get_count(filter_index, filter),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.filtered_blocks_get_count(filter_index, filter),
+        }
     }
     
     fn blocks_max_height(&self) -> Result<tari_dan_common_types::NodeHeight, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_max_height(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_max_height(),
+        }
     }
     
     fn block_diffs_get(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<tari_dan_storage::consensus_models::BlockDiff, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.block_diffs_get(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.block_diffs_get(block_id),
+        }
     }
     
     fn block_diffs_get_last_change_for_substate(
@@ -990,22 +1101,34 @@ impl<'tx> StateStoreReadTransaction
         block_id: &tari_dan_storage::consensus_models::BlockId,
         substate_id: &tari_engine_types::substate::SubstateId,
     ) -> Result<tari_dan_storage::consensus_models::SubstateChange, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.block_diffs_get_last_change_for_substate(block_id, substate_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.block_diffs_get_last_change_for_substate(block_id, substate_id),
+        }
     }
     
     fn quorum_certificates_get(&self, qc_id: &tari_dan_storage::consensus_models::QcId) -> Result<tari_dan_storage::consensus_models::QuorumCertificate, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.quorum_certificates_get(qc_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.quorum_certificates_get(qc_id),
+        }
     }
     
     fn quorum_certificates_get_all<'a, I: IntoIterator<Item = &'a tari_dan_storage::consensus_models::QcId>>(
         &self,
         qc_ids: I,
     ) -> Result<Vec<tari_dan_storage::consensus_models::QuorumCertificate>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.quorum_certificates_get_all(qc_ids),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.quorum_certificates_get_all(qc_ids),
+        }
     }
     
     fn quorum_certificates_get_by_block_id(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<tari_dan_storage::consensus_models::QuorumCertificate, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.quorum_certificates_get_by_block_id(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.quorum_certificates_get_by_block_id(block_id),
+        }
     }
     
     fn transaction_pool_get_for_blocks(
@@ -1014,15 +1137,24 @@ impl<'tx> StateStoreReadTransaction
         to_block_id: &tari_dan_storage::consensus_models::BlockId,
         transaction_id: &tari_transaction::TransactionId,
     ) -> Result<tari_dan_storage::consensus_models::TransactionPoolRecord, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_pool_get_for_blocks(from_block_id, to_block_id, transaction_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_get_for_blocks(from_block_id, to_block_id, transaction_id),
+        }
     }
     
     fn transaction_pool_exists(&self, transaction_id: &tari_transaction::TransactionId) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_pool_exists(transaction_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_exists(transaction_id),
+        }
     }
     
     fn transaction_pool_get_all(&self) -> Result<Vec<tari_dan_storage::consensus_models::TransactionPoolRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_pool_get_all(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_get_all(),
+        }
     }
     
     fn transaction_pool_get_many_ready(
@@ -1030,7 +1162,10 @@ impl<'tx> StateStoreReadTransaction
         max_txs: usize,
         block_id: &tari_dan_storage::consensus_models::BlockId,
     ) -> Result<Vec<tari_dan_storage::consensus_models::TransactionPoolRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_pool_get_many_ready(max_txs, block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_get_many_ready(max_txs, block_id),
+        }
     }
     
     fn transaction_pool_count(
@@ -1039,14 +1174,20 @@ impl<'tx> StateStoreReadTransaction
         is_ready: Option<bool>,
         confirmed_stage: Option<Option<tari_dan_storage::consensus_models::TransactionPoolConfirmedStage>>,
     ) -> Result<usize, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_pool_count(stage, is_ready, confirmed_stage),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_count(stage, is_ready, confirmed_stage),
+        }
     }
     
     fn transactions_fetch_involved_shards(
         &self,
         transaction_ids: std::collections::HashSet<tari_transaction::TransactionId>,
     ) -> Result<std::collections::HashSet<tari_dan_common_types::SubstateAddress>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transactions_fetch_involved_shards(transaction_ids),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transactions_fetch_involved_shards(transaction_ids),
+        }
     }
     
     fn votes_get_by_block_and_sender(
@@ -1054,52 +1195,82 @@ impl<'tx> StateStoreReadTransaction
         block_id: &tari_dan_storage::consensus_models::BlockId,
         sender_leaf_hash: &tari_common_types::types::FixedHash,
     ) -> Result<tari_dan_storage::consensus_models::Vote, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.votes_get_by_block_and_sender(block_id, sender_leaf_hash),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.votes_get_by_block_and_sender(block_id, sender_leaf_hash),
+        }
     }
     
     fn votes_count_for_block(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<u64, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.votes_count_for_block(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.votes_count_for_block(block_id),
+        }
     }
     
     fn votes_get_for_block(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<Vec<tari_dan_storage::consensus_models::Vote>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.votes_get_for_block(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.votes_get_for_block(block_id),
+        }
     }
     
     fn substates_get(&self, address: &tari_dan_common_types::SubstateAddress) -> Result<tari_dan_storage::consensus_models::SubstateRecord, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get(address),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get(address),
+        }
     }
     
     fn substates_get_any(
         &self,
         substate_ids: &std::collections::HashSet<tari_dan_common_types::SubstateRequirement>,
     ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_any(substate_ids),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_any(substate_ids),
+        }
     }
     
     fn substates_get_any_max_version<'a, I: IntoIterator<Item = &'a tari_engine_types::substate::SubstateId>>(
         &self,
         substate_ids: I,
     ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_any_max_version(substate_ids),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_any_max_version(substate_ids),
+        }
     }
     
     fn substates_get_max_version_for_substate(&self, substate_id: &tari_engine_types::substate::SubstateId) -> Result<(u32, bool), tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_max_version_for_substate(substate_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_max_version_for_substate(substate_id),
+        }
     }
     
     fn substates_any_exist<I, S>(&self, substates: I) -> Result<bool, tari_dan_storage::StorageError>
     where
         I: IntoIterator<Item = S>,
         S: std::borrow::Borrow<tari_dan_common_types::VersionedSubstateId> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_any_exist(substates),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_any_exist(substates),
+        }
     }
     
     fn substates_exists_for_transaction(&self, transaction_id: &tari_transaction::TransactionId) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_exists_for_transaction(transaction_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_exists_for_transaction(transaction_id),
+        }
     }
     
     fn substates_get_n_after(&self, n: usize, after: &tari_dan_common_types::SubstateAddress) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_n_after(n, after),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_n_after(n, after),
+        }
     }
     
     fn substates_get_many_within_range(
@@ -1108,46 +1279,67 @@ impl<'tx> StateStoreReadTransaction
         end: &tari_dan_common_types::SubstateAddress,
         exclude_shards: &[tari_dan_common_types::SubstateAddress],
     ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_many_within_range(start, end, exclude_shards),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_many_within_range(start, end, exclude_shards),
+        }
     }
     
     fn substates_get_many_by_created_transaction(
         &self,
         tx_id: &tari_transaction::TransactionId,
     ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_many_by_created_transaction(tx_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_many_by_created_transaction(tx_id),
+        }
     }
     
     fn substates_get_many_by_destroyed_transaction(
         &self,
         tx_id: &tari_transaction::TransactionId,
     ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_many_by_destroyed_transaction(tx_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_many_by_destroyed_transaction(tx_id),
+        }
     }
     
     fn substates_get_all_for_transaction(
         &self,
         transaction_id: &tari_transaction::TransactionId,
     ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_all_for_transaction(transaction_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_all_for_transaction(transaction_id),
+        }
     }
     
     fn substate_locks_get_locked_substates_for_transaction(
         &self,
         transaction_id: &tari_transaction::TransactionId,
     ) -> Result<Vec<tari_dan_storage::consensus_models::LockedSubstateValue>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substate_locks_get_locked_substates_for_transaction(transaction_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substate_locks_get_locked_substates_for_transaction(transaction_id),
+        }
     }
     
     fn substate_locks_get_latest_for_substate(&self, substate_id: &tari_engine_types::substate::SubstateId) -> Result<tari_dan_storage::consensus_models::SubstateLock, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substate_locks_get_latest_for_substate(substate_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substate_locks_get_latest_for_substate(substate_id),
+        }
     }
     
     fn pending_state_tree_diffs_get_all_up_to_commit_block(
         &self,
         block_id: &tari_dan_storage::consensus_models::BlockId,
     ) -> Result<std::collections::HashMap<tari_dan_common_types::shard::Shard, Vec<tari_dan_storage::consensus_models::PendingShardStateTreeDiff>>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.pending_state_tree_diffs_get_all_up_to_commit_block(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.pending_state_tree_diffs_get_all_up_to_commit_block(block_id),
+        }
     }
     
     fn state_transitions_get_n_after(
@@ -1156,23 +1348,38 @@ impl<'tx> StateStoreReadTransaction
         id: tari_dan_storage::consensus_models::StateTransitionId,
         end_epoch: tari_dan_common_types::Epoch,
     ) -> Result<Vec<tari_dan_storage::consensus_models::StateTransition>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.state_transitions_get_n_after(n, id, end_epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.state_transitions_get_n_after(n, id, end_epoch),
+        }
     }
     
     fn state_transitions_get_last_id(&self, shard: tari_dan_common_types::shard::Shard) -> Result<tari_dan_storage::consensus_models::StateTransitionId, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.state_transitions_get_last_id(shard),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.state_transitions_get_last_id(shard),
+        }
     }
     
     fn state_tree_nodes_get(&self, shard: tari_dan_common_types::shard::Shard, key: &NodeKey) -> Result<Node<Version>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.state_tree_nodes_get(shard, key),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.state_tree_nodes_get(shard, key),
+        }
     }
     
     fn state_tree_versions_get_latest(&self, shard: tari_dan_common_types::shard::Shard) -> Result<Option<Version>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.state_tree_versions_get_latest(shard),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.state_tree_versions_get_latest(shard),
+        }
     }
     
     fn epoch_checkpoint_get(&self, epoch: tari_dan_common_types::Epoch) -> Result<tari_dan_storage::consensus_models::EpochCheckpoint, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.epoch_checkpoint_get(epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.epoch_checkpoint_get(epoch),
+        }
     }
     
     fn foreign_substate_pledges_exists_for_address<T: tari_dan_common_types::ToSubstateAddress>(
@@ -1180,18 +1387,27 @@ impl<'tx> StateStoreReadTransaction
         transaction_id: &tari_transaction::TransactionId,
         address: T,
     ) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_substate_pledges_exists_for_address(transaction_id, address),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_substate_pledges_exists_for_address(transaction_id, address),
+        }
     }
     
     fn foreign_substate_pledges_get_all_by_transaction_id(
         &self,
         transaction_id: &tari_transaction::TransactionId,
     ) -> Result<tari_dan_storage::consensus_models::SubstatePledges, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_substate_pledges_get_all_by_transaction_id(transaction_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_substate_pledges_get_all_by_transaction_id(transaction_id),
+        }
     }
     
     fn burnt_utxos_get(&self, substate_id: &tari_engine_types::substate::SubstateId) -> Result<tari_dan_storage::consensus_models::BurntUtxo, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.burnt_utxos_get(substate_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.burnt_utxos_get(substate_id),
+        }
     }
     
     fn burnt_utxos_get_all_unproposed(
@@ -1199,15 +1415,24 @@ impl<'tx> StateStoreReadTransaction
         leaf_block: &tari_dan_storage::consensus_models::BlockId,
         limit: usize,
     ) -> Result<Vec<tari_dan_storage::consensus_models::BurntUtxo>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.burnt_utxos_get_all_unproposed(leaf_block, limit),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.burnt_utxos_get_all_unproposed(leaf_block, limit),
+        }
     }
     
     fn burnt_utxos_count(&self) -> Result<u64, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.burnt_utxos_count(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.burnt_utxos_count(),
+        }
     }
     
     fn foreign_parked_blocks_exists(&self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_parked_blocks_exists(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_parked_blocks_exists(block_id),
+        }
     }
     
     fn validator_epoch_stats_get(
@@ -1215,7 +1440,10 @@ impl<'tx> StateStoreReadTransaction
         epoch: tari_dan_common_types::Epoch,
         public_key: &tari_common_types::types::PublicKey,
     ) -> Result<tari_dan_storage::consensus_models::ValidatorConsensusStats, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.validator_epoch_stats_get(epoch, public_key),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.validator_epoch_stats_get(epoch, public_key),
+        }
     }
     
     fn validator_epoch_stats_get_nodes_to_suspend(
@@ -1224,7 +1452,10 @@ impl<'tx> StateStoreReadTransaction
         min_missed_proposals: u64,
         limit: usize,
     ) -> Result<Vec<tari_common_types::types::PublicKey>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.validator_epoch_stats_get_nodes_to_suspend(block_id, min_missed_proposals, limit),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.validator_epoch_stats_get_nodes_to_suspend(block_id, min_missed_proposals, limit),
+        }
     }
     
     fn validator_epoch_stats_get_nodes_to_resume(
@@ -1232,15 +1463,24 @@ impl<'tx> StateStoreReadTransaction
         block_id: &tari_dan_storage::consensus_models::BlockId,
         limit: usize,
     ) -> Result<Vec<tari_common_types::types::PublicKey>, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.validator_epoch_stats_get_nodes_to_resume(block_id, limit),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.validator_epoch_stats_get_nodes_to_resume(block_id, limit),
+        }
     }
     
     fn suspended_nodes_is_suspended(&self, block_id: &tari_dan_storage::consensus_models::BlockId, public_key: &tari_common_types::types::PublicKey) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.suspended_nodes_is_suspended(block_id, public_key),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.suspended_nodes_is_suspended(block_id, public_key),
+        }
     }
     
     fn suspended_nodes_count(&self) -> Result<u64, tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.suspended_nodes_count(),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.suspended_nodes_count(),
+        }
     }
 
 

@@ -77,6 +77,7 @@ pub async fn handle_submit_instruction(
         signing_key_index: Some(fee_account.key_index),
         autofill_inputs: vec![],
         detect_inputs: req.override_inputs.unwrap_or_default(),
+        detect_inputs_use_unversioned: false,
         proof_ids: vec![],
     };
     handle_submit(context, token, request).await
@@ -106,6 +107,12 @@ pub async fn handle_submit(
         loaded_substates
             .into_iter()
             .chain(substates.into_iter().map(SubstateRequirement::unversioned))
+            .map(|mut input| {
+                if req.detect_inputs_use_unversioned {
+                    input.version = None;
+                }
+                input
+            })
             .collect()
     } else {
         vec![]
@@ -113,8 +120,10 @@ pub async fn handle_submit(
 
     info!(
         target: LOG_TARGET,
-        "Detected {} input(s)",
-        detected_inputs.len()
+        "Detected {} input(s) (detect_inputs = {}, detect_inputs_use_unversioned = {})",
+        detected_inputs.len(),
+        req.detect_inputs,
+        req.detect_inputs_use_unversioned,
     );
 
     let transaction = Transaction::builder()
@@ -122,6 +131,10 @@ pub async fn handle_submit(
         .with_inputs(detected_inputs)
         .sign(&key.key)
         .build();
+
+    for input in transaction.inputs() {
+        debug!(target: LOG_TARGET, "Input: {}", input)
+    }
 
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
@@ -137,7 +150,7 @@ pub async fn handle_submit(
 
     let transaction_id = context
         .transaction_service()
-        .submit_transaction(transaction, autofill_inputs.clone())
+        .submit_transaction(transaction, autofill_inputs)
         .await?;
 
     Ok(TransactionSubmitResponse { transaction_id })

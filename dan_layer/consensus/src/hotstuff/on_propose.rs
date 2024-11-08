@@ -15,6 +15,7 @@ use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
     Epoch,
+    ExtraData,
     NodeHeight,
     ToSubstateAddress,
     VersionedSubstateId,
@@ -238,17 +239,18 @@ where TConsensusSpec: ConsensusSpec
             "🌿 Broadcasting local proposal {} to local committee",
             next_block,
         );
-
+        let msg = HotstuffMessage::Proposal(ProposalMessage {
+            block: next_block,
+            foreign_proposals,
+        });
         // Broadcast to local and foreign committees
-        self.outbound_messaging
-            .multicast(
-                local_committee_info.shard_group(),
-                HotstuffMessage::Proposal(ProposalMessage {
-                    block: next_block,
-                    foreign_proposals,
-                }),
-            )
-            .await?;
+        self.outbound_messaging.send_self(msg.clone()).await?;
+        // If we are the only VN in this committee, no need to multicast
+        if local_committee_info.num_shard_group_members() > 1 {
+            self.outbound_messaging
+                .multicast(local_committee_info.shard_group(), msg)
+                .await?;
+        }
 
         Ok(())
     }
@@ -640,7 +642,7 @@ where TConsensusSpec: ConsensusSpec
         // Ensure that foreign indexes are canonically ordered
         foreign_indexes.sort_keys();
 
-        let mut next_block = Block::new(
+        let mut next_block = Block::create(
             self.config.network,
             *parent_block.block_id(),
             high_qc_certificate,
@@ -656,8 +658,8 @@ where TConsensusSpec: ConsensusSpec
             EpochTime::now().as_u64(),
             base_layer_block_height,
             base_layer_block_hash,
-            None,
-        );
+            ExtraData::new(),
+        )?;
 
         let signature = self.signing_service.sign(next_block.id());
         next_block.set_signature(signature);

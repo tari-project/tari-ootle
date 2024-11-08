@@ -23,7 +23,7 @@
 use std::time::Duration;
 
 use tari_common::configuration::Network;
-use tari_dan_common_types::NumPreshards;
+use tari_dan_common_types::{Epoch, NumPreshards};
 
 #[derive(Clone, Debug)]
 pub struct ConsensusConstants {
@@ -33,19 +33,22 @@ pub struct ConsensusConstants {
     pub max_base_layer_blocks_behind: u64,
     pub num_preshards: NumPreshards,
     pub pacemaker_block_time: Duration,
-    /// The number of missed proposals before a SuspendNode proposal is sent
+    /// The number of missed proposals before a SuspendNode command is sent.
     pub missed_proposal_suspend_threshold: u64,
-    /// The maximum number of missed proposals to count. If a peer is offline, gets suspended and comes online, their
-    /// missed proposal count is decremented for each block that they participate in. Once this reaches zero, the node
-    /// is considered online and will be reinstated. This cap essentially gives the maximum number of rounds until they
-    /// will be reinstated once they resume participation in consensus.
-    pub missed_proposal_count_cap: u64,
+    /// The number of missed proposals before a EvictNode command is sent.
+    pub missed_proposal_evict_threshold: u64,
+    /// The number of rounds a node must participate in to be eligible for a ResumeNode command. If a peer is offline,
+    /// gets suspended and comes online, their missed proposal count is decremented for each block that they
+    /// participate (vote) in. Once this reaches zero, the node is considered online and will be reinstated.
+    pub missed_proposal_recovery_threshold: u64,
+    /// The maximum number of commands that a block may contain.
     pub max_block_size: usize,
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
     /// Maximum number of validator nodes to be activated in an epoch.
     /// This is to give enough time to the network to catch up with new validator nodes and do syncing.
     pub max_vns_per_epoch_activated: u64,
+    pub epochs_per_era: Epoch,
 }
 
 impl ConsensusConstants {
@@ -58,10 +61,12 @@ impl ConsensusConstants {
             num_preshards: NumPreshards::P256,
             pacemaker_block_time: Duration::from_secs(10),
             missed_proposal_suspend_threshold: 5,
-            missed_proposal_count_cap: 5,
+            missed_proposal_evict_threshold: 5,
+            missed_proposal_recovery_threshold: 5,
             max_block_size: 500,
             fee_exhaust_divisor: 20, // 5%
             max_vns_per_epoch_activated: 50,
+            epochs_per_era: Epoch(10),
         }
     }
 }

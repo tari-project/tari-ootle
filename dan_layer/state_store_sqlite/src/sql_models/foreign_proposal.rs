@@ -20,7 +20,8 @@ pub struct ForeignProposal {
     pub id: i32,
     pub block_id: String,
     pub parent_block_id: String,
-    pub merkle_root: String,
+    pub state_merkle_root: String,
+    pub command_merkle_root: String,
     pub network: String,
     pub height: i64,
     pub epoch: i64,
@@ -74,8 +75,9 @@ impl ForeignProposal {
                     details: format!("Block #{} proposed_by is malformed", self.id),
                 }
             })?,
+            deserialize_hex_try_from(&self.state_merkle_root)?,
             deserialize_json(&self.commands)?,
-            deserialize_hex_try_from(&self.merkle_root)?,
+            deserialize_hex_try_from(&self.command_merkle_root)?,
             self.total_leader_fee as u64,
             false,
             false,
@@ -87,7 +89,10 @@ impl ForeignProposal {
             self.timestamp as u64,
             self.base_layer_block_height as u64,
             deserialize_hex_try_from(&self.base_layer_block_hash)?,
-            self.extra_data.map(|val| deserialize_json(&val)).transpose()?,
+            self.extra_data
+                .map(|val| deserialize_json(&val))
+                .transpose()?
+                .unwrap_or_default(),
         );
 
         let status = consensus_models::ForeignProposalStatus::from_str(&self.status)?;

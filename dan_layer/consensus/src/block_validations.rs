@@ -30,10 +30,27 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     // check_base_layer_block_hash::<TConsensusSpec>(block, epoch_manager, config).await?;
     check_network(block, config.network)?;
     check_sidechain_id(block, config)?;
+    if block.is_dummy() {
+        check_dummy(block)?;
+    }
     check_hash_and_height(block)?;
     check_proposed_by_leader(leader_strategy, committee_for_block, block)?;
     check_signature(block)?;
     check_quorum_certificate::<TConsensusSpec>(block, committee_for_block, committee_info, vote_signing_service)?;
+    Ok(())
+}
+
+pub fn check_dummy(candidate_block: &Block) -> Result<(), ProposalValidationError> {
+    if candidate_block.signature().is_some() {
+        return Err(ProposalValidationError::DummyBlockWithSignature {
+            block_id: *candidate_block.id(),
+        });
+    }
+    if !candidate_block.commands().is_empty() {
+        return Err(ProposalValidationError::DummyBlockWithCommands {
+            block_id: *candidate_block.id(),
+        });
+    }
     Ok(())
 }
 
@@ -106,9 +123,9 @@ pub fn check_hash_and_height(candidate_block: &Block) -> Result<(), ProposalVali
 
     let calculated_hash = candidate_block.calculate_hash().into();
     if calculated_hash != *candidate_block.id() {
-        return Err(ProposalValidationError::NodeHashMismatch {
+        return Err(ProposalValidationError::BlockIdMismatch {
             proposed_by: candidate_block.proposed_by().to_string(),
-            hash: *candidate_block.id(),
+            block_id: *candidate_block.id(),
             calculated_hash,
         });
     }
@@ -219,12 +236,7 @@ pub fn check_sidechain_id(candidate_block: &Block, config: &HotstuffConfig) -> R
     // If we are using a sidechain id in the network, we need to check it matches the candidate block one
     if let Some(expected_sidechain_id) = &config.sidechain_id {
         // Extract the sidechain id from the candidate block
-        let extra_data = candidate_block.extra_data().ok_or::<HotStuffError>(
-            ProposalValidationError::MissingSidechainId {
-                block_id: *candidate_block.id(),
-            }
-            .into(),
-        )?;
+        let extra_data = candidate_block.extra_data();
         let sidechain_id_bytes = extra_data.get(&ExtraFieldKey::SidechainId).ok_or::<HotStuffError>(
             ProposalValidationError::InvalidSidechainId {
                 block_id: *candidate_block.id(),

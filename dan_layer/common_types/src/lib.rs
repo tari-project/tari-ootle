@@ -9,6 +9,8 @@ pub mod crypto;
 mod epoch;
 
 pub use epoch::Epoch;
+mod era;
+pub use era::*;
 
 mod extra_data;
 pub use extra_data::{ExtraData, ExtraFieldKey};
@@ -50,4 +52,5 @@ mod versioned_substate_id;
 pub use versioned_substate_id::*;
 
 mod lock_intent;
+
 pub use lock_intent::*;

@@ -26,7 +26,10 @@ use tari_dan_common_types::{DerivableFromPublicKey, NodeAddressable};
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, mpsc},
+    task::JoinHandle,
+};
 
 use crate::base_layer::{config::EpochManagerConfig, epoch_manager_service::EpochManagerService, EpochManagerHandle};
 
@@ -38,9 +41,11 @@ pub fn spawn_service<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>(
     shutdown: ShutdownSignal,
 ) -> (EpochManagerHandle<TAddr>, JoinHandle<anyhow::Result<()>>) {
     let (tx_request, rx_request) = mpsc::channel(10);
-    let epoch_manager = EpochManagerHandle::new(tx_request);
+    let (events, _) = broadcast::channel(100);
+    let epoch_manager = EpochManagerHandle::new(tx_request, events.clone());
     let handle = EpochManagerService::spawn(
         config,
+        events,
         rx_request,
         shutdown,
         global_db,

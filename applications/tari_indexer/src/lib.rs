@@ -96,12 +96,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     )
     .await?;
 
-    let mut epoch_manager_events = services.epoch_manager.subscribe().await.map_err(|e| {
-        ExitError::new(
-            ExitCode::ConfigError,
-            format!("Epoch manager crashed on startup: {}", e),
-        )
-    })?;
+    let mut epoch_manager_events = services.epoch_manager.subscribe();
 
     let substate_cache_dir = config.common.base_path.join("substate_cache");
     let substate_cache = SubstateFileCache::new(substate_cache_dir)
@@ -177,16 +172,12 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         .map(TryInto::try_into)
         .collect::<Result<_, _>>()
         .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Invalid event filters: {}", e)))?;
-    let consensus_constants = ConsensusConstants::from(config.network);
-    let event_scanner = Arc::new(EventScanner::new(
-        config.network,
-        config.indexer.sidechain_id,
-        Box::new(services.epoch_manager.clone()),
+    let event_scanner = EventScanner::new(
+        services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
         services.substate_store.clone(),
         event_filters,
-        consensus_constants,
-    ));
+    );
 
     // Run the GraphQL API
     let graphql_address = config.indexer.graphql_address;
@@ -229,13 +220,12 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 }
 
 async fn handle_epoch_manager_event(services: &Services, event: EpochManagerEvent) -> Result<(), anyhow::Error> {
-    if let EpochManagerEvent::EpochChanged(epoch) = event {
-        let all_vns = services.epoch_manager.get_all_validator_nodes(epoch).await?;
-        services
-            .networking
-            .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
-            .await?;
-    }
+    let EpochManagerEvent::EpochChanged { epoch, .. } = event;
+    let all_vns = services.epoch_manager.get_all_validator_nodes(epoch).await?;
+    services
+        .networking
+        .set_want_peers(all_vns.into_iter().map(|vn| vn.address.as_peer_id()))
+        .await?;
 
     Ok(())
 }

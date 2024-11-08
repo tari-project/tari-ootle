@@ -40,7 +40,7 @@ use crate::{EpochManagerError, EpochManagerEvent};
 pub trait EpochManagerReader: Send + Sync {
     type Addr: NodeAddressable;
 
-    async fn subscribe(&self) -> Result<broadcast::Receiver<EpochManagerEvent>, EpochManagerError>;
+    fn subscribe(&self) -> broadcast::Receiver<EpochManagerEvent>;
 
     async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EpochManagerError>;
 

@@ -80,7 +80,7 @@ impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::OutboundMessaging
             .map_err(|_| OutboundMessagingError::FailedToEnqueueMessage {
                 reason: "loopback sender closed".to_string(),
             })?;
-        return Ok(());
+        Ok(())
     }
 
     async fn send<T: Into<HotstuffMessage> + Send>(
@@ -110,16 +110,6 @@ impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::OutboundMessaging
         T: Into<HotstuffMessage> + Send,
     {
         let message = message.into();
-
-        // send it once to ourselves
-        let local_shard_group = self
-            .consensus_gossip
-            .get_local_shard_group()
-            .await
-            .map_err(OutboundMessagingError::from_error)?;
-        if local_shard_group == Some(shard_group) {
-            self.send_self(message.clone()).await?;
-        }
 
         self.consensus_gossip
             .multicast(shard_group, message)

@@ -29,7 +29,7 @@ type BlockBuffer = Vec<BlockData>;
 
 pub struct BlockSyncTask<TStateStore: StateStore> {
     store: TStateStore,
-    start_block: Block,
+    start_block_id: BlockId,
     up_to_epoch: Option<Epoch>,
     sender: mpsc::Sender<Result<SyncBlocksResponse, RpcStatus>>,
 }
@@ -37,13 +37,13 @@ pub struct BlockSyncTask<TStateStore: StateStore> {
 impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
     pub fn new(
         store: TStateStore,
-        start_block: Block,
+        start_block_id: BlockId,
         up_to_epoch: Option<Epoch>,
         sender: mpsc::Sender<Result<SyncBlocksResponse, RpcStatus>>,
     ) -> Self {
         Self {
             store,
-            start_block,
+            start_block_id,
             up_to_epoch,
             sender,
         }
@@ -51,7 +51,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
 
     pub async fn run(mut self) -> Result<(), ()> {
         let mut buffer = Vec::with_capacity(BLOCK_BUFFER_SIZE);
-        let mut current_block_id = *self.start_block.id();
+        let mut current_block_id = self.start_block_id;
         let mut counter = 0;
         loop {
             match self.fetch_next_batch(&mut buffer, &current_block_id) {

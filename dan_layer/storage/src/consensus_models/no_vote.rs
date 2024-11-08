@@ -48,8 +48,10 @@ pub enum NoVoteReason {
     NotEndOfEpoch,
     #[error("The node is not at the end of the epoch and other commands are present")]
     EndOfEpochWithOtherCommands,
-    #[error("The Merkle root does not match")]
-    MerkleRootMismatch,
+    #[error("The state Merkle root does not match")]
+    StateMerkleRootMismatch,
+    #[error("The command Merkle root does not match")]
+    CommandMerkleRootMismatch,
     #[error("Not all foreign input pledges are present")]
     NotAllForeignInputPledges,
     #[error("Leader proposed to suspend a node that should not be suspended")]
@@ -87,7 +89,8 @@ impl NoVoteReason {
             Self::NotEndOfEpoch => "NotEndOfEpoch",
             Self::EndOfEpochWithOtherCommands => "EndOfEpochWithOtherCommands",
             Self::TotalLeaderFeeDisagreement => "TotalLeaderFeeDisagreement",
-            Self::MerkleRootMismatch => "MerkleRootMismatch",
+            Self::StateMerkleRootMismatch => "StateMerkleRootMismatch",
+            Self::CommandMerkleRootMismatch => "CommandMerkleRootMismatch",
             Self::NotAllForeignInputPledges => "NotAllForeignInputPledges",
             Self::ShouldNotSuspendNode => "ShouldNotSuspendNode",
             Self::NodeAlreadySuspended => "NodeAlreadySuspended",

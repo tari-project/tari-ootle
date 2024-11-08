@@ -218,7 +218,7 @@ impl StateTracker {
         self.write_with(|state| {
             // If substates used in args are in scope for the current frame, we can bring then into scope for the new
             // frame
-            debug!(
+            trace!(
                  target: LOG_TARGET,
                 "CALL FRAME before:\n{}",
                 state.current_call_scope()?,
@@ -226,8 +226,7 @@ impl StateTracker {
             state.check_all_substates_in_scope(push_frame.arg_scope())?;
 
             let new_frame = push_frame.into_new_call_frame();
-            debug!(target: LOG_TARGET,
-                "NEW CALL FRAME:\n{}", new_frame.scope());
+            trace!(target: LOG_TARGET, "NEW CALL FRAME:\n{}", new_frame.scope());
 
             state.push_frame(new_frame, max_call_depth)
         })

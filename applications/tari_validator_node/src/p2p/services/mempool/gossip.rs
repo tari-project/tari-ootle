@@ -87,10 +87,9 @@ impl MempoolGossip<PeerAddress> {
         }
     }
 
-    pub async fn subscribe(&mut self, epoch: Epoch) -> Result<(), MempoolError> {
-        let committee_shard = self.epoch_manager.get_local_committee_info(epoch).await?;
+    pub async fn subscribe(&mut self, shard_group: ShardGroup) -> Result<(), MempoolError> {
         match self.is_subscribed {
-            Some(b) if b == committee_shard.shard_group() => {
+            Some(b) if b == shard_group => {
                 return Ok(());
             },
             Some(_) => {
@@ -100,9 +99,9 @@ impl MempoolGossip<PeerAddress> {
         }
 
         self.networking
-            .subscribe_topic(shard_group_to_topic(committee_shard.shard_group()))
+            .subscribe_topic(shard_group_to_topic(shard_group))
             .await?;
-        self.is_subscribed = Some(committee_shard.shard_group());
+        self.is_subscribed = Some(shard_group);
         Ok(())
     }
 

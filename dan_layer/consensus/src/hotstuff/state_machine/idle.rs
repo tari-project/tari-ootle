@@ -33,7 +33,7 @@ where TSpec: ConsensusSpec
         context: &mut ConsensusWorkerContext<TSpec>,
     ) -> Result<ConsensusStateEvent, HotStuffError> {
         // Subscribe before checking if we're registered to eliminate the chance that we miss the epoch event
-        let mut epoch_events = context.epoch_manager.subscribe().await?;
+        let mut epoch_events = context.epoch_manager.subscribe();
         context.epoch_manager.wait_for_initial_scanning_to_complete().await?;
         let current_epoch = context.epoch_manager.current_epoch().await?;
         if self.is_registered_for_epoch(context, current_epoch).await? {
@@ -45,7 +45,7 @@ where TSpec: ConsensusSpec
                 event = epoch_events.recv() => {
                     match event {
                         Ok(event) => {
-                            if let Some(event) = self.on_epoch_event(context, event).await? {
+                            if let Some(event) = self.on_epoch_event( event).await? {
                                 return Ok(event);
                             }
                         },
@@ -78,20 +78,18 @@ where TSpec: ConsensusSpec
         Ok(is_registered)
     }
 
-    async fn on_epoch_event(
-        &self,
-        context: &mut ConsensusWorkerContext<TSpec>,
-        event: EpochManagerEvent,
-    ) -> Result<Option<ConsensusStateEvent>, HotStuffError> {
+    async fn on_epoch_event(&self, event: EpochManagerEvent) -> Result<Option<ConsensusStateEvent>, HotStuffError> {
         match event {
-            EpochManagerEvent::EpochChanged(epoch) => {
-                if self.is_registered_for_epoch(context, epoch).await? {
+            EpochManagerEvent::EpochChanged {
+                epoch,
+                registered_shard_group,
+            } => {
+                if registered_shard_group.is_some() {
                     Ok(Some(ConsensusStateEvent::RegisteredForEpoch { epoch }))
                 } else {
                     Ok(None)
                 }
             },
-            EpochManagerEvent::ThisValidatorIsRegistered { .. } => Ok(None),
         }
     }
 }

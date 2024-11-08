@@ -728,3 +728,63 @@ pub struct StaleNodeIndex {
     /// record.
     pub node_key: NodeKey,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{jmt_node_hash, memory_store::MemoryTreeStore, StaleTreeNode, TreeStoreWriter};
+
+    fn leaf_key(seed: u64) -> LeafKey {
+        LeafKey::new(jmt_node_hash(&seed))
+    }
+
+    #[test]
+    fn check_merkle_proof() {
+        // Evaluating the functionality of the JMT Merkle proof.
+        let mut mem = MemoryTreeStore::new();
+        let jmt = JellyfishMerkleTree::new(&mem);
+
+        let values = [
+            (leaf_key(1), Some((jmt_node_hash(&10), Some(1u64)))),
+            (leaf_key(2), Some((jmt_node_hash(&11), Some(2)))),
+            (leaf_key(3), Some((jmt_node_hash(&12), Some(3)))),
+        ];
+        let (_, diff) = jmt.batch_put_value_set(values, None, None, 1).unwrap();
+        for (k, v) in diff.node_batch {
+            mem.insert_node(k, v).unwrap();
+        }
+
+        for a in diff.stale_node_index_batch {
+            mem.record_stale_tree_node(StaleTreeNode::Node(a.node_key)).unwrap();
+        }
+        mem.clear_stale_nodes();
+
+        let jmt = JellyfishMerkleTree::new(&mem);
+
+        // This causes get_with_proof to fail with node NotFound.
+        let values = [
+            (leaf_key(4), Some((jmt_node_hash(&13), Some(4u64)))),
+            (leaf_key(5), Some((jmt_node_hash(&14), Some(5)))),
+            (leaf_key(6), Some((jmt_node_hash(&15), Some(6)))),
+        ];
+        let (_mr, diff) = jmt.batch_put_value_set(values, None, Some(1), 2).unwrap();
+
+        for (k, v) in diff.node_batch {
+            mem.insert_node(k, v).unwrap();
+        }
+        for a in diff.stale_node_index_batch {
+            mem.record_stale_tree_node(StaleTreeNode::Node(a.node_key)).unwrap();
+        }
+        mem.clear_stale_nodes();
+        let jmt = JellyfishMerkleTree::new(&mem);
+
+        let k = leaf_key(3);
+        let (_value, sparse) = jmt.get_with_proof(k.as_ref(), 2).unwrap();
+
+        let leaf = sparse.leaf().unwrap();
+        assert_eq!(*leaf.key(), k);
+        assert_eq!(*leaf.value_hash(), jmt_node_hash(&12));
+        // Unanswered: How do we verify the proof root matches a Merkle root?
+        // assert!(sparse.siblings().iter().any(|h| *h == mr));
+    }
+}

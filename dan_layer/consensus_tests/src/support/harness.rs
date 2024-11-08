@@ -289,7 +289,10 @@ impl Test {
         info!("🌟 Starting {epoch}");
         for validator in self.validators.values_mut() {
             // Fire off initial epoch change event so that the pacemaker starts
-            validator.epoch_manager.set_current_epoch(epoch).await;
+            validator
+                .epoch_manager
+                .set_current_epoch(epoch, validator.shard_group)
+                .await;
         }
 
         self.wait_for_all_validators_to_start_consensus().await;
@@ -530,10 +533,12 @@ impl TestBuilder {
                     num_preshards: TEST_NUM_PRESHARDS,
                     pacemaker_block_time: Duration::from_secs(10),
                     missed_proposal_suspend_threshold: 5,
-                    missed_proposal_count_cap: 5,
+                    missed_proposal_evict_threshold: 10,
+                    missed_proposal_recovery_threshold: 5,
                     max_block_size: 500,
                     fee_exhaust_divisor: 20,
                     max_vns_per_epoch_activated: 5,
+                    epochs_per_era: Epoch(10),
                 },
             },
         }

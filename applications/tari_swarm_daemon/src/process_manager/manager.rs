@@ -1,7 +1,13 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, fs::File, path::PathBuf, str::FromStr, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    path::PathBuf,
+    str::FromStr,
+    time::Duration,
+};
 
 use anyhow::{anyhow, Context};
 use log::info;
@@ -70,41 +76,55 @@ impl ProcessManager {
         sleep(Duration::from_secs(self.instance_manager.num_instances() as u64)).await;
         self.check_instances_running()?;
 
-        if !self.skip_registration {
-            let num_vns = self.instance_manager.num_validator_nodes();
-            // Mine some initial funds, guessing 10 blocks to allow for coinbase maturity
-            self.mine(num_vns + 10).await.context("mining failed")?;
-            self.wait_for_wallet_funds(num_vns)
-                .await
-                .context("waiting for wallet funds")?;
-
-            self.register_all_validator_nodes()
-                .await
-                .context("registering validator node via GRPC")?;
-        }
-
+        let mut templates_to_register = vec![];
         if !self.disable_template_auto_register {
             let registered_templates = self.registered_templates().await?;
-            let registered_template_names: Vec<String> = registered_templates
+            let registered_template_names = registered_templates
                 .iter()
-                .map(|template_data| format!("{}-{}", template_data.name, template_data.version))
-                .collect();
+                .map(|template_data| template_data.name.as_str())
+                .collect::<HashSet<_>>();
             let fs_templates = self.file_system_templates().await?;
-            for template_data in fs_templates.iter().filter(|fs_template_data| {
-                !registered_template_names.contains(&format!("{}-{}", fs_template_data.name, fs_template_data.version))
-            }) {
+            for template_data in fs_templates
+                .iter()
+                .filter(|fs_template_data| !registered_template_names.contains(fs_template_data.name.as_str()))
+            {
                 info!(
                     "🟡 Register missing template from local file system: {}",
                     template_data.name
                 );
-                self.register_template(TemplateData {
+                templates_to_register.push(TemplateData {
                     name: template_data.name.clone(),
                     version: template_data.version,
                     contents_hash: template_data.contents_hash,
                     contents_url: template_data.contents_url.clone(),
-                })
-                .await?;
+                });
             }
+        }
+
+        let num_vns = if self.skip_registration {
+            0
+        } else {
+            self.instance_manager.num_validator_nodes()
+        };
+        let num_blocks = num_vns + u64::try_from(templates_to_register.len()).unwrap();
+
+        // Mine some initial funds, guessing 10 blocks extra to allow for coinbase maturity
+        self.mine(num_blocks + 10).await.context("initial mining failed")?;
+        self.wait_for_wallet_funds(num_blocks)
+            .await
+            .context("waiting for wallet funds")?;
+
+        if !self.skip_registration {
+            self.register_all_validator_nodes()
+                .await
+                .context("registering validator node via GRPC")?;
+        }
+        for templates in templates_to_register {
+            self.register_template(templates).await?;
+        }
+
+        if num_blocks > 0 {
+            self.mine(20).await?;
         }
 
         Ok(())
@@ -310,9 +330,15 @@ impl ProcessManager {
                 }
             },
             RegisterTemplate { data, reply } => {
-                let result = self.register_template(data).await;
-                if reply.send(result).is_err() {
-                    log::warn!("Request cancelled before response could be sent")
+                if let Err(err) = self.register_template(data).await {
+                    if reply.send(Err(err)).is_err() {
+                        log::warn!("Request cancelled before response could be sent")
+                    }
+                } else {
+                    let result = self.mine(10).await;
+                    if reply.send(result).is_err() {
+                        log::warn!("Request cancelled before response could be sent")
+                    }
                 }
             },
             RegisterValidatorNode { instance_id, reply } => {
@@ -421,7 +447,6 @@ impl ProcessManager {
             // inputs for a transaction.
             sleep(Duration::from_secs(2)).await;
         }
-        self.mine(20).await?;
         Ok(())
     }
 
@@ -462,6 +487,9 @@ impl ProcessManager {
     }
 
     async fn mine(&mut self, blocks: u64) -> anyhow::Result<()> {
+        if blocks == 0 {
+            return Ok(());
+        }
         let executable = self
             .executable_manager
             .get_executable(InstanceType::MinoTariMiner)
@@ -510,13 +538,15 @@ impl ProcessManager {
             .await?
             .into_inner();
         let template_address = TemplateAddress::try_from_vec(resp.template_address).unwrap();
-        info!("🟢 Registered template {template_address}. Mining some blocks");
-        self.mine(10).await?;
+        info!("🟢 Registered template {template_address}.");
 
         Ok(())
     }
 
     async fn wait_for_wallet_funds(&mut self, min_expected_blocks: u64) -> anyhow::Result<()> {
+        if min_expected_blocks == 0 {
+            return Ok(());
+        }
         // WARN: Assumes one wallet
         let wallet = self.instance_manager.minotari_wallets().next().ok_or_else(|| {
             anyhow!("No MinoTariConsoleWallet instances found. Please start a wallet before waiting for funds")

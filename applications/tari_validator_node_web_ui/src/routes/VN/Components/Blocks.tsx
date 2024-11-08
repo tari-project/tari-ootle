@@ -338,31 +338,31 @@ function Blocks() {
           <TableBody>
             {blocks.map((block) => {
               return (
-                <TableRow key={block.id}>
+                <TableRow key={block.header.id}>
                   <DataTableCell>
-                    <Link to={`/blocks/${block.id}`} style={{ textDecoration: "none" }}>
-                      {block.id.slice(0, 8)}
+                    <Link to={`/blocks/${block.header.id}`} style={{ textDecoration: "none" }}>
+                      {block.header.id.slice(0, 8)}
                     </Link>
                   </DataTableCell>
-                  <DataTableCell>{block.epoch}</DataTableCell>
-                  <DataTableCell>{block.height}</DataTableCell>
+                  <DataTableCell>{block.header.epoch}</DataTableCell>
+                  <DataTableCell>{block.header.height}</DataTableCell>
                   <DataTableCell>
                     <StatusChip
-                      status={block.is_dummy ? "Dummy" : block.is_committed ? "Commit" : "Pending"}
+                      status={block.header.is_dummy ? "Dummy" : block.is_committed ? "Commit" : "Pending"}
                       showTitle
                     />
                   </DataTableCell>
                   <DataTableCell>{block.commands.length}</DataTableCell>
                   <DataTableCell>
-                    <div className={block.proposed_by == identity?.public_key ? "my_money" : ""}>
-                      {block.total_leader_fee}
+                    <div className={block.header.proposed_by == identity?.public_key ? "my_money" : ""}>
+                      {block.header.total_leader_fee}
                     </div>
                   </DataTableCell>
                   <DataTableCell>{block.block_time} secs</DataTableCell>
                   <DataTableCell>{primitiveDateTimeToDate(block.stored_at || []).toLocaleString()}</DataTableCell>
                   <DataTableCell>
-                    <div className={block.proposed_by == identity?.public_key ? "my_money" : ""}>
-                      {block.proposed_by.slice(0, 8)}
+                    <div className={block.header.proposed_by == identity?.public_key ? "my_money" : ""}>
+                      {block.header.proposed_by.slice(0, 8)}
                     </div>
                   </DataTableCell>
                 </TableRow>

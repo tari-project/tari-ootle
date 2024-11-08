@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
 import { Grid, Table, TableContainer, TableBody, TableRow, TableCell, Button, Fade, Alert } from "@mui/material";
 import Typography from "@mui/material/Typography";
@@ -185,23 +185,23 @@ export default function BlockDetails() {
                           </TableRow>
                           <TableRow>
                             <TableCell>Epoch</TableCell>
-                            <DataTableCell>{block!.epoch}</DataTableCell>
+                            <DataTableCell>{block!.header.epoch}</DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Height</TableCell>
-                            <DataTableCell>{block!.height}</DataTableCell>
+                            <DataTableCell>{block!.header.height}</DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Parent block</TableCell>
                             <DataTableCell>
-                              <a href={`/blocks/${block!.parent}`}>{block!.parent}</a>
+                              <Link to={`/blocks/${block!.header.parent}`}>{block!.header.parent}</Link>
                             </DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Total Fees</TableCell>
                             <DataTableCell>
-                              <div className={block!.proposed_by === identity!.public_key ? "my_money" : ""}>
-                                {block!.total_leader_fee}
+                              <div className={block!.header.proposed_by === identity!.public_key ? "my_money" : ""}>
+                                {block!.header.total_leader_fee}
                               </div>
                             </DataTableCell>
                           </TableRow>
@@ -213,7 +213,7 @@ export default function BlockDetails() {
                           </TableRow>
                           <TableRow>
                             <TableCell>Proposed by</TableCell>
-                            <DataTableCell>{block!.proposed_by}</DataTableCell>
+                            <DataTableCell>{block!.header.proposed_by}</DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Block time</TableCell>

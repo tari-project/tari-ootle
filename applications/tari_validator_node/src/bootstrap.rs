@@ -34,6 +34,7 @@ use tari_common::{
     configuration::Network,
     exit_codes::{ExitCode, ExitError},
 };
+use tari_common_types::types::FixedHash;
 use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
@@ -76,7 +77,10 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
     vault::Vault,
 };
-use tari_epoch_manager::base_layer::{EpochManagerConfig, EpochManagerHandle};
+use tari_epoch_manager::{
+    base_layer::{EpochManagerConfig, EpochManagerHandle},
+    EpochManagerReader,
+};
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
@@ -244,8 +248,11 @@ pub async fn spawn_services(
     };
 
     // Consensus gossip
-    let (consensus_gossip_service, join_handle, rx_consensus_gossip_messages) =
-        consensus_gossip::spawn(epoch_manager.clone(), networking.clone(), rx_consensus_gossip_messages);
+    let (consensus_gossip_service, join_handle, rx_consensus_gossip_messages) = consensus_gossip::spawn(
+        epoch_manager.subscribe(),
+        networking.clone(),
+        rx_consensus_gossip_messages,
+    );
     handles.push(join_handle);
 
     // Messaging
@@ -592,8 +599,9 @@ where
         network,
         Epoch(0),
         ShardGroup::all_shards(num_preshards),
+        FixedHash::default(),
         sidechain_id.clone(),
-    )?;
+    );
     let substate_id = substate_id.into();
     let id = VersionedSubstateId::new(substate_id, 0);
     SubstateRecord {

@@ -22,18 +22,21 @@
 
 use libp2p::{gossipsub, PeerId};
 use log::*;
-use tari_dan_common_types::PeerAddress;
 use tari_dan_p2p::{proto, TariMessagingSpec};
-use tari_epoch_manager::base_layer::EpochManagerHandle;
+use tari_epoch_manager::EpochManagerEvent;
 use tari_networking::NetworkingHandle;
-use tokio::{sync::mpsc, task, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, mpsc},
+    task,
+    task::JoinHandle,
+};
 
 use crate::p2p::services::consensus_gossip::{service::ConsensusGossipService, ConsensusGossipHandle};
 
-const LOG_TARGET: &str = "tari::dan::validator_node::mempool";
+const LOG_TARGET: &str = "tari::validator_node::consensus_gossip::initializer";
 
 pub fn spawn(
-    epoch_manager: EpochManagerHandle<PeerAddress>,
+    epoch_manager_events: broadcast::Receiver<EpochManagerEvent>,
     networking: NetworkingHandle<TariMessagingSpec>,
     rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
 ) -> (
@@ -41,17 +44,11 @@ pub fn spawn(
     JoinHandle<anyhow::Result<()>>,
     mpsc::Receiver<(PeerId, proto::consensus::HotStuffMessage)>,
 ) {
-    let (tx_consensus_request, rx_consensus_request) = mpsc::channel(10);
     let (tx_consensus_gossip, rx_consensus_gossip) = mpsc::channel(10);
 
-    let consensus_gossip = ConsensusGossipService::new(
-        rx_consensus_request,
-        epoch_manager,
-        networking,
-        rx_gossip,
-        tx_consensus_gossip,
-    );
-    let handle = ConsensusGossipHandle::new(tx_consensus_request);
+    let consensus_gossip =
+        ConsensusGossipService::new(epoch_manager_events, networking.clone(), rx_gossip, tx_consensus_gossip);
+    let handle = ConsensusGossipHandle::new(networking);
 
     let join_handle = task::spawn(consensus_gossip.run());
     debug!(target: LOG_TARGET, "Spawning consensus gossip service (task: {:?})", join_handle);

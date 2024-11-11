@@ -317,16 +317,18 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
 
             for node_change in node_changes {
                 if node_change.registration.is_none() {
-                    warn!(target: LOG_TARGET,
-                                    "Can't register validator node \"{}\" because it has empty registration!",
-                                    node_change.public_key.to_hex());
+                    warn!(
+                        target: LOG_TARGET,
+                        "Can't register validator node \"{}\" because it has empty registration!",
+                        node_change.public_key.to_hex(),
+                    );
                     continue;
                 }
                 let registration = ValidatorNodeRegistration::try_from(node_change.registration.clone().unwrap())
                     .map_err(BaseLayerScannerError::GrpcConversion)?;
                 match node_change.state() {
                     ValidatorNodeChangeState::Add => {
-                        self.register_validator_node_registration(
+                        self.add_validator_node_registration(
                             node_change.start_height,
                             registration,
                             node_change.minimum_value_promise.into(),
@@ -530,7 +532,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         Ok(())
     }
 
-    async fn register_validator_node_registration(
+    async fn add_validator_node_registration(
         &mut self,
         height: u64,
         registration: ValidatorNodeRegistration,

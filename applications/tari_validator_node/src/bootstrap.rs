@@ -25,7 +25,7 @@ use std::{collections::HashMap, fs, io, ops::Deref, str::FromStr};
 use anyhow::{anyhow, Context};
 use futures::{future, FutureExt};
 use libp2p::identity;
-use log::info;
+use log::*;
 use minotari_app_utilities::identity_management;
 use serde::Serialize;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
@@ -224,17 +224,27 @@ pub async fn spawn_services(
         num_preshards: consensus_constants.num_preshards,
     };
     // Epoch manager
-    let (epoch_manager, join_handle) = tari_epoch_manager::base_layer::spawn_service(
+    let (epoch_manager, epoch_manager_join_handle) = tari_epoch_manager::base_layer::spawn_service(
         epoch_manager_config,
         global_db.clone(),
         base_node_client.clone(),
         keypair.public_key().clone(),
         shutdown.clone(),
     );
-    handles.push(join_handle);
 
     // Create registration file
-    create_registration_file(config, &epoch_manager, &keypair).await?;
+    if let Err(err) = create_registration_file(config, &epoch_manager, &keypair).await {
+        error!(target: LOG_TARGET, "Error creating registration file: {}", err);
+        if epoch_manager_join_handle.is_finished() {
+            return epoch_manager_join_handle
+                .await?
+                .and_then(|_| Err(anyhow!("Epoch manager exited in bootstrap")))
+                .map_err(|err| anyhow!("Epoch manager crashed: {err}"));
+        } else {
+            return Err(err);
+        }
+    }
+    handles.push(epoch_manager_join_handle);
 
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager

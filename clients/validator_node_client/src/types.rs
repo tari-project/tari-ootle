@@ -673,6 +673,7 @@ pub struct GetEpochManagerStatsResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub current_block_hash: FixedHash,
     pub is_valid: bool,
+    pub start_epoch: Option<Epoch>,
     pub committee_info: Option<CommitteeInfo>,
 }
 

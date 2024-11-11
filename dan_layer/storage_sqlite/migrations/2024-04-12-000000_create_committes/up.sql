@@ -5,7 +5,7 @@ CREATE TABLE committees
     epoch             BIGINT                            NOT NULL,
     shard_start       INTEGER                           NOT NULL,
     shard_end         INTEGER                           NOT NULL,
-    FOREIGN KEY (validator_node_id) REFERENCES validator_nodes (id)
+    FOREIGN KEY (validator_node_id) REFERENCES validator_nodes (id) ON DELETE CASCADE
 );
 
 CREATE INDEX committees_validator_node_id_epoch_index ON committees (validator_node_id, epoch);

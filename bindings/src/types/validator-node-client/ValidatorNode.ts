@@ -7,6 +7,5 @@ export interface ValidatorNode {
   public_key: string;
   shard_key: SubstateAddress;
   start_epoch: Epoch;
-  end_epoch: Epoch;
   fee_claim_public_key: string;
 }

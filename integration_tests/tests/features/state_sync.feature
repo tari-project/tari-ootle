@@ -5,7 +5,8 @@
 @state_sync
 Feature: State Sync
 
-  @flaky
+  # Ignore: this sometimes fails on CI but passes locally
+  @ignore
   Scenario: New validator node registers and syncs
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE

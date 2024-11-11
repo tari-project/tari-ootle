@@ -450,6 +450,9 @@ async fn when_i_wait_for_validator_leaf_block_at_least(world: &mut TariWorld, na
 
         if let Some(block) = resp.blocks.first() {
             assert!(block.epoch().as_u64() <= epoch);
+            if block.epoch().as_u64() < epoch {
+                eprintln!("VN {name} is in {}. Waiting for epoch {epoch}", block.epoch())
+            }
             if block.epoch().as_u64() == epoch && block.height().as_u64() >= height {
                 return;
             }
@@ -468,16 +471,19 @@ async fn when_i_wait_for_validator_leaf_block_at_least(world: &mut TariWorld, na
         })
         .await
         .unwrap();
-    let actual_height = resp
+    let block = resp
         .blocks
         .first()
-        .unwrap_or_else(|| panic!("Validator {name} has no blocks"))
-        .height()
-        .as_u64();
-    if actual_height < height {
+        .unwrap_or_else(|| panic!("Validator {name} has no blocks"));
+    if block.epoch().as_u64() < epoch {
+        panic!("Validator {} at {} is less than epoch {}", name, block.epoch(), epoch);
+    }
+    if block.height().as_u64() < height {
         panic!(
             "Validator {} leaf block height {} is less than {}",
-            name, actual_height, height
+            name,
+            block.height().as_u64(),
+            height
         );
     }
 }

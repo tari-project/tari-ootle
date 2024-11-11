@@ -1588,7 +1588,7 @@ dependencies = [
  "rand",
  "serde",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_consensus",
  "tari_crypto",
@@ -1598,7 +1598,7 @@ dependencies = [
  "tari_engine_types",
  "tari_epoch_manager",
  "tari_mmr",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_state_store_sqlite",
  "tari_template_lib",
  "tari_transaction",
@@ -4349,10 +4349,10 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_base_node_client",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tari_comms_dht 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
+ "tari_comms",
+ "tari_comms_dht",
  "tari_core",
  "tari_crypto",
  "tari_dan_app_utilities",
@@ -4366,7 +4366,7 @@ dependencies = [
  "tari_indexer_client",
  "tari_key_manager",
  "tari_p2p",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",
@@ -5709,7 +5709,7 @@ dependencies = [
 [[package]]
 name = "minotari_app_grpc"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "argon2",
  "base64 0.13.1",
@@ -5722,10 +5722,10 @@ dependencies = [
  "rcgen 0.12.1",
  "subtle",
  "tari_common_types",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_comms",
  "tari_core",
  "tari_crypto",
- "tari_features 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_features",
  "tari_max_size",
  "tari_script",
  "tari_utilities",
@@ -5739,7 +5739,7 @@ dependencies = [
 [[package]]
 name = "minotari_app_utilities"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "clap 3.2.25",
  "dialoguer 0.10.4",
@@ -5748,10 +5748,10 @@ dependencies = [
  "log",
  "rand",
  "serde",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_features 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_comms",
+ "tari_features",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -5761,7 +5761,7 @@ dependencies = [
 [[package]]
 name = "minotari_console_wallet"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "blake2",
  "chrono",
@@ -5788,21 +5788,21 @@ dependencies = [
  "serde_json",
  "sha2",
  "strum 0.22.0",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms_dht 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_comms",
+ "tari_comms_dht",
  "tari_contacts",
  "tari_core",
  "tari_crypto",
- "tari_features 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_features",
  "tari_hashing",
  "tari_key_manager",
  "tari_libtor",
  "tari_max_size",
  "tari_p2p",
  "tari_script",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -5818,7 +5818,7 @@ dependencies = [
 [[package]]
 name = "minotari_ledger_wallet_common"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "bs58 0.5.1",
 ]
@@ -5826,7 +5826,7 @@ dependencies = [
 [[package]]
 name = "minotari_ledger_wallet_comms"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "borsh",
  "dialoguer 0.11.0",
@@ -5838,7 +5838,7 @@ dependencies = [
  "rand",
  "semver",
  "serde",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_script",
@@ -5849,7 +5849,7 @@ dependencies = [
 [[package]]
 name = "minotari_node"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5875,19 +5875,19 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.22.0",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms_dht 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_comms",
+ "tari_comms_dht",
  "tari_core",
  "tari_crypto",
- "tari_features 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_features",
  "tari_key_manager",
  "tari_libtor",
  "tari_p2p",
  "tari_service_framework",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_storage 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
+ "tari_storage",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -5897,7 +5897,7 @@ dependencies = [
 [[package]]
 name = "minotari_node_grpc_client"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "minotari_app_grpc",
 ]
@@ -5905,7 +5905,7 @@ dependencies = [
 [[package]]
 name = "minotari_wallet"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "argon2",
  "async-trait",
@@ -5930,11 +5930,11 @@ dependencies = [
  "sha2",
  "strum 0.22.0",
  "strum_macros 0.22.0",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_common_sqlite 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
+ "tari_common_sqlite",
  "tari_common_types",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms_dht 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_comms",
+ "tari_comms_dht",
  "tari_contacts",
  "tari_core",
  "tari_crypto",
@@ -5943,7 +5943,7 @@ dependencies = [
  "tari_p2p",
  "tari_script",
  "tari_service_framework",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_utilities",
  "tempfile",
  "thiserror",
@@ -5955,7 +5955,7 @@ dependencies = [
 [[package]]
 name = "minotari_wallet_grpc_client"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "minotari_app_grpc",
  "tari_common_types",
@@ -7280,7 +7280,7 @@ checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes 1.8.0",
  "heck 0.5.0",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -7301,7 +7301,7 @@ checksum = "0c1318b19085f08681016926435853bbf7858f9c082d0999b80550ff5d9abe15"
 dependencies = [
  "bytes 1.8.0",
  "heck 0.5.0",
- "itertools 0.13.0",
+ "itertools 0.11.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -7347,7 +7347,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -7360,7 +7360,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9552f850d5f0964a4e4d0bf306459ac29323ddfbae05e35a7c0d35cb0803cc5"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -9213,32 +9213,7 @@ dependencies = [
 [[package]]
 name = "tari_common"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9012114a0a049369014d2ee00505cbabf0fad5c6"
-dependencies = [
- "anyhow",
- "cargo_toml",
- "config",
- "dirs-next 1.0.2",
- "log",
- "log4rs",
- "multiaddr 0.14.0",
- "path-clean",
- "prost-build 0.11.9",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "structopt",
- "tari_features 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tempfile",
- "thiserror",
- "toml 0.5.11",
-]
-
-[[package]]
-name = "tari_common"
-version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "anyhow",
  "cargo_toml",
@@ -9255,7 +9230,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "structopt",
- "tari_features 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_features",
  "tempfile",
  "thiserror",
  "toml 0.5.11",
@@ -9264,21 +9239,7 @@ dependencies = [
 [[package]]
 name = "tari_common_sqlite"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9012114a0a049369014d2ee00505cbabf0fad5c6"
-dependencies = [
- "diesel",
- "diesel_migrations",
- "log",
- "serde",
- "tari_utilities",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "tari_common_sqlite"
-version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -9292,7 +9253,7 @@ dependencies = [
 [[package]]
 name = "tari_common_types"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "base64 0.21.7",
  "bitflags 2.6.0",
@@ -9309,7 +9270,7 @@ dependencies = [
  "serde",
  "strum 0.22.0",
  "strum_macros 0.22.0",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_crypto",
  "tari_utilities",
  "thiserror",
@@ -9318,7 +9279,7 @@ dependencies = [
 [[package]]
 name = "tari_comms"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9012114a0a049369014d2ee00505cbabf0fad5c6"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9344,54 +9305,10 @@ dependencies = [
  "serde_derive",
  "sha3",
  "snow",
- "tari_common 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
+ "tari_common",
  "tari_crypto",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tari_storage 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tari_utilities",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-util 0.6.10",
- "tower 0.4.13",
- "tracing",
- "yamux 0.13.3",
- "zeroize",
-]
-
-[[package]]
-name = "tari_comms"
-version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitflags 2.6.0",
- "blake2",
- "bytes 1.8.0",
- "chrono",
- "cidr",
- "data-encoding",
- "derivative",
- "digest",
- "futures 0.3.31",
- "lmdb-zero",
- "log",
- "log-mdc",
- "multiaddr 0.14.0",
- "nom",
- "once_cell",
- "pin-project 1.1.7",
- "prost 0.13.3",
- "rand",
- "serde",
- "serde_derive",
- "sha3",
- "snow",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_crypto",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_storage 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
+ "tari_storage",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -9406,7 +9323,7 @@ dependencies = [
 [[package]]
 name = "tari_comms_dht"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9012114a0a049369014d2ee00505cbabf0fad5c6"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "anyhow",
  "bitflags 2.6.0",
@@ -9424,48 +9341,13 @@ dependencies = [
  "prost 0.13.3",
  "rand",
  "serde",
- "tari_common 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tari_common_sqlite 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tari_comms_rpc_macros 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
+ "tari_common",
+ "tari_common_sqlite",
+ "tari_comms",
+ "tari_comms_rpc_macros",
  "tari_crypto",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tari_storage 1.7.0-pre.3 (git+https://github.com/tari-project/tari.git?branch=feature-dan2)",
- "tari_utilities",
- "thiserror",
- "tokio",
- "tower 0.4.13",
- "zeroize",
-]
-
-[[package]]
-name = "tari_comms_dht"
-version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
-dependencies = [
- "anyhow",
- "bitflags 2.6.0",
- "blake2",
- "chacha20 0.7.3",
- "chacha20poly1305",
- "chrono",
- "diesel",
- "diesel_migrations",
- "digest",
- "futures 0.3.31",
- "log",
- "log-mdc",
- "pin-project 0.4.30",
- "prost 0.13.3",
- "rand",
- "serde",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_common_sqlite 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms_rpc_macros 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_crypto",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_storage 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
+ "tari_storage",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -9476,17 +9358,7 @@ dependencies = [
 [[package]]
 name = "tari_comms_rpc_macros"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9012114a0a049369014d2ee00505cbabf0fad5c6"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "tari_comms_rpc_macros"
-version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9502,14 +9374,14 @@ dependencies = [
  "indexmap 2.6.0",
  "log",
  "serde",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_dan_common_types",
  "tari_dan_storage",
  "tari_engine_types",
  "tari_epoch_manager",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_state_tree",
  "tari_transaction",
  "thiserror",
@@ -9519,7 +9391,7 @@ dependencies = [
 [[package]]
 name = "tari_contacts"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "chrono",
  "diesel",
@@ -9532,16 +9404,16 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_common_sqlite 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
+ "tari_common_sqlite",
  "tari_common_types",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms_dht 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_comms",
+ "tari_comms_dht",
  "tari_crypto",
  "tari_max_size",
  "tari_p2p",
  "tari_service_framework",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -9552,7 +9424,7 @@ dependencies = [
 [[package]]
 name = "tari_core"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "async-trait",
  "bincode 1.3.3",
@@ -9592,14 +9464,14 @@ dependencies = [
  "strum 0.22.0",
  "strum_macros 0.22.0",
  "tari-tiny-keccak",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_common_sqlite 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
+ "tari_common_sqlite",
  "tari_common_types",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms_dht 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms_rpc_macros 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_comms",
+ "tari_comms_dht",
+ "tari_comms_rpc_macros",
  "tari_crypto",
- "tari_features 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_features",
  "tari_hashing",
  "tari_key_manager",
  "tari_max_size",
@@ -9607,8 +9479,8 @@ dependencies = [
  "tari_p2p",
  "tari_script",
  "tari_service_framework",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_storage 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
+ "tari_storage",
  "tari_test_utils",
  "tari_utilities",
  "thiserror",
@@ -9667,7 +9539,7 @@ dependencies = [
  "std-semaphore",
  "tari_base_node_client",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_consensus",
  "tari_core",
@@ -9680,7 +9552,7 @@ dependencies = [
  "tari_epoch_manager",
  "tari_indexer_lib",
  "tari_networking",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_state_store_sqlite",
  "tari_template_builtin",
  "tari_template_lib",
@@ -9706,7 +9578,7 @@ dependencies = [
  "rand",
  "serde",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_engine_types",
@@ -9733,7 +9605,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_dan_common_types",
@@ -9783,7 +9655,7 @@ dependencies = [
  "serde",
  "strum 0.26.3",
  "strum_macros 0.26.4",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_core",
  "tari_crypto",
@@ -9885,7 +9757,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_dan_app_utilities",
@@ -9896,7 +9768,7 @@ dependencies = [
  "tari_engine_types",
  "tari_indexer_client",
  "tari_key_manager",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_template_abi",
  "tari_template_builtin",
  "tari_template_lib",
@@ -9978,7 +9850,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_hashing",
@@ -10002,7 +9874,7 @@ dependencies = [
  "tari_dan_common_types",
  "tari_dan_storage",
  "tari_dan_storage_sqlite",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -10011,12 +9883,7 @@ dependencies = [
 [[package]]
 name = "tari_features"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9012114a0a049369014d2ee00505cbabf0fad5c6"
-
-[[package]]
-name = "tari_features"
-version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 
 [[package]]
 name = "tari_generate"
@@ -10038,7 +9905,7 @@ dependencies = [
 [[package]]
 name = "tari_hashing"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "borsh",
  "digest",
@@ -10070,7 +9937,7 @@ dependencies = [
  "serde_json",
  "tari_base_node_client",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_consensus",
  "tari_crypto",
@@ -10086,7 +9953,7 @@ dependencies = [
  "tari_indexer_lib",
  "tari_networking",
  "tari_rpc_framework",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_state_store_sqlite",
  "tari_template_lib",
  "tari_transaction",
@@ -10141,7 +10008,7 @@ dependencies = [
 [[package]]
 name = "tari_key_manager"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "argon2",
  "async-trait",
@@ -10161,7 +10028,7 @@ dependencies = [
  "strum 0.22.0",
  "strum_macros 0.22.0",
  "subtle",
- "tari_common_sqlite 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common_sqlite",
  "tari_common_types",
  "tari_crypto",
  "tari_service_framework",
@@ -10174,13 +10041,13 @@ dependencies = [
 [[package]]
 name = "tari_libtor"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "derivative",
  "libtor",
  "log",
  "rand",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_p2p",
  "tempfile",
  "tor-hash-passwd",
@@ -10189,7 +10056,7 @@ dependencies = [
 [[package]]
 name = "tari_max_size"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "borsh",
  "serde",
@@ -10200,7 +10067,7 @@ dependencies = [
 [[package]]
 name = "tari_metrics"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "once_cell",
  "prometheus",
@@ -10210,7 +10077,7 @@ dependencies = [
 [[package]]
 name = "tari_mmr"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "borsh",
  "digest",
@@ -10231,7 +10098,7 @@ dependencies = [
  "log",
  "rand",
  "tari_rpc_framework",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_swarm",
  "thiserror",
  "tokio",
@@ -10240,7 +10107,7 @@ dependencies = [
 [[package]]
 name = "tari_p2p"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "anyhow",
  "fs2",
@@ -10256,13 +10123,13 @@ dependencies = [
  "rustls 0.23.16",
  "semver",
  "serde",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_comms_dht 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
+ "tari_comms",
+ "tari_comms_dht",
  "tari_crypto",
  "tari_service_framework",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_storage 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
+ "tari_storage",
  "tari_utilities",
  "thiserror",
  "tokio",
@@ -10288,7 +10155,7 @@ dependencies = [
  "prost-build 0.12.6",
  "proto_builder",
  "tari_metrics",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "thiserror",
  "tokio",
  "tokio-util 0.7.12",
@@ -10313,7 +10180,7 @@ dependencies = [
  "async-trait",
  "futures 0.3.31",
  "log",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_consensus",
  "tari_dan_common_types",
  "tari_dan_p2p",
@@ -10344,7 +10211,7 @@ dependencies = [
 [[package]]
 name = "tari_script"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "blake2",
  "borsh",
@@ -10362,13 +10229,13 @@ dependencies = [
 [[package]]
 name = "tari_service_framework"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "anyhow",
  "async-trait",
  "futures 0.3.31",
  "log",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "thiserror",
  "tokio",
  "tower-service",
@@ -10377,15 +10244,7 @@ dependencies = [
 [[package]]
 name = "tari_shutdown"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9012114a0a049369014d2ee00505cbabf0fad5c6"
-dependencies = [
- "futures 0.3.31",
-]
-
-[[package]]
-name = "tari_shutdown"
-version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "futures 0.3.31",
 ]
@@ -10404,10 +10263,10 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_dan_common_types",
  "tari_dan_wallet_sdk",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tokio",
  "tower-http",
  "webrtc",
@@ -10458,19 +10317,7 @@ dependencies = [
 [[package]]
 name = "tari_storage"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9012114a0a049369014d2ee00505cbabf0fad5c6"
-dependencies = [
- "bincode 1.3.3",
- "lmdb-zero",
- "log",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "tari_storage"
-version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "bincode 1.3.3",
  "lmdb-zero",
@@ -10515,13 +10362,13 @@ dependencies = [
  "serde",
  "serde_json",
  "slug",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_core",
  "tari_crypto",
  "tari_dan_engine",
  "tari_engine_types",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_validator_node_client",
  "tari_wallet_daemon_client",
  "thiserror",
@@ -10583,7 +10430,7 @@ dependencies = [
  "rand",
  "serde",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_crypto",
  "tari_dan_common_types",
@@ -10599,12 +10446,12 @@ dependencies = [
 [[package]]
 name = "tari_test_utils"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators#7ff6931e825303d7c2812d259b725518d2a9815f"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#9005c119dd090ee95d294755b0756abcffffdd43"
 dependencies = [
  "futures 0.3.31",
  "rand",
- "tari_comms 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_comms",
+ "tari_shutdown",
  "tempfile",
  "tokio",
 ]
@@ -10684,7 +10531,7 @@ dependencies = [
  "sqlite_message_logger",
  "tari_base_node_client",
  "tari_bor",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_consensus",
  "tari_core",
@@ -10701,7 +10548,7 @@ dependencies = [
  "tari_networking",
  "tari_rpc_framework",
  "tari_rpc_state_sync",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tari_state_store_sqlite",
  "tari_swarm",
  "tari_template_builtin",
@@ -10819,11 +10666,11 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tari_common 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_common",
  "tari_common_types",
  "tari_core",
  "tari_crypto",
- "tari_shutdown 1.7.0-pre.3 (git+https://github.com/ksrichard/tari.git?branch=feature/trickle-validators)",
+ "tari_shutdown",
  "tokio",
  "toml 0.8.19",
  "tonic 0.12.3",

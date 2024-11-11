@@ -21,9 +21,9 @@ Feature: State Sync
     When miner MINER mines 4 new blocks
     When wallet WALLET has at least 5000 T
     When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
-    Then VN has scanned to height 17
-    And indexer IDX has scanned to height 17
+    When miner MINER mines 26 new blocks
+    Then VN has scanned to height 27
+    And indexer IDX has scanned to height 27
     Then the validator node VN is listed as registered
 
     When indexer IDX connects to all other validators
@@ -43,8 +43,8 @@ Feature: State Sync
 
     When validator node VN2 sends a registration transaction to base wallet WALLET
     When miner MINER mines 20 new blocks
-    Then VN has scanned to height 37
-    Then VN2 has scanned to height 37
+    Then VN has scanned to height 47
+    Then VN2 has scanned to height 47
     Then the validator node VN2 is listed as registered
 
     When I wait for validator VN has leaf block height of at least 1 at epoch 3

@@ -20,7 +20,7 @@ Feature: Concurrency
     When miner MINER mines 10 new blocks
     When wallet WALLET has at least 2000 T
     When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
+    When miner MINER mines 26 new blocks
     Then the validator node VN is listed as registered
 
     # Initialize indexer and connect wallet daemon
@@ -30,7 +30,7 @@ Feature: Concurrency
     # Register the "counter" template
     When base wallet WALLET registers the template "counter"
     When miner MINER mines 20 new blocks
-    Then VN has scanned to height 43
+    Then VN has scanned to height 53
 
     # Create the sender account
     When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins

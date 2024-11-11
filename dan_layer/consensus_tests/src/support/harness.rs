@@ -537,7 +537,6 @@ impl TestBuilder {
                     missed_proposal_recovery_threshold: 5,
                     max_block_size: 500,
                     fee_exhaust_divisor: 20,
-                    max_vns_per_epoch_activated: 5,
                     epochs_per_era: Epoch(10),
                 },
             },
@@ -610,14 +609,14 @@ impl TestBuilder {
             .await
             .into_iter()
             // Dont start failed nodes
-            .filter(|(addr, _, _, pk, _, _, _)| {
+            .filter(|(addr, _, _, pk, _, _)| {
                 if failure_nodes.contains(addr) {
                     log::info!("❗️ {addr} {pk} is a failure node and will not be spawned");
                     return false;
                 }
                 true
             })
-            .map(|(address, shard_group, shard_addr, _, _, _, _)| {
+            .map(|(address, shard_group, shard_addr, _, _,  _)| {
                 let sql_address = sql_address.replace("{}", &address.0);
                 let (sk, pk) = helpers::derive_keypair_from_address(&address);
 

@@ -513,7 +513,6 @@ pub struct ValidatorNode {
     pub public_key: PublicKey,
     pub shard_key: SubstateAddress,
     pub start_epoch: Epoch,
-    pub end_epoch: Epoch,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub fee_claim_public_key: PublicKey,
 }
@@ -525,7 +524,6 @@ impl From<models::ValidatorNode<PeerAddress>> for ValidatorNode {
             public_key: value.public_key,
             shard_key: value.shard_key,
             start_epoch: value.start_epoch,
-            end_epoch: value.end_epoch,
             fee_claim_public_key: value.fee_claim_public_key,
         }
     }
@@ -675,6 +673,7 @@ pub struct GetEpochManagerStatsResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub current_block_hash: FixedHash,
     pub is_valid: bool,
+    pub start_epoch: Option<Epoch>,
     pub committee_info: Option<CommitteeInfo>,
 }
 

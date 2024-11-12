@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use async_trait::async_trait;
+use minotari_app_grpc::tari_rpc::ValidatorNodeChange;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_core::{blocks::BlockHeader, transactions::transaction_components::CodeTemplateRegistration};
 use tari_dan_common_types::SubstateAddress;
@@ -15,6 +16,12 @@ use crate::{
 pub trait BaseNodeClient: Send + Sync + Clone {
     async fn test_connection(&mut self) -> Result<(), BaseNodeClientError>;
     async fn get_tip_info(&mut self) -> Result<BaseLayerMetadata, BaseNodeClientError>;
+    async fn get_validator_node_changes(
+        &mut self,
+        start_height: u64,
+        end_height: u64,
+        sidechain_id: Option<&PublicKey>,
+    ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError>;
     async fn get_validator_nodes(&mut self, height: u64) -> Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError>;
     async fn get_shard_key(
         &mut self,

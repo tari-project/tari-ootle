@@ -44,7 +44,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         shard_key: SubstateAddress,
         registered_at_base_height: u64,
         start_epoch: Epoch,
-        end_epoch: Epoch,
         fee_claim_public_key: PublicKey,
         sidechain_id: Option<PublicKey>,
     ) -> Result<(), TGlobalDbAdapter::Error> {
@@ -56,26 +55,25 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
                 shard_key,
                 registered_at_base_height,
                 start_epoch,
-                end_epoch,
                 fee_claim_public_key,
                 sidechain_id,
             )
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
-    pub fn count(&mut self, epoch: Epoch, sidechain_id: Option<&PublicKey>) -> Result<u64, TGlobalDbAdapter::Error> {
+    pub fn remove(
+        &mut self,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend
-            .validator_nodes_count(self.tx, epoch, sidechain_id)
+            .remove_validator_node(self.tx, public_key, sidechain_id)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
-    pub fn count_by_epoch(
-        &mut self,
-        epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
-    ) -> Result<u64, TGlobalDbAdapter::Error> {
+    pub fn count(&mut self, epoch: Epoch, sidechain_id: Option<&PublicKey>) -> Result<u64, TGlobalDbAdapter::Error> {
         self.backend
-            .validator_nodes_count_by_start_epoch(self.tx, epoch, sidechain_id)
+            .validator_nodes_count(self.tx, epoch, sidechain_id)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 

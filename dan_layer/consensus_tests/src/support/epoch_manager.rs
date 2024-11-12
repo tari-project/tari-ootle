@@ -66,7 +66,6 @@ impl TestEpochManager {
                 shard_key,
                 registered_at_base_height: our_validator_node.registered_at_base_height,
                 start_epoch: our_validator_node.start_epoch,
-                end_epoch: our_validator_node.end_epoch,
                 fee_claim_public_key: PublicKey::default(),
                 sidechain_id: None,
             });
@@ -77,7 +76,6 @@ impl TestEpochManager {
                 shard_key,
                 registered_at_base_height: 0,
                 start_epoch: Epoch(0),
-                end_epoch: Epoch(1),
                 fee_claim_public_key: PublicKey::default(),
                 sidechain_id: None,
             });
@@ -100,7 +98,6 @@ impl TestEpochManager {
                         None,
                         0,
                         Epoch(0),
-                        Epoch(1),
                     ),
                 );
                 state.address_shard.insert(address.clone(), shard_group);
@@ -110,15 +107,13 @@ impl TestEpochManager {
         }
     }
 
-    pub async fn all_validators(
-        &self,
-    ) -> Vec<(TestAddress, ShardGroup, SubstateAddress, PublicKey, u64, Epoch, Epoch)> {
+    pub async fn all_validators(&self) -> Vec<(TestAddress, ShardGroup, SubstateAddress, PublicKey, u64, Epoch)> {
         self.state_lock()
             .await
             .validator_shards
             .iter()
             .filter_map(
-                |(a, (shard, substate_address, pk, sidechain_id, registered_at, start_epoch, end_epoch))| {
+                |(a, (shard, substate_address, pk, sidechain_id, registered_at, start_epoch))| {
                     if sidechain_id.is_none() {
                         Some((
                             a.clone(),
@@ -127,7 +122,6 @@ impl TestEpochManager {
                             pk.clone(),
                             *registered_at,
                             *start_epoch,
-                            *end_epoch,
                         ))
                     } else {
                         None
@@ -173,7 +167,7 @@ impl EpochManagerReader for TestEpochManager {
         _epoch: Epoch,
         addr: &Self::Addr,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
-        let (_shard, shard_key, public_key, sidechain_id, registered_at_base_height, start_epoch, end_epoch) =
+        let (_shard, shard_key, public_key, sidechain_id, registered_at_base_height, start_epoch) =
             self.state_lock().await.validator_shards[addr].clone();
 
         Ok(ValidatorNode {
@@ -182,7 +176,6 @@ impl EpochManagerReader for TestEpochManager {
             shard_key,
             registered_at_base_height,
             start_epoch,
-            end_epoch,
             fee_claim_public_key: PublicKey::default(),
             sidechain_id,
         })
@@ -318,10 +311,10 @@ impl EpochManagerReader for TestEpochManager {
         public_key: PublicKey,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
         let lock = self.state_lock().await;
-        let (address, (_shard, shard_key, public_key, sidechain_id, registered_at, start_epoch, end_epoch)) = lock
+        let (address, (_shard, shard_key, public_key, sidechain_id, registered_at, start_epoch)) = lock
             .validator_shards
             .iter()
-            .find(|(_, (_, _, pk, _, _, _, _))| *pk == public_key)
+            .find(|(_, (_, _, pk, _, _, _))| *pk == public_key)
             .unwrap();
 
         Ok(ValidatorNode {
@@ -330,7 +323,6 @@ impl EpochManagerReader for TestEpochManager {
             shard_key: *shard_key,
             registered_at_base_height: *registered_at,
             start_epoch: *start_epoch,
-            end_epoch: *end_epoch,
             fee_claim_public_key: PublicKey::default(),
             sidechain_id: sidechain_id.clone(),
         })
@@ -353,18 +345,7 @@ pub struct TestEpochManagerState {
     pub last_block_of_current_epoch: FixedHash,
     pub is_epoch_active: bool,
     #[allow(clippy::type_complexity)]
-    pub validator_shards: HashMap<
-        TestAddress,
-        (
-            ShardGroup,
-            SubstateAddress,
-            PublicKey,
-            Option<PublicKey>,
-            u64,
-            Epoch,
-            Epoch,
-        ),
-    >,
+    pub validator_shards: HashMap<TestAddress, (ShardGroup, SubstateAddress, PublicKey, Option<PublicKey>, u64, Epoch)>,
     pub committees: HashMap<ShardGroup, Committee<TestAddress>>,
     pub address_shard: HashMap<TestAddress, ShardGroup>,
 }

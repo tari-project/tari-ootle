@@ -45,7 +45,7 @@ tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "featu
 tari_comms_dht = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 
 anyhow = { workspace = true }
-# if we set this version in the workspace it would break other crates
+# if we set this version in the workspace it would break other crates
 base64 = "0.21.0"
 config = { workspace = true }
 cucumber = { workspace = true, features = ["default", "libtest", "output-junit"] }

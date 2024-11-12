@@ -7,7 +7,7 @@ use tokio::time::{self, Duration, MissedTickBehavior};
 
 use crate::{
     config::Config,
-    helpers::{contains_key, is_close_to_expiry, read_registration_file, to_vn_public_keys},
+    helpers::{contains_key, read_registration_file, to_vn_public_keys},
     manager::ManagerHandle,
 };
 
@@ -22,7 +22,6 @@ pub async fn registration_loop(config: Config, mut handle: ManagerHandle) -> any
     let mut interval = time::interval(REGISTRATION_LOOP_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_block_hash: Option<FixedHash> = None;
-    let mut last_registered: Option<u64> = None;
     let mut recently_registered = false;
 
     loop {
@@ -71,10 +70,7 @@ pub async fn registration_loop(config: Config, mut handle: ManagerHandle) -> any
         }
 
         // if the node is already registered and not close to expiring in the next epoch, skip registration
-        if contains_key(active_keys.clone(), public_key.clone()) &&
-            !is_close_to_expiry(constants.unwrap(), current_block, last_registered) ||
-            recently_registered
-        {
+        if contains_key(active_keys.clone(), public_key.clone()) || recently_registered {
             info!("VN has an active registration and will not expire in the next epoch, skip");
             recently_registered = false;
             continue;
@@ -98,7 +94,6 @@ pub async fn registration_loop(config: Config, mut handle: ManagerHandle) -> any
             current_block, tx.transaction_id
         );
 
-        last_registered = Some(current_block);
         // give the network another tick to process the registration
         recently_registered = true;
     }

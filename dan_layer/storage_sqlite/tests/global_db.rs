@@ -35,13 +35,7 @@ fn insert_vns(
     sidechain_id: Option<PublicKey>,
 ) {
     for _ in 0..num {
-        insert_vn_with_public_key(
-            validator_nodes,
-            new_public_key(),
-            epoch,
-            epoch + Epoch(1),
-            sidechain_id.clone(),
-        )
+        insert_vn_with_public_key(validator_nodes, new_public_key(), epoch, sidechain_id.clone())
     }
 }
 
@@ -49,7 +43,6 @@ fn insert_vn_with_public_key(
     validator_nodes: &mut ValidatorNodeDb<'_, '_, SqliteGlobalDbAdapter<PeerAddress>>,
     public_key: PublicKey,
     start_epoch: Epoch,
-    end_epoch: Epoch,
     sidechain_id: Option<PublicKey>,
 ) {
     validator_nodes
@@ -59,7 +52,6 @@ fn insert_vn_with_public_key(
             derived_substate_address(&public_key),
             0,
             start_epoch,
-            end_epoch,
             public_key,
             sidechain_id,
         )
@@ -94,7 +86,7 @@ fn change_committee_shard_group() {
     let mut tx = db.create_transaction().unwrap();
     let mut validator_nodes = db.validator_nodes(&mut tx);
     let pk = new_public_key();
-    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(0), Epoch(4), None);
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(0), None);
     set_committee_shard_group(&mut validator_nodes, &pk, ShardGroup::new(1, 2), Epoch(0));
     set_committee_shard_group(&mut validator_nodes, &pk, ShardGroup::new(3, 4), Epoch(1));
     set_committee_shard_group(&mut validator_nodes, &pk, ShardGroup::new(7, 8), Epoch(2));

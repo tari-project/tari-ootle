@@ -23,6 +23,7 @@
 use std::time::Duration;
 
 use log::*;
+use minotari_app_grpc::tari_rpc::ValidatorNodeChangeState;
 use tari_base_node_client::{
     grpc::GrpcBaseNodeClient,
     types::{BaseLayerMetadata, BlockInfo},
@@ -42,7 +43,7 @@ use tari_core::transactions::{
 };
 use tari_crypto::{
     ristretto::RistrettoPublicKey,
-    tari_utilities::{hex::Hex, ByteArray},
+    tari_utilities::{hex::Hex, ByteArray, ByteArrayError},
 };
 use tari_dan_common_types::{optional::Optional, NodeAddressable, VersionedSubstateId};
 use tari_dan_storage::{
@@ -106,6 +107,7 @@ pub struct BaseLayerScanner<TAddr> {
     last_scanned_height: u64,
     last_scanned_tip: Option<FixedHash>,
     last_scanned_hash: Option<FixedHash>,
+    last_scanned_validator_node_mr: Option<FixedHash>,
     next_block_hash: Option<FixedHash>,
     base_node_client: GrpcBaseNodeClient,
     epoch_manager: EpochManagerHandle<TAddr>,
@@ -141,6 +143,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             last_scanned_tip: None,
             last_scanned_height: 0,
             last_scanned_hash: None,
+            last_scanned_validator_node_mr: None,
             next_block_hash: None,
             base_node_client,
             epoch_manager,
@@ -223,6 +226,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 );
                 // TODO: we need to figure out where the fork happened, and delete data after the fork.
                 self.last_scanned_hash = None;
+                self.last_scanned_validator_node_mr = None;
                 self.last_scanned_height = 0;
                 self.sync_blockchain().await?;
             },
@@ -278,6 +282,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             Some(end_height) => end_height,
         };
         let mut scan = tip.tip_hash;
+        let mut current_last_validator_nodes_mr = self.last_scanned_validator_node_mr;
         loop {
             let header = self.base_node_client.get_header_by_hash(scan).await?;
             if let Some(last_tip) = self.last_scanned_tip {
@@ -290,9 +295,60 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 // This will be processed down below.
                 break;
             }
+            current_last_validator_nodes_mr = Some(header.validator_node_mr);
             self.epoch_manager.add_block_hash(header.height, scan).await?;
             scan = header.prev_hash;
         }
+
+        // syncing validator node changes
+        if current_last_validator_nodes_mr != self.last_scanned_validator_node_mr {
+            info!(target: LOG_TARGET,
+                "⛓️ Syncing validator nodes (sidechain ID: {:?}) from base node (height range: {}-{})",
+                self.validator_node_sidechain_id,
+                start_scan_height,
+                end_height,
+            );
+
+            let node_changes = self
+                .base_node_client
+                .get_validator_node_changes(start_scan_height, end_height, self.validator_node_sidechain_id.as_ref())
+                .await
+                .map_err(BaseLayerScannerError::BaseNodeError)?;
+
+            for node_change in node_changes {
+                if node_change.registration.is_none() {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Can't register validator node \"{}\" because it has empty registration!",
+                        node_change.public_key.to_hex(),
+                    );
+                    continue;
+                }
+                let registration = ValidatorNodeRegistration::try_from(node_change.registration.clone().unwrap())
+                    .map_err(BaseLayerScannerError::GrpcConversion)?;
+                match node_change.state() {
+                    ValidatorNodeChangeState::Add => {
+                        self.add_validator_node_registration(
+                            node_change.start_height,
+                            registration,
+                            node_change.minimum_value_promise.into(),
+                        )
+                        .await?;
+                    },
+                    ValidatorNodeChangeState::Remove => {
+                        self.remove_validator_node_registration(
+                            PublicKey::from_canonical_bytes(node_change.public_key.as_slice())
+                                .map_err(BaseLayerScannerError::PublicKeyConversion)?,
+                            registration.sidechain_id().cloned(),
+                        )
+                        .await?;
+                    },
+                }
+            }
+
+            self.last_scanned_validator_node_mr = current_last_validator_nodes_mr;
+        }
+
         for current_height in start_scan_height..=end_height {
             let utxos = self
                 .base_node_client
@@ -329,27 +385,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                 };
                 match sidechain_feature {
                     SideChainFeature::ValidatorNodeRegistration(reg) => {
-                        info!(
-                            target: LOG_TARGET,
-                            "⛓️ Validator node registration UTXO for {} sidechain {} found at height {}",
-                            reg.public_key(),
-                            reg.sidechain_id().map(|v| v.to_hex()).unwrap_or("None".to_string()),
-                            current_height,
-                        );
-                        if reg.sidechain_id() == self.validator_node_sidechain_id.as_ref() {
-                            self.register_validator_node_registration(
-                                current_height,
-                                reg.clone(),
-                                output.minimum_value_promise,
-                            )
-                            .await?;
-                        } else {
-                            warn!(
-                                target: LOG_TARGET,
-                                "Ignoring validator node registration for sidechain ID {:?}. Expected sidechain ID: {:?}",
-                                reg.sidechain_id().map(|v| v.to_hex()),
-                                self.validator_node_sidechain_id.as_ref().map(|v| v.to_hex()));
-                        }
+                        trace!(target: LOG_TARGET, "New validator node registration scanned: {reg:?}");
                     },
                     SideChainFeature::CodeTemplateRegistration(reg) => {
                         if reg.sidechain_id != self.template_sidechain_id {
@@ -496,7 +532,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         Ok(())
     }
 
-    async fn register_validator_node_registration(
+    async fn add_validator_node_registration(
         &mut self,
         height: u64,
         registration: ValidatorNodeRegistration,
@@ -511,6 +547,25 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
 
         self.epoch_manager
             .add_validator_node_registration(height, registration, minimum_value_promise)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn remove_validator_node_registration(
+        &mut self,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), BaseLayerScannerError> {
+        info!(
+            target: LOG_TARGET,
+            "⛓️ Remove validator node registration for {}(side chain ID: {:?})",
+            public_key,
+            sidechain_id
+        );
+
+        self.epoch_manager
+            .remove_validator_node_registration(public_key, sidechain_id)
             .await?;
 
         Ok(())
@@ -574,6 +629,10 @@ pub enum BaseLayerScannerError {
         commitment: Box<Commitment>,
         source: StorageError,
     },
+    #[error("Public key conversion error: {0}")]
+    PublicKeyConversion(ByteArrayError),
+    #[error("GRPC conversion error: {0}")]
+    GrpcConversion(String),
 }
 
 enum BlockchainProgression {

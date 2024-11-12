@@ -108,12 +108,9 @@ struct Handlers {
 }
 
 async fn spawn_manager(config: Config, shutdown: ShutdownSignal, trigger: Shutdown) -> anyhow::Result<Handlers> {
-    let (manager, mut manager_handle) = ProcessManager::new(config, shutdown, trigger);
+    let (manager, manager_handle) = ProcessManager::new(config, shutdown, trigger);
     let cr = manager.start_request_handler().await?;
-    let status = manager_handle.get_tip_info().await?;
-    // in the case the consensus constants have changed since the genesis block, use the latest ones
-    let constants = manager_handle.get_consensus_constants(status.height()).await?;
-    start_receivers(cr.rx_log, cr.rx_alert, cr.cfg_alert, constants).await;
+    start_receivers(cr.rx_log, cr.rx_alert, cr.cfg_alert).await;
 
     Ok(Handlers {
         manager: manager_handle,

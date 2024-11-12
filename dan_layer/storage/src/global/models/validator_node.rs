@@ -13,7 +13,6 @@ pub struct ValidatorNode<TAddr> {
     pub shard_key: SubstateAddress,
     pub registered_at_base_height: u64,
     pub start_epoch: Epoch,
-    pub end_epoch: Epoch,
     pub fee_claim_public_key: PublicKey,
     pub sidechain_id: Option<PublicKey>,
 }

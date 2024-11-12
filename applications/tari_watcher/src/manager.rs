@@ -65,7 +65,6 @@ impl ProcessManager {
 
         let cc = self.start_child_process().await;
 
-        let mut last_registered_at_block = 0;
         info!("Setup completed: connected to base node and wallet, ready to receive requests");
         let task_handle = tokio::spawn(async move {
             loop {
@@ -80,15 +79,6 @@ impl ProcessManager {
                                         continue;
                                     }
                                 };
-
-                                // send latest block height to logging
-                                if let Err(e) = cc.tx_log.send(ProcessStatus::WarnExpiration(response.height(), last_registered_at_block)).await {
-                                    error!("Failed to send tip status update to monitoring: {}", e);
-                                }
-                                // send latest block height to alerting
-                                if let Err(e) = cc.tx_alert.send(ProcessStatus::WarnExpiration(response.height(), last_registered_at_block)).await {
-                                    error!("Failed to send tip status update to alerting: {}", e);
-                                }
 
                                 drop(reply.send(Ok(response)));
                             }
@@ -110,7 +100,6 @@ impl ProcessManager {
                                         continue;
                                     }
                                 };
-                                last_registered_at_block = block;
 
                                 // send registration response to logger
                                 if let Err(e) = cc.tx_log.send(ProcessStatus::Submitted(Transaction::new(response.clone(), block))).await {
@@ -179,16 +168,14 @@ pub async fn start_receivers(
     rx_log: mpsc::Receiver<ProcessStatus>,
     rx_alert: mpsc::Receiver<ProcessStatus>,
     cfg_alert: Channels,
-    constants: ConsensusConstants,
 ) {
-    let const_copy = constants.clone();
     // spawn logging and alerting tasks to process status updates
     tokio::spawn(async move {
-        process_status_log(rx_log, const_copy).await;
+        process_status_log(rx_log).await;
         warn!("Logging task has exited");
     });
     tokio::spawn(async move {
-        process_status_alert(rx_alert, cfg_alert, constants).await;
+        process_status_alert(rx_alert, cfg_alert).await;
         warn!("Alerting task has exited");
     });
 }

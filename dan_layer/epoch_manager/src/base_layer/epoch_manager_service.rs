@@ -23,7 +23,7 @@
 use log::{error, info, trace};
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{DerivableFromPublicKey, NodeAddressable};
+use tari_dan_common_types::{optional::IsNotFoundError, DerivableFromPublicKey, NodeAddressable};
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
@@ -74,7 +74,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
 
     pub async fn run(&mut self, mut shutdown: ShutdownSignal) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Starting epoch manager");
-        info!(target: LOG_TARGET, "Loading initial state");
         // first, load initial state
         self.inner.load_initial_state().await?;
 
@@ -204,15 +203,23 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
                     .await,
                 context,
             ),
+            EpochManagerRequest::RemoveValidatorNodeRegistration {
+                public_key,
+                sidechain_id,
+                reply,
+            } => handle(
+                reply,
+                self.inner
+                    .remove_validator_node_registration(public_key, sidechain_id)
+                    .await,
+                context,
+            ),
             // TODO: This should be rather be a state machine event
             EpochManagerRequest::NotifyScanningComplete { reply } => {
                 handle(reply, self.inner.on_scanning_complete().await, context)
             },
             EpochManagerRequest::WaitForInitialScanningToComplete { reply } => {
                 self.inner.add_notify_on_scanning_complete(reply);
-            },
-            EpochManagerRequest::RemainingRegistrationEpochs { reply } => {
-                handle(reply, self.inner.remaining_registration_epochs().await, context)
             },
             EpochManagerRequest::GetBaseLayerConsensusConstants { reply } => handle(
                 reply,
@@ -265,7 +272,10 @@ fn handle<T>(
     context: &str,
 ) {
     if let Err(ref e) = result {
-        error!(target: LOG_TARGET, "Request {} failed with error: {}", context, e);
+        // These responses are not errors
+        if !e.is_not_registered_error() && !e.is_not_found_error() {
+            error!(target: LOG_TARGET, "Request {} failed with error: {}", context, e);
+        }
     }
     if reply.send(result).is_err() {
         error!(target: LOG_TARGET, "Requester abandoned request");

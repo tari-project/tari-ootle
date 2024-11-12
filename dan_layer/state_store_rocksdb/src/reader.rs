@@ -1019,35 +1019,26 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
-        start_block_id: &BlockId,
-        end_block_id: &BlockId,
+        start_block_height: NodeHeight,
+        end_block_height: NodeHeight,
         include_dummy_blocks: bool,
+        limit: u64,
     ) -> Result<Vec<Block>, StorageError> {
         todo!()
         /*
         use crate::schema::{blocks, quorum_certificates};
 
-        if !self.blocks_exists(start_block_id)? {
+        if start_block_height > end_block_height {
             return Err(StorageError::QueryError {
-                reason: format!("blocks_all_between: Start block {} does not exist", start_block_id),
+                reason: format!(
+                    "Start block height {start_block_height} must be less than end block height {end_block_height}"
+                ),
             });
-        }
-
-        if !self.blocks_exists(end_block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("blocks_all_between: End block {} does not exist", end_block_id),
-            });
-        }
-
-        let block_ids = self.get_block_ids_between(start_block_id, end_block_id)?;
-        if block_ids.is_empty() {
-            return Ok(vec![]);
         }
 
         let mut query = blocks::table
             .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
             .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::block_id.eq_any(block_ids))
             .into_boxed();
 
         if !include_dummy_blocks {
@@ -1057,7 +1048,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let results = query
             .filter(blocks::epoch.eq(epoch.as_u64() as i64))
             .filter(blocks::shard_group.eq(shard_group.encode_as_u32() as i32))
+            .filter(blocks::height.ge(start_block_height.as_u64() as i64))
+            .filter(blocks::height.le(end_block_height.as_u64() as i64))
             .order_by(blocks::height.asc())
+            .limit(limit as i64)
             .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "blocks_all_after_height",

@@ -29,6 +29,9 @@ use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
+use tari_dan_common_types::NodeHeight;
+use tari_dan_common_types::ShardGroup;
+use tari_dan_common_types::Epoch;
 
 use crate::{config::DatabaseType, ApplicationConfig};
 
@@ -973,15 +976,16 @@ impl<'tx> StateStoreReadTransaction
     
     fn blocks_get_all_between(
         &self,
-        epoch: tari_dan_common_types::Epoch,
-        shard_group: tari_dan_common_types::ShardGroup,
-        start_block_id: &tari_dan_storage::consensus_models::BlockId,
-        end_block_id: &tari_dan_storage::consensus_models::BlockId,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+        start_block_height: NodeHeight,
+        end_block_height: NodeHeight,
         include_dummy_blocks: bool,
+        limit: u64,
     ) -> Result<Vec<tari_dan_storage::consensus_models::Block>, tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_all_between(epoch, shard_group, start_block_id, end_block_id, include_dummy_blocks),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_all_between(epoch, shard_group, start_block_id, end_block_id, include_dummy_blocks),
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_all_between(epoch, shard_group, start_block_height, end_block_height, include_dummy_blocks, limit),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_all_between(epoch, shard_group, start_block_height, end_block_height, include_dummy_blocks, limit),
         }
     }
     

@@ -1,0 +1,22 @@
+[package]
+name = "tari_dan_cli"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tari"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.93"
+clap = { version = "4.5.20", features = ["derive", "string"] }
+dirs-next = "2.0.0"
+tokio = { version = "1.41.1", features = ["full"] }
+toml = "0.8.19"
+serde = { version = "1.0.215", features = ["derive"] }
+termimad = "0.31.0"
+#cargo-generate = "0.22.0"
+git2 = "^0.18"

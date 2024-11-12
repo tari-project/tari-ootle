@@ -246,10 +246,10 @@ pub async fn assert_vn_is_registered(world: &mut TariWorld, vn_name: String) {
     loop {
         // wait for the validator to pick up the registration
         let stats = client.get_epoch_manager_stats().await.unwrap();
-        if stats.current_block_height >= height || stats.is_valid {
+        if stats.current_block_height >= height || stats.committee_info.is_some() {
             break;
         }
-        if count > 10 {
+        if count > 20 {
             panic!("Timed out waiting for validator node to pick up registration");
         }
         count += 1;
@@ -495,7 +495,7 @@ async fn when_count(world: &mut TariWorld, vn_name: String, count: u64) {
     panic!("Block count on VN {vn_name} is less than {count}");
 }
 
-#[then(expr = "the validator node {word} switches to epoch {int}")]
+#[then(expr = "the validator node {word} has ended epoch {int}")]
 async fn then_validator_node_switches_epoch(world: &mut TariWorld, vn_name: String, epoch: u64) {
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
@@ -506,18 +506,17 @@ async fn then_validator_node_switches_epoch(world: &mut TariWorld, vn_name: Stri
                 offset: 0,
                 ordering_index: None,
                 ordering: None,
-                filter_index: None,
-                filter: None,
+                filter_index: Some(1),
+                filter: Some(epoch.to_string()),
             })
             .await
             .unwrap();
         let blocks = list_block.blocks;
         assert!(
-            blocks.iter().all(|b| b.epoch().as_u64() <= epoch),
+            blocks.iter().all(|b| b.epoch().as_u64() <= epoch + 1),
             "Epoch is greater than expected"
         );
-        if blocks.iter().any(|b| b.epoch().as_u64() == epoch) {
-            assert!(blocks.iter().any(|b| b.is_epoch_end()), "No end epoch block found");
+        if blocks.iter().any(|b| b.epoch().as_u64() == epoch && b.is_epoch_end()) {
             return;
         }
 

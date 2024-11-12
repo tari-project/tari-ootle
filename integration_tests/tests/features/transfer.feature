@@ -109,8 +109,8 @@ Feature: Account transfers
     Then the validator node VN is listed as registered
     Then the template "faucet" is listed as registered by the validator node VN
 
-    Then VN has scanned to height 32
-    Then indexer IDX has scanned to height 32
+    Then VN has scanned to height 42
+    Then indexer IDX has scanned to height 42
 
     # Create the sender account with some tokens
     When I create an account ACCOUNT_1 via the wallet daemon WALLET_D with 10000 free coins

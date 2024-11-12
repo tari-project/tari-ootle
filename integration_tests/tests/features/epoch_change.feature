@@ -43,7 +43,7 @@ Feature: Epoch change
     When Block count on VN VAL is at least 6
     When miner MINER mines 5 new blocks
     Then VAL has scanned to height 34
-    Then the validator node VAL switches to epoch 2
+    Then the validator node VAL has ended epoch 2
 
 #  @serial
 #  Scenario: Committee is split into two during epoch change

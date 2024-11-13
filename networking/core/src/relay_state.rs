@@ -3,11 +3,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use libp2p::{multiaddr::Protocol, Multiaddr, PeerId};
+use libp2p::{multiaddr::Protocol, swarm::ConnectionId, Multiaddr, PeerId};
 use rand::seq::IteratorRandom;
 
 #[derive(Debug, Clone, Default)]
-pub struct RelayState {
+pub(crate) struct RelayState {
     selected_relay: Option<RelayPeer>,
     possible_relays: HashMap<PeerId, HashSet<Multiaddr>>,
 }
@@ -40,6 +40,23 @@ impl RelayState {
         self.selected_relay.as_mut()
     }
 
+    pub fn set_relay_peer(&mut self, peer_id: PeerId, dialled_address: Option<Multiaddr>) -> bool {
+        if self.selected_relay.as_ref().map_or(false, |p| p.peer_id == peer_id) {
+            return true;
+        }
+
+        if let Some(addrs) = self.possible_relays.get(&peer_id) {
+            self.selected_relay = Some(RelayPeer {
+                peer_id,
+                addresses: addrs.iter().cloned().collect(),
+                circuit_connection_id: None,
+                remote_address: dialled_address,
+            });
+            return true;
+        }
+        false
+    }
+
     pub fn possible_relays(&self) -> impl Iterator<Item = (&PeerId, &HashSet<Multiaddr>)> {
         self.possible_relays.iter()
     }
@@ -49,10 +66,7 @@ impl RelayState {
     }
 
     pub fn has_active_relay(&self) -> bool {
-        self.selected_relay
-            .as_ref()
-            .map(|r| r.is_circuit_established)
-            .unwrap_or(false)
+        self.selected_relay.as_ref().map(|r| r.has_circuit()).unwrap_or(false)
     }
 
     pub fn add_possible_relay(&mut self, peer: PeerId, address: Multiaddr) {
@@ -70,16 +84,22 @@ impl RelayState {
         self.selected_relay = Some(RelayPeer {
             peer_id: *peer,
             addresses: addrs.iter().cloned().collect(),
-            is_circuit_established: false,
-            dialled_address: None,
+            circuit_connection_id: None,
+            remote_address: None,
         });
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct RelayPeer {
+pub(crate) struct RelayPeer {
     pub peer_id: PeerId,
     pub addresses: Vec<Multiaddr>,
-    pub is_circuit_established: bool,
-    pub dialled_address: Option<Multiaddr>,
+    pub circuit_connection_id: Option<ConnectionId>,
+    pub remote_address: Option<Multiaddr>,
+}
+
+impl RelayPeer {
+    pub fn has_circuit(&self) -> bool {
+        self.circuit_connection_id.is_some()
+    }
 }

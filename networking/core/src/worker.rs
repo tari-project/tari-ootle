@@ -565,14 +565,15 @@ where
             Autonat(event) => {
                 self.on_autonat_event(event)?;
             },
-            PeerSync(peersync::Event::LocalPeerRecordUpdated { record }) => {
-                info!(target: LOG_TARGET, "🧑‍🧑‍🧒‍🧒 Local peer record updated: {:?} announce enabled = {}, has_sent_announce = {}",record, self.config.announce, self.has_sent_announce);
-                if self.config.announce && !self.has_sent_announce && record.is_signed() {
+            PeerSync(peersync::Event::LocalPeerRecordUpdated) => {
+                if self.config.announce && !self.has_sent_announce {
+                    let record = self.swarm.behaviour().peer_sync.local_peer_record();
                     info!(target: LOG_TARGET, "📣 Sending local peer announce with {} address(es)", record.addresses().len());
+                    let proto_rec = record.encode_to_proto()?;
                     self.swarm
                         .behaviour_mut()
                         .gossipsub
-                        .publish(IdentTopic::new(PEER_ANNOUNCE_TOPIC), record.encode_to_proto()?)?;
+                        .publish(IdentTopic::new(PEER_ANNOUNCE_TOPIC), proto_rec)?;
                     self.has_sent_announce = true;
                 }
             },

@@ -101,15 +101,15 @@ impl ProcessManager {
             }
         }
 
-        let num_vns = if self.skip_registration {
+        let num_blocks = if self.skip_registration {
             0
         } else {
-            self.instance_manager.num_validator_nodes()
+            self.instance_manager.num_validator_nodes() +
+                u64::try_from(templates_to_register.len()).expect("impossibly many templates")
         };
-        let num_blocks = num_vns + u64::try_from(templates_to_register.len()).unwrap();
 
-        if !self.skip_registration {
-            // Mine some initial funds, guessing 10 blocks extra to allow for coinbase maturity
+        if num_blocks > 0 {
+            // Mine some initial funds, guessing 10 blocks extra is sufficient for coinbase maturity
             self.mine(num_blocks + 10).await.context("initial mining failed")?;
             self.wait_for_wallet_funds(num_blocks)
                 .await
@@ -121,9 +121,8 @@ impl ProcessManager {
             for templates in templates_to_register {
                 self.register_template(templates).await?;
             }
-        }
 
-        if num_blocks > 0 {
+            // "Mine in" the validators and templates
             self.mine(20).await?;
         }
 

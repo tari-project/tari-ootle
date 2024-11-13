@@ -1,5 +1,9 @@
-use crate::cli::config::Config;
+use crate::cli::commands::create;
+use crate::cli::config::{Config, TemplateRepository};
 use crate::cli::util;
+use crate::git::repository::GitRepository;
+use crate::loading;
+use anyhow::anyhow;
 use clap::builder::styling::AnsiColor;
 use clap::builder::Styles;
 use clap::{Parser, Subcommand};
@@ -7,6 +11,7 @@ use std::env;
 use std::path::PathBuf;
 
 const DEFAULT_DATA_FOLDER_NAME: &str = "tari_dan_cli";
+const TEMPLATE_REPOS_FOLDER_NAME: &str = "template_repositories";
 const DEFAULT_CONFIG_FILE_NAME: &str = "tari.config.toml";
 
 pub fn cli_styles() -> Styles {
@@ -25,7 +30,7 @@ fn default_base_dir() -> PathBuf {
         .join(DEFAULT_DATA_FOLDER_NAME)
 }
 
-fn default_config_dir() -> PathBuf {
+fn default_config_file() -> PathBuf {
     dirs_next::config_dir().unwrap_or_else(|| env::current_dir().unwrap())
         .join(DEFAULT_DATA_FOLDER_NAME)
         .join(DEFAULT_CONFIG_FILE_NAME)
@@ -40,13 +45,13 @@ pub fn config_override_parser(config_override: &str) -> Result<ConfigOverride, S
     if splitted.len() != 2 {
         return Err(String::from("Invalid override!"));
     }
-    let (key, value) = (splitted.get(0).unwrap(), splitted.get(0).unwrap());
+    let (key, value) = (splitted.first().unwrap(), splitted.get(1).unwrap());
 
-    if !Config::is_override_key_valid(*key) {
-        return Err(String::from("Override key invalid!"));
+    if !Config::is_override_key_valid(key) {
+        return Err(format!("Override key invalid: {}", key));
     }
 
-    Ok(ConfigOverride { key: "".to_string(), value: "".to_string() })
+    Ok(ConfigOverride { key: key.to_string(), value: value.to_string() })
 }
 
 #[derive(Clone, Debug)]
@@ -63,24 +68,14 @@ pub struct CommonArguments {
     base_dir: PathBuf,
 
     /// Config file location
-    #[arg(short = 'c', long, value_name = "PATH", default_value = default_config_dir().into_os_string()
+    #[arg(short = 'c', long, value_name = "PATH", default_value = default_config_file().into_os_string()
     )]
-    config: PathBuf,
+    config_file_path: PathBuf,
 
     /// Config file overrides
     #[arg(short = 'e', long, value_name = "KEY=VALUE", value_parser = config_override_parser
     )]
     config_overrides: Vec<ConfigOverride>,
-}
-
-impl CommonArguments {
-    pub fn base_dir(&self) -> &PathBuf {
-        &self.base_dir
-    }
-
-    pub fn config(&self) -> &PathBuf {
-        &self.config
-    }
 }
 
 #[derive(Clone, Parser)]
@@ -110,32 +105,85 @@ pub enum Commands {
 
 impl Cli {
     async fn init_base_dir_and_config(&self) -> anyhow::Result<Config> {
+        // make sure we have all the directories set up
         util::create_dir(&self.args.base_dir).await?;
+        if !util::path_metadata(&self.args.config_file_path).await?.is_file() {
+            return Err(anyhow!("Configuration file path is not pointing to a file!"));
+        }
+        util::create_dir(&self.args.config_file_path.parent()
+            .ok_or(anyhow!("Can't find folder of configuration file!"))?
+            .to_path_buf()).await?;
 
-        let config = if !util::file_exists(&self.args.config).await? {
+        // loading/creating config
+        let mut config = if !util::file_exists(&self.args.config_file_path).await? {
             let cfg = Config::default();
-            cfg.write_to_file(&self.args.config).await?;
+            cfg.write_to_file(&self.args.config_file_path).await?;
             cfg
         } else {
-            match Config::open(&self.args.config).await {
+            match Config::open(&self.args.config_file_path).await {
                 Ok(cfg) => cfg,
                 Err(error) => {
                     println!("Failed to open config file: {error:?}, creating default...");
                     let cfg = Config::default();
-                    cfg.write_to_file(&self.args.config).await?;
+                    cfg.write_to_file(&self.args.config_file_path).await?;
                     cfg
                 }
             }
         };
 
+        // apply config overrides
+        for config_override in &self.args.config_overrides {
+            config.override_data(config_override.key.as_str(), config_override.value.as_str())?;
+        }
+
         Ok(config)
     }
+
+    async fn refresh_template_repository(&self, template_repo: &TemplateRepository) -> anyhow::Result<()> {
+        util::create_dir(&self.args.base_dir.join(TEMPLATE_REPOS_FOLDER_NAME)).await?;
+        let repo_url_splitted: Vec<&str> = template_repo.url.split("/").collect();
+        let repo_name = repo_url_splitted.last().ok_or(anyhow!("Failed to get repository name from URL!"))?;
+        let repo_user = repo_url_splitted.get(repo_url_splitted.len() - 2).ok_or(anyhow!("Failed to get repository owner from URL!"))?;
+        let repo_folder_path = self.args.base_dir
+            .join(TEMPLATE_REPOS_FOLDER_NAME)
+            .join(repo_user)
+            .join(repo_name);
+        let mut repo = GitRepository::new(repo_folder_path.clone());
+
+        match util::dir_exists(&repo_folder_path).await? {
+            true => {
+                repo.init()?;
+                let current_branch = repo.current_branch_name()?;
+                if current_branch != template_repo.branch { // checkout branch and pull
+                    // TODO: implement checkout branch
+                    repo.pull_changes()?;
+                } else { // git pull
+                    repo.pull_changes()?;
+                }
+            }
+            false => {
+                repo.clone_and_checkout(
+                    template_repo.url.as_str(),
+                    template_repo.branch.as_str(),
+                )?;
+            }
+        }
+
+
+        Ok(())
+    }
+
     pub async fn handle_command(&self) -> anyhow::Result<()> {
-        self.init_base_dir_and_config().await?;
+        // init config and dirs
+        let config = loading!("Init configuration and directories", self.init_base_dir_and_config().await)?;
+
+        // refresh templates from provided repositories
+        loading!("Refresh project templates repository", self.refresh_template_repository(&config.project_template_repository).await)?;
+        loading!("Refresh wasm templates repository", self.refresh_template_repository(&config.wasm_template_repository).await)?;
+
         match &self.command {
             Commands::Create { name } => {
-                println!("Creating template");
-                Ok(())
+                create::handle(config, name.as_str()).await
             }
         }
     }

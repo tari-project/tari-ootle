@@ -57,6 +57,7 @@ impl Config {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .truncate(true)
+            .create(true)
             .open(path).await?;
         let content = toml::to_string(self)?;
         let _ = file.write(content.as_bytes()).await?;

@@ -19,4 +19,6 @@ toml = "0.8.19"
 serde = { version = "1.0.215", features = ["derive"] }
 termimad = "0.31.0"
 #cargo-generate = "0.22.0"
-git2 = "^0.18"
+git2 = { version = "^0.18", features = ["default"] }
+thiserror = "1.0.67"
+spinners = "4.1.1"

@@ -2,6 +2,7 @@ use crate::cli::arguments::Cli;
 use clap::Parser;
 
 mod cli;
+mod git;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

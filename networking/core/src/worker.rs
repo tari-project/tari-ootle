@@ -686,8 +686,12 @@ where
         use autonat::Event::*;
         match event {
             StatusChanged { old, new } => {
-                if let Some(public_address) = self.swarm.behaviour().autonat.public_address() {
+                if let Some(public_address) = self.swarm.behaviour().autonat.public_address().cloned() {
                     info!(target: LOG_TARGET, "🌍️ Autonat: Our public address is {public_address}");
+                    self.swarm
+                        .behaviour_mut()
+                        .peer_sync
+                        .add_known_local_public_addresses(vec![public_address]);
                 }
 
                 // If we are/were "Private", let's establish a relay reservation with a known relay

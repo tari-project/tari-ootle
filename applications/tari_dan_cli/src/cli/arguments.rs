@@ -30,6 +30,10 @@ fn default_base_dir() -> PathBuf {
         .join(DEFAULT_DATA_FOLDER_NAME)
 }
 
+fn default_target_dir() -> PathBuf {
+    env::current_dir().unwrap()
+}
+
 fn default_config_file() -> PathBuf {
     dirs_next::config_dir().unwrap_or_else(|| env::current_dir().unwrap())
         .join(DEFAULT_DATA_FOLDER_NAME)
@@ -100,6 +104,16 @@ pub enum Commands {
         /// Name of the project
         #[command()]
         name: String,
+
+        /// (Optional) Selected project template name.
+        /// It will be prompted if not set.
+        #[arg(short = 't', long)]
+        project_template: Option<String>,
+
+        /// Target folder where the new project will be generated
+        #[arg(long, value_name = "PATH", default_value = default_target_dir().into_os_string()
+        )]
+        target: PathBuf,
     },
 }
 
@@ -139,7 +153,7 @@ impl Cli {
         Ok(config)
     }
 
-    async fn refresh_template_repository(&self, template_repo: &TemplateRepository) -> anyhow::Result<()> {
+    async fn refresh_template_repository(&self, template_repo: &TemplateRepository) -> anyhow::Result<GitRepository> {
         util::create_dir(&self.args.base_dir.join(TEMPLATE_REPOS_FOLDER_NAME)).await?;
         let repo_url_splitted: Vec<&str> = template_repo.url.split("/").collect();
         let repo_name = repo_url_splitted.last().ok_or(anyhow!("Failed to get repository name from URL!"))?;
@@ -152,13 +166,12 @@ impl Cli {
 
         match util::dir_exists(&repo_folder_path).await? {
             true => {
-                repo.init()?;
+                repo.load()?;
                 let current_branch = repo.current_branch_name()?;
-                if current_branch != template_repo.branch { // checkout branch and pull
-                    // TODO: implement checkout branch
-                    repo.pull_changes()?;
-                } else { // git pull
-                    repo.pull_changes()?;
+                if current_branch != template_repo.branch {
+                    repo.pull_changes(Some(template_repo.branch.clone()))?;
+                } else {
+                    repo.pull_changes(None)?;
                 }
             }
             false => {
@@ -169,8 +182,7 @@ impl Cli {
             }
         }
 
-
-        Ok(())
+        Ok(repo)
     }
 
     pub async fn handle_command(&self) -> anyhow::Result<()> {
@@ -178,12 +190,18 @@ impl Cli {
         let config = loading!("Init configuration and directories", self.init_base_dir_and_config().await)?;
 
         // refresh templates from provided repositories
-        loading!("Refresh project templates repository", self.refresh_template_repository(&config.project_template_repository).await)?;
-        loading!("Refresh wasm templates repository", self.refresh_template_repository(&config.wasm_template_repository).await)?;
+        let project_template_repo = loading!("Refresh project templates repository", self.refresh_template_repository(&config.project_template_repository).await)?;
+        let wasm_template_repo = loading!("Refresh wasm templates repository", self.refresh_template_repository(&config.wasm_template_repository).await)?;
 
         match &self.command {
-            Commands::Create { name } => {
-                create::handle(config, name.as_str()).await
+            Commands::Create { name, project_template, target } => {
+                create::handle(
+                    config,
+                    project_template_repo,
+                    name.as_str(),
+                    project_template.as_ref(),
+                    target,
+                ).await
             }
         }
     }

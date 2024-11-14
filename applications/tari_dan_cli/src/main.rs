@@ -3,6 +3,7 @@ use clap::Parser;
 
 mod cli;
 mod git;
+mod template;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

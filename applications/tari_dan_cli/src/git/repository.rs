@@ -18,8 +18,6 @@ pub enum Error {
     InvalidBranchName,
     #[error("Current reference is not a branch!")]
     RefIsNotBranch,
-    #[error("Merge conflict")]
-    MergeConflict,
 }
 
 pub type GitRepositoryResult<T> = Result<T, Error>;
@@ -30,6 +28,11 @@ impl GitRepository {
     }
 
     pub fn init(&mut self) -> GitRepositoryResult<()> {
+        self.repository = Some(Repository::init(&self.local_folder)?);
+        Ok(())
+    }
+
+    pub fn load(&mut self) -> GitRepositoryResult<()> {
         self.repository = Some(Repository::open(&self.local_folder).map_err(Error::Git2)?);
 
         Ok(())
@@ -46,9 +49,13 @@ impl GitRepository {
         Ok(())
     }
 
-    pub fn pull_changes(&self) -> GitRepositoryResult<()> {
+    pub fn pull_changes(&self, branch: Option<String>) -> GitRepositoryResult<()> {
         let repo = self.repository()?;
-        let current_branch_name = self.current_branch_name()?;
+        let current_branch_name = if let Some(branch) = branch {
+            branch
+        } else {
+            self.current_branch_name()?
+        };
         let mut remote = repo.find_remote("origin")?;
 
         // fetch
@@ -58,7 +65,7 @@ impl GitRepository {
         let fetch_head = repo.find_reference("FETCH_HEAD")?;
         let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
 
-        // merge changes
+        // pull changes
         let refname = format!("refs/heads/{}", current_branch_name);
         repo.reference(
             &refname,
@@ -97,5 +104,9 @@ impl GitRepository {
         } else {
             Err(Error::RefIsNotBranch)
         }
+    }
+
+    pub fn local_folder(&self) -> &PathBuf {
+        &self.local_folder
     }
 }

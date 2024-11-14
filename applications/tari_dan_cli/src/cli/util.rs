@@ -1,3 +1,4 @@
+use dialoguer::FuzzySelect;
 use std::fs::Metadata;
 use std::io;
 use std::path::PathBuf;
@@ -21,4 +22,14 @@ pub async fn dir_exists(dir: &PathBuf) -> io::Result<bool> {
 
 pub async fn path_metadata(path: &PathBuf) -> io::Result<Metadata> {
     fs::metadata(path).await
+}
+
+pub fn cli_select<T: ToString + Clone>(prompt: &str, items: Vec<T>) -> anyhow::Result<T> {
+    let selection = FuzzySelect::new()
+        .with_prompt(prompt)
+        .highlight_matches(true)
+        .items(&items)
+        .interact()?;
+
+    Ok(items[selection].clone())
 }

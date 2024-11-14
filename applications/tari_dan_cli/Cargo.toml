@@ -18,7 +18,9 @@ tokio = { version = "1.41.1", features = ["full"] }
 toml = "0.8.19"
 serde = { version = "1.0.215", features = ["derive"] }
 termimad = "0.31.0"
-#cargo-generate = "0.22.0"
-git2 = { version = "^0.18", features = ["default"] }
+cargo-generate = "^0.22.0"
+git2 = { version = "^0.19", features = ["default"] }
 thiserror = "1.0.67"
 spinners = "4.1.1"
+convert_case = "0.6.0"
+dialoguer = { version = "0.11.0", features = ["default", "fuzzy-select"] }

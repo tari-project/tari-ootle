@@ -27,17 +27,20 @@ impl GitRepository {
         Self { repository: None, local_folder }
     }
 
+    /// Initializes a git repository in [`local_folder`].
     pub fn init(&mut self) -> GitRepositoryResult<()> {
         self.repository = Some(Repository::init(&self.local_folder)?);
         Ok(())
     }
 
+    /// Loads an existing git repository from [`local_folder`].
     pub fn load(&mut self) -> GitRepositoryResult<()> {
         self.repository = Some(Repository::open(&self.local_folder).map_err(Error::Git2)?);
 
         Ok(())
     }
 
+    /// Does a clone and checkout operation in [`local_folder`] based on the given repository [`url`] and [`branch`].
     pub fn clone_and_checkout(&mut self, url: &str, branch: &str) -> GitRepositoryResult<()> {
         self.repository = Some(
             RepoBuilder::new()
@@ -49,6 +52,8 @@ impl GitRepository {
         Ok(())
     }
 
+    /// Pulling latest changes on an optional branch (default is the current one).
+    /// Note: this method always force checkout to latest head.
     pub fn pull_changes(&self, branch: Option<String>) -> GitRepositoryResult<()> {
         let repo = self.repository()?;
         let current_branch_name = if let Some(branch) = branch {
@@ -84,6 +89,8 @@ impl GitRepository {
         Ok(())
     }
 
+    /// Gives back the actual repository if initialized using any of the methods 
+    /// ([`Self::init`], [`Self::load`] or [`Self::clone_and_checkout`]). 
     fn repository(&self) -> GitRepositoryResult<&Repository> {
         if self.repository.is_none() {
             return Err(Error::RepositoryNotInitialized);
@@ -92,6 +99,7 @@ impl GitRepository {
         Ok(self.repository.as_ref().unwrap())
     }
 
+    /// Returns current branch name.
     pub fn current_branch_name(&self) -> GitRepositoryResult<String> {
         let repo = self.repository()?;
         let head = repo.head()?;
@@ -105,7 +113,7 @@ impl GitRepository {
             Err(Error::RefIsNotBranch)
         }
     }
-
+    
     pub fn local_folder(&self) -> &PathBuf {
         &self.local_folder
     }

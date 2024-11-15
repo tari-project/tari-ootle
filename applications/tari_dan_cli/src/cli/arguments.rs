@@ -1,4 +1,4 @@
-use crate::cli::commands::create;
+use crate::cli::commands::{create, new};
 use crate::cli::config::{Config, TemplateRepository};
 use crate::cli::util;
 use crate::git::repository::GitRepository;
@@ -105,12 +105,29 @@ pub enum Commands {
         #[command()]
         name: String,
 
-        /// (Optional) Selected project template name.
+        /// (Optional) Selected project template (ID).
         /// It will be prompted if not set.
         #[arg(short = 't', long)]
-        project_template: Option<String>,
+        template: Option<String>,
 
         /// Target folder where the new project will be generated
+        #[arg(long, value_name = "PATH", default_value = default_target_dir().into_os_string()
+        )]
+        target: PathBuf,
+    },
+    /// Creates a new Tari wasm template project
+    New {
+        /// (Optional) Name of the project
+        /// Default is the template's name.
+        #[arg(short = 'n', long)]
+        name: Option<String>,
+
+        /// (Optional) Selected wasm template (ID).
+        /// It will be prompted if not set.
+        #[arg(short = 't', long)]
+        template: Option<String>,
+
+        /// Target folder where the new project will be generated.
         #[arg(long, value_name = "PATH", default_value = default_target_dir().into_os_string()
         )]
         target: PathBuf,
@@ -194,13 +211,22 @@ impl Cli {
         let wasm_template_repo = loading!("Refresh wasm templates repository", self.refresh_template_repository(&config.wasm_template_repository).await)?;
 
         match &self.command {
-            Commands::Create { name, project_template, target } => {
+            Commands::Create { name, template, target } => {
                 create::handle(
                     config,
                     project_template_repo,
                     name.as_str(),
-                    project_template.as_ref(),
-                    target,
+                    template.as_ref(),
+                    target.clone(),
+                ).await
+            }
+            Commands::New { name, template, target } => {
+                new::handle(
+                    config,
+                    wasm_template_repo,
+                    name.as_ref(),
+                    template.as_ref(),
+                    target.clone(),
                 ).await
             }
         }

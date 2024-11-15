@@ -24,3 +24,4 @@ thiserror = "1.0.67"
 spinners = "4.1.1"
 convert_case = "0.6.0"
 dialoguer = { version = "0.11.0", features = ["default", "fuzzy-select"] }
+cargo_toml = "0.20.5"

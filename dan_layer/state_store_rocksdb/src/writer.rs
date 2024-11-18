@@ -52,7 +52,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{BlockModel, TransactionPoolModel, TransactionPoolPendingUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{BlockModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -1086,14 +1086,21 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // fetch the related block
         let block = BlockModel::get(tx, operation, block_id)?;
 
-        // insert the pending update
-        let value = TransactionPoolPendingUpdateModel {
-            transaction: update.transaction().clone(),
+        // insert the update
+        let value = TransactionPoolStateUpdateModel {
             block_id: *block_id,
             block_height: block.height(),
             is_applied: false,
+            transaction_id: *update.transaction_id(),
+            evidence: update.evidence().clone(),
+            transaction_fee: update.transaction_fee(),
+            leader_fee: update.leader_fee().cloned(),
+            stage: update.stage(),
+            local_decision: Some(update.decision()),
+            remote_decision: update.remote_decision(),
+            is_ready: update.is_ready(),
         };
-        TransactionPoolPendingUpdateModel::put(tx, operation, &value)?;
+        TransactionPoolStateUpdateModel::put(self.db.clone(), tx, operation, &value)?;
 
         // Set is_ready and pending_stage to the updated values. This allows has_uncommitted_transactions to return an
         // accurate value without querying records in the updates table.

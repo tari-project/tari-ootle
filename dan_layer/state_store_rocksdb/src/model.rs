@@ -25,7 +25,7 @@ use std::sync::Arc;
 use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::NodeHeight;
-use tari_dan_storage::consensus_models::{Block, BlockId, TransactionPoolRecord, TransactionPoolStatusUpdate};
+use tari_dan_storage::consensus_models::{Block, BlockId, Decision, Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate};
 use tari_engine_types::confidential::validate_elgamal_verifiable_balance_proof;
 use tari_transaction::TransactionId;
 
@@ -33,6 +33,73 @@ use crate::error::RocksDbStorageError;
 
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct TransactionPoolStateUpdateModel {
+    pub block_id: BlockId,
+    pub block_height: NodeHeight,
+    pub transaction_id: TransactionId,
+    pub evidence: Evidence,
+    pub transaction_fee: u64,
+    pub leader_fee: Option<LeaderFee>,
+    pub stage: TransactionPoolStage,
+    pub local_decision: Option<Decision>,
+    pub remote_decision: Option<Decision>,
+    pub is_ready: bool,
+    pub is_applied: bool,
+}
+
+impl TransactionPoolStateUpdateModel {
+    pub const KEY_PREFIX: &str = "transactionpoolpendingupdate_";
+
+    fn key(value: &TransactionPoolStateUpdateModel) -> String {
+        // the key format allows us to query all updates by block prefix, ordered by height DESC
+        let block_id =  value.block_id.to_string();
+        // TODO: is there a cleaner way to implement desc key ordering in RocksDb?
+        let block_height_desc = NodeHeight(u64::MAX) - value.block_height;
+        let tx_id = value.transaction_id.to_string();
+        format!("{}_{}_{}_{}", Self::KEY_PREFIX, block_id, block_height_desc, tx_id)
+    }
+
+    fn encode(value: &TransactionPoolStateUpdateModel) -> Result<Vec<u8>, RocksDbStorageError> {
+        let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
+        Ok(bytes)
+    }
+
+    fn decode(bytes: Vec<u8>) -> Result<TransactionPoolStateUpdateModel, RocksDbStorageError> {
+        let (value, _): (TransactionPoolStateUpdateModel, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
+        Ok(value)
+    }
+
+    pub fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &TransactionPoolStateUpdateModel) -> Result<(), RocksDbStorageError> {
+        let key = Self::key(value);
+        let value_bytes = Self::encode(value)?;
+        tx.put(key, value_bytes)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+        })?;
+
+        Ok(())
+    }
+
+    pub fn multi_get(tx: &Transaction<'_, TransactionDB>, _operation: &'static str, prefix: &str) -> Result<Vec<TransactionPoolStateUpdateModel>, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        let prefix = format!("{}_{}", Self::KEY_PREFIX, prefix);
+        options.set_iterate_range(rocksdb::PrefixRange(prefix.as_bytes()));
+
+        let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
+        let values = iterator.map(|item| {
+            // TODO: properly handle errors and avoid unwraps
+            let (_, value) = item.unwrap();
+            let value = Self::decode(value.to_vec()).unwrap();
+            value
+        })
+        .collect();
+        Ok(values)
+    }
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TransactionPoolPendingUpdateModel {
@@ -43,6 +110,9 @@ pub(crate) struct TransactionPoolPendingUpdateModel {
 }
 
 impl TransactionPoolPendingUpdateModel {
+    pub const KEY_PREFIX: &str = "transactionpoolpendingupdate_";
+    //pub const CF_BLOCK_ID: &str = "transactionpoolpendingupdate_block_id";
+
     fn key(tx_id: &TransactionId) -> String {
         format!("transactionpoolpendingupdate_{}", tx_id.to_string())
     }
@@ -52,17 +122,67 @@ impl TransactionPoolPendingUpdateModel {
         Ok(bytes)
     }
 
-    pub fn put(tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &TransactionPoolPendingUpdateModel) -> Result<(), RocksDbStorageError> {
+    fn decode(bytes: Vec<u8>) -> Result<TransactionPoolPendingUpdateModel, RocksDbStorageError> {
+        let (value, _): (TransactionPoolPendingUpdateModel, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
+        Ok(value)
+    }
+
+    pub fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &TransactionPoolPendingUpdateModel) -> Result<(), RocksDbStorageError> {
         let key = Self::key(value.transaction.transaction_id());
-        let value = Self::encode(value)?;
-        tx.put(key, value)
+        let value_bytes = Self::encode(value)?;
+        tx.put(key, value_bytes)
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
                 source: e,
         })?;
 
+        /*
+        // blocks_id column family
+        let cf = db.cf_handle(Self::CF_BLOCK_ID).unwrap();
+        let key_cf = Self::key_cf(&value.block_id.to_string());
+        tx.put_cf(cf, key_cf, value.transaction.transaction_id().as_bytes())
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+        })?;
+         */
+
         Ok(())
     }
+
+    /*
+    pub fn multi_get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf: &str, operation: &'static str, key_value: &str) -> Result<Vec<TransactionPoolPendingUpdateModel>, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        let prefix = format!("{}{}", Self::KEY_PREFIX, key_value);
+        options.set_iterate_range(rocksdb::PrefixRange(prefix.as_bytes()));
+
+        // get all the tx_ids from the column family
+        let cf = db.cf_handle(cf).unwrap();
+        let iterator = tx.iterator_cf_opt(cf, options, rocksdb::IteratorMode::Start);
+        let tx_ids: Vec<TransactionId> = iterator.map(|item: Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>| {
+            // TODO: properly handle errors and avoid unwraps
+            let (_, value) = item.unwrap();
+            TransactionId::try_from(value.to_vec()).unwrap()
+        })
+        .collect();
+        
+        // get all the values
+        let mut updates = vec![];
+        for tx_id in tx_ids {
+            let key = Self::key(&tx_id);
+            let value = tx.get(&key)
+                .map_err(|e| RocksDbStorageError::RocksDbError {
+                    operation,
+                    source: e,
+                })?;
+            let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
+            let update = Self::decode(bytes)?;
+            updates.push(update);
+        }
+
+        Ok(updates)
+    }
+     */
 }
 
 pub(crate) struct TransactionPoolModel {}
@@ -120,44 +240,41 @@ impl TransactionPoolModel {
         Ok(values)
     }
 
-    /*
     pub fn try_convert(
-        self,
         value: &TransactionPoolRecord,
-        update: Option<TransactionPoolStatusUpdate>,
+        update: Option<TransactionPoolStateUpdateModel>,
     ) -> Result<TransactionPoolRecord, RocksDbStorageError> {
-        let mut evidence = value.evidence();
+        let mut evidence = value.evidence().clone();
         let mut pending_stage = None;
         let mut local_decision = value.local_decision();
         let mut is_ready = value.is_ready();
         let mut remote_decision = value.remote_decision();
-        let mut leader_fee = value.leader_fee();
+        let mut leader_fee = value.leader_fee().cloned();
         let mut transaction_fee = value.transaction_fee();
 
         if let Some(update) = update {
-            evidence = update.evidence();
-            is_ready = update.is_ready();
-            pending_stage = Some(&update.stage());
-            local_decision = update.transaction().local_decision();
-            remote_decision = update.remote_decision();
-            leader_fee = update.leader_fee();
-            transaction_fee = update.transaction_fee();
+            evidence = update.evidence;
+            is_ready = update.is_ready;
+            pending_stage = Some(update.stage);
+            local_decision = update.local_decision;
+            remote_decision = update.remote_decision;
+            leader_fee = update.leader_fee;
+            transaction_fee = update.transaction_fee;
         }
 
         Ok(TransactionPoolRecord::load(
             *value.transaction_id(),
-            *evidence,
+            evidence,
             transaction_fee as u64,
-            value.leader_fee().cloned(),
+            leader_fee,
             value.current_stage(),
-            pending_stage.copied(),
+            pending_stage,
             value.original_decision(),
             local_decision,
-            value.remote_decision(),
+            remote_decision,
             is_ready,
         ))
     }
-    */
 }
 
 pub(crate) struct BlockModel {}

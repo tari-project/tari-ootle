@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    borrow::Borrow, cell::UnsafeCell, collections::{HashMap, HashSet}, marker::PhantomData, ops::RangeInclusive, sync::{Arc, Mutex, MutexGuard}
+    borrow::Borrow, cell::UnsafeCell, collections::{HashMap, HashSet}, marker::PhantomData, ops::RangeInclusive, sync::{Arc, Mutex, MutexGuard}, thread::current
 };
 
 use bigdecimal::{BigDecimal, ToPrimitive};
@@ -29,6 +29,7 @@ use indexmap::IndexMap;
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::value::Index;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
     shard::Shard,
@@ -90,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::ByteArray;
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{BlockModel, TransactionPoolModel, TransactionPoolPendingUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{BlockModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -141,7 +142,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         from_block_id: &BlockId,
         to_block_id: &BlockId,
         transaction_ids: ITx,
-    ) -> Result<IndexMap<String, TransactionPoolPendingUpdateModel>, RocksDbStorageError>
+    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModel>, RocksDbStorageError>
     where
         ITx: Iterator<Item = &'i str> + ExactSizeIterator,
     {
@@ -153,8 +154,19 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         // block that proposes a change. So we cannot only use blocks that have commands.
         let applicable_block_ids = self.get_block_ids_between(from_block_id, to_block_id)?;
 
-        // TODO
-        Ok(IndexMap::new())
+        debug!(
+            target: LOG_TARGET,
+            "get_transaction_atom_state_updates_between_blocks: from_block_id={}, to_block_id={}, len(applicable_block_ids)={}",
+            from_block_id,
+            to_block_id,
+            applicable_block_ids.len());
+
+        if applicable_block_ids.is_empty() {
+            return Ok(IndexMap::new());
+        }
+
+        let block_ids = applicable_block_ids.iter().map(|s| s.as_str());
+        self.get_ranked_transaction_atom_updates(transaction_ids, block_ids)
 
         /*
         if transaction_ids.len() == 0 {
@@ -191,13 +203,97 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
             */
     }
 
+    /// Creates a query to select the latest transaction pool state updates for the given transaction ids and block ids.
+    /// If no transaction ids are provided, all updates for the given block ids are returned.
+    fn get_ranked_transaction_atom_updates<
+        'i1,
+        'i2,
+        IBlk: Iterator<Item = &'i1 str> + ExactSizeIterator,
+        ITx: Iterator<Item = &'i2 str> + ExactSizeIterator,
+    >(
+        &self,
+        transaction_ids: ITx,
+        block_ids: IBlk,
+    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModel>, RocksDbStorageError>
+    {
+        // TODO: optimize this query in RocksDB
+        let transaction_ids: Vec<String> = transaction_ids.map(|id| id.to_string()).collect();
+        let mut res = IndexMap::new();
+        for block_id in block_ids {
+            let key_value = block_id.to_string();
+            let updates = TransactionPoolStateUpdateModel::multi_get( &self.tx, "get_ranked_transaction_atom_updates", &key_value)?;
+            updates
+                .iter()
+                .filter(|u| {
+                    if !transaction_ids.is_empty() && !transaction_ids.contains(&u.transaction_id.to_string()) {
+                        return false;
+                    }
+                    u.is_applied == false
+                })
+                .for_each(|u| {
+                    res.insert(u.transaction_id.to_string(), u.clone());
+                });
+        }
+
+        Ok(res)
+
+        /*
+        // Query all updates if the transaction_ids are empty
+        let in_transactions = if transaction_ids.len() == 0 {
+            String::new()
+        } else {
+            format!(
+                "AND tpsu.transaction_id in ({})",
+                self.sql_frag_for_in_statement(transaction_ids, TransactionId::byte_size() * 2)
+            )
+        };
+        // Unfortunate hack. Binding array types in diesel is only supported for postgres.
+        sql_query(format!(
+            r#"
+                 WITH RankedResults AS (
+                    SELECT
+                        tpsu.*,
+                        ROW_NUMBER() OVER (PARTITION BY tpsu.transaction_id ORDER BY tpsu.block_height DESC) AS `rank`
+                    FROM
+                        transaction_pool_state_updates AS tpsu
+                    WHERE
+                        is_applied = 0  AND
+                        tpsu.block_id in ({})
+                    {}
+                )
+                SELECT
+                    id,
+                    block_id,
+                    block_height,
+                    transaction_id,
+                    stage,
+                    evidence,
+                    is_ready,
+                    local_decision,
+                    transaction_fee,
+                    leader_fee,
+                    remote_decision,
+                    is_applied,
+                    created_at
+                FROM
+                    RankedResults
+                WHERE
+                    rank = 1;
+                "#,
+            self.sql_frag_for_in_statement(block_ids, BlockId::byte_size() * 2),
+            in_transactions
+        ))
+         */
+    }
+
+    /*
     fn sql_frag_for_in_statement<'i, I: Iterator<Item = &'i str> + ExactSizeIterator>(
         &self,
         values: I,
         item_size: usize,
     ) -> String {
         todo!()
-        /*
+       
         let len = values.len();
         let mut sql_frag = String::with_capacity((len * item_size + len * 3 + len).saturating_sub(1));
         for (i, value) in values.enumerate() {
@@ -209,8 +305,9 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
             }
         }
         sql_frag
-        */
+        
     }
+    */
 
     /// Returns the blocks from the start_block (inclusive) to the end_block (inclusive).
     fn get_block_ids_between(
@@ -219,20 +316,19 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         end_block: &BlockId,
     ) -> Result<Vec<String>, RocksDbStorageError> {
         debug!(target: LOG_TARGET, "get_block_ids_between: start: {start_block}, end: {end_block}");
-
-        // TODO
-        Ok(vec![])
-        /*
+        
         let mut block_ids = vec![];
-        {
-            let block = BlockModel::get_cf(&self.tx, "blocks_parent_id", "get_block_ids_between", start_block)?;
 
+        let mut block_id = *end_block;
+        while block_id != *start_block || block_id != BlockId::genesis() {
+            let block = BlockModel::get(&self.tx, "blocks_parent_id", &block_id)?;
             block_ids.push(block.id().to_string());
+            block_id = *block.parent();
         }
 
-        Ok(block_ids)
-        */
+        //let block = BlockModel::get_cf(&self.tx, "blocks_parent_id", "get_block_ids_between", start_block)?;
 
+        Ok(block_ids)
 
         /* 
         debug!(target: LOG_TARGET, "get_block_ids_between: start: {start_block}, end: {end_block}");
@@ -1660,13 +1756,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             to_block_id,
             transaction_id,
             updates.len(),
-            updates.values().map(|v| v.block_id).collect::<Vec<_>>(),
+            updates.values().map(|v| v.block_id.clone()).collect::<Vec<_>>(),
         );
 
         let rec = TransactionPoolModel::get(&self.tx, "transaction_pool_get_for_blocks", transaction_id)?;
-
-        // TODO
-        //rec.try_convert(updates.swap_remove(&transaction_id))
+        let rec = TransactionPoolModel::try_convert(&rec, updates.swap_remove(&transaction_id.to_string()))?;
 
         Ok(rec)
 

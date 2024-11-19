@@ -1,7 +1,6 @@
+use std::{fs::Metadata, io, path::PathBuf};
+
 use dialoguer::FuzzySelect;
-use std::fs::Metadata;
-use std::io;
-use std::path::PathBuf;
 use tokio::fs;
 
 pub async fn create_dir(dir: &PathBuf) -> io::Result<()> {
@@ -9,26 +8,22 @@ pub async fn create_dir(dir: &PathBuf) -> io::Result<()> {
 }
 
 pub async fn file_exists(file: &PathBuf) -> io::Result<bool> {
-    Ok(
-        fs::try_exists(file).await? && path_metadata(file).await?.is_file()
-    )
+    Ok(fs::try_exists(file).await? && path_metadata(file).await?.is_file())
 }
 
 pub async fn dir_exists(dir: &PathBuf) -> io::Result<bool> {
-    Ok(
-        fs::try_exists(dir).await? && path_metadata(dir).await?.is_dir()
-    )
+    Ok(fs::try_exists(dir).await? && path_metadata(dir).await?.is_dir())
 }
 
 pub async fn path_metadata(path: &PathBuf) -> io::Result<Metadata> {
     fs::metadata(path).await
 }
 
-pub fn cli_select<T: ToString + Clone>(prompt: &str, items: Vec<T>) -> anyhow::Result<T> {
+pub fn cli_select<T: ToString + Clone>(prompt: &str, items: &[T]) -> anyhow::Result<T> {
     let selection = FuzzySelect::new()
         .with_prompt(prompt)
         .highlight_matches(true)
-        .items(&items)
+        .items(items)
         .interact()?;
 
     Ok(items[selection].clone())

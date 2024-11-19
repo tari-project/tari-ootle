@@ -1,14 +1,22 @@
-use crate::cli::commands::{create, new};
-use crate::cli::config::{Config, TemplateRepository};
-use crate::cli::util;
-use crate::git::repository::GitRepository;
-use crate::loading;
+use std::{env, path::PathBuf};
+
 use anyhow::anyhow;
-use clap::builder::styling::AnsiColor;
-use clap::builder::Styles;
-use clap::{Parser, Subcommand};
-use std::env;
-use std::path::PathBuf;
+use clap::{
+    builder::{styling::AnsiColor, Styles},
+    Parser,
+    Subcommand,
+};
+use convert_case::{Case, Casing};
+
+use crate::{
+    cli::{
+        commands::{create, new},
+        config::{Config, TemplateRepository},
+        util,
+    },
+    git::repository::GitRepository,
+    loading,
+};
 
 const DEFAULT_DATA_FOLDER_NAME: &str = "tari_dan_cli";
 const TEMPLATE_REPOS_FOLDER_NAME: &str = "template_repositories";
@@ -26,7 +34,8 @@ pub fn cli_styles() -> Styles {
 }
 
 fn default_base_dir() -> PathBuf {
-    dirs_next::data_dir().unwrap_or_else(|| env::current_dir().unwrap())
+    dirs_next::data_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap())
         .join(DEFAULT_DATA_FOLDER_NAME)
 }
 
@@ -35,7 +44,8 @@ fn default_target_dir() -> PathBuf {
 }
 
 fn default_config_file() -> PathBuf {
-    dirs_next::config_dir().unwrap_or_else(|| env::current_dir().unwrap())
+    dirs_next::config_dir()
+        .unwrap_or_else(|| env::current_dir().unwrap())
         .join(DEFAULT_DATA_FOLDER_NAME)
         .join(DEFAULT_CONFIG_FILE_NAME)
 }
@@ -55,7 +65,14 @@ pub fn config_override_parser(config_override: &str) -> Result<ConfigOverride, S
         return Err(format!("Override key invalid: {}", key));
     }
 
-    Ok(ConfigOverride { key: key.to_string(), value: value.to_string() })
+    Ok(ConfigOverride {
+        key: key.to_string(),
+        value: value.to_string(),
+    })
+}
+
+pub fn project_name_parser(project_name: &str) -> Result<String, String> {
+    Ok(project_name.to_case(Case::Snake))
 }
 
 #[derive(Clone, Debug)]
@@ -102,7 +119,7 @@ pub enum Commands {
     /// Creates a new Tari templates project
     Create {
         /// Name of the project
-        #[command()]
+        #[arg(value_parser = project_name_parser)]
         name: String,
 
         /// (Optional) Selected project template (ID).
@@ -117,10 +134,9 @@ pub enum Commands {
     },
     /// Creates a new Tari wasm template project
     New {
-        /// (Optional) Name of the project
-        /// Default is the template's name.
-        #[arg(short = 'n', long)]
-        name: Option<String>,
+        /// Name of the project
+        #[arg(value_parser = project_name_parser)]
+        name: String,
 
         /// (Optional) Selected wasm template (ID).
         /// It will be prompted if not set.
@@ -141,9 +157,15 @@ impl Cli {
         if !util::path_metadata(&self.args.config_file_path).await?.is_file() {
             return Err(anyhow!("Configuration file path is not pointing to a file!"));
         }
-        util::create_dir(&self.args.config_file_path.parent()
-            .ok_or(anyhow!("Can't find folder of configuration file!"))?
-            .to_path_buf()).await?;
+        util::create_dir(
+            &self
+                .args
+                .config_file_path
+                .parent()
+                .ok_or(anyhow!("Can't find folder of configuration file!"))?
+                .to_path_buf(),
+        )
+        .await?;
 
         // loading/creating config
         let mut config = if !util::file_exists(&self.args.config_file_path).await? {
@@ -158,7 +180,7 @@ impl Cli {
                     let cfg = Config::default();
                     cfg.write_to_file(&self.args.config_file_path).await?;
                     cfg
-                }
+                },
             }
         };
 
@@ -173,9 +195,15 @@ impl Cli {
     async fn refresh_template_repository(&self, template_repo: &TemplateRepository) -> anyhow::Result<GitRepository> {
         util::create_dir(&self.args.base_dir.join(TEMPLATE_REPOS_FOLDER_NAME)).await?;
         let repo_url_splitted: Vec<&str> = template_repo.url.split("/").collect();
-        let repo_name = repo_url_splitted.last().ok_or(anyhow!("Failed to get repository name from URL!"))?;
-        let repo_user = repo_url_splitted.get(repo_url_splitted.len() - 2).ok_or(anyhow!("Failed to get repository owner from URL!"))?;
-        let repo_folder_path = self.args.base_dir
+        let repo_name = repo_url_splitted
+            .last()
+            .ok_or(anyhow!("Failed to get repository name from URL!"))?;
+        let repo_user = repo_url_splitted
+            .get(repo_url_splitted.len() - 2)
+            .ok_or(anyhow!("Failed to get repository owner from URL!"))?;
+        let repo_folder_path = self
+            .args
+            .base_dir
             .join(TEMPLATE_REPOS_FOLDER_NAME)
             .join(repo_user)
             .join(repo_name);
@@ -190,13 +218,10 @@ impl Cli {
                 } else {
                     repo.pull_changes(None)?;
                 }
-            }
+            },
             false => {
-                repo.clone_and_checkout(
-                    template_repo.url.as_str(),
-                    template_repo.branch.as_str(),
-                )?;
-            }
+                repo.clone_and_checkout(template_repo.url.as_str(), template_repo.branch.as_str())?;
+            },
         }
 
         Ok(repo)
@@ -204,11 +229,21 @@ impl Cli {
 
     pub async fn handle_command(&self) -> anyhow::Result<()> {
         // init config and dirs
-        let config = loading!("Init configuration and directories", self.init_base_dir_and_config().await)?;
+        let config = loading!(
+            "Init configuration and directories",
+            self.init_base_dir_and_config().await
+        )?;
 
         // refresh templates from provided repositories
-        let project_template_repo = loading!("Refresh project templates repository", self.refresh_template_repository(&config.project_template_repository).await)?;
-        let wasm_template_repo = loading!("Refresh wasm templates repository", self.refresh_template_repository(&config.wasm_template_repository).await)?;
+        let project_template_repo = loading!(
+            "Refresh project templates repository",
+            self.refresh_template_repository(&config.project_template_repository)
+                .await
+        )?;
+        let wasm_template_repo = loading!(
+            "Refresh wasm templates repository",
+            self.refresh_template_repository(&config.wasm_template_repository).await
+        )?;
 
         match &self.command {
             Commands::Create { name, template, target } => {
@@ -218,8 +253,9 @@ impl Cli {
                     name.as_str(),
                     template.as_ref(),
                     target.clone(),
-                ).await
-            }
+                )
+                .await
+            },
             Commands::New { name, template, target } => {
                 new::handle(
                     config,
@@ -227,9 +263,9 @@ impl Cli {
                     name.as_ref(),
                     template.as_ref(),
                     target.clone(),
-                ).await
-            }
+                )
+                .await
+            },
         }
     }
 }
-

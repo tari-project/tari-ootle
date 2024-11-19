@@ -1,9 +1,10 @@
-use crate::cli::arguments::Cli;
 use clap::Parser;
+
+use crate::cli::arguments::Cli;
 
 mod cli;
 mod git;
-mod template;
+mod templates;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

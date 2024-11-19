@@ -1,6 +1,6 @@
-use git2::build::RepoBuilder;
-use git2::Repository;
 use std::path::PathBuf;
+
+use git2::{build::RepoBuilder, Repository};
 use thiserror::Error;
 
 pub struct GitRepository {
@@ -24,7 +24,10 @@ pub type GitRepositoryResult<T> = Result<T, Error>;
 
 impl GitRepository {
     pub fn new(local_folder: PathBuf) -> Self {
-        Self { repository: None, local_folder }
+        Self {
+            repository: None,
+            local_folder,
+        }
     }
 
     /// Initializes a git repository in [`local_folder`].
@@ -46,7 +49,7 @@ impl GitRepository {
             RepoBuilder::new()
                 .branch(branch)
                 .clone(url, &self.local_folder)
-                .map_err(Error::Git2)?
+                .map_err(Error::Git2)?,
         );
 
         Ok(())
@@ -89,8 +92,8 @@ impl GitRepository {
         Ok(())
     }
 
-    /// Gives back the actual repository if initialized using any of the methods 
-    /// ([`Self::init`], [`Self::load`] or [`Self::clone_and_checkout`]). 
+    /// Gives back the actual repository if initialized using any of the methods
+    /// ([`Self::init`], [`Self::load`] or [`Self::clone_and_checkout`]).
     fn repository(&self) -> GitRepositoryResult<&Repository> {
         if self.repository.is_none() {
             return Err(Error::RepositoryNotInitialized);
@@ -113,7 +116,7 @@ impl GitRepository {
             Err(Error::RefIsNotBranch)
         }
     }
-    
+
     pub fn local_folder(&self) -> &PathBuf {
         &self.local_folder
     }

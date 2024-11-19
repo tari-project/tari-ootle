@@ -267,7 +267,7 @@ impl TransactionPoolModel {
             evidence,
             transaction_fee as u64,
             leader_fee,
-            value.current_stage(),
+            value.stage(),
             pending_stage,
             value.original_decision(),
             local_decision,

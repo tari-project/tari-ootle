@@ -38,7 +38,7 @@ fn create_tx_atom() -> TransactionAtom {
 }
 
 mod confirm_all_transitions {
-    use tari_dan_common_types::{NumPreshards, ShardGroup};
+    use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
 
     use super::*;
 
@@ -52,11 +52,9 @@ mod confirm_all_transitions {
         let atom3 = create_tx_atom();
 
         let network = Default::default();
-        let zero_block = Block::zero_block(network, NumPreshards::P64, None).unwrap();
+        let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
-        //let res = tx.blocks_get(zero_block.id());
-        //eprintln!("{:?}", res);
-        let block1 = Block::new(
+        let block1 = Block::create(
             network,
             *zero_block.id(),
             zero_block.justify().clone(),
@@ -74,8 +72,9 @@ mod confirm_all_transitions {
             EpochTime::now().as_u64(),
             0,
             FixedHash::zero(),
-            None,
-        );
+            ExtraData::default(),
+        )
+        .unwrap();
         block1.insert(&mut tx).unwrap();
         
         tx.transaction_pool_insert_new(atom1.id, atom1.decision, true).unwrap();
@@ -112,7 +111,7 @@ mod confirm_all_transitions {
         tx.transaction_pool_add_pending_update(&block_id, &TransactionPoolStatusUpdate::new(tx_3, true))
             .unwrap();
 
-        /*
+       
         let rec = tx
             .transaction_pool_get_for_blocks(zero_block.id(), &block_id, &atom1.id)
             .unwrap();
@@ -125,6 +124,7 @@ mod confirm_all_transitions {
         assert!(rec.committed_stage().is_new());
         assert!(rec.pending_stage().unwrap().is_prepared());
 
+        /*
         tx.transaction_pool_confirm_all_transitions(&block1.as_locked_block())
             .unwrap();
 

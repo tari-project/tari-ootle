@@ -442,6 +442,10 @@ impl TransactionPoolRecord {
         self.pending_stage.unwrap_or(self.stage)
     }
 
+    pub fn stage(&self) -> TransactionPoolStage {
+        self.stage
+    }
+
     pub fn leader_fee(&self) -> Option<&LeaderFee> {
         self.leader_fee.as_ref()
     }

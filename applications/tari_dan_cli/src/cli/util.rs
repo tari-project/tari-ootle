@@ -1,3 +1,6 @@
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
 use std::{fs::Metadata, io, path::PathBuf};
 
 use dialoguer::FuzzySelect;

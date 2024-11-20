@@ -1,3 +1,6 @@
+// Copyright 2024 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
 use std::{collections::HashMap, fmt::Display, path::PathBuf};
 
 use serde::{Deserialize, Serialize};

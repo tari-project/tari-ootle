@@ -1096,7 +1096,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             transaction_fee: update.transaction_fee(),
             leader_fee: update.leader_fee().cloned(),
             stage: update.stage(),
-            local_decision: Some(update.decision()),
+            local_decision: update.decision(),
             remote_decision: update.remote_decision(),
             is_ready: update.is_ready(),
         };
@@ -1244,7 +1244,59 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn transaction_pool_confirm_all_transitions(&mut self, new_locked_block: &LockedBlock) -> Result<(), StorageError> {
-        todo!()
+        let operation = "transaction_pool_confirm_all_transitions";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        // fetch all the transaction updates that are not applied yet for the new block 
+        let key_prefix = new_locked_block.block_id().to_string();
+        let mut updates: Vec<TransactionPoolStateUpdateModel> = TransactionPoolStateUpdateModel::multi_get(tx, operation, &key_prefix)?
+            // TODO: do the filtering at the rocksdb query (use a dedicated column family?)
+            .into_iter()
+            .filter(|u| {
+                u.block_height <= new_locked_block.height() &&
+                u.is_applied == false 
+            })
+            .collect();
+
+        debug!(
+            target: LOG_TARGET,
+            "transaction_pool_confirm_all_transitions: new_locked_block={}, {} updates",  new_locked_block, updates.len()
+        );
+
+        // mark all transaction updates as applied
+        for mut update in &mut updates {
+            update.is_applied = true;
+            TransactionPoolStateUpdateModel::put(self.db.clone(), tx, operation, &update)?;
+        }
+
+        // update the transactions in the transaction pool
+        for update in &updates {
+            let confirm_stage = match update.stage {
+                TransactionPoolStage::LocalPrepared => Some(Some(TransactionPoolConfirmedStage::ConfirmedPrepared)),
+                TransactionPoolStage::LocalAccepted => Some(Some(TransactionPoolConfirmedStage::ConfirmedAccepted)),
+                _ => None,
+            };
+
+            // TODO: use instead the rocksdb "merge" operator for better performance?
+            let mut tx_pool_value = TransactionPoolModel::get(tx, operation, &update.transaction_id)?;
+            tx_pool_value.set_stage(update.stage);
+            tx_pool_value.set_local_decision(update.local_decision);
+            tx_pool_value.set_transaction_fee(update.transaction_fee);
+            if let Some(leader_fee) = &update.leader_fee {
+                tx_pool_value.set_leader_fee(leader_fee.clone());
+            }
+            tx_pool_value.set_evidence(update.evidence.clone());
+            tx_pool_value.set_is_ready(update.is_ready);
+            if let Some(remote_decision) = update.remote_decision {
+                tx_pool_value.set_remote_decision(remote_decision);
+            }
+            // TODO: tx_pool_value.set_confirm_stage?
+
+            TransactionPoolModel::put(tx, operation, &tx_pool_value)?;
+        }
+
+        Ok(())
+
         /*
         use crate::schema::{transaction_pool, transaction_pool_state_updates};
 

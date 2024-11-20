@@ -43,7 +43,7 @@ pub(crate) struct TransactionPoolStateUpdateModel {
     pub transaction_fee: u64,
     pub leader_fee: Option<LeaderFee>,
     pub stage: TransactionPoolStage,
-    pub local_decision: Option<Decision>,
+    pub local_decision: Decision,
     pub remote_decision: Option<Decision>,
     pub is_ready: bool,
     pub is_applied: bool,
@@ -256,7 +256,7 @@ impl TransactionPoolModel {
             evidence = update.evidence;
             is_ready = update.is_ready;
             pending_stage = Some(update.stage);
-            local_decision = update.local_decision;
+            local_decision = Some(update.local_decision);
             remote_decision = update.remote_decision;
             leader_fee = update.leader_fee;
             transaction_fee = update.transaction_fee;

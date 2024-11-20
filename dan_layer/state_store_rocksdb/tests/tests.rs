@@ -124,10 +124,10 @@ mod confirm_all_transitions {
         assert!(rec.committed_stage().is_new());
         assert!(rec.pending_stage().unwrap().is_prepared());
 
-        /*
+
         tx.transaction_pool_confirm_all_transitions(&block1.as_locked_block())
             .unwrap();
-
+        
         let rec = tx
             .transaction_pool_get_for_blocks(zero_block.id(), &block_id, &atom1.id)
             .unwrap();
@@ -147,6 +147,5 @@ mod confirm_all_transitions {
         assert_eq!(rec.pending_stage(), None);
 
         tx.rollback().unwrap();
-         */
     }
 }

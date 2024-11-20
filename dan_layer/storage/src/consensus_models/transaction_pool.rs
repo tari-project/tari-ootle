@@ -553,6 +553,11 @@ impl TransactionPoolRecord {
         self
     }
 
+    pub fn set_stage(&mut self, stage: TransactionPoolStage) -> &mut Self {
+        self.stage = stage;
+        self
+    }
+
     pub fn update_from_execution(
         &mut self,
         num_preshards: NumPreshards,

@@ -33,6 +33,7 @@ members = [
     "dan_layer/state_tree",
     "dan_layer/storage_sqlite",
     "dan_layer/storage",
+    "dan_layer/storage_tests",
     "dan_layer/tari_bor",
     "dan_layer/template_abi",
     "dan_layer/template_builtin",

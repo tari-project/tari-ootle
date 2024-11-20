@@ -1,4 +1,4 @@
-//   Copyright 2023 The Tari Project
+//   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use rand::{rngs::OsRng, RngCore};
@@ -10,13 +10,8 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::TransactionId;
 use tari_utilities::epoch_time::EpochTime;
-
-fn create_db() -> SqliteStateStore<String> {
-    SqliteStateStore::connect(":memory:").unwrap()
-}
 
 fn create_tx_atom() -> TransactionAtom {
     let mut bytes = [0u8; 32];
@@ -33,15 +28,25 @@ fn create_tx_atom() -> TransactionAtom {
 mod confirm_all_transitions {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
 
+    use crate::util::{create_rocksdb, create_sqlite};
+
     use super::*;
 
     #[test]
-    fn it_sets_pending_stage_to_stage() {
-        let db = create_db();
-        // Need FK=off because otherwise we'd have to create transactions for each in the pool
-        db.foreign_keys_off().unwrap();
-        let mut tx = db.create_write_tx().unwrap();
+    fn it_sets_pending_stage_to_stage_sqlite() {
+        let db = create_sqlite();
+        it_sets_pending_stage_to_stage(db);
+    }
 
+    #[test]
+    fn it_sets_pending_stage_to_stage_rocksdb() {
+        let db = create_rocksdb();
+        it_sets_pending_stage_to_stage(db);
+    }
+
+    fn it_sets_pending_stage_to_stage(db: impl StateStore) {
+        let mut tx = db.create_write_tx().unwrap();
+        
         let atom1 = create_tx_atom();
         let atom2 = create_tx_atom();
         let atom3 = create_tx_atom();
@@ -71,12 +76,11 @@ mod confirm_all_transitions {
         )
         .unwrap();
         block1.insert(&mut tx).unwrap();
-
+        
         tx.transaction_pool_insert_new(atom1.id, atom1.decision, true).unwrap();
         tx.transaction_pool_insert_new(atom2.id, atom2.decision, true).unwrap();
         tx.transaction_pool_insert_new(atom3.id, atom3.decision, true).unwrap();
         let block_id = *block1.id();
-
         let transactions = tx.transaction_pool_get_all().unwrap();
         let mut tx_1 = transactions
             .iter()
@@ -93,7 +97,7 @@ mod confirm_all_transitions {
             .find(|tx| *tx.transaction_id() == atom3.id)
             .unwrap()
             .clone();
-
+       
         tx_1.set_next_stage(TransactionPoolStage::Prepared).unwrap();
         tx_1.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
 
@@ -107,6 +111,7 @@ mod confirm_all_transitions {
         tx.transaction_pool_add_pending_update(&block_id, &TransactionPoolStatusUpdate::new(tx_3, true))
             .unwrap();
 
+       
         let rec = tx
             .transaction_pool_get_for_blocks(zero_block.id(), &block_id, &atom1.id)
             .unwrap();
@@ -119,9 +124,10 @@ mod confirm_all_transitions {
         assert!(rec.committed_stage().is_new());
         assert!(rec.pending_stage().unwrap().is_prepared());
 
+
         tx.transaction_pool_confirm_all_transitions(&block1.as_locked_block())
             .unwrap();
-
+        
         let rec = tx
             .transaction_pool_get_for_blocks(zero_block.id(), &block_id, &atom1.id)
             .unwrap();

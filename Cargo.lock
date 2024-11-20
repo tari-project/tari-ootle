@@ -8834,6 +8834,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ae9eec00137a8eed469fb4148acd9fc6ac8c3f9b110f52cd34698c8b5bfa0e"
 
 [[package]]
+name = "storage_tests"
+version = "0.7.0"
+dependencies = [
+ "rand",
+ "tari_common_types",
+ "tari_dan_common_types",
+ "tari_dan_storage",
+ "tari_engine_types",
+ "tari_state_store_rocksdb",
+ "tari_state_store_sqlite",
+ "tari_state_tree",
+ "tari_transaction",
+ "tari_utilities",
+ "tempfile",
+]
+
+[[package]]
 name = "str-buf"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

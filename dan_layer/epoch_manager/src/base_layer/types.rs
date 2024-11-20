@@ -54,6 +54,11 @@ pub enum EpochManagerRequest<TAddr> {
         value: MicroMinotari,
         reply: Reply<()>,
     },
+    RemoveValidatorNodeRegistration {
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+        reply: Reply<()>,
+    },
     AddBlockHash {
         block_height: u64,
         block_hash: FixedHash,
@@ -98,9 +103,6 @@ pub enum EpochManagerRequest<TAddr> {
     },
     WaitForInitialScanningToComplete {
         reply: Reply<()>,
-    },
-    RemainingRegistrationEpochs {
-        reply: Reply<Option<Epoch>>,
     },
     GetBaseLayerConsensusConstants {
         reply: Reply<BaseLayerConsensusConstants>,

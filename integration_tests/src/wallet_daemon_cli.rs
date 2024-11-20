@@ -223,6 +223,7 @@ pub async fn transfer_confidential(
         signing_key_index: Some(signing_key_index),
         proof_ids: vec![proof_id],
         detect_inputs: true,
+        detect_inputs_use_unversioned: false,
         autofill_inputs: vec![source_account_addr, dest_account_addr],
     };
 
@@ -475,6 +476,7 @@ pub async fn submit_manifest_with_signing_keys(
         transaction,
         signing_key_index: Some(account.key_index),
         detect_inputs: true,
+        detect_inputs_use_unversioned: false,
         proof_ids: vec![],
         autofill_inputs: inputs,
     };
@@ -555,6 +557,7 @@ pub async fn submit_manifest(
         transaction,
         signing_key_index: Some(account.key_index),
         detect_inputs: true,
+        detect_inputs_use_unversioned: false,
         proof_ids: vec![],
         autofill_inputs: inputs,
     };
@@ -604,6 +607,7 @@ pub async fn submit_transaction(
         transaction,
         signing_key_index: None,
         detect_inputs: true,
+        detect_inputs_use_unversioned: false,
         autofill_inputs: inputs,
         proof_ids: vec![],
     };
@@ -661,6 +665,7 @@ pub async fn create_component(
         transaction,
         signing_key_index: Some(account.key_index),
         detect_inputs: true,
+        detect_inputs_use_unversioned: false,
         proof_ids: vec![],
         autofill_inputs: vec![],
     };
@@ -716,6 +721,7 @@ pub async fn call_component(
     wallet_daemon_name: String,
     function_call: String,
     new_outputs_name: Option<String>,
+    use_unversioned_inputs: bool,
 ) -> anyhow::Result<TransactionWaitResultResponse> {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
@@ -734,10 +740,14 @@ pub async fn call_component(
         .as_component_address()
         .expect("Failed to get account component address");
 
-    let tx = Transaction::builder()
-        .fee_transaction_pay_from_component(account_component_address, Amount(1000))
-        .call_method(source_component_address, &function_call, vec![])
-        .with_inputs(vec![
+    let inputs = if use_unversioned_inputs {
+        [
+            SubstateRequirement::unversioned(account_component_address),
+            SubstateRequirement::unversioned(source_component_address),
+        ]
+    } else {
+        // Typically only used in failing tests to assert that a substate is already DOWN
+        [
             SubstateRequirement::new(
                 account_component_address.into(),
                 find_output_version(world, output_ref.as_str(), account_component_address.into())?,
@@ -746,10 +756,16 @@ pub async fn call_component(
                 source_component_address.into(),
                 find_output_version(world, output_ref.as_str(), source_component_address.into())?,
             ),
-        ])
+        ]
+    };
+
+    let tx = Transaction::builder()
+        .fee_transaction_pay_from_component(account_component_address, Amount(1000))
+        .call_method(source_component_address, &function_call, vec![])
+        .with_inputs(inputs)
         .build_unsigned_transaction();
 
-    let resp = submit_unsigned_tx_and_wait_for_response(client, tx, account).await?;
+    let resp = submit_unsigned_tx_and_wait_for_response(client, tx, account, use_unversioned_inputs).await?;
 
     let final_outputs_name = if let Some(name) = new_outputs_name {
         name
@@ -779,6 +795,10 @@ pub async fn concurrent_call_component(
     function_call: String,
     times: usize,
 ) -> anyhow::Result<()> {
+    log::info!(
+        "concurrent_call_component: account_name={account_name}, output_ref={output_ref}, \
+         wallet_daemon_name={wallet_daemon_name}"
+    );
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let source_component_address = get_address_from_output(world, output_ref.clone())
@@ -799,7 +819,7 @@ pub async fn concurrent_call_component(
             .fee_transaction_pay_from_component(account_component_address, Amount(1000))
             .call_method(source_component_address, &function_call, vec![])
             .build_unsigned_transaction();
-        join_set.spawn(submit_unsigned_tx_and_wait_for_response(clt, tx, acc));
+        join_set.spawn(submit_unsigned_tx_and_wait_for_response(clt, tx, acc, true));
     }
 
     while let Some(result) = join_set.join_next().await {
@@ -911,12 +931,17 @@ async fn submit_unsigned_tx_and_wait_for_response(
     mut client: WalletDaemonClient,
     transaction: UnsignedTransaction,
     account: Account,
+    use_unversioned_inputs: bool,
 ) -> anyhow::Result<TransactionWaitResultResponse> {
+    log::info!(
+        "submit_unsigned_tx_and_wait_for_response: account={account}, use_unversioned_inputs={use_unversioned_inputs}",
+    );
     let submit_req = TransactionSubmitRequest {
         transaction,
         signing_key_index: Some(account.key_index),
         autofill_inputs: vec![],
         detect_inputs: true,
+        detect_inputs_use_unversioned: use_unversioned_inputs,
         proof_ids: vec![],
     };
 

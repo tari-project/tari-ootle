@@ -186,20 +186,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         Ok(())
     }
 
-    fn validator_nodes_count(
-        &self,
-        next_epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
-    ) -> Result<u64, EpochManagerError> {
-        let mut tx = self.global_db.create_transaction()?;
-        let result = self
-            .global_db
-            .validator_nodes(&mut tx)
-            .count_by_epoch(next_epoch, sidechain_id)?;
-        tx.commit()?;
-        Ok(result)
-    }
-
     pub async fn add_validator_node_registration(
         &mut self,
         block_height: u64,
@@ -213,15 +199,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         }
 
         let constants = self.base_layer_consensus_constants().await?;
-        let mut next_epoch = constants.height_to_epoch(block_height) + Epoch(1);
-        let validator_node_expiry = constants.validator_node_registration_expiry;
-
-        // find the next available epoch
-        let mut next_epoch_vn_count = self.validator_nodes_count(next_epoch, registration.sidechain_id())?;
-        while next_epoch_vn_count >= self.config.max_vns_per_epoch_activated {
-            next_epoch += Epoch(1);
-            next_epoch_vn_count = self.validator_nodes_count(next_epoch, registration.sidechain_id())?;
-        }
+        let next_epoch = constants.height_to_epoch(block_height) + Epoch(1);
 
         let next_epoch_height = constants.epoch_to_height(next_epoch);
 
@@ -243,7 +221,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
             shard_key,
             block_height,
             next_epoch,
-            next_epoch + Epoch(validator_node_expiry),
             registration.claim_public_key().clone(),
             registration.sidechain_id().cloned(),
         )?;
@@ -264,6 +241,28 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
             );
         }
 
+        tx.commit()?;
+
+        Ok(())
+    }
+
+    pub async fn remove_validator_node_registration(
+        &mut self,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), EpochManagerError> {
+        if sidechain_id != self.config.validator_node_sidechain_id {
+            return Err(EpochManagerError::ValidatorNodeRegistrationSidechainIdMismatch {
+                expected: self.config.validator_node_sidechain_id.as_ref().map(|v| v.to_hex()),
+                actual: sidechain_id.map(|v| v.to_hex()),
+            });
+        }
+        info!(target: LOG_TARGET, "Remove validator node({}) registration", public_key);
+
+        let mut tx = self.global_db.create_transaction()?;
+        self.global_db
+            .validator_nodes(&mut tx)
+            .remove(public_key, sidechain_id)?;
         tx.commit()?;
 
         Ok(())
@@ -563,22 +562,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         } else {
             self.waiting_for_scanning_complete.push(reply);
         }
-    }
-
-    pub async fn remaining_registration_epochs(&mut self) -> Result<Option<Epoch>, EpochManagerError> {
-        let last_registration_epoch = match self.last_registration_epoch()? {
-            Some(epoch) => epoch,
-            None => return Ok(None),
-        };
-
-        let constants = self.get_base_layer_consensus_constants().await?;
-        let expiry = constants.validator_node_registration_expiry();
-
-        // Note this can be negative in some cases
-        let num_blocks_since_last_reg = self.current_epoch.saturating_sub(last_registration_epoch);
-
-        // None indicates that we are not registered, or a previous registration has expired
-        Ok(expiry.checked_sub(num_blocks_since_last_reg))
     }
 
     pub fn get_our_validator_node(&self, epoch: Epoch) -> Result<ValidatorNode<TAddr>, EpochManagerError> {

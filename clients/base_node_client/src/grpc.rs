@@ -26,7 +26,12 @@ use std::convert::TryInto;
 
 use async_trait::async_trait;
 use log::*;
-use minotari_app_grpc::tari_rpc::{self as grpc, GetShardKeyRequest};
+use minotari_app_grpc::tari_rpc::{
+    self as grpc,
+    GetShardKeyRequest,
+    GetValidatorNodeChangesRequest,
+    ValidatorNodeChange,
+};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_core::{blocks::BlockHeader, transactions::transaction_components::CodeTemplateRegistration};
@@ -113,6 +118,28 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                 BaseNodeClientError::InvalidPeerMessage("best_block was not a valid fixed hash".to_string())
             })?,
         })
+    }
+
+    async fn get_validator_node_changes(
+        &mut self,
+        start_height: u64,
+        end_height: u64,
+        sidechain_id: Option<&PublicKey>,
+    ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError> {
+        let client = self.connection().await?;
+        let result = client
+            .get_validator_node_changes(GetValidatorNodeChangesRequest {
+                start_height,
+                end_height,
+                sidechain_id: match sidechain_id {
+                    None => vec![],
+                    Some(sidechain_id) => sidechain_id.to_vec(),
+                },
+            })
+            .await?
+            .into_inner();
+
+        Ok(result.changes)
     }
 
     async fn get_validator_nodes(&mut self, height: u64) -> Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError> {
@@ -259,7 +286,6 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         let result = inner.get_constants(request).await?.into_inner();
 
         let consensus_constants = BaseLayerConsensusConstants {
-            validator_node_registration_expiry: result.validator_node_validity_period,
             epoch_length: result.epoch_length,
             validator_node_registration_min_deposit_amount: result
                 .validator_node_registration_min_deposit_amount

@@ -6,7 +6,6 @@ Feature: Claim Burn
   @concurrent
 #  @serial
   @fixed
-  @doit
   Scenario: Claim base layer burn funds with wallet daemon
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE
@@ -18,8 +17,8 @@ Feature: Claim Burn
     When miner MINER mines 4 new blocks
     When wallet WALLET has at least 5000 T
     When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
-    Then VN has scanned to height 17
+    When miner MINER mines 26 new blocks
+    Then VN has scanned to height 27
     Then the validator node VN is listed as registered
 
     # Initialize an indexer
@@ -36,7 +35,7 @@ Feature: Claim Burn
     # unfortunately have to wait for this to get into the mempool....
     Then there is 1 transaction in the mempool of BASE within 10 seconds
     When miner MINER mines 13 new blocks
-    Then VN has scanned to height 30
+    Then VN has scanned to height 40
 
     When I convert commitment COMMITMENT into COMM_ADDRESS address
     Then validator node VN has state at COMM_ADDRESS within 20 seconds
@@ -57,8 +56,8 @@ Feature: Claim Burn
     When miner MINER mines 4 new blocks
     When wallet WALLET has at least 10000 T
     When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
-    Then VN has scanned to height 17
+    When miner MINER mines 26 new blocks
+    Then VN has scanned to height 27
     Then the validator node VN is listed as registered
 
     # Initialize an indexer
@@ -75,7 +74,7 @@ Feature: Claim Burn
     # unfortunately have to wait for this to get into the mempool....
     Then there is 1 transaction in the mempool of BASE within 10 seconds
     When miner MINER mines 13 new blocks
-    Then VN has scanned to height 30
+    Then VN has scanned to height 40
 
     When I convert commitment COMMITMENT into COMM_ADDRESS address
     Then validator node VN has state at COMM_ADDRESS within 20 seconds

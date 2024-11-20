@@ -19,7 +19,7 @@ Feature: Counter template
     When miner MINER mines 10 new blocks
     When wallet WALLET has at least 2000 T
     When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
+    When miner MINER mines 26 new blocks
     Then the validator node VN is listed as registered
 
     # Initialize indexer and connect wallet daemon
@@ -29,7 +29,7 @@ Feature: Counter template
     # Register the "counter" template
     When base wallet WALLET registers the template "counter"
     When miner MINER mines 20 new blocks
-    Then VN has scanned to height 43
+    Then VN has scanned to height 53
 
     # Create the sender account
     When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
@@ -44,7 +44,7 @@ Feature: Counter template
     # Check that the counter has been increased
     When I invoke on wallet daemon WALLET_D on account ACC on component COUNTER/components/Counter the method call "value" the result is "1"
 
-    
+
   Scenario: Counter template registration and invocation multiple times
 
     # Initialize a base node, wallet, miner and VN
@@ -59,7 +59,7 @@ Feature: Counter template
     When miner MINER mines 10 new blocks
     When wallet WALLET has at least 2000 T
     When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
+    When miner MINER mines 26 new blocks
     Then the validator node VN is listed as registered
 
     # Initialize indexer and connect wallet daemon
@@ -69,7 +69,7 @@ Feature: Counter template
     # Register the "counter" template
     When base wallet WALLET registers the template "counter"
     When miner MINER mines 20 new blocks
-    Then VN has scanned to height 43
+    Then VN has scanned to height 53
 
     # Create the sender account
     When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins

@@ -108,19 +108,19 @@ impl ProcessManager {
         };
         let num_blocks = num_vns + u64::try_from(templates_to_register.len()).unwrap();
 
-        // Mine some initial funds, guessing 10 blocks extra to allow for coinbase maturity
-        self.mine(num_blocks + 10).await.context("initial mining failed")?;
-        self.wait_for_wallet_funds(num_blocks)
-            .await
-            .context("waiting for wallet funds")?;
-
         if !self.skip_registration {
+            // Mine some initial funds, guessing 10 blocks extra to allow for coinbase maturity
+            self.mine(num_blocks + 10).await.context("initial mining failed")?;
+            self.wait_for_wallet_funds(num_blocks)
+                .await
+                .context("waiting for wallet funds")?;
+
             self.register_all_validator_nodes()
                 .await
                 .context("registering validator node via GRPC")?;
-        }
-        for templates in templates_to_register {
-            self.register_template(templates).await?;
+            for templates in templates_to_register {
+                self.register_template(templates).await?;
+            }
         }
 
         if num_blocks > 0 {

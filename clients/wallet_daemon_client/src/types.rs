@@ -100,9 +100,20 @@ pub struct TransactionSubmitRequest {
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub signing_key_index: Option<u64>,
     pub autofill_inputs: Vec<SubstateRequirement>,
+    /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
+    /// contain the required inputs.
     pub detect_inputs: bool,
+    /// If true(default), detected inputs will omit versions allowing consensus to resolve input substates.
+    /// If false, the wallet will try determine versioned for the inputs. These may be outdated if the substate has
+    /// changed since detection.
+    #[serde(default = "return_true")]
+    pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub proof_ids: Vec<ConfidentialProofId>,
+}
+
+const fn return_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

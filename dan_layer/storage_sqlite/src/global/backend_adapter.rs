@@ -79,7 +79,7 @@ use crate::{
             TemplateModel,
             TemplateUpdateModel,
         },
-        schema::templates,
+        schema::{templates, validator_nodes::dsl::validator_nodes},
         serialization::serialize_json,
     },
     SqliteTransaction,
@@ -368,7 +368,6 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         shard_key: SubstateAddress,
         registered_at_base_height: u64,
         start_epoch: Epoch,
-        end_epoch: Epoch,
         fee_claim_public_key: PublicKey,
         sidechain_id: Option<PublicKey>,
     ) -> Result<(), Self::Error> {
@@ -382,7 +381,6 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 validator_nodes::shard_key.eq(shard_key.as_bytes()),
                 validator_nodes::registered_at_base_height.eq(registered_at_base_height as i64),
                 validator_nodes::start_epoch.eq(start_epoch.as_u64() as i64),
-                validator_nodes::end_epoch.eq(end_epoch.as_u64() as i64),
                 validator_nodes::fee_claim_public_key.eq(ByteArray::as_bytes(&fee_claim_public_key)),
                 validator_nodes::sidechain_id.eq(sidechain_id.as_ref().map(|id| id.as_bytes()).unwrap_or(&[0u8; 32])),
             ))
@@ -391,6 +389,30 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 source,
                 operation: "insert::validator_nodes".to_string(),
             })?;
+
+        Ok(())
+    }
+
+    fn remove_validator_node(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        public_key: PublicKey,
+        sidechain_id: Option<PublicKey>,
+    ) -> Result<(), Self::Error> {
+        use crate::global::schema::validator_nodes;
+        diesel::delete(
+            validator_nodes
+                .filter(
+                    validator_nodes::sidechain_id
+                        .eq(sidechain_id.as_ref().map(|id| id.as_bytes()).unwrap_or(&[0u8; 32])),
+                )
+                .filter(validator_nodes::public_key.eq(ByteArray::as_bytes(&public_key))),
+        )
+        .execute(tx.connection())
+        .map_err(|source| SqliteStorageError::DieselError {
+            source,
+            operation: "remove::validator_nodes".to_string(),
+        })?;
 
         Ok(())
     }
@@ -411,13 +433,11 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 validator_nodes::shard_key,
                 validator_nodes::registered_at_base_height,
                 validator_nodes::start_epoch,
-                validator_nodes::end_epoch,
                 validator_nodes::fee_claim_public_key,
                 validator_nodes::address,
                 validator_nodes::sidechain_id,
             ))
             .filter(validator_nodes::start_epoch.le(epoch.as_u64() as i64))
-            .filter(validator_nodes::end_epoch.gt(epoch.as_u64() as i64))
             .filter(validator_nodes::address.eq(serialize_json(address)?))
             .filter(validator_nodes::sidechain_id.eq(sidechain_id.map(ByteArray::as_bytes).unwrap_or(&[0u8; 32])))
             .order_by(validator_nodes::registered_at_base_height.desc())
@@ -442,7 +462,6 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
         let vn = validator_nodes::table
             .filter(validator_nodes::start_epoch.le(epoch.as_u64() as i64))
-            .filter(validator_nodes::end_epoch.gt(epoch.as_u64() as i64))
             .filter(validator_nodes::public_key.eq(ByteArray::as_bytes(public_key)))
             .filter(validator_nodes::sidechain_id.eq(sidechain_id.map(ByteArray::as_bytes).unwrap_or(&[0u8; 32])))
             .order_by(validator_nodes::registered_at_base_height.desc())
@@ -465,10 +484,8 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         let db_sidechain_id = sidechain_id.map(|id| id.as_bytes()).unwrap_or(&[0u8; 32]);
 
         let count = sql_query(
-            "SELECT COUNT(distinct public_key) as cnt FROM validator_nodes WHERE start_epoch <= ? AND end_epoch >= ? \
-             AND sidechain_id = ?",
+            "SELECT COUNT(distinct public_key) as cnt FROM validator_nodes WHERE start_epoch <= ? AND sidechain_id = ?",
         )
-        .bind::<BigInt, _>(epoch.as_u64() as i64)
         .bind::<BigInt, _>(epoch.as_u64() as i64)
         .bind::<diesel::sql_types::Binary, _>(db_sidechain_id)
         .get_result::<Count>(tx.connection())
@@ -585,7 +602,6 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .select(validator_nodes::id)
             .filter(validator_nodes::shard_key.eq(shard_key.as_bytes()))
             .filter(validator_nodes::start_epoch.le(epoch.as_u64() as i64))
-            .filter(validator_nodes::end_epoch.gt(epoch.as_u64() as i64))
             .filter(validator_nodes::sidechain_id.eq(db_sidechain_id))
             .order_by(validator_nodes::registered_at_base_height.desc())
             .first::<i32>(tx.connection())
@@ -627,13 +643,11 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 validator_nodes::shard_key,
                 validator_nodes::registered_at_base_height,
                 validator_nodes::start_epoch,
-                validator_nodes::end_epoch,
                 validator_nodes::fee_claim_public_key,
                 validator_nodes::address,
                 validator_nodes::sidechain_id
             ))
             .filter(validator_nodes::start_epoch.le(epoch.as_u64() as i64))
-            .filter(validator_nodes::end_epoch.gt(epoch.as_u64() as i64))
             // SQLite compares BLOB types using memcmp which, IIRC, compares bytes "left to right"/big-endian which is
             // the same way convert shard IDs to 256-bit integers when allocating committee shards.
             .filter(validator_nodes::shard_key.ge(shard_range.start().as_bytes()))
@@ -706,13 +720,11 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 validator_nodes::shard_key,
                 validator_nodes::registered_at_base_height,
                 validator_nodes::start_epoch,
-                validator_nodes::end_epoch,
                 validator_nodes::fee_claim_public_key,
                 validator_nodes::address,
                 validator_nodes::sidechain_id,
             ))
             .filter(validator_nodes::start_epoch.le(epoch.as_u64() as i64))
-            .filter(validator_nodes::end_epoch.gt(epoch.as_u64() as i64))
             .filter(validator_nodes::sidechain_id.eq(db_sidechain_id))
             .get_results::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {

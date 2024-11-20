@@ -596,6 +596,26 @@ impl JsonRpcHandlers {
                     ),
                 )
             })?;
+        let local_vn_start_epoch = self
+            .epoch_manager
+            .get_our_validator_node(current_epoch)
+            .await
+            .map(|vn| vn.start_epoch)
+            .map(Some)
+            .or_else(|err| {
+                if err.is_not_registered_error() {
+                    Ok(None)
+                } else {
+                    Err(JsonRpcResponse::error(
+                        answer_id,
+                        JsonRpcError::new(
+                            JsonRpcErrorReason::InternalError,
+                            format!("Could not get committee shard:{}", err),
+                            json::Value::Null,
+                        ),
+                    ))
+                }
+            })?;
         let committee_info = self
             .epoch_manager
             .get_local_committee_info(current_epoch)
@@ -620,6 +640,7 @@ impl JsonRpcHandlers {
             current_block_height,
             current_block_hash,
             is_valid: committee_info.is_some(),
+            start_epoch: local_vn_start_epoch,
             committee_info,
         };
         Ok(JsonRpcResponse::success(answer_id, response))

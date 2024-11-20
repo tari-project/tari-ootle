@@ -43,7 +43,6 @@ pub struct BaseLayerValidatorNode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseLayerConsensusConstants {
-    pub validator_node_registration_expiry: u64,
     pub epoch_length: u64,
     pub validator_node_registration_min_deposit_amount: MicroMinotari,
 }
@@ -55,10 +54,6 @@ impl BaseLayerConsensusConstants {
 
     pub fn epoch_to_height(&self, epoch: Epoch) -> u64 {
         epoch.0 * self.epoch_length
-    }
-
-    pub fn validator_node_registration_expiry(&self) -> Epoch {
-        Epoch(self.validator_node_registration_expiry)
     }
 
     pub fn validator_node_registration_min_deposit_amount(&self) -> MicroMinotari {

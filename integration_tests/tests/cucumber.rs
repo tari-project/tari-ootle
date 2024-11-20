@@ -385,9 +385,16 @@ async fn call_wallet_daemon_method_and_check_result(
     method_call: String,
     expected_result: String,
 ) -> anyhow::Result<()> {
-    let resp =
-        wallet_daemon_cli::call_component(world, account_name, output_ref, wallet_daemon_name, method_call, None)
-            .await?;
+    let resp = wallet_daemon_cli::call_component(
+        world,
+        account_name,
+        output_ref,
+        wallet_daemon_name,
+        method_call,
+        None,
+        true,
+    )
+    .await?;
 
     let finalize_result = resp
         .result
@@ -416,7 +423,16 @@ async fn call_wallet_daemon_method(
     output_ref: String,
     method_call: String,
 ) -> anyhow::Result<()> {
-    wallet_daemon_cli::call_component(world, account_name, output_ref, wallet_daemon_name, method_call, None).await?;
+    wallet_daemon_cli::call_component(
+        world,
+        account_name,
+        output_ref,
+        wallet_daemon_name,
+        method_call,
+        None,
+        true,
+    )
+    .await?;
 
     Ok(())
 }
@@ -439,6 +455,7 @@ async fn call_wallet_daemon_method_with_output_name(
         wallet_daemon_name,
         method_call,
         Some(new_output_name),
+        true,
     )
     .await?;
 
@@ -464,6 +481,8 @@ async fn call_wallet_daemon_method_with_output_name_error_result(
         wallet_daemon_name,
         method_call,
         Some(new_output_name),
+        // We expect this to fail due to a substate being downed so we need to use versioned inputs
+        false,
     )
     .await
     {
@@ -477,7 +496,7 @@ async fn call_wallet_daemon_method_with_output_name_error_result(
             );
         }
     } else {
-        bail!("Error expected, but none was happening!");
+        bail!("Error expected, but the transaction succeeded.");
     }
 
     Ok(())

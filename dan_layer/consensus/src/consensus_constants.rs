@@ -45,9 +45,6 @@ pub struct ConsensusConstants {
     pub max_block_size: usize,
     /// The value that fees are divided by to determine the amount of fees to burn. 0 means no fees are burned.
     pub fee_exhaust_divisor: u64,
-    /// Maximum number of validator nodes to be activated in an epoch.
-    /// This is to give enough time to the network to catch up with new validator nodes and do syncing.
-    pub max_vns_per_epoch_activated: u64,
     pub epochs_per_era: Epoch,
 }
 
@@ -65,7 +62,6 @@ impl ConsensusConstants {
             missed_proposal_recovery_threshold: 5,
             max_block_size: 500,
             fee_exhaust_divisor: 20, // 5%
-            max_vns_per_epoch_activated: 50,
             epochs_per_era: Epoch(10),
         }
     }

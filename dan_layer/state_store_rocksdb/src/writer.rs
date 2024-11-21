@@ -211,7 +211,15 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn blocks_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
-        todo!()
+        let operation = "blocks_delete";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+    
+        BlockModel::delete(self.db.clone(), tx, operation, block_id)?;
+
+        // NOTE: we not implementing the equivalent of the sqlite "diagnostic_deleted_blocks" table as it does not seem to be used
+
+        Ok(())
+
         /*
         use crate::schema::{blocks, diagnostic_deleted_blocks};
 
@@ -250,7 +258,22 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         is_committed: Option<bool>,
         is_justified: Option<bool>,
     ) -> Result<(), StorageError> {
-        todo!()
+        let operation = "blocks_set_flags";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        // fetch the related block
+        let mut block = BlockModel::get(tx, operation, block_id)?;
+
+        // set the flags
+        is_committed.map(|value| block.set_is_committed(value));
+        is_justified.map(|value| block.set_is_justified(value));
+        
+        // update the block in rocksDb
+        // TODO: is it better to use a RocksDB merge operator?
+        BlockModel::put(self.db.clone(), tx, operation, &block)?;
+
+        Ok(())
+
         /*
         use crate::schema::blocks;
 

@@ -1,34 +1,22 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::{rngs::OsRng, RngCore};
+
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_dan_storage::{
-    consensus_models::{Block, Command, Decision, TransactionAtom, TransactionPoolStage, TransactionPoolStatusUpdate},
+    consensus_models::{Block, Command, TransactionPoolStage, TransactionPoolStatusUpdate},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-use tari_transaction::TransactionId;
-use tari_utilities::epoch_time::EpochTime;
 
-fn create_tx_atom() -> TransactionAtom {
-    let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
-    TransactionAtom {
-        id: TransactionId::new(bytes),
-        decision: Decision::Commit,
-        evidence: Default::default(),
-        transaction_fee: 0,
-        leader_fee: None,
-    }
-}
+use tari_utilities::epoch_time::EpochTime;
 
 mod confirm_all_transitions {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
 
-    use crate::util::{create_rocksdb, create_sqlite};
+    use crate::util::{create_rocksdb, create_sqlite, create_tx_atom};
 
     use super::*;
 

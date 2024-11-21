@@ -370,4 +370,36 @@ impl BlockModel {
 
         Ok(())
     }
+
+    pub fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, block_id: &BlockId) -> Result<(), RocksDbStorageError> {
+        let key = Self::key(block_id);
+
+        // we need to fetch the parent id for CF related keys
+        let block = BlockModel::get(tx, operation, block_id)?;
+
+        tx.delete(key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+            operation,
+            source: e,
+        })?;
+
+        // we also need to delete related CF keys
+        let cf = db.cf_handle(Self::CF_PARENT_ID).unwrap();
+        let key = Self::key(block.parent());
+        tx.delete_cf(cf, key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+        })?;
+
+        Ok(())
+    }
+
+    pub fn count(tx: &Transaction<'_, TransactionDB>) -> Result<i64, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        options.set_iterate_range(rocksdb::PrefixRange("blocks_".as_bytes()));
+        let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
+        let count = iterator.count() as i64;
+        Ok(count)
+    }
 }

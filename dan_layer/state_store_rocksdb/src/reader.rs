@@ -1514,7 +1514,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_get_count(&self) -> Result<i64, StorageError> {
-        todo!()
+        Ok(BlockModel::count(&self.tx)?)
         /*
         use crate::schema::{blocks, quorum_certificates};
         let count = blocks::table

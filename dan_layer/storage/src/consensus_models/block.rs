@@ -469,6 +469,14 @@ impl Block {
     pub fn extra_data(&self) -> &ExtraData {
         self.header.extra_data()
     }
+
+    pub fn set_is_justified(&mut self, is_justified: bool) {
+        self.is_justified = is_justified;
+    }
+
+    pub fn set_is_committed(&mut self, is_committed: bool) {
+        self.is_committed = is_committed;
+    }
 }
 
 impl Block {

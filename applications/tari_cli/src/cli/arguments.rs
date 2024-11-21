@@ -21,7 +21,7 @@ use crate::{
     loading,
 };
 
-const DEFAULT_DATA_FOLDER_NAME: &str = "tari_dan_cli";
+const DEFAULT_DATA_FOLDER_NAME: &str = "tari_cli";
 const TEMPLATE_REPOS_FOLDER_NAME: &str = "template_repositories";
 const DEFAULT_CONFIG_FILE_NAME: &str = "tari.config.toml";
 
@@ -157,9 +157,8 @@ impl Cli {
     async fn init_base_dir_and_config(&self) -> anyhow::Result<Config> {
         // make sure we have all the directories set up
         util::create_dir(&self.args.base_dir).await?;
-        if !util::path_metadata(&self.args.config_file_path).await?.is_file() {
-            return Err(anyhow!("Configuration file path is not pointing to a file!"));
-        }
+
+        // create config file dir if not exists
         util::create_dir(
             &self
                 .args

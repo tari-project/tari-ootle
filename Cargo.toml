@@ -11,7 +11,7 @@ license = "BSD-3-Clause"
 members = [
     "applications/tari_dan_app_utilities",
     "applications/tari_dan_wallet_cli",
-    "applications/tari_dan_cli",
+    "applications/tari_cli",
     "applications/tari_dan_wallet_daemon",
     "applications/tari_generate",
     "applications/tari_indexer",
@@ -57,7 +57,7 @@ members = [
     "utilities/transaction_submitter",
     "utilities/transaction_submitter",
     "utilities/generate_ristretto_value_lookup",
-    "applications/tari_watcher", "applications/tari_dan_cli",
+    "applications/tari_watcher",
 ]
 resolver = "2"
 

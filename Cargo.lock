@@ -9942,6 +9942,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tari_cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cargo-generate",
+ "cargo_toml",
+ "clap 4.5.21",
+ "convert_case 0.6.0",
+ "dialoguer 0.11.0",
+ "dirs-next 2.0.0",
+ "git2",
+ "serde",
+ "spinners",
+ "termimad",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml 0.8.19",
+]
+
+[[package]]
 name = "tari_common"
 version = "1.7.0-pre.3"
 source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#b75d533bbda62bf18b9436e228a422374f486d51"
@@ -10293,26 +10313,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
-]
-
-[[package]]
-name = "tari_dan_cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cargo-generate",
- "cargo_toml",
- "clap 4.5.21",
- "convert_case 0.6.0",
- "dialoguer 0.11.0",
- "dirs-next 2.0.0",
- "git2",
- "serde",
- "spinners",
- "termimad",
- "thiserror 1.0.69",
- "tokio",
- "toml 0.8.19",
 ]
 
 [[package]]

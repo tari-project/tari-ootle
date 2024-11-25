@@ -45,6 +45,10 @@ pub enum RocksDbStorageError {
         #[from]
         source: bincode::error::DecodeError,
     },
+    #[error("General error: {message}")]
+    GeneralError {
+        message: String,
+    },
 
     /*
     #[error("Could not connect to database: {source}")]
@@ -88,6 +92,7 @@ impl From<RocksDbStorageError> for StorageError {
             RocksDbStorageError::NotFound { key, operation } => StorageError::NotFound { item: operation, key },
             RocksDbStorageError::EncodeError { source } => StorageError::EncodingError { operation: "", item: "", details: source.to_string() },
             RocksDbStorageError::DecodeError { source } => StorageError::DecodingError { operation: "", item: "", details: source.to_string() },
+            RocksDbStorageError::GeneralError { .. } => StorageError::General { details: source.to_string() },
             /*
             RocksDbStorageError::ConnectionError { .. } => StorageError::ConnectionError {
                 reason: source.to_string(),

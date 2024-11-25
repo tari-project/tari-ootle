@@ -354,7 +354,11 @@ mod block_query_operations {
         let res = tx.blocks_get_all_ids_by_height(Epoch(0), NodeHeight(2)).unwrap();
         assert_eq!(res.len(), 2);
 
-        // TODO: blocks_get_genesis_for_epoch
+        // blocks_get_genesis_for_epoch
+        let res = tx.blocks_get_genesis_for_epoch(Epoch(0)).unwrap();
+        assert_eq!(res.to_string(), zero_block.to_string());
+        // TODO: try with another epoch
+
         // TODO: blocks_get_last_n_in_epoch
         // TODO: blocks_get_all_between
 

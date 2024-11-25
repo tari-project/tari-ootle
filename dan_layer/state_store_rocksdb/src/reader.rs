@@ -895,30 +895,24 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect();
 
         Ok(block_ids)
-
-
-        /*
-        use crate::schema::blocks;
-
-        let block_ids = blocks::table
-            .select(blocks::block_id)
-            .filter(blocks::height.eq(height.as_u64() as i64))
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .get_results::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_all_ids_by_height",
-                source: e,
-            })?;
-
-        block_ids
-            .into_iter()
-            .map(|block_id| deserialize_hex_try_from(&block_id))
-            .collect()
-            */
     }
 
     fn blocks_get_genesis_for_epoch(&self, epoch: Epoch) -> Result<Block, StorageError> {
-        todo!()
+        let cf = BlockModel::CF_EPOCH_HEIGHT;
+        let key_prefix = format!("{}_{}_", epoch, NodeHeight(0));
+
+        let block_id =
+            BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_genesis_for_epoch",  cf, &key_prefix)?
+            .into_iter()
+            .next();
+
+        if let Some(block_id) = block_id {
+            let block= BlockModel::get(&self.tx, "blocks_get_genesis_for_epoch", &block_id)?;
+            Ok(block)
+        } else {
+            Err(RocksDbStorageError::GeneralError { message: "Genesis block not found".to_owned() }.into())
+        }
+
         /*
         use crate::schema::{blocks, quorum_certificates};
 

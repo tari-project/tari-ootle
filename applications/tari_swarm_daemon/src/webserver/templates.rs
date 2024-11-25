@@ -3,6 +3,7 @@
 
 use std::{io, sync::Arc};
 
+use axum::extract::Query;
 use axum::{
     extract::{multipart::MultipartError, Multipart},
     http::StatusCode,
@@ -10,6 +11,7 @@ use axum::{
     Extension,
 };
 use log::{error, info};
+use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::hex;
 use tari_dan_engine::wasm::WasmModule;
 use tari_engine_types::calculate_template_binary_hash;
@@ -18,14 +20,35 @@ use url::Url;
 
 use crate::{process_manager::TemplateData, webserver::context::HandlerContext};
 
+fn register_template_default() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+struct UploadQueryParams {
+    #[serde(default = "register_template_default")]
+    register_template: bool,
+}
+
+#[derive(Serialize)]
+struct UploadResponse {
+    success: bool,
+    template_url: Option<Url>,
+    error: String,
+}
+
 pub async fn upload(
     Extension(context): Extension<Arc<HandlerContext>>,
     mut value: Multipart,
-) -> Result<(), UploadError> {
+    query_params: Query<UploadQueryParams>,
+) -> Result<UploadResponse, UploadError> {
     let Some(field) = value.next_field().await? else {
         error!("🌐 Upload template: no field found");
-        // TODO: return error
-        return Ok(());
+        return Ok(UploadResponse {
+            success: false,
+            template_url: None,
+            error: "No multipart file field found".to_string(),
+        });
     };
 
     let name = field.file_name().unwrap_or("unnamed-template").to_string();
@@ -41,28 +64,38 @@ pub async fn upload(
     file.write_all(&bytes).await?;
     info!("🌐 Upload template {} bytes", bytes.len());
 
-    let data = TemplateData {
-        name,
-        version: 0,
-        contents_hash: hash,
-        contents_url: Url::parse(&format!(
-            "http://localhost:{}/templates/{}",
-            context.config().webserver.bind_address.port(),
-            dest_file
-        ))
-        .unwrap(),
-    };
+    let template_url = Url::parse(&format!(
+        "http://localhost:{}/templates/{}",
+        context.config().webserver.bind_address.port(),
+        dest_file
+    ))
+        .unwrap();
 
-    match context.process_manager().register_template(data).await {
-        Ok(()) => {
-            info!("🌐 Registered template");
-            Ok(())
-        },
-        Err(err) => {
-            error!("🌐 Registering template failed: {}", err);
-            Err(err.into())
-        },
+    if query_params.register_template {
+        let data = TemplateData {
+            name,
+            version: 0,
+            contents_hash: hash,
+            contents_url: template_url,
+        };
+
+        return match context.process_manager().register_template(data).await {
+            Ok(()) => {
+                info!("🌐 Registered template");
+                Ok(UploadResponse {
+                    success: true,
+                    template_url: Some(template_url.clone()),
+                    error: String::new(),
+                })
+            }
+            Err(err) => {
+                error!("🌐 Registering template failed: {}", err);
+                Err(err.into())
+            }
+        };
     }
+
+    Ok(UploadResponse { template_url })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -91,7 +124,7 @@ impl IntoResponse for UploadError {
             UploadError::MultiPartError(err) => err.into_response(),
             UploadError::Other(err) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, format!("Upload error: {}", err)).into_response()
-            },
+            }
         }
     }
 }

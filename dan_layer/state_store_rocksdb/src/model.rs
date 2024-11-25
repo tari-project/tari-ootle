@@ -283,9 +283,10 @@ pub(crate) struct BlockModel {}
 impl BlockModel {
     pub const KEY_PREFIX: &str = "blocks";
     pub const CF_PARENT_ID: &str = "blocks_parent_id";
+    pub const CF_EPOCH_HEIGHT: &str = "blocks_epoch_height";
 
     pub fn cfs() -> Vec<&'static str> {
-        vec![Self::CF_PARENT_ID]
+        vec![Self::CF_PARENT_ID, Self::CF_EPOCH_HEIGHT]
     }
 
     fn key(block_id: &BlockId) -> String {
@@ -381,6 +382,15 @@ impl BlockModel {
         // blocks_parent_id column family
         let cf = db.cf_handle(Self::CF_PARENT_ID).unwrap();
         let key = format!("{}_{}_{}", Self::KEY_PREFIX, block.parent(), block.id());
+        tx.put_cf(cf, key, block.id().as_bytes())
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+        })?;
+
+        // blocks_epoch_height column family
+        let cf = db.cf_handle(Self::CF_EPOCH_HEIGHT).unwrap();
+        let key = format!("{}_{}_{}_{}", Self::KEY_PREFIX, block.epoch(), block.height(), block.id());
         tx.put_cf(cf, key, block.id().as_bytes())
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,

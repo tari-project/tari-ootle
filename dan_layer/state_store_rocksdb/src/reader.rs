@@ -886,7 +886,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_get_all_ids_by_height(&self, epoch: Epoch, height: NodeHeight) -> Result<Vec<BlockId>, StorageError> {
-        todo!()
+        let cf = BlockModel::CF_EPOCH_HEIGHT;
+        let key_prefix = format!("{}_{}_", epoch, height);
+        
+        let block_ids =
+            BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_all_ids_by_height",  cf, &key_prefix)?
+            .into_iter()
+            .collect();
+
+        Ok(block_ids)
+
+
         /*
         use crate::schema::blocks;
 

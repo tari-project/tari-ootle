@@ -240,3 +240,130 @@ mod block_parent_operations {
         tx.rollback().unwrap();
     }
 }
+
+
+mod block_query_operations {
+    use tari_dan_common_types::{ExtraData, ExtraFieldKey, NumPreshards, ShardGroup};
+
+    use crate::util::{create_rocksdb, create_sqlite, create_tx_atom};
+
+    use super::*;
+
+    // TODO: sqlite fails due to missing foreign key values
+    #[ignore]
+    #[test]
+    fn block_query_operations_sqlite() {
+        let db = create_sqlite();
+        db.foreign_keys_off().unwrap();
+        block_query_operations(db);
+    }
+
+    #[test]
+    fn block_query_operations_rocksdb() {
+        let db = create_rocksdb();
+        block_query_operations(db);
+    }
+
+    fn block_query_operations(db: impl StateStore) {
+        let mut tx = db.create_write_tx().unwrap();
+
+        // insert multiple blocks
+        let network = Default::default();
+        let atom1 = create_tx_atom();
+        let atom2 = create_tx_atom();
+        
+        let zero_block = Block::zero_block(network, NumPreshards::P64);
+        zero_block.insert(&mut tx).unwrap();
+
+        let block1 = Block::create(
+            network,
+            *zero_block.id(),
+            zero_block.justify().clone(),
+            NodeHeight(1),
+            Epoch(0),
+            ShardGroup::all_shards(NumPreshards::P64),
+            Default::default(),
+            // Need to have a command in, otherwise this block will not be included internally in the query because it
+            // cannot cause a state change without any commands
+            [Command::Prepare(atom1.clone())].into_iter().collect(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            None,
+            EpochTime::now().as_u64(),
+            0,
+            FixedHash::zero(),
+            ExtraData::default(),
+        )
+        .unwrap();
+        block1.insert(&mut tx).unwrap();
+
+        let block2 = Block::create(
+            network,
+            *block1.id(),
+            block1.justify().clone(),
+            NodeHeight(2),
+            Epoch(0),
+            ShardGroup::all_shards(NumPreshards::P64),
+            Default::default(),
+            // Need to have a command in, otherwise this block will not be included internally in the query because it
+            // cannot cause a state change without any commands
+            [Command::Prepare(atom2.clone())].into_iter().collect(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            None,
+            EpochTime::now().as_u64(),
+            0,
+            FixedHash::zero(),
+            ExtraData::default(),
+        )
+        .unwrap();
+        block2.insert(&mut tx).unwrap();
+
+        let mut block3_data = ExtraData::new();
+        block3_data
+            .insert(ExtraFieldKey::SidechainId, "block3".as_bytes().to_vec().try_into().unwrap());
+        let block3 = Block::create(
+            network,
+            *block1.id(),
+            block1.justify().clone(),
+            NodeHeight(2),
+            Epoch(0),
+            ShardGroup::all_shards(NumPreshards::P64),
+            Default::default(),
+            // Need to have a command in, otherwise this block will not be included internally in the query because it
+            // cannot cause a state change without any commands
+            [Command::Prepare(atom2.clone())].into_iter().collect(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            None,
+            EpochTime::now().as_u64(),
+            0,
+            FixedHash::zero(),
+            block3_data.clone(),
+        )
+        .unwrap();
+        block3.insert(&mut tx).unwrap();
+
+        // blocks_get_all_ids_by_height
+        let res = tx.blocks_get_all_ids_by_height(Epoch(0), NodeHeight(1)).unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0], *block1.id());
+        let res = tx.blocks_get_all_ids_by_height(Epoch(0), NodeHeight(2)).unwrap();
+        assert_eq!(res.len(), 2);
+
+        // TODO: blocks_get_genesis_for_epoch
+        // TODO: blocks_get_last_n_in_epoch
+        // TODO: blocks_get_all_between
+
+        // TODO: blocks_get_pending_transactions
+        // TODO: blocks_get_total_leader_fee_for_epoch
+        // TODO: blocks_get_any_with_epoch_range
+        // TODO: blocks_get_paginated
+        // TODO: filtered_blocks_get_count
+
+        tx.rollback().unwrap();
+    }
+}

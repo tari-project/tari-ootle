@@ -912,35 +912,32 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         } else {
             Err(RocksDbStorageError::GeneralError { message: "Genesis block not found".to_owned() }.into())
         }
-
-        /*
-        use crate::schema::{blocks, quorum_certificates};
-
-        let (block, qc) = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::height.eq(0))
-            .first::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_genesis_for_epoch",
-                source: e,
-            })?;
-
-        let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-            operation: "blocks_get_genesis_for_epoch",
-            details: format!(
-                "block {} references non-existent quorum certificate {}",
-                block.id, block.qc_id
-            ),
-        })?;
-
-        block.try_convert(qc)
-        */
     }
 
     fn blocks_get_last_n_in_epoch(&self, n: usize, epoch: Epoch) -> Result<Vec<Block>, StorageError> {
-        todo!()
+        // TODO: this could be optimized by a new column familiy with the height reversed
+        //       so we could avoid fetching the ids for all the blocks in the epoch
+
+        let cf = BlockModel::CF_EPOCH_HEIGHT;
+        let key_prefix = format!("{}_", epoch);
+
+        let block_ids: Vec<BlockId> =
+            BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_last_n_in_epoch",  cf, &key_prefix)?
+            .into_iter()
+            .collect();
+
+        let mut blocks = vec![];
+        for block_id in block_ids {
+            let block= BlockModel::get(&self.tx, "blocks_get_last_n_in_epoch", &block_id)?;
+            if block.is_committed() {
+                blocks.push(block);
+            }
+        }
+        blocks.sort_by(|a, b| b.height().cmp(&a.height()));
+        
+        let last_n = blocks.into_iter().take(n).collect();
+
+        Ok(last_n)
         /*
         use crate::schema::{blocks, quorum_certificates};
 

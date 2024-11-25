@@ -298,7 +298,7 @@ mod block_query_operations {
         .unwrap();
         block1.insert(&mut tx).unwrap();
 
-        let block2 = Block::create(
+        let mut block2 = Block::create(
             network,
             *block1.id(),
             block1.justify().clone(),
@@ -319,12 +319,13 @@ mod block_query_operations {
             ExtraData::default(),
         )
         .unwrap();
+        block2.set_is_committed(true);
         block2.insert(&mut tx).unwrap();
 
         let mut block3_data = ExtraData::new();
         block3_data
             .insert(ExtraFieldKey::SidechainId, "block3".as_bytes().to_vec().try_into().unwrap());
-        let block3 = Block::create(
+        let mut block3 = Block::create(
             network,
             *block1.id(),
             block1.justify().clone(),
@@ -345,6 +346,7 @@ mod block_query_operations {
             block3_data.clone(),
         )
         .unwrap();
+        block3.set_is_committed(true);
         block3.insert(&mut tx).unwrap();
 
         // blocks_get_all_ids_by_height
@@ -359,9 +361,11 @@ mod block_query_operations {
         assert_eq!(res.to_string(), zero_block.to_string());
         // TODO: try with another epoch
 
-        // TODO: blocks_get_last_n_in_epoch
-        // TODO: blocks_get_all_between
+        // blocks_get_last_n_in_epoch
+        let res = tx.blocks_get_last_n_in_epoch(2, Epoch(0)).unwrap();
+        assert_eq!(res.len(), 2);
 
+        // TODO: blocks_get_all_between
         // TODO: blocks_get_pending_transactions
         // TODO: blocks_get_total_leader_fee_for_epoch
         // TODO: blocks_get_any_with_epoch_range

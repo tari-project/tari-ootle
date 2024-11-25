@@ -368,6 +368,27 @@ impl BlockModel {
         Ok(values)
     }
 
+    pub fn multi_get_cf_range(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, _operation: &'static str, cf: &str, lower_prefix: &str, upper_prefix: &str) -> Result<Vec<BlockId>, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        let lower = format!("{}_{}", Self::KEY_PREFIX, lower_prefix);
+        options.set_iterate_lower_bound(lower.as_bytes());
+        let upper = format!("{}_{}", Self::KEY_PREFIX, upper_prefix);
+        options.set_iterate_upper_bound(upper.as_bytes());
+
+        let cf = db.cf_handle(cf).unwrap();
+
+        let iterator = tx.iterator_cf_opt(cf,options, rocksdb::IteratorMode::Start);
+        let values = iterator.map(|item| {
+            // TODO: properly handle errors and avoid unwraps
+            let (_, value) = item.unwrap();
+            let value = BlockId::try_from(value.to_vec()).unwrap();
+            value
+        })
+        .collect();
+
+        Ok(values)
+    }
+
     pub fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, block: &Block) -> Result<(), RocksDbStorageError> {
         let key = Self::key(block.id());
         let value = Self::encode(block)?;

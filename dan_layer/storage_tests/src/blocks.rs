@@ -366,6 +366,12 @@ mod block_query_operations {
         assert_eq!(res.len(), 2);
 
         // TODO: blocks_get_all_between
+        let shard_group = ShardGroup::all_shards(NumPreshards::P64);
+        let res = tx.blocks_get_all_between(Epoch(0), shard_group, NodeHeight(0), NodeHeight(1), false, 10).unwrap();
+        assert_eq!(res.len(), 2);
+        assert_eq!(res[0].to_string(), zero_block.to_string());
+        assert_eq!(res[1].to_string(), block1.to_string());
+
         // TODO: blocks_get_pending_transactions
         // TODO: blocks_get_total_leader_fee_for_epoch
         // TODO: blocks_get_any_with_epoch_range

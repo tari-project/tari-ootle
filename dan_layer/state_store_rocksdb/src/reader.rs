@@ -933,42 +933,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 blocks.push(block);
             }
         }
+        // order by descending height 
         blocks.sort_by(|a, b| b.height().cmp(&a.height()));
         
         let last_n = blocks.into_iter().take(n).collect();
 
         Ok(last_n)
-        /*
-        use crate::schema::{blocks, quorum_certificates};
-
-        let blocks = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::is_committed.eq(true))
-            .order_by(blocks::height.desc())
-            .limit(n as i64)
-            .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_last_n_in_epoch",
-                source: e,
-            })?;
-
-        blocks
-            .into_iter()
-            // Order from lowest to highest height
-            .rev()
-            .map(|(b, qc)| {
-                qc.ok_or_else(|| StorageError::DataInconsistency {
-                    details: format!(
-                        "blocks_get_last_n_in_epoch: block {} references non-existent quorum certificate {}",
-                        b.block_id, b.qc_id
-                    ),
-                })
-                    .and_then(|qc| b.try_convert(qc))
-            })
-            .collect()
-            */
     }
 
     fn blocks_get_all_between(
@@ -980,10 +950,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         include_dummy_blocks: bool,
         limit: u64,
     ) -> Result<Vec<Block>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, quorum_certificates};
-
+        // TODO: this operation could be optimized by creating a new column family that includes shard_group as part of the key
+        
         if start_block_height > end_block_height {
             return Err(StorageError::QueryError {
                 reason: format!(
@@ -992,43 +960,34 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        let mut query = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .into_boxed();
+        let cf = BlockModel::CF_EPOCH_HEIGHT;
+        let lower_prefix = format!("{}_{}_", epoch, start_block_height);
+        // in rocksdb, the upper bound of a range is not included, and we want the blocks with the end height
+        let upper_prefix = format!("{}_{}_", epoch, end_block_height + NodeHeight(1));
 
-        if !include_dummy_blocks {
-            query = query.filter(blocks::is_dummy.eq(false));
-        }
-
-        let results = query
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::shard_group.eq(shard_group.encode_as_u32() as i32))
-            .filter(blocks::height.ge(start_block_height.as_u64() as i64))
-            .filter(blocks::height.le(end_block_height.as_u64() as i64))
-            .order_by(blocks::height.asc())
-            .limit(limit as i64)
-            .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_all_after_height",
-                source: e,
-            })?;
-
-        results
+        let block_ids: Vec<BlockId> =
+            BlockModel::multi_get_cf_range(self.db.clone(), &self.tx, "blocks_get_last_n_in_epoch",  cf, &lower_prefix, &upper_prefix)?
             .into_iter()
-            .map(|(block, qc)| {
-                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "blocks_all_after_height",
-                    details: format!(
-                        "block {} references non-existent quorum certificate {}",
-                        block.block_id, block.qc_id
-                    ),
-                })?;
+            .collect();
 
-                block.try_convert(qc)
-            })
-            .collect()
-            */
+        let mut blocks = vec![];
+        for block_id in block_ids {
+            let block= BlockModel::get(&self.tx, "blocks_get_last_n_in_epoch", &block_id)?;
+
+            if !include_dummy_blocks && block.is_dummy() {
+                continue;
+            }
+
+            if block.shard_group() == shard_group {
+                blocks.push(block);
+            }
+        }
+        // order by ascending height 
+        blocks.sort_by(|a, b| a.height().cmp(&b.height()));
+        
+        let first_n = blocks.into_iter().take(limit.try_into().unwrap()).collect();
+
+        Ok(first_n)
     }
 
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {

@@ -224,7 +224,15 @@ mod block_parent_operations {
         let res = tx.blocks_get_all_by_parent(block2.id()).unwrap();
         assert_eq!(res.len(), 0);
 
-        // TODO: blocks_get_parent_chain
+        // blocks_get_parent_chain
+        let res = tx.blocks_get_parent_chain(zero_block.id(), 10).unwrap();
+        assert_eq!(res.len(), 0);
+        let res = tx.blocks_get_parent_chain(block1.id(), 10).unwrap();
+        assert_eq!(res.len(), 0);
+        let res = tx.blocks_get_parent_chain(block2.id(), 10).unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].to_string(), block1.to_string());
+        // TODO: test a longer parent chain
 
         // TODO: have a block with multiple children and check method results
         // TODO: remove block1 and check method results

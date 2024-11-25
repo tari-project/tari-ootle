@@ -1091,51 +1091,24 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_get_parent_chain(&self, block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError> {
-        todo!()
-        /*
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::QueryError {
                 reason: format!("blocks_get_parent_chain: descendant block {} does not exist", block_id),
             });
         }
-        let blocks = sql_query(
-            r#"
-            WITH RECURSIVE tree(bid, parent) AS (
-                  SELECT block_id, parent_block_id FROM blocks where block_id = ?
-                UNION ALL
-                  SELECT block_id, parent_block_id
-                    FROM blocks JOIN tree ON block_id = tree.parent AND tree.bid != tree.parent
-                    LIMIT ?
-            )
-            SELECT blocks.*, quorum_certificates.* FROM tree
-                INNER JOIN blocks ON blocks.block_id = tree.bid
-                LEFT JOIN quorum_certificates ON blocks.qc_id = quorum_certificates.qc_id
-                ORDER BY height desc
-        "#,
-        )
-        .bind::<Text, _>(serialize_hex(block_id))
-        .bind::<BigInt, _>(limit as i64)
-        .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-        .map_err(|e| SqliteStorageError::DieselError {
-            operation: "blocks_get_parent_chain",
-            source: e,
-        })?;
 
-        blocks
-            .into_iter()
-            .map(|(b, qc)| {
-                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "blocks_get_by_parent",
-                    details: format!(
-                        "block {} references non-existent quorum certificate {}",
-                        block_id, b.qc_id
-                    ),
-                })?;
+        let mut blocks = vec![];
+        let mut i = 0;
+        let initial_block = BlockModel::get(&self.tx, "blocks_is_ancestor", &block_id)?;  
+        let mut current_block_id = *initial_block.parent();
+        while i < limit && current_block_id != BlockId::genesis() {
+            let block = BlockModel::get(&self.tx, "blocks_is_ancestor", &current_block_id)?;
+            current_block_id = *block.parent();
+            blocks.push(block);
+            i += 1;
+        }
 
-                b.try_convert(qc)
-            })
-            .collect()
-            */
+        Ok(blocks)
     }
 
     fn blocks_get_pending_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError> {

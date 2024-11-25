@@ -324,11 +324,9 @@ impl BlockModel {
         Ok(block)
     }
 
-    pub fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf: &str, operation: &'static str, block_id: &BlockId) -> Result<Block, RocksDbStorageError> {
-        // get the column family value for the actual block id
-        // TODO: make this a multi-get?
+    pub fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf: &str, operation: &'static str, key_prefix: &str) -> Result<Block, RocksDbStorageError> {
         let cf = db.cf_handle(cf).unwrap();
-        let key = Self::key(block_id);
+        let key = format!("{}_{}", Self::KEY_PREFIX, key_prefix);
         let value = tx.get_cf(cf, &key)
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,

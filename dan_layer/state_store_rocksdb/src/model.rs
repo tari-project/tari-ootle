@@ -28,6 +28,7 @@ use tari_dan_common_types::NodeHeight;
 use tari_dan_storage::consensus_models::{Block, BlockId, Decision, Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate};
 use tari_engine_types::confidential::validate_elgamal_verifiable_balance_proof;
 use tari_transaction::TransactionId;
+use tari_utilities::ByteArray;
 
 use crate::error::RocksDbStorageError;
 
@@ -280,6 +281,7 @@ impl TransactionPoolModel {
 pub(crate) struct BlockModel {}
 
 impl BlockModel {
+    pub const KEY_PREFIX: &str = "blocks";
     pub const CF_PARENT_ID: &str = "blocks_parent_id";
 
     pub fn cfs() -> Vec<&'static str> {
@@ -287,7 +289,7 @@ impl BlockModel {
     }
 
     fn key(block_id: &BlockId) -> String {
-        format!("blocks_{}", block_id.to_string())
+        format!("{}_{}", Self::KEY_PREFIX, block_id.to_string())
     }
 
     fn encode(block: &Block) -> Result<Vec<u8>, RocksDbStorageError> {
@@ -348,6 +350,25 @@ impl BlockModel {
         Ok(block)
     }
 
+    pub fn multi_get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, _operation: &'static str, cf: &str, prefix: &str) -> Result<Vec<BlockId>, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        let prefix = format!("{}_{}", Self::KEY_PREFIX, prefix);
+        options.set_iterate_range(rocksdb::PrefixRange(prefix.as_bytes()));
+
+        let cf = db.cf_handle(cf).unwrap();
+
+        let iterator = tx.iterator_cf_opt(cf,options, rocksdb::IteratorMode::Start);
+        let values = iterator.map(|item| {
+            // TODO: properly handle errors and avoid unwraps
+            let (_, value) = item.unwrap();
+            let value = BlockId::try_from(value.to_vec()).unwrap();
+            value
+        })
+        .collect();
+
+        Ok(values)
+    }
+
     pub fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, block: &Block) -> Result<(), RocksDbStorageError> {
         let key = Self::key(block.id());
         let value = Self::encode(block)?;
@@ -361,12 +382,12 @@ impl BlockModel {
 
         // blocks_parent_id column family
         let cf = db.cf_handle(Self::CF_PARENT_ID).unwrap();
-        let key = Self::key(block.parent());
+        let key = format!("{}_{}_{}", Self::KEY_PREFIX, block.parent(), block.id());
         tx.put_cf(cf, key, block.id().as_bytes())
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
                 source: e,
-        })?;
+        })?;                 
 
         Ok(())
     }
@@ -385,7 +406,7 @@ impl BlockModel {
 
         // we also need to delete related CF keys
         let cf = db.cf_handle(Self::CF_PARENT_ID).unwrap();
-        let key = Self::key(block.parent());
+        let key = format!("{}_{}_{}", Self::KEY_PREFIX, block.parent(), block.id());
         tx.delete_cf(cf, key)
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,

@@ -1074,58 +1074,20 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect();
 
         Ok(block_ids)
-
-        /*
-        use crate::schema::blocks;
-
-        let results = blocks::table
-            .select(blocks::block_id)
-            .filter(blocks::parent_block_id.eq(serialize_hex(parent_id)))
-            .filter(blocks::block_id.ne(blocks::parent_block_id)) // Exclude the genesis block
-            .get_results::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_by_parent",
-                source: e,
-            })?;
-
-        results
-            .into_iter()
-            .map(|block_id| deserialize_hex_try_from(&block_id))
-            .collect()
-            */
     }
 
     fn blocks_get_all_by_parent(&self, parent_id: &BlockId) -> Result<Vec<Block>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, quorum_certificates};
+        // get all the block ids first
+        let block_ids = self.blocks_get_ids_by_parent(parent_id)?;
 
-        let results = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::parent_block_id.eq(serialize_hex(parent_id)))
-            .filter(blocks::block_id.ne(blocks::parent_block_id)) // Exclude the genesis block
-            .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_by_parent",
-                source: e,
-            })?;
-
-        results
-            .into_iter()
-            .map(|(block, qc)| {
-                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "blocks_get_by_parent",
-                    details: format!(
-                        "block {} references non-existent quorum certificate {}",
-                        parent_id, block.qc_id
-                    ),
-                })?;
-
-                block.try_convert(qc)
-            })
-            .collect()
-            */
+        // fetch each child by id
+        let mut blocks = vec![];
+        for block_id in block_ids {
+            let block = BlockModel::get(&self.tx, "blocks_get_all_by_parent", &block_id)?;
+            blocks.push(block);
+        }
+        
+        Ok(blocks)
     }
 
     fn blocks_get_parent_chain(&self, block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError> {

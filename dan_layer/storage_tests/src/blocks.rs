@@ -243,6 +243,8 @@ mod block_parent_operations {
 
 
 mod block_query_operations {
+    use std::ops::RangeInclusive;
+
     use tari_dan_common_types::{ExtraData, ExtraFieldKey, NumPreshards, ShardGroup};
 
     use crate::util::{create_rocksdb, create_sqlite, create_tx_atom};
@@ -348,6 +350,7 @@ mod block_query_operations {
         .unwrap();
         block3.set_is_committed(true);
         block3.insert(&mut tx).unwrap();
+        
 
         // blocks_get_all_ids_by_height
         let res = tx.blocks_get_all_ids_by_height(Epoch(0), NodeHeight(1)).unwrap();
@@ -372,9 +375,15 @@ mod block_query_operations {
         assert_eq!(res[0].to_string(), zero_block.to_string());
         assert_eq!(res[1].to_string(), block1.to_string());
 
+        // blocks_get_any_with_epoch_range
+        let res = tx.blocks_get_any_with_epoch_range(RangeInclusive::new(Epoch(0), Epoch(0)), None).unwrap();
+        assert_eq!(res.len(), 4);
+
+        // TODO: test with a greater epoch range
+        // TODO: test with a specific vn key
+
         // TODO: blocks_get_pending_transactions
         // TODO: blocks_get_total_leader_fee_for_epoch
-        // TODO: blocks_get_any_with_epoch_range
         // TODO: blocks_get_paginated
         // TODO: filtered_blocks_get_count
 

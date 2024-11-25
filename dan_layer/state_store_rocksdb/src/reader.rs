@@ -966,13 +966,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let upper_prefix = format!("{}_{}_", epoch, end_block_height + NodeHeight(1));
 
         let block_ids: Vec<BlockId> =
-            BlockModel::multi_get_cf_range(self.db.clone(), &self.tx, "blocks_get_last_n_in_epoch",  cf, &lower_prefix, &upper_prefix)?
+            BlockModel::multi_get_cf_range(self.db.clone(), &self.tx, "blocks_get_all_between",  cf, &lower_prefix, &upper_prefix)?
             .into_iter()
             .collect();
 
         let mut blocks = vec![];
         for block_id in block_ids {
-            let block= BlockModel::get(&self.tx, "blocks_get_last_n_in_epoch", &block_id)?;
+            let block= BlockModel::get(&self.tx, "blocks_get_all_between", &block_id)?;
 
             if !include_dummy_blocks && block.is_dummy() {
                 continue;
@@ -1117,42 +1117,32 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         epoch_range: RangeInclusive<Epoch>,
         validator_public_key: Option<&PublicKey>,
     ) -> Result<Vec<Block>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, quorum_certificates};
+        // TODO: this could be optimized by creating a new rocksdb column family for vn keys
 
-        let mut query = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::epoch.between(epoch_range.start().as_u64() as i64, epoch_range.end().as_u64() as i64))
-            .into_boxed();
+        let cf = BlockModel::CF_EPOCH_HEIGHT;
+        let lower_prefix = format!("{}_", epoch_range.start());
+        // in rocksdb, the upper bound of a range is not included, and we want the blocks with the end epoch
+        let upper_prefix = format!("{}_", epoch_range.end() + &Epoch(1));
 
-        if let Some(vn) = validator_public_key {
-            query = query.filter(blocks::proposed_by.eq(serialize_hex(vn.as_bytes())));
+        let block_ids: Vec<BlockId> =
+            BlockModel::multi_get_cf_range(self.db.clone(), &self.tx, "blocks_get_any_with_epoch_range",  cf, &lower_prefix, &upper_prefix)?
+            .into_iter()
+            .collect();
+
+        let mut blocks = vec![];
+        for block_id in block_ids {
+            let block= BlockModel::get(&self.tx, "blocks_get_any_with_epoch_range", &block_id)?;
+
+            if let Some(vn) = validator_public_key {
+                if block.proposed_by() != vn {
+                    continue
+                }
+            }
+
+            blocks.push(block);
         }
 
-        let blocks_and_qcs = query
-            .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_fees_get_any_with_epoch_range_for_validator",
-                source: e,
-            })?;
-
-        blocks_and_qcs
-            .into_iter()
-            .map(|(block, qc)| {
-                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "blocks_get_by_parent",
-                    details: format!(
-                        "block {} references non-existent quorum certificate {}",
-                        block.id, block.qc_id
-                    ),
-                })?;
-
-                block.try_convert(qc)
-            })
-            .collect()
-            */
+        Ok(blocks)
     }
 
     fn blocks_get_paginated(

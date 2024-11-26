@@ -398,7 +398,12 @@ mod block_query_operations {
         let res = tx.blocks_get_total_leader_fee_for_epoch(Epoch(0), &Default::default()).unwrap();
         assert_eq!(res, 9);
 
-        // TODO: filtered_blocks_get_count
+        // filtered_blocks_get_count
+        let res = tx.filtered_blocks_get_count(None, None).unwrap();
+        assert_eq!(res, 4);
+        let res = tx.filtered_blocks_get_count(Some(2), Some(1_u64.to_string())).unwrap();
+        assert_eq!(res, 1);
+
         // TODO: blocks_max_height
 
         tx.rollback().unwrap();

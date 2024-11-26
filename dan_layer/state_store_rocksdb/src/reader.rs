@@ -1231,60 +1231,46 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         filter_index: Option<usize>,
         filter: Option<String>,
     ) -> Result<i64, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, quorum_certificates};
+        // TODO: this operation could be optimized by creating column families for all filtering fields
 
-        let mut query = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .into_boxed();
-
-        if let Some(filter) = filter {
-            if !filter.is_empty() {
-                if let Some(filter_index) = filter_index {
-                    match filter_index {
-                        0 => query = query.filter(blocks::block_id.like(format!("%{filter}%"))),
-                        1 => {
-                            query = query.filter(
-                                blocks::epoch
-                                    .eq(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
-                        },
-                        2 => {
-                            query = query.filter(
-                                blocks::height
-                                    .eq(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
-                        },
-                        4 => {
-                            query = query.filter(
-                                blocks::command_count
-                                    .ge(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
-                        },
-                        5 => {
-                            query = query.filter(
-                                blocks::total_leader_fee
-                                    .ge(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
-                        },
-                        7 => query = query.filter(blocks::proposed_by.like(format!("%{filter}%"))),
-                        _ => (),
-                    }
+        let block_filter = |block: &Block| {
+            let mut res = true;
+            if let Some(filter) = &filter {
+                if !filter.is_empty() {
+                    if let Some(filter_index) = filter_index {
+                        match filter_index {
+                            0 => res = block.id().to_string().contains(filter),
+                            1 => {
+                                let epoch_number = filter.parse::<u64>().unwrap();
+                                res = block.epoch() == Epoch(epoch_number);
+                            },
+                            2 => {
+                                let height_number = filter.parse::<u64>().unwrap();
+                                res = block.height() == NodeHeight(height_number);
+                            },
+                            4 => {
+                                let cmd_number = filter.parse::<usize>().unwrap();
+                                res = block.command_count() >= cmd_number;
+                            },
+                            5 => {
+                                let fee = filter.parse::<u64>().unwrap();
+                                res = block.total_leader_fee() >= fee;
+                            },
+                            7 => res = block.proposed_by().to_string().contains(filter),
+                            _ => (),
+                        }
+                    } 
                 }
             }
-        }
+            res
+        };
 
-        let count = query
-            .select(diesel::dsl::count(blocks::id))
-            .first::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "filtered_blocks_get_count",
-                source: e,
-            })?;
+        let count = BlockModel::list(&self.tx)?
+            .into_iter()
+            .filter(block_filter)
+            .count() as i64;
+
         Ok(count)
-        */
     }
 
     fn blocks_max_height(&self) -> Result<NodeHeight, StorageError> {

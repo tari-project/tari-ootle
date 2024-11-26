@@ -1093,23 +1093,22 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         epoch: Epoch,
         validator_public_key: &PublicKey,
     ) -> Result<u64, StorageError> {
-        todo!()
-        /*
-        use crate::schema::blocks;
+        // TODO: to optimize this query we could create a new column familiy with epoch and proposed_by fields in the key
 
-        let total_fee = blocks::table
-            .select(diesel::dsl::sum(blocks::total_leader_fee))
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::proposed_by.eq(serialize_hex(validator_public_key.as_bytes())))
-            .first::<Option<BigDecimal>>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_fees_get_total_fee_for_epoch",
-                source: e,
-            })?
-            .unwrap_or(BigDecimal::default());
+        let cf = BlockModel::CF_EPOCH_HEIGHT;
+        let key_prefix = format!("{}_", epoch);
+        let block_ids = BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_total_leader_fee_for_epoch", cf, &key_prefix)?;
 
-        Ok(total_fee.to_u64().expect("total fee overflows u64"))
-        */
+        let mut sum = 0;
+        for block_id in block_ids {
+            let block= BlockModel::get(&self.tx, "blocks_get_total_leader_fee_for_epoch", &block_id)?;
+
+            if block.proposed_by() == validator_public_key {
+                sum += block.total_leader_fee();
+            }
+        }
+
+        Ok(sum)
     }
 
     fn blocks_get_any_with_epoch_range(
@@ -1225,18 +1224,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn blocks_get_count(&self) -> Result<i64, StorageError> {
         Ok(BlockModel::count(&self.tx)?)
-        /*
-        use crate::schema::{blocks, quorum_certificates};
-        let count = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select(diesel::dsl::count(blocks::id))
-            .first::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_count",
-                source: e,
-            })?;
-        Ok(count)
-        */
     }
 
     fn filtered_blocks_get_count(

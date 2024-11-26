@@ -313,7 +313,8 @@ mod block_query_operations {
             // cannot cause a state change without any commands
             [Command::Prepare(atom2.clone())].into_iter().collect(),
             Default::default(),
-            Default::default(),
+            // adding some fee to test blocks_get_total_leader_fee_for_epoch
+            4,
             Default::default(),
             None,
             EpochTime::now().as_u64(),
@@ -340,7 +341,8 @@ mod block_query_operations {
             // cannot cause a state change without any commands
             [Command::Prepare(atom2.clone())].into_iter().collect(),
             Default::default(),
-            Default::default(),
+            // adding some fee to test blocks_get_total_leader_fee_for_epoch
+            5,
             Default::default(),
             None,
             EpochTime::now().as_u64(),
@@ -392,9 +394,12 @@ mod block_query_operations {
         let res = tx.blocks_get_paginated(1, 0, None, None, Some(7), Some(Ordering::Descending)).unwrap();
         assert_eq!(res.len(), 1);
 
-        // TODO: blocks_get_pending_transactions
-        // TODO: blocks_get_total_leader_fee_for_epoch
+        // blocks_get_total_leader_fee_for_epoch
+        let res = tx.blocks_get_total_leader_fee_for_epoch(Epoch(0), &Default::default()).unwrap();
+        assert_eq!(res, 9);
+
         // TODO: filtered_blocks_get_count
+        // TODO: blocks_max_height
 
         tx.rollback().unwrap();
     }

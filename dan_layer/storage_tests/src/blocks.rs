@@ -404,8 +404,6 @@ mod block_query_operations {
         let res = tx.filtered_blocks_get_count(Some(2), Some(1_u64.to_string())).unwrap();
         assert_eq!(res, 1);
 
-        // TODO: blocks_max_height
-
         tx.rollback().unwrap();
     }
 }

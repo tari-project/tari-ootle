@@ -1202,7 +1202,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             Some(4) => blocks.sort_by(|a, b| a.command_count().cmp(&b.command_count())),
             Some(5) => blocks.sort_by(|a, b| a.total_leader_fee().cmp(&b.total_leader_fee())),
             Some(6) => blocks.sort_by(|a, b| a.block_time().cmp(&b.block_time())),
-            // This filter is by creation time, but RocksDb default order is already by creation time, so no need for further ordering
+            // TODO: This filter is by creation time, but we don't have a created_at field yet in the corresponding RocksDB values
             Some(7) => (),
             Some(8) => blocks.sort_by(|a, b| a.proposed_by().cmp(&b.proposed_by())),
             _ => blocks.sort_by(|a, b| (a.epoch(), a.height()).cmp(&(b.epoch(), b.height()))),
@@ -1274,21 +1274,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_max_height(&self) -> Result<NodeHeight, StorageError> {
+        // This method is not used
+        // TODO: remove it from the state store trait
         todo!()
-        /*
-        use crate::schema::blocks;
-
-        let height = blocks::table
-            .select(diesel::dsl::max(blocks::height))
-            .first::<Option<i64>>(self.connection())
-            .map(|height| NodeHeight(height.unwrap_or(0) as u64))
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_max_height",
-                source: e,
-            })?;
-
-        Ok(height)
-        */
     }
 
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError> {

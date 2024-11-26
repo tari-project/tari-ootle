@@ -4,12 +4,7 @@
 use std::{io, sync::Arc};
 
 use axum::extract::Query;
-use axum::{
-    extract::{multipart::MultipartError, Multipart},
-    http::StatusCode,
-    response::IntoResponse,
-    Extension,
-};
+use axum::{extract::{multipart::MultipartError, Multipart}, http::StatusCode, response::IntoResponse, Extension, Json};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::hex;
@@ -25,30 +20,48 @@ fn register_template_default() -> bool {
 }
 
 #[derive(Deserialize)]
-struct UploadQueryParams {
+pub struct UploadQueryParams {
     #[serde(default = "register_template_default")]
     register_template: bool,
 }
 
-#[derive(Serialize)]
-struct UploadResponse {
+#[derive(Serialize, Deserialize)]
+pub struct UploadResponse {
     success: bool,
     template_url: Option<Url>,
     error: String,
 }
 
-pub async fn upload(
-    Extension(context): Extension<Arc<HandlerContext>>,
-    mut value: Multipart,
-    query_params: Query<UploadQueryParams>,
-) -> Result<UploadResponse, UploadError> {
-    let Some(field) = value.next_field().await? else {
-        error!("🌐 Upload template: no field found");
-        return Ok(UploadResponse {
+impl UploadResponse {
+    pub fn success(template_url: Url) -> Self {
+        Self {
+            success: true,
+            template_url: Some(template_url),
+            error: String::new(),
+        }
+    }
+
+    pub fn failure(error: String) -> Self {
+        Self {
             success: false,
             template_url: None,
-            error: "No multipart file field found".to_string(),
-        });
+            error,
+        }
+    }
+}
+
+pub async fn upload(
+    Extension(context): Extension<Arc<HandlerContext>>,
+    query_params: Query<UploadQueryParams>,
+    mut value: Multipart,
+) -> Result<Json<UploadResponse>, UploadError> {
+    let Some(field) = value.next_field().await? else {
+        error!("🌐 Upload template: no field found");
+        return Ok(
+            Json(
+                UploadResponse::failure("No multipart file field found".to_string())
+            )
+        );
     };
 
     let name = field.file_name().unwrap_or("unnamed-template").to_string();
@@ -76,17 +89,17 @@ pub async fn upload(
             name,
             version: 0,
             contents_hash: hash,
-            contents_url: template_url,
+            contents_url: template_url.clone(),
         };
 
         return match context.process_manager().register_template(data).await {
             Ok(()) => {
                 info!("🌐 Registered template");
-                Ok(UploadResponse {
-                    success: true,
-                    template_url: Some(template_url.clone()),
-                    error: String::new(),
-                })
+                Ok(
+                    Json(
+                        UploadResponse::success(template_url)
+                    )
+                )
             }
             Err(err) => {
                 error!("🌐 Registering template failed: {}", err);
@@ -95,7 +108,11 @@ pub async fn upload(
         };
     }
 
-    Ok(UploadResponse { template_url })
+    Ok(
+        Json(
+            UploadResponse::success(template_url)
+        )
+    )
 }
 
 #[derive(Debug, thiserror::Error)]

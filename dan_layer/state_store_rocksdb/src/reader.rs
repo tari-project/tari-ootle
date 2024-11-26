@@ -1154,104 +1154,73 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         ordering_index: Option<usize>,
         ordering: Option<Ordering>,
     ) -> Result<Vec<Block>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, quorum_certificates};
+        // This operation is implemented in a naive way, by manually looping all blocks in the database.
+        // As this is only used for VN testing, further RocksDb database optimizations are probably not worth it
 
-        let mut query = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .into_boxed();
-
-        query = match ordering {
-            Some(Ordering::Ascending) => match ordering_index {
-                Some(0) => query.order_by(blocks::block_id.asc()),
-                Some(1) => query.order_by(blocks::epoch.asc()),
-                Some(2) => query.order_by(blocks::epoch.asc()).then_order_by(blocks::height.asc()),
-                Some(4) => query.order_by(blocks::command_count.asc()),
-                Some(5) => query.order_by(blocks::total_leader_fee.asc()),
-                Some(6) => query.order_by(blocks::block_time.asc()),
-                Some(7) => query.order_by(blocks::created_at.asc()),
-                Some(8) => query.order_by(blocks::proposed_by.asc()),
-                _ => query.order_by(blocks::epoch.asc()).then_order_by(blocks::height.asc()),
-            },
-            _ => match ordering_index {
-                Some(0) => query.order_by(blocks::block_id.desc()),
-                Some(1) => query.order_by(blocks::epoch.desc()),
-                Some(2) => query
-                    .order_by(blocks::epoch.desc())
-                    .then_order_by(blocks::height.desc()),
-                Some(4) => query.order_by(blocks::command_count.desc()),
-                Some(5) => query.order_by(blocks::total_leader_fee.desc()),
-                Some(6) => query.order_by(blocks::block_time.desc()),
-                Some(7) => query.order_by(blocks::created_at.desc()),
-                Some(8) => query.order_by(blocks::proposed_by.desc()),
-                _ => query
-                    .order_by(blocks::epoch.desc())
-                    .then_order_by(blocks::height.desc()),
-            },
-        };
-
-        if let Some(filter) = filter {
-            if !filter.is_empty() {
-                if let Some(filter_index) = filter_index {
-                    match filter_index {
-                        0 => query = query.filter(blocks::block_id.like(format!("%{filter}%"))),
-                        1 => {
-                            query = query.filter(
-                                blocks::epoch
-                                    .eq(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
-                        },
-                        2 => {
-                            query = query.filter(
-                                blocks::height
-                                    .eq(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
-                        },
-                        4 => {
-                            query = query.filter(
-                                blocks::command_count
-                                    .ge(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
-                        },
-                        5 => {
-                            query = query.filter(
-                                blocks::total_leader_fee
-                                    .ge(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
-                        },
-                        7 => query = query.filter(blocks::proposed_by.like(format!("%{filter}%"))),
-                        _ => (),
-                    }
+        let block_filter = |block: &Block| {
+            let mut res = true;
+            if let Some(filter) = &filter {
+                if !filter.is_empty() {
+                    if let Some(filter_index) = filter_index {
+                        match filter_index {
+                            0 => res = block.id().to_string().contains(filter),
+                            1 => {
+                                let epoch_number = filter.parse::<u64>().unwrap();
+                                res = block.epoch() == Epoch(epoch_number);
+                            },
+                            2 => {
+                                let height_number = filter.parse::<u64>().unwrap();
+                                res = block.height() == NodeHeight(height_number);
+                            },
+                            4 => {
+                                let cmd_number = filter.parse::<usize>().unwrap();
+                                res = block.command_count() >= cmd_number;
+                            },
+                            5 => {
+                                let fee = filter.parse::<u64>().unwrap();
+                                res = block.total_leader_fee() >= fee;
+                            },
+                            7 => res = block.proposed_by().to_string().contains(filter),
+                            _ => (),
+                        }
+                    } 
                 }
             }
+            res
+        };
+
+        let mut blocks: Vec<Block> =
+            BlockModel::list(&self.tx)?
+            .into_iter()
+            .filter(block_filter)
+            .collect();
+
+        // ordering
+        match ordering_index {
+            Some(0) => blocks.sort_by(|a, b| a.id().cmp(b.id())),   
+            Some(1) => blocks.sort_by(|a, b| a.epoch().cmp(&b.epoch())),
+            Some(2) => blocks.sort_by(|a, b| (a.epoch(), a.height()).cmp(&(b.epoch(), b.height()))),
+            Some(4) => blocks.sort_by(|a, b| a.command_count().cmp(&b.command_count())),
+            Some(5) => blocks.sort_by(|a, b| a.total_leader_fee().cmp(&b.total_leader_fee())),
+            Some(6) => blocks.sort_by(|a, b| a.block_time().cmp(&b.block_time())),
+            // This filter is by creation time, but RocksDb default order is already by creation time, so no need for further ordering
+            Some(7) => (),
+            Some(8) => blocks.sort_by(|a, b| a.proposed_by().cmp(&b.proposed_by())),
+            _ => blocks.sort_by(|a, b| (a.epoch(), a.height()).cmp(&(b.epoch(), b.height()))),
         }
 
-        let blocks = query
-            .limit(limit as i64)
-            .offset(offset as i64)
-            .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_paginated",
-                source: e,
-            })?;
+        if let Some(Ordering::Descending) = ordering {
+            blocks.reverse();
+        }
 
-        blocks
+        // pagination
+        blocks = blocks
             .into_iter()
-            .map(|(block, qc)| {
-                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "blocks_get_paginated",
-                    details: format!(
-                        "block {} references non-existent quorum certificate {}",
-                        block.id, block.qc_id
-                    ),
-                })?;
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect();
 
-                block.try_convert(qc)
-            })
-            .collect()
-            */
+        Ok(blocks)
     }
 
     fn blocks_get_count(&self) -> Result<i64, StorageError> {

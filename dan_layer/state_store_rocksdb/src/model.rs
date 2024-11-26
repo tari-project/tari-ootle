@@ -416,7 +416,7 @@ impl BlockModel {
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
                 source: e,
-        })?;                 
+        })?;         
 
         Ok(())
     }
@@ -443,6 +443,20 @@ impl BlockModel {
         })?;
 
         Ok(())
+    }
+
+    pub fn list(tx: &Transaction<'_, TransactionDB>) -> Result<Vec<Block>, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        options.set_iterate_range(rocksdb::PrefixRange("blocks_".as_bytes()));
+
+        let iterator = tx.iterator_opt( rocksdb::IteratorMode::Start, options);
+        let blocks = iterator.map(|item| {
+            let (_, bytes) = item.unwrap();
+            Self::decode(bytes.to_vec()).unwrap()
+        })
+        .collect();
+
+        Ok(blocks)
     }
 
     pub fn count(tx: &Transaction<'_, TransactionDB>) -> Result<i64, RocksDbStorageError> {

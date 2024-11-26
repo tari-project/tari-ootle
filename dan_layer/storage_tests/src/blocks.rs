@@ -246,6 +246,7 @@ mod block_query_operations {
     use std::ops::RangeInclusive;
 
     use tari_dan_common_types::{ExtraData, ExtraFieldKey, NumPreshards, ShardGroup};
+    use tari_dan_storage::Ordering;
 
     use crate::util::{create_rocksdb, create_sqlite, create_tx_atom};
 
@@ -382,9 +383,17 @@ mod block_query_operations {
         // TODO: test with a greater epoch range
         // TODO: test with a specific vn key
 
+        // blocks_get_paginated
+        let res = tx.blocks_get_paginated(10, 0, None, None, None, None).unwrap();
+        assert_eq!(res.len(), 4);
+        let res = tx.blocks_get_paginated(10, 0, Some(2), Some(1_u64.to_string()), None, None).unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].to_string(), block1.to_string());
+        let res = tx.blocks_get_paginated(1, 0, None, None, Some(7), Some(Ordering::Descending)).unwrap();
+        assert_eq!(res.len(), 1);
+
         // TODO: blocks_get_pending_transactions
         // TODO: blocks_get_total_leader_fee_for_epoch
-        // TODO: blocks_get_paginated
         // TODO: filtered_blocks_get_count
 
         tx.rollback().unwrap();

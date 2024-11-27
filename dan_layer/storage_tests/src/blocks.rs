@@ -16,7 +16,7 @@ use tari_utilities::epoch_time::EpochTime;
 mod basic_block_operations {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
 
-    use crate::util::{create_rocksdb, create_sqlite, create_tx_atom};
+    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
     use super::*;
 
@@ -110,7 +110,7 @@ mod basic_block_operations {
 mod block_parent_operations {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
 
-    use crate::util::{create_rocksdb, create_sqlite, create_tx_atom};
+    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
     use super::*;
 
@@ -248,7 +248,7 @@ mod block_query_operations {
     use tari_dan_common_types::{ExtraData, ExtraFieldKey, NumPreshards, ShardGroup};
     use tari_dan_storage::Ordering;
 
-    use crate::util::{create_rocksdb, create_sqlite, create_tx_atom};
+    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
     use super::*;
 

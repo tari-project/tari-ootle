@@ -1,9 +1,11 @@
 use tari_dan_storage::consensus_models::{Decision, TransactionAtom};
+use tari_engine_types::substate::SubstateId;
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_lib::models::{ComponentAddress, ComponentKey, EntityId, ObjectKey};
 use tempfile::tempdir;
 
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng, RngCore};
 use tari_transaction::TransactionId;
 
 pub fn create_rocksdb() -> RocksDbStateStore<String> {
@@ -34,4 +36,26 @@ pub fn create_tx_atom() -> TransactionAtom {
         transaction_fee: 0,
         leader_fee: None,
     }
+}
+
+pub fn create_random_substate_id() -> SubstateId {
+    let entity_id = EntityId::default();
+    let rand_bytes = OsRng.gen::<[u8; ComponentKey::LENGTH]>();
+    let component_key = ComponentKey::new(copy_fixed(&rand_bytes));
+    SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
+}
+
+pub fn copy_fixed<const SZ: usize>(bytes: &[u8]) -> [u8; SZ] {
+    let mut out = [0u8; SZ];
+    out.copy_from_slice(bytes);
+    out
+}
+
+pub fn assert_eq_debug<T>(a: &T, b: &T)
+    where T: std::fmt::Debug
+{
+    assert_eq!(
+        format!("{:?}", a),
+        format!("{:?}", b),
+    );
 }

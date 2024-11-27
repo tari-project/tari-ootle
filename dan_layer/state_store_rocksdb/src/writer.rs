@@ -52,7 +52,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{BlockModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{BlockModel, TransactionModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -273,32 +273,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         BlockModel::put(self.db.clone(), tx, operation, &block)?;
 
         Ok(())
-
-        /*
-        use crate::schema::blocks;
-
-        #[derive(AsChangeset)]
-        #[diesel(table_name = blocks)]
-        struct Changes {
-            is_committed: Option<bool>,
-            is_justified: Option<bool>,
-        }
-        let changes = Changes {
-            is_committed,
-            is_justified,
-        };
-
-        diesel::update(blocks::table)
-            .filter(blocks::block_id.eq(serialize_hex(block_id)))
-            .set(changes)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_commit",
-                source: e,
-            })?;
-
-        Ok(())
-        */
     }
 
     fn block_diffs_insert(&mut self, block_id: &BlockId, changes: &[SubstateChange]) -> Result<(), StorageError> {
@@ -820,145 +794,41 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn transactions_insert(&mut self, tx_rec: &TransactionRecord) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::transactions;
-
-        let transaction = tx_rec.transaction();
-        let insert = (
-            transactions::transaction_id.eq(serialize_hex(transaction.id())),
-            transactions::fee_instructions.eq(serialize_json(transaction.fee_instructions())?),
-            transactions::instructions.eq(serialize_json(transaction.instructions())?),
-            transactions::signatures.eq(serialize_json(transaction.signatures())?),
-            transactions::inputs.eq(serialize_json(transaction.inputs())?),
-            transactions::filled_inputs.eq(serialize_json(transaction.filled_inputs())?),
-            transactions::resolved_inputs.eq(tx_rec.resolved_inputs().map(serialize_json).transpose()?),
-            transactions::resulting_outputs.eq(tx_rec.resulting_outputs().map(serialize_json).transpose()?),
-            transactions::result.eq(tx_rec.execution_result().map(serialize_json).transpose()?),
-            transactions::execution_time_ms.eq(tx_rec
-                .execution_time()
-                .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))),
-            transactions::final_decision.eq(tx_rec.final_decision().map(|d| d.to_string())),
-            transactions::finalized_at.eq(tx_rec
-                .finalized_time()
-                .map(|t| {
-                    let now = OffsetDateTime::now_utc().saturating_sub(t.try_into()?);
-                    Ok(PrimitiveDateTime::new(now.date(), now.time()))
-                })
-                .transpose()
-                .map_err(|e: time::error::ConversionRange| StorageError::QueryError {
-                    reason: format!("Cannot convert finalize time into PrimitiveDateTime: {e}"),
-                })?),
-            transactions::abort_details.eq(tx_rec.abort_reason().map(serialize_json).transpose()?),
-            transactions::min_epoch.eq(transaction.min_epoch().map(|e| e.as_u64() as i64)),
-            transactions::max_epoch.eq(transaction.max_epoch().map(|e| e.as_u64() as i64)),
-        );
-
-        diesel::insert_into(transactions::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_insert",
-                source: e,
-            })?;
-
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        TransactionModel::put(self.db.clone(), tx, "transactions_insert", &tx_rec)?;
         Ok(())
-        */
     }
 
     fn transactions_update(&mut self, transaction_rec: &TransactionRecord) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::transactions;
+        let operation = "transactions_update";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let transaction = transaction_rec.transaction();
-
-        #[derive(AsChangeset)]
-        #[diesel(table_name = transactions)]
-        struct Changes {
-            result: Option<String>,
-            filled_inputs: String,
-            resulting_outputs: Option<String>,
-            resolved_inputs: Option<String>,
-            execution_time_ms: Option<i64>,
-            final_decision: Option<String>,
-            finalized_at: Option<PrimitiveDateTime>,
-            abort_details: Option<String>,
-        }
-
-        let change_set = Changes {
-            result: transaction_rec.execution_result().map(serialize_json).transpose()?,
-            filled_inputs: serialize_json(transaction.filled_inputs())?,
-            resulting_outputs: transaction_rec.resulting_outputs().map(serialize_json).transpose()?,
-            resolved_inputs: transaction_rec.resolved_inputs().map(serialize_json).transpose()?,
-            execution_time_ms: transaction_rec
-                .execution_time()
-                .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX)),
-
-            final_decision: transaction_rec.final_decision().map(|d| d.to_string()),
-            finalized_at: transaction_rec.final_decision().map(|_| {
-                let now = OffsetDateTime::now_utc();
-                PrimitiveDateTime::new(now.date(), now.time())
-            }),
-            abort_details: transaction_rec.abort_reason.as_ref().map(serialize_json).transpose()?,
-        };
-
-        let num_affected = diesel::update(transactions::table)
-            .filter(transactions::transaction_id.eq(serialize_hex(transaction.id())))
-            .set(change_set)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_update",
-                source: e,
-            })?;
-
-        if num_affected == 0 {
+        if !TransactionModel::key_exists(tx, operation, transaction_rec.id())? {
             return Err(StorageError::NotFound {
-                item: "transaction".to_string(),
-                key: transaction.id().to_string(),
+                item: "transaction",
+                key: transaction_rec.id().to_string(),
             });
         }
 
+        // update the transaction in rocksDb
+        // TODO: is it better to use a RocksDB merge operator?
+        TransactionModel::put(self.db.clone(), tx, operation, &transaction_rec)?;
+
         Ok(())
-        */
     }
 
     fn transactions_save_all<'a, I: IntoIterator<Item = &'a TransactionRecord>>(
         &mut self,
         txs: I,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::transactions;
+        let operation = "transactions_save_all";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let insert = txs
-            .into_iter()
-            .map(|rec| {
-                let transaction = rec.transaction();
-                Ok((
-                    transactions::transaction_id.eq(serialize_hex(transaction.id())),
-                    transactions::fee_instructions.eq(serialize_json(transaction.fee_instructions())?),
-                    transactions::instructions.eq(serialize_json(transaction.instructions())?),
-                    transactions::signatures.eq(serialize_json(transaction.signatures())?),
-                    transactions::inputs.eq(serialize_json(transaction.inputs())?),
-                    transactions::resolved_inputs.eq(rec.resolved_inputs().map(serialize_json).transpose()?),
-                    transactions::filled_inputs.eq(serialize_json(transaction.filled_inputs())?),
-                    transactions::resulting_outputs.eq(rec.resulting_outputs().map(serialize_json).transpose()?),
-                    transactions::result.eq(rec.execution_result().map(serialize_json).transpose()?),
-                ))
-            })
-            .collect::<Result<Vec<_>, StorageError>>()?;
-
-        diesel::insert_or_ignore_into(transactions::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_insert",
-                source: e,
-            })?;
+        for transaction in txs {
+            TransactionModel::put(self.db.clone(), tx, operation, transaction)?;
+        }
 
         Ok(())
-        */
     }
 
     fn transactions_finalize_all<'a, I: IntoIterator<Item = &'a TransactionPoolRecord>>(

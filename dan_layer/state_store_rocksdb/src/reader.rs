@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::ByteArray;
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{BlockModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{BlockModel, TransactionModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -683,99 +683,43 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError> {
-        todo!()
-        /*
-        use crate::schema::transactions;
-
-        let transaction = transactions::table
-            .filter(transactions::transaction_id.eq(serialize_hex(tx_id)))
-            .first::<sql_models::Transaction>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_get",
-                source: e,
-            })?;
-
-        transaction.try_into()
-        */
+        Ok(TransactionModel::get(&self.tx, "transactions_get", tx_id)?)
     }
 
     fn transactions_exists(&self, tx_id: &TransactionId) -> Result<bool, StorageError> {
-        todo!()
-        /*
-        use crate::schema::transactions;
-
-        let exists = transactions::table
-            .count()
-            .filter(transactions::transaction_id.eq(serialize_hex(tx_id)))
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_exists",
-                source: e,
-            })?;
-
-        Ok(exists > 0)
-        */
+        Ok(TransactionModel::key_exists(&self.tx, "transactions_exists", tx_id)?)
     }
 
     fn transactions_get_any<'a, I: IntoIterator<Item = &'a TransactionId>>(
         &self,
         tx_ids: I,
     ) -> Result<Vec<TransactionRecord>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::transactions;
-
-        let tx_ids: Vec<String> = tx_ids.into_iter().map(serialize_hex).collect();
-
-        let transactions = transactions::table
-            .filter(transactions::transaction_id.eq_any(tx_ids))
-            .load::<sql_models::Transaction>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_get_any",
-                source: e,
-            })?;
-
-        transactions
-            .into_iter()
-            .map(|transaction| transaction.try_into())
-            .collect()
-            */
+        let tx_ids = tx_ids.into_iter().collect();
+        Ok(TransactionModel::multi_get(&self.tx, "transactions_get_any", tx_ids)?)
     }
 
     fn transactions_get_paginated(
         &self,
         limit: u64,
         offset: u64,
-        asc_desc_created_at: Option<Ordering>,
+        _asc_desc_created_at: Option<Ordering>,
     ) -> Result<Vec<TransactionRecord>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::transactions;
+        // This operation is implemented in a naive way, by manually looping all transactions in the database.
+        // As this method is only used for testing, further RocksDb database optimizations are probably not worth it
 
-        let mut query = transactions::table.into_boxed();
-
-        if let Some(ordering) = asc_desc_created_at {
-            match ordering {
-                Ordering::Ascending => query = query.order_by(transactions::created_at.asc()),
-                Ordering::Descending => query = query.order_by(transactions::created_at.desc()),
-            }
-        }
-
-        let transactions = query
-            .limit(limit as i64)
-            .offset(offset as i64)
-            .get_results::<sql_models::Transaction>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_get_paginated",
-                source: e,
-            })?;
-
-        transactions
+        let mut transactions: Vec<TransactionRecord> =
+            TransactionModel::list(&self.tx)?
             .into_iter()
-            .map(|transaction| transaction.try_into())
-            .collect()
-            */
+            .collect();
+
+        // pagination
+        transactions = transactions
+            .into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect();
+
+        Ok(transactions)
     }
 
     fn transaction_executions_get(
@@ -860,29 +804,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError> {
         Ok(BlockModel::get(&self.tx, "blocks_get", block_id)?)
-        /*
-        use crate::schema::{blocks, quorum_certificates};
-
-        let (block, qc) = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::block_id.eq(serialize_hex(block_id)))
-            .first::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get",
-                source: e,
-            })?;
-
-        let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-            operation: "blocks_get",
-            details: format!(
-                "block {} references non-existent quorum certificate {}",
-                block_id, block.qc_id
-            ),
-        })?;
-
-        block.try_convert(qc)
-        */
     }
 
     fn blocks_get_all_ids_by_height(&self, epoch: Epoch, height: NodeHeight) -> Result<Vec<BlockId>, StorageError> {

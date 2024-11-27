@@ -8,7 +8,7 @@ use std::{
 };
 
 use log::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{committee::CommitteeInfo, SubstateLockType};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason},
@@ -36,7 +36,7 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::dan::storage::consensus_models::transaction";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionRecord {
     pub transaction: Transaction,
     pub execution_result: Option<ExecuteResult>,

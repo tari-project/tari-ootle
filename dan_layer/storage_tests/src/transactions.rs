@@ -16,7 +16,7 @@ use tari_utilities::epoch_time::EpochTime;
 mod confirm_all_transitions {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
 
-    use crate::util::{create_rocksdb, create_sqlite, create_tx_atom};
+    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
     use super::*;
 
@@ -133,6 +133,120 @@ mod confirm_all_transitions {
             .unwrap();
         assert_eq!(rec.committed_stage(), TransactionPoolStage::Prepared);
         assert_eq!(rec.pending_stage(), None);
+
+        tx.rollback().unwrap();
+    }
+}
+
+
+mod basic_transaction_operations {
+    use tari_dan_common_types::SubstateRequirement;
+    use tari_dan_storage::consensus_models::TransactionRecord;
+    use tari_engine_types::commit_result::RejectReason;
+    use tari_transaction::{Instruction, Transaction};
+
+    use crate::helper::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_sqlite};
+
+    use super::*;
+
+    #[test]
+    fn basic_transaction_operations_sqlite() {
+        let db = create_sqlite();
+        basic_transaction_operations(db);
+    }
+
+    #[test]
+    fn basic_transaction_operations_rocksdb() {
+        let db = create_rocksdb();
+        basic_transaction_operations(db);
+    }
+
+    fn basic_transaction_operations(db: impl StateStore) {
+        let mut tx = db.create_write_tx().unwrap();
+        
+        // transactions_insert
+        let tx1 = TransactionRecord::new(
+            Transaction::builder()
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
+            .build()
+        );
+        tx.transactions_insert(&tx1).unwrap();
+        let tx2 = TransactionRecord::new(
+            Transaction::builder()
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
+            .build()
+        );
+        tx.transactions_insert(&tx2).unwrap();
+        let unexisting_tx = TransactionRecord::new(
+            Transaction::builder()
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_input(SubstateRequirement::new(create_random_substate_id(), Some(2)))
+            .build()
+        );
+
+        // transactions_get
+        let res = tx.transactions_get(tx1.id()).unwrap();
+        assert_eq_debug(&res, &tx1);
+        let res = tx.transactions_get(tx2.id()).unwrap();
+        assert_eq_debug(&res, &tx2);
+        assert!(tx.transactions_get(unexisting_tx.id()).is_err());
+
+        // transactions_exists
+        let res = tx.transactions_exists(tx1.id()).unwrap();
+        assert!(res);
+        let res = tx.transactions_exists(tx2.id()).unwrap();
+        assert!(res);
+        let res = tx.transactions_exists(unexisting_tx.id()).unwrap();
+        assert!(!res);
+
+        // transactions_update
+        let mut updated_tx = TransactionRecord::new(
+            Transaction::builder()
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_input(SubstateRequirement::new(create_random_substate_id(), Some(3)))
+            .build()
+        );
+        tx.transactions_insert(&updated_tx).unwrap();
+
+        let res = tx.transactions_get(updated_tx.id()).unwrap();
+        assert_eq_debug(&res, &updated_tx);
+        assert_eq!(res.abort_reason, None);
+
+        updated_tx.set_abort_reason(RejectReason::Unknown);
+
+        tx.transactions_update(&updated_tx).unwrap();
+        let res = tx.transactions_get(updated_tx.id()).unwrap();
+        assert_eq_debug(&res, &updated_tx);
+        assert_eq!(res.abort_reason, Some(RejectReason::Unknown));
+
+        // transactions_get_any
+        let res = tx.transactions_get_any(vec![tx1.id(), tx2.id(), unexisting_tx.id()]).unwrap();
+        assert_eq!(res.len(), 2);
+
+        // transactions_get_paginated
+        let res = tx.transactions_get_paginated(10, 0, None).unwrap();
+        assert_eq!(res.len(), 3);
+
+        // transactions_save_all
+        let tx3 = TransactionRecord::new(
+            Transaction::builder()
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
+            .build()
+        );
+        let tx4 = TransactionRecord::new(
+            Transaction::builder()
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
+            .build()
+        );
+        tx.transactions_save_all(vec![&tx3, &tx4]).unwrap();    
+        let res = tx.transactions_get_paginated(10, 0, None).unwrap();
+        assert_eq!(res.len(), 5);
+
+        // TODO: transactions_finalize_all       
 
         tx.rollback().unwrap();
     }

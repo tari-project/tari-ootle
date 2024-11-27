@@ -8845,6 +8845,7 @@ dependencies = [
  "tari_state_store_rocksdb",
  "tari_state_store_sqlite",
  "tari_state_tree",
+ "tari_template_lib",
  "tari_transaction",
  "tari_utilities",
  "tempfile",

@@ -3,8 +3,13 @@
 
 use std::{io, sync::Arc};
 
-use axum::extract::Query;
-use axum::{extract::{multipart::MultipartError, Multipart}, http::StatusCode, response::IntoResponse, Extension, Json};
+use axum::{
+    extract::{multipart::MultipartError, Multipart, Query},
+    http::StatusCode,
+    response::IntoResponse,
+    Extension,
+    Json,
+};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use tari_crypto::tari_utilities::hex;
@@ -82,7 +87,7 @@ pub async fn upload(
         context.config().webserver.bind_address.port(),
         dest_file
     ))
-        .unwrap();
+    .unwrap();
 
     if query_params.register_template {
         let data = TemplateData {
@@ -95,24 +100,16 @@ pub async fn upload(
         return match context.process_manager().register_template(data).await {
             Ok(()) => {
                 info!("🌐 Registered template");
-                Ok(
-                    Json(
-                        UploadResponse::success(template_url)
-                    )
-                )
-            }
+                Ok(Json(UploadResponse::success(template_url)))
+            },
             Err(err) => {
                 error!("🌐 Registering template failed: {}", err);
                 Err(err.into())
-            }
+            },
         };
     }
 
-    Ok(
-        Json(
-            UploadResponse::success(template_url)
-        )
-    )
+    Ok(Json(UploadResponse::success(template_url)))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -141,7 +138,7 @@ impl IntoResponse for UploadError {
             UploadError::MultiPartError(err) => err.into_response(),
             UploadError::Other(err) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, format!("Upload error: {}", err)).into_response()
-            }
+            },
         }
     }
 }

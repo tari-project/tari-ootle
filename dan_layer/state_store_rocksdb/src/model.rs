@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::Duration};
+use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 
 use indexmap::IndexSet;
 use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{NodeHeight, VersionedSubstateId};
-use tari_dan_storage::consensus_models::{Block, BlockId, Decision, Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent};
+use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
 use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof};
 use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
 use tari_utilities::ByteArray;
@@ -634,3 +634,95 @@ impl TransactionModel {
         Ok(res)
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct BlockTransactionExecutionModel {
+    pub transaction_execution: BlockTransactionExecution,
+    // we need this field to keep track of insertion order
+    // for the "transaction_executions_get_pending_for_block" method
+    pub created_at: u128,
+}
+
+impl From<&BlockTransactionExecution> for BlockTransactionExecutionModel {
+    fn from(exec: &BlockTransactionExecution) -> Self {
+        Self {
+            transaction_execution: exec.clone(),
+            created_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis(),
+        }
+    }
+}
+
+impl BlockTransactionExecutionModel {
+    pub const KEY_PREFIX: &str = "transactionexecution_";
+
+    fn key(value: &Self) -> String {
+        let transaction_id = value.transaction_execution.transaction_id();
+        let block_id = value.transaction_execution.block_id();
+        let created_at = value.created_at;
+        // the key segment for "created_at" is binary to order keys by creation time
+        format!("{}_{}_{}_{:b}", Self::KEY_PREFIX, transaction_id, block_id, created_at)
+    }
+
+    pub fn key_prefix(block_id: &BlockId, transaction_id: &TransactionId) -> String {
+        format!("{}_{}_{}_", Self::KEY_PREFIX, transaction_id, block_id)
+    }
+
+    pub fn key_prefix_by_transaction(transaction_id: &TransactionId) -> String {
+        format!("{}_{}_", Self::KEY_PREFIX, transaction_id)
+    }
+
+    fn encode(value: &BlockTransactionExecutionModel) -> Result<Vec<u8>, RocksDbStorageError> {
+        let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
+        Ok(bytes)
+    }
+
+    fn decode(bytes: Vec<u8>) -> Result<BlockTransactionExecutionModel, RocksDbStorageError> {
+        let (value, _): (BlockTransactionExecutionModel, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
+        Ok(value)
+    }
+
+    pub fn put(_db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &BlockTransactionExecution) -> Result<(), RocksDbStorageError> {
+        let value = Self::from(value);
+        let key = Self::key(&value);
+        let value = Self::encode(&value)?;
+        tx.put(key, value)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+        })?;
+
+        Ok(())
+    }
+
+    pub fn list(tx: &Transaction<'_, TransactionDB>, key_prefix: &str, ordering: Ordering) -> Result<Vec<BlockTransactionExecutionModel>, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+       
+        let iterator_mode = match ordering {
+            Ordering::Ascending => rocksdb::IteratorMode::Start,
+            Ordering::Descending => rocksdb::IteratorMode::End,
+        };
+
+        let iterator = tx.iterator_opt(iterator_mode, options);
+
+        let res = iterator.map(|item| {
+            let (_, bytes) = item.unwrap();
+            let model = Self::decode(bytes.to_vec()).unwrap();
+            model
+        })
+        .collect();
+
+        Ok(res)
+    }
+
+    pub fn key_exists(tx: &Transaction<'_, TransactionDB>, tx_id: &TransactionId, block_id: &BlockId) -> Result<bool, RocksDbStorageError> {
+        let key_prefix = Self::key_prefix(block_id, tx_id);
+
+        let mut options = rocksdb::ReadOptions::default();
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+        let mut iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
+        
+        Ok(iterator.next().is_some())
+    }
+}
+

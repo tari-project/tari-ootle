@@ -138,8 +138,7 @@ mod confirm_all_transitions {
     }
 }
 
-
-mod basic_transaction_operations {
+mod transaction_operations {
     use tari_dan_common_types::SubstateRequirement;
     use tari_dan_storage::consensus_models::TransactionRecord;
     use tari_engine_types::commit_result::RejectReason;
@@ -150,18 +149,18 @@ mod basic_transaction_operations {
     use super::*;
 
     #[test]
-    fn basic_transaction_operations_sqlite() {
+    fn transaction_operations_sqlite() {
         let db = create_sqlite();
-        basic_transaction_operations(db);
+        transaction_operations(db);
     }
 
     #[test]
-    fn basic_transaction_operations_rocksdb() {
+    fn transaction_operations_rocksdb() {
         let db = create_rocksdb();
-        basic_transaction_operations(db);
+        transaction_operations(db);
     }
 
-    fn basic_transaction_operations(db: impl StateStore) {
+    fn transaction_operations(db: impl StateStore) {
         let mut tx = db.create_write_tx().unwrap();
         
         // transactions_insert
@@ -246,7 +245,91 @@ mod basic_transaction_operations {
         let res = tx.transactions_get_paginated(10, 0, None).unwrap();
         assert_eq!(res.len(), 5);
 
-        // TODO: transactions_finalize_all       
+        tx.rollback().unwrap();
+    }
+}
+
+
+mod transaction_execution_operations {
+    use std::{process::id, time::Duration};
+
+    use tari_dan_common_types::{NumPreshards, SubstateRequirement};
+    use tari_dan_storage::consensus_models::{BlockTransactionExecution, TransactionRecord};
+    use tari_engine_types::{commit_result::{ExecuteResult, FinalizeResult, TransactionResult}, fees::{FeeBreakdown, FeeReceipt}, substate::SubstateDiff};
+    use tari_template_lib::{models::Amount, Hash};
+    use tari_transaction::{Instruction, Transaction};
+
+    use crate::helper::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_sqlite};
+
+    use super::*;
+
+    #[test]
+    fn transaction_execution_operations_sqlite() {
+        let db = create_sqlite();
+        transaction_execution_operations(db);
+    }
+
+    #[test]
+    fn transaction_execution_operations_rocksdb() {
+        let db = create_rocksdb();
+        transaction_execution_operations(db);
+    }
+
+    fn transaction_execution_operations(db: impl StateStore) {
+        let mut tx = db.create_write_tx().unwrap();
+        
+        // insert some transactions
+        let tx1 = TransactionRecord::new(
+            Transaction::builder()
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
+            .build()
+        );
+        tx.transactions_insert(&tx1).unwrap();
+        let tx2 = TransactionRecord::new(
+            Transaction::builder()
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
+            .build()
+        );
+        tx.transactions_insert(&tx2).unwrap();
+
+        // insert blocks
+        let network = Default::default();
+        let zero_block = Block::zero_block(network, NumPreshards::P64);
+        zero_block.insert(&mut tx).unwrap();
+
+        // insert transaction executions
+        let exec1 = BlockTransactionExecution::new(
+            *zero_block.id(),
+            *tx1.id(),
+            ExecuteResult {
+                finalize: FinalizeResult::new(
+                    Hash::default(),
+                    vec![],
+                    vec![],
+                    TransactionResult::Accept(SubstateDiff::new()),
+                    FeeReceipt {
+                        total_fee_payment: Amount(0),
+                        total_fees_paid: Amount(0),
+                        cost_breakdown: FeeBreakdown::default(),
+                    }
+                ),
+                execution_time: Duration::new(1, 0),
+            },
+            vec![],
+            vec![],
+            None,
+        );
+        tx.transaction_executions_insert_or_ignore(&exec1).unwrap();
+
+        // transaction_executions_get
+        let res = tx.transaction_executions_get(tx1.id(), zero_block.id()).unwrap();
+        assert_eq_debug(&res, &exec1);
+
+        // TODO: transactions_finalize_all
+        // TODO: transaction_executions_insert_or_ignore
+        // TODO: transaction_executions_remove_any_by_block_id
 
         tx.rollback().unwrap();
     }

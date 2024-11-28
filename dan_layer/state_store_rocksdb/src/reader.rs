@@ -88,10 +88,10 @@ use tari_dan_storage::{
 use tari_engine_types::substate::SubstateId;
 use tari_state_tree::{Node, NodeKey, TreeNode, Version};
 use tari_transaction::TransactionId;
-use tari_utilities::ByteArray;
+use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{BlockModel, TransactionModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{BlockModel, BlockTransactionExecutionModel, TransactionModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -727,21 +727,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         tx_id: &TransactionId,
         block: &BlockId,
     ) -> Result<BlockTransactionExecution, StorageError> {
-        todo!()
-        /*
-        use crate::schema::transaction_executions;
-
-        let execution = transaction_executions::table
-            .filter(transaction_executions::transaction_id.eq(serialize_hex(tx_id)))
-            .filter(transaction_executions::block_id.eq(serialize_hex(block)))
-            .first::<sql_models::TransactionExecution>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_executions_get",
-                source: e,
-            })?;
-
-        execution.try_into()
-        */
+        let key_prefix = BlockTransactionExecutionModel::key_prefix(block, tx_id);
+        let executions = BlockTransactionExecutionModel::list(&self.tx, &key_prefix, Ordering::Descending)?;
+        
+        match executions.first() {
+            Some(execution) => Ok(execution.transaction_execution.clone()),
+            None => Err(StorageError::NotFound { item: "transaction_execution", key: format!("tx_id={}, block={}", tx_id, block) }),
+        }
     }
 
     fn transaction_executions_get_pending_for_block(
@@ -749,7 +741,62 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         tx_id: &TransactionId,
         from_block_id: &BlockId,
     ) -> Result<BlockTransactionExecution, StorageError> {
-        todo!()
+        let operation = "transaction_executions_get_pending_for_block";
+
+        if !self.blocks_exists(from_block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "transaction_executions_get_pending_for_block: Block {} does not exist",
+                    from_block_id
+                ),
+            });
+        }
+
+        let commit_block = self.get_commit_block_id()?;
+        let block_ids = self.get_block_ids_between(&commit_block, from_block_id)?;
+
+        // get the most recent escution of the transaction for every block in the range
+        let mut executions: Vec<BlockTransactionExecutionModel> = vec![];
+        for block_id in block_ids {
+            let block_id = BlockId::new(FixedHash::from_hex(&block_id).unwrap());
+            let key_prefix = BlockTransactionExecutionModel::key_prefix(&block_id, tx_id);
+            let block_executions = BlockTransactionExecutionModel::list(&self.tx, &key_prefix, Ordering::Descending)?;
+            if let Some(exec) = block_executions.first() {
+                executions.push(exec.clone());
+            }
+        }
+        // get the latest execution
+        executions.sort_by(|a,b| b.created_at.cmp(&a.created_at));
+        let execution = executions.first();
+
+        if let Some(execution) = execution {
+            return Ok(execution.transaction_execution.clone());
+        }
+
+        // Otherwise look for executions after the commit block
+        let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction(tx_id);
+        let executions = BlockTransactionExecutionModel::list(&self.tx, &key_prefix, Ordering::Descending)?;
+        for execution in executions {
+            let block = BlockModel::get(&self.tx, operation, execution.transaction_execution.block_id())?;
+            if block.is_committed() {
+                return Ok(execution.transaction_execution)
+            }
+        }
+
+        // No execution found
+        Err(StorageError::QueryError {
+            reason: format!(
+                "transaction_executions_get_pending_for_block: no execution found for transaction_id {}",
+                tx_id
+            ),
+        })
+
+
+
+        // get transaction_executions: block_id, is_committed, transaction_id
+            // last (order by id desc), get first
+
+
         /*
         use crate::schema::{blocks, transaction_executions};
 

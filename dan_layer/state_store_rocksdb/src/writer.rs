@@ -52,7 +52,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{BlockModel, TransactionModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{BlockModel, BlockTransactionExecutionModel, TransactionModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -836,7 +836,47 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: BlockId,
         transactions: I,
     ) -> Result<(), StorageError> {
-        todo!()
+        let operation = "transactions_finalize_all";
+
+        if !self.blocks_exists(&block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "{}: Cannot finalize transactions for non-existent block {}",
+                    operation,
+                    block_id
+                ),
+            });
+        }
+
+        let mut updated_recs = vec![];
+        for rec in transactions {
+            let exec = self
+                    .transaction_executions_get_pending_for_block(rec.transaction_id(), &block_id)
+                    .optional()?
+                    .ok_or_else(|| StorageError::DataInconsistency {
+                        details: format!(
+                            "transactions_finalize_all: No pending execution for transaction {}",
+                            rec.transaction_id()
+                        ),
+                    })?;
+            let mut db_rec = self.transactions_get(rec.transaction_id())?;
+
+            db_rec.resolved_inputs = Some(exec.resolved_inputs().to_vec());
+            db_rec.resulting_outputs = Some(exec.resulting_outputs().to_vec());
+            db_rec.execution_result = Some(exec.result().clone());
+            db_rec.final_decision = Some(db_rec.current_decision());
+            db_rec.abort_reason = exec.abort_reason().cloned();
+            
+            updated_recs.push(db_rec);
+        }
+
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        for rec in updated_recs {
+            TransactionModel::put(self.db.clone(), tx, operation, &rec)?;
+        }
+
+        Ok(())
+
         /*
         use crate::schema::transactions;
 
@@ -898,33 +938,19 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         &mut self,
         transaction_execution: &BlockTransactionExecution,
     ) -> Result<bool, StorageError> {
-        todo!()
-        /*
-        use crate::schema::transaction_executions;
+        let operation = "transaction_executions_insert_or_ignore";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let insert = (
-            transaction_executions::block_id.eq(serialize_hex(transaction_execution.block_id())),
-            transaction_executions::transaction_id.eq(serialize_hex(transaction_execution.transaction_id())),
-            transaction_executions::result.eq(serialize_json(&transaction_execution.result())?),
-            transaction_executions::abort_reason
-                .eq(transaction_execution.abort_reason().map(serialize_json).transpose()?),
-            transaction_executions::resolved_inputs.eq(serialize_json(&transaction_execution.resolved_inputs())?),
-            transaction_executions::resulting_outputs.eq(serialize_json(&transaction_execution.resulting_outputs())?),
-            transaction_executions::execution_time_ms
-                .eq(i64::try_from(transaction_execution.execution_time().as_millis()).unwrap_or(i64::MAX)),
-        );
-
-        let num_inserted = diesel::insert_or_ignore_into(transaction_executions::table)
-            .values(insert)
-            .on_conflict_do_nothing()
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_executions_insert",
-                source: e,
-            })?;
-
-        Ok(num_inserted > 0)
-        */
+        let tx_id = transaction_execution.transaction_id();
+        let block_id = transaction_execution.block_id();
+        
+        if BlockTransactionExecutionModel::key_exists(tx, tx_id, block_id)? {
+            // ignore if it already exists
+            return Ok(false)
+        } else {
+            BlockTransactionExecutionModel::put(self.db.clone(), tx, operation, &transaction_execution)?;
+            return Ok(true)
+        }
     }
 
     fn transaction_executions_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {

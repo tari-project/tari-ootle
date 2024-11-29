@@ -87,14 +87,12 @@ impl TryFrom<proto::transaction::Transaction> for Transaction {
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()?;
-        println!("Signatures try_from OK!");
 
         let filled_inputs = request
             .filled_inputs
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()?;
-        println!("filled_inputs try_from OK!");
 
         let transaction = Transaction::new(
             request
@@ -105,7 +103,6 @@ impl TryFrom<proto::transaction::Transaction> for Transaction {
             signatures,
         )
             .with_filled_inputs(filled_inputs);
-        println!("transaction try_from OK!");
 
         Ok(transaction)
     }
@@ -130,27 +127,23 @@ impl TryFrom<proto::transaction::UnsignedTransaction> for UnsignedTransaction {
     type Error = anyhow::Error;
 
     fn try_from(request: proto::transaction::UnsignedTransaction) -> Result<Self, Self::Error> {
-        println!("instructions try_from START!");
         let instructions = request
             .instructions
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
-        println!("instructions try_from OK!");
 
         let fee_instructions = request
             .fee_instructions
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
-        println!("fee_instructions try_from OK!");
 
         let inputs = request
             .inputs
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()?;
-        println!("inputs try_from OK!");
 
         let min_epoch = request.min_epoch.map(|epoch| Epoch(epoch.epoch));
         let max_epoch = request.max_epoch.map(|epoch| Epoch(epoch.epoch));
@@ -199,22 +192,16 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
             .collect::<Result<_, _>>()?;
         let instruction_type =
             InstructionType::try_from(request.instruction_type).map_err(|e| anyhow!("invalid instruction_type {e}"))?;
-        println!("instruction_type try_from OK!");
 
-        println!("instruction match START!");
         let instruction = match instruction_type {
-            InstructionType::CreateAccount => {
-                println!("InstructionType::CreateAccount match!");
-                Instruction::CreateAccount {
-                    public_key_address: PublicKey::from_canonical_bytes(&request.create_account_public_key)
-                        .map_err(|e| anyhow!("create_account_public_key: {}", e))?,
-                    owner_rule: request.create_account_owner_rule.map(TryInto::try_into).transpose()?,
-                    access_rules: request.create_account_access_rules.map(TryInto::try_into).transpose()?,
-                    workspace_bucket: Some(request.create_account_workspace_bucket).filter(|s| !s.is_empty()),
-                }
-            }
+            InstructionType::CreateAccount => Instruction::CreateAccount {
+                public_key_address: PublicKey::from_canonical_bytes(&request.create_account_public_key)
+                    .map_err(|e| anyhow!("create_account_public_key: {}", e))?,
+                owner_rule: request.create_account_owner_rule.map(TryInto::try_into).transpose()?,
+                access_rules: request.create_account_access_rules.map(TryInto::try_into).transpose()?,
+                workspace_bucket: Some(request.create_account_workspace_bucket).filter(|s| !s.is_empty()),
+            },
             InstructionType::Function => {
-                println!("InstructionType::Function match! - tmpl addr: {:?}", request.template_address);
                 let function = request.function;
                 Instruction::CallFunction {
                     template_address: request.template_address.try_into()?,
@@ -223,7 +210,6 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                 }
             }
             InstructionType::Method => {
-                println!("InstructionType::Method match!");
                 let method = request.method;
                 let component_address = ObjectKey::try_from(request.component_address)?.into();
                 Instruction::CallMethod {
@@ -232,51 +218,39 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     args,
                 }
             }
-            InstructionType::PutOutputInWorkspace => {
-                println!("InstructionType::PutOutputInWorkspace match!");
-                Instruction::PutLastInstructionOutputOnWorkspace { key: request.key }
-            }
-            InstructionType::EmitLog => {
-                println!("InstructionType::EmitLog match!");
-                Instruction::EmitLog {
-                    level: request.log_level.parse()?,
-                    message: request.log_message,
-                }
-            }
-            InstructionType::ClaimBurn => {
-                println!("InstructionType::ClaimBurn match!");
-                Instruction::ClaimBurn {
-                    claim: Box::new(ConfidentialClaim {
-                        public_key: PublicKey::from_canonical_bytes(&request.claim_burn_public_key)
-                            .map_err(|e| anyhow!("claim_burn_public_key: {}", e))?,
-                        output_address: request
-                            .claim_burn_commitment_address
-                            .as_slice()
-                            .try_into()
-                            .map_err(|e| anyhow!("claim_burn_commitment_address: {}", e))?,
-                        range_proof: request.claim_burn_range_proof,
-                        proof_of_knowledge: request
-                            .claim_burn_proof_of_knowledge
-                            .ok_or_else(|| anyhow!("claim_burn_proof_of_knowledge not provided"))?
-                            .try_into()
-                            .map_err(|e| anyhow!("claim_burn_proof_of_knowledge: {}", e))?,
-                        withdraw_proof: request.claim_burn_withdraw_proof.map(TryInto::try_into).transpose()?,
-                    }),
-                }
-            }
-            InstructionType::ClaimValidatorFees => {
-                println!("InstructionType::ClaimValidatorFees match!");
+            InstructionType::PutOutputInWorkspace => Instruction::PutLastInstructionOutputOnWorkspace { key: request.key },
+            InstructionType::EmitLog => Instruction::EmitLog {
+                level: request.log_level.parse()?,
+                message: request.log_message,
+            },
+            InstructionType::ClaimBurn => Instruction::ClaimBurn {
+                claim: Box::new(ConfidentialClaim {
+                    public_key: PublicKey::from_canonical_bytes(&request.claim_burn_public_key)
+                        .map_err(|e| anyhow!("claim_burn_public_key: {}", e))?,
+                    output_address: request
+                        .claim_burn_commitment_address
+                        .as_slice()
+                        .try_into()
+                        .map_err(|e| anyhow!("claim_burn_commitment_address: {}", e))?,
+                    range_proof: request.claim_burn_range_proof,
+                    proof_of_knowledge: request
+                        .claim_burn_proof_of_knowledge
+                        .ok_or_else(|| anyhow!("claim_burn_proof_of_knowledge not provided"))?
+                        .try_into()
+                        .map_err(|e| anyhow!("claim_burn_proof_of_knowledge: {}", e))?,
+                    withdraw_proof: request.claim_burn_withdraw_proof.map(TryInto::try_into).transpose()?,
+                }),
+            },
+            InstructionType::ClaimValidatorFees =>
                 Instruction::ClaimValidatorFees {
                     epoch: request.claim_validator_fees_epoch,
                     validator_public_key: PublicKey::from_canonical_bytes(
                         &request.claim_validator_fees_validator_public_key,
                     )
                         .map_err(|e| anyhow!("claim_validator_fees_validator_public_key: {}", e))?,
-                }
-            }
+                },
             InstructionType::DropAllProofsInWorkspace => Instruction::DropAllProofsInWorkspace,
             InstructionType::AssertBucketContains => {
-                println!("InstructionType::AssertBucketContains match!");
                 let resource_address = ObjectKey::try_from(request.resource_address)?.into();
                 Instruction::AssertBucketContains {
                     key: request.key,
@@ -285,13 +259,11 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                 }
             }
             InstructionType::PublishTemplate => {
-                println!("InstructionType::PublishTemplate match!");
                 Instruction::PublishTemplate {
                     binary: request.template_binary
                 }
             }
         };
-        println!("instruction match END!");
 
         Ok(instruction)
     }
@@ -373,6 +345,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.min_amount = min_amount.0
             }
             Instruction::PublishTemplate { binary } => {
+                result.instruction_type = InstructionType::PublishTemplate as i32;
                 result.template_binary = binary;
             }
         }

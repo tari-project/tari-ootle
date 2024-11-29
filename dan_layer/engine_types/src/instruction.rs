@@ -68,6 +68,9 @@ pub enum Instruction {
         resource_address: ResourceAddress,
         min_amount: Amount,
     },
+    PublishTemplate {
+        binary: Vec<u8>,
+    },
 }
 
 impl Display for Instruction {
@@ -89,7 +92,7 @@ impl Display for Instruction {
                     None => write!(f, "None")?,
                 }
                 write!(f, " }}")
-            },
+            }
             Self::CallFunction {
                 template_address,
                 function,
@@ -110,10 +113,10 @@ impl Display for Instruction {
             ),
             Self::PutLastInstructionOutputOnWorkspace { key } => {
                 write!(f, "PutLastInstructionOutputOnWorkspace {{ key: {:?} }}", key)
-            },
+            }
             Self::EmitLog { level, message } => {
                 write!(f, "EmitLog {{ level: {:?}, message: {:?} }}", level, message)
-            },
+            }
             Self::ClaimBurn { claim } => {
                 write!(
                     f,
@@ -123,7 +126,7 @@ impl Display for Instruction {
                     claim.proof_of_knowledge.u().to_hex(),
                     claim.proof_of_knowledge.v().to_hex()
                 )
-            },
+            }
             Self::ClaimValidatorFees {
                 epoch,
                 validator_public_key,
@@ -133,11 +136,11 @@ impl Display for Instruction {
                     "ClaimValidatorFees {{ epoch: {}, validator_public_key: {:.5} }}",
                     epoch, validator_public_key
                 )
-            },
+            }
 
             Self::DropAllProofsInWorkspace => {
                 write!(f, "DropAllProofsInWorkspace")
-            },
+            }
             Self::AssertBucketContains {
                 key,
                 resource_address,
@@ -148,7 +151,10 @@ impl Display for Instruction {
                     "AssertBucketContains {{ key: {:?}, resource_address: {}, min_amount: {} }}",
                     key, resource_address, min_amount
                 )
-            },
+            }
+            Instruction::PublishTemplate { .. } => {
+                write!(f, "PublishTemplate")
+            }
         }
     }
 }

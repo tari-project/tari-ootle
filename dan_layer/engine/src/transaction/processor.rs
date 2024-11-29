@@ -52,6 +52,7 @@ use tari_template_lib::{
 use tari_transaction::Transaction;
 use tari_utilities::ByteArray;
 
+use crate::wasm::WasmModule;
 use crate::{
     runtime::{
         scope::{CallScope, PushCallFrame},
@@ -82,7 +83,7 @@ pub struct TransactionProcessor<TTemplateProvider> {
     network: Network,
 }
 
-impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
+impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
     pub fn new(
         template_provider: Arc<TTemplateProvider>,
         state_db: ReadOnlyMemoryStateStore,
@@ -165,7 +166,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     });
                 }
                 execution_results
-            },
+            }
             Err(err) => {
                 return Ok(ExecuteResult {
                     finalize: FinalizeResult::new_rejected(
@@ -174,7 +175,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     ),
                     execution_time: timer.elapsed(),
                 });
-            },
+            }
         };
 
         let instruction_result = Self::process_instructions(&*template_provider, &runtime, instructions);
@@ -191,7 +192,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     finalize,
                     execution_time: timer.elapsed(),
                 })
-            },
+            }
             // This can happen e.g if you have dangling buckets after running the instructions
             Err(err) => {
                 // Reset the state to when the state at the end of the fee instructions. The fee charges for the
@@ -212,7 +213,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     finalize,
                     execution_time: timer.elapsed(),
                 })
-            },
+            }
         }
     }
 
@@ -269,20 +270,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             Instruction::PutLastInstructionOutputOnWorkspace { key } => {
                 Self::put_output_on_workspace_with_name(runtime, key)?;
                 Ok(InstructionResult::empty())
-            },
+            }
             Instruction::DropAllProofsInWorkspace => {
                 Self::drop_all_proofs_in_workspace(runtime)?;
                 Ok(InstructionResult::empty())
-            },
+            }
             Instruction::EmitLog { level, message } => {
                 runtime.interface().emit_log(level, message)?;
                 Ok(InstructionResult::empty())
-            },
+            }
             Instruction::ClaimBurn { claim } => {
                 // Need to call it on the runtime so that a bucket is created.
                 runtime.interface().claim_burn(*claim)?;
                 Ok(InstructionResult::empty())
-            },
+            }
             Instruction::ClaimValidatorFees {
                 epoch,
                 validator_public_key,
@@ -291,7 +292,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     .interface()
                     .claim_validator_fees(Epoch(epoch), validator_public_key)?;
                 Ok(InstructionResult::empty())
-            },
+            }
             Instruction::AssertBucketContains {
                 key,
                 resource_address,
@@ -302,7 +303,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     invoke_args![key, resource_address, min_amount].into(),
                 )?;
                 Ok(InstructionResult::empty())
-            },
+            }
+            Instruction::PublishTemplate { binary } => Self::publish_template(runtime, binary),
         }
     }
 
@@ -318,6 +320,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             .interface()
             .workspace_invoke(WorkspaceAction::DropAllProofs, invoke_args![].into())?;
         Ok(())
+    }
+
+    /// Load, validate template binary and adds to the cache of TemplateProvider.
+    pub fn publish_template(_runtime: &Runtime, binary: Vec<u8>) -> Result<InstructionResult, TransactionError> {
+        let template = WasmModule::load_template_from_code(binary.as_slice())?;
+        debug!("New template publish instruction! Template name: \"{}\"", template.template_name());
+        // TODO: implement
+        Ok(InstructionResult::empty())
     }
 
     pub fn create_account(
@@ -523,7 +533,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 let mut store = loaded.create_store();
                 let mut process = WasmProcess::init(&mut store, loaded, runtime)?;
                 process.invoke(&mut store, &function_def, args)?
-            },
+            }
             LoadedTemplate::Flow(flow_factory) => {
                 flow_factory.run_new_instance(
                     Arc::new(template_provider.clone()),
@@ -534,7 +544,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                     0,
                     MAX_CALL_DEPTH,
                 )?
-            },
+            }
         };
         Ok(result)
     }

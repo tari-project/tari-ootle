@@ -23,6 +23,7 @@
 use tari_engine_types::indexed_value::IndexedValueError;
 use tari_template_lib::models::TemplateAddress;
 
+use crate::template::TemplateLoaderError;
 use crate::{runtime::RuntimeError, wasm::WasmExecutionError};
 
 #[derive(Debug, thiserror::Error)]
@@ -45,4 +46,6 @@ pub enum TransactionError {
     FunctionNotFound { name: String },
     #[error("Invariant error: {details}")]
     InvariantError { details: String },
+    #[error("Load template error: {0}")]
+    LoadTemplate(#[from] TemplateLoaderError),
 }

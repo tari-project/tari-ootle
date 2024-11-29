@@ -134,6 +134,11 @@ impl TransactionBuilder {
         })
     }
 
+    /// Publishing a WASM template.
+    pub fn publish_template<T: AsRef<[u8]>>(self, binary: T) -> Self {
+        self.add_instruction(Instruction::PublishTemplate { binary: binary.as_ref().to_vec() })
+    }
+
     pub fn claim_burn(self, claim: ConfidentialClaim) -> Self {
         self.add_instruction(Instruction::ClaimBurn { claim: Box::new(claim) })
     }
@@ -191,7 +196,7 @@ impl TransactionBuilder {
         self
     }
 
-    pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
+    pub fn with_inputs<I: IntoIterator<Item=SubstateRequirement>>(mut self, inputs: I) -> Self {
         self.unsigned_transaction.inputs.extend(inputs);
         // Reset the signatures as they are no longer valid
         self.signatures = vec![];

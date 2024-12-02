@@ -102,7 +102,7 @@ impl TryFrom<proto::transaction::Transaction> for Transaction {
                 .ok_or_else(|| anyhow!("Unsigned transaction not provided"))?,
             signatures,
         )
-            .with_filled_inputs(filled_inputs);
+        .with_filled_inputs(filled_inputs);
 
         Ok(transaction)
     }
@@ -208,7 +208,7 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     function,
                     args,
                 }
-            }
+            },
             InstructionType::Method => {
                 let method = request.method;
                 let component_address = ObjectKey::try_from(request.component_address)?.into();
@@ -217,8 +217,10 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     method,
                     args,
                 }
-            }
-            InstructionType::PutOutputInWorkspace => Instruction::PutLastInstructionOutputOnWorkspace { key: request.key },
+            },
+            InstructionType::PutOutputInWorkspace => {
+                Instruction::PutLastInstructionOutputOnWorkspace { key: request.key }
+            },
             InstructionType::EmitLog => Instruction::EmitLog {
                 level: request.log_level.parse()?,
                 message: request.log_message,
@@ -241,14 +243,13 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     withdraw_proof: request.claim_burn_withdraw_proof.map(TryInto::try_into).transpose()?,
                 }),
             },
-            InstructionType::ClaimValidatorFees =>
-                Instruction::ClaimValidatorFees {
-                    epoch: request.claim_validator_fees_epoch,
-                    validator_public_key: PublicKey::from_canonical_bytes(
-                        &request.claim_validator_fees_validator_public_key,
-                    )
-                        .map_err(|e| anyhow!("claim_validator_fees_validator_public_key: {}", e))?,
-                },
+            InstructionType::ClaimValidatorFees => Instruction::ClaimValidatorFees {
+                epoch: request.claim_validator_fees_epoch,
+                validator_public_key: PublicKey::from_canonical_bytes(
+                    &request.claim_validator_fees_validator_public_key,
+                )
+                .map_err(|e| anyhow!("claim_validator_fees_validator_public_key: {}", e))?,
+            },
             InstructionType::DropAllProofsInWorkspace => Instruction::DropAllProofsInWorkspace,
             InstructionType::AssertBucketContains => {
                 let resource_address = ObjectKey::try_from(request.resource_address)?.into();
@@ -257,12 +258,10 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     resource_address,
                     min_amount: Amount::new(request.min_amount),
                 }
-            }
-            InstructionType::PublishTemplate => {
-                Instruction::PublishTemplate {
-                    binary: request.template_binary
-                }
-            }
+            },
+            InstructionType::PublishTemplate => Instruction::PublishTemplate {
+                binary: request.template_binary,
+            },
         };
 
         Ok(instruction)
@@ -285,7 +284,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.create_account_owner_rule = owner_rule.map(Into::into);
                 result.create_account_access_rules = access_rules.map(Into::into);
                 result.create_account_workspace_bucket = workspace_bucket.unwrap_or_default();
-            }
+            },
             Instruction::CallFunction {
                 template_address,
                 function,
@@ -295,7 +294,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.template_address = template_address.to_vec();
                 result.function = function;
                 result.args = args.into_iter().map(|a| a.into()).collect();
-            }
+            },
             Instruction::CallMethod {
                 component_address,
                 method,
@@ -305,16 +304,16 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.component_address = component_address.as_bytes().to_vec();
                 result.method = method;
                 result.args = args.into_iter().map(|a| a.into()).collect();
-            }
+            },
             Instruction::PutLastInstructionOutputOnWorkspace { key } => {
                 result.instruction_type = InstructionType::PutOutputInWorkspace as i32;
                 result.key = key;
-            }
+            },
             Instruction::EmitLog { level, message } => {
                 result.instruction_type = InstructionType::EmitLog as i32;
                 result.log_level = level.to_string();
                 result.log_message = message;
-            }
+            },
             Instruction::ClaimBurn { claim } => {
                 result.instruction_type = InstructionType::ClaimBurn as i32;
                 result.claim_burn_commitment_address = claim.output_address.to_vec();
@@ -322,7 +321,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.claim_burn_proof_of_knowledge = Some(claim.proof_of_knowledge.into());
                 result.claim_burn_public_key = claim.public_key.to_vec();
                 result.claim_burn_withdraw_proof = claim.withdraw_proof.map(Into::into);
-            }
+            },
             Instruction::ClaimValidatorFees {
                 epoch,
                 validator_public_key,
@@ -330,10 +329,10 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.instruction_type = InstructionType::ClaimValidatorFees as i32;
                 result.claim_validator_fees_epoch = epoch;
                 result.claim_validator_fees_validator_public_key = validator_public_key.to_vec();
-            }
+            },
             Instruction::DropAllProofsInWorkspace => {
                 result.instruction_type = InstructionType::DropAllProofsInWorkspace as i32;
-            }
+            },
             Instruction::AssertBucketContains {
                 key,
                 resource_address,
@@ -343,11 +342,11 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.key = key;
                 result.resource_address = resource_address.as_bytes().to_vec();
                 result.min_amount = min_amount.0
-            }
+            },
             Instruction::PublishTemplate { binary } => {
                 result.instruction_type = InstructionType::PublishTemplate as i32;
                 result.template_binary = binary;
-            }
+            },
         }
         result
     }
@@ -378,11 +377,11 @@ impl From<Arg> for proto::transaction::Arg {
             Arg::Literal(data) => {
                 result.arg_type = 0;
                 result.data = tari_bor::encode(&data).unwrap();
-            }
+            },
             Arg::Workspace(data) => {
                 result.arg_type = 1;
                 result.data = data;
-            }
+            },
         }
 
         result

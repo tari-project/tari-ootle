@@ -23,8 +23,7 @@
 use tari_engine_types::indexed_value::IndexedValueError;
 use tari_template_lib::models::TemplateAddress;
 
-use crate::template::TemplateLoaderError;
-use crate::{runtime::RuntimeError, wasm::WasmExecutionError};
+use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionError {
@@ -48,4 +47,6 @@ pub enum TransactionError {
     InvariantError { details: String },
     #[error("Load template error: {0}")]
     LoadTemplate(#[from] TemplateLoaderError),
+    #[error("WASM binary too big! {0} bytes are greater than allowed maximum {1} bytes.")]
+    WasmBinaryTooBig(usize, usize),
 }

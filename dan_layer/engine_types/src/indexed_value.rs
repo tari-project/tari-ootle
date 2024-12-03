@@ -22,6 +22,7 @@ use tari_template_lib::{
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
+use crate::published_template::PublishedTemplateAddress;
 use crate::{
     fee_claim::FeeClaimAddress,
     serde_with,
@@ -59,7 +60,7 @@ impl IndexedValue {
         Ok(Self { indexed, value })
     }
 
-    pub fn referenced_substates(&self) -> impl Iterator<Item = SubstateId> + '_ {
+    pub fn referenced_substates(&self) -> impl Iterator<Item=SubstateId> + '_ {
         self.indexed
             .component_addresses
             .iter()
@@ -110,7 +111,9 @@ impl IndexedValue {
     }
 
     pub fn get_value<T>(&self, path: &str) -> Result<Option<T>, IndexedValueError>
-    where for<'a> T: serde::Deserialize<'a> {
+    where
+            for<'a> T: serde::Deserialize<'a>,
+    {
         decode_value_at_path(&self.value, path)
     }
 }
@@ -140,6 +143,7 @@ pub struct IndexedWellKnownTypes {
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
+    published_template_addresses: Vec<PublishedTemplateAddress>,
 }
 
 impl IndexedWellKnownTypes {
@@ -154,6 +158,7 @@ impl IndexedWellKnownTypes {
             vault_ids: vec![],
             metadata: vec![],
             unclaimed_confidential_output_address: vec![],
+            published_template_addresses: vec![],
         }
     }
 
@@ -175,6 +180,7 @@ impl IndexedWellKnownTypes {
             vault_ids: visitor.vault_ids,
             metadata: visitor.metadata,
             unclaimed_confidential_output_address: visitor.unclaimed_confidential_output_addresses,
+            published_template_addresses: visitor.published_templates,
         })
     }
 
@@ -187,28 +193,31 @@ impl IndexedWellKnownTypes {
                 match value {
                     WellKnownTariValue::ComponentAddress(addr) => {
                         found = *address == addr;
-                    },
+                    }
                     WellKnownTariValue::ResourceAddress(addr) => {
                         found = *address == addr;
-                    },
+                    }
                     WellKnownTariValue::TransactionReceiptAddress(addr) => {
                         found = *address == addr;
-                    },
+                    }
                     WellKnownTariValue::NonFungibleAddress(addr) => {
                         found = *address == addr;
-                    },
+                    }
                     WellKnownTariValue::VaultId(addr) => {
                         found = *address == addr;
-                    },
+                    }
                     WellKnownTariValue::FeeClaim(addr) => {
                         found = *address == addr;
-                    },
+                    }
                     WellKnownTariValue::UnclaimedConfidentialOutputAddress(addr) => {
                         found = *address == addr;
-                    },
+                    }
+                    WellKnownTariValue::PublishedTemplateAddress(addr) => {
+                        found = *address == addr;
+                    }
                     WellKnownTariValue::BucketId(_) |
                     WellKnownTariValue::Metadata(_) |
-                    WellKnownTariValue::ProofId(_) => {},
+                    WellKnownTariValue::ProofId(_) => {}
                 }
 
                 if found {
@@ -222,7 +231,7 @@ impl IndexedWellKnownTypes {
         Ok(found)
     }
 
-    pub fn referenced_substates(&self) -> impl Iterator<Item = SubstateId> + '_ {
+    pub fn referenced_substates(&self) -> impl Iterator<Item=SubstateId> + '_ {
         self.component_addresses
             .iter()
             .map(|a| (*a).into())
@@ -277,6 +286,7 @@ impl IndexedWellKnownTypes {
                 &self.unclaimed_confidential_output_address,
                 &other.unclaimed_confidential_output_address,
             ),
+            published_template_addresses: diff_vec(&self.published_template_addresses, &other.published_template_addresses),
         }
     }
 }
@@ -286,7 +296,7 @@ fn diff_vec<T: PartialEq + Clone>(a: &[T], b: &[T]) -> Vec<T> {
 }
 
 impl FromIterator<IndexedWellKnownTypes> for IndexedWellKnownTypes {
-    fn from_iter<T: IntoIterator<Item = IndexedWellKnownTypes>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item=IndexedWellKnownTypes>>(iter: T) -> Self {
         let mut indexed = Self::default();
         for value in iter {
             indexed.bucket_ids.extend(value.bucket_ids);
@@ -318,55 +328,62 @@ pub enum WellKnownTariValue {
     FeeClaim(FeeClaimAddress),
     ProofId(ProofId),
     UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
+    PublishedTemplateAddress(PublishedTemplateAddress),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
     type Error = IndexedValueError;
 
     fn try_from_tag_and_value(tag: u64, value: &tari_bor::Value) -> Result<Self, Self::Error>
-    where Self: Sized {
+    where
+        Self: Sized,
+    {
         let tag = BinaryTag::from_u64(tag).ok_or(IndexedValueError::InvalidTag(tag))?;
         match tag {
             BinaryTag::ComponentAddress => {
                 let component_address: ObjectKey = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ComponentAddress(component_address.into()))
-            },
+            }
             BinaryTag::BucketId => {
                 let bucket_id: u32 = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::BucketId(bucket_id.into()))
-            },
+            }
             BinaryTag::ResourceAddress => {
                 let resource_address: ObjectKey = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ResourceAddress(resource_address.into()))
-            },
+            }
             BinaryTag::TransactionReceipt => {
                 let tx_receipt_hash: Hash = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::TransactionReceiptAddress(tx_receipt_hash.into()))
-            },
+            }
             BinaryTag::NonFungibleAddress => {
                 let non_fungible_address: NonFungibleAddressContents = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::NonFungibleAddress(non_fungible_address.into()))
-            },
+            }
             BinaryTag::Metadata => {
                 let metadata: BTreeMap<String, String> = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::Metadata(metadata.into()))
-            },
+            }
             BinaryTag::VaultId => {
                 let vault_id: ObjectKey = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::VaultId(vault_id.into()))
-            },
+            }
             BinaryTag::FeeClaim => {
                 let value: Hash = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::FeeClaim(value.into()))
-            },
+            }
             BinaryTag::ProofId => {
                 let value: u32 = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ProofId(value.into()))
-            },
+            }
             BinaryTag::UnclaimedConfidentialOutputAddress => {
                 let value: ObjectKey = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::UnclaimedConfidentialOutputAddress(value.into()))
-            },
+            }
+            BinaryTag::PublishedTemplateAddress => {
+                let value: Hash = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::PublishedTemplateAddress(value.into()))
+            }
         }
     }
 }
@@ -382,6 +399,7 @@ pub struct IndexedValueVisitor {
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
     unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
+    published_templates: Vec<PublishedTemplateAddress>,
 }
 
 impl IndexedValueVisitor {
@@ -396,6 +414,7 @@ impl IndexedValueVisitor {
             vault_ids: vec![],
             metadata: vec![],
             unclaimed_confidential_output_addresses: vec![],
+            published_templates: vec![],
         }
     }
 }
@@ -407,34 +426,37 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
         match value {
             WellKnownTariValue::ComponentAddress(address) => {
                 self.component_addresses.push(address);
-            },
+            }
             WellKnownTariValue::ResourceAddress(address) => {
                 self.resource_addresses.push(address);
-            },
+            }
             WellKnownTariValue::TransactionReceiptAddress(address) => {
                 self.transaction_receipt_addresses.push(address);
-            },
+            }
             WellKnownTariValue::BucketId(bucket_id) => {
                 self.buckets.push(bucket_id);
-            },
+            }
             WellKnownTariValue::NonFungibleAddress(address) => {
                 self.non_fungible_addresses.push(address);
-            },
+            }
             WellKnownTariValue::VaultId(vault_id) => {
                 self.vault_ids.push(vault_id);
-            },
+            }
             WellKnownTariValue::Metadata(metadata) => {
                 self.metadata.push(metadata);
-            },
+            }
             WellKnownTariValue::ProofId(proof_id) => {
                 self.proofs.push(proof_id);
-            },
+            }
             WellKnownTariValue::UnclaimedConfidentialOutputAddress(address) => {
                 self.unclaimed_confidential_output_addresses.push(address);
-            },
+            }
             WellKnownTariValue::FeeClaim(_) => {
                 // Do nothing
-            },
+            }
+            WellKnownTariValue::PublishedTemplateAddress(template) => {
+                self.published_templates.push(template);
+            }
         }
         Ok(ControlFlow::Continue(()))
     }
@@ -457,7 +479,9 @@ impl From<&str> for IndexedValueError {
 }
 
 pub fn decode_value_at_path<T>(value: &tari_bor::Value, path: &str) -> Result<Option<T>, IndexedValueError>
-where for<'a> T: serde::Deserialize<'a> {
+where
+        for<'a> T: serde::Deserialize<'a>,
+{
     get_value_by_path(value, path)
         .map(tari_bor::from_value)
         .transpose()
@@ -476,11 +500,11 @@ fn get_value_by_path<'a>(value: &'a tari_bor::Value, path: &str) -> Option<&'a t
                     .iter()
                     .find(|(k, _)| k.as_text().map(|s| s == part).unwrap_or(false))?
                     .1;
-            },
+            }
             tari_bor::Value::Array(list) => {
                 let index: usize = part.parse().expect("invalid index");
                 value = list.get(index)?;
-            },
+            }
             _ => return None,
         }
     }
@@ -593,17 +617,17 @@ mod tests {
                 "proof1" => ProofId::from(1),
                 "proof2" => ProofId::from(2),
             })
-            .unwrap(),
+                .unwrap(),
         )
-        .unwrap();
+            .unwrap();
         let v2 = IndexedWellKnownTypes::from_value(
             &cbor!({
                 "buckets" => [BucketId::from(1), BucketId::from(2)],
                 "proofs" => [ProofId::from(2), ProofId::from(3), ProofId::from(4)],
             })
-            .unwrap(),
+                .unwrap(),
         )
-        .unwrap();
+            .unwrap();
 
         let diff = v2.diff(&v1);
 

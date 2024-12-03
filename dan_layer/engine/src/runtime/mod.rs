@@ -180,6 +180,8 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError>;
     fn pop_call_frame(&self) -> Result<(), RuntimeError>;
+
+    fn publish_template(&self, template: &[u8]) -> Result<(), RuntimeError>;
 }
 
 #[derive(Clone)]
@@ -197,7 +199,7 @@ impl Runtime {
                         .interface
                         .workspace_invoke(WorkspaceAction::Get, invoke_args![key].into())?;
                     resolved.push(value.into_value()?);
-                },
+                }
                 Arg::Literal(v) => resolved.push(decode_exact(&v)?),
             }
         }

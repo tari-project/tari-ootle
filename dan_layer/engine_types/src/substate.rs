@@ -44,6 +44,7 @@ use tari_template_lib::{
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
+use crate::published_template::{PublishedTemplate, PublishedTemplateAddress};
 use crate::{
     component::ComponentHeader,
     confidential::UnclaimedConfidentialOutput,
@@ -113,11 +114,14 @@ pub enum SubstateId {
     Component(#[serde(with = "serde_with::string")] ComponentAddress),
     Resource(#[serde(with = "serde_with::string")] ResourceAddress),
     Vault(#[serde(with = "serde_with::string")] VaultId),
-    UnclaimedConfidentialOutput(#[serde(with = "serde_with::string")] UnclaimedConfidentialOutputAddress),
+    UnclaimedConfidentialOutput(#[serde(
+        with = "serde_with::string"
+    )] UnclaimedConfidentialOutputAddress),
     NonFungible(#[serde(with = "serde_with::string")] NonFungibleAddress),
     NonFungibleIndex(#[serde(with = "serde_with::string")] NonFungibleIndexAddress),
     TransactionReceipt(#[serde(with = "serde_with::string")] TransactionReceiptAddress),
     FeeClaim(#[serde(with = "serde_with::string")] FeeClaimAddress),
+    PublishedTemplate(#[serde(with = "serde_with::string")] PublishedTemplateAddress),
 }
 
 impl SubstateId {
@@ -149,6 +153,13 @@ impl SubstateId {
         }
     }
 
+    pub fn as_published_template(&self) -> Option<PublishedTemplateAddress> {
+        match self {
+            Self::PublishedTemplate(address) => Some(*address),
+            _ => None,
+        }
+    }
+
     /// Returns true for any substate that has is "versionable" i.e. can have a version > 0, otherwise false.
     pub fn is_versioned(&self) -> bool {
         match self {
@@ -156,6 +167,7 @@ impl SubstateId {
             SubstateId::Resource(_) |
             SubstateId::Vault(_) |
             SubstateId::NonFungibleIndex(_) |
+            SubstateId::PublishedTemplate(_) |
             SubstateId::NonFungible(_) => true,
             SubstateId::UnclaimedConfidentialOutput(_) |
             SubstateId::TransactionReceipt(_) |
@@ -185,7 +197,7 @@ impl SubstateId {
                     .into();
 
                 ObjectKey::new(addr.resource_address().as_entity_id(), key)
-            },
+            }
             SubstateId::NonFungibleIndex(addr) => {
                 let key = hasher32(EngineHashDomainLabel::NonFungibleIndex)
                     .chain(addr.resource_address())
@@ -194,10 +206,11 @@ impl SubstateId {
                     .trailing_bytes()
                     .into();
                 ObjectKey::new(addr.resource_address().as_entity_id(), key)
-            },
+            }
             SubstateId::UnclaimedConfidentialOutput(addr) => *addr.as_object_key(),
             SubstateId::TransactionReceipt(addr) => *addr.as_object_key(),
             SubstateId::FeeClaim(addr) => *addr.as_object_key(),
+            SubstateId::PublishedTemplate(addr) => *addr.as_object_key(),
         }
     }
 
@@ -315,6 +328,12 @@ impl From<TransactionReceiptAddress> for SubstateId {
     }
 }
 
+impl From<PublishedTemplateAddress> for SubstateId {
+    fn from(address: PublishedTemplateAddress) -> Self {
+        Self::PublishedTemplate(address)
+    }
+}
+
 impl TryFrom<SubstateId> for ComponentAddress {
     type Error = SubstateId;
 
@@ -337,6 +356,7 @@ impl Display for SubstateId {
             SubstateId::UnclaimedConfidentialOutput(commitment_address) => write!(f, "{}", commitment_address),
             SubstateId::TransactionReceipt(addr) => write!(f, "{}", addr),
             SubstateId::FeeClaim(addr) => write!(f, "{}", addr),
+            SubstateId::PublishedTemplate(addr) => write!(f, "{}", addr),
         }
     }
 }
@@ -353,41 +373,45 @@ impl FromStr for SubstateId {
             Some(("component", addr)) => {
                 let addr = ComponentAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Component(addr))
-            },
+            }
             Some(("resource", addr)) => {
                 // resource_xxxxx
                 let addr = ResourceAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Resource(addr))
-            },
+            }
             Some(("nft", rest)) => {
                 // nft_{resource_hex}_{id_type}_{id}
                 let addr = NonFungibleAddress::from_str(rest).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::NonFungible(addr))
-            },
+            }
             Some(("nftindex", rest)) => {
                 // nftindex_{resource_id}_{index}
                 let addr =
                     NonFungibleIndexAddress::from_str(rest).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::NonFungibleIndex(addr))
-            },
+            }
             Some(("vault", addr)) => {
                 let id = VaultId::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Vault(id))
-            },
+            }
             Some(("commitment", addr)) => {
                 let commitment_address = UnclaimedConfidentialOutputAddress::from_hex(addr)
                     .map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::UnclaimedConfidentialOutput(commitment_address))
-            },
+            }
             Some(("txreceipt", addr)) => {
                 let tx_receipt_addr =
                     TransactionReceiptAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::TransactionReceipt(tx_receipt_addr))
-            },
+            }
             Some(("feeclaim", addr)) => {
                 let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::FeeClaim(addr.into()))
-            },
+            }
+            Some(("published_template", addr)) => {
+                let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                Ok(SubstateId::PublishedTemplate(addr.into()))
+            }
             Some(_) | None => Err(InvalidSubstateIdFormat(s.to_string())),
         }
     }
@@ -417,6 +441,7 @@ impl_partial_eq!(UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput
 impl_partial_eq!(NonFungibleAddress, NonFungible);
 impl_partial_eq!(TransactionReceiptAddress, TransactionReceipt);
 impl_partial_eq!(FeeClaimAddress, FeeClaim);
+impl_partial_eq!(PublishedTemplateAddress, PublishedTemplate);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
@@ -429,6 +454,7 @@ pub enum SubstateValue {
     UnclaimedConfidentialOutput(UnclaimedConfidentialOutput),
     TransactionReceipt(TransactionReceipt),
     FeeClaim(FeeClaim),
+    PublishedTemplate(PublishedTemplate),
 }
 
 impl SubstateValue {
@@ -637,18 +663,25 @@ impl From<TransactionReceipt> for SubstateValue {
     }
 }
 
+impl From<PublishedTemplate> for SubstateValue {
+    fn from(template: PublishedTemplate) -> Self {
+        Self::PublishedTemplate(template)
+    }
+}
+
 impl Display for SubstateValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // TODO: improve output
         match self {
             SubstateValue::Component(component) => write!(f, "{:?}", component.state()),
-            SubstateValue::Resource(resource) => write!(f, "{:?}", resource,),
+            SubstateValue::Resource(resource) => write!(f, "{:?}", resource, ),
             SubstateValue::Vault(vault) => write!(f, "{:?}", vault),
             SubstateValue::NonFungible(nft) => write!(f, "{:?}", nft),
             SubstateValue::NonFungibleIndex(index) => write!(f, "{:?}", index),
             SubstateValue::UnclaimedConfidentialOutput(commitment) => write!(f, "{:?}", commitment),
             SubstateValue::TransactionReceipt(tx_receipt) => write!(f, "{:?}", tx_receipt),
             SubstateValue::FeeClaim(fee_claim) => write!(f, "{:?}", fee_claim),
+            SubstateValue::PublishedTemplate(template) => write!(f, "{:?}", template),
         }
     }
 }
@@ -672,7 +705,7 @@ impl SubstateDiff {
         self.up_substates.push((address, value));
     }
 
-    pub fn extend_up(&mut self, iter: impl Iterator<Item = (SubstateId, Substate)>) -> &mut Self {
+    pub fn extend_up(&mut self, iter: impl Iterator<Item=(SubstateId, Substate)>) -> &mut Self {
         self.up_substates.extend(iter);
         self
     }
@@ -681,20 +714,20 @@ impl SubstateDiff {
         self.down_substates.push((address, version));
     }
 
-    pub fn extend_down(&mut self, iter: impl Iterator<Item = (SubstateId, u32)>) -> &mut Self {
+    pub fn extend_down(&mut self, iter: impl Iterator<Item=(SubstateId, u32)>) -> &mut Self {
         self.down_substates.extend(iter);
         self
     }
 
-    pub fn up_iter(&self) -> impl Iterator<Item = &(SubstateId, Substate)> + '_ {
+    pub fn up_iter(&self) -> impl Iterator<Item=&(SubstateId, Substate)> + '_ {
         self.up_substates.iter()
     }
 
-    pub fn into_up_iter(self) -> impl Iterator<Item = (SubstateId, Substate)> {
+    pub fn into_up_iter(self) -> impl Iterator<Item=(SubstateId, Substate)> {
         self.up_substates.into_iter()
     }
 
-    pub fn down_iter(&self) -> impl Iterator<Item = &(SubstateId, u32)> + '_ {
+    pub fn down_iter(&self) -> impl Iterator<Item=&(SubstateId, u32)> + '_ {
         self.down_substates.iter()
     }
 
@@ -743,9 +776,9 @@ mod tests {
             SubstateId::from_str(
                 "nft_a7cf4fd18ada7f367b1c102a9c158abc3754491665033231c5eb907fffffffff_uuid_7f19c3fe5fa13ff66a0d379fe5f9e3508acbd338db6bedd7350d8d565b2c5d32",
             )
-            .unwrap()
-            .as_non_fungible_address()
-            .unwrap();
+                .unwrap()
+                .as_non_fungible_address()
+                .unwrap();
             SubstateId::from_str("nftindex_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_0")
                 .unwrap()
                 .as_non_fungible_index_address()

@@ -4,6 +4,7 @@ import type { ComponentAddress } from "./ComponentAddress";
 import type { Metadata } from "./Metadata";
 import type { NonFungibleAddress } from "./NonFungibleAddress";
 import type { ProofId } from "./ProofId";
+import type { PublishedTemplateAddress } from "./PublishedTemplateAddress";
 import type { ResourceAddress } from "./ResourceAddress";
 import type { TransactionReceiptAddress } from "./TransactionReceiptAddress";
 import type { UnclaimedConfidentialOutputAddress } from "./UnclaimedConfidentialOutputAddress";
@@ -19,4 +20,5 @@ export interface IndexedWellKnownTypes {
   vault_ids: Array<VaultId>;
   metadata: Array<Metadata>;
   unclaimed_confidential_output_address: Array<UnclaimedConfidentialOutputAddress>;
+  published_template_addresses: Array<PublishedTemplateAddress>;
 }

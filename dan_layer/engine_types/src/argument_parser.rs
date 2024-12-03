@@ -15,7 +15,9 @@ use tari_template_lib::{
 use crate::{substate::SubstateId, template::parse_template_address, TemplateAddress};
 
 pub fn json_deserialize<'de, D>(d: D) -> Result<Vec<Arg>, D::Error>
-where D: Deserializer<'de> {
+where
+    D: Deserializer<'de>,
+{
     if d.is_human_readable() {
         // human_readable !== json. This is why the function name is json_deserialize
         let value = json::Value::deserialize(d)?;
@@ -164,6 +166,7 @@ impl From<ParsedArg<'_>> for Arg {
                 SubstateId::NonFungibleIndex(v) => arg!(v),
                 SubstateId::TransactionReceipt(v) => arg!(v),
                 SubstateId::FeeClaim(v) => arg!(v),
+                SubstateId::PublishedTemplate(v) => arg!(v),
             },
             ParsedArg::TemplateAddress(v) => arg!(v),
             ParsedArg::UnsignedInteger(v) => arg!(v),
@@ -201,6 +204,7 @@ fn convert_to_cbor(value: json::Value) -> tari_bor::Value {
                     SubstateId::NonFungibleIndex(id) => to_value(&id).unwrap(),
                     SubstateId::TransactionReceipt(id) => to_value(&id).unwrap(),
                     SubstateId::FeeClaim(id) => to_value(&id).unwrap(),
+                    SubstateId::PublishedTemplate(id) => to_value(&id).unwrap(),
                 },
                 ParsedArg::TemplateAddress(address) => to_value(&address).unwrap(),
                 ParsedArg::UnsignedInteger(i) => tari_bor::Value::Integer(i.into()),
@@ -262,7 +266,7 @@ mod tests {
         let some_args: SomeArgs = json::from_str(
             r#"{"args": ["component_4e146f73f764ddc21a89c315bd00c939cfaae7d86df082a36e47028dffffffff"] }"#,
         )
-        .unwrap();
+            .unwrap();
         match &some_args.args[0] {
             Arg::Workspace(_) => panic!(),
             Arg::Literal(a) => {
@@ -271,7 +275,7 @@ mod tests {
                     a.to_string(),
                     "component_4e146f73f764ddc21a89c315bd00c939cfaae7d86df082a36e47028dffffffff"
                 );
-            },
+            }
         }
     }
 
@@ -309,7 +313,7 @@ mod tests {
                 ComponentAddress::from_str(
                     "component_4e146f73f764ddc21a89c315bd00c939cfaae7d86df082a36e47028dffffffff",
                 )
-                .unwrap(),
+                    .unwrap(),
             ),
         };
 
@@ -326,7 +330,7 @@ mod tests {
             r#"{{"args": [{}]}}"#,
             json::to_string(&struct_sample).unwrap()
         ))
-        .unwrap();
+            .unwrap();
         let bytes = some_args.args[0].as_literal_bytes().unwrap();
         let a: StructInWasm = decode_exact(bytes).unwrap();
         assert_eq!(a, struct_sample);
@@ -380,13 +384,13 @@ mod tests {
             match SubstateId::from_str(case).unwrap() {
                 SubstateId::Component(c) => {
                     assert_eq!(a, arg!(c), "Unexpected value for case '{}'", case);
-                },
+                }
                 SubstateId::Resource(r) => {
                     assert_eq!(a, arg!(r), "Unexpected value for case '{}'", case);
-                },
+                }
                 SubstateId::Vault(v) => {
                     assert_eq!(a, arg!(v), "Unexpected value for case '{}'", case);
-                },
+                }
                 _ => unreachable!(),
             }
         }

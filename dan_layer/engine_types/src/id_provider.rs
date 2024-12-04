@@ -18,7 +18,6 @@ use tari_template_lib::{
     Hash,
 };
 
-use crate::published_template::PublishedTemplateAddress;
 use crate::{
     component::new_component_address_from_public_key,
     hashing::{hasher32, EngineHashDomainLabel},
@@ -51,19 +50,6 @@ impl<'a> IdProvider<'a> {
     pub fn new_resource_address(&self) -> Result<ResourceAddress, IdProviderError> {
         let key = self.next_object_key()?;
         Ok(ResourceAddress::new(key))
-    }
-
-    pub fn new_published_template_address(
-        &self,
-        author: &RistrettoPublicKey,
-        template_bin_hash: Hash,
-    ) -> Result<PublishedTemplateAddress, IdProviderError> {
-        let hash = hasher32(EngineHashDomainLabel::PublishedTemplateAddress)
-            .chain(&author)
-            .chain(&template_bin_hash)
-            .result();
-
-        Ok(PublishedTemplateAddress::from_hash(hash))
     }
 
     pub fn new_component_address(

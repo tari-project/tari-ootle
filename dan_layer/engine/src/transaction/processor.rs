@@ -45,6 +45,7 @@ use tari_common_types::types::PublicKey;
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch};
 use tari_engine_types::indexed_value::IndexedValue;
+use tari_engine_types::published_template::PublishedTemplate;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::new_component_address_from_public_key,
@@ -57,16 +58,7 @@ use tari_engine_types::{
 };
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{
-    arg,
-    args,
-    args::{Arg, LogLevel, WorkspaceAction},
-    auth::OwnerRule,
-    crypto::RistrettoPublicKeyBytes,
-    invoke_args,
-    models::{Bucket, ComponentAddress, NonFungibleAddress},
-    prelude::{AccessRules, TemplateAddress},
-};
+use tari_template_lib::{arg, args, args::{Arg, LogLevel, WorkspaceAction}, auth::OwnerRule, crypto::RistrettoPublicKeyBytes, invoke_args, models::{Bucket, ComponentAddress, NonFungibleAddress}, prelude::{AccessRules, TemplateAddress}, Hash};
 use tari_transaction::Transaction;
 use tari_utilities::ByteArray;
 
@@ -310,7 +302,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                 )?;
                 Ok(InstructionResult::empty())
             }
-            Instruction::PublishTemplate { binary } => Self::publish_template(consensus_constants, runtime, binary),
+            Instruction::PublishTemplate { binary } => Self::publish_template(template_provider, consensus_constants, runtime, binary),
         }
     }
 
@@ -328,8 +320,9 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
         Ok(())
     }
 
-    /// Load, validate template binary and adds to the cache of TemplateProvider.
+    /// Load, validate template binary and adds it to TemplateProvider.
     pub fn publish_template(
+        template_provider: &TTemplateProvider,
         consensus_constants: &ConsensusConstants,
         runtime: &Runtime,
         binary: Vec<u8>,
@@ -340,10 +333,16 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                 consensus_constants.template_binary_max_size_bytes,
             ));
         }
+
+        // validate binary
         WasmModule::load_template_from_code(binary.as_slice())?;
 
-        // TODO: continue by fixing error: ExecutionFailure(No active call frame)
-        runtime.interface().publish_template(binary.as_slice())?;
+        // creating new substate
+        let template_address = runtime.interface().publish_template(binary.as_slice())?.as_hash()?;
+
+        // add new template to template provider
+        template_provider.insert(TemplateAddress::from(template_address), binary.as_slice())
+            .map_err(|error| TransactionError::TemplateProvider(error.to_string()))?;
 
         Ok(InstructionResult::empty())
     }

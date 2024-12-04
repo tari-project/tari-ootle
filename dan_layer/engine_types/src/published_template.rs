@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::models::{BinaryTag, KeyParseError, ObjectKey};
-use tari_template_lib::Hash;
+use tari_template_lib::{Hash, HashParseError};
 
 const TAG: u64 = BinaryTag::PublishedTemplateAddress.as_u64();
 
@@ -30,6 +30,10 @@ impl PublishedTemplateAddress {
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
     }
+
+    pub fn as_hash(&self) -> Result<Hash, HashParseError> {
+        Hash::try_from_vec(self.0.inner().to_vec())
+    }
 }
 
 impl<T: Into<Hash>> From<T> for PublishedTemplateAddress {
@@ -40,7 +44,7 @@ impl<T: Into<Hash>> From<T> for PublishedTemplateAddress {
 
 impl Display for PublishedTemplateAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "published_template_{}", self.as_object_key())
+        write!(f, "template_{}", self.as_object_key())
     }
 }
 
@@ -48,7 +52,7 @@ impl FromStr for PublishedTemplateAddress {
     type Err = KeyParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.strip_prefix("published_template_").unwrap_or(s);
+        let s = s.strip_prefix("template_").unwrap_or(s);
         Self::from_hex(s)
     }
 }

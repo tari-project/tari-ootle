@@ -27,7 +27,7 @@ use tari_common::configuration::Network;
 use tari_common_types::types::PublicKey;
 use tari_crypto::{range_proof::RangeProofService, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch};
-use tari_engine_types::hashing::template_hasher32;
+use tari_engine_types::hashing::{hasher32, template_hasher32, EngineHashDomainLabel};
 use tari_engine_types::published_template::{PublishedTemplate, PublishedTemplateAddress};
 use tari_engine_types::{
     base_layer_hashing::ownership_proof_hasher64,
@@ -2345,12 +2345,16 @@ for RuntimeInterfaceImpl<TTemplateProvider>
         Ok(InvokeResult::encode(&address)?)
     }
 
-    fn publish_template(&self, template: &[u8]) -> Result<(), RuntimeError> {
+    fn publish_template(&self, template: &[u8]) -> Result<PublishedTemplateAddress, RuntimeError> {
         self.tracker.write_with(|state| {
             let binary_hash = template_hasher32().chain(template).result();
-            let template_address = state
-                .id_provider()?
-                .new_published_template_address(&self.transaction_signer_public_key, binary_hash)?;
+            let template_address = PublishedTemplateAddress::from_hash(
+                hasher32(EngineHashDomainLabel::PublishedTemplateAddress)
+                    .chain(&self.transaction_signer_public_key)
+                    .chain(&binary_hash)
+                    .result()
+            );
+            // TODO: check if there is a template with the same address
             state.new_substate(template_address,
                                SubstateValue::PublishedTemplate(
                                    PublishedTemplate {
@@ -2358,11 +2362,11 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                                    }
                                ),
             )?;
+            let scope_mut = state.current_call_scope_mut()?;
+            scope_mut.move_node_to_owned(&template_address.into())?;
 
-            Result::<(), RuntimeError>::Ok(())
-        })?;
-
-        Ok(())
+            Ok(template_address)
+        })
     }
 }
 

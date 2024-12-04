@@ -24,7 +24,7 @@ use std::{collections::HashMap, convert::TryFrom, fs, sync::Arc};
 
 use chrono::Utc;
 use log::*;
-use tari_core::transactions::transaction_components::TemplateType;
+use tari_core::transactions::transaction_components::{BuildInfo, CodeTemplateRegistration, TemplateType};
 use tari_dan_common_types::{optional::Optional, services::template_provider::TemplateProvider, NodeAddressable};
 use tari_dan_engine::{
     flow::FlowFactory,
@@ -35,6 +35,7 @@ use tari_dan_engine::{
 use tari_dan_storage::global::{DbTemplate, DbTemplateType, DbTemplateUpdate, GlobalDb, TemplateStatus};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_engine_types::calculate_template_binary_hash;
+use tari_engine_types::published_template::{PublishedTemplate, PublishedTemplateAddress};
 use tari_template_builtin::{
     get_template_builtin,
     ACCOUNT_NFT_TEMPLATE_ADDRESS,
@@ -161,10 +162,10 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 TemplateExecutable::CompiledWasm(wasm) => {
                     let binary = fs::read(dbg_replacement).expect("Could not read debug file");
                     *wasm = binary;
-                },
+                }
                 TemplateExecutable::Flow(_) => {
                     todo!("debug replacements for flow templates not implemented");
-                },
+                }
                 _ => return Err(TemplateManagerError::TemplateUnavailable),
             }
 
@@ -268,18 +269,24 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
             TemplateExecutable::CompiledWasm(wasm) => {
                 let module = WasmModule::from_code(wasm);
                 module.load_template()?
-            },
+            }
             TemplateExecutable::Manifest(_) => return Err(TemplateManagerError::UnsupportedTemplateType),
             TemplateExecutable::Flow(flow_json) => {
                 let definition: FlowFunctionDefinition = serde_json::from_str(&flow_json)?;
                 let factory = FlowFactory::try_create::<Self>(definition)?;
                 LoadedTemplate::Flow(factory)
-            },
+            }
         };
 
         self.cache.insert(*address, loaded.clone());
 
         Ok(Some(loaded))
+    }
+
+    fn insert(&self, template_address: tari_engine_types::TemplateAddress, template: &[u8]) -> Result<(), Self::Error> {
+        let _loaded = WasmModule::load_template_from_code(template)?;
+        // TODO: implement
+        Ok(())
     }
 }
 

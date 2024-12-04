@@ -56,6 +56,7 @@ use std::{fmt::Debug, sync::Arc};
 use tari_bor::decode_exact;
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::Epoch;
+use tari_engine_types::published_template::PublishedTemplateAddress;
 use tari_engine_types::{
     commit_result::FinalizeResult,
     component::ComponentHeader,
@@ -181,7 +182,7 @@ pub trait RuntimeInterface: Send + Sync {
     fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError>;
     fn pop_call_frame(&self) -> Result<(), RuntimeError>;
 
-    fn publish_template(&self, template: &[u8]) -> Result<(), RuntimeError>;
+    fn publish_template(&self, template: &[u8]) -> Result<PublishedTemplateAddress, RuntimeError>;
 }
 
 #[derive(Clone)]

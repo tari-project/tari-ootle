@@ -8,4 +8,6 @@ pub trait TemplateProvider: Send + Sync + Clone + 'static {
     type Error: std::error::Error + Sync + Send + 'static;
 
     fn get_template_module(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error>;
+
+    fn insert(&self, template_address: TemplateAddress, template: &[u8]) -> Result<(), Self::Error>;
 }

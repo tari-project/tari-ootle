@@ -408,7 +408,7 @@ impl FromStr for SubstateId {
                 let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::FeeClaim(addr.into()))
             }
-            Some(("published_template", addr)) => {
+            Some(("template", addr)) => {
                 let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::PublishedTemplate(addr.into()))
             }
@@ -475,6 +475,13 @@ impl SubstateValue {
     pub fn component_mut(&mut self) -> Option<&mut ComponentHeader> {
         match self {
             SubstateValue::Component(component) => Some(component),
+            _ => None,
+        }
+    }
+
+    pub fn published_template(&self) -> Option<&PublishedTemplate> {
+        match self {
+            SubstateValue::PublishedTemplate(template) => Some(template),
             _ => None,
         }
     }

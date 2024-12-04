@@ -1,8 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::RwLock;
 use std::{collections::HashMap, convert::Infallible, path::Path};
-
 use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_dan_engine::{
     abi::TemplateDef,
@@ -15,7 +15,7 @@ use tari_template_lib::models::TemplateAddress;
 
 #[derive(Debug, Clone)]
 pub struct Package {
-    templates: HashMap<TemplateAddress, LoadedTemplate>,
+    templates: RwLock<HashMap<TemplateAddress, LoadedTemplate>>,
 }
 
 impl Package {
@@ -24,22 +24,25 @@ impl Package {
     }
 
     pub fn get_template_by_address(&self, addr: &TemplateAddress) -> Option<&LoadedTemplate> {
-        self.templates.get(addr)
+        let lock = self.templates.read().unwrap();
+        lock.get(addr)
     }
 
     pub fn get_template_defs(&self) -> HashMap<TemplateAddress, TemplateDef> {
-        self.templates
-            .iter()
+        let lock = self.templates.read().unwrap();
+        lock.iter()
             .map(|(addr, template)| (*addr, template.template_def().clone()))
             .collect()
     }
 
     pub fn total_code_byte_size(&self) -> usize {
-        self.templates.values().map(|t| t.code_size()).sum()
+        let lock = self.templates.read().unwrap();
+        lock.values().map(|t| t.code_size()).sum()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&TemplateAddress, &LoadedTemplate)> {
-        self.templates.iter()
+    pub fn iter(&self) -> impl Iterator<Item=(&TemplateAddress, &LoadedTemplate)> {
+        let lock = self.templates.read().unwrap();
+        lock.iter()
     }
 }
 
@@ -82,7 +85,7 @@ impl PackageBuilder {
 
     pub fn build(&mut self) -> Package {
         Package {
-            templates: self.templates.drain().collect(),
+            templates: RwLock::new(self.templates.drain().collect()),
         }
     }
 }
@@ -95,6 +98,13 @@ impl TemplateProvider for Package {
         &self,
         id: &tari_engine_types::TemplateAddress,
     ) -> Result<Option<Self::Template>, Self::Error> {
-        Ok(self.templates.get(id).cloned())
+        let lock = self.templates.read()?;
+        Ok(lock.get(id).cloned())
+    }
+
+    fn insert(&self, template_address: tari_engine_types::TemplateAddress, template: &[u8]) -> Result<(), Self::Error> {
+        let mut lock = self.templates.write()?;
+        lock.insert(template_address, WasmModule::load_template_from_code(template)?);
+        Ok(())
     }
 }

@@ -41,15 +41,15 @@ diesel::table! {
 diesel::table! {
     templates (id) {
         id -> Integer,
+        author_public_key -> Binary,
+        template_address -> Binary,
         template_name -> Text,
         expected_hash -> Binary,
-        template_address -> Binary,
         template_type -> Text,
         compiled_code -> Nullable<Binary>,
         flow_json -> Nullable<Text>,
-        status -> Text,
-        wasm_path -> Nullable<Text>,
         manifest -> Nullable<Text>,
+        status -> Text,
         added_at -> Timestamp,
     }
 }

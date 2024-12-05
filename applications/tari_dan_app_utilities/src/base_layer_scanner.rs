@@ -63,7 +63,7 @@ use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::models::{EncryptedData, TemplateAddress, UnclaimedConfidentialOutputAddress};
 use tokio::{task, task::JoinHandle, time};
 
-use crate::template_manager::interface::{TemplateManagerError, TemplateManagerHandle, TemplateRegistration};
+use crate::template_manager::interface::{TemplateManagerError, TemplateManagerHandle};
 
 const LOG_TARGET: &str = "tari::dan::base_layer_scanner";
 
@@ -71,7 +71,6 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
     global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
     base_node_client: GrpcBaseNodeClient,
     epoch_manager: EpochManagerHandle<TAddr>,
-    template_manager: TemplateManagerHandle,
     shutdown: ShutdownSignal,
     consensus_constants: ConsensusConstants,
     shard_store: SqliteStateStore<TAddr>,
@@ -86,7 +85,6 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
             global_db,
             base_node_client,
             epoch_manager,
-            template_manager,
             shutdown,
             consensus_constants,
             shard_store,
@@ -128,7 +126,6 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
         base_node_client: GrpcBaseNodeClient,
         epoch_manager: EpochManagerHandle<TAddr>,
-        template_manager: TemplateManagerHandle,
         shutdown: ShutdownSignal,
         consensus_constants: ConsensusConstants,
         state_store: SqliteStateStore<TAddr>,
@@ -387,22 +384,9 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                     SideChainFeature::ValidatorNodeRegistration(reg) => {
                         trace!(target: LOG_TARGET, "New validator node registration scanned: {reg:?}");
                     },
+                    // TODO: remove completely SideChainFeature::CodeTemplateRegistration at some point
                     SideChainFeature::CodeTemplateRegistration(reg) => {
-                        if reg.sidechain_id != self.template_sidechain_id {
-                            warn!(
-                                target: LOG_TARGET,
-                                "Ignoring code template registration for sidechain ID {:?}. Expected sidechain ID: {:?}",
-                                reg.sidechain_id.as_ref().map(|v| v.to_hex()),
-                                self.template_sidechain_id.as_ref().map(|v| v.to_hex()));
-                            continue;
-                        }
-                        self.register_code_template_registration(
-                            reg.template_name.to_string(),
-                            (*output_hash).into(),
-                            reg.clone(),
-                            &block_info,
-                        )
-                        .await?;
+                        trace!(target: LOG_TARGET, "New code template registration scanned: {reg:?}");
                     },
                     SideChainFeature::ConfidentialOutput(data) => {
                         // Should be checked by the base layer
@@ -571,29 +555,6 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         Ok(())
     }
 
-    async fn register_code_template_registration(
-        &mut self,
-        template_name: String,
-        template_address: TemplateAddress,
-        registration: CodeTemplateRegistration,
-        block_info: &BlockInfo,
-    ) -> Result<(), BaseLayerScannerError> {
-        info!(
-            target: LOG_TARGET,
-            "🌠 new template found with address {} at height {}", template_address, block_info.height
-        );
-        let template = TemplateRegistration {
-            template_name,
-            template_address,
-            registration,
-            mined_height: block_info.height,
-            mined_hash: block_info.hash,
-        };
-        self.template_manager.add_template(template).await?;
-
-        Ok(())
-    }
-
     fn set_last_scanned_block(&mut self, tip: FixedHash, block_info: &BlockInfo) -> Result<(), BaseLayerScannerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut metadata = self.global_db.metadata(&mut tx);
@@ -618,8 +579,6 @@ pub enum BaseLayerScannerError {
     SqliteStorageError(#[from] SqliteStorageError),
     #[error("Epoch manager error: {0}")]
     EpochManagerError(#[from] EpochManagerError),
-    #[error("Template manager error: {0}")]
-    TemplateManagerError(#[from] TemplateManagerError),
     #[error("Base node client error: {0}")]
     BaseNodeError(#[from] BaseNodeClientError),
     #[error("Invalid side chain utxo response: {0}")]

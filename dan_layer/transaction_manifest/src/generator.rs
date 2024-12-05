@@ -53,7 +53,7 @@ impl ManifestInstructionGenerator {
                         .copied()
                         .map(|addr| (import.alias, addr))
                         .ok_or(ManifestError::TemplateAliasNotDefined { alias: alias_str })
-                }
+                },
             })
             .collect::<Result<_, _>>()?;
 
@@ -76,12 +76,12 @@ impl ManifestInstructionGenerator {
     fn translate_intent(&mut self, intent: ManifestIntent) -> Result<Vec<Instruction>, ManifestError> {
         match intent {
             ManifestIntent::InvokeTemplate(InvokeIntent {
-                                               output_variable,
-                                               template_variable,
-                                               function_name,
-                                               arguments,
-                                               ..
-                                           }) => {
+                output_variable,
+                template_variable,
+                function_name,
+                arguments,
+                ..
+            }) => {
                 let template_ident = template_variable
                     .as_ref()
                     .expect("AST parse should have failed: no template ident for TemplateInvoke statement");
@@ -97,14 +97,14 @@ impl ManifestInstructionGenerator {
                     });
                 }
                 Ok(instructions)
-            }
+            },
             ManifestIntent::InvokeComponent(InvokeIntent {
-                                                output_variable,
-                                                component_variable,
-                                                function_name,
-                                                arguments,
-                                                ..
-                                            }) => {
+                output_variable,
+                component_variable,
+                function_name,
+                arguments,
+                ..
+            }) => {
                 let component_ident = component_variable
                     .as_ref()
                     .expect("AST parse should have failed: no component ident for ComponentInvoke statement")
@@ -131,14 +131,14 @@ impl ManifestInstructionGenerator {
                     });
                 }
                 Ok(instructions)
-            }
+            },
             ManifestIntent::AssignInput(assign) => {
                 self.global_aliases.insert(
                     assign.variable_name.to_string(),
                     self.get_global(&assign.global_variable_name.value())?.clone(),
                 );
                 Ok(vec![])
-            }
+            },
             ManifestIntent::Log(log) => Ok(vec![Instruction::EmitLog {
                 level: log.level,
                 message: log.message,
@@ -186,12 +186,12 @@ impl ManifestInstructionGenerator {
                                 name: ident.to_string(),
                             }
                         })?
-                }
+                },
                 ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(arg!(Amount(amount))),
                 ManifestLiteral::Special(SpecialLiteral::NonFungibleId(lit)) => {
                     let id = lit_to_nonfungible_id(&lit)?;
                     Ok(arg!(id))
-                }
+                },
             })
             .collect()
     }
@@ -270,7 +270,7 @@ fn lit_to_nonfungible_id(lit: &Lit) -> Result<NonFungibleId, ManifestError> {
             let mut id = [0u8; 32];
             id.copy_from_slice(&bytes);
             Ok(NonFungibleId::from_u256(id))
-        }
+        },
         Lit::Int(v) => match v.suffix() {
             "u8" | "u16" | "u32" => Ok(NonFungibleId::from_u32(v.base10_parse()?)),
             "u64" => Ok(NonFungibleId::from_u64(v.base10_parse()?)),

@@ -22,6 +22,39 @@
 
 use std::{sync::Arc, time::Instant};
 
+use log::*;
+use tari_bor::to_value;
+use tari_common::configuration::Network;
+use tari_common_types::types::PublicKey;
+use tari_consensus::consensus_constants::ConsensusConstants;
+use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch};
+use tari_engine_types::{
+    commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
+    component::new_component_address_from_public_key,
+    entity_id_provider::EntityIdProvider,
+    indexed_value::{IndexedValue, IndexedWellKnownTypes},
+    instruction::Instruction,
+    instruction_result::InstructionResult,
+    lock::LockFlag,
+    published_template::PublishedTemplate,
+    virtual_substate::VirtualSubstates,
+};
+use tari_template_abi::{FunctionDef, Type};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+use tari_template_lib::{
+    arg,
+    args,
+    args::{Arg, LogLevel, WorkspaceAction},
+    auth::OwnerRule,
+    crypto::RistrettoPublicKeyBytes,
+    invoke_args,
+    models::{Bucket, ComponentAddress, NonFungibleAddress},
+    prelude::{AccessRules, TemplateAddress},
+    Hash,
+};
+use tari_transaction::Transaction;
+use tari_utilities::ByteArray;
+
 use crate::{
     runtime::{
         scope::{CallScope, PushCallFrame},
@@ -38,29 +71,6 @@ use crate::{
     transaction::TransactionError,
     wasm::{WasmModule, WasmProcess},
 };
-use log::*;
-use tari_bor::to_value;
-use tari_common::configuration::Network;
-use tari_common_types::types::PublicKey;
-use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch};
-use tari_engine_types::indexed_value::IndexedValue;
-use tari_engine_types::published_template::PublishedTemplate;
-use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
-    component::new_component_address_from_public_key,
-    entity_id_provider::EntityIdProvider,
-    indexed_value::IndexedWellKnownTypes,
-    instruction::Instruction,
-    instruction_result::InstructionResult,
-    lock::LockFlag,
-    virtual_substate::VirtualSubstates,
-};
-use tari_template_abi::{FunctionDef, Type};
-use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::{arg, args, args::{Arg, LogLevel, WorkspaceAction}, auth::OwnerRule, crypto::RistrettoPublicKeyBytes, invoke_args, models::{Bucket, ComponentAddress, NonFungibleAddress}, prelude::{AccessRules, TemplateAddress}, Hash};
-use tari_transaction::Transaction;
-use tari_utilities::ByteArray;
 
 const LOG_TARGET: &str = "tari::dan::engine::instruction_processor";
 pub const MAX_CALL_DEPTH: usize = 10;
@@ -75,7 +85,7 @@ pub struct TransactionProcessor<TTemplateProvider> {
     network: Network,
 }
 
-impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
+impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
     pub fn new(
         template_provider: Arc<TTemplateProvider>,
         state_db: ReadOnlyMemoryStateStore,
@@ -161,7 +171,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     });
                 }
                 execution_results
-            }
+            },
             Err(err) => {
                 return Ok(ExecuteResult {
                     finalize: FinalizeResult::new_rejected(
@@ -170,7 +180,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     ),
                     execution_time: timer.elapsed(),
                 });
-            }
+            },
         };
 
         let instruction_result =
@@ -188,7 +198,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     finalize,
                     execution_time: timer.elapsed(),
                 })
-            }
+            },
             // This can happen e.g if you have dangling buckets after running the instructions
             Err(err) => {
                 // Reset the state to when the state at the end of the fee instructions. The fee charges for the
@@ -209,7 +219,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     finalize,
                     execution_time: timer.elapsed(),
                 })
-            }
+            },
         }
     }
 
@@ -268,20 +278,20 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
             Instruction::PutLastInstructionOutputOnWorkspace { key } => {
                 Self::put_output_on_workspace_with_name(runtime, key)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::DropAllProofsInWorkspace => {
                 Self::drop_all_proofs_in_workspace(runtime)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::EmitLog { level, message } => {
                 runtime.interface().emit_log(level, message)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::ClaimBurn { claim } => {
                 // Need to call it on the runtime so that a bucket is created.
                 runtime.interface().claim_burn(*claim)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::ClaimValidatorFees {
                 epoch,
                 validator_public_key,
@@ -290,7 +300,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     .interface()
                     .claim_validator_fees(Epoch(epoch), validator_public_key)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::AssertBucketContains {
                 key,
                 resource_address,
@@ -301,8 +311,10 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     invoke_args![key, resource_address, min_amount].into(),
                 )?;
                 Ok(InstructionResult::empty())
-            }
-            Instruction::PublishTemplate { binary } => Self::publish_template(template_provider, consensus_constants, runtime, binary),
+            },
+            Instruction::PublishTemplate { binary } => {
+                Self::publish_template(template_provider, consensus_constants, runtime, binary)
+            },
         }
     }
 
@@ -342,7 +354,12 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
         let template_address = template_address.as_hash()?;
 
         // add new template to template provider
-        template_provider.insert(author_public_key, TemplateAddress::from(template_address), binary.as_slice())
+        template_provider
+            .add_wasm_template(
+                author_public_key,
+                TemplateAddress::from(template_address),
+                binary.as_slice(),
+            )
             .map_err(|error| TransactionError::TemplateProvider(error.to_string()))?;
 
         Ok(InstructionResult::empty())
@@ -551,7 +568,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                 let mut store = loaded.create_store();
                 let mut process = WasmProcess::init(&mut store, loaded, runtime)?;
                 process.invoke(&mut store, &function_def, args)?
-            }
+            },
             LoadedTemplate::Flow(flow_factory) => {
                 flow_factory.run_new_instance(
                     Arc::new(template_provider.clone()),
@@ -562,7 +579,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     0,
                     MAX_CALL_DEPTH,
                 )?
-            }
+            },
         };
         Ok(result)
     }

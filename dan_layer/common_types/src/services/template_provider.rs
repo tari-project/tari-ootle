@@ -10,5 +10,10 @@ pub trait TemplateProvider: Send + Sync + Clone + 'static {
 
     fn get_template_module(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error>;
 
-    fn insert(&self, author_public_key: PublicKey, template_address: TemplateAddress, template: &[u8]) -> Result<(), Self::Error>;
+    fn add_wasm_template(
+        &self,
+        author_public_key: PublicKey,
+        template_address: TemplateAddress,
+        template: &[u8],
+    ) -> Result<(), Self::Error>;
 }

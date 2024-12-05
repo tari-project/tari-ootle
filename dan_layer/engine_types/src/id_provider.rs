@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::sync::{atomic, atomic::AtomicU32};
+
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
     models::{

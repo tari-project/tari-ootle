@@ -64,6 +64,7 @@ use tari_dan_storage::{
     },
     AtomicDb,
 };
+use tari_engine_types::TemplateAddress;
 use tari_utilities::ByteArray;
 
 use super::{models, models::DbValidatorNode};
@@ -208,12 +209,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
         match template {
             Some(t) => Ok(Some(DbTemplate {
+                author_public_key: FixedHash::try_from(t.author_public_key.as_slice())?,
                 template_name: t.template_name,
-
                 expected_hash: t.expected_hash.try_into()?,
                 template_address: t.template_address.try_into()?,
-                url: t.url,
-                height: t.height as u64,
                 template_type: t.template_type.parse().expect("DB template type corrupted"),
                 compiled_code: t.compiled_code,
                 flow_json: t.flow_json,
@@ -246,11 +245,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .into_iter()
             .map(|t| {
                 Ok(DbTemplate {
+                    author_public_key: FixedHash::try_from(t.author_public_key.as_slice())?,
                     template_name: t.template_name,
                     expected_hash: t.expected_hash.try_into()?,
-                    template_address: t.template_address.try_into()?,
-                    url: t.url,
-                    height: t.height as u64,
+                    template_address: TemplateAddress::try_from_vec(t.template_address)?,
                     template_type: t.template_type.parse().expect("DB template type corrupted"),
                     compiled_code: t.compiled_code,
                     flow_json: t.flow_json,
@@ -281,11 +279,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .into_iter()
             .map(|t| {
                 Ok(DbTemplate {
+                    author_public_key: t.author_public_key.try_into()?,
                     template_name: t.template_name,
                     expected_hash: t.expected_hash.try_into()?,
-                    template_address: t.template_address.try_into()?,
-                    url: t.url,
-                    height: t.height as u64,
+                    template_address: TemplateAddress::try_from_vec(t.template_address)?,
                     template_type: t.template_type.parse().expect("DB template type corrupted"),
                     compiled_code: t.compiled_code,
                     flow_json: t.flow_json,
@@ -299,17 +296,15 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
     fn insert_template(&self, tx: &mut Self::DbTransaction<'_>, item: DbTemplate) -> Result<(), Self::Error> {
         let new_template = NewTemplateModel {
+            author_public_key: item.author_public_key.to_vec(),
             template_name: item.template_name,
             expected_hash: item.expected_hash.to_vec(),
             template_address: item.template_address.to_vec(),
-            url: item.url.to_string(),
-            height: item.height as i64,
             template_type: item.template_type.as_str().to_string(),
             compiled_code: item.compiled_code,
             flow_json: item.flow_json,
             status: item.status.as_str().to_string(),
-            wasm_path: None,
-            manifest: None,
+            manifest: item.manifest,
         };
         diesel::insert_into(templates::table)
             .values(new_template)

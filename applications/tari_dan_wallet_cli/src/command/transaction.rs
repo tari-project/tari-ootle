@@ -175,17 +175,17 @@ impl TransactionSubcommand {
         match self {
             TransactionSubcommand::Submit(args) => {
                 handle_submit(args, &mut client).await?;
-            }
+            },
             TransactionSubcommand::SubmitManifest(args) => {
                 handle_submit_manifest(args, &mut client).await?;
-            }
+            },
             TransactionSubcommand::Get(args) => handle_get(args, &mut client).await?,
             TransactionSubcommand::Send(args) => {
                 handle_send(args, &mut client).await?;
-            }
+            },
             TransactionSubcommand::ConfidentialTransfer(args) => {
                 handle_confidential_transfer(args, &mut client).await?;
-            }
+            },
         }
         Ok(())
     }
@@ -203,7 +203,7 @@ async fn handle_get(args: GetArgs, client: &mut WalletDaemonClient) -> Result<()
 
         summarize_finalize_result(&result);
     } else {
-        println!("Transaction not finalized", );
+        println!("Transaction not finalized",);
     }
 
     Ok(())
@@ -450,7 +450,7 @@ pub async fn wait_transaction_result(
         })
         .await?;
     if wait_resp.timed_out {
-        println!("⏳️ Transaction result timed out.", );
+        println!("⏳️ Transaction result timed out.",);
         println!();
     } else if let Some(ref result) = wait_resp.result {
         summarize(result, timer.elapsed());
@@ -506,34 +506,34 @@ fn summarize(result: &FinalizeResult, time_taken: Duration) {
 
 pub fn print_substate_diff(diff: &SubstateDiff) {
     for (address, substate) in diff.up_iter() {
-        println!("️🌲 UP substate {} (v{})", address, substate.version(), );
+        println!("️🌲 UP substate {} (v{})", address, substate.version(),);
         println!(
             "      🧩 Substate address: {}",
             SubstateAddress::from_substate_id(address, substate.version())
         );
         match substate.substate_value() {
             SubstateValue::Component(component) => {
-                println!("      ▶ component ({}): {}", component.module_name, address, );
-            }
+                println!("      ▶ component ({}): {}", component.module_name, address,);
+            },
             SubstateValue::Resource(_) => {
                 println!("      ▶ resource: {}", address);
-            }
+            },
             SubstateValue::TransactionReceipt(_) => {
                 println!("      ▶ transaction_receipt: {}", address);
-            }
+            },
             SubstateValue::Vault(vault) => {
                 println!("      ▶ vault: {} {}", address, vault.resource_address());
-            }
+            },
             SubstateValue::NonFungible(_) => {
                 println!("      ▶ NFT: {}", address);
-            }
+            },
             SubstateValue::UnclaimedConfidentialOutput(_) => {
                 println!("      ▶ Layer 1 commitment: {}", address);
-            }
+            },
             SubstateValue::NonFungibleIndex(index) => {
                 let referenced_address = SubstateId::from(index.referenced_address().clone());
                 println!("      ▶ NFT index {} referencing {}", address, referenced_address);
-            }
+            },
             SubstateValue::FeeClaim(fee_claim) => {
                 println!("      ▶ Fee claim: {}", address);
                 println!("        ▶ Amount: {}", fee_claim.amount);
@@ -541,15 +541,15 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
                     "        ▶ validator: {}",
                     to_hex(fee_claim.validator_public_key.as_bytes())
                 );
-            }
+            },
             SubstateValue::PublishedTemplate(_) => {
                 println!("      ▶ Published template: {}", address);
-            }
+            },
         }
         println!();
     }
     for (address, version) in diff.down_iter() {
-        println!("🗑️ DOWN substate {} v{}", address, version, );
+        println!("🗑️ DOWN substate {} v{}", address, version,);
         println!(
             "      🧩 Substate address: {}",
             SubstateAddress::from_substate_id(address, *version)
@@ -569,7 +569,7 @@ pub fn summarize_finalize_result(finalize: &FinalizeResult) {
         TransactionResult::AcceptFeeRejectRest(ref diff, ref reason) => {
             print_substate_diff(diff);
             print_reject_reason(reason);
-        }
+        },
         TransactionResult::Reject(ref reason) => print_reject_reason(reason),
     }
 
@@ -589,72 +589,72 @@ fn display_vec<W: fmt::Write>(writer: &mut W, ty: &Type, result: &InstructionRes
     }
 
     match &ty {
-        Type::Unit => {}
+        Type::Unit => {},
         Type::Bool => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<bool>>().unwrap()))?;
-        }
+        },
         Type::I8 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<i8>>().unwrap()))?;
-        }
+        },
         Type::I16 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<i16>>().unwrap()))?;
-        }
+        },
         Type::I32 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<i32>>().unwrap()))?;
-        }
+        },
         Type::I64 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<i64>>().unwrap()))?;
-        }
+        },
         Type::I128 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<i128>>().unwrap()))?;
-        }
+        },
         Type::U8 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<u8>>().unwrap()))?;
-        }
+        },
         Type::U16 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<u16>>().unwrap()))?;
-        }
+        },
         Type::U32 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<u32>>().unwrap()))?;
-        }
+        },
         Type::U64 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<u64>>().unwrap()))?;
-        }
+        },
         Type::U128 => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<u128>>().unwrap()))?;
-        }
+        },
         Type::String => {
             write!(writer, "{}", result.decode::<Vec<String>>().unwrap().join(", "))?;
-        }
+        },
         Type::Vec(ty) => {
             let mut vec_ty = String::new();
             display_vec(&mut vec_ty, ty, result)?;
             match &**ty {
                 Type::Other { name } => {
                     write!(writer, "Vec<{}>: {}", name, vec_ty)?;
-                }
+                },
                 _ => {
                     write!(writer, "Vec<{:?}>: {}", ty, vec_ty)?;
-                }
+                },
             }
-        }
+        },
         Type::Tuple(subtypes) => {
             let str = format_tuple(subtypes, result);
             write!(writer, "{}", str)?;
-        }
+        },
         Type::Other { name } if name == "Amount" => {
             write!(writer, "{}", stringify_slice(&result.decode::<Vec<Amount>>().unwrap()))?;
-        }
+        },
         Type::Other { name } if name == "NonFungibleId" => {
             write!(
                 writer,
                 "{}",
                 stringify_slice(&result.decode::<Vec<NonFungibleId>>().unwrap())
             )?;
-        }
+        },
         Type::Other { .. } => {
             write!(writer, "{}", serde_json::to_string_pretty(&result.indexed).unwrap())?;
-        }
+        },
     }
     Ok(())
 }
@@ -668,68 +668,68 @@ fn format_tuple(subtypes: &[Type], result: &InstructionResult) -> String {
 pub fn print_execution_results(results: &[InstructionResult]) {
     for result in results {
         match &result.return_type {
-            Type::Unit => {}
+            Type::Unit => {},
             Type::Bool => {
                 println!("bool: {}", result.decode::<bool>().unwrap());
-            }
+            },
             Type::I8 => {
                 println!("i8: {}", result.decode::<i8>().unwrap());
-            }
+            },
             Type::I16 => {
                 println!("i16: {}", result.decode::<i16>().unwrap());
-            }
+            },
             Type::I32 => {
                 println!("i32: {}", result.decode::<i32>().unwrap());
-            }
+            },
             Type::I64 => {
                 println!("i64: {}", result.decode::<i64>().unwrap());
-            }
+            },
             Type::I128 => {
                 println!("i128: {}", result.decode::<i128>().unwrap());
-            }
+            },
             Type::U8 => {
                 println!("u8: {}", result.decode::<u8>().unwrap());
-            }
+            },
             Type::U16 => {
                 println!("u16: {}", result.decode::<u16>().unwrap());
-            }
+            },
             Type::U32 => {
                 println!("u32: {}", result.decode::<u32>().unwrap());
-            }
+            },
             Type::U64 => {
                 println!("u64: {}", result.decode::<u64>().unwrap());
-            }
+            },
             Type::U128 => {
                 println!("u128: {}", result.decode::<u128>().unwrap());
-            }
+            },
             Type::String => {
                 println!("string: {}", result.decode::<String>().unwrap());
-            }
+            },
             Type::Vec(ty) => {
                 let mut vec_ty = String::new();
                 display_vec(&mut vec_ty, ty, result).unwrap();
                 match &**ty {
                     Type::Other { name } => {
                         println!("Vec<{}>: {}", name, vec_ty);
-                    }
+                    },
                     _ => {
                         println!("Vec<{:?}>: {}", ty, vec_ty);
-                    }
+                    },
                 }
-            }
+            },
             Type::Tuple(subtypes) => {
                 let str = format_tuple(subtypes, result);
                 println!("{}", str);
-            }
+            },
             Type::Other { ref name } if name == "Amount" => {
                 println!("{}: {}", name, result.decode::<Amount>().unwrap());
-            }
+            },
             Type::Other { ref name } if name == "Bucket" => {
                 println!("{}: {}", name, result.decode::<BucketId>().unwrap());
-            }
+            },
             Type::Other { ref name } => {
                 println!("{}: {}", name, serde_json::to_string_pretty(&result.indexed).unwrap());
-            }
+            },
         }
     }
 }
@@ -801,13 +801,13 @@ impl FromStr for CliArg {
             match NonFungibleId::try_from_canonical_string(nft_id) {
                 Ok(v) => {
                     return Ok(CliArg::NonFungibleId(v));
-                }
+                },
                 Err(e) => {
                     eprintln!(
                         "WARN: '{}' is not a valid NonFungibleId ({:?}) and will be interpreted as a string",
                         s, e
                     );
-                }
+                },
             }
         }
         Ok(CliArg::String(s.to_string()))
@@ -963,10 +963,10 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
 
                     base64::decode(contents.trim())
                         .map_err(|err| anyhow!("Failed to decode base64 file '{}': {}", url, err))?
-                }
+                },
                 "data" => {
                     base64::decode(url.path()).map_err(|err| anyhow!("Failed to decode base64 '{}': {}", url, err))?
-                }
+                },
                 scheme => anyhow::bail!("Unsupported scheme '{}'", scheme),
             };
             result.insert(name.to_string(), ManifestValue::Value(decode_exact(&blob)?));

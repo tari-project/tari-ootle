@@ -1,21 +1,28 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::str::FromStr;
+use std::{
+    fmt,
+    fmt::{Display, Formatter},
+    str::FromStr,
+};
+
 use tari_bor::{BorTag, Deserialize, Serialize};
-use tari_template_lib::models::{BinaryTag, KeyParseError, ObjectKey};
-use tari_template_lib::{Hash, HashParseError};
+use tari_template_lib::{
+    models::{BinaryTag, KeyParseError, ObjectKey},
+    Hash,
+    HashParseError,
+};
 
 const TAG: u64 = BinaryTag::PublishedTemplateAddress.as_u64();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "../../bindings/src/types/"))]
-pub struct PublishedTemplateAddress(#[cfg_attr(
+#[cfg_attr(
     feature = "ts",
-    ts(type = "string")
-)] BorTag<ObjectKey, TAG>);
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct PublishedTemplateAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl PublishedTemplateAddress {
     pub const fn from_hash(hash: Hash) -> Self {
@@ -58,7 +65,11 @@ impl FromStr for PublishedTemplateAddress {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct PublishedTemplate {
     pub template: Vec<u8>,
 }

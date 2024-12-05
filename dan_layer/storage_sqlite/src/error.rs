@@ -26,6 +26,7 @@ use diesel;
 use tari_common_types::types::FixedHashSizeError;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_storage::StorageError;
+use tari_template_lib::HashParseError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -69,6 +70,8 @@ pub enum SqliteStorageError {
         item: &'static str,
         details: String,
     },
+    #[error("Hash parsing error: {0}")]
+    HashParse(#[from] HashParseError),
 }
 
 impl From<SqliteStorageError> for StorageError {

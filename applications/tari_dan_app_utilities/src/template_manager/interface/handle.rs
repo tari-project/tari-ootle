@@ -36,18 +36,6 @@ impl TemplateManagerHandle {
         Self { request_tx }
     }
 
-    pub async fn add_template(&self, template: TemplateRegistration) -> Result<(), TemplateManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.request_tx
-            .send(TemplateManagerRequest::AddTemplate {
-                template: Box::new(template),
-                reply: tx,
-            })
-            .await
-            .map_err(|_| TemplateManagerError::ChannelClosed)?;
-        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
-    }
-
     pub async fn get_template(&self, address: TemplateAddress) -> Result<Template, TemplateManagerError> {
         let (tx, rx) = oneshot::channel();
         self.request_tx

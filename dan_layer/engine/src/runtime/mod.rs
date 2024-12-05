@@ -56,13 +56,13 @@ use std::{fmt::Debug, sync::Arc};
 use tari_bor::decode_exact;
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::Epoch;
-use tari_engine_types::published_template::PublishedTemplateAddress;
 use tari_engine_types::{
     commit_result::FinalizeResult,
     component::ComponentHeader,
     confidential::ConfidentialClaim,
     indexed_value::IndexedValue,
     lock::LockFlag,
+    published_template::PublishedTemplateAddress,
     substate::SubstateValue,
 };
 use tari_template_lib::{
@@ -200,7 +200,7 @@ impl Runtime {
                         .interface
                         .workspace_invoke(WorkspaceAction::Get, invoke_args![key].into())?;
                     resolved.push(value.into_value()?);
-                }
+                },
                 Arg::Literal(v) => resolved.push(decode_exact(&v)?),
             }
         }

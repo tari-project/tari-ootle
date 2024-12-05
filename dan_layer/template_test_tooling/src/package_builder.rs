@@ -1,8 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::RwLock;
-use std::{collections::HashMap, convert::Infallible, path::Path};
+use std::{collections::HashMap, convert::Infallible, path::Path, sync::RwLock};
+
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_dan_engine::{
@@ -41,7 +41,7 @@ impl Package {
         lock.values().map(|t| t.code_size()).sum()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=(&TemplateAddress, &LoadedTemplate)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&TemplateAddress, &LoadedTemplate)> {
         let lock = self.templates.read().unwrap();
         lock.iter()
     }
@@ -103,7 +103,12 @@ impl TemplateProvider for Package {
         Ok(lock.get(id).cloned())
     }
 
-    fn insert(&self, _author_public_key: PublicKey, template_address: tari_engine_types::TemplateAddress, template: &[u8]) -> Result<(), Self::Error> {
+    fn add_wasm_template(
+        &self,
+        _author_public_key: PublicKey,
+        template_address: tari_engine_types::TemplateAddress,
+        template: &[u8],
+    ) -> Result<(), Self::Error> {
         let mut lock = self.templates.write()?;
         lock.insert(template_address, WasmModule::load_template_from_code(template)?);
         Ok(())

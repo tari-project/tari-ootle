@@ -26,32 +26,14 @@ use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::oneshot;
 
-use super::{TemplateManagerError, TemplateRegistration};
+use super::TemplateManagerError;
 
 #[derive(Debug, Clone)]
 pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
-    // this must be in the form of "https://example.com/my_template.wasm"
-    pub url: String,
     /// SHA hash of binary
     pub binary_sha: FixedHash,
-    /// Block height in which the template was published
-    pub height: u64,
-}
-
-impl From<TemplateRegistration> for TemplateMetadata {
-    fn from(reg: TemplateRegistration) -> Self {
-        TemplateMetadata {
-            name: reg.template_name,
-            address: reg.template_address,
-            url: reg.registration.binary_url.into_string(),
-            binary_sha: FixedHash::try_from(reg.registration.binary_sha.as_ref())
-                // TODO: impl Fallible conversion
-                .expect("binary_sha must be 32 bytes long"),
-            height: reg.mined_height,
-        }
-    }
 }
 
 // TODO: Allow fetching of just the template metadata without the compiled code
@@ -60,9 +42,7 @@ impl From<DbTemplate> for TemplateMetadata {
         TemplateMetadata {
             name: record.template_name,
             address: (*record.template_address).into(),
-            url: record.url,
             binary_sha: FixedHash::zero(),
-            height: record.height,
         }
     }
 }

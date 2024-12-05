@@ -44,8 +44,6 @@ diesel::table! {
         template_name -> Text,
         expected_hash -> Binary,
         template_address -> Binary,
-        url -> Text,
-        height -> BigInt,
         template_type -> Text,
         compiled_code -> Nullable<Binary>,
         flow_json -> Nullable<Text>,

@@ -20,8 +20,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::FixedHash;
-use tari_core::transactions::transaction_components::CodeTemplateRegistration;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
@@ -76,13 +74,4 @@ impl TemplateManagerHandle {
             .map_err(|_| TemplateManagerError::ChannelClosed)?;
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct TemplateRegistration {
-    pub template_name: String,
-    pub template_address: TemplateAddress,
-    pub registration: CodeTemplateRegistration,
-    pub mined_height: u64,
-    pub mined_hash: FixedHash,
 }

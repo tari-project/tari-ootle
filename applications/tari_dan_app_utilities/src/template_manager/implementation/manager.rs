@@ -24,8 +24,9 @@ use std::{collections::HashMap, convert::TryFrom, fs, sync::Arc};
 
 use chrono::Utc;
 use log::*;
-use tari_common_types::types::PublicKey;
+use tari_common_types::types::{FixedHash, PublicKey};
 use tari_core::transactions::transaction_components::{BuildInfo, CodeTemplateRegistration, TemplateType};
+use tari_crypto::tari_utilities::{ByteArray, Hashable};
 use tari_dan_common_types::{optional::Optional, services::template_provider::TemplateProvider, NodeAddressable};
 use tari_dan_engine::{
     flow::FlowFactory,
@@ -36,6 +37,7 @@ use tari_dan_engine::{
 use tari_dan_storage::global::{DbTemplate, DbTemplateType, DbTemplateUpdate, GlobalDb, TemplateStatus};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_engine_types::calculate_template_binary_hash;
+use tari_engine_types::hashing::template_hasher32;
 use tari_engine_types::published_template::{PublishedTemplate, PublishedTemplateAddress};
 use tari_template_builtin::{
     get_template_builtin,
@@ -188,13 +190,18 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         Ok(templates)
     }
 
-    pub(super) fn add_template(&self, template: TemplateRegistration) -> Result<(), TemplateManagerError> {
+    pub(super) fn add_template(&self,
+                               author_public_key: PublicKey,
+                               template_address: tari_engine_types::TemplateAddress,
+                               template: &[u8],
+    ) -> Result<(), TemplateManagerError> {
+        let template_hash = template_hasher32().chain(template).result();
+        let loaded_template = WasmModule::load_template_from_code(template)?;
         let template = DbTemplate {
-            template_name: template.template_name,
-            template_address: template.template_address.into_array().into(),
-            expected_hash: template.registration.binary_sha.as_ref().try_into()?,
-            url: template.registration.binary_url.into_string(),
-            height: template.mined_height,
+            author_public_key: FixedHash::from(author_public_key.to_vec().as_slice()),
+            template_name: loaded_template.template_name().to_string(),
+            template_address,
+            expected_hash: template_hash.try_into()?,
             status: TemplateStatus::New,
             compiled_code: None,
             added_at: Utc::now().naive_utc(),

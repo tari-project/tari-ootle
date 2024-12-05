@@ -338,10 +338,11 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
         WasmModule::load_template_from_code(binary.as_slice())?;
 
         // creating new substate
-        let template_address = runtime.interface().publish_template(binary.as_slice())?.as_hash()?;
+        let (author_public_key, template_address) = runtime.interface().publish_template(binary.as_slice())?;
+        let template_address = template_address.as_hash()?;
 
         // add new template to template provider
-        template_provider.insert(TemplateAddress::from(template_address), binary.as_slice())
+        template_provider.insert(author_public_key, TemplateAddress::from(template_address), binary.as_slice())
             .map_err(|error| TransactionError::TemplateProvider(error.to_string()))?;
 
         Ok(InstructionResult::empty())

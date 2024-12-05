@@ -3,6 +3,7 @@
 
 use std::sync::RwLock;
 use std::{collections::HashMap, convert::Infallible, path::Path};
+use tari_common_types::types::PublicKey;
 use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_dan_engine::{
     abi::TemplateDef,
@@ -102,7 +103,7 @@ impl TemplateProvider for Package {
         Ok(lock.get(id).cloned())
     }
 
-    fn insert(&self, template_address: tari_engine_types::TemplateAddress, template: &[u8]) -> Result<(), Self::Error> {
+    fn insert(&self, _author_public_key: PublicKey, template_address: tari_engine_types::TemplateAddress, template: &[u8]) -> Result<(), Self::Error> {
         let mut lock = self.templates.write()?;
         lock.insert(template_address, WasmModule::load_template_from_code(template)?);
         Ok(())

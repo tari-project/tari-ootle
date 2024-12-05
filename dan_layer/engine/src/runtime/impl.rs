@@ -2345,7 +2345,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
         Ok(InvokeResult::encode(&address)?)
     }
 
-    fn publish_template(&self, template: &[u8]) -> Result<PublishedTemplateAddress, RuntimeError> {
+    fn publish_template(&self, template: &[u8]) -> Result<(PublicKey, PublishedTemplateAddress), RuntimeError> {
         self.tracker.write_with(|state| {
             let binary_hash = template_hasher32().chain(template).result();
             let template_address = PublishedTemplateAddress::from_hash(
@@ -2365,7 +2365,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
             let scope_mut = state.current_call_scope_mut()?;
             scope_mut.move_node_to_owned(&template_address.into())?;
 
-            Ok(template_address)
+            Ok((self.transaction_signer_public_key.clone(), template_address))
         })
     }
 }

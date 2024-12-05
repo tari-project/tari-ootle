@@ -24,6 +24,7 @@ use std::{collections::HashMap, convert::TryFrom, fs, sync::Arc};
 
 use chrono::Utc;
 use log::*;
+use tari_common_types::types::PublicKey;
 use tari_core::transactions::transaction_components::{BuildInfo, CodeTemplateRegistration, TemplateType};
 use tari_dan_common_types::{optional::Optional, services::template_provider::TemplateProvider, NodeAddressable};
 use tari_dan_engine::{
@@ -283,7 +284,7 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
         Ok(Some(loaded))
     }
 
-    fn insert(&self, template_address: tari_engine_types::TemplateAddress, template: &[u8]) -> Result<(), Self::Error> {
+    fn insert(&self, author_public_key: PublicKey, template_address: tari_engine_types::TemplateAddress, template: &[u8]) -> Result<(), Self::Error> {
         let _loaded = WasmModule::load_template_from_code(template)?;
         // TODO: implement
         Ok(())

@@ -247,6 +247,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                 Err(err) => {
                     let error = err.ok_lock_failed()?;
                     match error {
+                        err @ LockFailedError::SubstateIsUp { .. } |
                         err @ LockFailedError::SubstateIsDown { .. } |
                         err @ LockFailedError::SubstateNotFound { .. } => {
                             // If the substate does not exist or is not UP (unversioned: previously DOWNed and never
@@ -291,7 +292,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
 
         let Some(existing) = self.get_latest_lock_by_id(versioned_substate_id.substate_id())? else {
             if requested_lock_type.is_output() {
-                self.assert_not_exist(&versioned_substate_id)?;
+                self.lock_assert_not_exist(&versioned_substate_id)?;
             } else {
                 self.lock_assert_is_up(&versioned_substate_id)?;
             }
@@ -548,16 +549,20 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
         Ok(())
     }
 
-    fn assert_not_exist(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
+    fn lock_assert_not_exist(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
         if let Some(change) = self.get_pending(&id.to_substate_address()) {
             if change.is_up() {
-                return Err(SubstateStoreError::ExpectedSubstateNotExist { id: id.clone() });
+                return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
+                    id: id.clone(),
+                }));
             }
             return Ok(());
         }
 
         if SubstateRecord::exists(self.read_transaction(), id)? {
-            return Err(SubstateStoreError::ExpectedSubstateNotExist { id: id.clone() });
+            return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
+                id: id.clone(),
+            }));
         }
 
         Ok(())

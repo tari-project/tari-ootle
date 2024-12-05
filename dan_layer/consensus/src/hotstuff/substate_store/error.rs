@@ -12,8 +12,6 @@ pub enum SubstateStoreError {
     SubstateNotFound { id: VersionedSubstateId },
     #[error("Substate {id} is DOWN")]
     SubstateIsDown { id: VersionedSubstateId },
-    #[error("Expected substate {id} to not exist but it was found")]
-    ExpectedSubstateNotExist { id: VersionedSubstateId },
     #[error("Expected substate {id} to be DOWN but it was UP")]
     ExpectedSubstateDown { id: VersionedSubstateId },
 
@@ -56,6 +54,8 @@ pub enum LockFailedError {
         substate_id: VersionedSubstateId,
         conflict: LockConflict,
     },
+    #[error("Substate {id} is already UP and conflicts with an existing output")]
+    SubstateIsUp { id: VersionedSubstateId },
 }
 
 impl LockFailedError {

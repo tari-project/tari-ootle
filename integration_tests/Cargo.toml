@@ -19,6 +19,7 @@ minotari_console_wallet = { workspace = true, features = ["grpc"] }
 minotari_wallet = { workspace = true }
 tari_p2p = { workspace = true }
 tari_shutdown = { workspace = true }
+tari_sidechain = { workspace = true }
 
 tari_crypto = { workspace = true }
 tari_indexer = { workspace = true }
@@ -62,6 +63,7 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread", "signal"] }
 tonic = { workspace = true }
 regex = "1.11.0"
+notify = "7.0.0"
 
 [[test]]
 name = "cucumber" # this should be the same as the filename of your test target

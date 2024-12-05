@@ -23,7 +23,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use async_trait::async_trait;
 use tari_consensus::{messages::HotstuffMessage, traits::OutboundMessagingError};
 use tari_dan_common_types::{PeerAddress, ShardGroup};
 use tari_dan_p2p::{proto, TariMessagingSpec};
@@ -60,7 +59,6 @@ impl<TMsgLogger: MessageLogger> ConsensusOutboundMessaging<TMsgLogger> {
     }
 }
 
-#[async_trait]
 impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::OutboundMessaging
     for ConsensusOutboundMessaging<TMsgLogger>
 {
@@ -104,15 +102,12 @@ impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::OutboundMessaging
         Ok(())
     }
 
-    async fn multicast<'a, T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
-    where
-        Self::Addr: 'a,
-        T: Into<HotstuffMessage> + Send,
-    {
+    async fn multicast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
+    where T: Into<HotstuffMessage> + Send {
         let message = message.into();
 
         self.consensus_gossip
-            .multicast(shard_group, message)
+            .publish(shard_group, message)
             .await
             .map_err(OutboundMessagingError::from_error)?;
 

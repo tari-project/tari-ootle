@@ -637,6 +637,12 @@ impl From<TransactionReceipt> for SubstateValue {
     }
 }
 
+impl From<UnclaimedConfidentialOutput> for SubstateValue {
+    fn from(output: UnclaimedConfidentialOutput) -> Self {
+        Self::UnclaimedConfidentialOutput(output)
+    }
+}
+
 impl Display for SubstateValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // TODO: improve output

@@ -62,6 +62,10 @@ impl ValidatorNodeProcess {
         get_vn_client(self.json_rpc_port)
     }
 
+    pub fn layer_one_transaction_path(&self) -> PathBuf {
+        self.temp_dir_path.join("data/layer_one_transactions")
+    }
+
     pub async fn save_database(&self, database_name: String, to: &Path) {
         fs::create_dir_all(to).expect("Could not create directory");
         let from = &self.temp_dir_path.join(format!("{}.db", database_name));
@@ -119,6 +123,7 @@ pub async fn spawn_validator_node(
         world.current_scenario_name.as_ref().unwrap(),
         &validator_node_name,
     );
+    // Connect to shard db
     let temp_dir_path = temp_dir.clone();
     let handle = task::spawn(async move {
         let mut config = ApplicationConfig {

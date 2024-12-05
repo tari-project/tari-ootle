@@ -29,7 +29,12 @@ use std::{
 
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
-use tari_dan_common_types::{optional::Optional, SubstateAddress, SubstateRequirement};
+use tari_dan_common_types::{
+    option::{DisplayCont, DisplayContainer},
+    optional::Optional,
+    SubstateAddress,
+    SubstateRequirement,
+};
 use tari_dan_engine::abi::Type;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
@@ -491,44 +496,44 @@ fn summarize_finalize_result(finalize: &FinalizeResult) {
 }
 
 fn display_vec<W: fmt::Write>(writer: &mut W, ty: &Type, result: &InstructionResult) -> fmt::Result {
-    fn stringify_slice<T: fmt::Display>(slice: &[T]) -> String {
-        slice.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")
+    fn display_slice<T: fmt::Display>(slice: &[T]) -> DisplayCont<&[T]> {
+        slice.display()
     }
 
     match &ty {
         Type::Unit => {},
         Type::Bool => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<bool>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<bool>>().unwrap()))?;
         },
         Type::I8 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<i8>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<i8>>().unwrap()))?;
         },
         Type::I16 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<i16>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<i16>>().unwrap()))?;
         },
         Type::I32 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<i32>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<i32>>().unwrap()))?;
         },
         Type::I64 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<i64>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<i64>>().unwrap()))?;
         },
         Type::I128 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<i128>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<i128>>().unwrap()))?;
         },
         Type::U8 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<u8>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<u8>>().unwrap()))?;
         },
         Type::U16 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<u16>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<u16>>().unwrap()))?;
         },
         Type::U32 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<u32>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<u32>>().unwrap()))?;
         },
         Type::U64 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<u64>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<u64>>().unwrap()))?;
         },
         Type::U128 => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<u128>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<u128>>().unwrap()))?;
         },
         Type::String => {
             write!(writer, "{}", result.decode::<Vec<String>>().unwrap().join(", "))?;
@@ -550,13 +555,13 @@ fn display_vec<W: fmt::Write>(writer: &mut W, ty: &Type, result: &InstructionRes
             write!(writer, "{}", str)?;
         },
         Type::Other { name } if name == "Amount" => {
-            write!(writer, "{}", stringify_slice(&result.decode::<Vec<Amount>>().unwrap()))?;
+            write!(writer, "{}", display_slice(&result.decode::<Vec<Amount>>().unwrap()))?;
         },
         Type::Other { name } if name == "NonFungibleId" => {
             write!(
                 writer,
                 "{}",
-                stringify_slice(&result.decode::<Vec<NonFungibleId>>().unwrap())
+                display_slice(&result.decode::<Vec<NonFungibleId>>().unwrap())
             )?;
         },
         Type::Other { .. } => {

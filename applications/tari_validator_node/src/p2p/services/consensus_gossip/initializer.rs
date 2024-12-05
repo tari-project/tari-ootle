@@ -22,6 +22,7 @@
 
 use libp2p::{gossipsub, PeerId};
 use log::*;
+use tari_consensus::hotstuff::HotstuffEvent;
 use tari_dan_p2p::{proto, TariMessagingSpec};
 use tari_epoch_manager::EpochManagerEvent;
 use tari_networking::NetworkingHandle;
@@ -37,6 +38,7 @@ const LOG_TARGET: &str = "tari::validator_node::consensus_gossip::initializer";
 
 pub fn spawn(
     epoch_manager_events: broadcast::Receiver<EpochManagerEvent>,
+    consensus_events: broadcast::Receiver<HotstuffEvent>,
     networking: NetworkingHandle<TariMessagingSpec>,
     rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
 ) -> (
@@ -46,8 +48,13 @@ pub fn spawn(
 ) {
     let (tx_consensus_gossip, rx_consensus_gossip) = mpsc::channel(10);
 
-    let consensus_gossip =
-        ConsensusGossipService::new(epoch_manager_events, networking.clone(), rx_gossip, tx_consensus_gossip);
+    let consensus_gossip = ConsensusGossipService::new(
+        epoch_manager_events,
+        consensus_events,
+        networking.clone(),
+        rx_gossip,
+        tx_consensus_gossip,
+    );
     let handle = ConsensusGossipHandle::new(networking);
 
     let join_handle = task::spawn(consensus_gossip.run());

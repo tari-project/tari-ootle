@@ -13,6 +13,7 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_storage::global::models::ValidatorNode;
+use tari_sidechain::EvictionProof;
 use tokio::sync::oneshot;
 
 use crate::error::EpochManagerError;
@@ -49,14 +50,14 @@ pub enum EpochManagerRequest<TAddr> {
         reply: Reply<HashMap<(Epoch, PublicKey), ValidatorNode<TAddr>>>,
     },
     AddValidatorNodeRegistration {
-        block_height: u64,
+        activation_epoch: Epoch,
         registration: ValidatorNodeRegistration,
         value: MicroMinotari,
         reply: Reply<()>,
     },
-    RemoveValidatorNodeRegistration {
+    DeactivateValidatorNode {
         public_key: PublicKey,
-        sidechain_id: Option<PublicKey>,
+        deactivation_epoch: Epoch,
         reply: Reply<()>,
     },
     AddBlockHash {
@@ -124,7 +125,12 @@ pub enum EpochManagerRequest<TAddr> {
         epoch: Epoch,
         reply: Reply<u32>,
     },
-    GetCommitteesForShardGroup {
+    GetCommitteeForShardGroup {
+        epoch: Epoch,
+        shard_group: ShardGroup,
+        reply: Reply<Committee<TAddr>>,
+    },
+    GetCommitteesOverlappingShardGroup {
         epoch: Epoch,
         shard_group: ShardGroup,
         reply: Reply<HashMap<ShardGroup, Committee<TAddr>>>,
@@ -138,6 +144,10 @@ pub enum EpochManagerRequest<TAddr> {
     },
     SetFeeClaimPublicKey {
         public_key: PublicKey,
+        reply: Reply<()>,
+    },
+    AddIntentToEvictValidator {
+        proof: Box<EvictionProof>,
         reply: Reply<()>,
     },
 }

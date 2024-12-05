@@ -123,6 +123,7 @@ impl ProcessManager {
             }
 
             // "Mine in" the validators and templates
+            // 10 for new epoch + 10 for BL scan lag
             self.mine(20).await?;
         }
 

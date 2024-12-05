@@ -49,7 +49,7 @@ impl ConsensusGossipHandle {
         }
     }
 
-    pub async fn multicast(
+    pub async fn publish(
         &mut self,
         shard_group: ShardGroup,
         message: HotstuffMessage,

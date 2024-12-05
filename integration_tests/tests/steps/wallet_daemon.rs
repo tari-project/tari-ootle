@@ -165,6 +165,7 @@ async fn when_i_create_transfer_proof_via_wallet_daemon(
     .await;
 }
 
+#[then(expr = "I create an account {word} via the wallet daemon {word}")]
 #[when(expr = "I create an account {word} via the wallet daemon {word}")]
 async fn when_i_create_account_via_wallet_daemon(
     world: &mut TariWorld,
@@ -174,6 +175,7 @@ async fn when_i_create_account_via_wallet_daemon(
     wallet_daemon_cli::create_account(world, account_name, wallet_daemon_name).await;
 }
 
+#[then(expr = "I create an account {word} via the wallet daemon {word} with {int} free coins")]
 #[when(expr = "I create an account {word} via the wallet daemon {word} with {int} free coins")]
 async fn when_i_create_account_via_wallet_daemon_with_free_coins(
     world: &mut TariWorld,
@@ -192,6 +194,7 @@ async fn when_i_create_a_wallet_key(world: &mut TariWorld, key_name: String, wal
     world.wallet_keys.insert(key_name, key.id);
 }
 
+#[then(expr = "I create an account {word} via the wallet daemon {word} with {int} free coins using key {word}")]
 #[when(expr = "I create an account {word} via the wallet daemon {word} with {int} free coins using key {word}")]
 async fn when_i_create_account_via_wallet_daemon_with_free_coins_using_key(
     world: &mut TariWorld,

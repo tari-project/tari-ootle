@@ -49,6 +49,7 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
   horizontal: boolean
 }) {
   const [epochManagerStats, setEpochManagerStats] = useState<any>(null);
+  const [consensusStatus, setConsensusStatus] = useState<any>(null);
   const [pool, setPool] = useState([]);
   const [copied, setCopied] = useState<string | null>(null);
   const [missingTxStates, setMissingTxStates] = useState({}); // {tx_id: [vn1, vn2, ...]}
@@ -65,8 +66,12 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
   }, [tick, autoRefresh]);
   useEffect(() => {
     jsonRpc2(url, "get_epoch_manager_stats").then((resp) => {
-      // setRow(resp.committee_info.shard + 1);
       setEpochManagerStats(resp);
+    }).catch((resp) => {
+      console.error("err", resp);
+    });
+    jsonRpc2(url, "get_consensus_status").then((resp) => {
+      setConsensusStatus(resp);
     }).catch((resp) => {
       console.error("err", resp);
     });
@@ -194,10 +199,16 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
 
   const {
     committee_info: committeeInfo,
-    current_block_height: height,
-    current_epoch: epoch,
+    current_block_height: baseLayerheight,
+    current_epoch: baseLayerEpoch,
     start_epoch: startEpoch,
   } = epochManagerStats || {} as any;
+
+  const {
+    height: consensusHeight,
+    epoch: consensusEpoch,
+    state: consensusState,
+  } = consensusStatus || {} as any;
 
   return (
     <div style={{ whiteSpace: "nowrap" }}>
@@ -209,13 +220,14 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
         gridTemplateRows: "auto auto auto auto auto",
       }}>
         <div><b>Shard Group</b></div>
-        <div><b>Height</b></div>
-        <div><b>Epoch</b></div>
+        <div><b>Base layer</b></div>
+        <div><b>Consensus</b></div>
         <div><b>Public key</b></div>
         <div><b>Peer id</b></div>
         <div>{committeeInfo ? `${committeeInfo?.shard_group.start}-${committeeInfo?.shard_group.end_inclusive} (${committeeInfo?.num_shard_group_members} members)` : "--"}</div>
-        <div>{height}</div>
-        <div>{epoch}{startEpoch ? `  (since epoch ${startEpoch})` : " <inactive>"}</div>
+        <div>Height: {baseLayerheight},
+          Epoch: {baseLayerEpoch} {startEpoch ? `  (since epoch ${startEpoch})` : " <inactive>"}</div>
+        <div>Height: {consensusHeight}, Epoch: {consensusEpoch}, Status: {consensusState}</div>
         <div>{publicKey}</div>
         <div>{peerId}</div>
       </div>
@@ -296,11 +308,11 @@ function ShowInfo(params: any) {
   };
 
   const handleOnStart = () => {
-    jsonRpc("start", name).then(onReload);
+    jsonRpc("start_instance", { by_name: name }).then(onReload);
   };
 
   const handleOnStop = () => {
-    jsonRpc("stop", name).then(onReload);
+    jsonRpc("stop_instance", { by_name: name }).then(onReload);
   };
 
   const handleDeleteData = () => {

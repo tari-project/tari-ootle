@@ -146,6 +146,20 @@ impl ProcessManagerHandle {
         Ok(intances.into_iter().find(|i| i.name == name))
     }
 
+    pub async fn get_instance(&self, id: InstanceId) -> anyhow::Result<Option<InstanceInfo>> {
+        let (tx_reply, rx_reply) = oneshot::channel();
+        // TODO: consider optimizing this by adding a new request variant
+        self.tx_request
+            .send(ProcessManagerRequest::ListInstances {
+                by_type: None,
+                reply: tx_reply,
+            })
+            .await?;
+
+        let intances = rx_reply.await??;
+        Ok(intances.into_iter().find(|i| i.id == id))
+    }
+
     // pub async fn list_minotari_nodes(&self) -> anyhow::Result<Vec<InstanceInfo>> {
     //     self.list_instances(Some(InstanceType::MinoTariNode)).await
     // }

@@ -424,9 +424,8 @@ impl Test {
                 for (addr, block) in blocks {
                     if (first.epoch() != block.epoch() || first.height() != block.height()) && attempts < 5 {
                         attempts += 1;
-                        // Send this task to the back of the queue and try again after other tasks have executed
-                        // to allow validators to catch up
-                        task::yield_now().await;
+                        // Allow validators to catch up
+                        tokio::time::sleep(Duration::from_millis(10)).await;
                         continue 'outer;
                     }
                     assert_eq!(
@@ -610,28 +609,28 @@ impl TestBuilder {
             .await
             .into_iter()
             // Dont start failed nodes
-            .filter(|(addr, _, _, pk, _, _)| {
-                if failure_nodes.contains(addr) {
-                    log::info!("❗️ {addr} {pk} is a failure node and will not be spawned");
+            .filter(|(vn, _)| {
+                if failure_nodes.contains(&vn.address) {
+                    log::info!("❗️ {} {} is a failure node and will not be spawned", vn.address, vn.public_key);
                     return false;
                 }
                 true
             })
-            .map(|(address, shard_group, shard_addr, _, _, _)| {
-                let sql_address = sql_address.replace("{}", &address.0);
-                let (sk, pk) = helpers::derive_keypair_from_address(&address);
+            .map(|(vn, shard_group)| {
+                let sql_address = sql_address.replace("{}", &vn.address.0);
+                let (sk, pk) = helpers::derive_keypair_from_address(&vn.address);
 
                 let (channels, validator) = Validator::builder()
                     .with_sql_url(sql_address)
                     .with_config(config.clone())
-                    .with_address_and_secret_key(address.clone(), sk)
-                    .with_shard(shard_addr)
+                    .with_address_and_secret_key(vn.address.clone(), sk)
+                    .with_shard(vn.shard_key)
                     .with_shard_group(shard_group)
-                    .with_epoch_manager(epoch_manager.clone_for(address.clone(), pk, shard_addr))
+                    .with_epoch_manager(epoch_manager.clone_for(vn.address.clone(), pk, vn.shard_key))
                     .with_leader_strategy(*leader_strategy)
                     .with_num_committees(num_committees)
                     .spawn(shutdown_signal.clone());
-                (channels, (address, validator))
+                (channels, (vn.address, validator))
             })
             .unzip()
     }

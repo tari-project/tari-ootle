@@ -10,7 +10,7 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, ShardGroup};
+use tari_dan_common_types::{option::DisplayContainer, optional::Optional, shard::Shard, Epoch, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,
@@ -42,7 +42,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_transaction::TransactionId;
 
 use crate::tracing::TraceTimer;
@@ -55,7 +55,6 @@ const MEM_MAX_SUBSTATE_LOCK_SIZE: usize = 100000;
 const MEM_MAX_TRANSACTION_CHANGE_SIZE: usize = 1000;
 const MEM_MAX_PROPOSED_FOREIGN_PROPOSALS_SIZE: usize = 1000;
 const MEM_MAX_PROPOSED_UTXO_MINTS_SIZE: usize = 1000;
-const MEM_MAX_SUSPEND_CHANGE_SIZE: usize = 10;
 
 #[derive(Debug, Clone)]
 pub struct BlockDecision {
@@ -66,6 +65,7 @@ pub struct BlockDecision {
     pub finalized_transactions: Vec<Vec<TransactionPoolRecord>>,
     pub end_of_epoch: Option<Epoch>,
     pub high_qc: HighQc,
+    pub committed_blocks_with_evictions: Vec<Block>,
 }
 
 impl BlockDecision {
@@ -78,15 +78,14 @@ impl BlockDecision {
 pub struct ProposedBlockChangeSet {
     block: LeafBlock,
     quorum_decision: Option<QuorumDecision>,
-    block_diff: Vec<SubstateChange>,
+    substate_changes: Vec<SubstateChange>,
     state_tree_diffs: IndexMap<Shard, VersionedStateHashTreeDiff>,
     substate_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
     transaction_changes: IndexMap<TransactionId, TransactionChangeSet>,
     proposed_foreign_proposals: Vec<BlockId>,
-    proposed_utxo_mints: Vec<SubstateId>,
+    proposed_utxo_mints: Vec<UnclaimedConfidentialOutputAddress>,
     no_vote_reason: Option<NoVoteReason>,
-    suspend_nodes: Vec<PublicKey>,
-    resume_nodes: Vec<PublicKey>,
+    evict_nodes: Vec<PublicKey>,
 }
 
 impl ProposedBlockChangeSet {
@@ -94,15 +93,14 @@ impl ProposedBlockChangeSet {
         Self {
             block,
             quorum_decision: None,
-            block_diff: Vec::new(),
+            substate_changes: Vec::new(),
             substate_locks: IndexMap::new(),
             transaction_changes: IndexMap::new(),
             state_tree_diffs: IndexMap::new(),
             proposed_foreign_proposals: Vec::new(),
             proposed_utxo_mints: Vec::new(),
             no_vote_reason: None,
-            suspend_nodes: Vec::new(),
-            resume_nodes: Vec::new(),
+            evict_nodes: Vec::new(),
         }
     }
 
@@ -112,7 +110,6 @@ impl ProposedBlockChangeSet {
     }
 
     pub fn no_vote(&mut self, no_vote_reason: NoVoteReason) -> &mut Self {
-        self.clear();
         self.no_vote_reason = Some(no_vote_reason);
         self
     }
@@ -120,15 +117,15 @@ impl ProposedBlockChangeSet {
     pub fn clear(&mut self) {
         self.quorum_decision = None;
 
-        self.block_diff.clear();
-        if self.block_diff.capacity() > MEM_MAX_BLOCK_DIFF_CHANGES {
+        self.substate_changes.clear();
+        if self.substate_changes.capacity() > MEM_MAX_BLOCK_DIFF_CHANGES {
             debug!(
                 target: LOG_TARGET,
                 "Shrinking block_diff from {} to {}",
-                self.block_diff.capacity(),
+                self.substate_changes.capacity(),
                 MEM_MAX_BLOCK_DIFF_CHANGES
             );
-            self.block_diff.shrink_to(MEM_MAX_BLOCK_DIFF_CHANGES);
+            self.substate_changes.shrink_to(MEM_MAX_BLOCK_DIFF_CHANGES);
         }
         self.transaction_changes.clear();
         if self.transaction_changes.capacity() > MEM_MAX_TRANSACTION_CHANGE_SIZE {
@@ -181,10 +178,8 @@ impl ProposedBlockChangeSet {
             );
             self.proposed_utxo_mints.shrink_to(MEM_MAX_PROPOSED_UTXO_MINTS_SIZE);
         }
-        self.suspend_nodes.clear();
-        if self.suspend_nodes.capacity() > MEM_MAX_SUSPEND_CHANGE_SIZE {
-            self.suspend_nodes.shrink_to(MEM_MAX_SUSPEND_CHANGE_SIZE);
-        }
+        // evict_nodes is typically rare, so rather release all memory
+        self.evict_nodes = vec![];
         self.no_vote_reason = None;
     }
 
@@ -198,8 +193,8 @@ impl ProposedBlockChangeSet {
         self
     }
 
-    pub fn set_block_diff(&mut self, diff: Vec<SubstateChange>) -> &mut Self {
-        self.block_diff = diff;
+    pub fn set_substate_changes(&mut self, diff: Vec<SubstateChange>) -> &mut Self {
+        self.substate_changes = diff;
         self
     }
 
@@ -217,7 +212,7 @@ impl ProposedBlockChangeSet {
         &self.proposed_foreign_proposals
     }
 
-    pub fn set_utxo_mint_proposed_in(&mut self, mint: SubstateId) -> &mut Self {
+    pub fn set_utxo_mint_proposed_in(&mut self, mint: UnclaimedConfidentialOutputAddress) -> &mut Self {
         self.proposed_utxo_mints.push(mint);
         self
     }
@@ -228,14 +223,13 @@ impl ProposedBlockChangeSet {
         }
     }
 
-    pub fn add_suspend_node(&mut self, public_key: PublicKey) -> &mut Self {
-        self.suspend_nodes.push(public_key);
+    pub fn add_evict_node(&mut self, public_key: PublicKey) -> &mut Self {
+        self.evict_nodes.push(public_key);
         self
     }
 
-    pub fn add_resume_node(&mut self, public_key: PublicKey) -> &mut Self {
-        self.resume_nodes.push(public_key);
-        self
+    pub fn num_evicted_nodes_this_block(&self) -> usize {
+        self.evict_nodes.len()
     }
 
     #[allow(clippy::mutable_key_type)]
@@ -345,7 +339,7 @@ impl ProposedBlockChangeSet {
 
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save");
         // Store the block diff
-        BlockDiff::insert_record(tx, &self.block.block_id, &self.block_diff)?;
+        BlockDiff::insert_record(tx, &self.block.block_id, &self.substate_changes)?;
 
         // Store the tree diffs for each effected shard
         for (shard, diff) in &self.state_tree_diffs {
@@ -391,18 +385,65 @@ impl ProposedBlockChangeSet {
         }
 
         for mint in &self.proposed_utxo_mints {
-            BurntUtxo::set_proposed_in_block(tx, mint, &self.block.block_id)?
+            BurntUtxo::set_proposed_in_block(tx, mint, &self.block.block_id)?;
         }
 
-        for node in &self.suspend_nodes {
-            ValidatorConsensusStats::suspend_node(tx, node, self.block.block_id)?
-        }
-
-        for node in &self.resume_nodes {
-            ValidatorConsensusStats::resume_node(tx, node, self.block.block_id)?
+        for node in &self.evict_nodes {
+            ValidatorConsensusStats::evict_node(tx, node, self.block.block_id)?;
         }
 
         Ok(())
+    }
+
+    pub fn log_everything(&self) {
+        const LOG_TARGET: &str = "tari::dan::consensus::block_change_set::debug";
+        debug!(target: LOG_TARGET, "❌ No vote: {}", self.no_vote_reason.display());
+        let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save_for_debug");
+        // TODO: consider persisting this data somewhere
+
+        for change in &self.substate_changes {
+            debug!(target: LOG_TARGET, "[drop] SubstateChange: {}", change);
+        }
+
+        // Store the tree diffs for each effected shard
+        for (shard, diff) in &self.state_tree_diffs {
+            debug!(target: LOG_TARGET, "[drop] StateTreeDiff: shard: {}, diff: {}", shard, diff);
+        }
+
+        for (substate_id, locks) in &self.substate_locks {
+            debug!(target: LOG_TARGET, "[drop] SubstateLock: {substate_id}");
+            for lock in locks {
+                debug!(target: LOG_TARGET, "  - {lock}");
+            }
+        }
+
+        for (transaction_id, change) in &self.transaction_changes {
+            debug!(target: LOG_TARGET, "[drop] TransactionChange: {transaction_id}");
+            if let Some(ref execution) = change.execution {
+                debug!(target: LOG_TARGET, "  - {execution}");
+            }
+            if let Some(ref update) = change.next_update {
+                debug!(target: LOG_TARGET, "  - Update: {} {} {}", update.transaction_id(), update.decision(), update.transaction().current_stage());
+            }
+            for (shard_group, pledges) in &change.foreign_pledges {
+                debug!(target: LOG_TARGET, "  - ForeignPledges: {shard_group}");
+                for pledge in pledges {
+                    debug!(target: LOG_TARGET, "    - {pledge}");
+                }
+            }
+        }
+
+        for block_id in &self.proposed_foreign_proposals {
+            debug!(target: LOG_TARGET, "[drop] ProposedForeignProposal: {block_id}");
+        }
+
+        for mint in &self.proposed_utxo_mints {
+            debug!(target: LOG_TARGET, "[drop] ProposedUtxoMint: {mint}");
+        }
+
+        for node in &self.evict_nodes {
+            debug!(target: LOG_TARGET, "[drop] EvictNode: {node}");
+        }
     }
 }
 
@@ -413,8 +454,8 @@ impl Display for ProposedBlockChangeSet {
             Some(decision) => write!(f, " Decision: {},", decision)?,
             None => write!(f, " Decision: NO VOTE, ")?,
         }
-        if !self.block_diff.is_empty() {
-            write!(f, " BlockDiff: {} change(s), ", self.block_diff.len())?;
+        if !self.substate_changes.is_empty() {
+            write!(f, " BlockDiff: {} change(s), ", self.substate_changes.len())?;
         }
         if !self.state_tree_diffs.is_empty() {
             write!(f, " StateTreeDiff: {} change(s), ", self.state_tree_diffs.len())?;

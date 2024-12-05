@@ -121,6 +121,7 @@ minotari_wallet_grpc_client = { git = "https://github.com/tari-project/tari.git"
 tari_common = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 tari_common_types = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 tari_hashing = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
+tari_sidechain = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 
 # avoid including default features so each crate can choose which ones to import
 tari_core = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2", default-features = false }
@@ -148,7 +149,7 @@ bigdecimal = "0.4.1"
 bincode = "2.0.0-rc.3"
 bitflags = "2.4"
 blake2 = "0.10.6"
-borsh = "1.3"
+borsh = "1.5"
 bytes = "1.5"
 cacache = "12.0.0"
 cargo_metadata = "0.15.3"
@@ -163,7 +164,7 @@ convert_case = "0.6.0"
 cucumber = "0.21.0"
 d3ne = { git = "https://github.com/stringhandler/d3ne-rs.git", tag = "v0.8.0-pre.3" }
 dashmap = "5.5.0"
-diesel = { version = "2.2.4", default-features = false }
+diesel = { version = "2.2.6", default-features = false }
 diesel_migrations = "2.2.0"
 digest = "0.10"
 dirs = "4.0.0"
@@ -181,7 +182,7 @@ httpmock = "0.6.8"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 include_dir = "0.7.2"
-indexmap = "2.5.0"
+indexmap = "2.6.0"
 indoc = "1.0.6"
 itertools = "0.11.0"
 lazy_static = "1.4.0"
@@ -216,7 +217,7 @@ reqwest = "0.11.16"
 semver = "1.0"
 serde = { version = "1.0", default-features = false }
 serde_json = "1.0"
-serde_with = "2.3"
+serde_with = "3.11.0"
 sha2 = "0.10.8"
 smallvec = "2.0.0-alpha.1"
 std-semaphore = "0.1.0"
@@ -276,6 +277,7 @@ overflow-checks = true
 #tari_metrics = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_libtor = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_hashing = { git = "https://github.com/account/tari.git", branch = "my-branch" }
+#tari_sidechain = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 
 
 #[patch."https://github.com/tari-project/tari.git"]
@@ -302,4 +304,4 @@ overflow-checks = true
 #tari_metrics = { path = "../tari/infrastructure/metrics" }
 #tari_libtor = { path = "../tari/infrastructure/libtor" }
 #tari_hashing = { path = "../tari/hashing" }
-
+#tari_sidechain = { path = "../tari/base_layer/sidechain" }

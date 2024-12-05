@@ -127,18 +127,9 @@ message Command {
 
     ForeignProposalAtom foreign_proposal = 9;
     MintConfidentialOutputAtom mint_confidential_output = 10;
-    SuspendNodeAtom suspend_node = 11;
-    ResumeNodeAtom resume_node = 12;
-    bool end_epoch = 13;
+    EvictNodeAtom evict_node = 11;
+    bool end_epoch = 12;
   }
-}
-
-message SuspendNodeAtom {
-  bytes public_key = 1;
-}
-
-message ResumeNodeAtom {
-  bytes public_key = 1;
 }
 
 message ForeignProposalAtom {
@@ -147,7 +138,7 @@ message ForeignProposalAtom {
 }
 
 message MintConfidentialOutputAtom {
-  bytes substate_id = 1;
+  bytes commitment = 1;
 }
 
 message TransactionAtom {
@@ -192,13 +183,14 @@ message Evidence {
 
 
 message QuorumCertificate {
-  bytes block_id = 1;
-  uint64 block_height = 2;
-  uint64 epoch = 3;
-  repeated tari.dan.common.SignatureAndPublicKey signatures = 4;
-  repeated bytes leaf_hashes = 6;
-  QuorumDecision decision = 7;
-  uint32 shard_group = 8;
+  bytes header_hash = 1;
+  bytes parent_id = 2;
+  uint64 block_height = 3;
+  uint64 epoch = 4;
+  repeated tari.dan.common.SignatureAndPublicKey signatures = 5;
+  repeated bytes leaf_hashes = 7;
+  QuorumDecision decision = 8;
+  uint32 shard_group = 9;
 }
 
 message ValidatorMetadata {
@@ -294,4 +286,8 @@ message FullBlock {
   Block block = 1;
   repeated QuorumCertificate qcs = 2;
   repeated tari.dan.transaction.Transaction transactions = 3;
+}
+
+message EvictNodeAtom {
+  bytes public_key = 1;
 }

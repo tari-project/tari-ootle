@@ -149,9 +149,14 @@ where TConsensusSpec: ConsensusSpec
                 target: LOG_TARGET,
                 "🔥 Receive VOTE with NEWVIEW for node {} {} from {}", vote.unverified_block_height, vote.block_id, from,
             );
-            self.vote_collector
+            if let Err(err) = self
+                .vote_collector
                 .check_and_collect_vote(from.clone(), current_epoch, vote, local_committee_info)
-                .await?;
+                .await
+            {
+                warn!(target: LOG_TARGET, "❌ Error handling vote: {}", err);
+                return Ok(());
+            }
         }
 
         // Take note of unique NEWVIEWs so that we can count them

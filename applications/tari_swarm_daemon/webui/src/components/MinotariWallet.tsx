@@ -15,11 +15,14 @@ export default function MinotariWallet(props: Props) {
   const [danWallets, setDanWallets] = React.useState<null | [any]>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
-
-  React.useEffect(() => {
+  const reload = () =>
     jsonRpc("list_instances", { by_type: "MinoTariConsoleWallet" }).then((wallets: any) => setWallets(wallets.instances))
       .then(() => jsonRpc("list_instances", { by_type: "TariWalletDaemon" }).then((wallets: any) => setDanWallets(wallets.instances)))
       .then(() => setIsLoading(false));
+
+
+  React.useEffect(() => {
+    reload();
   }, []);
 
   if (isLoading) {
@@ -29,7 +32,7 @@ export default function MinotariWallet(props: Props) {
   return (
     <div>
       {wallets!.map((wallet: any, i: number) => (
-        <Wallet key={i} {...wallet} showLogs={props.showLogs} danWallets={danWallets} />
+        <Wallet key={i} {...wallet} onReload={reload} showLogs={props.showLogs} danWallets={danWallets} />
       ))}
     </div>
   );
@@ -37,15 +40,18 @@ export default function MinotariWallet(props: Props) {
 
 function Wallet(props: any) {
   const onStart = () => {
-    jsonRpc("start_instance", { instance_id: props.id });
+    jsonRpc("start_instance", { by_id: props.id })
+      .then(props.onReload);
   };
 
   const onStop = () => {
-    jsonRpc("stop_instance", { instance_id: props.id });
+    jsonRpc("stop_instance", { by_id: props.id })
+      .then(props.onReload);
   };
 
   const onDeleteData = () => {
-    jsonRpc("delete_instance_data", { instance_id: props.id });
+    jsonRpc("delete_instance_data", { instance_id: props.id })
+      .then(props.onReload);
   };
 
   const wallet = props.danWallets[0];

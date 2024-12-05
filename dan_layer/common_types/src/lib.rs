@@ -18,6 +18,7 @@ pub use extra_data::{ExtraData, ExtraFieldKey};
 pub mod committee;
 pub mod hasher;
 pub mod hashing;
+pub mod option;
 pub mod optional;
 
 mod node_height;
@@ -51,6 +52,8 @@ mod versioned_substate_id;
 
 pub use versioned_substate_id::*;
 
+pub mod borsh;
 mod lock_intent;
 
 pub use lock_intent::*;
+pub mod layer_one_transaction;

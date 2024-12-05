@@ -118,6 +118,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
         for (id, version) in diff.down_iter() {
             let id = VersionedSubstateId::new(id.clone(), *version);
             let shard = id.to_substate_address().to_shard(self.num_preshards);
+            debug!(target: LOG_TARGET, "🔽️ Down: {id} {shard}");
             self.put(SubstateChange::Down {
                 id,
                 shard,
@@ -128,6 +129,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
         for (id, substate) in diff.up_iter() {
             let id = VersionedSubstateId::new(id.clone(), substate.version());
             let shard = id.to_substate_address().to_shard(self.num_preshards);
+            debug!(target: LOG_TARGET, "🔼️ Up: {id} {shard} value hash: {}", substate.to_value_hash());
             self.put(SubstateChange::Up {
                 id,
                 shard,

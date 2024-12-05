@@ -29,7 +29,11 @@ pub async fn start_all(context: &HandlerContext, req: StartAllRequest) -> Result
     Ok(StartAllResponse { num_instances })
 }
 
-pub type StartInstanceRequest = String;
+#[derive(Debug, Clone, Deserialize)]
+pub struct StartInstanceRequest {
+    pub by_name: Option<String>,
+    pub by_id: Option<InstanceId>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StartInstanceResponse {
@@ -40,26 +44,37 @@ pub async fn start(
     context: &HandlerContext,
     req: StartInstanceRequest,
 ) -> Result<StartInstanceResponse, anyhow::Error> {
-    let name = req;
-
-    let instance = context
-        .process_manager()
-        .get_instance_by_name(name)
-        .await?
-        .ok_or_else(|| {
-            JsonRpcError::new(
-                JsonRpcErrorReason::ApplicationError(404),
-                "Instance not found".to_string(),
+    let instance = match (req.by_name, req.by_id) {
+        (_, Some(id)) => context.process_manager().get_instance(id).await?,
+        (Some(name), None) => context.process_manager().get_instance_by_name(name).await?,
+        (None, None) => {
+            return Err(JsonRpcError::new(
+                JsonRpcErrorReason::InvalidParams,
+                "Either `by_name` or `by_id` must be provided".to_string(),
                 serde_json::Value::Null,
             )
-        })?;
+            .into());
+        },
+    };
+
+    let instance = instance.ok_or_else(|| {
+        JsonRpcError::new(
+            JsonRpcErrorReason::ApplicationError(404),
+            "Instance not found".to_string(),
+            serde_json::Value::Null,
+        )
+    })?;
 
     context.process_manager().start_instance(instance.id).await?;
 
     Ok(StartInstanceResponse { success: true })
 }
 
-pub type StopInstanceRequest = String;
+#[derive(Debug, Clone, Deserialize)]
+pub struct StopInstanceRequest {
+    pub by_name: Option<String>,
+    pub by_id: Option<InstanceId>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct StopInstanceResponse {
@@ -67,19 +82,26 @@ pub struct StopInstanceResponse {
 }
 
 pub async fn stop(context: &HandlerContext, req: StopInstanceRequest) -> Result<StopInstanceResponse, anyhow::Error> {
-    let name = req;
-
-    let instance = context
-        .process_manager()
-        .get_instance_by_name(name)
-        .await?
-        .ok_or_else(|| {
-            JsonRpcError::new(
-                JsonRpcErrorReason::ApplicationError(404),
-                "Instance not found".to_string(),
+    let instance = match (req.by_name, req.by_id) {
+        (_, Some(id)) => context.process_manager().get_instance(id).await?,
+        (Some(name), None) => context.process_manager().get_instance_by_name(name).await?,
+        (None, None) => {
+            return Err(JsonRpcError::new(
+                JsonRpcErrorReason::InvalidParams,
+                "Either `by_name` or `by_id` must be provided".to_string(),
                 serde_json::Value::Null,
             )
-        })?;
+            .into());
+        },
+    };
+
+    let instance = instance.ok_or_else(|| {
+        JsonRpcError::new(
+            JsonRpcErrorReason::ApplicationError(404),
+            "Instance not found".to_string(),
+            serde_json::Value::Null,
+        )
+    })?;
 
     context.process_manager().stop_instance(instance.id).await?;
 

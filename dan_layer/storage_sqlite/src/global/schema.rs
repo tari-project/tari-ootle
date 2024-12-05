@@ -32,6 +32,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    layer_one_transactions (id) {
+        id -> Integer,
+        epoch -> BigInt,
+        payload_type -> Text,
+        payload -> Text,
+        submitted_at -> Nullable<Timestamp>,
+        is_observed -> Bool,
+    }
+}
+
+diesel::table! {
     metadata (key_name) {
         key_name -> Binary,
         value -> Binary,
@@ -60,12 +71,11 @@ diesel::table! {
     validator_nodes (id) {
         id -> Integer,
         public_key -> Binary,
-        shard_key -> Binary,
-        registered_at_base_height -> BigInt,
-        start_epoch -> BigInt,
-        fee_claim_public_key -> Binary,
         address -> Text,
-        sidechain_id -> Binary,
+        shard_key -> Binary,
+        start_epoch -> BigInt,
+        end_epoch -> Nullable<BigInt>,
+        fee_claim_public_key -> Binary,
     }
 }
 
@@ -76,6 +86,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     bmt_cache,
     committees,
     epochs,
+    layer_one_transactions,
     metadata,
     templates,
     validator_nodes,

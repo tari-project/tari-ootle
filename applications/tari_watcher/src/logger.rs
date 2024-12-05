@@ -14,8 +14,9 @@ pub fn init_logger() -> Result<(), log::SetLoggerError> {
     }
 
     let colors = fern::colors::ColoredLevelConfig::new()
-        .info(fern::colors::Color::Green)
-        .debug(fern::colors::Color::Yellow)
+        .info(fern::colors::Color::Blue)
+        .debug(fern::colors::Color::White)
+        .warn(fern::colors::Color::Yellow)
         .error(fern::colors::Color::Red);
     fern::Dispatch::new()
         .format(move |out, message, record| {

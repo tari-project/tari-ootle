@@ -4,7 +4,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::HashMap, fmt::Display, ops::Deref};
 
 use indexmap::IndexMap;
 use tari_dan_common_types::shard::Shard;
@@ -67,5 +67,17 @@ pub struct VersionedStateHashTreeDiff {
 impl VersionedStateHashTreeDiff {
     pub fn new(version: Version, diff: StateHashTreeDiff<Version>) -> Self {
         Self { version, diff }
+    }
+}
+
+impl Display for VersionedStateHashTreeDiff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "VersionedStateHashTreeDiff(v{}, {} new node(s), {} stale node(s))",
+            self.version,
+            self.diff.new_nodes.len(),
+            self.diff.stale_tree_nodes.len()
+        )
     }
 }

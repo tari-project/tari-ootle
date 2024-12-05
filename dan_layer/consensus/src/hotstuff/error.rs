@@ -118,12 +118,6 @@ impl From<EpochManagerError> for HotStuffError {
 pub enum ProposalValidationError {
     #[error("Storage error: {0}")]
     StorageError(#[from] StorageError),
-    #[error("Node proposed by {proposed_by} with ID {block_id} does not match calculated hash {calculated_hash}")]
-    BlockIdMismatch {
-        proposed_by: String,
-        block_id: BlockId,
-        calculated_hash: BlockId,
-    },
     #[error("Node proposed by {proposed_by} with hash {hash} did not satisfy the safeNode predicate")]
     NotSafeBlock { proposed_by: String, hash: BlockId },
     #[error("Node proposed by {proposed_by} with hash {hash} is missing foreign index")]
@@ -261,4 +255,6 @@ pub enum ProposalValidationError {
     DummyBlockWithSignature { block_id: BlockId },
     #[error("Dummy block {block_id} includes commands")]
     DummyBlockWithCommands { block_id: BlockId },
+    #[error("Malformed block {block_id}: {details}")]
+    MalformedBlock { block_id: BlockId, details: String },
 }

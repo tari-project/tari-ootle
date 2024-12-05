@@ -3,9 +3,10 @@
 
 use std::fmt::{Display, Formatter};
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

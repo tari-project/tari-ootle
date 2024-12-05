@@ -160,7 +160,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         let mut transaction = TransactionRecord::get(store.read_transaction(), &transaction_id)?;
         let mut outputs = HashSet::new();
         outputs.insert(VersionedSubstateId::new(
-            TransactionReceiptAddress::from(transaction_id).into(),
+            TransactionReceiptAddress::from(transaction_id),
             0,
         ));
 

@@ -7,6 +7,7 @@ use std::{
     str::FromStr,
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use strum::ParseError;
 use strum_macros::{AsRefStr, EnumString};
@@ -22,7 +23,7 @@ pub enum FromStrConversionError {
     InvalidAbortReason(String, ParseError),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub enum Decision {
     /// Decision to COMMIT the transaction
@@ -31,7 +32,7 @@ pub enum Decision {
     Abort(AbortReason),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, AsRefStr, EnumString)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, AsRefStr, EnumString, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub enum AbortReason {
     None,

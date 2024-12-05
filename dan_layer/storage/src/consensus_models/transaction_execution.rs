@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Duration;
+use std::{fmt::Display, time::Duration};
 
 use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
 use tari_transaction::TransactionId;
@@ -186,5 +186,18 @@ impl BlockTransactionExecution {
         block_id: &BlockId,
     ) -> Result<Self, StorageError> {
         tx.transaction_executions_get(transaction_id, block_id)
+    }
+}
+
+impl Display for BlockTransactionExecution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BlockTransactionExecution(block_id: {}, transaction_id: {}, decision: {}, execution_time: {:.2?})",
+            self.block_id,
+            self.execution.transaction_id,
+            self.decision(),
+            self.execution_time()
+        )
     }
 }

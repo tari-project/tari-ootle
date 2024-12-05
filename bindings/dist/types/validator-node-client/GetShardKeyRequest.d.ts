@@ -1,4 +1,5 @@
+import type { Epoch } from "../Epoch";
 export interface GetShardKeyRequest {
-    height: number;
+    epoch: Epoch;
     public_key: string;
 }

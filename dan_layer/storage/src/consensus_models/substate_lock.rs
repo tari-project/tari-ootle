@@ -60,8 +60,8 @@ impl fmt::Display for SubstateLock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "LockedSubstate(transaction_id: {}, version: {}, lock_flag: {}, is_local_only: {})",
-            self.transaction_id, self.version, self.lock_type, self.is_local_only
+            "SubstateLock(version: {}, lock_flag: {}, is_local_only: {}, transaction_id: {})",
+            self.version, self.lock_type, self.is_local_only, self.transaction_id,
         )
     }
 }

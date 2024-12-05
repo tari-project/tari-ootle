@@ -7,11 +7,12 @@ use std::{
     ops::RangeInclusive,
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 
 use crate::{shard::Shard, uint::U256, NumPreshards, SubstateAddress};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -89,6 +90,10 @@ impl ShardGroup {
 
     pub fn contains(&self, shard: &Shard) -> bool {
         self.as_range().contains(shard)
+    }
+
+    pub fn overlaps_shard_group(&self, other: &ShardGroup) -> bool {
+        self.start <= other.end_inclusive && self.end_inclusive >= other.start
     }
 
     pub fn as_range(&self) -> RangeInclusive<Shard> {

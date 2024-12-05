@@ -18,12 +18,15 @@ use tari_indexer_client::types::AddPeerRequest;
 #[when(expr = "indexer {word} connects to all other validators")]
 async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: String) {
     let indexer = world.get_indexer(&name);
-    let details = world.all_validators_iter().filter(|vn| vn.name != name).map(|vn| {
-        (
-            vn.public_key.clone(),
-            Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
-        )
-    });
+    let details = world
+        .all_running_validators_iter()
+        .filter(|vn| vn.name != name)
+        .map(|vn| {
+            (
+                vn.public_key.clone(),
+                Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
+            )
+        });
 
     let mut cli = indexer.get_jrpc_indexer_client();
     for (pk, addr) in details {

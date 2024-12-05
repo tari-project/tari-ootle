@@ -4,6 +4,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use log::debug;
+use tari_dan_common_types::option::DisplayContainer;
 
 use crate::{JmtStorageError, Node, NodeKey, StaleTreeNode, StateHashTreeDiff, TreeStoreReader, TreeStoreWriter};
 
@@ -29,7 +30,7 @@ impl<'s, S: TreeStoreReader<P>, P> StagedTreeStore<'s, S, P> {
     pub fn apply_pending_diff(&mut self, diff: StateHashTreeDiff<P>) {
         self.preceding_pending_state.reserve(diff.new_nodes.len());
         for (key, node) in diff.new_nodes {
-            debug!(target: LOG_TARGET, "PENDING INSERT: node {}", key);
+            debug!(target: LOG_TARGET, "PENDING INSERT: node {} leaf: {}", key, node.leaf().map(|l| l.value_hash()).display());
             self.preceding_pending_state.insert(key, node);
         }
 

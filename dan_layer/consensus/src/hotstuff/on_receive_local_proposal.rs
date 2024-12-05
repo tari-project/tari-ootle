@@ -1,7 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+};
 
 use log::*;
 use tari_dan_common_types::{
@@ -35,6 +38,7 @@ use crate::{
         calculate_dummy_blocks_from_justify,
         create_epoch_checkpoint,
         error::HotStuffError,
+        eviction_proof::generate_eviction_proofs,
         get_next_block_height_and_leader,
         on_ready_to_vote_on_local_block::OnReadyToVoteOnLocalBlock,
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
@@ -69,6 +73,7 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     vote_signing_service: TConsensusSpec::SignatureService,
     on_receive_foreign_proposal: OnReceiveForeignProposalHandler<TConsensusSpec>,
+    tx_events: broadcast::Sender<HotstuffEvent>,
     hooks: TConsensusSpec::Hooks,
 }
 
@@ -100,6 +105,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             vote_signing_service,
             outbound_messaging,
             hooks,
+            tx_events: tx_events.clone(),
             on_receive_foreign_proposal: OnReceiveForeignProposalHandler::new(store, epoch_manager, pacemaker),
             on_ready_to_vote_on_local_block: OnReadyToVoteOnLocalBlock::new(
                 local_validator_pk,
@@ -251,7 +257,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let mut on_ready_to_vote_on_local_block = self.on_ready_to_vote_on_local_block.clone();
 
-        let (block_decision, valid_block, mut change_set) = task::spawn_blocking({
+        let (mut block_decision, valid_block, mut change_set) = task::spawn_blocking({
             // Reusing the change set allocated memory (pointers in the Vec types are passed onto the thread stack).
             let mut change_set = self
                 .change_set
@@ -281,11 +287,30 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             }
         })
         .await??;
+
+        if !block_decision.is_accept() {
+            change_set.log_everything();
+        }
         // Reuse the changeset allocations after clearing it
         change_set.clear();
         self.change_set = Some(change_set);
 
         let is_accept_decision = block_decision.is_accept();
+
+        if is_accept_decision && !block_decision.committed_blocks_with_evictions.is_empty() {
+            let store = self.store.clone();
+            let qc = valid_block.justify().clone();
+            let committed_blocks_with_evictions = mem::take(&mut block_decision.committed_blocks_with_evictions);
+            let proofs = task::spawn_blocking(move || {
+                store.with_read_tx(|tx| generate_eviction_proofs(tx, &qc, &committed_blocks_with_evictions))
+            })
+            .await??;
+            info!(target: LOG_TARGET, "🦶 Generated {} eviction proofs", proofs.len());
+            for proof in proofs {
+                self.epoch_manager.add_intent_to_evict_validator(proof).await?;
+            }
+        }
+
         if block_decision.end_of_epoch.is_none() {
             if let Some(decision) = block_decision.quorum_decision {
                 let (next_height, next_leader_addr, num_skipped) = self.store.with_read_tx(|tx| {
@@ -329,6 +354,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         if let Some(epoch) = block_decision.end_of_epoch {
             let next_epoch = epoch + Epoch(1);
+            let mut registered_shard_group = None;
 
             // If we're registered for the next epoch. Create a new genesis block.
             if let Some(vn) = self.epoch_manager.get_our_validator_node(next_epoch).await.optional()? {
@@ -337,6 +363,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 let next_shard_group = vn
                     .shard_key
                     .to_shard_group(self.config.consensus_constants.num_preshards, num_committees);
+                registered_shard_group = Some(next_shard_group);
                 self.store.with_write_tx(|tx| {
                     // Generate checkpoint
                     create_epoch_checkpoint(tx, epoch, local_committee_info.shard_group())?;
@@ -374,6 +401,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     "💤 Our validator node is not registered for epoch {next_epoch}.",
                 )
             }
+            self.publish_event(HotstuffEvent::EpochChanged {
+                epoch: next_epoch,
+                registered_shard_group,
+            });
         }
 
         // Propose quickly for the end of epoch chain
@@ -382,6 +413,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         Ok(())
+    }
+
+    fn publish_event(&self, event: HotstuffEvent) {
+        let _ignore = self.tx_events.send(event);
     }
 
     async fn send_vote_to_leader(
@@ -511,7 +546,21 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             info!(target: LOG_TARGET, "Saving {} dummy block(s)", valid_block.dummy_blocks().len());
             valid_block.save_all_dummy_blocks(tx)?;
         }
-        valid_block.block().save(tx)?;
+        if let Err(err) = valid_block.block().save(tx) {
+            error!(target: LOG_TARGET, "Error saving block: {:?}", err);
+            error!(target: LOG_TARGET, "block: {}", valid_block.block());
+            error!(target: LOG_TARGET, "dummy count {:?}", valid_block.dummy_blocks().len());
+
+            for dummy in valid_block.dummy_blocks() {
+                error!(target: LOG_TARGET, "dummy: {}", dummy);
+            }
+            let mut block = valid_block.block().clone();
+            while let Some(b) = block.get_parent(&**tx).optional()? {
+                block = b;
+                error!(target: LOG_TARGET, "parent {}", block);
+            }
+            return Err(err.into());
+        }
 
         Ok(())
     }
@@ -673,6 +722,28 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         }
 
+        if candidate_block.height().is_zero() {
+            return Err(ProposalValidationError::MalformedBlock {
+                block_id: *candidate_block.id(),
+                details: "Block height is zero".to_string(),
+            }
+            .into());
+        }
+
+        if candidate_block.header().justify_id() != candidate_block.justify().id() {
+            // Note the ID is calculated locally when the message is read from the network, therefore if this happens
+            // there is a bug. This is here as a sanity check.
+            return Err(ProposalValidationError::MalformedBlock {
+                block_id: *candidate_block.id(),
+                details: format!(
+                    "BUG: justify_id ({}) in header does not match the calculated justify id ({})",
+                    candidate_block.header().justify_id(),
+                    candidate_block.justify().id()
+                ),
+            }
+            .into());
+        }
+
         if !local_committee.contains_public_key(candidate_block.proposed_by()) {
             return Err(ProposalValidationError::ValidatorNotInCommittee {
                 validator: candidate_block.proposed_by().to_string(),
@@ -747,7 +818,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         let high_qc = HighQc::get(tx, candidate_block.epoch())?;
         // if the block parent is not the justify parent, then we have experienced a leader failure
         // and should make dummy blocks to fill in the gaps.
-        if !high_qc.block_id().is_zero() && !candidate_block.justifies_parent() {
+        if !candidate_block.justifies_parent() && candidate_block.height() > NodeHeight(1) {
+            let num_dummies = candidate_block.height().as_u64() - justify_block.height().as_u64() - 1;
+            info!(target: LOG_TARGET, "🔨 Creating {} dummy block(s) for block {}", num_dummies, candidate_block);
+
             let dummy_blocks = calculate_dummy_blocks_from_justify(
                 &candidate_block,
                 &justify_block,

@@ -1,6 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use log::debug;
 use tari_common::configuration::Network;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_common_types::{
@@ -16,6 +17,8 @@ use crate::{
     traits::{ConsensusSpec, LeaderStrategy, VoteSignatureService},
 };
 
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::block_validations";
+
 pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     block: &Block,
     committee_info: &CommitteeInfo,
@@ -29,11 +32,17 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     //       tip. Without this, the check has a race condition between the base layer scanner and consensus.
     // check_base_layer_block_hash::<TConsensusSpec>(block, epoch_manager, config).await?;
     check_network(block, config.network)?;
+    if block.is_genesis() {
+        return Err(ProposalValidationError::ProposingGenesisBlock {
+            proposed_by: block.proposed_by().to_string(),
+            hash: *block.id(),
+        }
+        .into());
+    }
     check_sidechain_id(block, config)?;
     if block.is_dummy() {
         check_dummy(block)?;
     }
-    check_hash_and_height(block)?;
     check_proposed_by_leader(leader_strategy, committee_for_block, block)?;
     check_signature(block)?;
     check_quorum_certificate::<TConsensusSpec>(block, committee_for_block, committee_info, vote_signing_service)?;
@@ -113,26 +122,6 @@ pub async fn check_base_layer_block_hash<TConsensusSpec: ConsensusSpec>(
     Ok(())
 }
 
-pub fn check_hash_and_height(candidate_block: &Block) -> Result<(), ProposalValidationError> {
-    if candidate_block.is_genesis() {
-        return Err(ProposalValidationError::ProposingGenesisBlock {
-            proposed_by: candidate_block.proposed_by().to_string(),
-            hash: *candidate_block.id(),
-        });
-    }
-
-    let calculated_hash = candidate_block.calculate_hash().into();
-    if calculated_hash != *candidate_block.id() {
-        return Err(ProposalValidationError::BlockIdMismatch {
-            proposed_by: candidate_block.proposed_by().to_string(),
-            block_id: *candidate_block.id(),
-            calculated_hash,
-        });
-    }
-
-    Ok(())
-}
-
 pub fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
@@ -164,6 +153,13 @@ pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidation
             block_id: *candidate_block.id(),
             height: candidate_block.height(),
         })?;
+    debug!(
+        target: LOG_TARGET,
+        "Validating signature block_id={}, P={}, R={}",
+        candidate_block.id(),
+        candidate_block.proposed_by(),
+        validator_signature.get_public_nonce(),
+    );
     if !validator_signature.verify(candidate_block.proposed_by(), candidate_block.id()) {
         return Err(ProposalValidationError::InvalidSignature {
             block_id: *candidate_block.id(),

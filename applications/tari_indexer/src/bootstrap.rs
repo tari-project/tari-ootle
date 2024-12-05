@@ -20,11 +20,12 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fs, io, str::FromStr};
+use std::{convert::Infallible, fs, io, str::FromStr};
 
 use anyhow::Context;
 use libp2p::identity;
 use minotari_app_utilities::identity_management;
+use serde::Serialize;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{
     configuration::bootstrap::{grpc_default_port, ApplicationType},
@@ -34,15 +35,19 @@ use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_app_utilities::{
     base_layer_scanner,
+    common::verify_correct_network,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
     template_manager::{self, implementation::TemplateManager},
 };
-use tari_dan_common_types::PeerAddress;
+use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_epoch_manager::base_layer::{EpochManagerConfig, EpochManagerHandle};
+use tari_epoch_manager::{
+    base_layer::{EpochManagerConfig, EpochManagerHandle},
+    traits::LayerOneTransactionSubmitter,
+};
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
@@ -62,12 +67,15 @@ pub async fn spawn_services(
     ensure_directories_exist(config)?;
 
     // GRPC client connection to base node
-    let base_node_client = GrpcBaseNodeClient::new(config.indexer.base_node_grpc_url.clone().unwrap_or_else(|| {
-        let port = grpc_default_port(ApplicationType::BaseNode, config.network);
-        format!("http://127.0.0.1:{port}")
-            .parse()
-            .expect("Default base node GRPC URL is malformed")
-    }));
+    let mut base_node_client =
+        GrpcBaseNodeClient::new(config.indexer.base_node_grpc_url.clone().unwrap_or_else(|| {
+            let port = grpc_default_port(ApplicationType::BaseNode, config.network);
+            format!("http://127.0.0.1:{port}")
+                .parse()
+                .expect("Default base node GRPC URL is malformed")
+        }));
+
+    verify_correct_network(&mut base_node_client, config.network).await?;
 
     // Initialize networking
     let identity = identity::Keypair::sr25519_from_bytes(keypair.secret_key().as_bytes().to_vec()).map_err(|e| {
@@ -129,6 +137,7 @@ pub async fn spawn_services(
         global_db.clone(),
         base_node_client.clone(),
         keypair.public_key().clone(),
+        NoopL1Submitter,
         shutdown.clone(),
     );
 
@@ -189,4 +198,17 @@ fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> R
         .map_err(|e| ExitError::new(ExitCode::ConfigError, format!("Failed to save node identity: {}", e)))?;
 
     Ok(())
+}
+
+struct NoopL1Submitter;
+
+impl LayerOneTransactionSubmitter for NoopL1Submitter {
+    type Error = Infallible;
+
+    async fn submit_transaction<T: Serialize + Send>(
+        &self,
+        _proof: LayerOneTransactionDef<T>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }

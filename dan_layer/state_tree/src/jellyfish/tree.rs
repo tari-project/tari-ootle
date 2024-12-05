@@ -265,10 +265,10 @@ impl<'a, R: 'a + TreeStoreReader<P>, P: Clone> JellyfishMerkleTree<'a, R, P> {
 
                 // Reuse the current `InternalNode` in memory to create a new internal node.
                 let mut old_children = internal_node.into_children();
-                let mut new_created_children: HashMap<Nibble, Node<P>> = HashMap::new();
+                let mut new_created_children: Vec<(Nibble, Node<P>)> = Vec::new();
                 for (child_nibble, child_option) in new_children {
                     if let Some(child) = child_option {
-                        new_created_children.insert(child_nibble, child);
+                        new_created_children.push((child_nibble, child));
                     } else {
                         old_children.swap_remove(&child_nibble);
                     }
@@ -278,7 +278,7 @@ impl<'a, R: 'a + TreeStoreReader<P>, P: Clone> JellyfishMerkleTree<'a, R, P> {
                     return Ok(None);
                 }
                 if old_children.len() <= 1 && new_created_children.len() <= 1 {
-                    if let Some((new_nibble, new_child)) = new_created_children.iter().next() {
+                    if let Some((new_nibble, new_child)) = new_created_children.first() {
                         if let Some((old_nibble, _old_child)) = old_children.iter().next() {
                             if old_nibble == new_nibble && new_child.is_leaf() {
                                 return Ok(Some(new_child.clone()));

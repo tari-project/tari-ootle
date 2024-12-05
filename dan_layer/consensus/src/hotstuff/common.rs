@@ -322,8 +322,8 @@ pub(crate) fn get_next_block_height_and_leader<
     let mut next_height = height;
     let (mut leader_addr, mut leader_pk) = leader_strategy.get_leader_for_next_height(committee, next_height);
 
-    while ValidatorConsensusStats::is_node_suspended(tx, block_id, leader_pk)? {
-        debug!(target: LOG_TARGET, "Validator {} suspended for next height {}. Checking next validator", leader_addr, next_height + NodeHeight(1));
+    while ValidatorConsensusStats::is_node_evicted(tx, block_id, leader_pk)? {
+        debug!(target: LOG_TARGET, "Validator {} evicted for next height {}. Checking next validator", leader_addr, next_height + NodeHeight(1));
         next_height += NodeHeight(1);
         num_skipped += 1;
         let (addr, pk) = leader_strategy.get_leader_for_next_height(committee, next_height);

@@ -35,3 +35,7 @@ pub mod id_provider;
 mod argument_parser;
 
 pub use argument_parser::parse_arg;
+
+pub mod template_models {
+    pub use tari_template_lib::models::*;
+}

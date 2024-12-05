@@ -1,7 +1,6 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use async_trait::async_trait;
 use tari_consensus::{
     messages::HotstuffMessage,
     traits::{InboundMessaging, InboundMessagingError, OutboundMessaging, OutboundMessagingError},
@@ -40,7 +39,6 @@ impl TestOutboundMessaging {
     }
 }
 
-#[async_trait]
 impl OutboundMessaging for TestOutboundMessaging {
     type Addr = TestAddress;
 
@@ -66,23 +64,21 @@ impl OutboundMessaging for TestOutboundMessaging {
             })
     }
 
-    async fn multicast<'a, T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
-    where
-        Self::Addr: 'a,
-        T: Into<HotstuffMessage> + Send,
-    {
+    async fn multicast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
+    where T: Into<HotstuffMessage> + Send {
+        // TODO: technically we should use the consensus epoch here, but current tests will not cause this issue
         let epoch = self
             .epoch_manager
             .current_epoch()
             .await
             .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?;
-        let peers: Vec<TestAddress> = self
+        let peers = self
             .epoch_manager
-            .get_committees_by_shard_group(epoch, shard_group)
+            .get_committee_by_shard_group(epoch, shard_group)
             .await
             .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?
-            .values()
-            .flat_map(|c| c.addresses().cloned())
+            .into_iter()
+            .map(|(addr, _)| addr)
             .collect();
 
         self.tx_broadcast.send((peers, message.into())).await.map_err(|_| {
@@ -113,7 +109,6 @@ impl TestInboundMessaging {
     }
 }
 
-#[async_trait]
 impl InboundMessaging for TestInboundMessaging {
     type Addr = TestAddress;
 

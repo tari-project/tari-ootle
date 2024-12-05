@@ -22,9 +22,10 @@
 
 use std::{cmp, convert::TryFrom, ops::Deref};
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default, Deserialize, Serialize, BorshSerialize)]
 pub struct MaxSizeBytes<const MAX: usize> {
     inner: Vec<u8>,
 }

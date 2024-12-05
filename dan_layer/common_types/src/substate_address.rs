@@ -9,6 +9,7 @@ use std::{
     str::FromStr,
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{FixedHash, FixedHashSizeError};
 use tari_crypto::tari_utilities::{
@@ -24,7 +25,7 @@ pub trait ToSubstateAddress {
     fn to_substate_address(&self) -> SubstateAddress;
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

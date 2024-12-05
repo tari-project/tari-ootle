@@ -20,34 +20,41 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use async_trait::async_trait;
+use std::future::Future;
+
 use tari_dan_common_types::{NodeAddressable, ShardGroup};
 
 use crate::messages::HotstuffMessage;
 
-#[async_trait]
 pub trait OutboundMessaging {
-    type Addr: NodeAddressable + Send;
+    type Addr: NodeAddressable + Send + 'static;
 
-    async fn send_self<T: Into<HotstuffMessage> + Send>(&mut self, message: T) -> Result<(), OutboundMessagingError>;
+    fn send_self<T: Into<HotstuffMessage> + Send>(
+        &mut self,
+        message: T,
+    ) -> impl Future<Output = Result<(), OutboundMessagingError>> + Send;
 
-    async fn send<T: Into<HotstuffMessage> + Send>(
+    fn send<T: Into<HotstuffMessage> + Send>(
         &mut self,
         to: Self::Addr,
         message: T,
-    ) -> Result<(), OutboundMessagingError>;
+    ) -> impl Future<Output = Result<(), OutboundMessagingError>> + Send;
 
-    async fn multicast<'a, T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
+    fn multicast<T>(
+        &mut self,
+        shard_group: ShardGroup,
+        message: T,
+    ) -> impl Future<Output = Result<(), OutboundMessagingError>> + Send
     where
-        Self::Addr: 'a,
         T: Into<HotstuffMessage> + Send;
 }
 
-#[async_trait]
 pub trait InboundMessaging {
     type Addr: NodeAddressable + Send;
 
-    async fn next_message(&mut self) -> Option<Result<(Self::Addr, HotstuffMessage), InboundMessagingError>>;
+    fn next_message(
+        &mut self,
+    ) -> impl Future<Output = Option<Result<(Self::Addr, HotstuffMessage), InboundMessagingError>>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]

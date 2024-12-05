@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
-use cucumber::{given, when};
-use minotari_app_grpc::tari_rpc::{GetBalanceRequest, ValidateRequest};
+use cucumber::{given, then, when};
+use minotari_app_grpc::tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest};
 use tari_common_types::types::{Commitment, PrivateKey, PublicKey};
 use tari_crypto::{ristretto::RistrettoComSig, tari_utilities::ByteArray};
 use tokio::time::sleep;
@@ -107,4 +107,24 @@ pub async fn check_balance(world: &mut TariWorld, wallet_name: String, balance: 
         }
         iterations += 1;
     }
+}
+
+#[then(expr = "I submit the eviction proof {word} to {word}")]
+#[when(expr = "I submit the eviction proof {word} to {word}")]
+pub async fn submit_eviction(world: &mut TariWorld, eviction_name: String, wallet_name: String) {
+    let eviction = world
+        .eviction_proofs
+        .get(&eviction_name)
+        .unwrap_or_else(|| panic!("Eviction proof {} not found", eviction_name));
+    let wallet = world.get_wallet(&wallet_name);
+    let mut client = wallet.create_client().await;
+    client
+        .submit_validator_eviction_proof(SubmitValidatorEvictionProofRequest {
+            proof: Some(eviction.into()),
+            fee_per_gram: 1,
+            message: "Eviction proof in cucumber".to_string(),
+            sidechain_deployment_key: vec![],
+        })
+        .await
+        .unwrap();
 }

@@ -8,6 +8,7 @@ use std::{
     str::FromStr,
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{Epoch, ShardGroup};
 
@@ -112,7 +113,7 @@ impl ForeignProposal {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, PartialOrd, Ord, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

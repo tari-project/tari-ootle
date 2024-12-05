@@ -42,10 +42,8 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         peer_address: TGlobalDbAdapter::Addr,
         public_key: PublicKey,
         shard_key: SubstateAddress,
-        registered_at_base_height: u64,
         start_epoch: Epoch,
         fee_claim_public_key: PublicKey,
-        sidechain_id: Option<PublicKey>,
     ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend
             .insert_validator_node(
@@ -53,38 +51,35 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
                 peer_address,
                 public_key,
                 shard_key,
-                registered_at_base_height,
                 start_epoch,
                 fee_claim_public_key,
-                sidechain_id,
             )
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
-    pub fn remove(
+    pub fn deactivate(
         &mut self,
         public_key: PublicKey,
-        sidechain_id: Option<PublicKey>,
+        deactivation_epoch: Epoch,
     ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend
-            .remove_validator_node(self.tx, public_key, sidechain_id)
+            .deactivate_validator_node(self.tx, public_key, deactivation_epoch)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
-    pub fn count(&mut self, epoch: Epoch, sidechain_id: Option<&PublicKey>) -> Result<u64, TGlobalDbAdapter::Error> {
+    pub fn count(&mut self, epoch: Epoch) -> Result<u64, TGlobalDbAdapter::Error> {
         self.backend
-            .validator_nodes_count(self.tx, epoch, sidechain_id)
+            .validator_nodes_count(self.tx, epoch)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
     pub fn count_in_shard_group(
         &mut self,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
         shard_group: ShardGroup,
     ) -> Result<u64, TGlobalDbAdapter::Error> {
         self.backend
-            .validator_nodes_count_for_shard_group(self.tx, epoch, sidechain_id, shard_group)
+            .validator_nodes_count_for_shard_group(self.tx, epoch, shard_group)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
@@ -92,10 +87,9 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         &mut self,
         epoch: Epoch,
         public_key: &PublicKey,
-        sidechain_id: Option<&PublicKey>,
     ) -> Result<ValidatorNode<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
         self.backend
-            .get_validator_node_by_public_key(self.tx, epoch, public_key, sidechain_id)
+            .get_validator_node_by_public_key(self.tx, epoch, public_key)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
@@ -103,40 +97,61 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         &mut self,
         epoch: Epoch,
         address: &TGlobalDbAdapter::Addr,
-        sidechain_id: Option<&PublicKey>,
     ) -> Result<ValidatorNode<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
         self.backend
-            .get_validator_node_by_address(self.tx, epoch, address, sidechain_id)
+            .get_validator_node_by_address(self.tx, epoch, address)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
+    /// Returns all registered validator nodes from the given epoch
+    ///
+    /// This may be used to fetch validators registered for a future epoch, however since the epoch is not finalized
+    /// yet, the list may not be complete.
+    pub fn get_all_registered_within_start_epoch(
+        &mut self,
+        epoch: Epoch,
+    ) -> Result<Vec<ValidatorNode<TGlobalDbAdapter::Addr>>, TGlobalDbAdapter::Error> {
+        self.backend
+            .get_validator_nodes_within_start_epoch(self.tx, epoch)
+            .map_err(TGlobalDbAdapter::Error::into)
+    }
+
+    /// Fetches all validator nodes that are active for a given epoch
     pub fn get_all_within_epoch(
         &mut self,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
     ) -> Result<Vec<ValidatorNode<TGlobalDbAdapter::Addr>>, TGlobalDbAdapter::Error> {
         self.backend
-            .get_validator_nodes_within_epoch(self.tx, epoch, sidechain_id)
+            .get_validator_nodes_within_committee_epoch(self.tx, epoch)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
-    pub fn get_committees_for_shard_group(
+    pub fn get_committee_for_shard_group(
+        &mut self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<Committee<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
+        self.backend
+            .validator_nodes_get_for_shard_group(self.tx, epoch, shard_group)
+            .map_err(TGlobalDbAdapter::Error::into)
+    }
+
+    pub fn get_committees_overlapping_shard_group(
         &mut self,
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<HashMap<ShardGroup, Committee<TGlobalDbAdapter::Addr>>, TGlobalDbAdapter::Error> {
         self.backend
-            .validator_nodes_get_for_shard_group(self.tx, epoch, shard_group)
+            .validator_nodes_get_overlapping_shard_group(self.tx, epoch, shard_group)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
     pub fn get_committees(
         &mut self,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
     ) -> Result<HashMap<ShardGroup, Committee<TGlobalDbAdapter::Addr>>, TGlobalDbAdapter::Error> {
         self.backend
-            .validator_nodes_get_committees_for_epoch(self.tx, epoch, sidechain_id)
+            .validator_nodes_get_committees_for_epoch(self.tx, epoch)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 
@@ -144,11 +159,10 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         &mut self,
         substate_address: SubstateAddress,
         shard_group: ShardGroup,
-        sidechain_id: Option<&PublicKey>,
         epoch: Epoch,
     ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend
-            .validator_nodes_set_committee_shard(self.tx, substate_address, shard_group, sidechain_id, epoch)
+            .validator_nodes_set_committee_shard(self.tx, substate_address, shard_group, epoch)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 }

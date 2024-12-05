@@ -54,16 +54,12 @@ pub enum NoVoteReason {
     CommandMerkleRootMismatch,
     #[error("Not all foreign input pledges are present")]
     NotAllForeignInputPledges,
-    #[error("Leader proposed to suspend a node that should not be suspended")]
-    ShouldNotSuspendNode,
-    #[error("Leader proposed to suspend a node but node is already suspended")]
-    NodeAlreadySuspended,
-    #[error("Leader proposed to resume a node but node is not suspended")]
-    NodeNotSuspended,
-    #[error("Leader proposed to suspend a node but it is not permitted to suspend more than f nodes")]
-    CannotSuspendNodeBelowQuorumThreshold,
-    #[error("Leader proposed to resume a node but the node should not be resumed")]
-    ShouldNodeResumeNode,
+    #[error("Leader proposed to EVICT a node that should not be evicted")]
+    ShouldNotEvictNode,
+    #[error("Leader proposed to EVICT a node but node is already evicted")]
+    NodeAlreadyEvicted,
+    #[error("Leader proposed to evict a node but it is not permitted to suspend more than f nodes")]
+    CannotEvictNodeBelowQuorumThreshold,
 }
 
 impl NoVoteReason {
@@ -92,11 +88,9 @@ impl NoVoteReason {
             Self::StateMerkleRootMismatch => "StateMerkleRootMismatch",
             Self::CommandMerkleRootMismatch => "CommandMerkleRootMismatch",
             Self::NotAllForeignInputPledges => "NotAllForeignInputPledges",
-            Self::ShouldNotSuspendNode => "ShouldNotSuspendNode",
-            Self::NodeAlreadySuspended => "NodeAlreadySuspended",
-            Self::NodeNotSuspended => "NodeNotSuspended",
-            Self::ShouldNodeResumeNode => "ShouldNodeResumeNode",
-            Self::CannotSuspendNodeBelowQuorumThreshold => "CannotSuspendNodeBelowQuorumThreshold",
+            Self::NodeAlreadyEvicted => "NodeAlreadyEvicted",
+            Self::ShouldNotEvictNode => "ShouldNotEvictNode",
+            Self::CannotEvictNodeBelowQuorumThreshold => "CannotSuspendNodeBelowQuorumThreshold",
         }
     }
 }

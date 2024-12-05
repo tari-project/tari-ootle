@@ -172,8 +172,11 @@ pub struct VersionedSubstateId {
 }
 
 impl VersionedSubstateId {
-    pub fn new(substate_id: SubstateId, version: u32) -> Self {
-        Self { substate_id, version }
+    pub fn new<T: Into<SubstateId>>(substate_id: T, version: u32) -> Self {
+        Self {
+            substate_id: substate_id.into(),
+            version,
+        }
     }
 
     pub fn substate_id(&self) -> &SubstateId {

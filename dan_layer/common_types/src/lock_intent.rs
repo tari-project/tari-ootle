@@ -3,6 +3,7 @@
 
 use std::{fmt, str::FromStr};
 
+use borsh::BorshSerialize;
 use tari_bor::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 
@@ -26,7 +27,7 @@ impl<T: LockIntent> ToSubstateAddress for T {
 }
 
 /// Substate lock flags
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

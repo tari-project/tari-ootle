@@ -96,8 +96,8 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
             let (from, msg) = result?;
             match msg_epoch_and_height(&msg) {
                 // Discard old message
-                Some((e, h)) if e < current_epoch || h < next_height => {
-                    info!(target: LOG_TARGET, "Discard message {} is for previous view {}/{}. Current view {}/{}", msg, e, h, current_epoch, next_height);
+                Some((e, h)) if e < current_epoch || (e == current_epoch && h < next_height) => {
+                    info!(target: LOG_TARGET, "🗑️ Discard message {} is for previous view {}/{}. Current view {}/{}", msg, e, h, current_epoch, next_height);
                     continue;
                 },
                 // Buffer message for future epoch/height

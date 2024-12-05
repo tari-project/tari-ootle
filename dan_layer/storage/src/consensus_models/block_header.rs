@@ -2,17 +2,16 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt::{Debug, Display, Formatter},
 };
 
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{hashing, shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
-use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError};
+use tari_state_tree::compute_merkle_root_for_hashes;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
@@ -41,11 +40,10 @@ pub struct BlockHeader {
     state_merkle_root: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     command_merkle_root: FixedHash,
-    /// If the block is a dummy block. This is metadata and not sent over
-    /// the wire or part of the block hash.
+    /// If the block is a dummy block.
     is_dummy: bool,
     /// Counter for each foreign shard for reliable broadcast.
-    foreign_indexes: IndexMap<Shard, u64>,
+    foreign_indexes: BTreeMap<Shard, u64>,
     /// Signature of block by the proposer.
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce : string, signature: string} | null"))]
     signature: Option<ValidatorSchnorrSignature>,
@@ -71,14 +69,14 @@ impl BlockHeader {
         state_merkle_root: FixedHash,
         commands: &BTreeSet<Command>,
         total_leader_fee: u64,
-        sorted_foreign_indexes: IndexMap<Shard, u64>,
+        sorted_foreign_indexes: BTreeMap<Shard, u64>,
         signature: Option<ValidatorSchnorrSignature>,
         timestamp: u64,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
-        let command_merkle_root = compute_command_merkle_root(commands)?;
+        let command_merkle_root = Self::compute_command_merkle_root(commands)?;
         let mut header = BlockHeader {
             id: BlockId::zero(),
             network,
@@ -99,9 +97,14 @@ impl BlockHeader {
             base_layer_block_hash,
             extra_data,
         };
-        header.id = header.calculate_hash().into();
+        header.id = header.calculate_id();
 
         Ok(header)
+    }
+
+    pub fn compute_command_merkle_root(commands: &BTreeSet<Command>) -> Result<FixedHash, BlockError> {
+        let hashes = commands.iter().map(|cmd| cmd.hash()).peekable();
+        compute_merkle_root_for_hashes(hashes).map_err(BlockError::StateTreeError)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -117,7 +120,7 @@ impl BlockHeader {
         state_merkle_root: FixedHash,
         total_leader_fee: u64,
         is_dummy: bool,
-        sorted_foreign_indexes: IndexMap<Shard, u64>,
+        sorted_foreign_indexes: BTreeMap<Shard, u64>,
         signature: Option<ValidatorSchnorrSignature>,
         timestamp: u64,
         base_layer_block_height: u64,
@@ -162,7 +165,7 @@ impl BlockHeader {
             command_merkle_root: FixedHash::zero(),
             total_leader_fee: 0,
             is_dummy: false,
-            foreign_indexes: IndexMap::new(),
+            foreign_indexes: BTreeMap::new(),
             signature: None,
             timestamp: EpochTime::now().as_u64(),
             base_layer_block_height: 0,
@@ -194,22 +197,22 @@ impl BlockHeader {
             shard_group,
             proposed_by,
             state_merkle_root: parent_state_merkle_root,
-            command_merkle_root: compute_command_merkle_root([].into_iter().peekable())
+            command_merkle_root: BlockHeader::compute_command_merkle_root(&BTreeSet::new())
                 .expect("compute_command_merkle_root is infallible for empty commands"),
             total_leader_fee: 0,
             is_dummy: true,
-            foreign_indexes: IndexMap::new(),
+            foreign_indexes: BTreeMap::new(),
             signature: None,
             timestamp: parent_timestamp,
             base_layer_block_height: parent_base_layer_block_height,
             base_layer_block_hash: parent_base_layer_block_hash,
             extra_data: ExtraData::new(),
         };
-        block.id = block.calculate_hash().into();
+        block.id = block.calculate_id();
         block
     }
 
-    pub fn calculate_hash(&self) -> FixedHash {
+    pub fn calculate_id(&self) -> BlockId {
         // Hash is created from the hash of the "body" and
         // then hashed with the parent, so that you can
         // create a merkle proof of a chain of blocks
@@ -223,8 +226,41 @@ impl BlockHeader {
         // blockbody
         // ```
 
-        let inner_hash = hashing::block_hasher()
-            .chain(&self.network)
+        let header_hash = self.calculate_hash();
+        Self::calculate_block_id(&header_hash, &self.parent)
+    }
+
+    pub(crate) fn calculate_block_id(contents_hash: &FixedHash, parent_id: &BlockId) -> BlockId {
+        if *contents_hash == FixedHash::zero() && parent_id.is_zero() {
+            return BlockId::zero();
+        }
+
+        hashing::block_hasher()
+            .chain(parent_id)
+            .chain(contents_hash)
+            .finalize_into_array()
+            .into()
+    }
+
+    pub fn create_extra_data_hash(&self) -> FixedHash {
+        hashing::extra_data_hasher().chain(&self.extra_data).finalize().into()
+    }
+
+    pub fn create_foreign_indexes_hash(&self) -> FixedHash {
+        hashing::foreign_indexes_hasher()
+            .chain(&self.foreign_indexes)
+            .finalize()
+            .into()
+    }
+
+    pub fn calculate_hash(&self) -> FixedHash {
+        // These hashes reduce proof sizes, specifically, a proof-of-commit only needs to include these hashes and not
+        // their data.
+        let extra_data_hash = self.create_extra_data_hash();
+        let foreign_indexes_hash = self.create_foreign_indexes_hash();
+
+        hashing::block_hasher()
+            .chain(&self.network.as_byte())
             .chain(&self.justify_id)
             .chain(&self.height)
             .chain(&self.total_leader_fee)
@@ -234,14 +270,13 @@ impl BlockHeader {
             .chain(&self.state_merkle_root)
             .chain(&self.is_dummy)
             .chain(&self.command_merkle_root)
-            .chain(&self.foreign_indexes)
+            .chain(&foreign_indexes_hash)
             .chain(&self.timestamp)
             .chain(&self.base_layer_block_height)
             .chain(&self.base_layer_block_hash)
-            .chain(&self.extra_data)
-            .result();
-
-        hashing::block_hasher().chain(&self.parent).chain(&inner_hash).result()
+            .chain(&extra_data_hash)
+            .finalize()
+            .into()
     }
 
     pub fn is_genesis(&self) -> bool {
@@ -344,7 +379,7 @@ impl BlockHeader {
         self.foreign_indexes.get(bucket).copied()
     }
 
-    pub fn foreign_indexes(&self) -> &IndexMap<Shard, u64> {
+    pub fn foreign_indexes(&self) -> &BTreeMap<Shard, u64> {
         &self.foreign_indexes
     }
 
@@ -388,11 +423,4 @@ impl Display for BlockHeader {
             self.parent()
         )
     }
-}
-
-pub(crate) fn compute_command_merkle_root<'a, I: IntoIterator<Item = &'a Command>>(
-    commands: I,
-) -> Result<FixedHash, StateTreeError> {
-    let hashes = commands.into_iter().map(|cmd| cmd.hash()).peekable();
-    compute_merkle_root_for_hashes(hashes)
 }

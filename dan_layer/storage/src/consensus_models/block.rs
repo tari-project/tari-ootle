@@ -2,12 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt::{Debug, Display, Formatter},
     iter,
     ops::{Deref, RangeInclusive},
 };
 
+use borsh::BorshSerialize;
 use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,7 @@ use ts_rs::TS;
 use super::{
     BlockDiff,
     BlockPledge,
+    EvictNodeAtom,
     ForeignProposal,
     ForeignProposalAtom,
     ForeignSendCounters,
@@ -43,7 +45,6 @@ use super::{
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
     QuorumCertificate,
-    ResumeNodeAtom,
     SubstateChange,
     SubstateDestroyedProof,
     SubstatePledge,
@@ -54,7 +55,7 @@ use super::{
 };
 use crate::{
     consensus_models::{
-        block_header::{compute_command_merkle_root, BlockHeader},
+        block_header::BlockHeader,
         Command,
         LastExecuted,
         LastProposed,
@@ -113,7 +114,7 @@ impl Block {
         commands: BTreeSet<Command>,
         state_merkle_root: FixedHash,
         total_leader_fee: u64,
-        sorted_foreign_indexes: IndexMap<Shard, u64>,
+        sorted_foreign_indexes: BTreeMap<Shard, u64>,
         signature: Option<ValidatorSchnorrSignature>,
         timestamp: u64,
         base_layer_block_height: u64,
@@ -170,7 +171,7 @@ impl Block {
         is_dummy: bool,
         is_justified: bool,
         is_committed: bool,
-        sorted_foreign_indexes: IndexMap<Shard, u64>,
+        sorted_foreign_indexes: BTreeMap<Shard, u64>,
         signature: Option<ValidatorSchnorrSignature>,
         created_at: PrimitiveDateTime,
         block_time: Option<u64>,
@@ -240,7 +241,7 @@ impl Block {
             Default::default(),
             state_merkle_root,
             0,
-            IndexMap::new(),
+            BTreeMap::new(),
             None,
             0,
             0,
@@ -263,8 +264,8 @@ impl Block {
         }
     }
 
-    pub fn calculate_hash(&self) -> FixedHash {
-        self.header.calculate_hash()
+    pub fn calculate_id(&self) -> BlockId {
+        self.header.calculate_id()
     }
 
     pub fn header(&self) -> &BlockHeader {
@@ -310,8 +311,8 @@ impl Block {
         self.commands.iter().filter_map(|c| c.foreign_proposal())
     }
 
-    pub fn all_resume_nodes(&self) -> impl Iterator<Item = &ResumeNodeAtom> + '_ {
-        self.commands.iter().filter_map(|c| c.resume_node())
+    pub fn all_evict_nodes(&self) -> impl Iterator<Item = &EvictNodeAtom> + '_ {
+        self.commands.iter().filter_map(|c| c.evict_node())
     }
 
     pub fn all_confidential_output_mints(&self) -> impl Iterator<Item = &MintConfidentialOutputAtom> + '_ {
@@ -406,10 +407,6 @@ impl Block {
         self.header.command_merkle_root()
     }
 
-    pub fn compute_command_merkle_root(&self) -> Result<FixedHash, StateTreeError> {
-        compute_command_merkle_root(&self.commands)
-    }
-
     pub fn commands(&self) -> &BTreeSet<Command> {
         &self.commands
     }
@@ -434,7 +431,7 @@ impl Block {
         self.header.get_foreign_counter(shard)
     }
 
-    pub fn foreign_indexes(&self) -> &IndexMap<Shard, u64> {
+    pub fn foreign_indexes(&self) -> &BTreeMap<Shard, u64> {
         self.header.foreign_indexes()
     }
 
@@ -448,10 +445,6 @@ impl Block {
 
     pub fn signature(&self) -> Option<&ValidatorSchnorrSignature> {
         self.header.signature()
-    }
-
-    pub fn set_signature(&mut self, signature: ValidatorSchnorrSignature) {
-        self.header.set_signature(signature);
     }
 
     pub fn base_layer_block_height(&self) -> u64 {
@@ -833,7 +826,7 @@ impl Block {
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
         TFnOnLock: FnMut(&mut TTx, &LockedBlock, &Block, &QuorumCertificate) -> Result<(), E>,
-        TFnOnCommit: FnMut(&mut TTx, &LastExecuted, &Block) -> Result<(), E>,
+        TFnOnCommit: FnMut(&mut TTx, &LastExecuted, Block) -> Result<(), E>,
         E: From<StorageError>,
     {
         let high_qc = self.justify().update_high_qc(tx)?;
@@ -842,34 +835,34 @@ impl Block {
         let justified_node = self.justify().get_block(&**tx)?;
 
         // b' <- b''.justify.node
-        let prepared_node = justified_node.justify().get_block(&**tx)?;
+        let new_locked = justified_node.justify().get_block(&**tx)?;
 
-        if prepared_node.is_genesis() {
+        if new_locked.is_genesis() {
             return Ok(high_qc);
         }
 
         let current_locked = LockedBlock::get(&**tx, self.epoch())?;
-        if prepared_node.height() > current_locked.height {
+        if new_locked.height() > current_locked.height {
             on_locked_block_recurse(
                 tx,
                 &current_locked,
-                &prepared_node,
+                &new_locked,
                 justified_node.justify(),
                 &mut on_lock_block,
             )?;
-            prepared_node.as_locked_block().set(tx)?;
+            new_locked.as_locked_block().set(tx)?;
         }
 
         // b <- b'.justify.node
-        let commit_node = prepared_node.justify().block_id();
-        if justified_node.parent() == prepared_node.id() && prepared_node.parent() == commit_node {
+        let commit_node = new_locked.justify().block_id();
+        if justified_node.parent() == new_locked.id() && new_locked.parent() == commit_node {
             debug!(
                 target: LOG_TARGET,
                 "✅ Block {} {} forms a 3-chain b'' = {}, b' = {}, b = {}",
                 self.height(),
                 self.id(),
                 justified_node.id(),
-                prepared_node.id(),
+                new_locked.id(),
                 commit_node,
             );
 
@@ -879,8 +872,9 @@ impl Block {
             }
             let prepare_node = Block::get(&**tx, commit_node)?;
             let last_executed = LastExecuted::get(&**tx)?;
-            on_commit_block_recurse(tx, &last_executed, &prepare_node, &mut on_commit)?;
-            prepare_node.as_last_executed().set(tx)?;
+            let last_exec = prepare_node.as_last_executed();
+            on_commit_block_recurse(tx, &last_executed, prepare_node, &mut on_commit)?;
+            last_exec.set(tx)?;
         } else {
             debug!(
                 target: LOG_TARGET,
@@ -888,7 +882,7 @@ impl Block {
                 self.height(),
                 self.id(),
                 justified_node.id(),
-                prepared_node.id(),
+                new_locked.id(),
                 commit_node,
                 self.id()
             );
@@ -1041,7 +1035,7 @@ impl Display for Block {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
 #[serde(transparent)]
 pub struct BlockId(#[serde(with = "serde_with::hex")] FixedHash);
 
@@ -1084,6 +1078,12 @@ impl AsRef<[u8]> for BlockId {
 impl From<FixedHash> for BlockId {
     fn from(value: FixedHash) -> Self {
         Self(value)
+    }
+}
+
+impl From<[u8; 32]> for BlockId {
+    fn from(value: [u8; 32]) -> Self {
+        Self(value.into())
     }
 }
 
@@ -1133,19 +1133,19 @@ where
 fn on_commit_block_recurse<TTx, F, E>(
     tx: &mut TTx,
     last_executed: &LastExecuted,
-    block: &Block,
+    block: Block,
     callback: &mut F,
 ) -> Result<(), E>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
     E: From<StorageError>,
-    F: FnMut(&mut TTx, &LastExecuted, &Block) -> Result<(), E>,
+    F: FnMut(&mut TTx, &LastExecuted, Block) -> Result<(), E>,
 {
     if last_executed.height < block.height() {
         let parent = block.get_parent(&**tx)?;
-        // Recurse to "catch up" any parent parent blocks we may not have executed
-        on_commit_block_recurse(tx, last_executed, &parent, callback)?;
+        // Recurse to "catch up" any parent blocks we may not have executed
+        on_commit_block_recurse(tx, last_executed, parent, callback)?;
         callback(tx, last_executed, block)?;
     }
     Ok(())

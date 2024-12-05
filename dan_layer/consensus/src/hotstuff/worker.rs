@@ -240,6 +240,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.pacemaker
             .start(current_epoch, current_height, high_qc.block_height())
             .await?;
+        self.publish_event(HotstuffEvent::EpochChanged {
+            epoch: current_epoch,
+            registered_shard_group: Some(local_committee_info.shard_group()),
+        });
 
         let local_committee = self.epoch_manager.get_local_committee(current_epoch).await?;
         self.run(local_committee_info, local_committee).await?;
@@ -318,7 +322,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
                 Some(result) = self.on_inbound_message.next_message(current_epoch, current_height) => {
                     if let Err(e) = self.on_unvalidated_message(current_epoch, current_height, result, &local_committee_info, &local_committee).await {
-                        self.on_failure("on_inbound_message", &e).await;
+                        self.on_failure("on_unvalidated_message", &e).await;
                         return Err(e);
                     }
                 },
@@ -547,6 +551,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     );
                     return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
                 }
+                info!(
+                    target: LOG_TARGET,
+                    "🌟 This validator is registered for epoch {}.", epoch
+                );
 
                 // Edge case: we have started a VN and have progressed a few epochs quickly and have no blocks in
                 // previous epochs to update the current view. This only really applies when mining is

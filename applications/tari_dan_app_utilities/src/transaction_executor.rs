@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use log::*;
-use tari_common::configuration::Network;
 use tari_common_types::types::PublicKey;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
@@ -18,7 +17,7 @@ use tari_dan_engine::{
     runtime::{AuthParams, RuntimeModule},
     state_store::{memory::ReadOnlyMemoryStateStore, StateStoreError},
     template::LoadedTemplate,
-    transaction::{TransactionError, TransactionProcessor},
+    transaction::{TransactionError, TransactionProcessor, TransactionProcessorConfig},
 };
 use tari_dan_storage::consensus_models::VersionedSubstateIdLockIntent;
 use tari_engine_types::{commit_result::ExecuteResult, substate::Substate, virtual_substate::VirtualSubstates};
@@ -89,15 +88,15 @@ impl ExecutionOutput {
 pub struct TariDanTransactionProcessor<TTemplateProvider> {
     template_provider: Arc<TTemplateProvider>,
     fee_table: FeeTable,
-    network: Network,
+    config: TransactionProcessorConfig,
 }
 
 impl<TTemplateProvider> TariDanTransactionProcessor<TTemplateProvider> {
-    pub fn new(network: Network, template_provider: TTemplateProvider, fee_table: FeeTable) -> Self {
+    pub fn new(config: TransactionProcessorConfig, template_provider: TTemplateProvider, fee_table: FeeTable) -> Self {
         Self {
             template_provider: Arc::new(template_provider),
             fee_table,
-            network,
+            config,
         }
     }
 }
@@ -128,12 +127,12 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
         let modules: Vec<Arc<dyn RuntimeModule>> = vec![Arc::new(FeeModule::new(initial_cost, self.fee_table.clone()))];
 
         let processor = TransactionProcessor::new(
+            self.config.clone(),
             self.template_provider.clone(),
             state_store,
             auth_params,
             virtual_substates,
             modules,
-            self.network,
         );
         let result = processor.execute(transaction.clone())?;
 

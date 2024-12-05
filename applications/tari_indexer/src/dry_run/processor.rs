@@ -23,13 +23,12 @@
 use std::{collections::HashMap, sync::Arc};
 
 use log::info;
-use tari_common::configuration::Network;
 use tari_dan_app_utilities::{
     template_manager::implementation::TemplateManager,
     transaction_executor::{TariDanTransactionProcessor, TransactionExecutor as _},
 };
 use tari_dan_common_types::{Epoch, PeerAddress, SubstateAddress, SubstateRequirement};
-use tari_dan_engine::{fees::FeeTable, state_store::new_memory_store};
+use tari_dan_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     instruction::Instruction,
@@ -56,6 +55,7 @@ use crate::dry_run::error::DryRunTransactionProcessorError;
 const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 
 pub struct DryRunTransactionProcessor<TSubstateCache> {
+    config: TransactionProcessorConfig,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_provider: TariValidatorNodeRpcClientFactory,
     transaction_autofiller:
@@ -63,30 +63,29 @@ pub struct DryRunTransactionProcessor<TSubstateCache> {
     template_manager: TemplateManager<PeerAddress>,
     substate_scanner:
         Arc<SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, TSubstateCache>>,
-    network: Network,
 }
 
 impl<TSubstateCache> DryRunTransactionProcessor<TSubstateCache>
 where TSubstateCache: SubstateCache + 'static
 {
     pub fn new(
+        config: TransactionProcessorConfig,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         client_provider: TariValidatorNodeRpcClientFactory,
         substate_scanner: Arc<
             SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, TSubstateCache>,
         >,
         template_manager: TemplateManager<PeerAddress>,
-        network: Network,
     ) -> Self {
         let transaction_autofiller = TransactionAutofiller::new(substate_scanner.clone());
 
         Self {
+            config,
             epoch_manager,
             client_provider,
             transaction_autofiller,
             template_manager,
             substate_scanner,
-            network,
         }
     }
 
@@ -139,7 +138,7 @@ where TSubstateCache: SubstateCache + 'static
             FeeTable::zero_rated()
         };
 
-        TariDanTransactionProcessor::new(self.network, self.template_manager.clone(), fee_table)
+        TariDanTransactionProcessor::new(self.config.clone(), self.template_manager.clone(), fee_table)
     }
 
     fn transaction_includes_fees(transaction: &Transaction) -> bool {

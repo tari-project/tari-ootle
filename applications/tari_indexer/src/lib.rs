@@ -53,7 +53,7 @@ use tari_common::{
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_dan_app_utilities::{keypair::setup_keypair_prompt, substate_file_cache::SubstateFileCache};
-use tari_dan_engine::transaction::TransactionProcessorConfigBuilder;
+use tari_dan_engine::transaction::TransactionProcessorConfig;
 use tari_dan_storage::global::DbFactory;
 use tari_dan_storage_sqlite::SqliteDbFactory;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
@@ -122,7 +122,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 
     // dry run
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
-        TransactionProcessorConfigBuilder::new()
+        TransactionProcessorConfig::builder()
             .with_network(config.network)
             .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes)
             .build(),

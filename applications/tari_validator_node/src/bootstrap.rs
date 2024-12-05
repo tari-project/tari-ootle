@@ -59,7 +59,7 @@ use tari_dan_common_types::{
     ShardGroup,
     VersionedSubstateId,
 };
-use tari_dan_engine::{fees::FeeTable, transaction::TransactionProcessorConfigBuilder};
+use tari_dan_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, SubstateRecord},
@@ -290,7 +290,7 @@ pub async fn spawn_services(
 
     // Consensus
     let payload_processor = TariDanTransactionProcessor::new(
-        TransactionProcessorConfigBuilder::new()
+        TransactionProcessorConfig::builder()
             .with_network(config.network)
             .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes)
             .build(),

@@ -24,7 +24,7 @@ use tari_dan_engine::{
     runtime::{AuthParams, RuntimeModule},
     state_store::{memory::MemoryStateStore, new_memory_store, StateWriter},
     template::LoadedTemplate,
-    transaction::{TransactionError, TransactionProcessor, TransactionProcessorConfigBuilder},
+    transaction::{TransactionError, TransactionProcessor, TransactionProcessorConfig},
     wasm::LoadedWasmTemplate,
 };
 use tari_engine_types::{
@@ -474,7 +474,7 @@ impl TemplateTest {
             initial_ownership_proofs: proofs,
         };
         let processor = TransactionProcessor::new(
-            TransactionProcessorConfigBuilder::new()
+            TransactionProcessorConfig::builder()
                 .with_network(Network::LocalNet)
                 .build(),
             self.package.clone(),

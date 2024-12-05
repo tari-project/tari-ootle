@@ -79,6 +79,12 @@ pub struct TransactionProcessorConfig {
     pub template_binary_max_size_bytes: usize,
 }
 
+impl TransactionProcessorConfig {
+    pub fn builder() -> TransactionProcessorConfigBuilder {
+        TransactionProcessorConfigBuilder::default()
+    }
+}
+
 impl Default for TransactionProcessorConfig {
     fn default() -> Self {
         Self {
@@ -88,17 +94,12 @@ impl Default for TransactionProcessorConfig {
     }
 }
 
+#[derive(Default)]
 pub struct TransactionProcessorConfigBuilder {
     config: TransactionProcessorConfig,
 }
 
 impl TransactionProcessorConfigBuilder {
-    pub fn new() -> Self {
-        Self {
-            config: Default::default(),
-        }
-    }
-
     pub fn with_network(&mut self, network: Network) -> &mut Self {
         self.config.network = network;
         self

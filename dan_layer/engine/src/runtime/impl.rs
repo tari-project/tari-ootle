@@ -2354,7 +2354,6 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     .chain(&binary_hash)
                     .result()
             );
-            // TODO: check if there is a template with the same address
             state.new_substate(template_address,
                                SubstateValue::PublishedTemplate(
                                    PublishedTemplate {

@@ -24,4 +24,5 @@ export type Instruction =
   | { ClaimBurn: { claim: ConfidentialClaim } }
   | { ClaimValidatorFees: { epoch: number; validator_public_key: string } }
   | "DropAllProofsInWorkspace"
-  | { AssertBucketContains: { key: Array<number>; resource_address: ResourceAddress; min_amount: Amount } };
+  | { AssertBucketContains: { key: Array<number>; resource_address: ResourceAddress; min_amount: Amount } }
+  | { PublishTemplate: { binary: Array<number> } };

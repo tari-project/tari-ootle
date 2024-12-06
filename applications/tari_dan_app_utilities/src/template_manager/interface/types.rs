@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::FixedHash;
+use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_storage::global::{DbTemplate, DbTemplateType};
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
@@ -41,7 +41,7 @@ impl From<DbTemplate> for TemplateMetadata {
     fn from(record: DbTemplate) -> Self {
         TemplateMetadata {
             name: record.template_name,
-            address: (*record.template_address).into(),
+            address: record.template_address,
             binary_sha: FixedHash::zero(),
         }
     }
@@ -67,11 +67,9 @@ impl From<DbTemplate> for Template {
             metadata: TemplateMetadata {
                 name: record.template_name,
                 // TODO: this will change when common engine types are moved around
-                address: (*record.template_address).into(),
-                url: record.url,
+                address: record.template_address,
                 // TODO: add field to db
                 binary_sha: FixedHash::zero(),
-                height: record.height,
             },
             executable: match record.template_type {
                 DbTemplateType::Wasm => TemplateExecutable::CompiledWasm(record.compiled_code.unwrap()),
@@ -85,7 +83,10 @@ impl From<DbTemplate> for Template {
 #[derive(Debug)]
 pub enum TemplateManagerRequest {
     AddTemplate {
-        template: Box<TemplateRegistration>,
+        author_public_key: PublicKey,
+        template_address: tari_engine_types::TemplateAddress,
+        template: TemplateExecutable,
+        template_name: Option<String>,
         reply: oneshot::Sender<Result<(), TemplateManagerError>>,
     },
     GetTemplate {

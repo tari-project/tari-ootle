@@ -96,7 +96,6 @@ impl ProcessManager {
                     name: template_data.name.clone(),
                     version: template_data.version,
                     contents_hash: template_data.contents_hash,
-                    contents_url: template_data.contents_url.clone(),
                 });
             }
         }
@@ -148,10 +147,6 @@ impl ProcessManager {
                             name,
                             version: 0,
                             contents_hash: hash,
-                            contents_url: Url::parse(&format!(
-                                "http://localhost:{}/templates/{}",
-                                self.web_server_port, file_name
-                            ))?,
                         })
                     }
                 }
@@ -175,22 +170,10 @@ impl ProcessManager {
             .await?
             .templates
             .iter()
-            .map(|metadata| {
-                let url = if let Ok(url) = Url::from_str(metadata.url.as_str()) {
-                    url
-                } else {
-                    Url::parse(&format!(
-                        "http://localhost:{}/templates/{}",
-                        self.web_server_port, metadata.name
-                    ))
-                    .unwrap()
-                };
-                TemplateData {
-                    name: metadata.name.clone(),
-                    version: 0,
-                    contents_hash: FixedHash::try_from(metadata.binary_sha.as_slice()).unwrap_or_default(),
-                    contents_url: url,
-                }
+            .map(|metadata| TemplateData {
+                name: metadata.name.clone(),
+                version: 0,
+                contents_hash: FixedHash::try_from(metadata.binary_sha.as_slice()).unwrap_or_default(),
             })
             .collect())
     }
@@ -511,33 +494,34 @@ impl ProcessManager {
     }
 
     async fn register_template(&mut self, data: TemplateData) -> anyhow::Result<()> {
-        let wallet = self.instance_manager.minotari_wallets().next().ok_or_else(|| {
-            anyhow!("No MinoTariConsoleWallet instances found. Please start a wallet before uploading a template")
-        })?;
-
-        let mut client = wallet.connect_client().await?;
-        let resp = client
-            .create_template_registration(grpc::CreateTemplateRegistrationRequest {
-                fee_per_gram: 10,
-                template_name: data.name,
-                template_version: data.version,
-                template_type: Some(grpc::TemplateType {
-                    template_type: Some(grpc::template_type::TemplateType::Wasm(grpc::WasmInfo {
-                        abi_version: 0,
-                    })),
-                }),
-                build_info: Some(grpc::BuildInfo {
-                    repo_url: "".to_string(),
-                    commit_hash: vec![],
-                }),
-                binary_sha: data.contents_hash.to_vec(),
-                binary_url: data.contents_url.to_string(),
-                sidechain_deployment_key: vec![],
-            })
-            .await?
-            .into_inner();
-        let template_address = TemplateAddress::try_from_vec(resp.template_address).unwrap();
-        info!("🟢 Registered template {template_address}.");
+        // TODO: handle properly on L2 instead of L1
+        // let wallet = self.instance_manager.minotari_wallets().next().ok_or_else(|| {
+        //     anyhow!("No MinoTariConsoleWallet instances found. Please start a wallet before uploading a template")
+        // })?;
+        //
+        // let mut client = wallet.connect_client().await?;
+        // let resp = client
+        //     .create_template_registration(grpc::CreateTemplateRegistrationRequest {
+        //         fee_per_gram: 10,
+        //         template_name: data.name,
+        //         template_version: data.version,
+        //         template_type: Some(grpc::TemplateType {
+        //             template_type: Some(grpc::template_type::TemplateType::Wasm(grpc::WasmInfo {
+        //                 abi_version: 0,
+        //             })),
+        //         }),
+        //         build_info: Some(grpc::BuildInfo {
+        //             repo_url: "".to_string(),
+        //             commit_hash: vec![],
+        //         }),
+        //         binary_sha: data.contents_hash.to_vec(),
+        //         binary_url: data.contents_url.to_string(),
+        //         sidechain_deployment_key: vec![],
+        //     })
+        //     .await?
+        //     .into_inner();
+        // let template_address = TemplateAddress::try_from_vec(resp.template_address).unwrap();
+        // info!("🟢 Registered template {template_address}.");
 
         Ok(())
     }

@@ -350,7 +350,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 )?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),
+            Instruction::PublishTemplate { binary } => {
+                Self::publish_template(config, template_provider, runtime, binary)
+            },
         }
     }
 

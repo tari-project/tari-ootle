@@ -345,7 +345,6 @@ pub async fn spawn_services(
         global_db.clone(),
         base_node_client.clone(),
         epoch_manager.clone(),
-        template_manager_service.clone(),
         shutdown.clone(),
         consensus_constants,
         state_store.clone(),

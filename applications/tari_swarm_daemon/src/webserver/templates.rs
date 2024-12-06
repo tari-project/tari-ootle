@@ -94,7 +94,6 @@ pub async fn upload(
             name,
             version: 0,
             contents_hash: hash,
-            contents_url: template_url.clone(),
         };
 
         return match context.process_manager().register_template(data).await {

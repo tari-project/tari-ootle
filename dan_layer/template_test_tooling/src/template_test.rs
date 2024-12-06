@@ -101,7 +101,7 @@ impl TemplateTest {
 
         let mut name_to_template = HashMap::new();
 
-        for (addr, template) in package.iter() {
+        for (addr, template) in package.templates().iter() {
             if name_to_template
                 .insert(template.template_name().to_string(), *addr)
                 .is_some()
@@ -255,7 +255,7 @@ impl TemplateTest {
         }
     }
 
-    pub fn get_module(&self, module_name: &str) -> &LoadedWasmTemplate {
+    pub fn get_module(&self, module_name: &str) -> LoadedWasmTemplate {
         let addr = self.name_to_template.get(module_name).unwrap();
         match self.package.get_template_by_address(addr).unwrap() {
             LoadedTemplate::Wasm(wasm) => wasm,

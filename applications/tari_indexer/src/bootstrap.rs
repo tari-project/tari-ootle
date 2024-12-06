@@ -142,7 +142,6 @@ pub async fn spawn_services(
         global_db,
         base_node_client.clone(),
         epoch_manager.clone(),
-        template_manager_service.clone(),
         shutdown.clone(),
         consensus_constants,
         // TODO: Remove coupling between scanner and shard store

@@ -618,9 +618,7 @@ impl JsonRpcHandlers {
                 .map(|t| TemplateMetadata {
                     name: t.name,
                     address: t.address,
-                    url: t.url,
                     binary_sha: to_hex(t.binary_sha.as_slice()),
-                    height: t.height,
                 })
                 .collect(),
         }))

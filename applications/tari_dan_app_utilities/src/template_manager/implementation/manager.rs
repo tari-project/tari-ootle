@@ -124,9 +124,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             metadata: TemplateMetadata {
                 name: name.to_string(),
                 address,
-                url: "".to_string(),
                 binary_sha,
-                height: 0,
             },
             executable: TemplateExecutable::CompiledWasm(compiled_code),
         }
@@ -223,10 +221,10 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         }
 
         let template = DbTemplate {
-            author_public_key: FixedHash::from(author_public_key.to_vec().as_slice()),
+            author_public_key: FixedHash::try_from(author_public_key.to_vec().as_slice())?,
             template_name,
             template_address,
-            expected_hash: FixedHash::from(template_hash),
+            expected_hash: FixedHash::from(template_hash.into_array()),
             status: TemplateStatus::New,
             compiled_code,
             added_at: Utc::now().naive_utc(),

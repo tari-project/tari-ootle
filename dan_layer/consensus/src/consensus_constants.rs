@@ -65,7 +65,7 @@ impl ConsensusConstants {
             max_block_size: 500,
             fee_exhaust_divisor: 20, // 5%
             epochs_per_era: Epoch(10),
-            template_binary_max_size_bytes: 1000 * 1000 * 2, // 2 MB
+            template_binary_max_size_bytes: 1000 * 1000 * 5, // 5 MB
         }
     }
 }

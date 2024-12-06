@@ -538,7 +538,7 @@ impl TestBuilder {
                     max_block_size: 500,
                     fee_exhaust_divisor: 20,
                     epochs_per_era: Epoch(10),
-                    template_binary_max_size_bytes: 1000 * 1000 * 2,
+                    template_binary_max_size_bytes: 1000 * 1000 * 5,
                 },
             },
         }

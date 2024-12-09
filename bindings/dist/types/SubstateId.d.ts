@@ -24,5 +24,5 @@ export type SubstateId = {
 } | {
     FeeClaim: FeeClaimAddress;
 } | {
-    PublishedTemplate: PublishedTemplateAddress;
+    Template: PublishedTemplateAddress;
 };

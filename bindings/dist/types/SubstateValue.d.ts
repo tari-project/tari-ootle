@@ -24,5 +24,5 @@ export type SubstateValue = {
 } | {
     FeeClaim: FeeClaim;
 } | {
-    PublishedTemplate: PublishedTemplate;
+    Template: PublishedTemplate;
 };

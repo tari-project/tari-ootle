@@ -34,7 +34,7 @@ pub enum BinaryTag {
     FeeClaim = 135,
     ProofId = 136,
     UnclaimedConfidentialOutputAddress = 137,
-    PublishedTemplateAddress = 138,
+    TemplateAddress = 138,
 }
 
 impl BinaryTag {
@@ -50,7 +50,7 @@ impl BinaryTag {
             135 => Some(Self::FeeClaim),
             136 => Some(Self::ProofId),
             137 => Some(Self::UnclaimedConfidentialOutputAddress),
-            138 => Some(Self::PublishedTemplateAddress),
+            138 => Some(Self::TemplateAddress),
             _ => None,
         }
     }
@@ -77,7 +77,7 @@ mod tests {
             BinaryTag::FeeClaim,
             BinaryTag::ProofId,
             BinaryTag::UnclaimedConfidentialOutputAddress,
-            BinaryTag::PublishedTemplateAddress,
+            BinaryTag::TemplateAddress,
         ];
 
         for case in cases {

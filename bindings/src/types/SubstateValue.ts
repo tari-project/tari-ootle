@@ -18,4 +18,4 @@ export type SubstateValue =
   | { UnclaimedConfidentialOutput: UnclaimedConfidentialOutput }
   | { TransactionReceipt: TransactionReceipt }
   | { FeeClaim: FeeClaim }
-  | { PublishedTemplate: PublishedTemplate };
+  | { Template: PublishedTemplate };

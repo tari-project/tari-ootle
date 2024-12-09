@@ -1,3 +1,3 @@
 export interface PublishedTemplate {
-    template: Array<number>;
+    binary: Array<number>;
 }

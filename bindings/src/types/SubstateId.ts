@@ -18,4 +18,4 @@ export type SubstateId =
   | { NonFungibleIndex: NonFungibleIndexAddress }
   | { TransactionReceipt: TransactionReceiptAddress }
   | { FeeClaim: FeeClaimAddress }
-  | { PublishedTemplate: PublishedTemplateAddress };
+  | { Template: PublishedTemplateAddress };

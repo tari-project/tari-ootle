@@ -200,7 +200,7 @@ impl Runtime {
                         .interface
                         .workspace_invoke(WorkspaceAction::Get, invoke_args![key].into())?;
                     resolved.push(value.into_value()?);
-                },
+                }
                 Arg::Literal(v) => resolved.push(decode_exact(&v)?),
             }
         }

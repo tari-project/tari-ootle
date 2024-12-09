@@ -180,7 +180,7 @@ pub enum EngineHashDomainLabel {
     ComponentAddress,
     TransactionReceipt,
     FeeClaimAddress,
-    PublishedTemplateAddress,
+    TemplateAddress,
     QuorumCertificate,
     SubstateValue,
     ViewKey,
@@ -207,7 +207,7 @@ impl EngineHashDomainLabel {
             Self::QuorumCertificate => "QuorumCertificate",
             Self::SubstateValue => "SubstateValue",
             Self::ViewKey => "ViewKey",
-            Self::PublishedTemplateAddress => "PublishedTemplateAddress",
+            Self::TemplateAddress => "TemplateAddress",
         }
     }
 }

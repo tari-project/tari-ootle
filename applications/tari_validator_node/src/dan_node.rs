@@ -20,14 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::Services;
 use log::*;
+use std::any::Any;
 use tari_consensus::hotstuff::HotstuffEvent;
+use tari_dan_storage::consensus_models::Decision;
 use tari_dan_storage::{consensus_models::Block, StateStore};
+use tari_engine_types::instruction::Instruction;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
-
-use crate::Services;
 
 const LOG_TARGET: &str = "tari::validator_node::dan_node";
 
@@ -93,7 +95,50 @@ impl DanNode {
         };
 
         let block = self.services.state_store.with_read_tx(|tx| Block::get(tx, &block_id))?;
+
         info!(target: LOG_TARGET, "🏁 Block {} committed", block);
+
+        // add wasm templates to template manager if available in any of the new block's transactions
+        let mut template_counter = 0;
+        self.services.state_store
+            .with_read_tx(|tx| block.get_transactions(tx))?
+            .iter()
+            .filter(|record| {
+                if let Some(decision) = record.final_decision {
+                    if decision == Decision::Commit {
+                        return true;
+                    }
+                }
+                false
+            })
+            .flat_map(|record| {
+                let transaction_signer_public_key = record
+                    .transaction
+                    .signatures()
+                    .first()
+                    .map(|sig| sig.public_key().clone());
+                if let Some(signer_pub_key) = transaction_signer_public_key {
+                    return Some((signer_pub_key, record.transaction.instructions()));
+                }
+                None
+            })
+            .filter_map(|(signer_pub_key, instructions)| {
+                instructions.iter().filter(|instruction| {
+                    // TODO: finish impl
+                })
+                // for instruction in instructions {
+                //     if let Instruction::PublishTemplate { binary } = instruction {
+                //         return Some((signer_pub_key, binary.as_slice()));
+                //     }
+                //     None
+                // }
+            })
+            .for_each(|binary| {});
+
+        if template_counter > 0 {
+            info!(target: LOG_TARGET, "🏁 {} new templates have been persisted locally.", template_counter);
+        }
+
         let committed_transactions = block
             .commands()
             .iter()

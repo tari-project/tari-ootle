@@ -420,7 +420,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             // if the validator node MR has changed, we need to update the active validator node set
             if self
                 .last_scanned_validator_node_mr
-                .is_none_or(|last| last != current_validator_node_mr)
+                .map_or(true, |last| last != current_validator_node_mr)
             {
                 let constants = self.base_node_client.get_consensus_constants(block_info.height).await?;
                 let scanned_epoch = constants.height_to_epoch(block_info.height);

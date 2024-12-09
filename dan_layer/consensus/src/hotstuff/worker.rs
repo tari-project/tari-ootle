@@ -139,6 +139,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 config.clone(),
                 state_store.clone(),
                 epoch_manager.clone(),
+                pacemaker.clone_handle().current_view().clone(),
                 leader_strategy.clone(),
                 signing_service.clone(),
                 outbound_messaging.clone(),
@@ -438,6 +439,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 Ok(())
             },
             MessageValidationResult::Discard => Ok(()),
+            // In these cases, we want to propagate the error back to the state machine, to allow sync
+            MessageValidationResult::Invalid {
+                err: err @ HotStuffError::FallenBehind { .. },
+                ..
+            } |
+            MessageValidationResult::Invalid {
+                err: err @ HotStuffError::ProposalValidationError(ProposalValidationError::FutureEpoch { .. }),
+                ..
+            } => {
+                self.hooks.on_error(&err);
+                Err(err)
+            },
             MessageValidationResult::Invalid { err, from, message } => {
                 self.hooks.on_error(&err);
                 error!(target: LOG_TARGET, "🚨 Invalid new message from {from}: {err} - {message}");

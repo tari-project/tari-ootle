@@ -257,4 +257,10 @@ pub enum ProposalValidationError {
     DummyBlockWithCommands { block_id: BlockId },
     #[error("Malformed block {block_id}: {details}")]
     MalformedBlock { block_id: BlockId, details: String },
+    #[error("Block {block_id} is for a future epoch. Current epoch: {current_epoch}, block epoch: {block_epoch}")]
+    FutureEpoch {
+        block_id: BlockId,
+        current_epoch: Epoch,
+        block_epoch: Epoch,
+    },
 }

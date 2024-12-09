@@ -1220,7 +1220,6 @@ async fn leader_failure_node_goes_down_and_gets_evicted() {
     let mut test = Test::builder()
         // Allow enough time for leader failures
         .with_test_timeout(Duration::from_secs(30))
-        .debug_sql("/tmp/test{}.db")
         .modify_consensus_constants(|config_mut| {
             // The node will be evicted after three missed proposals
             config_mut.missed_proposal_suspend_threshold = 1;

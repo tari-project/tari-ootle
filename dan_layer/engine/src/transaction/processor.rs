@@ -26,31 +26,28 @@ use log::*;
 use tari_bor::to_value;
 use tari_common::configuration::Network;
 use tari_common_types::types::PublicKey;
-use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::new_component_address_from_public_key,
     entity_id_provider::EntityIdProvider,
-    indexed_value::{IndexedValue, IndexedWellKnownTypes},
+    indexed_value::IndexedWellKnownTypes,
     instruction::Instruction,
     instruction_result::InstructionResult,
     lock::LockFlag,
-    published_template::PublishedTemplate,
     virtual_substate::VirtualSubstates,
 };
-use tari_template_abi::{FunctionDef, Type};
+use tari_template_abi::FunctionDef;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     arg,
     args,
-    args::{Arg, LogLevel, WorkspaceAction},
+    args::{Arg, WorkspaceAction},
     auth::OwnerRule,
     crypto::RistrettoPublicKeyBytes,
     invoke_args,
     models::{Bucket, ComponentAddress, NonFungibleAddress},
     prelude::{AccessRules, TemplateAddress},
-    Hash,
 };
 use tari_transaction::Transaction;
 use tari_utilities::ByteArray;
@@ -127,7 +124,7 @@ pub struct TransactionProcessor<TTemplateProvider> {
     modules: Vec<Arc<dyn RuntimeModule>>,
 }
 
-impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
+impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
     pub fn new(
         config: TransactionProcessorConfig,
         template_provider: Arc<TTemplateProvider>,
@@ -210,7 +207,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     });
                 }
                 execution_results
-            }
+            },
             Err(err) => {
                 return Ok(ExecuteResult {
                     finalize: FinalizeResult::new_rejected(
@@ -219,7 +216,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     ),
                     execution_time: timer.elapsed(),
                 });
-            }
+            },
         };
 
         let instruction_result = Self::process_instructions(&config, &*template_provider, &runtime, instructions);
@@ -236,7 +233,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     finalize,
                     execution_time: timer.elapsed(),
                 })
-            }
+            },
             // This can happen e.g if you have dangling buckets after running the instructions
             Err(err) => {
                 // Reset the state to when the state at the end of the fee instructions. The fee charges for the
@@ -257,7 +254,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     finalize,
                     execution_time: timer.elapsed(),
                 })
-            }
+            },
         }
     }
 
@@ -316,20 +313,20 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
             Instruction::PutLastInstructionOutputOnWorkspace { key } => {
                 Self::put_output_on_workspace_with_name(runtime, key)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::DropAllProofsInWorkspace => {
                 Self::drop_all_proofs_in_workspace(runtime)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::EmitLog { level, message } => {
                 runtime.interface().emit_log(level, message)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::ClaimBurn { claim } => {
                 // Need to call it on the runtime so that a bucket is created.
                 runtime.interface().claim_burn(*claim)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::ClaimValidatorFees {
                 epoch,
                 validator_public_key,
@@ -338,7 +335,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     .interface()
                     .claim_validator_fees(Epoch(epoch), validator_public_key)?;
                 Ok(InstructionResult::empty())
-            }
+            },
             Instruction::AssertBucketContains {
                 key,
                 resource_address,
@@ -349,10 +346,8 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     invoke_args![key, resource_address, min_amount].into(),
                 )?;
                 Ok(InstructionResult::empty())
-            }
-            Instruction::PublishTemplate { binary } => {
-                Self::publish_template(config, template_provider, runtime, binary)
-            }
+            },
+            Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),
         }
     }
 
@@ -373,7 +368,6 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
     /// Load, validate template binary and adds it to TemplateProvider.
     pub fn publish_template(
         config: &TransactionProcessorConfig,
-        template_provider: &TTemplateProvider,
         runtime: &Runtime,
         binary: Vec<u8>,
     ) -> Result<InstructionResult, TransactionError> {
@@ -388,18 +382,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
         WasmModule::load_template_from_code(binary.as_slice())?;
 
         // creating new substate
-        let (author_public_key, template_address) = runtime.interface().publish_template(binary.as_slice())?;
-        let template_address = template_address.as_hash()?;
-
-        // TODO: move this call when tx is COMMITTED, block committed event
-        // add new template to template provider.
-        template_provider
-            .add_wasm_template(
-                author_public_key,
-                TemplateAddress::from(template_address),
-                binary.as_slice(),
-            )
-            .map_err(|error| TransactionError::TemplateProvider(error.to_string()))?;
+        runtime.interface().publish_template(binary.as_slice())?;
 
         Ok(InstructionResult::empty())
     }
@@ -607,7 +590,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                 let mut store = loaded.create_store();
                 let mut process = WasmProcess::init(&mut store, loaded, runtime)?;
                 process.invoke(&mut store, &function_def, args)?
-            }
+            },
             LoadedTemplate::Flow(flow_factory) => {
                 flow_factory.run_new_instance(
                     Arc::new(template_provider.clone()),
@@ -618,7 +601,7 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate> + 'static> Tra
                     0,
                     MAX_CALL_DEPTH,
                 )?
-            }
+            },
         };
         Ok(result)
     }

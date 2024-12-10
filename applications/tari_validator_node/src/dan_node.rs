@@ -20,16 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::Services;
 use log::*;
-use std::any::Any;
+use tari_common_types::types::PublicKey;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_dan_storage::consensus_models::Decision;
-use tari_dan_storage::{consensus_models::Block, StateStore};
-use tari_engine_types::instruction::Instruction;
+use tari_dan_app_utilities::template_manager::interface::TemplateExecutable;
+use tari_dan_storage::{
+    consensus_models::{Block, Decision},
+    StateStore,
+};
+use tari_engine_types::{
+    commit_result::TransactionResult,
+    instruction::Instruction,
+    substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
+    TemplateAddress,
+};
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
+
+use crate::Services;
 
 const LOG_TARGET: &str = "tari::validator_node::dan_node";
 
@@ -87,6 +96,70 @@ impl DanNode {
         Ok(())
     }
 
+    /// Handles template publishes, adds all the committed templates to template manager
+    /// from the given block.
+    async fn handle_template_publishes(&self, block: &Block) -> Result<(), anyhow::Error> {
+        // add wasm templates to template manager if available in any of the new block's transactions
+        let mut template_counter = 0;
+        let templates: Vec<(PublicKey, TemplateAddress, TemplateExecutable)> = self
+            .services
+            .state_store
+            .with_read_tx(|tx| block.get_transactions(tx))?
+            .iter()
+            .filter(|record| {
+                if let Some(decision) = record.final_decision {
+                    if decision == Decision::Commit {
+                        return true;
+                    }
+                }
+                false
+            })
+            .filter_map(|record| {
+                let tx_signature = record.transaction.signatures().first();
+                if let Some(tx_signature) = tx_signature {
+                    let signer_pub_key = tx_signature.public_key();
+                    return match &record.execution_result {
+                        Some(result) => {
+                            if let TransactionResult::Accept(diff) = &result.finalize.result {
+                                for (substate_id, substate) in diff.up_iter() {
+                                    if let SubstateId::Template(template_address) = substate_id {
+                                        if let Ok(template_address_hash) = template_address.as_hash() {
+                                            if let SubstateValue::Template(template) = substate.substate_value() {
+                                                return Some((
+                                                    signer_pub_key.clone(),
+                                                    TemplateAddress::from(template_address_hash),
+                                                    TemplateExecutable::CompiledWasm(template.binary.clone()),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            None
+                        },
+                        None => None,
+                    };
+                }
+                None
+            })
+            .collect();
+
+        // adding templates to template manager
+        for (author_pub_key, template_address, template) in templates {
+            self.services
+                .template_manager
+                .add_template(author_pub_key, template_address, template)
+                .await?;
+            template_counter += 1;
+        }
+
+        if template_counter > 0 {
+            info!(target: LOG_TARGET, "🏁 {} new template(s) have been persisted locally.", template_counter);
+        }
+
+        Ok(())
+    }
+
     async fn handle_hotstuff_event(&self, event: HotstuffEvent) -> Result<(), anyhow::Error> {
         info!(target: LOG_TARGET, "🔥 consensus event: {event}");
 
@@ -98,46 +171,7 @@ impl DanNode {
 
         info!(target: LOG_TARGET, "🏁 Block {} committed", block);
 
-        // add wasm templates to template manager if available in any of the new block's transactions
-        let mut template_counter = 0;
-        self.services.state_store
-            .with_read_tx(|tx| block.get_transactions(tx))?
-            .iter()
-            .filter(|record| {
-                if let Some(decision) = record.final_decision {
-                    if decision == Decision::Commit {
-                        return true;
-                    }
-                }
-                false
-            })
-            .flat_map(|record| {
-                let transaction_signer_public_key = record
-                    .transaction
-                    .signatures()
-                    .first()
-                    .map(|sig| sig.public_key().clone());
-                if let Some(signer_pub_key) = transaction_signer_public_key {
-                    return Some((signer_pub_key, record.transaction.instructions()));
-                }
-                None
-            })
-            .filter_map(|(signer_pub_key, instructions)| {
-                instructions.iter().filter(|instruction| {
-                    // TODO: finish impl
-                })
-                // for instruction in instructions {
-                //     if let Instruction::PublishTemplate { binary } = instruction {
-                //         return Some((signer_pub_key, binary.as_slice()));
-                //     }
-                //     None
-                // }
-            })
-            .for_each(|binary| {});
-
-        if template_counter > 0 {
-            info!(target: LOG_TARGET, "🏁 {} new templates have been persisted locally.", template_counter);
-        }
+        self.handle_template_publishes(&block).await?;
 
         let committed_transactions = block
             .commands()

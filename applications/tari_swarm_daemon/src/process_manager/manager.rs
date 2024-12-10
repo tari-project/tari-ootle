@@ -5,21 +5,17 @@ use std::{
     collections::{HashMap, HashSet},
     fs::File,
     path::PathBuf,
-    str::FromStr,
     time::Duration,
 };
 
 use anyhow::{anyhow, Context};
 use log::info;
-use minotari_node_grpc_client::grpc;
 use tari_common_types::types::FixedHash;
-use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_engine::wasm::WasmModule;
-use tari_engine_types::{calculate_template_binary_hash, TemplateAddress};
+use tari_engine_types::calculate_template_binary_hash;
 use tari_shutdown::ShutdownSignal;
 use tari_validator_node_client::types::GetTemplatesRequest;
 use tokio::{sync::mpsc, time::sleep};
-use url::Url;
 
 use crate::{
     config::{Config, InstanceType},
@@ -40,7 +36,6 @@ pub struct ProcessManager {
     skip_registration: bool,
     disable_template_auto_register: bool,
     base_dir: PathBuf,
-    web_server_port: u16,
 }
 
 impl ProcessManager {
@@ -62,7 +57,6 @@ impl ProcessManager {
             shutdown_signal,
             disable_template_auto_register: !config.auto_register_previous_templates,
             base_dir: config.base_dir.clone(),
-            web_server_port: config.webserver.bind_address.port(),
         };
         (this, ProcessManagerHandle::new(tx_request))
     }

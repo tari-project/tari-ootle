@@ -165,10 +165,10 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 TemplateExecutable::CompiledWasm(wasm) => {
                     let binary = fs::read(dbg_replacement).expect("Could not read debug file");
                     *wasm = binary;
-                }
+                },
                 TemplateExecutable::Flow(_) => {
                     todo!("debug replacements for flow templates not implemented");
-                }
+                },
                 _ => return Err(TemplateManagerError::TemplateUnavailable),
             }
 
@@ -210,15 +210,17 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 template_hash = template_hasher32().chain(binary.as_slice()).result();
                 compiled_code = Some(binary);
                 template_name = loaded_template.template_name().to_string();
-            }
+            },
             TemplateExecutable::Manifest(curr_manifest) => {
                 template_hash = template_hasher32().chain(curr_manifest.as_str()).result();
                 manifest = Some(curr_manifest);
-            }
+                template_type = DbTemplateType::Manifest;
+            },
             TemplateExecutable::Flow(curr_flow_json) => {
                 template_hash = template_hasher32().chain(curr_flow_json.as_str()).result();
                 flow_json = Some(curr_flow_json);
-            }
+                template_type = DbTemplateType::Flow;
+            },
         }
 
         let template = DbTemplate {
@@ -236,7 +238,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
 
         let mut tx = self.global_db.create_transaction()?;
         let mut templates_db = self.global_db.templates(&mut tx);
-        if templates_db.get_template(&*template.template_address)?.is_some() {
+        if templates_db.get_template(&template.template_address)?.is_some() {
             return Ok(());
         }
         templates_db.insert_template(template)?;
@@ -297,13 +299,13 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
             TemplateExecutable::CompiledWasm(wasm) => {
                 let module = WasmModule::from_code(wasm);
                 module.load_template()?
-            }
+            },
             TemplateExecutable::Manifest(_) => return Err(TemplateManagerError::UnsupportedTemplateType),
             TemplateExecutable::Flow(flow_json) => {
                 let definition: FlowFunctionDefinition = serde_json::from_str(&flow_json)?;
                 let factory = FlowFactory::try_create::<Self>(definition)?;
                 LoadedTemplate::Flow(factory)
-            }
+            },
         };
 
         self.cache.insert(*address, loaded.clone());

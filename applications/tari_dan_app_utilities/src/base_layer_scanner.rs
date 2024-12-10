@@ -77,7 +77,6 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
     scan_base_layer: bool,
     base_layer_scanning_interval: Duration,
     validator_node_sidechain_id: Option<RistrettoPublicKey>,
-    template_sidechain_id: Option<RistrettoPublicKey>,
     burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
 ) -> JoinHandle<anyhow::Result<()>> {
     task::spawn(async move {
@@ -91,7 +90,6 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
             scan_base_layer,
             base_layer_scanning_interval,
             validator_node_sidechain_id,
-            template_sidechain_id,
             burnt_utxo_sidechain_id,
         );
 
@@ -116,7 +114,6 @@ pub struct BaseLayerScanner<TAddr> {
     base_layer_scanning_interval: Duration,
     has_attempted_scan: bool,
     validator_node_sidechain_id: Option<PublicKey>,
-    template_sidechain_id: Option<PublicKey>,
     burnt_utxo_sidechain_id: Option<PublicKey>,
 }
 
@@ -131,7 +128,6 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         scan_base_layer: bool,
         base_layer_scanning_interval: Duration,
         validator_node_sidechain_id: Option<PublicKey>,
-        template_sidechain_id: Option<PublicKey>,
         burnt_utxo_sidechain_id: Option<PublicKey>,
     ) -> Self {
         Self {
@@ -150,7 +146,6 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             base_layer_scanning_interval,
             has_attempted_scan: false,
             validator_node_sidechain_id,
-            template_sidechain_id,
             burnt_utxo_sidechain_id,
         }
     }

@@ -139,7 +139,7 @@ pub struct RuntimeInterfaceImpl<TTemplateProvider> {
     network: Network,
 }
 
-impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate>> RuntimeInterfaceImpl<TTemplateProvider> {
+impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInterfaceImpl<TTemplateProvider> {
     pub fn initialize(
         tracker: StateTracker,
         template_provider: Arc<TTemplateProvider>,
@@ -355,11 +355,11 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate>> RuntimeInterf
             function,
             args,
         )
-            .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
-                template_address: *template_address,
-                function: function.to_string(),
-                details: e.to_string(),
-            })
+        .map_err(|e| RuntimeError::CrossTemplateCallFunctionError {
+            template_address: *template_address,
+            function: function.to_string(),
+            details: e.to_string(),
+        })
     }
 
     fn check_resource_auth_hook(&self, hook: &AuthHook) -> Result<(), RuntimeError> {
@@ -416,8 +416,8 @@ impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate>> RuntimeInterf
     }
 }
 
-impl<TTemplateProvider: TemplateProvider<Template=LoadedTemplate>> RuntimeInterface
-for RuntimeInterfaceImpl<TTemplateProvider>
+impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInterface
+    for RuntimeInterfaceImpl<TTemplateProvider>
 {
     fn next_entity_id(&self) -> Result<EntityId, RuntimeError> {
         let id = self.entity_id_provider.next_entity_id()?;
@@ -492,7 +492,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     );
 
                 Ok(InvokeResult::encode(&sender_public_key)?)
-            }
+            },
             CallerContextAction::GetComponentAddress => self.tracker.read_with(|state| {
                 args.assert_no_args("CallerContextAction::GetComponentAddress")?;
                 let call_frame = state.current_call_scope()?;
@@ -563,7 +563,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                 let owner_key = match owner_rule {
                     OwnerRule::OwnedBySigner => {
                         Some(to_ristretto_public_key_bytes(&self.transaction_signer_public_key))
-                    }
+                    },
                     OwnerRule::None => None,
                     OwnerRule::ByAccessRule(_) => None,
                     OwnerRule::ByPublicKey(key) => Some(key),
@@ -577,7 +577,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     address_allocation,
                 )?;
                 Ok(InvokeResult::encode(&component_address)?)
-            }
+            },
             ComponentAction::GetState => {
                 let component_address =
                     component_ref
@@ -622,7 +622,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(result)
                 })
-            }
+            },
             ComponentAction::SetState => {
                 let component_address =
                     component_ref
@@ -663,7 +663,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
             ComponentAction::SetAccessRules => {
                 let component_address =
                     component_ref
@@ -709,7 +709,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                 })?;
 
                 Ok(InvokeResult::unit())
-            }
+            },
             ComponentAction::GetTemplateAddress => {
                 let component_address =
                     component_ref
@@ -733,7 +733,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&component.template_address)?)
                 })
-            }
+            },
         }
     }
 
@@ -779,7 +779,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                 let owner_key = match &arg.owner_rule {
                     OwnerRule::OwnedBySigner => {
                         Some(to_ristretto_public_key_bytes(&self.transaction_signer_public_key))
-                    }
+                    },
                     OwnerRule::ByPublicKey(key) => Some(*key),
                     OwnerRule::None | OwnerRule::ByAccessRule(_) => None,
                 };
@@ -826,7 +826,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&(resource_address, output_bucket))?)
                 })
-            }
+            },
 
             ResourceAction::GetTotalSupply => {
                 let resource_address =
@@ -844,7 +844,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(locked)?;
                     Ok(InvokeResult::encode(&total_supply)?)
                 })
-            }
+            },
             ResourceAction::GetResourceType => {
                 let resource_address =
                     resource_ref
@@ -863,7 +863,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(locked)?;
                     Ok(InvokeResult::encode(&resource_type)?)
                 })
-            }
+            },
             ResourceAction::Mint => {
                 let resource_address =
                     resource_ref
@@ -904,7 +904,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&bucket)?)
                 })
-            }
+            },
             ResourceAction::Recall => {
                 let resource_address =
                     resource_ref
@@ -952,7 +952,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                         bucket_id,
                     ))?)
                 })
-            }
+            },
             ResourceAction::GetNonFungible => {
                 let resource_address =
                     resource_ref
@@ -981,7 +981,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(addr.as_non_fungible_address().unwrap())?)
                 })
-            }
+            },
             ResourceAction::UpdateNonFungibleData => {
                 let resource_address =
                     resource_ref
@@ -1038,7 +1038,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
             ResourceAction::UpdateAccessRules => {
                 let resource_address =
                     resource_ref
@@ -1074,7 +1074,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
         }
     }
 
@@ -1125,10 +1125,10 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                         ResourceType::Fungible => ResourceContainer::fungible(*resource_address, 0.into()),
                         ResourceType::NonFungible => {
                             ResourceContainer::non_fungible(*resource_address, Default::default())
-                        }
+                        },
                         ResourceType::Confidential => {
                             ResourceContainer::confidential(*resource_address, None, Amount::zero())
-                        }
+                        },
                     };
 
                     let vault = Vault::new(resource);
@@ -1149,7 +1149,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&vault_id)?)
                 })
-            }
+            },
             VaultAction::Deposit => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1211,7 +1211,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
             VaultAction::Withdraw => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1253,7 +1253,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                         VaultWithdrawArg::Fungible { amount } => {
                             let container = vault_mut.withdraw(amount)?;
                             (container, amount)
-                        }
+                        },
                         VaultWithdrawArg::NonFungible { ids } => {
                             let container = vault_mut.withdraw_non_fungibles(&ids)?;
                             let amount =
@@ -1261,12 +1261,12 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                                     details: "Could not convert to i64".to_owned(),
                                 })?);
                             (container, amount)
-                        }
+                        },
                         VaultWithdrawArg::Confidential { proof } => {
                             let amount = proof.revealed_input_amount();
                             let container = vault_mut.withdraw_confidential(*proof, maybe_view_key.as_ref())?;
                             (container, amount)
-                        }
+                        },
                     };
 
                     // Emit a builtin event for the withdraw
@@ -1288,7 +1288,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
                     Ok(InvokeResult::encode(&bucket)?)
                 })
-            }
+            },
             VaultAction::GetBalance => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1302,7 +1302,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&balance)?)
                 })
-            }
+            },
             VaultAction::GetLockedBalance => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1316,7 +1316,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&balance)?)
                 })
-            }
+            },
             VaultAction::GetResourceAddress => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1330,7 +1330,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&resource_address)?)
                 })
-            }
+            },
             VaultAction::GetNonFungibleIds => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1345,7 +1345,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(vault_lock)?;
                     Ok(result)
                 })
-            }
+            },
             VaultAction::GetCommitmentCount => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1360,7 +1360,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(vault_lock)?;
                     Ok(InvokeResult::encode(&commitment_count)?)
                 })
-            }
+            },
             VaultAction::ConfidentialReveal => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1409,7 +1409,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
                     Ok(InvokeResult::encode(&bucket)?)
                 })
-            }
+            },
             VaultAction::PayFee => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1471,7 +1471,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
             VaultAction::CreateProofByResource => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1515,7 +1515,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&proof_id)?)
                 })
-            }
+            },
             VaultAction::CreateProofByFungibleAmount => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1559,7 +1559,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&proof_id)?)
                 })
-            }
+            },
             VaultAction::CreateProofByNonFungibles => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "vault_ref",
@@ -1603,7 +1603,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&proof_id)?)
                 })
-            }
+            },
             VaultAction::CreateProofByConfidentialResource => todo!("CreateProofByConfidentialResource"),
             VaultAction::GetNonFungibles => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
@@ -1626,7 +1626,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(vault_lock)?;
                     Ok(result)
                 })
-            }
+            },
         }
     }
 
@@ -1653,7 +1653,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let bucket = state.get_bucket(bucket_id)?;
                     Ok(InvokeResult::encode(bucket.resource_address())?)
                 })
-            }
+            },
             BucketAction::GetResourceType => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1665,7 +1665,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let bucket = state.get_bucket(bucket_id)?;
                     Ok(InvokeResult::encode(&bucket.resource_type())?)
                 })
-            }
+            },
             BucketAction::GetAmount => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1677,7 +1677,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let bucket = state.get_bucket(bucket_id)?;
                     Ok(InvokeResult::encode(&bucket.amount())?)
                 })
-            }
+            },
             BucketAction::Take => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1692,7 +1692,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.new_bucket(bucket_id, resource)?;
                     Ok(InvokeResult::encode(&bucket_id)?)
                 })
-            }
+            },
             BucketAction::TakeConfidential => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1712,7 +1712,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(resource_lock)?;
                     Ok(InvokeResult::encode(&bucket_id)?)
                 })
-            }
+            },
             BucketAction::Join => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1726,7 +1726,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     bucket.join(other_bucket)?;
                     Ok(InvokeResult::encode(&bucket_id)?)
                 })
-            }
+            },
             BucketAction::RevealConfidential => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1745,7 +1745,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(resource_lock)?;
                     Ok(InvokeResult::encode(&bucket_id)?)
                 })
-            }
+            },
             BucketAction::Burn => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1786,7 +1786,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
             BucketAction::CreateProof => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1828,7 +1828,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&proof_id)?)
                 })
-            }
+            },
             BucketAction::GetNonFungibleIds => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1840,7 +1840,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let bucket = state.get_bucket(bucket_id)?;
                     Ok(InvokeResult::encode(bucket.non_fungible_ids())?)
                 })
-            }
+            },
             BucketAction::GetNonFungibles => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1860,7 +1860,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::encode(&nfts)?)
                 })
-            }
+            },
             BucketAction::CountConfidentialCommitments => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "bucket_ref",
@@ -1872,7 +1872,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let bucket = state.get_bucket(bucket_id)?;
                     Ok(InvokeResult::encode(&bucket.number_of_confidential_commitments())?)
                 })
-            }
+            },
         }
     }
 
@@ -1902,7 +1902,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let proof = state.get_proof(proof_id)?;
                     Ok(InvokeResult::encode(&proof.amount())?)
                 })
-            }
+            },
             ProofAction::GetResourceAddress => {
                 let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "proof_ref",
@@ -1913,7 +1913,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let proof = state.get_proof(proof_id)?;
                     Ok(InvokeResult::encode(proof.resource_address())?)
                 })
-            }
+            },
             ProofAction::GetResourceType => {
                 let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "proof_ref",
@@ -1926,7 +1926,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let proof = state.get_proof(proof_id)?;
                     Ok(InvokeResult::encode(&proof.resource_type())?)
                 })
-            }
+            },
             ProofAction::GetNonFungibles => {
                 let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "proof_ref",
@@ -1940,7 +1940,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     let nfts = proof.non_fungible_token_ids();
                     Ok(InvokeResult::encode(&nfts)?)
                 })
-            }
+            },
             ProofAction::Authorize => {
                 let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "proof_ref",
@@ -1955,7 +1955,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.current_call_scope_mut()?.auth_scope_mut().add_proof(proof_id);
                     Ok(InvokeResult::encode(&Ok::<_, NotAuthorized>(()))?)
                 })
-            }
+            },
             ProofAction::DropAuthorize => {
                 let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "proof_ref",
@@ -1971,7 +1971,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
             ProofAction::Drop => {
                 let proof_id = proof_ref.proof_id().ok_or_else(|| RuntimeError::InvalidArgument {
                     argument: "proof_ref",
@@ -1982,7 +1982,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                 self.tracker.write_with(|state| state.drop_proof(proof_id))?;
 
                 Ok(InvokeResult::unit())
-            }
+            },
         }
     }
 
@@ -1995,7 +1995,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
             WorkspaceAction::ListBuckets => {
                 let bucket_ids = self.tracker.list_buckets();
                 Ok(InvokeResult::encode(&bucket_ids)?)
-            }
+            },
             // Basically names an output on the workspace so that you can refer to it as an
             // Arg::Variable
             WorkspaceAction::PutLastInstructionOutput => {
@@ -2010,12 +2010,12 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                 self.tracker
                     .with_workspace_mut(|workspace| workspace.insert(key, last_output))?;
                 Ok(InvokeResult::unit())
-            }
+            },
             WorkspaceAction::Get => {
                 let key: Vec<u8> = args.get(0)?;
                 let value = self.tracker.get_from_workspace(&key)?;
                 Ok(InvokeResult::from_value(value.into_value()))
-            }
+            },
 
             WorkspaceAction::DropAllProofs => {
                 let proofs = self
@@ -2028,7 +2028,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     }
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
             WorkspaceAction::AssertBucketContains => {
                 let key: Vec<u8> = args.get(0)?;
                 let resource_address: ResourceAddress = args.get(1)?;
@@ -2062,7 +2062,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::unit())
                 })
-            }
+            },
         }
     }
 
@@ -2098,7 +2098,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                     state.unlock_substate(nft_lock)?;
                     Ok(InvokeResult::from_value(contents))
                 })
-            }
+            },
             NonFungibleAction::GetMutableData => {
                 args.assert_no_args("NonFungibleAction::GetMutableData")?;
 
@@ -2118,7 +2118,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
 
                     Ok(InvokeResult::from_value(contents))
                 })
-            }
+            },
         }
     }
 
@@ -2128,7 +2128,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
             ConsensusAction::GetCurrentEpoch => {
                 let epoch = self.tracker.get_current_epoch()?;
                 Ok(InvokeResult::encode(&epoch)?)
-            }
+            },
         }
     }
 
@@ -2138,7 +2138,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
             GenerateRandomAction::GetRandomBytes { len } => {
                 let random = self.tracker.get_pseudorandom_bytes(len as usize)?;
                 Ok(InvokeResult::encode(&random)?)
-            }
+            },
         }
     }
 
@@ -2160,7 +2160,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                 } = args.assert_one_arg()?;
 
                 self.invoke_template_function(&template_address, &function, args)?
-            }
+            },
             CallAction::CallMethod => {
                 let CallMethodArg {
                     component_address,
@@ -2169,7 +2169,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
                 } = args.assert_one_arg()?;
 
                 self.invoke_component_method(&component_address, &method, args)?
-            }
+            },
         };
 
         Ok(InvokeResult::from_value(exec_result.indexed.into_value()))
@@ -2345,7 +2345,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
         Ok(InvokeResult::encode(&address)?)
     }
 
-    fn publish_template(&self, template: &[u8]) -> Result<(PublicKey, PublishedTemplateAddress), RuntimeError> {
+    fn publish_template(&self, template: &[u8]) -> Result<(), RuntimeError> {
         self.tracker.write_with(|state| {
             let binary_hash = template_hasher32().chain(template).result();
             let template_address = PublishedTemplateAddress::from_hash(
@@ -2363,7 +2363,7 @@ for RuntimeInterfaceImpl<TTemplateProvider>
             let scope_mut = state.current_call_scope_mut()?;
             scope_mut.move_node_to_owned(&template_address.into())?;
 
-            Ok((self.transaction_signer_public_key.clone(), template_address))
+            Ok(())
         })
     }
 }

@@ -20,11 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use tari_common_types::types::PublicKey;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{types::TemplateManagerRequest, Template, TemplateManagerError, TemplateMetadata};
+use super::{types::TemplateManagerRequest, Template, TemplateExecutable, TemplateManagerError, TemplateMetadata};
 
 #[derive(Debug, Clone)]
 pub struct TemplateManagerHandle {
@@ -58,6 +59,26 @@ impl TemplateManagerHandle {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(TemplateManagerRequest::GetTemplates { limit, reply: tx })
+            .await
+            .map_err(|_| TemplateManagerError::ChannelClosed)?;
+        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
+
+    pub async fn add_template(
+        &self,
+        author_public_key: PublicKey,
+        template_address: tari_engine_types::TemplateAddress,
+        template: TemplateExecutable,
+    ) -> Result<(), TemplateManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(TemplateManagerRequest::AddTemplate {
+                author_public_key,
+                template_address,
+                template,
+                template_name: None,
+                reply: tx,
+            })
             .await
             .map_err(|_| TemplateManagerError::ChannelClosed)?;
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?

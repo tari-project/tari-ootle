@@ -22,10 +22,7 @@ const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct PublishedTemplateAddress(#[cfg_attr(
-    feature = "ts",
-    ts(type = "string")
-)] BorTag<ObjectKey, TAG>);
+pub struct PublishedTemplateAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl PublishedTemplateAddress {
     pub const fn from_hash(hash: Hash) -> Self {

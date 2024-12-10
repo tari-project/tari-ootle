@@ -89,7 +89,7 @@ where
                     substate_addresses.insert(parent.address.substate_id, parent.address.version);
                     let children = self.store.with_read_tx(|tx| tx.substates_get_children(parent_addr))?;
                     substate_addresses.extend(children.into_iter().map(|s| (s.address.substate_id, s.address.version)));
-                }
+                },
                 None => {
                     let ValidatorScanResult { address, substate, .. } =
                         self.scan_for_substate(parent_addr, None).await?;
@@ -111,8 +111,8 @@ where
                                     self.scan_for_substate(&addr, None).await?;
                                 substate_addresses.insert(addr.substate_id, addr.version);
                             }
-                        }
-                        SubstateValue::Resource(_) => {}
+                        },
+                        SubstateValue::Resource(_) => {},
                         SubstateValue::TransactionReceipt(tx_receipt) => {
                             let tx_receipt_addr = SubstateId::TransactionReceipt(TransactionReceiptAddress::from_hash(
                                 tx_receipt.transaction_hash,
@@ -123,7 +123,7 @@ where
                             let ValidatorScanResult { address: addr, .. } =
                                 self.scan_for_substate(&tx_receipt_addr, None).await?;
                             substate_addresses.insert(addr.substate_id, addr.version);
-                        }
+                        },
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
                             if substate_addresses.contains_key(&resx_addr) {
@@ -132,8 +132,8 @@ where
                             let ValidatorScanResult { address: addr, .. } =
                                 self.scan_for_substate(&resx_addr, None).await?;
                             substate_addresses.insert(addr.substate_id, addr.version);
-                        }
-                        SubstateValue::NonFungible(_) => {}
+                        },
+                        SubstateValue::NonFungible(_) => {},
                         SubstateValue::NonFungibleIndex(addr) => {
                             let resx_addr = SubstateId::Resource(*addr.referenced_address().resource_address());
                             if substate_addresses.contains_key(&resx_addr) {
@@ -142,12 +142,12 @@ where
                             let ValidatorScanResult { address: addr, .. } =
                                 self.scan_for_substate(&resx_addr, None).await?;
                             substate_addresses.insert(addr.substate_id, addr.version);
-                        }
-                        SubstateValue::UnclaimedConfidentialOutput(_) => {}
-                        SubstateValue::FeeClaim(_) => {}
-                        SubstateValue::Template(_) => {}
+                        },
+                        SubstateValue::UnclaimedConfidentialOutput(_) => {},
+                        SubstateValue::FeeClaim(_) => {},
+                        SubstateValue::Template(_) => {},
                     }
-                }
+                },
             }
         }
 

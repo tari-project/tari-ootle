@@ -349,7 +349,7 @@ mod tests {
                 CommandOrdering::TransactionId(&TransactionId::default())
         );
         let commitment = UnclaimedConfidentialOutputAddress::from_str(
-            "component_0000000000000000000000000000000000000000000000000000000000000000",
+            "commitment_0000000000000000000000000000000000000000000000000000000000000000",
         )
         .unwrap();
 

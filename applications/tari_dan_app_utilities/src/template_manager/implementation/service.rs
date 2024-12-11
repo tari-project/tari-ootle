@@ -49,14 +49,14 @@ pub struct TemplateManagerService<TAddr> {
     rx_request: Receiver<TemplateManagerRequest>,
     manager: TemplateManager<TAddr>,
     completed_downloads: mpsc::Receiver<DownloadResult>,
-    download_queue: mpsc::Sender<DownloadRequest>,
+    // download_queue: mpsc::Sender<DownloadRequest>,
 }
 
 impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
     pub fn spawn(
         rx_request: Receiver<TemplateManagerRequest>,
         manager: TemplateManager<TAddr>,
-        download_queue: mpsc::Sender<DownloadRequest>,
+        _download_queue: mpsc::Sender<DownloadRequest>,
         completed_downloads: mpsc::Receiver<DownloadResult>,
         shutdown: ShutdownSignal,
     ) -> JoinHandle<anyhow::Result<()>> {
@@ -64,7 +64,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
             Self {
                 rx_request,
                 manager,
-                download_queue,
+                // download_queue,
                 completed_downloads,
             }
             .run(shutdown)

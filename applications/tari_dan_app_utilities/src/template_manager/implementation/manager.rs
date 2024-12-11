@@ -25,8 +25,8 @@ use std::{collections::HashMap, convert::TryFrom, fs, sync::Arc};
 use chrono::Utc;
 use log::*;
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_core::transactions::transaction_components::{BuildInfo, CodeTemplateRegistration, TemplateType};
-use tari_crypto::tari_utilities::{ByteArray, Hashable};
+use tari_core::transactions::transaction_components::{CodeTemplateRegistration, TemplateType};
+use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{optional::Optional, services::template_provider::TemplateProvider, NodeAddressable};
 use tari_dan_engine::{
     flow::FlowFactory,
@@ -36,11 +36,7 @@ use tari_dan_engine::{
 };
 use tari_dan_storage::global::{DbTemplate, DbTemplateType, DbTemplateUpdate, GlobalDb, TemplateStatus};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_engine_types::{
-    calculate_template_binary_hash,
-    hashing::template_hasher32,
-    published_template::{PublishedTemplate, PublishedTemplateAddress},
-};
+use tari_engine_types::{calculate_template_binary_hash, hashing::template_hasher32};
 use tari_template_builtin::{
     get_template_builtin,
     ACCOUNT_NFT_TEMPLATE_ADDRESS,
@@ -202,7 +198,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         let mut flow_json = None;
         let mut manifest = None;
         let mut template_type = DbTemplateType::Wasm;
-        let mut template_hash = Hash::default();
+        let template_hash: Hash;
         let mut template_name = template_name.unwrap_or(String::from("default"));
         match template {
             TemplateExecutable::CompiledWasm(binary) => {

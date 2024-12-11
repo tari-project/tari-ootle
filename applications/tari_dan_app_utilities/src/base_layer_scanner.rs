@@ -35,12 +35,7 @@ use tari_core::{
     base_node::comms_interface::ValidatorNodeChange,
     transactions::{
         tari_amount::MicroMinotari,
-        transaction_components::{
-            CodeTemplateRegistration,
-            SideChainFeatureData,
-            TransactionOutput,
-            ValidatorNodeRegistration,
-        },
+        transaction_components::{SideChainFeatureData, TransactionOutput, ValidatorNodeRegistration},
     },
 };
 use tari_crypto::{
@@ -65,10 +60,8 @@ use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::Sub
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_template_lib::models::{EncryptedData, TemplateAddress, UnclaimedConfidentialOutputAddress};
+use tari_template_lib::models::{EncryptedData, UnclaimedConfidentialOutputAddress};
 use tokio::{task, task::JoinHandle, time};
-
-use crate::template_manager::interface::{TemplateManagerError, TemplateManagerHandle};
 
 const LOG_TARGET: &str = "tari::dan::base_layer_scanner";
 

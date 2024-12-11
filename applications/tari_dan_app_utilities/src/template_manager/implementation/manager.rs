@@ -25,7 +25,6 @@ use std::{collections::HashMap, convert::TryFrom, fs, sync::Arc};
 use chrono::Utc;
 use log::*;
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_core::transactions::transaction_components::{CodeTemplateRegistration, TemplateType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{optional::Optional, services::template_provider::TemplateProvider, NodeAddressable};
 use tari_dan_engine::{

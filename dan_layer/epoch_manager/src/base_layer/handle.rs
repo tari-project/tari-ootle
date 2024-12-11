@@ -414,12 +414,14 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
+        limit: Option<usize>,
     ) -> Result<Committee<Self::Addr>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::GetCommitteeForShardGroup {
                 epoch,
                 shard_group,
+                limit,
                 reply: tx,
             })
             .await

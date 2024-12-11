@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use tari_common_types::types::PrivateKey;
-use tari_consensus::hotstuff::HotStuffError;
+use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage};
 use tari_dan_common_types::{optional::Optional, Epoch, LockIntent, NodeHeight, SubstateRequirement};
 use tari_dan_storage::{
     consensus_models::{
@@ -981,15 +981,19 @@ async fn leader_failure_node_goes_down() {
 async fn foreign_block_distribution() {
     setup_logger();
     let mut test = Test::builder()
+        .debug_sql("/tmp/test{}.db")
         .with_test_timeout(Duration::from_secs(60))
-        .with_message_filter(Box::new(move |from: &TestAddress, to: &TestAddress, _| {
-            match from.0.as_str() {
-                // We filter our message from each leader to the foreign committees. So we will rely on other members of
-                // the local committees to send the message to the foreign committee members. And then on
-                // the distribution within the foreign committee.
-                "1" => *to == TestAddress::new("1") || *to == TestAddress::new("2") || *to == TestAddress::new("3"),
-                "4" => *to == TestAddress::new("4") || *to == TestAddress::new("5") || *to == TestAddress::new("6"),
-                "7" => *to == TestAddress::new("7") || *to == TestAddress::new("8") || *to == TestAddress::new("9"),
+        .with_message_filter(Box::new(move |from: &TestAddress, to: &TestAddress, msg| {
+            if !matches!(msg, HotstuffMessage::ForeignProposalNotification(_)) {
+                return true;
+            }
+
+            match from.as_str() {
+                // We filter out some messages from each node to foreign committees to ensure we sometimes have to
+                // rely on other members of the foreign and local committees to receive the foreign proposal.
+                "1" => to == "1" || to == "2" || to == "3",
+                "4" => to == "4" || to == "5" || to == "6",
+                "7" => to == "7" || to == "8" || to == "9",
                 _ => true,
             }
         }))

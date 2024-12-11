@@ -301,6 +301,7 @@ create table lock_conflicts
     transaction_id text      not null,
     depends_on_tx  text      not null,
     lock_type      text      not null CHECK (lock_type IN ('Write', 'Read', 'Output')),
+    is_local_only  boolean   not null,
     created_at     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Note: cannot use foreign key for block_id since it does not yet exist when proposing
     FOREIGN KEY (transaction_id) REFERENCES transaction_pool (transaction_id) ON DELETE CASCADE,

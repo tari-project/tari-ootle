@@ -29,6 +29,3 @@ log = { workspace = true }
 serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, default-features = false, features = ["sync", "time", "macros", "rt"] }
-
-# REMOvE
-serde_json = { workspace = true }

@@ -9,4 +9,5 @@ pub struct LockConflict {
     pub transaction_id: TransactionId,
     pub existing_lock: SubstateLockType,
     pub requested_lock: SubstateLockType,
+    pub is_local_only: bool,
 }

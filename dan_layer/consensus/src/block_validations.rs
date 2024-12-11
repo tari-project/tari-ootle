@@ -10,7 +10,7 @@ use tari_dan_common_types::{
     Epoch,
     ExtraFieldKey,
 };
-use tari_dan_storage::consensus_models::Block;
+use tari_dan_storage::consensus_models::{Block, QuorumCertificate};
 use tari_epoch_manager::EpochManagerReader;
 
 use crate::{
@@ -68,7 +68,13 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     }
     check_proposed_by_leader(leader_strategy, committee_for_block, block)?;
     check_signature(block)?;
-    check_quorum_certificate::<TConsensusSpec>(block, committee_for_block, committee_info, vote_signing_service)?;
+    check_block(block)?;
+    check_quorum_certificate::<TConsensusSpec>(
+        block.justify(),
+        committee_for_block,
+        committee_info,
+        vote_signing_service,
+    )?;
     Ok(())
 }
 
@@ -205,25 +211,29 @@ pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidation
     Ok(())
 }
 
-pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
-    candidate_block: &Block,
-    committee: &Committee<TConsensusSpec::Addr>,
-    committee_info: &CommitteeInfo,
-    vote_signing_service: &TConsensusSpec::SignatureService,
-) -> Result<(), HotStuffError> {
+pub fn check_block(candidate_block: &Block) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
-    if qc.is_zero() {
-        // TODO: This is potentially dangerous. There should be a check
-        // to make sure this is the start of the chain.
-
-        return Ok(());
-    }
     if candidate_block.height() <= qc.block_height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
             justify_block_height: qc.block_height(),
             candidate_block_height: candidate_block.height(),
-        }
-        .into());
+        });
+    }
+
+    Ok(())
+}
+
+pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
+    qc: &QuorumCertificate,
+    committee: &Committee<TConsensusSpec::Addr>,
+    committee_info: &CommitteeInfo,
+    vote_signing_service: &TConsensusSpec::SignatureService,
+) -> Result<(), HotStuffError> {
+    if qc.justifies_zero_block() {
+        // TODO: This is potentially dangerous. There should be a check
+        // to make sure this is the start of the chain.
+
+        return Ok(());
     }
 
     if qc.signatures().is_empty() {

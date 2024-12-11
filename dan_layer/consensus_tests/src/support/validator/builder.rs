@@ -157,7 +157,7 @@ impl ValidatorBuilder {
             tx_current_state: tx_current_state.clone(),
         };
 
-        let mut worker = ConsensusWorker::new(shutdown_signal);
+        let mut worker = ConsensusWorker::new(shutdown_signal).no_initial_delay();
         let handle = tokio::spawn(async move { worker.run(context).await });
 
         let channels = ValidatorChannels {

@@ -169,6 +169,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 state_store.clone(),
                 epoch_manager.clone(),
                 pacemaker.clone_handle(),
+                outbound_messaging.clone(),
             ),
             on_receive_vote: OnReceiveVoteHandler::new(pacemaker.clone_handle(), vote_receiver.clone()),
             on_receive_new_view: OnReceiveNewViewHandler::new(
@@ -530,7 +531,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let is_any_block_unparked = !local_proposals.is_empty() || !foreign_proposals.is_empty();
 
         for msg in foreign_proposals {
-            if let Err(e) = self.on_receive_foreign_proposal.handle(msg, local_committee_info).await {
+            if let Err(e) = self
+                .on_receive_foreign_proposal
+                .handle_received(msg, local_committee_info)
+                .await
+            {
                 self.on_failure("check_if_block_can_be_unparked -> on_receive_foreign_proposal", &e)
                     .await;
                 return Err(e);
@@ -539,7 +544,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         for msg in local_proposals {
             if let Err(e) = self
-                .on_proposal_message(current_epoch, *local_committee_info, local_committee, msg)
+                .on_proposal_message(
+                    current_epoch,
+                    current_height,
+                    local_committee_info,
+                    local_committee,
+                    msg,
+                )
                 .await
             {
                 self.on_failure("check_if_block_can_be_unparked -> on_proposal_message", &e)
@@ -827,12 +838,32 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             ),
             HotstuffMessage::Proposal(msg) => log_err(
                 "on_receive_local_proposal",
-                self.on_proposal_message(current_epoch, *local_committee_info, local_committee, msg)
-                    .await,
+                self.on_proposal_message(
+                    current_epoch,
+                    current_height,
+                    local_committee_info,
+                    local_committee,
+                    msg,
+                )
+                .await,
             ),
             HotstuffMessage::ForeignProposal(msg) => log_err(
-                "on_receive_foreign_proposal",
-                self.on_receive_foreign_proposal.handle(msg, local_committee_info).await,
+                "on_receive_foreign_proposal (received)",
+                self.on_receive_foreign_proposal
+                    .handle_received(msg, local_committee_info)
+                    .await,
+            ),
+            HotstuffMessage::ForeignProposalNotification(msg) => log_err(
+                "on_receive_foreign_proposal (notification)",
+                self.on_receive_foreign_proposal
+                    .handle_notification_received(from, current_epoch, msg, local_committee_info)
+                    .await,
+            ),
+            HotstuffMessage::ForeignProposalRequest(msg) => log_err(
+                "on_receive_foreign_proposal (request)",
+                self.on_receive_foreign_proposal
+                    .handle_requested(from, msg, local_committee_info)
+                    .await,
             ),
             HotstuffMessage::Vote(msg) => log_err(
                 "on_receive_vote",
@@ -868,7 +899,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     async fn on_proposal_message(
         &mut self,
         current_epoch: Epoch,
-        local_committee_info: CommitteeInfo,
+        current_height: NodeHeight,
+        local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
         msg: ProposalMessage,
     ) -> Result<(), HotStuffError> {
@@ -879,7 +911,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .handle(current_epoch, local_committee_info, local_committee, msg)
                 .await,
         ) {
-            Ok(_) => Ok(()),
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                // We decided NOVOTE, so we immediately send a NEWVIEW
+                self.on_leader_timeout(current_epoch, current_height, local_committee)
+                    .await
+            },
             Err(err @ HotStuffError::ProposalValidationError(ProposalValidationError::JustifyBlockNotFound { .. })) => {
                 let vn = self
                     .epoch_manager

@@ -342,8 +342,9 @@ impl JsonRpcHandlers {
 
         let transaction = self
             .state_store
-            .with_read_tx(|tx| ExecutedTransaction::get(tx, &data.transaction_id))
-            .map_err(internal_error(answer_id))?;
+            .with_read_tx(|tx| ExecutedTransaction::get(tx, &data.transaction_id).optional())
+            .map_err(internal_error(answer_id))?
+            .ok_or_else(|| not_found(answer_id, format!("Transaction {} not found", data.transaction_id)))?;
 
         Ok(JsonRpcResponse::success(answer_id, GetTransactionResponse {
             transaction,
@@ -410,40 +411,25 @@ impl JsonRpcHandlers {
     pub async fn get_block(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let data: GetBlockRequest = value.parse_params()?;
-        let tx = self.state_store.create_read_tx().map_err(internal_error(answer_id))?;
-        match Block::get(&tx, &data.block_id) {
-            Ok(block) => {
-                let res = GetBlockResponse { block };
-                Ok(JsonRpcResponse::success(answer_id, res))
-            },
-            Err(e) => Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    format!("Something went wrong: {}", e),
-                    json::Value::Null,
-                ),
-            )),
-        }
+        let block = self
+            .state_store
+            .with_read_tx(|tx| Block::get(tx, &data.block_id).optional())
+            .map_err(internal_error(answer_id))?
+            .ok_or_else(|| not_found(answer_id, format!("Block {} not found", data.block_id)))?;
+
+        let res = GetBlockResponse { block };
+        Ok(JsonRpcResponse::success(answer_id, res))
     }
 
     pub async fn get_blocks_count(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let tx = self.state_store.create_read_tx().map_err(internal_error(answer_id))?;
-        match Block::get_count(&tx) {
-            Ok(count) => {
-                let res = GetBlocksCountResponse { count };
-                Ok(JsonRpcResponse::success(answer_id, res))
-            },
-            Err(e) => Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InternalError,
-                    format!("Something went wrong: {}", e),
-                    json::Value::Null,
-                ),
-            )),
-        }
+        let count = self
+            .state_store
+            .with_read_tx(|tx| Block::get_count(tx))
+            .map_err(internal_error(answer_id))?;
+
+        let res = GetBlocksCountResponse { count };
+        Ok(JsonRpcResponse::success(answer_id, res))
     }
 
     pub async fn get_filtered_blocks_count(&self, value: JsonRpcExtractor) -> JrpcResult {

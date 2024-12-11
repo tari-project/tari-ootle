@@ -573,7 +573,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         use crate::schema::foreign_proposals;
 
         let foreign_proposals = foreign_proposals::table
-            .filter(foreign_proposals::epoch.eq(epoch.as_u64() as i64))
+            .filter(foreign_proposals::epoch.le(epoch.as_u64() as i64))
             .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
             .count()
             .limit(1)
@@ -605,7 +605,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let foreign_proposals = foreign_proposals::table
             .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
-            .filter(foreign_proposals::epoch.eq(locked.epoch.as_u64() as i64))
+            .filter(foreign_proposals::epoch.le(locked.epoch.as_u64() as i64))
+            .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
             .filter(
                 foreign_proposals::proposed_in_block
                     .is_null()
@@ -1622,11 +1623,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        let mut ready_txs = transaction_pool::table
+        let ready_txs = transaction_pool::table
             // Exclude new transactions
             .filter(transaction_pool::stage.ne(TransactionPoolStage::New.to_string()))
             .filter(transaction_pool::is_ready.eq(true))
             .order_by(transaction_pool::transaction_id.asc())
+            .limit(max_txs as i64)
             .get_results::<sql_models::TransactionPoolRecord>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "transaction_pool_get_many_ready",
@@ -1639,35 +1641,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             block_id,
             ready_txs.len()
         );
-
-        let new_limit = max_txs.saturating_sub(ready_txs.len());
-        if new_limit > 0 {
-            let new_txs = transaction_pool::table
-                .filter(transaction_pool::stage.eq(TransactionPoolStage::New.to_string()))
-                .filter(transaction_pool::is_ready.eq(true))
-                // Filter out any transactions that are in lock conflict
-                .filter(transaction_pool::transaction_id.ne_all(lock_conflicts::table.select(lock_conflicts::transaction_id)))
-                .order_by(transaction_pool::transaction_id.asc())
-                .limit(new_limit as i64)
-                .get_results::<sql_models::TransactionPoolRecord>(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "transaction_pool_get_many_ready",
-                    source: e,
-                })?;
-
-            debug!(
-                target: LOG_TARGET,
-                "🛢️ transaction_pool_get_many_ready: block_id={}, new ready_txs={}, total ready_txs={}",
-                block_id,
-                new_txs.len(),
-                ready_txs.len() + new_txs.len()
-            );
-            ready_txs.extend(new_txs);
-        }
-
-        if ready_txs.is_empty() {
-            return Ok(Vec::new());
-        }
 
         // Fetch all applicable block ids between the locked block and the given block
         let locked = self.get_current_locked_block()?;
@@ -1686,16 +1659,68 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             ready_txs.len(),
             updates.len()
         );
-
-        ready_txs
+        let num_ready = ready_txs.len();
+        let ready_txs = ready_txs
             .into_iter()
             .map(|rec| {
                 let maybe_update = updates.swap_remove(&rec.transaction_id);
                 rec.try_convert(maybe_update)
             })
             // Filter only Ok where is_ready == true (after update) or Err
-            .filter(|result| result.as_ref().map_or(true, |rec| rec.is_ready()))
-            .take(max_txs)
+            .filter(|result| result.as_ref().map_or(true, |rec| rec.is_ready()));
+
+        // Prioritise already sequenced transactions, if there is still space, add transactions that are not previously
+        // sequenced (new)
+        let new_limit = max_txs.saturating_sub(num_ready);
+        if new_limit == 0 {
+            debug!(
+                target: LOG_TARGET,
+                "transaction_pool_get_many_ready: locked.block_id={}, leaf.block_id={}, len(ready_txs)={}",
+                locked.block_id,
+                block_id,
+                num_ready
+            );
+
+            return ready_txs.collect();
+        }
+
+        let new_txs = transaction_pool::table
+                .filter(transaction_pool::stage.eq(TransactionPoolStage::New.to_string()))
+                // Filter out any transactions that are in lock conflict
+                .filter(transaction_pool::transaction_id.ne_all(lock_conflicts::table.select(lock_conflicts::transaction_id).filter(lock_conflicts::is_local_only.eq(false))))
+                .order_by(transaction_pool::transaction_id.asc())
+                .limit(new_limit as i64)
+                .get_results::<sql_models::TransactionPoolRecord>(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "transaction_pool_get_many_ready",
+                    source: e,
+                })?;
+        let mut updates = self.get_transaction_atom_state_updates_between_blocks(
+            &locked.block_id,
+            block_id,
+            new_txs.iter().map(|s| s.transaction_id.as_str()),
+        )?;
+
+        debug!(
+            target: LOG_TARGET,
+            "🛢️ transaction_pool_get_many_ready: block_id={}, new ready_txs={}, total ready_txs={}, updates={}",
+            block_id,
+            new_txs.len(),
+            num_ready + new_txs.len(),
+            updates.len()
+        );
+
+        ready_txs
+            .chain(
+                new_txs
+                .into_iter()
+                .map(|rec| {
+                    let maybe_update = updates.swap_remove(&rec.transaction_id);
+                    rec.try_convert(maybe_update)
+                })
+                // Filter only Ok where is_ready == true (after update) or Err
+                .filter(|result| result.as_ref().map_or(true, |rec| rec.is_ready())),
+            )
             .collect()
     }
 

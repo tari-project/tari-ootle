@@ -92,6 +92,10 @@ define_sql_function! {
     #[sql_name = "COALESCE"]
     fn coalesce_bigint(x: diesel::sql_types::Nullable<Bigint>, y: BigInt) -> BigInt;
 }
+define_sql_function! {
+    #[sql_name = "random"]
+    fn sql_random() -> Integer;
+}
 
 pub struct SqliteGlobalDbAdapter<TAddr> {
     connection: Arc<Mutex<SqliteConnection>>,
@@ -576,15 +580,25 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         shard_group: ShardGroup,
+        shuffle: bool,
+        limit: usize,
     ) -> Result<Committee<Self::Addr>, Self::Error> {
         use crate::global::schema::{committees, validator_nodes};
 
-        let validators = validator_nodes::table
+        let mut query = validator_nodes::table
             .inner_join(committees::table.on(committees::validator_node_id.eq(validator_nodes::id)))
             .select(validator_nodes::all_columns)
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
             .filter(committees::shard_start.eq(shard_group.start().as_u32() as i32))
             .filter(committees::shard_end.eq(shard_group.end().as_u32() as i32))
+            .into_boxed();
+
+        if shuffle {
+            query = query.order_by(sql_random());
+        }
+
+        let validators = query
+            .limit(i64::try_from(limit).unwrap_or(i64::MAX))
             .get_results::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

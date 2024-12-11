@@ -233,24 +233,35 @@ where TConsensusSpec: ConsensusSpec
         foreign_proposals: Vec<ForeignProposal>,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
-        info!(
-            target: LOG_TARGET,
-            "🌿 Broadcasting local proposal {} to local committee",
-            next_block,
-        );
+        let epoch = next_block.epoch();
+        let leaf_block = next_block.as_leaf_block();
         let msg = HotstuffMessage::Proposal(ProposalMessage {
             block: next_block,
             foreign_proposals,
         });
+
         // Broadcast to local and foreign committees
         self.outbound_messaging.send_self(msg.clone()).await?;
+
         // If we are the only VN in this committee, no need to multicast
-        if local_committee_info.num_shard_group_members() > 1 {
-            if let Err(err) = self
-                .outbound_messaging
-                .multicast(local_committee_info.shard_group(), msg)
-                .await
-            {
+        if local_committee_info.num_shard_group_members() <= 1 {
+            info!(
+                target: LOG_TARGET,
+            "🌿 Only member of local committee. No need to multicast proposal {leaf_block}",
+            );
+        } else {
+            let committee = self
+                .epoch_manager
+                .get_committee_by_shard_group(epoch, local_committee_info.shard_group(), None)
+                .await?;
+
+            info!(
+                target: LOG_TARGET,
+                "🌿 Broadcasting local proposal to {}/{} local committee members {}",
+                committee.len(), local_committee_info.num_shard_group_members(), leaf_block,
+            );
+
+            if let Err(err) = self.outbound_messaging.multicast(committee.into_addresses(), msg).await {
                 warn!(
                     target: LOG_TARGET,
                     "Failed to multicast proposal to local committee: {}",
@@ -631,14 +642,9 @@ where TConsensusSpec: ConsensusSpec
             .map(|max| {
                 let num_evicted =
                     ValidatorConsensusStats::count_number_evicted_nodes(tx, start_of_chain_block.epoch())?;
-                let remaining_max = u64::from(local_committee_info.max_failures()).saturating_sub(num_evicted);
-                if remaining_max == 0 {
-                    debug!(
-                        target: LOG_TARGET,
-                        "🦶 No more nodes can be evicted for next block. Num evicted: {num_evicted}",
-                    );
-                }
-                let max_allowed_to_evict = remaining_max.min(max as u64);
+                let max_allowed_to_evict = u64::from(local_committee_info.max_failures())
+                    .saturating_sub(num_evicted)
+                    .min(max as u64);
                 ValidatorConsensusStats::get_nodes_to_evict(
                     tx,
                     start_of_chain_block.block_id(),

@@ -473,6 +473,22 @@ impl Block {
         tx.blocks_get_all_ids_by_height(epoch, height)
     }
 
+    pub fn get_genesis_for_epoch<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch) -> Result<Self, StorageError> {
+        let ids = Self::get_ids_by_epoch_and_height(tx, epoch, NodeHeight::zero())?;
+        if ids.is_empty() {
+            return Err(StorageError::DataInconsistency {
+                details: format!("No genesis block found for epoch {}", epoch),
+            });
+        }
+        if ids.len() > 1 {
+            return Err(StorageError::DataInconsistency {
+                details: format!("Multiple genesis blocks found for epoch {}", epoch),
+            });
+        }
+
+        Self::get(tx, &ids[0])
+    }
+
     /// Returns all blocks from and excluding the start block (lower height) to the end block (inclusive)
     pub fn get_all_blocks_between<TTx: StateStoreReadTransaction>(
         tx: &TTx,
@@ -1168,6 +1184,7 @@ where
     tx.transaction_executions_remove_any_by_block_id(block_id)?;
     tx.foreign_proposals_clear_proposed_in(block_id)?;
     tx.burnt_utxos_clear_proposed_block(block_id)?;
+    tx.lock_conflicts_remove_by_block_id(block_id)?;
 
     Block::delete_record(tx, block_id)?;
 

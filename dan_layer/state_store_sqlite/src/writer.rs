@@ -9,6 +9,7 @@ use diesel::{
     sql_query,
     sql_types::Text,
     AsChangeset,
+    BoolExpressionMethods,
     ExpressionMethods,
     NullableExpressionMethods,
     OptionalExtension,
@@ -2105,6 +2106,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                         lock_conflicts::transaction_id.eq(serialize_hex(tx_id)),
                         lock_conflicts::depends_on_tx.eq(serialize_hex(conflict.transaction_id)),
                         lock_conflicts::lock_type.eq(conflict.requested_lock.to_string()),
+                        lock_conflicts::is_local_only.eq(conflict.is_local_only),
                     )
                 })
             })
@@ -2115,6 +2117,47 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "lock_conflicts_insert_all",
+                source: e,
+            })?;
+
+        Ok(())
+    }
+
+    fn lock_conflicts_remove_by_transaction_ids<'a, I: IntoIterator<Item = &'a TransactionId>>(
+        &mut self,
+        transaction_ids: I,
+    ) -> Result<(), StorageError> {
+        use crate::schema::lock_conflicts;
+
+        let tx_ids = transaction_ids.into_iter().map(serialize_hex).collect::<Vec<_>>();
+        let num_deleted = diesel::delete(lock_conflicts::table)
+            .filter(
+                lock_conflicts::depends_on_tx
+                    .eq_any(&tx_ids)
+                    .or(lock_conflicts::transaction_id.eq_any(&tx_ids)),
+            )
+            .execute(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "lock_conflicts_remove_by_transaction_ids",
+                source: e,
+            })?;
+
+        debug!(
+            target: LOG_TARGET,
+            "Deleted {num_deleted} lock conflicts",
+        );
+
+        Ok(())
+    }
+
+    fn lock_conflicts_remove_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
+        use crate::schema::lock_conflicts;
+
+        diesel::delete(lock_conflicts::table)
+            .filter(lock_conflicts::block_id.eq(serialize_hex(block_id)))
+            .execute(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "lock_conflicts_remove_by_block_id",
                 source: e,
             })?;
 

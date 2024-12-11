@@ -336,7 +336,9 @@ impl Test {
     pub fn is_transaction_pool_empty(&self) -> bool {
         self.validators.values().all(|v| {
             let c = v.get_transaction_pool_count();
-            log::info!("{} has {} transactions in pool", v.address, c);
+            if c > 0 {
+                log::info!("🐞 {} has {} transactions in pool", v.address, c);
+            }
             c == 0
         })
     }
@@ -617,7 +619,7 @@ impl TestBuilder {
                 true
             })
             .map(|(vn, shard_group)| {
-                let sql_address = sql_address.replace("{}", &vn.address.0);
+                let sql_address = sql_address.replace("{}", vn.address.as_str());
                 let (sk, pk) = helpers::derive_keypair_from_address(&vn.address);
 
                 let (channels, validator) = Validator::builder()
@@ -641,7 +643,7 @@ impl TestBuilder {
             for path in self
                 .committees
                 .values()
-                .flat_map(|committee| committee.iter().map(|(addr, _)| sql_file.replace("{}", &addr.0)))
+                .flat_map(|committee| committee.iter().map(|(addr, _)| sql_file.replace("{}", addr.as_str())))
             {
                 let _ignore = std::fs::remove_file(&path);
             }

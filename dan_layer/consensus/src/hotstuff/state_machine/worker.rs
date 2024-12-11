@@ -25,6 +25,7 @@ const LOG_TARGET: &str = "tari::dan::consensus::sm::worker";
 #[derive(Debug)]
 pub struct ConsensusWorker<TSpec> {
     pub(super) shutdown_signal: ShutdownSignal,
+    initial_delay: bool,
     _spec: PhantomData<TSpec>,
 }
 
@@ -44,8 +45,14 @@ where
     pub fn new(shutdown_signal: ShutdownSignal) -> Self {
         Self {
             shutdown_signal,
+            initial_delay: true,
             _spec: PhantomData,
         }
+    }
+
+    pub fn no_initial_delay(mut self) -> Self {
+        self.initial_delay = false;
+        self
     }
 
     async fn next_event(
@@ -114,8 +121,14 @@ where
 
     pub async fn run(&mut self, mut context: ConsensusWorkerContext<TSpec>) {
         // When starting up we will wait a bit.
-        // Context: in swarm, we start on epoch 2, then quickly go to epoch 3.
-        let mut state = ConsensusState::Idle(Idle::new());
+        // Context: in swarm, we start on epoch 2, then quickly go to epoch 3. This causes some nodes to start consensus
+        // on epoch 2 and some on epoch 3.
+        let idle = if self.initial_delay {
+            Idle::with_delay()
+        } else {
+            Idle::new()
+        };
+        let mut state = ConsensusState::Idle(idle);
         loop {
             let next_event = self.next_event(&mut context, &state).await;
             state = self.transition(state, next_event);

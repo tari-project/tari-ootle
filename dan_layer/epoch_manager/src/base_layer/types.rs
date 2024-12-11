@@ -128,6 +128,7 @@ pub enum EpochManagerRequest<TAddr> {
     GetCommitteeForShardGroup {
         epoch: Epoch,
         shard_group: ShardGroup,
+        limit: Option<usize>,
         reply: Reply<Committee<TAddr>>,
     },
     GetCommitteesOverlappingShardGroup {

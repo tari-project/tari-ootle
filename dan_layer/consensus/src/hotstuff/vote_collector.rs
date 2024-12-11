@@ -46,6 +46,10 @@ where TConsensusSpec: ConsensusSpec
         }
     }
 
+    pub fn signing_service(&self) -> &TConsensusSpec::SignatureService {
+        &self.vote_signature_service
+    }
+
     /// Returns Some if quorum is reached
     pub async fn check_and_collect_vote(
         &self,

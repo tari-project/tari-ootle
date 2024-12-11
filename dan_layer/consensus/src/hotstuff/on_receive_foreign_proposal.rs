@@ -2,18 +2,23 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, ShardGroup};
+use tari_dan_common_types::{committee::CommitteeInfo, Epoch, ShardGroup};
 use tari_dan_storage::{
-    consensus_models::{Block, ForeignProposal, ForeignReceiveCounters},
+    consensus_models::{Block, ForeignProposal, ForeignReceiveCounters, QuorumCertificate},
     StateStore,
 };
 use tari_epoch_manager::EpochManagerReader;
 
 use crate::{
     hotstuff::{error::HotStuffError, pacemaker_handle::PaceMakerHandle, ProposalValidationError},
-    messages::ForeignProposalMessage,
+    messages::{
+        ForeignProposalMessage,
+        ForeignProposalNotificationMessage,
+        ForeignProposalRequestMessage,
+        HotstuffMessage,
+    },
     tracing::TraceTimer,
-    traits::ConsensusSpec,
+    traits::{ConsensusSpec, OutboundMessaging},
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_foreign_proposal";
@@ -23,6 +28,7 @@ pub struct OnReceiveForeignProposalHandler<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
     pacemaker: PaceMakerHandle,
+    outbound_messaging: TConsensusSpec::OutboundMessaging,
 }
 
 impl<TConsensusSpec> OnReceiveForeignProposalHandler<TConsensusSpec>
@@ -32,15 +38,17 @@ where TConsensusSpec: ConsensusSpec
         store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
         pacemaker: PaceMakerHandle,
+        outbound_messaging: TConsensusSpec::OutboundMessaging,
     ) -> Self {
         Self {
             store,
             epoch_manager,
             pacemaker,
+            outbound_messaging,
         }
     }
 
-    pub async fn handle(
+    pub async fn handle_received(
         &mut self,
         message: ForeignProposalMessage,
         local_committee_info: &CommitteeInfo,
@@ -67,6 +75,152 @@ where TConsensusSpec: ConsensusSpec
 
         // Foreign proposals to propose
         self.pacemaker.beat();
+        Ok(())
+    }
+
+    pub async fn handle_notification_received(
+        &mut self,
+        from: TConsensusSpec::Addr,
+        current_epoch: Epoch,
+        message: ForeignProposalNotificationMessage,
+        local_committee_info: &CommitteeInfo,
+    ) -> Result<(), HotStuffError> {
+        debug!(
+            target: LOG_TARGET,
+            "🌐 Receive FOREIGN PROPOSAL NOTIFICATION from {} for block {}",
+            from,
+            message.block_id,
+        );
+        if self
+            .store
+            .with_read_tx(|tx| ForeignProposal::record_exists(tx, &message.block_id))?
+        {
+            // This is expected behaviour, we may receive the same foreign proposal notification multiple times
+            debug!(
+                target: LOG_TARGET,
+                "FOREIGN PROPOSAL: Already received proposal for block {}",
+                message.block_id,
+            );
+            return Ok(());
+        }
+
+        // Check if the source is in a foreign committee
+        let foreign_committee_info = self
+            .epoch_manager
+            .get_committee_info_by_validator_address(message.epoch, &from)
+            .await?;
+
+        if local_committee_info.shard_group() == foreign_committee_info.shard_group() {
+            warn!(
+                target: LOG_TARGET,
+                "❓️ FOREIGN PROPOSAL: Received foreign proposal notification from a validator in the same shard group. Ignoring."
+            );
+            return Ok(());
+        }
+
+        let f = local_committee_info.max_failures() as usize;
+        let committee = self
+            .epoch_manager
+            .get_committee_by_shard_group(current_epoch, foreign_committee_info.shard_group(), Some(f + 1))
+            .await?;
+
+        let Some((selected, _)) = committee.shuffled().next() else {
+            warn!(
+                target: LOG_TARGET,
+                "FOREIGN PROPOSAL: No validator selected for the shard group {}",
+                foreign_committee_info.shard_group(),
+            );
+            return Ok(());
+        };
+
+        info!(
+            target: LOG_TARGET,
+            "🌐 REQUEST foreign proposal for block {} from {}",
+            message.block_id,
+            selected,
+        );
+        self.outbound_messaging
+            .send(
+                selected.clone(),
+                HotstuffMessage::ForeignProposalRequest(ForeignProposalRequestMessage::ByBlockId {
+                    block_id: message.block_id,
+                    for_shard_group: local_committee_info.shard_group(),
+                    epoch: message.epoch,
+                }),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn handle_requested(
+        &mut self,
+        from: TConsensusSpec::Addr,
+        message: ForeignProposalRequestMessage,
+        local_committee_info: &CommitteeInfo,
+    ) -> Result<(), HotStuffError> {
+        match message {
+            ForeignProposalRequestMessage::ByBlockId {
+                block_id,
+                for_shard_group,
+                ..
+            } => {
+                let (block, justify_qc, mut block_pledge) = self.store.with_read_tx(|tx| {
+                    let block = Block::get(tx, &block_id)?;
+                    let justify_qc = QuorumCertificate::get_by_block_id(tx, &block_id)?;
+                    let block_pledge = block.get_block_pledge(tx)?;
+                    Ok::<_, HotStuffError>((block, justify_qc, block_pledge))
+                })?;
+
+                info!(
+                    target: LOG_TARGET,
+                    "🌐 REPLY foreign proposal {} to {}. justify: {} ({}), parent: {}",
+                    block,
+                    for_shard_group,
+                    justify_qc.block_id(),
+                    justify_qc.block_height(),
+                    block.parent()
+                );
+
+                let applicable_transactions = block
+                    .commands()
+                    .iter()
+                    .filter_map(|c| {
+                        c.local_prepare()
+                            // No need to broadcast LocalPrepare if the committee is output only
+                            .filter(|atom| !atom.evidence.is_committee_output_only(local_committee_info))
+                            .or_else(|| c.local_accept())
+                    })
+                    .filter(|atom| {
+                        atom.evidence
+                            .shard_groups_iter()
+                            .any(|shard_group| *shard_group == for_shard_group)
+                    })
+                    .map(|atom| atom.id)
+                    .collect();
+
+                // Only send the pledges for the involved shard group that requested them
+                block_pledge.retain_transactions(&applicable_transactions);
+
+                self.outbound_messaging
+                    .send(
+                        from,
+                        HotstuffMessage::ForeignProposal(ForeignProposalMessage {
+                            block,
+                            justify_qc,
+                            block_pledge,
+                        }),
+                    )
+                    .await?;
+            },
+            ForeignProposalRequestMessage::ByTransactionId { .. } => {
+                error!(
+                    target: LOG_TARGET,
+                    "TODO FOREIGN PROPOSAL: Request by transaction id is not supported. Ignoring."
+                );
+            },
+        }
+
         Ok(())
     }
 

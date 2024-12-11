@@ -9,6 +9,7 @@ pub const TEST_NUM_PRESHARDS: NumPreshards = NumPreshards::P64;
 mod address;
 mod epoch_manager;
 mod executions_store;
+mod fixtures;
 mod harness;
 pub mod helpers;
 mod leader_strategy;
@@ -24,6 +25,7 @@ mod validator;
 
 pub use address::*;
 pub use executions_store::ExecuteSpec;
+pub use fixtures::*;
 pub use harness::*;
 pub use leader_strategy::*;
 pub use network::*;

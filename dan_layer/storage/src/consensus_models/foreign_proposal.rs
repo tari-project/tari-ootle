@@ -89,7 +89,11 @@ impl ForeignProposal {
     }
 
     pub fn exists<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
-        tx.foreign_proposals_exists(self.block.id())
+        Self::record_exists(tx, self.block.id())
+    }
+
+    pub fn record_exists<TTx: StateStoreReadTransaction>(tx: &TTx, block_id: &BlockId) -> Result<bool, StorageError> {
+        tx.foreign_proposals_exists(block_id)
     }
 
     pub fn get_all_new<TTx: StateStoreReadTransaction>(

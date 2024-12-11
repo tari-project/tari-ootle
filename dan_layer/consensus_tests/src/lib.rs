@@ -3,6 +3,10 @@
 #[cfg(test)]
 mod consensus;
 #[cfg(test)]
+mod dummy_blocks;
+#[cfg(test)]
+mod eviction_proof;
+#[cfg(test)]
 mod substate_store;
 #[cfg(test)]
 mod support;

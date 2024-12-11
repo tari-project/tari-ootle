@@ -44,9 +44,6 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         current_height: NodeHeight,
         local_committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
-        // info!(target: LOG_TARGET, "⚠️ Leader failure: NEXTSYNCVIEW for epoch {} and current height {}", epoch,
-        // current_height);
-
         let (new_height, next_leader, leaf_block, high_qc, last_sent_vote) = self.store.with_read_tx(|tx| {
             let leaf_block = LeafBlock::get(tx, epoch)?;
             let (next_height, next_leader, _) = get_next_block_height_and_leader(
@@ -60,7 +57,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             let high_qc = HighQc::get(tx, epoch)?.get_quorum_certificate(tx)?;
             let last_sent_vote = LastSentVote::get(tx)
                 .optional()?
-                .filter(|vote| high_qc.epoch() < vote.epoch)
+                .filter(|vote| high_qc.epoch() == vote.epoch)
                 .filter(|vote| high_qc.block_height() < vote.block_height);
             Ok::<_, HotStuffError>((next_height, next_leader, leaf_block, high_qc, last_sent_vote))
         })?;

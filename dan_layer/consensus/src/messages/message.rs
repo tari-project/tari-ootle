@@ -6,7 +6,15 @@ use std::fmt::Display;
 use serde::Serialize;
 use tari_dan_common_types::Epoch;
 
-use super::{ForeignProposalMessage, MissingTransactionsResponse, NewViewMessage, ProposalMessage, VoteMessage};
+use super::{
+    ForeignProposalMessage,
+    ForeignProposalNotificationMessage,
+    ForeignProposalRequestMessage,
+    MissingTransactionsResponse,
+    NewViewMessage,
+    ProposalMessage,
+    VoteMessage,
+};
 use crate::messages::{MissingTransactionsRequest, SyncRequestMessage, SyncResponseMessage};
 
 // Serialize is implemented for the message logger
@@ -15,6 +23,8 @@ pub enum HotstuffMessage {
     NewView(NewViewMessage),
     Proposal(ProposalMessage),
     ForeignProposal(ForeignProposalMessage),
+    ForeignProposalNotification(ForeignProposalNotificationMessage),
+    ForeignProposalRequest(ForeignProposalRequestMessage),
     Vote(VoteMessage),
     MissingTransactionsRequest(MissingTransactionsRequest),
     MissingTransactionsResponse(MissingTransactionsResponse),
@@ -26,14 +36,16 @@ pub enum HotstuffMessage {
 impl HotstuffMessage {
     pub fn as_type_str(&self) -> &'static str {
         match self {
-            HotstuffMessage::NewView(_) => "NewView",
-            HotstuffMessage::Proposal(_) => "Proposal",
-            HotstuffMessage::ForeignProposal(_) => "ForeignProposal",
-            HotstuffMessage::Vote(_) => "Vote",
-            HotstuffMessage::MissingTransactionsRequest(_) => "MissingTransactionsRequest",
-            HotstuffMessage::MissingTransactionsResponse(_) => "MissingTransactionsResponse",
-            HotstuffMessage::CatchUpSyncRequest(_) => "CatchUpSyncRequest",
-            HotstuffMessage::SyncResponse(_) => "SyncResponse",
+            Self::NewView(_) => "NewView",
+            Self::Proposal(_) => "Proposal",
+            Self::ForeignProposal(_) => "ForeignProposal",
+            Self::ForeignProposalNotification(_) => "ForeignProposalNotification",
+            Self::ForeignProposalRequest(_) => "ForeignProposalRequest",
+            Self::Vote(_) => "Vote",
+            Self::MissingTransactionsRequest(_) => "MissingTransactionsRequest",
+            Self::MissingTransactionsResponse(_) => "MissingTransactionsResponse",
+            Self::CatchUpSyncRequest(_) => "CatchUpSyncRequest",
+            Self::SyncResponse(_) => "SyncResponse",
         }
     }
 
@@ -42,6 +54,8 @@ impl HotstuffMessage {
             Self::NewView(msg) => msg.high_qc.epoch(),
             Self::Proposal(msg) => msg.block.epoch(),
             Self::ForeignProposal(msg) => msg.block.epoch(),
+            Self::ForeignProposalNotification(msg) => msg.epoch,
+            Self::ForeignProposalRequest(msg) => msg.epoch(),
             Self::Vote(msg) => msg.epoch,
             Self::MissingTransactionsRequest(msg) => msg.epoch,
             Self::MissingTransactionsResponse(msg) => msg.epoch,
@@ -80,6 +94,8 @@ impl Display for HotstuffMessage {
                 )
             },
             HotstuffMessage::ForeignProposal(msg) => write!(f, "ForeignProposal({})", msg),
+            HotstuffMessage::ForeignProposalNotification(msg) => write!(f, "ForeignProposalNotification({})", msg),
+            HotstuffMessage::ForeignProposalRequest(msg) => write!(f, "ForeignProposalRequest({})", msg),
             HotstuffMessage::Vote(msg) => write!(
                 f,
                 "Vote({}, {}, {}, {})",

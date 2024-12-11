@@ -124,7 +124,7 @@ impl QuorumCertificate {
 }
 
 impl QuorumCertificate {
-    pub fn is_zero(&self) -> bool {
+    pub fn justifies_zero_block(&self) -> bool {
         self.block_id.is_zero()
     }
 

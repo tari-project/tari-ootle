@@ -275,6 +275,7 @@ diesel::table! {
         transaction_id -> Text,
         depends_on_tx -> Text,
         lock_type -> Text,
+        is_local_only -> Bool,
         created_at -> Timestamp,
     }
 }

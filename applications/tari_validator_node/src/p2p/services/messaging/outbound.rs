@@ -102,7 +102,29 @@ impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::OutboundMessaging
         Ok(())
     }
 
-    async fn multicast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
+    async fn multicast<T, I>(&mut self, addresses: I, message: T) -> Result<(), OutboundMessagingError>
+    where
+        I: IntoIterator<Item = Self::Addr> + Send,
+        T: Into<HotstuffMessage> + Send,
+    {
+        let message = message.into();
+
+        self.networking
+            .send_multicast(
+                addresses
+                    .into_iter()
+                    .filter(|addr| *addr != self.our_node_addr)
+                    .map(|addr| addr.as_peer_id())
+                    .collect::<Vec<_>>(),
+                proto::consensus::HotStuffMessage::from(&message),
+            )
+            .await
+            .map_err(OutboundMessagingError::from_error)?;
+
+        Ok(())
+    }
+
+    async fn broadcast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
     where T: Into<HotstuffMessage> + Send {
         let message = message.into();
 

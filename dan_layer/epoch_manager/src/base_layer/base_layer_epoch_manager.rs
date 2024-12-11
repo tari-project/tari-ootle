@@ -475,7 +475,7 @@ where
         let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
 
         // TODO(perf): fetch full validator node records for the shard group in single query (current O(n + 1) queries)
-        let committees = self.get_committee_for_shard_group(epoch, shard_group)?;
+        let committees = self.get_committee_for_shard_group(epoch, shard_group, false, None)?;
 
         let mut res = vec![];
         for (_, pub_key) in committees {
@@ -489,6 +489,7 @@ where
             })?;
             res.push(vn);
         }
+        res.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
         Ok(res)
     }
 
@@ -611,10 +612,17 @@ where
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
+        shuffle: bool,
+        limit: Option<usize>,
     ) -> Result<Committee<TAddr>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let committees = validator_node_db.get_committee_for_shard_group(epoch, shard_group)?;
+        let committees = validator_node_db.get_committee_for_shard_group(
+            epoch,
+            shard_group,
+            shuffle,
+            limit.unwrap_or(usize::MAX),
+        )?;
         Ok(committees)
     }
 

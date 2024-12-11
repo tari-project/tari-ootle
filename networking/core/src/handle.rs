@@ -74,6 +74,7 @@ pub enum NetworkingRequest<TMsg: MessageSpec> {
     },
     SubscribeTopic {
         topic: IdentTopic,
+        explicit_topic_peers: Vec<PeerId>,
         reply_tx: oneshot::Sender<Result<(), NetworkingError>>,
     },
     UnsubscribeTopic {
@@ -357,11 +358,16 @@ impl<TMsg: MessageSpec + Send + 'static> NetworkingService<TMsg> for NetworkingH
         rx.await?
     }
 
-    async fn subscribe_topic<T: Into<String> + Send>(&mut self, topic: T) -> Result<(), NetworkingError> {
+    async fn subscribe_topic_with_explicit_peers<T: Into<String> + Send>(
+        &mut self,
+        topic: T,
+        explicit_topic_peers: Vec<PeerId>,
+    ) -> Result<(), NetworkingError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(NetworkingRequest::SubscribeTopic {
                 topic: IdentTopic::new(topic),
+                explicit_topic_peers,
                 reply_tx: tx,
             })
             .await

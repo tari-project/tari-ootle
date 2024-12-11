@@ -64,7 +64,21 @@ impl OutboundMessaging for TestOutboundMessaging {
             })
     }
 
-    async fn multicast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
+    async fn multicast<T, I>(&mut self, addresses: I, message: T) -> Result<(), OutboundMessagingError>
+    where
+        I: IntoIterator<Item = Self::Addr> + Send,
+        T: Into<HotstuffMessage> + Send,
+    {
+        let peers = addresses.into_iter().collect();
+
+        self.tx_broadcast.send((peers, message.into())).await.map_err(|_| {
+            OutboundMessagingError::FailedToEnqueueMessage {
+                reason: "broadcast channel closed".to_string(),
+            }
+        })
+    }
+
+    async fn broadcast<T>(&mut self, shard_group: ShardGroup, message: T) -> Result<(), OutboundMessagingError>
     where T: Into<HotstuffMessage> + Send {
         // TODO: technically we should use the consensus epoch here, but current tests will not cause this issue
         let epoch = self
@@ -74,18 +88,11 @@ impl OutboundMessaging for TestOutboundMessaging {
             .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?;
         let peers = self
             .epoch_manager
-            .get_committee_by_shard_group(epoch, shard_group)
+            .get_committee_by_shard_group(epoch, shard_group, None)
             .await
             .map_err(|e| OutboundMessagingError::UpstreamError(e.into()))?
-            .into_iter()
-            .map(|(addr, _)| addr)
-            .collect();
-
-        self.tx_broadcast.send((peers, message.into())).await.map_err(|_| {
-            OutboundMessagingError::FailedToEnqueueMessage {
-                reason: "broadcast channel closed".to_string(),
-            }
-        })
+            .into_addresses();
+        self.multicast(peers, message).await
     }
 }
 

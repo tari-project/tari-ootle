@@ -15,7 +15,7 @@ use libp2p::{
     dcutr,
     futures::StreamExt,
     gossipsub,
-    gossipsub::{IdentTopic, MessageId},
+    gossipsub::{IdentTopic, MessageId, TopicHash},
     identify,
     identity,
     mdns,
@@ -83,6 +83,7 @@ where
     pending_substream_requests: HashMap<StreamId, ReplyTx<NegotiatedSubstream<Substream>>>,
     pending_dial_requests: HashMap<PeerId, Vec<ReplyTx<()>>>,
     substream_notifiers: Notifiers<Substream>,
+    topic_peers: HashMap<TopicHash, Vec<PeerId>>,
     swarm: TariSwarm<ProstCodec<TMsg::Message>>,
     config: crate::Config,
     relays: RelayState,
@@ -118,6 +119,7 @@ where
             pending_substream_requests: HashMap::new(),
             pending_dial_requests: HashMap::new(),
             relays: RelayState::new(known_relay_nodes),
+            topic_peers: HashMap::new(),
             swarm,
             config,
             is_initial_bootstrap_complete: false,
@@ -274,7 +276,18 @@ where
                     let _ignore = reply_tx.send(Err(err.into()));
                 },
             },
-            NetworkingRequest::SubscribeTopic { topic, reply_tx } => {
+            NetworkingRequest::SubscribeTopic {
+                topic,
+                explicit_topic_peers,
+                reply_tx,
+            } => {
+                if !explicit_topic_peers.is_empty() {
+                    info!(target: LOG_TARGET, "📢 Adding {} explicit peers to topic {}", explicit_topic_peers.len(), topic);
+                    for peer in &explicit_topic_peers {
+                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(peer);
+                    }
+                    self.topic_peers.insert(topic.hash(), explicit_topic_peers);
+                }
                 match self.swarm.behaviour_mut().gossipsub.subscribe(&topic) {
                     Ok(_) => {
                         debug!(target: LOG_TARGET, "📢 Subscribed to gossipsub topic: {}", topic);
@@ -287,6 +300,12 @@ where
                 }
             },
             NetworkingRequest::UnsubscribeTopic { topic, reply_tx } => {
+                if let Some(peers) = self.topic_peers.remove(&topic.hash()) {
+                    for peer in peers {
+                        self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                    }
+                }
+
                 match self.swarm.behaviour_mut().gossipsub.unsubscribe(&topic) {
                     Ok(_) => {
                         debug!(target: LOG_TARGET, "📢 Unsubscribed from gossipsub topic: {}", topic);
@@ -542,6 +561,14 @@ where
                         .await?;
                 },
                 None => {
+                    // We accept all messages as we cannot validate them in this service.
+                    // We could allow users to report back the validation result e.g. if a proposal is valid, however a
+                    // naive implementation would likely incur a substantial cost for many messages.
+                    self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                        &message_id,
+                        &propagation_source,
+                        gossipsub::MessageAcceptance::Ignore,
+                    )?;
                     warn!(target: LOG_TARGET, "📢 Discarding Gossipsub message [{topic}] ({bytes} bytes) with no source propagated by {propagation_source}", topic=message.topic, bytes=message.data.len());
                 },
             },

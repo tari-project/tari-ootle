@@ -1,12 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Duration};
 
 use log::*;
 use tari_dan_common_types::Epoch;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
-use tokio::sync::broadcast;
+use tokio::{sync::broadcast, time};
 
 use crate::{
     hotstuff::{
@@ -19,19 +19,35 @@ use crate::{
 const LOG_TARGET: &str = "tari::dan::consensus::sm::idle";
 
 #[derive(Debug, Clone)]
-pub struct Idle<TSpec>(PhantomData<TSpec>);
+pub struct Idle<TSpec> {
+    _spec: PhantomData<TSpec>,
+    delay: bool,
+}
 
 impl<TSpec> Idle<TSpec>
 where TSpec: ConsensusSpec
 {
     pub fn new() -> Self {
-        Self(PhantomData)
+        Self {
+            _spec: PhantomData,
+            delay: false,
+        }
+    }
+
+    pub fn with_delay() -> Self {
+        Self {
+            _spec: PhantomData,
+            delay: true,
+        }
     }
 
     pub(super) async fn on_enter(
         &self,
         context: &mut ConsensusWorkerContext<TSpec>,
     ) -> Result<ConsensusStateEvent, HotStuffError> {
+        if self.delay {
+            time::sleep(Duration::from_secs(5)).await;
+        }
         // Subscribe before checking if we're registered to eliminate the chance that we miss the epoch event
         let mut epoch_events = context.epoch_manager.subscribe();
         context.epoch_manager.wait_for_initial_scanning_to_complete().await?;

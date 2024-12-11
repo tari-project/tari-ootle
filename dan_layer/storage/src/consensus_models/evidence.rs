@@ -163,6 +163,16 @@ impl Evidence {
         self.evidence.keys()
     }
 
+    pub fn missing_evidence_iter(&self) -> impl Iterator<Item = &ShardGroup> {
+        self.evidence.iter().filter_map(|(sg, e)| {
+            if e.prepare_qc.is_none() || e.accept_qc.is_none() {
+                Some(sg)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn num_shard_groups(&self) -> usize {
         self.evidence.len()
     }

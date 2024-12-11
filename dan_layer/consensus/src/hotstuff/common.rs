@@ -89,7 +89,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     dummy
 }
 
-fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStrategy<TAddr>>(
+pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStrategy<TAddr>>(
     from_height: NodeHeight,
     new_height: NodeHeight,
     network: Network,
@@ -105,7 +105,7 @@ fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStrateg
     parent_base_layer_block_height: u64,
     parent_base_layer_block_hash: FixedHash,
 ) -> Vec<Block> {
-    let mut dummies = Vec::new();
+    let mut dummies = Vec::with_capacity(new_height.saturating_sub(from_height).as_u64() as usize);
     with_dummy_blocks(
         from_height,
         new_height,
@@ -147,7 +147,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         candidate_block.network(),
         candidate_block.epoch(),
         candidate_block.shard_group(),
-        *candidate_block.justify().block_id(),
+        *justify_block.id(),
         candidate_block.justify(),
         candidate_block.parent(),
         *justify_block.state_merkle_root(),

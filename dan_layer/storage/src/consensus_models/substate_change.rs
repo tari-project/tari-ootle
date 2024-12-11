@@ -146,12 +146,10 @@ impl From<&SubstateChange> for SubstateTreeChange {
     fn from(value: &SubstateChange) -> Self {
         match value {
             SubstateChange::Up { id, substate, .. } => SubstateTreeChange::Up {
-                id: id.substate_id().clone(),
+                id: id.clone(),
                 value_hash: substate.to_value_hash(),
             },
-            SubstateChange::Down { id, .. } => SubstateTreeChange::Down {
-                id: id.substate_id().clone(),
-            },
+            SubstateChange::Down { id, .. } => SubstateTreeChange::Down { id: id.clone() },
         }
     }
 }

@@ -334,16 +334,15 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                         if sidechain_feature.sidechain_public_key() != self.validator_node_sidechain_id.as_ref() {
                             debug!(
                                 target: LOG_TARGET,
-                                "Ignoring code template registration for sidechain ID {:?}. Local node's sidechain ID: {:?}",
+                                "Ignoring code template registration for sidechain ID {:?}.",
                                 sidechain_feature.sidechain_public_key(),
-                                self.template_sidechain_id,
                             );
                             continue;
                         }
-                        trace!(target: LOG_TARGET, "New code template registration scanned: {reg:?}");
+                        trace!(target: LOG_TARGET, "New validator node registration scanned: {reg:?}");
                     },
                     // TODO: remove completely SideChainFeature::CodeTemplateRegistration at some point
-                    SideChainFeature::CodeTemplateRegistration(reg) => {
+                    SideChainFeatureData::CodeTemplateRegistration(reg) => {
                         trace!(target: LOG_TARGET, "New code template registration scanned: {reg:?}");
                     },
                     SideChainFeatureData::ConfidentialOutput(_) => {
@@ -484,8 +483,8 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
     ) -> Result<(), BaseLayerScannerError> {
         let commitment_address = UnclaimedConfidentialOutputAddress::try_from_commitment(output.commitment.as_bytes())
             .map_err(|e|
-            // Technically impossible, but anyway
-            BaseLayerScannerError::InvalidSideChainUtxoResponse(format!("Invalid commitment: {}", e)))?;
+                // Technically impossible, but anyway
+                BaseLayerScannerError::InvalidSideChainUtxoResponse(format!("Invalid commitment: {}", e)))?;
         let substate_id = SubstateId::UnclaimedConfidentialOutput(commitment_address);
         let consensus_constants = self.epoch_manager.get_base_layer_consensus_constants().await?;
         let epoch = consensus_constants.height_to_epoch(block_info.height);

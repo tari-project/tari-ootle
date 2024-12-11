@@ -52,7 +52,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{BlockModel, BlockTransactionExecutionModel, TransactionModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -876,62 +876,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         }
 
         Ok(())
-
-        /*
-        use crate::schema::transactions;
-
-        if !self.blocks_exists(&block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "transactions_finalize_all: Cannot finalize transactions for non-existent block {}",
-                    block_id
-                ),
-            });
-        }
-
-        let changes = transactions
-            .into_iter()
-            .map(|rec| {
-                // TODO(perf): 2n queries, query is slow
-                let exec = self
-                    .transaction_executions_get_pending_for_block(rec.transaction_id(), &block_id)
-                    .optional()?
-                    .ok_or_else(|| StorageError::DataInconsistency {
-                        details: format!(
-                            "transactions_finalize_all: No pending execution for transaction {}",
-                            rec.transaction_id()
-                        ),
-                    })?;
-
-                Ok((
-                    transactions::transaction_id.eq(serialize_hex(rec.transaction_id())),
-                    (
-                        transactions::resolved_inputs.eq(serialize_json(&exec.resolved_inputs())?),
-                        transactions::resulting_outputs.eq(serialize_json(&exec.resulting_outputs())?),
-                        transactions::result.eq(serialize_json(&exec.result())?),
-                        transactions::execution_time_ms.eq(exec.execution_time().as_millis() as i64),
-                        transactions::final_decision.eq(rec.current_decision().to_string()),
-                        transactions::abort_details.eq(exec.abort_reason().map(serialize_json).transpose()?),
-                        transactions::outcome.eq(exec.result().finalize.result.to_string()),
-                        transactions::finalized_at.eq(now()),
-                    ),
-                ))
-            })
-            .collect::<Result<Vec<_>, StorageError>>()?;
-
-        for (predicate, change) in changes {
-            diesel::update(transactions::table)
-                .filter(predicate)
-                .set(change)
-                .execute(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "transactions_finalize_all",
-                    source: e,
-                })?;
-        }
-
-        Ok(())
-        */
     }
 
     fn transaction_executions_insert_or_ignore(
@@ -954,20 +898,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn transaction_executions_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::transaction_executions;
+        let operation = "transaction_executions_remove_any_by_block_id";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::delete(transaction_executions::table)
-            .filter(transaction_executions::block_id.eq(serialize_hex(block_id)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_executions_remove_any_by_block_id",
-                source: e,
-            })?;
+        let cf = BlockTransactionExecutionModel::CF_BLOCK_ID;
+        let key_prefix = BlockTransactionExecutionModel::key_prefix_by_block(block_id);
+        let execs = BlockTransactionExecutionModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix)?;
+
+        for exec in execs {
+            BlockTransactionExecutionModel::delete(self.db.clone(), tx, operation, &exec)?;
+        }
 
         Ok(())
-        */
     }
 
     fn transaction_pool_insert_new(
@@ -1669,7 +1611,27 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn substates_create(&mut self, substate: &SubstateRecord) -> Result<(), StorageError> {
+        /*
+        if substate.is_destroyed() {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "calling substates_create with a destroyed SubstateRecord is not valid. substate_id = {}",
+                    substate.substate_id
+                ),
+            });
+        }
+
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        SubstateModel::put(self.db.clone(), tx, "substates_create", &substate)?;
+        */
         todo!()
+
+        // StateTransition: get maximum "seq" field for all transition for the shard
+
+
+        // let version = self.state_tree_versions_get_latest(substate.created_by_shard)?;
+        // insert the next state transition
+
         /*
         use crate::schema::{state_transitions, substates};
 

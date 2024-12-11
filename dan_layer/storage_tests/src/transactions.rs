@@ -249,7 +249,6 @@ mod transaction_operations {
     }
 }
 
-
 mod transaction_execution_operations {
     use std::{process::id, time::Duration};
 
@@ -327,9 +326,17 @@ mod transaction_execution_operations {
         let res = tx.transaction_executions_get(tx1.id(), zero_block.id()).unwrap();
         assert_eq_debug(&res, &exec1);
 
-        // TODO: transactions_finalize_all
-        // TODO: transaction_executions_insert_or_ignore
-        // TODO: transaction_executions_remove_any_by_block_id
+        // transaction_executions_get_pending_for_block
+        let res = tx.transaction_executions_get_pending_for_block(tx1.id(), zero_block.id()).unwrap();
+        assert_eq_debug(&res, &exec1);
+
+        // transactions_finalize_all
+        tx.transaction_pool_insert_new(*tx1.id(), tx1.current_decision(), true).unwrap();
+        let transactions = tx.transaction_pool_get_all().unwrap();
+        tx.transactions_finalize_all(*zero_block.id(), transactions.iter()).unwrap();     
+
+        // transaction_executions_remove_any_by_block_id
+        tx.transaction_executions_remove_any_by_block_id(zero_block.id()).unwrap();
 
         tx.rollback().unwrap();
     }

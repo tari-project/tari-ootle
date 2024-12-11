@@ -30,7 +30,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
 use tari_dan_storage::{StateStore, StorageError};
 
-use crate::{model::BlockModel, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 
@@ -47,7 +47,8 @@ impl<TAddr> RocksDbStateStore<TAddr> {
         options.create_missing_column_families(true);
 
         let cf_names = [
-            BlockModel::cfs()
+            BlockModel::cfs(),
+            BlockTransactionExecutionModel::cfs(),
         ].concat();
 
         let db = TransactionDB::<SingleThreaded>::open_cf(&options, &TransactionDBOptions::default(), path, cf_names.clone())

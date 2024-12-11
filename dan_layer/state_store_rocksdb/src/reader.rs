@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{BlockModel, BlockTransactionExecutionModel, TransactionModel, TransactionPoolModel, TransactionPoolPendingUpdateModel, TransactionPoolStateUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -283,22 +283,8 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     pub(crate) fn get_commit_block_id(&self) -> Result<BlockId, StorageError> {
-        todo!()
-        /*
-        use crate::schema::blocks;
-
-        let block_id = blocks::table
-            .select(blocks::block_id)
-            .filter(blocks::is_committed.eq(true))
-            .order_by(blocks::id.desc())
-            .first::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "get_commit_block_id",
-                source: e,
-            })?;
-
-        deserialize_hex_try_from(&block_id)
-        */
+        let block = BlockModel::get_cf(self.db.clone(), &self.tx, BlockModel::CF_IS_COMMITED, "get_commit_block_id", "", Ordering::Descending)?;
+        Ok(*block.id())
     }
 
     pub fn substates_count(&self) -> Result<u64, RocksDbStorageError> {
@@ -1402,38 +1388,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let rec = TransactionPoolModel::try_convert(&rec, updates.swap_remove(&transaction_id.to_string()))?;
 
         Ok(rec)
-
-
-        /*
-        use crate::schema::transaction_pool;
-
-        let transaction_id = serialize_hex(transaction_id);
-        let mut updates = self.get_transaction_atom_state_updates_between_blocks(
-            from_block_id,
-            to_block_id,
-            std::iter::once(transaction_id.as_str()),
-        )?;
-
-        debug!(
-            target: LOG_TARGET,
-            "transaction_pool_get: from_block_id={}, to_block_id={}, transaction_id={}, updates={} [{:?}]",
-            from_block_id,
-            to_block_id,
-            transaction_id,
-            updates.len(),
-            updates.values().map(|v| v.id).collect::<Vec<_>>(),
-        );
-
-        let rec = transaction_pool::table
-            .filter(transaction_pool::transaction_id.eq(&transaction_id))
-            .first::<sql_models::TransactionPoolRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_get_for_blocks",
-                source: e,
-            })?;
-
-        rec.try_convert(updates.swap_remove(&transaction_id))
-        */
     }
 
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {

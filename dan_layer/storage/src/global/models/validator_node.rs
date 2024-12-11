@@ -11,10 +11,9 @@ pub struct ValidatorNode<TAddr> {
     pub address: TAddr,
     pub public_key: PublicKey,
     pub shard_key: SubstateAddress,
-    pub registered_at_base_height: u64,
     pub start_epoch: Epoch,
+    pub end_epoch: Option<Epoch>,
     pub fee_claim_public_key: PublicKey,
-    pub sidechain_id: Option<PublicKey>,
 }
 
 impl<TAddr: NodeAddressable> ValidatorNode<TAddr> {

@@ -143,6 +143,7 @@ where TConsensusSpec: ConsensusSpec
         let mut finalized_transactions = Vec::new();
         let mut end_of_epoch = None;
         let mut maybe_high_qc = None;
+        let mut committed_blocks_with_evictions = Vec::new();
 
         if change_set.is_accept() {
             // Update nodes
@@ -155,9 +156,12 @@ where TConsensusSpec: ConsensusSpec
                     self.on_lock_block(tx, block)
                 },
                 |tx, last_exec, commit_block| {
-                    let committed = self.on_commit(tx, last_exec, commit_block, local_committee_info)?;
+                    let committed = self.on_commit(tx, last_exec, &commit_block, local_committee_info)?;
                     if commit_block.is_epoch_end() {
                         end_of_epoch = Some(commit_block.epoch());
+                    }
+                    if commit_block.all_evict_nodes().next().is_some() {
+                        committed_blocks_with_evictions.push(commit_block);
                     }
                     if !committed.is_empty() {
                         finalized_transactions.push(committed);
@@ -191,6 +195,7 @@ where TConsensusSpec: ConsensusSpec
             finalized_transactions,
             end_of_epoch,
             high_qc,
+            committed_blocks_with_evictions,
         })
     }
 
@@ -305,7 +310,6 @@ where TConsensusSpec: ConsensusSpec
             PendingSubstateStore::new(tx, *block.parent(), self.config.consensus_constants.num_preshards);
         let mut total_leader_fee = 0;
         let locked_block = LockedBlock::get(tx, block.epoch())?;
-        let mut suspended_in_this_block_count = 0u64;
 
         for cmd in block.commands() {
             match cmd {
@@ -439,84 +443,49 @@ where TConsensusSpec: ConsensusSpec
                         return Ok(());
                     }
                 },
-                Command::SuspendNode(atom) => {
-                    if ValidatorConsensusStats::is_node_suspended(tx, block.id(), &atom.public_key)? {
+                Command::EvictNode(atom) => {
+                    if ValidatorConsensusStats::is_node_evicted(tx, block.id(), &atom.public_key)? {
                         warn!(
                             target: LOG_TARGET,
-                            "❌ NO VOTE: {}", NoVoteReason::NodeAlreadySuspended
+                            "❌ NO VOTE: {}", NoVoteReason::NodeAlreadyEvicted
                         );
 
-                        proposed_block_change_set.no_vote(NoVoteReason::ShouldNotSuspendNode);
+                        proposed_block_change_set.no_vote(NoVoteReason::NodeAlreadyEvicted);
                         return Ok(());
                     }
 
-                    let num_suspended = ValidatorConsensusStats::count_number_suspended_nodes(tx)?;
-                    let max_allowed_to_suspend = u64::from(local_committee_info.quorum_threshold())
-                        .saturating_sub(num_suspended)
-                        .saturating_sub(suspended_in_this_block_count);
-                    if max_allowed_to_suspend == 0 {
+                    let num_evicted = ValidatorConsensusStats::count_number_evicted_nodes(tx, block.epoch())?;
+                    let max_allowed_to_evict = u64::from(local_committee_info.quorum_threshold())
+                        .saturating_sub(num_evicted)
+                        .saturating_sub(proposed_block_change_set.num_evicted_nodes_this_block() as u64);
+                    if max_allowed_to_evict == 0 {
                         warn!(
                             target: LOG_TARGET,
-                            "❌ NO VOTE: {}", NoVoteReason::CannotSuspendNodeBelowQuorumThreshold
+                            "❌ NO VOTE: {}", NoVoteReason::CannotEvictNodeBelowQuorumThreshold
                         );
 
-                        proposed_block_change_set.no_vote(NoVoteReason::ShouldNotSuspendNode);
+                        proposed_block_change_set.no_vote(NoVoteReason::CannotEvictNodeBelowQuorumThreshold);
                         return Ok(());
                     }
-                    suspended_in_this_block_count += 1;
 
                     let stats = ValidatorConsensusStats::get_by_public_key(tx, block.epoch(), &atom.public_key)?;
-                    if stats.missed_proposals < self.config.consensus_constants.missed_proposal_suspend_threshold {
+                    if stats.missed_proposals < self.config.consensus_constants.missed_proposal_evict_threshold {
                         warn!(
                             target: LOG_TARGET,
-                            "❌ NO VOTE: {} (actual missed count: {}, threshold: {})", NoVoteReason::ShouldNotSuspendNode, stats.missed_proposals, self.config.consensus_constants.missed_proposal_suspend_threshold
+                            "❌ NO VOTE: {} (actual missed count: {}, threshold: {})", NoVoteReason::ShouldNotEvictNode, stats.missed_proposals, self.config.consensus_constants.missed_proposal_evict_threshold
                         );
 
-                        proposed_block_change_set.no_vote(NoVoteReason::ShouldNotSuspendNode);
+                        proposed_block_change_set.no_vote(NoVoteReason::ShouldNotEvictNode);
                         return Ok(());
                     }
 
                     info!(
                         target: LOG_TARGET,
-                        "🐢 Suspending node: {} with missed count {}",
+                        "💀 EVICTING node: {} with missed count {}",
                         atom.public_key,
                         stats.missed_proposals
                     );
-                    proposed_block_change_set.add_suspend_node(atom.public_key.clone());
-                },
-                Command::ResumeNode(atom) => {
-                    if !ValidatorConsensusStats::is_node_suspended(tx, block.id(), &atom.public_key)? {
-                        warn!(
-                            target: LOG_TARGET,
-                            "❌ NO VOTE: {}", NoVoteReason::NodeNotSuspended
-                        );
-
-                        proposed_block_change_set.no_vote(NoVoteReason::NodeNotSuspended);
-                        return Ok(());
-                    }
-
-                    let stats = ValidatorConsensusStats::get_by_public_key(tx, block.epoch(), &atom.public_key)?;
-                    if stats.missed_proposals > 0 {
-                        warn!(
-                            target: LOG_TARGET,
-                            "❌ NO VOTE: {}", NoVoteReason::ShouldNodeResumeNode
-                        );
-                        warn!(
-                            target: LOG_TARGET,
-                            "❌ NO VOTE: {} (actual missed count: {})", NoVoteReason::ShouldNodeResumeNode, stats.missed_proposals,
-                        );
-
-                        proposed_block_change_set.no_vote(NoVoteReason::ShouldNodeResumeNode);
-                        return Ok(());
-                    }
-                    suspended_in_this_block_count = suspended_in_this_block_count.saturating_sub(1);
-
-                    info!(
-                        target: LOG_TARGET,
-                        "🐇 Resume node: {}",
-                        atom.public_key,
-                    );
-                    proposed_block_change_set.add_resume_node(atom.public_key.clone());
+                    proposed_block_change_set.add_evict_node(atom.public_key.clone());
                 },
                 Command::EndEpoch => {
                     if !can_propose_epoch_end {
@@ -569,18 +538,23 @@ where TConsensusSpec: ConsensusSpec
         if expected_merkle_root != *block.state_merkle_root() {
             warn!(
                 target: LOG_TARGET,
-                "❌ Merkle root disagreement for block {}. Leader proposed {}, we calculated {}",
+                "❌ State Merkle root disagreement for block {}. Leader proposed {}, we calculated {}",
                 block,
                 block.state_merkle_root(),
                 expected_merkle_root
             );
-            proposed_block_change_set.no_vote(NoVoteReason::StateMerkleRootMismatch);
+            let (diff, locks) = substate_store.into_parts();
+            proposed_block_change_set
+                .no_vote(NoVoteReason::StateMerkleRootMismatch)
+                // These are set for debugging purposes but aren't actually committed
+                .set_substate_changes(diff)
+                .set_substate_locks(locks);
             return Ok(());
         }
 
         let (diff, locks) = substate_store.into_parts();
         proposed_block_change_set
-            .set_block_diff(diff)
+            .set_substate_changes(diff)
             .set_state_tree_diffs(tree_diffs)
             .set_substate_locks(locks)
             .set_quorum_decision(QuorumDecision::Accept);
@@ -1634,18 +1608,18 @@ where TConsensusSpec: ConsensusSpec
             warn!(
                 target: LOG_TARGET,
                 "❌ NO VOTE: MintConfidentialOutputAtom for {} is not known.",
-                atom.substate_id
+                atom.commitment
             );
             return Ok(Some(NoVoteReason::MintConfidentialOutputUnknown));
         };
-        let id = VersionedSubstateId::new(utxo.substate_id.clone(), 0);
+        let id = VersionedSubstateId::new(utxo.commitment, 0);
         let shard = id.to_substate_address().to_shard(local_committee_info.num_preshards());
         let change = SubstateChange::Up {
             id,
             shard,
             // N/A
             transaction_id: Default::default(),
-            substate: Substate::new(0, utxo.substate_value),
+            substate: Substate::new(0, utxo.output),
         };
 
         if let Err(err) = substate_store.put(change) {
@@ -1653,13 +1627,13 @@ where TConsensusSpec: ConsensusSpec
             warn!(
                 target: LOG_TARGET,
                 "❌ NO VOTE: Failed to store mint confidential output for {}. Error: {}",
-                atom.substate_id,
+                atom.commitment,
                 err
             );
             return Ok(Some(NoVoteReason::MintConfidentialOutputStoreFailed));
         }
 
-        proposed_block_change_set.set_utxo_mint_proposed_in(utxo.substate_id);
+        proposed_block_change_set.set_utxo_mint_proposed_in(utxo.commitment);
 
         Ok(None)
     }
@@ -1777,8 +1751,8 @@ where TConsensusSpec: ConsensusSpec
             atom.delete(tx)?;
         }
 
-        for atom in block.all_resume_nodes() {
-            atom.delete_suspended_node(tx)?;
+        for atom in block.all_evict_nodes() {
+            atom.mark_as_committed_in_epoch(tx, block.epoch())?;
         }
 
         // NOTE: this must happen before we commit the substate diff because the state transitions use this version

@@ -123,11 +123,14 @@ where TConsensusSpec: ConsensusSpec
 
     fn validate_proposed_block(
         &self,
-        candidate_block: &Block,
+        _candidate_block: &Block,
         _foreign_shard: ShardGroup,
         _local_shard: ShardGroup,
         _foreign_receive_counter: &ForeignReceiveCounters,
     ) -> Result<(), ProposalValidationError> {
+        // TODO: validations specific to the foreign proposal. General block validations (signature etc) are already
+        //       performed in on_message_validate.
+
         // TODO: ignoring for now because this is currently broken
         // let Some(incoming_count) = candidate_block.get_foreign_counter(&local_shard) else {
         //     debug!(target:LOG_TARGET, "Our bucket {local_shard:?} is missing reliability index in the proposed block
@@ -149,24 +152,6 @@ where TConsensusSpec: ConsensusSpec
         //         ),
         //     });
         // }
-        if candidate_block.is_genesis() {
-            return Err(ProposalValidationError::ProposingGenesisBlock {
-                proposed_by: candidate_block.proposed_by().to_string(),
-                hash: *candidate_block.id(),
-            });
-        }
-
-        let calculated_hash = candidate_block.calculate_hash().into();
-        if calculated_hash != *candidate_block.id() {
-            return Err(ProposalValidationError::BlockIdMismatch {
-                proposed_by: candidate_block.proposed_by().to_string(),
-                block_id: *candidate_block.id(),
-                calculated_hash,
-            });
-        }
-
-        // TODO: validate justify signatures
-        // self.validate_qc(candidate_block.justify(), committee)?;
 
         Ok(())
     }

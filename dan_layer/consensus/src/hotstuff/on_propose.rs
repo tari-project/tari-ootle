@@ -3,15 +3,16 @@
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
+    fmt::Display,
     num::NonZeroU64,
 };
 
-use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
+    option::DisplayContainer,
     optional::Optional,
     shard::Shard,
     Epoch,
@@ -24,11 +25,13 @@ use tari_dan_storage::{
     consensus_models::{
         AbortReason,
         Block,
+        BlockHeader,
         BlockId,
         BlockTransactionExecution,
         BurntUtxo,
         Command,
         Decision,
+        EvictNodeAtom,
         ForeignProposal,
         ForeignSendCounters,
         HighQc,
@@ -37,10 +40,8 @@ use tari_dan_storage::{
         LockedBlock,
         PendingShardStateTreeDiff,
         QuorumCertificate,
-        ResumeNodeAtom,
         SubstateChange,
         SubstateRequirementLockIntent,
-        SuspendNodeAtom,
         TransactionAtom,
         TransactionExecution,
         TransactionPool,
@@ -155,7 +156,6 @@ where TConsensusSpec: ConsensusSpec
         let base_layer_block_height = current_base_layer_block_height;
 
         let on_propose = self.clone();
-        let validator_node_pk = self.signing_service.public_key().clone();
         let (next_block, foreign_proposals) = task::spawn_blocking(move || {
             on_propose.store.with_write_tx(|tx| {
                 let high_qc = HighQc::get(&**tx, epoch)?;
@@ -174,7 +174,6 @@ where TConsensusSpec: ConsensusSpec
                     next_height,
                     leaf_block,
                     high_qc_cert,
-                    validator_node_pk,
                     &local_committee_info,
                     false,
                     base_layer_block_height,
@@ -247,9 +246,17 @@ where TConsensusSpec: ConsensusSpec
         self.outbound_messaging.send_self(msg.clone()).await?;
         // If we are the only VN in this committee, no need to multicast
         if local_committee_info.num_shard_group_members() > 1 {
-            self.outbound_messaging
+            if let Err(err) = self
+                .outbound_messaging
                 .multicast(local_committee_info.shard_group(), msg)
-                .await?;
+                .await
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "Failed to multicast proposal to local committee: {}",
+                    err
+                );
+            }
         }
 
         Ok(())
@@ -381,145 +388,57 @@ where TConsensusSpec: ConsensusSpec
         next_height: NodeHeight,
         parent_block: LeafBlock,
         high_qc_certificate: QuorumCertificate,
-        proposed_by: PublicKey,
         local_committee_info: &CommitteeInfo,
         dont_propose_transactions: bool,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
         propose_epoch_end: bool,
     ) -> Result<NextBlock, HotStuffError> {
-        let max_block_size = self.config.consensus_constants.max_block_size;
-
-        let justifies_parent = high_qc_certificate.block_id() == parent_block.block_id();
-        let start_of_chain_block = if justifies_parent || high_qc_certificate.is_zero() {
-            // Parent is justified - we can include its state in the MR calc, foreign propose etc
+        // The parent block will only ever not exist if it is a dummy block
+        let parent_exists = Block::record_exists(tx, parent_block.block_id())?;
+        let start_of_chain_block = if parent_exists {
+            // Parent exists - we can include its state in the MR calc, foreign propose etc
             parent_block
         } else {
-            // Parent is not justified which means we have dummy blocks between the parent and the justified block so we
-            // can exclude them from the query. Also note that the query will fail if we used the parent
-            // block id, since the dummy blocks do not exist yet.
+            // Parent does not exist which means we have dummy blocks between the parent and the justified block so we
+            // can exclude them from the query. There are a few queries that will fail if we used a non-existent block.
             high_qc_certificate.as_leaf_block()
         };
 
         let mut total_leader_fee = 0;
 
-        let foreign_proposals = if propose_epoch_end {
-            vec![]
+        let batch = if propose_epoch_end {
+            ProposalBatch::default()
         } else {
-            ForeignProposal::get_all_new(tx, start_of_chain_block.block_id(), max_block_size / 4)?
+            self.fetch_next_proposal_batch(
+                tx,
+                local_committee_info,
+                dont_propose_transactions,
+                start_of_chain_block,
+            )?
         };
 
-        if !foreign_proposals.is_empty() {
-            debug!(
-                target: LOG_TARGET,
-                "🌿 Found {} foreign proposals for next block",
-                foreign_proposals.len()
-            );
-        }
-
-        let burnt_utxos = if dont_propose_transactions || propose_epoch_end {
-            vec![]
-        } else {
-            max_block_size
-                .checked_sub(foreign_proposals.len() * 4)
-                .filter(|n| *n > 0)
-                .map(|size| BurntUtxo::get_all_unproposed(tx, start_of_chain_block.block_id(), size))
-                .transpose()?
-                .unwrap_or_default()
-        };
-
-        if !burnt_utxos.is_empty() {
-            debug!(
-                target: LOG_TARGET,
-               "🌿 Found {} burnt utxos for next block",
-                burnt_utxos.len()
-            );
-        }
-
-        let suspend_nodes = if dont_propose_transactions || propose_epoch_end {
-            vec![]
-        } else {
-            let num_suspended = ValidatorConsensusStats::count_number_suspended_nodes(tx)?;
-            let max_allowed_to_suspend =
-                u64::from(local_committee_info.quorum_threshold()).saturating_sub(num_suspended);
-
-            max_block_size
-                .checked_sub(foreign_proposals.len() * 4 + burnt_utxos.len())
-                .filter(|n| *n > 0)
-                .map(|size| {
-                    ValidatorConsensusStats::get_nodes_to_suspend(
-                        tx,
-                        start_of_chain_block.block_id(),
-                        self.config.consensus_constants.missed_proposal_suspend_threshold,
-                        size.min(max_allowed_to_suspend as usize),
-                    )
-                })
-                .transpose()?
-                .unwrap_or_default()
-        };
-
-        if !suspend_nodes.is_empty() {
-            debug!(
-                target: LOG_TARGET,
-                "🌿 Found {} suspend nodes for next block",
-                suspend_nodes.len()
-            )
-        }
-
-        let resume_nodes = if dont_propose_transactions || propose_epoch_end {
-            vec![]
-        } else {
-            max_block_size
-                .checked_sub(foreign_proposals.len() * 4 + burnt_utxos.len())
-                .filter(|n| *n > 0)
-                .map(|size| ValidatorConsensusStats::get_nodes_to_resume(tx, start_of_chain_block.block_id(), size))
-                .transpose()?
-                .unwrap_or_default()
-        };
-
-        if !resume_nodes.is_empty() {
-            debug!(
-                target: LOG_TARGET,
-                "🌿 Found {} resume nodes for next block",
-                resume_nodes.len()
-            )
-        }
-
-        let suspend_nodes_len = suspend_nodes.len();
-
-        let batch = if dont_propose_transactions || propose_epoch_end {
-            vec![]
-        } else {
-            max_block_size
-                // Each foreign proposal is "heavier" than a transaction command
-                .checked_sub(foreign_proposals.len() * 4 + burnt_utxos.len() + suspend_nodes.len())
-                .filter(|n| *n > 0)
-                .map(|size| self.transaction_pool.get_batch_for_next_block(tx, size, start_of_chain_block.block_id()))
-                .transpose()?
-                .unwrap_or_default()
-        };
+        debug!(target: LOG_TARGET, "🌿 PROPOSE: {batch}");
 
         let mut commands = if propose_epoch_end {
             BTreeSet::from_iter([Command::EndEpoch])
         } else {
             BTreeSet::from_iter(
-                foreign_proposals
+                batch
+                    .foreign_proposals
                     .iter()
                     .map(|fp| Command::ForeignProposal(fp.to_atom()))
                     .chain(
-                        burnt_utxos
+                        batch
+                            .burnt_utxos
                             .iter()
                             .map(|bu| Command::MintConfidentialOutput(bu.to_atom())),
                     )
                     .chain(
-                        suspend_nodes
+                        batch
+                            .evict_nodes
                             .into_iter()
-                            .map(|public_key| Command::SuspendNode(SuspendNodeAtom { public_key })),
-                    )
-                    .chain(
-                        resume_nodes
-                            .into_iter()
-                            .map(|public_key| Command::ResumeNode(ResumeNodeAtom { public_key })),
+                            .map(|public_key| Command::EvictNode(EvictNodeAtom { public_key })),
                     ),
             )
         };
@@ -527,7 +446,7 @@ where TConsensusSpec: ConsensusSpec
         let mut change_set = ProposedBlockChangeSet::new(high_qc_certificate.as_leaf_block());
 
         // No need to include evidence from justified block if no transactions are included in the next block
-        if !batch.is_empty() {
+        if !batch.transactions.is_empty() {
             // TODO(protocol-efficiency): We should process any foreign proposals included in this block to include
             // evidence. And that should determine if they are ready. However this is difficult because we
             // get the batch from the database which isnt aware of which foreign proposals we're going to
@@ -559,22 +478,16 @@ where TConsensusSpec: ConsensusSpec
             }
         }
 
-        debug!(
-            target: LOG_TARGET,
-            "🌿 PROPOSE: {} (or less) transaction(s), {} foreign proposal(s), {} UTXOs, {} suspends for next block (justifies_parent = {})",
-            batch.len(), foreign_proposals.len() , burnt_utxos.len(), justifies_parent, suspend_nodes_len
-        );
-
         // batch is empty for is_empty, is_epoch_end and is_epoch_start blocks
         let mut substate_store = PendingSubstateStore::new(
             tx,
-            *parent_block.block_id(),
+            *start_of_chain_block.block_id(),
             self.config.consensus_constants.num_preshards,
         );
         let mut executed_transactions = HashMap::new();
-        let timer = TraceTimer::info(LOG_TARGET, "Generating commands").with_iterations(batch.len());
+        let timer = TraceTimer::info(LOG_TARGET, "Generating commands").with_iterations(batch.transactions.len());
         let mut lock_conflicts = TransactionLockConflicts::new();
-        for mut transaction in batch {
+        for mut transaction in batch.transactions {
             // Apply the transaction updates (if any) that occurred as a result of the justified block.
             // This allows us to propose evidence in the next block that relates to transactions in the justified block.
             change_set.apply_transaction_update(&mut transaction);
@@ -598,15 +511,15 @@ where TConsensusSpec: ConsensusSpec
         timer.done();
 
         // This relies on the UTXO commands being ordered after transaction commands
-        for utxo in burnt_utxos {
-            let id = VersionedSubstateId::new(utxo.substate_id.clone(), 0);
+        for utxo in batch.burnt_utxos {
+            let id = VersionedSubstateId::new(utxo.commitment, 0);
             let shard = id.to_substate_address().to_shard(local_committee_info.num_preshards());
             let change = SubstateChange::Up {
                 id,
                 shard,
                 // N/A
                 transaction_id: Default::default(),
-                substate: Substate::new(0, utxo.substate_value),
+                substate: Substate::new(0, utxo.output),
             };
 
             substate_store.put(change)?;
@@ -615,7 +528,7 @@ where TConsensusSpec: ConsensusSpec
         debug!(
             target: LOG_TARGET,
             "command(s) for next block: [{}]",
-            commands.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(",")
+            commands.display()
         );
 
         let timer = TraceTimer::info(LOG_TARGET, "Propose calculate state root");
@@ -634,24 +547,21 @@ where TConsensusSpec: ConsensusSpec
         let non_local_shards = get_non_local_shards(substate_store.diff(), local_committee_info);
 
         let foreign_counters = ForeignSendCounters::get_or_default(tx, parent_block.block_id())?;
-        let mut foreign_indexes = non_local_shards
+        let foreign_indexes = non_local_shards
             .iter()
             .map(|shard| (*shard, foreign_counters.get_count(*shard) + 1))
-            .collect::<IndexMap<_, _>>();
+            .collect();
 
-        // Ensure that foreign indexes are canonically ordered
-        foreign_indexes.sort_keys();
-
-        let mut next_block = Block::create(
+        let mut header = BlockHeader::create(
             self.config.network,
             *parent_block.block_id(),
-            high_qc_certificate,
+            *high_qc_certificate.id(),
             next_height,
             epoch,
             local_committee_info.shard_group(),
-            proposed_by,
-            commands,
+            self.signing_service.public_key().clone(),
             state_root,
+            &commands,
             total_leader_fee,
             foreign_indexes,
             None,
@@ -661,14 +571,111 @@ where TConsensusSpec: ConsensusSpec
             ExtraData::new(),
         )?;
 
-        let signature = self.signing_service.sign(next_block.id());
-        next_block.set_signature(signature);
+        let signature = self.signing_service.sign(header.id());
+        header.set_signature(signature);
+
+        let next_block = Block::new(header, high_qc_certificate, commands);
 
         Ok(NextBlock {
             block: next_block,
-            foreign_proposals,
+            foreign_proposals: batch.foreign_proposals,
             executed_transactions,
             lock_conflicts,
+        })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn fetch_next_proposal_batch(
+        &self,
+        tx: &<<TConsensusSpec as ConsensusSpec>::StateStore as StateStore>::ReadTransaction<'_>,
+        local_committee_info: &CommitteeInfo,
+        dont_propose_transactions: bool,
+        start_of_chain_block: LeafBlock,
+    ) -> Result<ProposalBatch, HotStuffError> {
+        let _timer = TraceTimer::debug(LOG_TARGET, "fetch_next_proposal_batch");
+        let foreign_proposals = ForeignProposal::get_all_new(
+            tx,
+            start_of_chain_block.block_id(),
+            self.config.consensus_constants.max_block_size / 4,
+        )?;
+
+        if !foreign_proposals.is_empty() {
+            debug!(
+                target: LOG_TARGET,
+                "🌿 Found {} foreign proposals for next block",
+                foreign_proposals.len()
+            );
+        }
+
+        let mut remaining_block_size = subtract_block_size_checked(
+            Some(self.config.consensus_constants.max_block_size),
+            foreign_proposals.len() * 4,
+        );
+
+        let burnt_utxos = remaining_block_size
+            .map(|size| BurntUtxo::get_all_unproposed(tx, start_of_chain_block.block_id(), size))
+            .transpose()?
+            .unwrap_or_default();
+
+        if !burnt_utxos.is_empty() {
+            debug!(
+                target: LOG_TARGET,
+               "🌿 Found {} burnt utxos for next block",
+                burnt_utxos.len()
+            );
+        }
+
+        remaining_block_size = subtract_block_size_checked(remaining_block_size, burnt_utxos.len());
+
+        let evict_nodes = remaining_block_size
+            .map(|max| {
+                let num_evicted =
+                    ValidatorConsensusStats::count_number_evicted_nodes(tx, start_of_chain_block.epoch())?;
+                let remaining_max = u64::from(local_committee_info.max_failures()).saturating_sub(num_evicted);
+                if remaining_max == 0 {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🦶 No more nodes can be evicted for next block. Num evicted: {num_evicted}",
+                    );
+                }
+                let max_allowed_to_evict = remaining_max.min(max as u64);
+                ValidatorConsensusStats::get_nodes_to_evict(
+                    tx,
+                    start_of_chain_block.block_id(),
+                    self.config.consensus_constants.missed_proposal_evict_threshold,
+                    max_allowed_to_evict,
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        if !evict_nodes.is_empty() {
+            debug!(
+                target: LOG_TARGET,
+                "🌿 Found {} EVICT nodes for next block",
+                evict_nodes.len()
+            )
+        }
+
+        remaining_block_size = subtract_block_size_checked(remaining_block_size, evict_nodes.len());
+
+        let transactions = if dont_propose_transactions {
+            vec![]
+        } else {
+            remaining_block_size
+                .map(|size| {
+                    self.transaction_pool
+                        .get_batch_for_next_block(tx, size, start_of_chain_block.block_id())
+                })
+                .transpose()?
+                .unwrap_or_default()
+        };
+
+        Ok(ProposalBatch {
+            foreign_proposals,
+            burnt_utxos,
+            transactions,
+            evict_nodes,
         })
     }
 
@@ -991,4 +998,31 @@ pub fn get_non_local_shards(diff: &[SubstateChange], local_committee_info: &Comm
         })
         .filter(|shard| local_committee_info.shard_group().contains(shard))
         .collect()
+}
+
+#[derive(Default)]
+struct ProposalBatch {
+    pub foreign_proposals: Vec<ForeignProposal>,
+    pub burnt_utxos: Vec<BurntUtxo>,
+    pub transactions: Vec<TransactionPoolRecord>,
+    pub evict_nodes: Vec<PublicKey>,
+}
+
+impl Display for ProposalBatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} transaction(s), {} foreign proposal(s), {} UTXOs, {} evict",
+            self.transactions.len(),
+            self.foreign_proposals.len(),
+            self.burnt_utxos.len(),
+            self.evict_nodes.len()
+        )
+    }
+}
+
+fn subtract_block_size_checked(remaining_block_size: Option<usize>, by: usize) -> Option<usize> {
+    remaining_block_size
+        .and_then(|sz| sz.checked_sub(by))
+        .filter(|sz| *sz > 0)
 }

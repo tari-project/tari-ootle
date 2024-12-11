@@ -1,7 +1,6 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use async_trait::async_trait;
 use libp2p::PeerId;
 use tari_consensus::{messages::HotstuffMessage, traits::InboundMessagingError};
 use tari_dan_common_types::PeerAddress;
@@ -53,7 +52,6 @@ impl<TMsgLogger: MessageLogger> ConsensusInboundMessaging<TMsgLogger> {
     }
 }
 
-#[async_trait]
 impl<TMsgLogger: MessageLogger + Send> tari_consensus::traits::InboundMessaging
     for ConsensusInboundMessaging<TMsgLogger>
 {

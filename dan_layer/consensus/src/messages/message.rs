@@ -64,8 +64,9 @@ impl Display for HotstuffMessage {
             HotstuffMessage::NewView(msg) => {
                 write!(
                     f,
-                    "NewView({}, high-qc: {})",
+                    "NewView({}, {}, high-qc: {})",
                     msg.new_height,
+                    msg.high_qc.epoch(),
                     msg.high_qc.block_height()
                 )
             },
@@ -81,8 +82,8 @@ impl Display for HotstuffMessage {
             HotstuffMessage::ForeignProposal(msg) => write!(f, "ForeignProposal({})", msg),
             HotstuffMessage::Vote(msg) => write!(
                 f,
-                "Vote({}, {}, {})",
-                msg.unverified_block_height, msg.block_id, msg.decision
+                "Vote({}, {}, {}, {})",
+                msg.unverified_block_height, msg.epoch, msg.block_id, msg.decision,
             ),
             HotstuffMessage::MissingTransactionsRequest(msg) => {
                 write!(
@@ -101,7 +102,9 @@ impl Display for HotstuffMessage {
                 msg.epoch
             ),
             HotstuffMessage::CatchUpSyncRequest(msg) => write!(f, "SyncRequest({})", msg.high_qc),
-            HotstuffMessage::SyncResponse(msg) => write!(f, "SyncResponse({} block(s))", msg.blocks.len()),
+            HotstuffMessage::SyncResponse(msg) => {
+                write!(f, "SyncResponse({}, {} block(s))", msg.epoch, msg.blocks.len())
+            },
         }
     }
 }

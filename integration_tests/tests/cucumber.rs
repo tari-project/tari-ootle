@@ -128,9 +128,10 @@ async fn main() {
     shutdown.trigger();
 }
 
+#[then(expr = "I stop validator node {word}")]
 #[when(expr = "I stop validator node {word}")]
 async fn stop_validator_node(world: &mut TariWorld, vn_name: String) {
-    let vn_ps = world.validator_nodes.get_mut(&vn_name).unwrap();
+    let vn_ps = world.get_validator_node_mut(&vn_name);
     vn_ps.stop();
 }
 
@@ -569,6 +570,7 @@ async fn create_transaction_signing_key(world: &mut TariWorld, name: String) {
     validator_node_cli::create_or_use_key(world, name);
 }
 
+#[then(expr = "I create an account {word} on {word}")]
 #[when(expr = "I create an account {word} on {word}")]
 async fn create_account(world: &mut TariWorld, account_name: String, vn_name: String) {
     validator_node_cli::create_account(world, account_name, vn_name).await;

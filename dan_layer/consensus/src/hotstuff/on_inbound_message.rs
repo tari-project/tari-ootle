@@ -94,14 +94,23 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
 
         while let Some(result) = self.inbound_messaging.next_message().await {
             let (from, msg) = result?;
+
+            // If we receive an FP that is greater than our current epoch, we buffer it
+            if let HotstuffMessage::ForeignProposal(ref m) = msg {
+                if m.justify_qc.epoch() > current_epoch {
+                    self.push_to_buffer(m.justify_qc.epoch(), NodeHeight::zero(), from, msg);
+                    continue;
+                }
+            }
+
             match msg_epoch_and_height(&msg) {
                 // Discard old message
-                Some((e, h)) if e < current_epoch || h < next_height => {
-                    info!(target: LOG_TARGET, "Discard message {} is for previous view {}/{}. Current view {}/{}", msg, e, h, current_epoch, next_height);
+                Some((e, h)) if e < current_epoch || (e == current_epoch && h < next_height) => {
+                    info!(target: LOG_TARGET, "🗑️ Discard message {} is for previous view {}/{}. Current view {}/{}", msg, e, h, current_epoch, next_height);
                     continue;
                 },
                 // Buffer message for future epoch/height
-                Some((epoch, height)) if epoch > current_epoch || height > next_height => {
+                Some((epoch, height)) if epoch == current_epoch && height > next_height => {
                     if msg.proposal().is_some() {
                         info!(target: LOG_TARGET, "🦴Proposal {msg} is for future view (Current view: {current_epoch}, {next_height})");
                     } else {
@@ -109,6 +118,17 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                     }
                     self.push_to_buffer(epoch, height, from, msg);
                     continue;
+                },
+                Some((epoch, height)) if epoch > current_epoch => {
+                    warn!(target: LOG_TARGET, "⚠️ Message {msg} is for future epoch {epoch}. Current epoch {current_epoch}");
+                    if matches!(&msg, HotstuffMessage::Vote(_)) {
+                        // Buffer VOTE messages. As it does not contain a QC we can use to prove that a BFT-majority has
+                        // reached the epoch
+                        self.push_to_buffer(epoch, height, from, msg);
+                        continue;
+                    }
+                    // Return the message, it will be validated and if valid, will kick consensus into sync
+                    return Ok(Some((from, msg)));
                 },
                 // Height is irrelevant or current, return message
                 _ => return Ok(Some((from, msg))),

@@ -13,8 +13,13 @@ use crate::hotstuff::{
 };
 
 pub enum PacemakerRequest {
-    ResetLeaderTimeout { high_qc_height: Option<NodeHeight> },
-    Start { high_qc_height: NodeHeight },
+    Reset {
+        high_qc_height: Option<NodeHeight>,
+        reset_block_time: bool,
+    },
+    Start {
+        high_qc_height: NodeHeight,
+    },
     Stop,
     SuspendLeaderFailure,
     ResumeLeaderFailure,
@@ -92,8 +97,19 @@ impl PaceMakerHandle {
 
     pub async fn reset_leader_timeout(&self, high_qc_height: NodeHeight) -> Result<(), HotStuffError> {
         self.sender
-            .send(PacemakerRequest::ResetLeaderTimeout {
+            .send(PacemakerRequest::Reset {
                 high_qc_height: Some(high_qc_height),
+                reset_block_time: false,
+            })
+            .await
+            .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })
+    }
+
+    pub async fn reset(&self, high_qc_height: NodeHeight) -> Result<(), HotStuffError> {
+        self.sender
+            .send(PacemakerRequest::Reset {
+                high_qc_height: Some(high_qc_height),
+                reset_block_time: true,
             })
             .await
             .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })
@@ -108,7 +124,7 @@ impl PaceMakerHandle {
     ) -> Result<(), HotStuffError> {
         // Update current height here to prevent possibility of race conditions
         self.current_view.update(epoch, last_seen_height);
-        self.reset_leader_timeout(high_qc_height).await
+        self.reset(high_qc_height).await
     }
 
     /// Suspend leader failure trigger. This should be called when a proposal is being processed. No leader failure will
@@ -138,13 +154,13 @@ impl PaceMakerHandle {
     ) -> Result<(), HotStuffError> {
         // Update current height here to prevent possibility of race conditions
         self.current_view.reset(epoch, last_seen_height);
-        self.reset_leader_timeout(high_qc_height).await
+        self.reset(high_qc_height).await
     }
 
     /// Reset the leader timeout. This should be called when an end of epoch proposal has been committed.
     pub async fn set_epoch(&self, epoch: Epoch) -> Result<(), HotStuffError> {
         self.current_view.reset(epoch, NodeHeight::zero());
-        self.reset_leader_timeout(NodeHeight::zero()).await
+        self.reset(NodeHeight::zero()).await
     }
 
     pub fn current_view(&self) -> &CurrentView {

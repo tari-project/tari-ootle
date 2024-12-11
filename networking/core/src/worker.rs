@@ -432,7 +432,7 @@ where
                 error,
                 ..
             } => {
-                warn!(target: LOG_TARGET, "🚨 Outgoing connection error: peer_id={}, error={}", peer_id, error);
+                debug!(target: LOG_TARGET, "🚨 Outgoing connection error: peer_id={}, error={}", peer_id, error);
                 let Some(waiters) = self.pending_dial_requests.remove(&peer_id) else {
                     debug!(target: LOG_TARGET, "No pending dial requests initiated by this service for peer {}", peer_id);
                     return Ok(());
@@ -823,7 +823,7 @@ where
                 if is_connected_through_relay {
                     info!(target: LOG_TARGET, "📡 Peer {} has a p2p-circuit address. Upgrading to DCUtR", peer_id);
                     // Ignore as connection failures are logged in events, or an error here is because the peer is
-                    // already connected/being dialled
+                    // already connected/being dialed
                     let _ignore = self
                         .swarm
                         .dial(DialOpts::peer_id(peer_id).addresses(vec![address.clone()]).build());
@@ -840,7 +840,7 @@ where
             }
         }
 
-        // If this peer is the selected relay that was dialled previously, listen on the circuit address
+        // If this peer is the selected relay that was dialed previously, listen on the circuit address
         // Note we only select a relay if autonat says we are not publicly accessible.
         if is_relay {
             self.establish_relay_circuit_on_connect(&peer_id, connection_id);
@@ -872,7 +872,7 @@ where
             return false;
         };
 
-        // If the peer we've connected with is the selected relay that we previously dialled, then continue
+        // If the peer we've connected with is the selected relay that we previously dialed, then continue
         if relay.peer_id != *peer_id {
             return false;
         }
@@ -883,18 +883,19 @@ where
         }
 
         // Check if we've got a confirmed address for the relay
-        let Some(dialled_address) = relay.remote_address.as_ref() else {
+        let Some(remote_address) = relay.remote_address.as_ref() else {
             return false;
         };
 
-        let circuit_addr = dialled_address.clone().with(Protocol::P2pCircuit);
+        let circuit_addr = remote_address.clone().with(Protocol::P2pCircuit);
 
         match self.swarm.listen_on(circuit_addr.clone()) {
             Ok(id) => {
+                let local_peer_id = *self.swarm.local_peer_id();
                 self.swarm
                     .behaviour_mut()
                     .peer_sync
-                    .add_known_local_public_addresses(vec![circuit_addr]);
+                    .add_known_local_public_addresses(vec![circuit_addr.with(Protocol::P2p(local_peer_id))]);
                 info!(target: LOG_TARGET, "🌍️ Peer {peer_id} is a relay. Listening (id={id:?}) for circuit connections");
                 let Some(relay_mut) = self.relays.selected_relay_mut() else {
                     // unreachable

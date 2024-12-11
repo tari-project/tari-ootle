@@ -2,10 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use async_trait::async_trait;
-use minotari_app_grpc::tari_rpc::ValidatorNodeChange;
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_core::{blocks::BlockHeader, transactions::transaction_components::CodeTemplateRegistration};
-use tari_dan_common_types::SubstateAddress;
+use tari_core::{
+    base_node::comms_interface::ValidatorNodeChange,
+    blocks::BlockHeader,
+    transactions::transaction_components::CodeTemplateRegistration,
+};
+use tari_dan_common_types::{Epoch, SubstateAddress};
 
 use crate::{
     error::BaseNodeClientError,
@@ -15,17 +18,17 @@ use crate::{
 #[async_trait]
 pub trait BaseNodeClient: Send + Sync + Clone {
     async fn test_connection(&mut self) -> Result<(), BaseNodeClientError>;
+    async fn get_network(&mut self) -> Result<u8, BaseNodeClientError>;
     async fn get_tip_info(&mut self) -> Result<BaseLayerMetadata, BaseNodeClientError>;
     async fn get_validator_node_changes(
         &mut self,
-        start_height: u64,
-        end_height: u64,
+        epoch: Epoch,
         sidechain_id: Option<&PublicKey>,
     ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError>;
     async fn get_validator_nodes(&mut self, height: u64) -> Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError>;
     async fn get_shard_key(
         &mut self,
-        height: u64,
+        epoch: Epoch,
         public_key: &PublicKey,
     ) -> Result<Option<SubstateAddress>, BaseNodeClientError>;
     async fn get_template_registrations(

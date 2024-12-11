@@ -316,14 +316,16 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let prev_epoch = current_epoch.saturating_sub(Epoch(1));
         info!(target: LOG_TARGET,"Previous epoch is {}", prev_epoch);
+        // We want to get any committees from the previous epoch that overlap with our shard group in this epoch
         let committees = self
             .epoch_manager
-            .get_committees_by_shard_group(prev_epoch, local_info.shard_group())
+            .get_committees_overlapping_shard_group(prev_epoch, local_info.shard_group())
             .await?;
 
         // TODO: not strictly necessary to sort by shard but easier on the eyes in logs
         let mut committees = committees.into_iter().collect::<Vec<_>>();
         committees.sort_by_key(|(k, _)| *k);
+        info!(target: LOG_TARGET, "🛜 Querying {} shard group(s) from epoch {}", committees.len(), prev_epoch);
         Ok(committees)
     }
 
@@ -361,16 +363,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     async fn check_sync(&self) -> Result<SyncStatus, Self::Error> {
         let current_epoch = self.epoch_manager.current_epoch().await?;
 
-        let leaf_epoch = self.state_store.with_read_tx(|tx| {
-            let epoch = LeafBlock::get(tx, current_epoch)
-                .optional()?
-                .map(|leaf| leaf.epoch())
-                .unwrap_or(Epoch(0));
-            Ok::<_, Self::Error>(epoch)
-        })?;
+        let leaf_block = self
+            .state_store
+            .with_read_tx(|tx| LeafBlock::get(tx, current_epoch).optional())?;
 
         // We only sync if we're behind by an epoch. The current epoch is replayed in consensus.
-        if current_epoch > leaf_epoch {
+        if current_epoch > leaf_block.map_or(Epoch::zero(), |b| b.epoch()) {
+            info!(target: LOG_TARGET, "🛜Our current leaf block is behind the current epoch. Syncing...");
+            return Ok(SyncStatus::Behind);
+        }
+
+        if leaf_block.is_some_and(|l| l.height.is_zero()) {
+            // We only have the genesis for the epoch, let's assume we're behind in this case
             info!(target: LOG_TARGET, "🛜Our current leaf block is behind the current epoch. Syncing...");
             return Ok(SyncStatus::Behind);
         }
@@ -414,8 +418,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                     let checkpoint = match self.fetch_epoch_checkpoint(&mut client, current_epoch).await {
                         Ok(Some(cp)) => cp,
                         Ok(None) => {
-                            // EDGE-CASE: This may occur because the previous epoch had not started at the consensus
-                            // level.
+                            // TODO: we should check with f + 1 validators in this case. If a single validator reports
+                            // this falsely, this will prevent us from continuing with consensus for a long time (state
+                            // root will mismatch).
+                            // TODO: we should instead ask the base layer if this is the first epoch in the network
                             warn!(
                                 target: LOG_TARGET,
                                 "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
@@ -486,6 +492,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             return Err(err);
         }
 
+        info!(target: LOG_TARGET, "🛜State sync complete");
         Ok(())
     }
 }

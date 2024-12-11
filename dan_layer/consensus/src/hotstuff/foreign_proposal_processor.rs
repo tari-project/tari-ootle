@@ -387,8 +387,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
             Command::Prepare(_) |
             Command::LocalOnly(_) |
             Command::ForeignProposal(_) |
-            Command::SuspendNode(_) |
-            Command::ResumeNode(_) |
+            Command::EvictNode(_) |
             Command::MintConfidentialOutput(_) => {
                 // Disregard
                 continue;

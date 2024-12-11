@@ -22,20 +22,17 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::convert::TryInto;
-
 use async_trait::async_trait;
 use log::*;
-use minotari_app_grpc::tari_rpc::{
-    self as grpc,
-    GetShardKeyRequest,
-    GetValidatorNodeChangesRequest,
-    ValidatorNodeChange,
-};
+use minotari_app_grpc::tari_rpc::{self as grpc, GetShardKeyRequest, GetValidatorNodeChangesRequest};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_core::{blocks::BlockHeader, transactions::transaction_components::CodeTemplateRegistration};
-use tari_dan_common_types::SubstateAddress;
+use tari_core::{
+    base_node::comms_interface::ValidatorNodeChange,
+    blocks::BlockHeader,
+    transactions::transaction_components::CodeTemplateRegistration,
+};
+use tari_dan_common_types::{Epoch, SubstateAddress};
 use tari_utilities::ByteArray;
 use url::Url;
 
@@ -105,6 +102,14 @@ impl BaseNodeClient for GrpcBaseNodeClient {
         Ok(())
     }
 
+    async fn get_network(&mut self) -> Result<u8, BaseNodeClientError> {
+        let inner = self.connection().await?;
+        let request = grpc::Empty {};
+        let result = inner.get_version(request).await?.into_inner();
+        u8::try_from(result.network)
+            .map_err(|_| BaseNodeClientError::InvalidPeerMessage(format!("Invalid network byte {}", result.network)))
+    }
+
     async fn get_tip_info(&mut self) -> Result<BaseLayerMetadata, BaseNodeClientError> {
         let inner = self.connection().await?;
         let request = grpc::Empty {};
@@ -122,24 +127,27 @@ impl BaseNodeClient for GrpcBaseNodeClient {
 
     async fn get_validator_node_changes(
         &mut self,
-        start_height: u64,
-        end_height: u64,
+        epoch: Epoch,
         sidechain_id: Option<&PublicKey>,
     ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError> {
         let client = self.connection().await?;
         let result = client
             .get_validator_node_changes(GetValidatorNodeChangesRequest {
-                start_height,
-                end_height,
-                sidechain_id: match sidechain_id {
-                    None => vec![],
-                    Some(sidechain_id) => sidechain_id.to_vec(),
-                },
+                epoch: epoch.as_u64(),
+                sidechain_id: sidechain_id.map(|id| id.as_bytes().to_vec()).unwrap_or_default(),
             })
             .await?
             .into_inner();
 
-        Ok(result.changes)
+        let changes = result
+            .changes
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map_err(|err| {
+                BaseNodeClientError::InvalidPeerMessage(format!("Error converting validator node changes: {}", err))
+            })?;
+        Ok(changes)
     }
 
     async fn get_validator_nodes(&mut self, height: u64) -> Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError> {
@@ -201,23 +209,22 @@ impl BaseNodeClient for GrpcBaseNodeClient {
 
     async fn get_shard_key(
         &mut self,
-        height: u64,
+        epoch: Epoch,
         public_key: &PublicKey,
     ) -> Result<Option<SubstateAddress>, BaseNodeClientError> {
         let inner = self.connection().await?;
         let request = GetShardKeyRequest {
-            height,
+            epoch: epoch.as_u64(),
             public_key: public_key.as_bytes().to_vec(),
         };
-        let result = inner.get_shard_key(request).await?.into_inner();
-        if result.shard_key.is_empty() {
-            Ok(None)
-        } else {
-            // The SubstateAddress type has 4 extra bytes for the version, this is disregarded for validator node shard
-            // key.
-            // TODO: separate type for validator node shard key
-            let hash = FixedHash::try_from(result.shard_key.as_slice())?;
-            Ok(Some(SubstateAddress::from_hash_and_version(hash, 0)))
+        match inner.get_shard_key(request).await {
+            Ok(result) => {
+                let result = result.into_inner();
+                let hash = FixedHash::try_from(result.shard_key.as_slice())?;
+                Ok(Some(SubstateAddress::from_hash_and_version(hash, 0)))
+            },
+            Err(status) if matches!(status.code(), tonic::Code::NotFound) => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
 

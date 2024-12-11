@@ -20,18 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, future::Future};
 
 use async_trait::async_trait;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
+    layer_one_transaction::LayerOneTransactionDef,
     Epoch,
     NodeAddressable,
     ShardGroup,
     SubstateAddress,
 };
 use tari_dan_storage::global::models::ValidatorNode;
+use tari_sidechain::EvictionProof;
 use tokio::sync::broadcast;
 
 use crate::{EpochManagerError, EpochManagerEvent};
@@ -113,10 +115,15 @@ pub trait EpochManagerReader: Send + Sync {
 
     async fn get_num_committees(&self, epoch: Epoch) -> Result<u32, EpochManagerError>;
 
-    async fn get_committees_by_shard_group(
+    async fn get_committee_by_shard_group(
         &self,
         epoch: Epoch,
         shards: ShardGroup,
+    ) -> Result<Committee<Self::Addr>, EpochManagerError>;
+    async fn get_committees_overlapping_shard_group(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
     ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, EpochManagerError>;
 
     async fn get_local_committee(&self, epoch: Epoch) -> Result<Committee<Self::Addr>, EpochManagerError> {
@@ -175,4 +182,14 @@ pub trait EpochManagerReader: Send + Sync {
     }
 
     async fn get_base_layer_block_height(&self, hash: FixedHash) -> Result<Option<u64>, EpochManagerError>;
+
+    async fn add_intent_to_evict_validator(&self, proof: EvictionProof) -> Result<(), EpochManagerError>;
+}
+
+pub trait LayerOneTransactionSubmitter {
+    type Error: std::error::Error;
+    fn submit_transaction<T: serde::Serialize + Send>(
+        &self,
+        proof: LayerOneTransactionDef<T>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }

@@ -22,6 +22,7 @@
 
 use libp2p::{gossipsub, PeerId};
 use log::*;
+use tari_consensus::hotstuff::HotstuffEvent;
 use tari_dan_common_types::ShardGroup;
 use tari_dan_p2p::{proto, TariMessagingSpec};
 use tari_epoch_manager::EpochManagerEvent;
@@ -38,6 +39,7 @@ pub const TOPIC_PREFIX: &str = "consensus";
 #[derive(Debug)]
 pub(super) struct ConsensusGossipService {
     epoch_manager_events: broadcast::Receiver<EpochManagerEvent>,
+    consensus_events: broadcast::Receiver<HotstuffEvent>,
     is_subscribed: Option<ShardGroup>,
     networking: NetworkingHandle<TariMessagingSpec>,
     codec: ProstCodec<proto::consensus::HotStuffMessage>,
@@ -48,12 +50,14 @@ pub(super) struct ConsensusGossipService {
 impl ConsensusGossipService {
     pub fn new(
         epoch_manager_events: broadcast::Receiver<EpochManagerEvent>,
+        consensus_events: broadcast::Receiver<HotstuffEvent>,
         networking: NetworkingHandle<TariMessagingSpec>,
         rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
         tx_consensus_gossip: mpsc::Sender<(PeerId, proto::consensus::HotStuffMessage)>,
     ) -> Self {
         Self {
             epoch_manager_events,
+            consensus_events,
             is_subscribed: None,
             networking,
             codec: ProstCodec::default(),
@@ -63,17 +67,25 @@ impl ConsensusGossipService {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
+        let mut initial_subscription = false;
         loop {
             tokio::select! {
+                Ok(HotstuffEvent::EpochChanged{ registered_shard_group, .. }) = self.consensus_events.recv() => {
+                    if let Some(shard_group) = registered_shard_group{
+                        self.subscribe(shard_group).await?;
+                    }
+                },
                 Some(msg) = self.rx_gossip.recv() => {
                     if let Err(err) = self.handle_incoming_gossip_message(msg).await {
                         warn!(target: LOG_TARGET, "Consensus gossip service error: {}", err);
                     }
                 },
-                Ok(event) = self.epoch_manager_events.recv() => {
-                    let EpochManagerEvent::EpochChanged{ registered_shard_group, ..} = event ;
-                    if let Some(shard_group) = registered_shard_group{
-                        self.subscribe(shard_group).await?;
+                Ok(EpochManagerEvent::EpochChanged{ registered_shard_group, .. }) = self.epoch_manager_events.recv() => {
+                    if !initial_subscription {
+                        if let Some(shard_group) = registered_shard_group {
+                            self.subscribe(shard_group).await?;
+                            initial_subscription = true;
+                        }
                     }
                 },
                 else => {

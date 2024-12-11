@@ -35,12 +35,11 @@ use crate::{
 pub struct DbValidatorNode {
     pub id: i32,
     pub public_key: Vec<u8>,
-    pub shard_key: Vec<u8>,
-    pub registered_at_base_height: i64,
-    pub start_epoch: i64,
-    pub fee_claim_public_key: Vec<u8>,
     pub address: String,
-    pub sidechain_id: Vec<u8>,
+    pub shard_key: Vec<u8>,
+    pub start_epoch: i64,
+    pub end_epoch: Option<i64>,
+    pub fee_claim_public_key: Vec<u8>,
 }
 impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
     type Error = SqliteStorageError;
@@ -54,24 +53,14 @@ impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
             public_key: PublicKey::from_canonical_bytes(&vn.public_key).map_err(|_| {
                 SqliteStorageError::MalformedDbData(format!("Invalid public key in validator node record id={}", vn.id))
             })?,
-            registered_at_base_height: vn.registered_at_base_height as u64,
             start_epoch: Epoch(vn.start_epoch as u64),
+            end_epoch: vn.end_epoch.map(|e| Epoch(e as u64)),
             fee_claim_public_key: PublicKey::from_canonical_bytes(&vn.fee_claim_public_key).map_err(|_| {
                 SqliteStorageError::MalformedDbData(format!(
                     "Invalid fee claim public key in validator node record id={}",
                     vn.id
                 ))
             })?,
-            sidechain_id: if vn.sidechain_id == [0u8; 32] {
-                None
-            } else {
-                Some(PublicKey::from_canonical_bytes(&vn.sidechain_id).map_err(|_| {
-                    SqliteStorageError::MalformedDbData(format!(
-                        "Invalid sidechain id in validator node record id={}",
-                        vn.id
-                    ))
-                })?)
-            },
         })
     }
 }

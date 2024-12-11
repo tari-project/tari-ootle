@@ -6,12 +6,14 @@ use std::{
     ops::{Add, AddAssign, Sub},
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[serde(transparent)]
 pub struct NodeHeight(#[cfg_attr(feature = "ts", ts(type = "number"))] pub u64);
 
 impl NodeHeight {

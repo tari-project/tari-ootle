@@ -10,6 +10,7 @@ diesel::table! {
         shard -> Integer,
         change -> Text,
         state -> Nullable<Text>,
+        state_hash -> Nullable<Text>,
         created_at -> Timestamp,
     }
 }
@@ -48,8 +49,8 @@ diesel::table! {
 diesel::table! {
     burnt_utxos (id) {
         id -> Integer,
-        substate_id -> Text,
-        substate -> Text,
+        commitment -> Text,
+        output -> Text,
         base_layer_block_height -> BigInt,
         proposed_in_block -> Nullable<Text>,
         proposed_in_block_height -> Nullable<BigInt>,
@@ -106,6 +107,18 @@ diesel::table! {
         commit_block -> Text,
         qcs -> Text,
         shard_roots -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    evicted_nodes (id) {
+        id -> Integer,
+        epoch -> BigInt,
+        public_key -> Text,
+        evicted_in_block -> Nullable<Text>,
+        evicted_in_block_height -> Nullable<BigInt>,
+        eviction_committed_in_epoch -> Nullable<BigInt>,
         created_at -> Timestamp,
     }
 }
@@ -411,19 +424,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    suspended_nodes (id) {
-        id -> Integer,
-        epoch -> BigInt,
-        public_key -> Text,
-        suspended_in_block -> Text,
-        suspended_in_block_height -> BigInt,
-        resumed_in_block -> Nullable<Text>,
-        resumed_in_block_height -> Nullable<BigInt>,
-        created_at -> Timestamp,
-    }
-}
-
-diesel::table! {
     transaction_executions (id) {
         id -> Integer,
         block_id -> Text,
@@ -539,7 +539,7 @@ diesel::table! {
 diesel::table! {
     votes (id) {
         id -> Integer,
-        hash -> Text,
+        siphash -> BigInt,
         epoch -> BigInt,
         block_id -> Text,
         decision -> Integer,
@@ -558,6 +558,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     diagnostic_deleted_blocks,
     diagnostics_no_votes,
     epoch_checkpoints,
+    evicted_nodes,
     foreign_missing_transactions,
     foreign_parked_blocks,
     foreign_proposals,
@@ -581,7 +582,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     state_tree_shard_versions,
     substate_locks,
     substates,
-    suspended_nodes,
     transaction_executions,
     transaction_pool,
     transaction_pool_history,

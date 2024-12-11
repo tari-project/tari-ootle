@@ -1,9 +1,8 @@
 //    Copyright 2023 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::{collections::HashSet, future::Future};
 
-use async_trait::async_trait;
 use indexmap::IndexMap;
 use tari_dan_common_types::{Epoch, SubstateRequirement};
 use tari_engine_types::{
@@ -17,20 +16,19 @@ pub struct ResolvedSubstates {
     pub unresolved_foreign: HashSet<SubstateRequirement>,
 }
 
-#[async_trait]
 pub trait SubstateResolver {
     type Error: Send + Sync + 'static;
 
     fn try_resolve_local(&self, transaction: &Transaction) -> Result<ResolvedSubstates, Self::Error>;
 
-    async fn try_resolve_foreign(
+    fn try_resolve_foreign(
         &self,
         requested_substates: &HashSet<SubstateRequirement>,
-    ) -> Result<IndexMap<SubstateId, Substate>, Self::Error>;
+    ) -> impl Future<Output = Result<IndexMap<SubstateId, Substate>, Self::Error>> + Send;
 
-    async fn resolve_virtual_substates(
+    fn resolve_virtual_substates(
         &self,
         transaction: &Transaction,
         current_epoch: Epoch,
-    ) -> Result<VirtualSubstates, Self::Error>;
+    ) -> impl Future<Output = Result<VirtualSubstates, Self::Error>> + Send;
 }

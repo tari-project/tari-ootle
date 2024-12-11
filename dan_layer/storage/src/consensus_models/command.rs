@@ -6,10 +6,11 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_dan_common_types::{hashing::command_hasher, ShardGroup};
-use tari_engine_types::substate::SubstateId;
+use tari_dan_common_types::{hashing::command_hasher, Epoch, ShardGroup};
+use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
 use tari_transaction::TransactionId;
 
 use super::{
@@ -28,7 +29,7 @@ use crate::{
     StorageError,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -84,7 +85,7 @@ impl Display for TransactionAtom {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -112,21 +113,18 @@ pub enum Command {
     // Validator node commands
     ForeignProposal(ForeignProposalAtom),
     MintConfidentialOutput(MintConfidentialOutputAtom),
-    SuspendNode(SuspendNodeAtom),
-    ResumeNode(ResumeNodeAtom),
-    // EvictNode(EvictNodeAtom),
+    EvictNode(EvictNodeAtom),
     EndEpoch,
 }
 
 /// Defines the order in which commands should be processed in a block. "Smallest" comes first and "largest" comes last.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum CommandOrdering<'a> {
-    ResumeNode,
-    SuspendNode,
+    EvictNode,
     // EvictNode,
     /// Foreign proposals should come first in the block so that they are processed before commands
     ForeignProposal(ShardGroup, &'a BlockId),
-    MintConfidentialOutput(&'a SubstateId),
+    MintConfidentialOutput(&'a UnclaimedConfidentialOutputAddress),
     TransactionId(&'a TransactionId),
     EndEpoch,
 }
@@ -144,8 +142,7 @@ impl Command {
             Command::LocalOnly(tx) => Some(tx),
             Command::ForeignProposal(_) |
             Command::MintConfidentialOutput(_) |
-            Command::SuspendNode(_) |
-            Command::ResumeNode(_) |
+            Command::EvictNode(_) |
             Command::EndEpoch => None,
         }
     }
@@ -164,15 +161,14 @@ impl Command {
                 // Order by shard group then by block id
                 CommandOrdering::ForeignProposal(foreign_proposal.shard_group, &foreign_proposal.block_id)
             },
-            Command::MintConfidentialOutput(mint) => CommandOrdering::MintConfidentialOutput(&mint.substate_id),
-            Command::SuspendNode(_) => CommandOrdering::SuspendNode,
-            Command::ResumeNode(_) => CommandOrdering::ResumeNode,
+            Command::MintConfidentialOutput(mint) => CommandOrdering::MintConfidentialOutput(&mint.commitment),
+            Command::EvictNode(_) => CommandOrdering::EvictNode,
             Command::EndEpoch => CommandOrdering::EndEpoch,
         }
     }
 
     pub fn hash(&self) -> FixedHash {
-        command_hasher().chain(self).result()
+        command_hasher().chain(self).finalize().into()
     }
 
     pub fn local_only(&self) -> Option<&TransactionAtom> {
@@ -217,9 +213,9 @@ impl Command {
         }
     }
 
-    pub fn resume_node(&self) -> Option<&ResumeNodeAtom> {
+    pub fn evict_node(&self) -> Option<&EvictNodeAtom> {
         match self {
-            Command::ResumeNode(atom) => Some(atom),
+            Command::EvictNode(atom) => Some(atom),
             _ => None,
         }
     }
@@ -300,9 +296,8 @@ impl Display for Command {
             Command::AllAccept(tx) => write!(f, "AllAccept({}, {})", tx.id, tx.decision),
             Command::SomeAccept(tx) => write!(f, "SomeAccept({}, {})", tx.id, tx.decision),
             Command::ForeignProposal(fp) => write!(f, "ForeignProposal {}", fp.block_id),
-            Command::MintConfidentialOutput(mint) => write!(f, "MintConfidentialOutput({})", mint.substate_id),
-            Command::SuspendNode(atom) => write!(f, "SuspendNode({atom})"),
-            Command::ResumeNode(atom) => write!(f, "ResumeNode({atom})"),
+            Command::MintConfidentialOutput(mint) => write!(f, "MintConfidentialOutput({})", mint.commitment),
+            Command::EvictNode(atom) => write!(f, "EvictNode({atom})"),
             Command::EndEpoch => write!(f, "EndEpoch"),
         }
     }
@@ -313,54 +308,19 @@ impl Display for Command {
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SuspendNodeAtom {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
-}
-
-impl Display for SuspendNodeAtom {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.public_key)
-    }
-}
-
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResumeNodeAtom {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
-}
-
-impl crate::consensus_models::ResumeNodeAtom {
-    pub fn delete_suspended_node<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.suspended_nodes_delete(&self.public_key)
-    }
-}
-
-impl Display for crate::consensus_models::ResumeNodeAtom {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.public_key)
-    }
-}
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 pub struct EvictNodeAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: PublicKey,
 }
 
 impl EvictNodeAtom {
-    pub fn delete_suspended_node<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.suspended_nodes_delete(&self.public_key)
+    pub fn mark_as_committed_in_epoch<TTx: StateStoreWriteTransaction>(
+        &self,
+        tx: &mut TTx,
+        epoch: Epoch,
+    ) -> Result<(), StorageError> {
+        tx.evicted_nodes_mark_eviction_as_committed(&self.public_key, epoch)
     }
 }
 
@@ -374,6 +334,8 @@ impl Display for EvictNodeAtom {
 mod tests {
     use std::{collections::BTreeSet, str::FromStr};
 
+    use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
+
     use super::*;
 
     #[test]
@@ -386,18 +348,20 @@ mod tests {
             CommandOrdering::ForeignProposal(ShardGroup::new(0, 64), &BlockId::zero()) <
                 CommandOrdering::TransactionId(&TransactionId::default())
         );
-        let substate_id =
-            SubstateId::from_str("component_0000000000000000000000000000000000000000000000000000000000000000").unwrap();
+        let commitment = UnclaimedConfidentialOutputAddress::from_str(
+            "commitment_0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap();
 
         assert!(
-            CommandOrdering::MintConfidentialOutput(&substate_id) <
+            CommandOrdering::MintConfidentialOutput(&commitment) <
                 CommandOrdering::TransactionId(&TransactionId::default())
         );
-        assert!(CommandOrdering::MintConfidentialOutput(&substate_id) < CommandOrdering::EndEpoch);
+        assert!(CommandOrdering::MintConfidentialOutput(&commitment) < CommandOrdering::EndEpoch);
         let mut set = BTreeSet::new();
         let cmds = [
             Command::EndEpoch,
-            Command::MintConfidentialOutput(MintConfidentialOutputAtom { substate_id }),
+            Command::MintConfidentialOutput(MintConfidentialOutputAtom { commitment }),
             Command::ForeignProposal(ForeignProposalAtom {
                 block_id: BlockId::zero(),
                 shard_group: ShardGroup::new(0, 64),

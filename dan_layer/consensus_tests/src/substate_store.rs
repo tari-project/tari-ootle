@@ -1,13 +1,21 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_common::configuration::Network;
 use tari_consensus::{
     hotstuff::substate_store::{LockFailedError, PendingSubstateStore, SubstateStoreError},
     traits::{ReadableSubstateStore, WriteableSubstateStore},
 };
-use tari_dan_common_types::{shard::Shard, NodeAddressable, PeerAddress, SubstateLockType, VersionedSubstateId};
+use tari_dan_common_types::{
+    shard::Shard,
+    NodeAddressable,
+    NumPreshards,
+    PeerAddress,
+    SubstateLockType,
+    VersionedSubstateId,
+};
 use tari_dan_storage::{
-    consensus_models::{BlockId, QcId, SubstateChange, SubstateRecord, SubstateRequirementLockIntent},
+    consensus_models::{Block, BlockId, QcId, SubstateChange, SubstateRecord, SubstateRequirementLockIntent},
     StateStore,
 };
 use tari_engine_types::{
@@ -220,7 +228,15 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
 }
 
 fn create_store() -> TestStore {
-    SqliteStateStore::connect(":memory:").unwrap()
+    let store = SqliteStateStore::connect(":memory:").unwrap();
+    store
+        .with_write_tx(|tx| {
+            let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+            zero.justify().insert(tx)?;
+            zero.insert(tx)
+        })
+        .unwrap();
+    store
 }
 
 fn create_pending_store<'a, 'tx, TAddr: NodeAddressable>(

@@ -60,7 +60,7 @@ impl ConsensusConstants {
             num_preshards: NumPreshards::P256,
             pacemaker_block_time: Duration::from_secs(10),
             missed_proposal_suspend_threshold: 5,
-            missed_proposal_evict_threshold: 5,
+            missed_proposal_evict_threshold: 10,
             missed_proposal_recovery_threshold: 5,
             max_block_size: 500,
             fee_exhaust_divisor: 20, // 5%

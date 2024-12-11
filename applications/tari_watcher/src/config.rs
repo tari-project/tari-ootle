@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use tari_common::configuration::Network;
 use tokio::io::{self, AsyncWriteExt};
 use url::Url;
 
@@ -13,6 +14,8 @@ use crate::{
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
+    /// Allow watcher to restart the validator node if it crashes and stops running
+    pub network: Network,
     /// Allow watcher to submit a new validator node registration transaction initially and before
     /// the current registration expires
     pub auto_register: bool,
@@ -28,10 +31,6 @@ pub struct Config {
 
     /// The base directory of the watcher with configuration and data files
     pub base_dir: PathBuf,
-
-    /// The path of the validator node registration file, containing signed information required to
-    /// submit a registration transaction on behalf of the node
-    pub vn_registration_file: PathBuf,
 
     /// The path of the validator node base directory. This directory is automatically created when starting a new VN.
     pub vn_base_dir: PathBuf,
@@ -52,6 +51,19 @@ impl Config {
         writer.write_all(toml.as_bytes()).await?;
         Ok(())
     }
+
+    pub fn get_registration_file(&self) -> PathBuf {
+        self.vn_base_dir
+            .join(self.network.as_key_str())
+            .join("registration.json")
+    }
+
+    pub fn get_layer_one_transaction_path(&self) -> PathBuf {
+        self.vn_base_dir
+            .join(self.network.as_key_str())
+            .join("data")
+            .join("layer_one_transactions")
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -71,17 +83,17 @@ pub struct Channels {
 
 pub fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
     let base_dir = cli.common.base_dir.clone();
-    let vn_registration_file = base_dir.join(cli.common.key_path.clone());
-    let vn_base_dir = base_dir.join(cli.common.validator_dir.clone());
+    let vn_base_dir = cli.get_validator_node_base_dir();
+    let network = cli.common.network.unwrap_or(Network::Esmeralda);
 
     Ok(Config {
+        network,
         auto_register: true,
         auto_restart: true,
         base_node_grpc_url: DEFAULT_BASE_NODE_GRPC_URL.parse()?,
         base_wallet_grpc_url: DEFAULT_BASE_WALLET_GRPC_URL.parse()?,
         base_dir: base_dir.to_path_buf(),
         sidechain_id: None,
-        vn_registration_file,
         vn_base_dir,
         validator_node_executable_path: DEFAULT_VALIDATOR_NODE_BINARY_PATH.into(),
         channel_config: Channels {

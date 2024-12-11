@@ -668,6 +668,12 @@ impl From<TransactionReceipt> for SubstateValue {
     }
 }
 
+impl From<UnclaimedConfidentialOutput> for SubstateValue {
+    fn from(output: UnclaimedConfidentialOutput) -> Self {
+        Self::UnclaimedConfidentialOutput(output)
+    }
+}
+
 impl From<PublishedTemplate> for SubstateValue {
     fn from(template: PublishedTemplate) -> Self {
         Self::Template(template)

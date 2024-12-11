@@ -14,9 +14,11 @@ export default function MinotariNodes(props: Props) {
   const [isLoading, setIsLoading] = React.useState(true);
 
 
+  const reload = () =>
+    jsonRpc("list_instances", { by_type: "MinoTariNode" }).then((nodes: any) => setNodes(nodes.instances));
+
   React.useEffect(() => {
-    jsonRpc("list_instances", { by_type: "MinoTariNode" }).then((nodes: any) => setNodes(nodes.instances))
-      .then(() => setIsLoading(false));
+    reload().then(() => setIsLoading(false));
   }, []);
 
   if (isLoading) {
@@ -26,7 +28,7 @@ export default function MinotariNodes(props: Props) {
   return (
     <div>
       {nodes!.map((node: any, i: number) => (
-        <Node key={i} {...node} showLogs={props.showLogs} />
+        <Node key={i} {...node} onReload={reload} showLogs={props.showLogs} />
       ))}
     </div>
   );
@@ -34,15 +36,18 @@ export default function MinotariNodes(props: Props) {
 
 function Node(props: any) {
   const onStart = () => {
-    jsonRpc("start_instance", { instance_id: props.id });
+    jsonRpc("start_instance", { by_id: props.id })
+      .then(props.onReload);
   };
 
   const onStop = () => {
-    jsonRpc("stop_instance", { instance_id: props.id });
+    jsonRpc("stop_instance", { by_id: props.id })
+      .then(props.onReload);
   };
 
   const onDeleteData = () => {
-    jsonRpc("delete_instance_data", { instance_id: props.id });
+    jsonRpc("delete_instance_data", { instance_id: props.id })
+      .then(props.onReload);
   };
 
   return (

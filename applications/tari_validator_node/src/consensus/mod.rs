@@ -51,7 +51,7 @@ mod spec;
 pub use block_transaction_executor::*;
 pub use handle::*;
 pub use signature_service::*;
-use tari_consensus::consensus_constants::ConsensusConstants;
+use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
 
 use crate::{p2p::NopLogger, transaction_validators::WithContext};
 
@@ -73,13 +73,13 @@ pub async fn spawn(
         TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
         ConsensusTransactionValidator,
     >,
+    tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
     let leader_strategy = RoundRobinLeaderStrategy::new();
     let transaction_pool = TransactionPool::new();
-    let (tx_hotstuff_events, _) = broadcast::channel(100);
 
     let hs_config = HotstuffConfig {
         network,

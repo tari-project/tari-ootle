@@ -261,7 +261,8 @@ fn create_qc(vote_data: VoteData) -> QuorumCertificate {
         block,
     } = vote_data;
     QuorumCertificate::new(
-        *block.id(),
+        block.header().calculate_hash(),
+        *block.parent(),
         block.height(),
         block.epoch(),
         block.shard_group(),

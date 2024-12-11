@@ -139,6 +139,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 config.clone(),
                 state_store.clone(),
                 epoch_manager.clone(),
+                pacemaker.clone_handle().current_view().clone(),
                 leader_strategy.clone(),
                 signing_service.clone(),
                 outbound_messaging.clone(),
@@ -240,6 +241,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.pacemaker
             .start(current_epoch, current_height, high_qc.block_height())
             .await?;
+        self.publish_event(HotstuffEvent::EpochChanged {
+            epoch: current_epoch,
+            registered_shard_group: Some(local_committee_info.shard_group()),
+        });
 
         let local_committee = self.epoch_manager.get_local_committee(current_epoch).await?;
         self.run(local_committee_info, local_committee).await?;
@@ -318,7 +323,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
                 Some(result) = self.on_inbound_message.next_message(current_epoch, current_height) => {
                     if let Err(e) = self.on_unvalidated_message(current_epoch, current_height, result, &local_committee_info, &local_committee).await {
-                        self.on_failure("on_inbound_message", &e).await;
+                        self.on_failure("on_unvalidated_message", &e).await;
                         return Err(e);
                     }
                 },
@@ -434,6 +439,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 Ok(())
             },
             MessageValidationResult::Discard => Ok(()),
+            // In these cases, we want to propagate the error back to the state machine, to allow sync
+            MessageValidationResult::Invalid {
+                err: err @ HotStuffError::FallenBehind { .. },
+                ..
+            } |
+            MessageValidationResult::Invalid {
+                err: err @ HotStuffError::ProposalValidationError(ProposalValidationError::FutureEpoch { .. }),
+                ..
+            } => {
+                self.hooks.on_error(&err);
+                Err(err)
+            },
             MessageValidationResult::Invalid { err, from, message } => {
                 self.hooks.on_error(&err);
                 error!(target: LOG_TARGET, "🚨 Invalid new message from {from}: {err} - {message}");
@@ -547,6 +564,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     );
                     return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
                 }
+                info!(
+                    target: LOG_TARGET,
+                    "🌟 This validator is registered for epoch {}.", epoch
+                );
 
                 // Edge case: we have started a VN and have progressed a few epochs quickly and have no blocks in
                 // previous epochs to update the current view. This only really applies when mining is

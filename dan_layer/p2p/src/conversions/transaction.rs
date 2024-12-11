@@ -316,7 +316,7 @@ impl From<Instruction> for proto::transaction::Instruction {
             },
             Instruction::ClaimBurn { claim } => {
                 result.instruction_type = InstructionType::ClaimBurn as i32;
-                result.claim_burn_commitment_address = claim.output_address.to_vec();
+                result.claim_burn_commitment_address = claim.output_address.as_bytes().to_vec();
                 result.claim_burn_range_proof = claim.range_proof.to_vec();
                 result.claim_burn_proof_of_knowledge = Some(claim.proof_of_knowledge.into());
                 result.claim_burn_public_key = claim.public_key.to_vec();

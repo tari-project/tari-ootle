@@ -22,21 +22,19 @@ tari_dan_engine = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_epoch_manager = { workspace = true }
 tari_template_lib = { workspace = true }
+tari_sidechain = { workspace = true }
 
 tari_common_types = { workspace = true }
-tari_mmr = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_crypto = { workspace = true }
 
-anyhow = { workspace = true }
 async-trait = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
-thiserror = { workspace = true }
 tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread"] }
 rand = { workspace = true }
 futures = { workspace = true }
 fern = { workspace = true }
 humantime = { workspace = true }
-indexmap = { workspace = true }
 itertools = { workspace = true }
+serde_json = { workspace = true }

@@ -314,7 +314,7 @@ export default function BlockDetails() {
                     <AccordionDetails>
                       {mintedUtxos.map((utxo, i) => (
                         <div key={i}>
-                          Unclaimed UTXO: {JSON.stringify(utxo.substate_id)}
+                          Unclaimed UTXO: {utxo.commitment}
                         </div>
                       ))}
                     </AccordionDetails>

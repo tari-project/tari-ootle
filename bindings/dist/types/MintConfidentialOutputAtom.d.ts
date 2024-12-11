@@ -1,4 +1,4 @@
-import type { SubstateId } from "./SubstateId";
+import type { UnclaimedConfidentialOutputAddress } from "./UnclaimedConfidentialOutputAddress";
 export interface MintConfidentialOutputAtom {
-    substate_id: SubstateId;
+    commitment: UnclaimedConfidentialOutputAddress;
 }

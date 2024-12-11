@@ -31,15 +31,23 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::base_layer::{config::EpochManagerConfig, epoch_manager_service::EpochManagerService, EpochManagerHandle};
+use crate::{
+    base_layer::{config::EpochManagerConfig, epoch_manager_service::EpochManagerService, EpochManagerHandle},
+    traits::LayerOneTransactionSubmitter,
+};
 
-pub fn spawn_service<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>(
+pub fn spawn_service<TAddr, TLayerOneSubmitter>(
     config: EpochManagerConfig,
     global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
     base_node_client: GrpcBaseNodeClient,
     node_public_key: PublicKey,
+    layer_one_submitter: TLayerOneSubmitter,
     shutdown: ShutdownSignal,
-) -> (EpochManagerHandle<TAddr>, JoinHandle<anyhow::Result<()>>) {
+) -> (EpochManagerHandle<TAddr>, JoinHandle<anyhow::Result<()>>)
+where
+    TAddr: NodeAddressable + DerivableFromPublicKey + 'static,
+    TLayerOneSubmitter: LayerOneTransactionSubmitter + Send + Sync + 'static,
+{
     let (tx_request, rx_request) = mpsc::channel(10);
     let (events, _) = broadcast::channel(100);
     let epoch_manager = EpochManagerHandle::new(tx_request, events.clone());
@@ -50,6 +58,7 @@ pub fn spawn_service<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>(
         shutdown,
         global_db,
         base_node_client,
+        layer_one_submitter,
         node_public_key,
     );
     (epoch_manager, handle)

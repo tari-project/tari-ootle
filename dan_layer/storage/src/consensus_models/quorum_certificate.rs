@@ -3,6 +3,7 @@
 
 use std::{fmt::Display, ops::Deref};
 
+use borsh::BorshSerialize;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{FixedHash, FixedHashSizeError};
@@ -18,6 +19,7 @@ use tari_dan_common_types::{
 use crate::{
     consensus_models::{
         Block,
+        BlockHeader,
         BlockId,
         HighQc,
         LastVoted,
@@ -44,6 +46,10 @@ pub struct QuorumCertificate {
     qc_id: QcId,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     block_id: BlockId,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    header_hash: FixedHash,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    parent_id: BlockId,
     block_height: NodeHeight,
     epoch: Epoch,
     shard_group: ShardGroup,
@@ -57,7 +63,8 @@ pub struct QuorumCertificate {
 
 impl QuorumCertificate {
     pub fn new(
-        block: BlockId,
+        header_hash: FixedHash,
+        parent_id: BlockId,
         block_height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
@@ -68,7 +75,9 @@ impl QuorumCertificate {
         leaf_hashes.sort();
         let mut qc = Self {
             qc_id: QcId::zero(),
-            block_id: block,
+            block_id: BlockHeader::calculate_block_id(&header_hash, &parent_id),
+            header_hash,
+            parent_id,
             block_height,
             epoch,
             shard_group,
@@ -82,27 +91,34 @@ impl QuorumCertificate {
     }
 
     pub fn genesis(epoch: Epoch, shard_group: ShardGroup) -> Self {
-        Self::new(
-            BlockId::zero(),
-            NodeHeight::zero(),
+        let mut qc = Self {
+            qc_id: QcId::zero(),
+            block_id: BlockHeader::calculate_block_id(&FixedHash::zero(), &BlockId::zero()),
+            header_hash: FixedHash::zero(),
+            parent_id: BlockId::zero(),
+            block_height: NodeHeight::zero(),
             epoch,
             shard_group,
-            vec![],
-            vec![],
-            QuorumDecision::Accept,
-        )
+            signatures: vec![],
+            leaf_hashes: vec![],
+            decision: QuorumDecision::Accept,
+            is_shares_processed: false,
+        };
+        qc.qc_id = qc.calculate_id();
+        qc
     }
 
     pub fn calculate_id(&self) -> QcId {
         quorum_certificate_hasher()
             .chain(&self.epoch)
             .chain(&self.shard_group)
-            .chain(&self.block_id)
+            .chain(&self.header_hash)
+            .chain(&self.parent_id)
             .chain(&self.block_height)
             .chain(&self.signatures)
             .chain(&self.leaf_hashes)
             .chain(&self.decision)
-            .result()
+            .finalize_into_array()
             .into()
     }
 }
@@ -142,6 +158,14 @@ impl QuorumCertificate {
 
     pub fn block_id(&self) -> &BlockId {
         &self.block_id
+    }
+
+    pub fn header_hash(&self) -> &FixedHash {
+        &self.header_hash
+    }
+
+    pub fn parent_id(&self) -> &BlockId {
+        &self.parent_id
     }
 
     pub fn as_high_qc(&self) -> HighQc {
@@ -290,7 +314,7 @@ impl Display for QuorumCertificate {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
 #[serde(transparent)]
 pub struct QcId(#[serde(with = "serde_with::hex")] FixedHash);
 
@@ -326,6 +350,12 @@ impl AsRef<[u8]> for QcId {
 impl From<FixedHash> for QcId {
     fn from(value: FixedHash) -> Self {
         Self(value)
+    }
+}
+
+impl From<[u8; 32]> for QcId {
+    fn from(value: [u8; 32]) -> Self {
+        Self(value.into())
     }
 }
 

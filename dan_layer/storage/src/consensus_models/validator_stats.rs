@@ -76,21 +76,16 @@ pub struct ValidatorConsensusStats {
 }
 
 impl ValidatorConsensusStats {
-    pub fn get_nodes_to_suspend<TTx: StateStoreReadTransaction>(
+    pub fn get_nodes_to_evict<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         block_id: &BlockId,
-        suspend_threshold: u64,
-        limit: usize,
+        threshold: u64,
+        limit: u64,
     ) -> Result<Vec<PublicKey>, StorageError> {
-        tx.validator_epoch_stats_get_nodes_to_suspend(block_id, suspend_threshold, limit)
-    }
-
-    pub fn get_nodes_to_resume<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        block_id: &BlockId,
-        limit: usize,
-    ) -> Result<Vec<PublicKey>, StorageError> {
-        tx.validator_epoch_stats_get_nodes_to_resume(block_id, limit)
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        tx.validator_epoch_stats_get_nodes_to_evict(block_id, threshold, limit)
     }
 
     pub fn get_by_public_key<TTx: StateStoreReadTransaction>(
@@ -101,31 +96,26 @@ impl ValidatorConsensusStats {
         tx.validator_epoch_stats_get(epoch, public_key)
     }
 
-    pub fn is_node_suspended<TTx: StateStoreReadTransaction>(
+    pub fn is_node_evicted<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         block_id: &BlockId,
         public_key: &PublicKey,
     ) -> Result<bool, StorageError> {
-        tx.suspended_nodes_is_suspended(block_id, public_key)
+        tx.suspended_nodes_is_evicted(block_id, public_key)
     }
 
-    pub fn suspend_node<TTx: StateStoreWriteTransaction>(
+    pub fn evict_node<TTx: StateStoreWriteTransaction>(
         tx: &mut TTx,
         public_key: &PublicKey,
-        suspended_in_block: BlockId,
+        evicted_in_block: BlockId,
     ) -> Result<(), StorageError> {
-        tx.suspended_nodes_insert(public_key, suspended_in_block)
+        tx.evicted_nodes_evict(public_key, evicted_in_block)
     }
 
-    pub fn resume_node<TTx: StateStoreWriteTransaction>(
-        tx: &mut TTx,
-        public_key: &PublicKey,
-        resumed_in_block: BlockId,
-    ) -> Result<(), StorageError> {
-        tx.suspended_nodes_mark_for_removal(public_key, resumed_in_block)
-    }
-
-    pub fn count_number_suspended_nodes<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<u64, StorageError> {
-        tx.suspended_nodes_count()
+    pub fn count_number_evicted_nodes<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        epoch: Epoch,
+    ) -> Result<u64, StorageError> {
+        tx.evicted_nodes_count(epoch)
     }
 }

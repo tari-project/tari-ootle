@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use minotari_app_grpc::tari_rpc::RegisterValidatorNodeResponse;
 use tokio::{
     process::Child,
     sync::mpsc,
@@ -21,11 +20,8 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn new(response: RegisterValidatorNodeResponse, block: u64) -> Self {
-        Self {
-            id: response.transaction_id,
-            block,
-        }
+    pub fn new(id: u64, block: u64) -> Self {
+        Self { id, block }
     }
 }
 

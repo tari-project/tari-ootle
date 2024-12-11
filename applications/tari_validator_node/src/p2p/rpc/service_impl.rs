@@ -96,7 +96,7 @@ impl ValidatorNodeRpcServiceImpl {
     }
 }
 
-#[async_trait::async_trait]
+#[tari_rpc_framework::async_trait]
 impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
     async fn submit_transaction(
         &self,
@@ -299,9 +299,9 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                         .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
                     let Some(block_id) = block_ids.pop() else {
-                        return Err(RpcStatus::not_found(
-                            "Block not found with epoch={epoch},height={height}",
-                        ));
+                        return Err(RpcStatus::not_found(format!(
+                            "Block not found with epoch={epoch},height=0"
+                        )));
                     };
                     if !block_ids.is_empty() {
                         return Err(RpcStatus::conflict(format!(

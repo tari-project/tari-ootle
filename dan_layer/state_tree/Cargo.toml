@@ -12,8 +12,9 @@ tari_engine_types = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true }
+tari_bor = { workspace = true }
 
-hex = { workspace = true }
+blake2 = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 log = { workspace = true }

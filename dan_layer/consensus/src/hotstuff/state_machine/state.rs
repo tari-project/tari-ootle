@@ -3,6 +3,8 @@
 
 use std::fmt::Display;
 
+use serde::Serialize;
+
 use crate::hotstuff::state_machine::{check_sync::CheckSync, idle::Idle, running::Running, syncing::Syncing};
 
 #[derive(Debug)]
@@ -15,7 +17,7 @@ pub(super) enum ConsensusState<TSpec> {
     Shutdown,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub enum ConsensusCurrentState {
     #[default]
     Idle,

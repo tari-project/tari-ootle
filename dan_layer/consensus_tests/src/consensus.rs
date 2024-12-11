@@ -918,8 +918,9 @@ async fn leader_failure_node_goes_down() {
         // Allow enough time for leader failures
         .with_test_timeout(Duration::from_secs(60))
         .modify_consensus_constants(|config_mut| {
-            // Prevent suspends
+            // Prevent evictions
             config_mut.missed_proposal_suspend_threshold = 10;
+            config_mut.missed_proposal_evict_threshold = 10;
             config_mut.pacemaker_block_time = Duration::from_secs(2);
         })
         .add_committee(0, vec!["1", "2", "3", "4", "5"])
@@ -971,91 +972,6 @@ async fn leader_failure_node_goes_down() {
         .for_each(|v| {
             assert!(v.has_committed_substates(), "Validator {} did not commit", v.address);
         });
-
-    log::info!("total messages sent: {}", test.network().total_messages_sent());
-    test.assert_clean_shutdown_except(&[failure_node]).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn leader_failure_node_goes_down_and_gets_suspended() {
-    setup_logger();
-    let failure_node = TestAddress::new("4");
-
-    let mut test = Test::builder()
-        // Allow enough time for leader failures
-        .with_test_timeout(Duration::from_secs(30))
-        .modify_consensus_constants(|config_mut| {
-            // The node will be suspended after one missed proposal
-            config_mut.missed_proposal_suspend_threshold = 2;
-            config_mut.pacemaker_block_time = Duration::from_secs(5);
-        })
-        .add_committee(0, vec!["1", "2", "3", "4", "5"])
-        .add_failure_node(failure_node.clone())
-        .start()
-        .await;
-
-    for _ in 0..10 {
-        test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
-    }
-
-    // Take the VN offline - if we do it in the loop below, all transactions may have already been finalized (local
-    // only) by committed block 1
-    log::info!("😴 {failure_node} is offline");
-    test.network()
-        .go_offline(TestVnDestination::Address(failure_node.clone()))
-        .await;
-
-    test.start_epoch(Epoch(1)).await;
-
-    loop {
-        let (_, _, _, committed_height) = test.on_block_committed().await;
-
-        // Takes missed_proposal_suspend_threshold * 5 + 3 blocks for nodes to suspend. So we need to keep the
-        // transactions coming to speed up this test.
-        if committed_height >= NodeHeight(1) && committed_height < NodeHeight(20) {
-            // This allows a few more leader failures to occur
-            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
-            // test.wait_for_pool_count(TestVnDestination::All, 1).await;
-        }
-
-        // if test.validators_iter().filter(|vn| vn.address != failure_node).all(|v| {
-        //     let c = v.get_transaction_pool_count();
-        //     log::info!("{} has {} transactions in pool", v.address, c);
-        //     c == 0
-        // }) {
-        //     break;
-        // }
-
-        if committed_height >= NodeHeight(20) {
-            break;
-            // panic!("Not all transaction committed after {} blocks", committed_height);
-        }
-    }
-
-    test.assert_all_validators_at_same_height_except(&[failure_node.clone()])
-        .await;
-
-    test.validators_iter()
-        .filter(|vn| vn.address != failure_node)
-        .for_each(|v| {
-            assert!(v.has_committed_substates(), "Validator {} did not commit", v.address);
-        });
-
-    let (_, suspended_public_key) = helpers::derive_keypair_from_address(&failure_node);
-    test.validators()
-        .get(&TestAddress::new("1"))
-        .unwrap()
-        .state_store()
-        .with_read_tx(|tx| {
-            let leaf = tx.leaf_block_get(Epoch(1))?;
-            assert!(
-                tx.suspended_nodes_is_suspended(leaf.block_id(), &suspended_public_key)
-                    .unwrap(),
-                "{failure_node} is not suspended"
-            );
-            Ok::<_, HotStuffError>(())
-        })
-        .unwrap();
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
     test.assert_clean_shutdown_except(&[failure_node]).await;
@@ -1295,3 +1211,167 @@ async fn multi_shard_unversioned_input_conflict() {
     test.assert_clean_shutdown().await;
     log::info!("total messages sent: {}", test.network().total_messages_sent());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn leader_failure_node_goes_down_and_gets_evicted() {
+    setup_logger();
+    let failure_node = TestAddress::new("4");
+
+    let mut test = Test::builder()
+        // Allow enough time for leader failures
+        .with_test_timeout(Duration::from_secs(30))
+        .modify_consensus_constants(|config_mut| {
+            // The node will be evicted after three missed proposals
+            config_mut.missed_proposal_suspend_threshold = 1;
+            config_mut.missed_proposal_evict_threshold = 3;
+            config_mut.pacemaker_block_time = Duration::from_secs(5);
+        })
+        .add_committee(0, vec!["1", "2", "3", "4", "5"])
+        .add_failure_node(failure_node.clone())
+        .start()
+        .await;
+
+    for _ in 0..10 {
+        test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+    }
+
+    // Take the VN offline - if we do it in the loop below, all transactions may have already been finalized (local
+    // only) by committed block 1
+    log::info!("😴 {failure_node} is offline");
+    test.network()
+        .go_offline(TestVnDestination::Address(failure_node.clone()))
+        .await;
+
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        let (_, _, _, committed_height) = test.on_block_committed().await;
+
+        // Takes missed_proposal_evict_threshold * 5 (members) + 3 (chain) blocks for nodes to evict. So we need to keep
+        // the transactions coming to speed up this test.
+        if committed_height >= NodeHeight(1) && committed_height < NodeHeight(20) {
+            // This allows a few more leader failures to occur
+            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+        }
+
+        let eviction_proofs = test
+            .validators()
+            .get(&TestAddress::new("1"))
+            .unwrap()
+            .epoch_manager()
+            .eviction_proofs()
+            .await;
+        if !eviction_proofs.is_empty() {
+            break;
+        }
+
+        if committed_height >= NodeHeight(40) {
+            panic!("Not all transaction committed after {} blocks", committed_height);
+        }
+    }
+
+    test.assert_all_validators_at_same_height_except(&[failure_node.clone()])
+        .await;
+
+    test.validators_iter()
+        .filter(|vn| vn.address != failure_node)
+        .for_each(|v| {
+            assert!(v.has_committed_substates(), "Validator {} did not commit", v.address);
+        });
+
+    let (_, failure_node_pk) = helpers::derive_keypair_from_address(&failure_node);
+    test.validators()
+        .get(&TestAddress::new("1"))
+        .unwrap()
+        .state_store()
+        .with_read_tx(|tx| {
+            let leaf = tx.leaf_block_get(Epoch(1))?;
+            assert!(
+                tx.suspended_nodes_is_evicted(leaf.block_id(), &failure_node_pk)
+                    .unwrap(),
+                "{failure_node} is not evicted"
+            );
+            Ok::<_, HotStuffError>(())
+        })
+        .unwrap();
+
+    let eviction_proofs = test
+        .validators()
+        .get(&TestAddress::new("1"))
+        .unwrap()
+        .epoch_manager()
+        .eviction_proofs()
+        .await;
+    for proof in &eviction_proofs {
+        assert_eq!(proof.node_to_evict(), &failure_node_pk);
+    }
+
+    // Epoch manager state is shared between all validators, so each working validator (4) should create a proof.
+    assert_eq!(eviction_proofs.len(), 4);
+
+    log::info!("total messages sent: {}", test.network().total_messages_sent());
+    test.assert_clean_shutdown_except(&[failure_node]).await;
+}
+
+// mod dump_data {
+//     use super::*;
+//     use std::fs::File;
+//     use tari_crypto::tari_utilities::hex::from_hex;
+//     use tari_consensus::hotstuff::eviction_proof::convert_block_to_sidechain_block_header;
+//     use tari_state_store_sqlite::SqliteStateStore;
+//
+//    fn asd() {
+//            let store = SqliteStateStore::<PeerAddress>::connect(
+//                "data/swarm/processes/validator-node-01/localnet/data/validator_node/state.db",
+//            )
+//                .unwrap();
+//            let p = store
+//                .with_read_tx(|tx| {
+//                    let block = tari_dan_storage::consensus_models::Block::get(
+//                        tx,
+//                        &BlockId::try_from(
+//                            from_hex("891d186d2d46b990cc0974dc68734f701eaeb418a1bba487de93905d3986e0e3").unwrap(),
+//                        )
+//                            .unwrap(),
+//                    )?;
+//
+//                    let commit_block = tari_dan_storage::consensus_models::Block::get(
+//                        tx,
+//                        &BlockId::try_from(
+//                            from_hex("1cdbe5c1a894bcc254b47cf017d4d17608839b7048d1c02162bccd39e7635288").unwrap(),
+//                        )
+//                            .unwrap(),
+//                    )
+//                        .unwrap();
+//
+//                    let mut p = tari_consensus::hotstuff::eviction_proof::generate_eviction_proofs(tx,
+// block.justify(), &[                        commit_block.clone(),
+//                    ])
+//                        .unwrap();
+//
+//                    eprintln!();
+//                    eprintln!("{}", serde_json::to_string_pretty(&commit_block).unwrap());
+//                    eprintln!();
+//                    eprintln!();
+//
+//                    let h = convert_block_to_sidechain_block_header(commit_block.header());
+//
+//                    assert_eq!(h.calculate_hash(), commit_block.header().calculate_hash());
+//                    let b = p[0].proof().header().calculate_block_id();
+//                    assert_eq!(
+//                        p[0].proof().header().calculate_hash(),
+//                        commit_block.header().calculate_hash()
+//                    );
+//                    assert_eq!(b, *commit_block.id().hash());
+//                    Ok::<_, HotStuffError>(p.remove(0))
+//                })
+//                .unwrap();
+//            let f = File::options()
+//                .create(true)
+//                .write(true)
+//                .truncate(true)
+//                .open("/tmp/eviction_proof.json")
+//                .unwrap();
+//            serde_json::to_writer_pretty(f, &p).unwrap();
+//    }
+// }

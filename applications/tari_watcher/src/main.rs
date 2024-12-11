@@ -1,15 +1,14 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use anyhow::{anyhow, Context};
-use registration::registration_loop;
+use anyhow::{anyhow, bail, Context};
 use tari_shutdown::{Shutdown, ShutdownSignal};
 use tokio::{fs, task::JoinHandle};
+use transaction_worker::worker_loop;
 
 use crate::{
     cli::{Cli, Commands},
     config::{get_base_config, Config},
-    constants::DEFAULT_WATCHER_BASE_PATH,
     helpers::read_config_file,
     logger::init_logger,
     manager::{start_receivers, ManagerHandle, ProcessManager},
@@ -27,22 +26,31 @@ mod manager;
 mod minotari;
 mod monitoring;
 mod process;
-mod registration;
 mod shutdown;
+mod transaction_worker;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::init();
     let config_path = cli.get_config_path();
 
-    let config_path = config_path
-        .canonicalize()
-        .context("Failed to canonicalize config path")?;
+    if config_path.is_dir() {
+        bail!(
+            "Config path '{}' does points to a directory, expected a file",
+            config_path.display()
+        );
+    }
 
     init_logger()?;
 
     match cli.command {
         Commands::Init(ref args) => {
+            if !args.force && config_path.exists() {
+                bail!(
+                    "Config file already exists at {} (use --force to overwrite)",
+                    config_path.display()
+                );
+            }
             // set by default in CommonCli
             let parent = config_path.parent().context("parent path")?;
             fs::create_dir_all(parent).await?;
@@ -72,48 +80,44 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn start(config: Config) -> anyhow::Result<()> {
-    let shutdown = Shutdown::new();
+    let mut shutdown = Shutdown::new();
     let signal = shutdown.to_signal().select(exit_signal()?);
-    fs::create_dir_all(config.base_dir.join(DEFAULT_WATCHER_BASE_PATH))
+    fs::create_dir_all(&config.base_dir)
         .await
         .context("create watcher base path")?;
-    create_pid_file(
-        config.base_dir.join(DEFAULT_WATCHER_BASE_PATH).join("watcher.pid"),
-        std::process::id(),
-    )
-    .await?;
-    let handlers = spawn_manager(config.clone(), shutdown.to_signal(), shutdown).await?;
-    let manager_handle = handlers.manager;
-    let task_handle = handlers.task;
+    create_pid_file(config.base_dir.join("watcher.pid"), std::process::id()).await?;
+    let Handlers { manager_handle, task } = spawn_manager(config.clone(), shutdown.to_signal()).await?;
 
     tokio::select! {
         _ = signal => {
             log::info!("Shutting down");
         },
-        result = task_handle => {
+        result = task => {
             result?;
             log::info!("Process manager exited");
         },
-        Err(err) = registration_loop(config, manager_handle) => {
+        Err(err) = worker_loop(config, manager_handle) => {
             log::error!("Registration loop exited with error {err}");
         },
     }
+
+    shutdown.trigger();
 
     Ok(())
 }
 
 struct Handlers {
-    manager: ManagerHandle,
+    manager_handle: ManagerHandle,
     task: JoinHandle<()>,
 }
 
-async fn spawn_manager(config: Config, shutdown: ShutdownSignal, trigger: Shutdown) -> anyhow::Result<Handlers> {
-    let (manager, manager_handle) = ProcessManager::new(config, shutdown, trigger);
+async fn spawn_manager(config: Config, shutdown: ShutdownSignal) -> anyhow::Result<Handlers> {
+    let (manager, manager_handle) = ProcessManager::new(config, shutdown);
     let cr = manager.start_request_handler().await?;
     start_receivers(cr.rx_log, cr.rx_alert, cr.cfg_alert).await;
 
     Ok(Handlers {
-        manager: manager_handle,
+        manager_handle,
         task: cr.task,
     })
 }

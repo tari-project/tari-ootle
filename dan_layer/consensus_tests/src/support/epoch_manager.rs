@@ -64,20 +64,18 @@ impl TestEpochManager {
                 address,
                 public_key,
                 shard_key,
-                registered_at_base_height: our_validator_node.registered_at_base_height,
                 start_epoch: our_validator_node.start_epoch,
+                end_epoch: None,
                 fee_claim_public_key: PublicKey::default(),
-                sidechain_id: None,
             });
         } else {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
                 public_key,
                 shard_key,
-                registered_at_base_height: 0,
                 start_epoch: Epoch(0),
+                end_epoch: None,
                 fee_claim_public_key: PublicKey::default(),
-                sidechain_id: None,
             });
         }
         copy
@@ -92,12 +90,15 @@ impl TestEpochManager {
                 state.validator_shards.insert(
                     address.clone(),
                     (
+                        ValidatorNode {
+                            address: address.clone(),
+                            public_key: pk.clone(),
+                            shard_key: substate_id.to_substate_address(),
+                            start_epoch: Epoch(0),
+                            end_epoch: None,
+                            fee_claim_public_key: Default::default(),
+                        },
                         shard_group,
-                        substate_id.to_substate_address(),
-                        pk.clone(),
-                        None,
-                        0,
-                        Epoch(0),
                     ),
                 );
                 state.address_shard.insert(address.clone(), shard_group);
@@ -107,28 +108,8 @@ impl TestEpochManager {
         }
     }
 
-    pub async fn all_validators(&self) -> Vec<(TestAddress, ShardGroup, SubstateAddress, PublicKey, u64, Epoch)> {
-        self.state_lock()
-            .await
-            .validator_shards
-            .iter()
-            .filter_map(
-                |(a, (shard, substate_address, pk, sidechain_id, registered_at, start_epoch))| {
-                    if sidechain_id.is_none() {
-                        Some((
-                            a.clone(),
-                            *shard,
-                            *substate_address,
-                            pk.clone(),
-                            *registered_at,
-                            *start_epoch,
-                        ))
-                    } else {
-                        None
-                    }
-                },
-            )
-            .collect()
+    pub async fn all_validators(&self) -> Vec<(ValidatorNode<TestAddress>, ShardGroup)> {
+        self.state_lock().await.validator_shards.values().cloned().collect()
     }
 
     pub async fn all_committees(&self) -> HashMap<ShardGroup, Committee<TestAddress>> {
@@ -137,6 +118,10 @@ impl TestEpochManager {
 
     pub fn get_current_epoch(&self) -> Epoch {
         self.current_epoch
+    }
+
+    pub async fn eviction_proofs(&self) -> Vec<tari_sidechain::EvictionProof> {
+        self.state_lock().await.eviction_proofs.clone()
     }
 }
 
@@ -167,18 +152,8 @@ impl EpochManagerReader for TestEpochManager {
         _epoch: Epoch,
         addr: &Self::Addr,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
-        let (_shard, shard_key, public_key, sidechain_id, registered_at_base_height, start_epoch) =
-            self.state_lock().await.validator_shards[addr].clone();
-
-        Ok(ValidatorNode {
-            address: addr.clone(),
-            public_key,
-            shard_key,
-            registered_at_base_height,
-            start_epoch,
-            fee_claim_public_key: PublicKey::default(),
-            sidechain_id,
-        })
+        let (vn, _) = self.state_lock().await.validator_shards[addr].clone();
+        Ok(vn)
     }
 
     async fn get_all_validator_nodes(
@@ -248,17 +223,32 @@ impl EpochManagerReader for TestEpochManager {
         todo!()
     }
 
-    async fn get_committees_by_shard_group(
+    async fn get_committee_by_shard_group(
         &self,
         _epoch: Epoch,
         shard_group: ShardGroup,
-    ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, EpochManagerError> {
+    ) -> Result<Committee<Self::Addr>, EpochManagerError> {
         let state = self.state_lock().await;
         let Some(committee) = state.committees.get(&shard_group) else {
             panic!("Committee not found for shard group {}", shard_group);
         };
 
-        Ok(Some((shard_group, committee.clone())).into_iter().collect())
+        Ok(committee.clone())
+    }
+
+    async fn get_committees_overlapping_shard_group(
+        &self,
+        _epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, EpochManagerError> {
+        let state = self.state_lock().await;
+        let mut committees = HashMap::new();
+        for (sg, committee) in &state.committees {
+            if sg.overlaps_shard_group(&shard_group) {
+                committees.insert(*sg, committee.clone());
+            }
+        }
+        Ok(committees)
     }
 
     async fn get_committee_info_for_substate(
@@ -311,20 +301,19 @@ impl EpochManagerReader for TestEpochManager {
         public_key: PublicKey,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
         let lock = self.state_lock().await;
-        let (address, (_shard, shard_key, public_key, sidechain_id, registered_at, start_epoch)) = lock
+        let (vn, _) = lock
             .validator_shards
-            .iter()
-            .find(|(_, (_, _, pk, _, _, _))| *pk == public_key)
+            .values()
+            .find(|(vn, _)| vn.public_key == public_key)
             .unwrap();
 
         Ok(ValidatorNode {
-            address: address.clone(),
-            public_key: public_key.clone(),
-            shard_key: *shard_key,
-            registered_at_base_height: *registered_at,
-            start_epoch: *start_epoch,
-            fee_claim_public_key: PublicKey::default(),
-            sidechain_id: sidechain_id.clone(),
+            address: vn.address.clone(),
+            public_key: vn.public_key.clone(),
+            shard_key: vn.shard_key,
+            start_epoch: vn.start_epoch,
+            end_epoch: vn.end_epoch,
+            fee_claim_public_key: vn.fee_claim_public_key.clone(),
         })
     }
 
@@ -336,6 +325,15 @@ impl EpochManagerReader for TestEpochManager {
         // Scanning is not relevant to tests
         Ok(())
     }
+
+    async fn add_intent_to_evict_validator(
+        &self,
+        proof: tari_sidechain::EvictionProof,
+    ) -> Result<(), EpochManagerError> {
+        let mut state = self.state_lock().await;
+        state.eviction_proofs.push(proof);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -345,9 +343,10 @@ pub struct TestEpochManagerState {
     pub last_block_of_current_epoch: FixedHash,
     pub is_epoch_active: bool,
     #[allow(clippy::type_complexity)]
-    pub validator_shards: HashMap<TestAddress, (ShardGroup, SubstateAddress, PublicKey, Option<PublicKey>, u64, Epoch)>,
+    pub validator_shards: HashMap<TestAddress, (ValidatorNode<TestAddress>, ShardGroup)>,
     pub committees: HashMap<ShardGroup, Committee<TestAddress>>,
     pub address_shard: HashMap<TestAddress, ShardGroup>,
+    pub eviction_proofs: Vec<tari_sidechain::EvictionProof>,
 }
 
 impl Default for TestEpochManagerState {
@@ -360,6 +359,7 @@ impl Default for TestEpochManagerState {
             is_epoch_active: false,
             committees: HashMap::new(),
             address_shard: HashMap::new(),
+            eviction_proofs: Vec::new(),
         }
     }
 }

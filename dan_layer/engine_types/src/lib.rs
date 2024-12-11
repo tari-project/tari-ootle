@@ -36,3 +36,7 @@ mod argument_parser;
 pub mod published_template;
 
 pub use argument_parser::parse_arg;
+
+pub mod template_models {
+    pub use tari_template_lib::models::*;
+}

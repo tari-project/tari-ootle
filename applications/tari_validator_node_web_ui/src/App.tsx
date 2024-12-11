@@ -163,7 +163,7 @@ export default function App() {
   useEffect(() => {
     if (epoch !== undefined && identity !== undefined) {
       // The *10 is from the hardcoded constant in VN.
-      getShardKey({ height: epoch.current_epoch * 10, public_key: identity.public_key }).then((response) => {
+      getShardKey({ epoch: epoch.current_epoch, public_key: identity.public_key }).then((response) => {
         setShardKey(response.shard_key);
       });
     }

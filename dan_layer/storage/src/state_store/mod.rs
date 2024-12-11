@@ -24,6 +24,7 @@ use tari_dan_common_types::{
 };
 use tari_engine_types::substate::SubstateId;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
+use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
 use tari_transaction::TransactionId;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
@@ -341,7 +342,7 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstatePledges, StorageError>;
 
     // -------------------------------- BurntUtxos -------------------------------- //
-    fn burnt_utxos_get(&self, substate_id: &SubstateId) -> Result<BurntUtxo, StorageError>;
+    fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError>;
     fn burnt_utxos_get_all_unproposed(
         &self,
         leaf_block: &BlockId,
@@ -359,20 +360,16 @@ pub trait StateStoreReadTransaction: Sized {
         epoch: Epoch,
         public_key: &PublicKey,
     ) -> Result<ValidatorConsensusStats, StorageError>;
-    fn validator_epoch_stats_get_nodes_to_suspend(
+
+    fn validator_epoch_stats_get_nodes_to_evict(
         &self,
         block_id: &BlockId,
-        min_missed_proposals: u64,
-        limit: usize,
-    ) -> Result<Vec<PublicKey>, StorageError>;
-    fn validator_epoch_stats_get_nodes_to_resume(
-        &self,
-        block_id: &BlockId,
-        limit: usize,
+        threshold: u64,
+        limit: u64,
     ) -> Result<Vec<PublicKey>, StorageError>;
     // -------------------------------- SuspendedNodes -------------------------------- //
-    fn suspended_nodes_is_suspended(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError>;
-    fn suspended_nodes_count(&self) -> Result<u64, StorageError>;
+    fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError>;
+    fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError>;
 }
 
 pub trait StateStoreWriteTransaction {
@@ -585,11 +582,11 @@ pub trait StateStoreWriteTransaction {
     fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError>;
     fn burnt_utxos_set_proposed_block(
         &mut self,
-        substate_id: &SubstateId,
+        commitment: &UnclaimedConfidentialOutputAddress,
         proposed_in_block: &BlockId,
     ) -> Result<(), StorageError>;
     fn burnt_utxos_clear_proposed_block(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError>;
-    fn burnt_utxos_delete(&mut self, substate_id: &SubstateId) -> Result<(), StorageError>;
+    fn burnt_utxos_delete(&mut self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<(), StorageError>;
 
     // -------------------------------- Lock conflicts -------------------------------- //
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(
@@ -607,17 +604,13 @@ pub trait StateStoreWriteTransaction {
     ) -> Result<(), StorageError>;
 
     // -------------------------------- SuspendedNodes -------------------------------- //
-    fn suspended_nodes_insert(
+
+    fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError>;
+    fn evicted_nodes_mark_eviction_as_committed(
         &mut self,
         public_key: &PublicKey,
-        suspended_in_block: BlockId,
+        epoch: Epoch,
     ) -> Result<(), StorageError>;
-    fn suspended_nodes_mark_for_removal(
-        &mut self,
-        public_key: &PublicKey,
-        resumed_in_block: BlockId,
-    ) -> Result<(), StorageError>;
-    fn suspended_nodes_delete(&mut self, public_key: &PublicKey) -> Result<(), StorageError>;
 
     // -------------------------------- Diagnotics -------------------------------- //
     fn diagnostics_add_no_vote(&mut self, block_id: BlockId, reason: NoVoteReason) -> Result<(), StorageError>;

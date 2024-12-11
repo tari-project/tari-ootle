@@ -73,7 +73,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeNode, Version};
 use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
@@ -358,6 +358,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                         block_diffs::shard.eq(ch.shard().as_u32() as i32),
                         block_diffs::change.eq(ch.as_change_string()),
                         block_diffs::state.eq(ch.substate().map(serialize_json).transpose()?),
+                        block_diffs::state_hash.eq(ch.substate().map(|s| s.to_value_hash().to_string())),
                     ))
                 })
                 .collect::<Result<Vec<_>, StorageError>>()?;
@@ -1483,7 +1484,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::votes;
 
         let insert = (
-            votes::hash.eq(serialize_hex(vote.calculate_hash())),
+            votes::siphash.eq(vote.get_hash() as i64),
             votes::epoch.eq(vote.epoch.as_u64() as i64),
             votes::block_id.eq(serialize_hex(vote.block_id)),
             votes::sender_leaf_hash.eq(serialize_hex(vote.sender_leaf_hash)),
@@ -1999,8 +2000,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::burnt_utxos;
 
         let values = (
-            burnt_utxos::substate_id.eq(burnt_utxo.substate_id.to_string()),
-            burnt_utxos::substate.eq(serialize_json(&burnt_utxo.substate_value)?),
+            burnt_utxos::commitment.eq(burnt_utxo.commitment.to_string()),
+            burnt_utxos::output.eq(serialize_json(&burnt_utxo.output)?),
             burnt_utxos::base_layer_block_height.eq(burnt_utxo.base_layer_block_height as i64),
         );
 
@@ -2017,14 +2018,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
     fn burnt_utxos_set_proposed_block(
         &mut self,
-        substate_id: &SubstateId,
+        commitment: &UnclaimedConfidentialOutputAddress,
         proposed_in_block: &BlockId,
     ) -> Result<(), StorageError> {
         use crate::schema::{blocks, burnt_utxos};
 
         let proposed_in_block_hex = serialize_hex(proposed_in_block);
         let num_affected = diesel::update(burnt_utxos::table)
-            .filter(burnt_utxos::substate_id.eq(substate_id.to_string()))
+            .filter(burnt_utxos::commitment.eq(commitment.to_string()))
             .set((
                 burnt_utxos::proposed_in_block.eq(&proposed_in_block_hex),
                 burnt_utxos::proposed_in_block_height.eq(blocks::table
@@ -2041,7 +2042,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         if num_affected == 0 {
             return Err(StorageError::NotFound {
                 item: "burnt_utxo",
-                key: substate_id.to_string(),
+                key: commitment.to_string(),
             });
         }
 
@@ -2067,11 +2068,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn burnt_utxos_delete(&mut self, substate_id: &SubstateId) -> Result<(), StorageError> {
+    fn burnt_utxos_delete(&mut self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<(), StorageError> {
         use crate::schema::burnt_utxos;
 
         let num_affected = diesel::delete(burnt_utxos::table)
-            .filter(burnt_utxos::substate_id.eq(substate_id.to_string()))
+            .filter(burnt_utxos::commitment.eq(commitment.to_string()))
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "burnt_utxos_delete",
@@ -2081,7 +2082,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         if num_affected == 0 {
             return Err(StorageError::NotFound {
                 item: "burnt_utxo",
-                key: substate_id.to_string(),
+                key: commitment.to_string(),
             });
         }
 
@@ -2279,60 +2280,41 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn suspended_nodes_insert(
-        &mut self,
-        public_key: &PublicKey,
-        suspended_in_block: BlockId,
-    ) -> Result<(), StorageError> {
-        let suspended_in_block = serialize_hex(suspended_in_block);
+    fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError> {
+        if !self.blocks_exists(&evicted_in_block)? {
+            return Err(StorageError::QueryError {
+                reason: format!("suspended_nodes_evict: block {evicted_in_block} does not exist"),
+            });
+        }
+        let evicted_in_block = serialize_hex(evicted_in_block);
+
         sql_query(
             r#"
             INSERT INTO
-                suspended_nodes (public_key, epoch, suspended_in_block, suspended_in_block_height)
+                evicted_nodes (public_key, epoch, evicted_in_block, evicted_in_block_height)
                 SELECT ?, epoch, block_id, height FROM blocks where block_id = ?"#,
         )
         .bind::<Text, _>(public_key.to_hex())
-        .bind::<Text, _>(suspended_in_block)
+        .bind::<Text, _>(evicted_in_block)
         .execute(self.connection())
         .map_err(|e| SqliteStorageError::DieselError {
-            operation: "suspended_nodes_insert",
+            operation: "suspended_nodes_evict",
             source: e,
         })?;
 
         Ok(())
     }
 
-    fn suspended_nodes_mark_for_removal(
+    fn evicted_nodes_mark_eviction_as_committed(
         &mut self,
         public_key: &PublicKey,
-        resumed_in_block: BlockId,
+        epoch: Epoch,
     ) -> Result<(), StorageError> {
-        use crate::schema::{blocks, suspended_nodes};
-        let resumed_in_block = serialize_hex(resumed_in_block);
+        use crate::schema::evicted_nodes;
 
-        diesel::update(suspended_nodes::table)
-            .set((
-                suspended_nodes::resumed_in_block.eq(&resumed_in_block),
-                suspended_nodes::resumed_in_block_height.eq(blocks::table
-                    .select(blocks::height)
-                    .filter(blocks::block_id.eq(&resumed_in_block))
-                    .single_value()),
-            ))
-            .filter(suspended_nodes::public_key.eq(public_key.to_hex()))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "suspended_nodes_mark_for_removal",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
-    fn suspended_nodes_delete(&mut self, public_key: &PublicKey) -> Result<(), StorageError> {
-        use crate::schema::suspended_nodes;
-
-        let num_affected = diesel::delete(suspended_nodes::table)
-            .filter(suspended_nodes::public_key.eq(public_key.to_hex()))
+        let num_affected = diesel::update(evicted_nodes::table)
+            .set(evicted_nodes::eviction_committed_in_epoch.eq(epoch.as_u64() as i64))
+            .filter(evicted_nodes::public_key.eq(public_key.to_hex()))
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "suspended_nodes_delete",

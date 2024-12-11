@@ -3,7 +3,6 @@
 
 use std::{collections::HashSet, time::Instant};
 
-use async_trait::async_trait;
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::PublicKey;
@@ -217,7 +216,6 @@ where
     }
 }
 
-#[async_trait]
 impl<TStateStore, TEpochManager, TValidatorNodeClientFactory, TSubstateCache> SubstateResolver
     for TariSubstateResolver<TStateStore, TEpochManager, TValidatorNodeClientFactory, TSubstateCache>
 where

@@ -22,7 +22,7 @@
 
 use std::sync::Arc;
 
-use super::{validator_node_db::ValidatorNodeDb, BaseLayerHashesDb, BmtDb, EpochDb};
+use super::{validator_node_db::ValidatorNodeDb, BaseLayerDb, BmtDb, EpochDb};
 use crate::{
     global::{backend_adapter::GlobalDbAdapter, metadata_db::MetadataDb, template_db::TemplateDb},
     StorageError,
@@ -87,11 +87,11 @@ impl<TGlobalDbAdapter: GlobalDbAdapter> GlobalDb<TGlobalDbAdapter> {
         EpochDb::new(&self.adapter, tx)
     }
 
-    pub fn base_layer_hashes<'a, 'tx>(
+    pub fn base_layer<'a, 'tx>(
         &'a self,
         tx: &'tx mut TGlobalDbAdapter::DbTransaction<'a>,
-    ) -> BaseLayerHashesDb<'a, 'tx, TGlobalDbAdapter> {
-        BaseLayerHashesDb::new(&self.adapter, tx)
+    ) -> BaseLayerDb<'a, 'tx, TGlobalDbAdapter> {
+        BaseLayerDb::new(&self.adapter, tx)
     }
 
     pub fn bmt<'a, 'tx>(

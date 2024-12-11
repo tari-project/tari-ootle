@@ -15,6 +15,7 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_storage::global::models::ValidatorNode;
+use tari_sidechain::EvictionProof;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::{
@@ -94,14 +95,14 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
 
     pub async fn add_validator_node_registration(
         &self,
-        block_height: u64,
+        activation_epoch: Epoch,
         registration: ValidatorNodeRegistration,
         value_of_registration: MicroMinotari,
     ) -> Result<(), EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::AddValidatorNodeRegistration {
-                block_height,
+                activation_epoch,
                 registration,
                 value: value_of_registration,
                 reply: tx,
@@ -111,16 +112,16 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
-    pub async fn remove_validator_node_registration(
+    pub async fn deactivate_validator_node(
         &self,
         public_key: PublicKey,
-        sidechain_id: Option<PublicKey>,
+        deactivation_epoch: Epoch,
     ) -> Result<(), EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
-            .send(EpochManagerRequest::RemoveValidatorNodeRegistration {
+            .send(EpochManagerRequest::DeactivateValidatorNode {
                 public_key,
-                sidechain_id,
+                deactivation_epoch,
                 reply: tx,
             })
             .await
@@ -409,14 +410,32 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
-    async fn get_committees_by_shard_group(
+    async fn get_committee_by_shard_group(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<Committee<Self::Addr>, EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::GetCommitteeForShardGroup {
+                epoch,
+                shard_group,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    }
+
+    async fn get_committees_overlapping_shard_group(
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
-            .send(EpochManagerRequest::GetCommitteesForShardGroup {
+            .send(EpochManagerRequest::GetCommitteesOverlappingShardGroup {
                 epoch,
                 shard_group,
                 reply: tx,
@@ -431,6 +450,18 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::GetBaseLayerBlockHeight { hash, reply: tx })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    }
+
+    async fn add_intent_to_evict_validator(&self, proof: EvictionProof) -> Result<(), EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::AddIntentToEvictValidator {
+                proof: Box::new(proof),
+                reply: tx,
+            })
             .await
             .map_err(|_| EpochManagerError::SendError)?;
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?

@@ -81,33 +81,56 @@
 // Copyright (c) Aptos
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fmt, ops::Range};
+use std::{fmt, io, ops::Range};
 
+use blake2::{digest::consts::U32, Blake2b};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use tari_crypto::{hash_domain, tari_utilities::ByteArray};
-use tari_dan_common_types::{
-    hasher::{tari_hasher, TariHasher},
-    optional::IsNotFoundError,
+use tari_crypto::{
+    hash_domain,
+    hashing::{AsFixedBytes, DomainSeparatedHasher},
+    tari_utilities::ByteArray,
 };
+use tari_dan_common_types::optional::IsNotFoundError;
 use tari_engine_types::serde_with;
 
 use crate::jellyfish::store::TreeStoreReader;
 
 pub type Hash = tari_common_types::types::FixedHash;
 
-hash_domain!(SparseMerkleTree, "com.tari.dan.state_tree", 0);
+hash_domain!(ValidatorJmtHashDomain, "com.tari.jmt", 0);
 
-fn jmt_node_hasher() -> TariHasher {
-    tari_hasher::<SparseMerkleTree>("JmtNode")
+pub type JmtHasher = DomainSeparatedHasher<Blake2b<U32>, ValidatorJmtHashDomain>;
+
+fn jmt_node_hasher() -> JmtHasher {
+    JmtHasher::new_with_label("Node")
+}
+
+struct HashWriter<'a>(&'a mut JmtHasher);
+
+impl io::Write for HashWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 pub fn jmt_node_hash<T: Serialize>(data: &T) -> Hash {
-    jmt_node_hasher().chain(data).result()
+    let mut hasher = jmt_node_hasher();
+    let mut hash_writer = HashWriter(&mut hasher);
+    tari_bor::encode_into_std_writer(data, &mut hash_writer).expect("encoding failed");
+    let bytes: [u8; 32] = hasher.finalize().as_fixed_bytes().expect("hash is 32 bytes");
+    bytes.into()
 }
 
 pub fn jmt_node_hash2(d1: &[u8], d2: &[u8]) -> Hash {
-    jmt_node_hasher().chain(d1).chain(d2).result()
+    let hasher = jmt_node_hasher().chain(d1).chain(d2);
+    let bytes: [u8; 32] = hasher.finalize().as_fixed_bytes().expect("hash is 32 bytes");
+    bytes.into()
 }
 
 // SOURCE: https://github.com/aptos-labs/aptos-core/blob/1.0.4/types/src/proof/definition.rs#L182
@@ -419,7 +442,6 @@ pub struct NibblePath {
     num_nibbles: usize,
     /// The underlying bytes that stores the path, 2 nibbles per byte. If the number of nibbles is
     /// odd, the second half of the last byte must be 0.
-    #[serde(with = "serde_with::hex")]
     bytes: Vec<u8>,
 }
 
@@ -1115,7 +1137,7 @@ pub struct LeafNode<P> {
     version: Version,
 }
 
-impl<P: Clone> LeafNode<P> {
+impl<P> LeafNode<P> {
     /// Creates a new leaf node.
     pub fn new(leaf_key: LeafKey, value_hash: Hash, payload: P, version: Version) -> Self {
         Self {
@@ -1184,7 +1206,7 @@ impl<P: Clone> From<LeafNode<P>> for Node<P> {
     }
 }
 
-impl<P: Clone> Node<P> {
+impl<P> Node<P> {
     // /// Creates the [`Internal`](Node::Internal) variant.
     // #[cfg(any(test, feature = "fuzzing"))]
     // pub fn new_internal(children: Children) -> Self {
@@ -1199,6 +1221,13 @@ impl<P: Clone> Node<P> {
     /// Returns `true` if the node is a leaf node.
     pub fn is_leaf(&self) -> bool {
         matches!(self, Node::Leaf(_))
+    }
+
+    pub fn leaf(&self) -> Option<&LeafNode<P>> {
+        match self {
+            Node::Leaf(leaf) => Some(leaf),
+            _ => None,
+        }
     }
 
     /// Returns `NodeType`

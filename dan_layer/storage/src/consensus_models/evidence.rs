@@ -3,10 +3,12 @@
 
 use std::fmt::{Display, Formatter};
 
+use borsh::BorshSerialize;
 use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
+    borsh::indexmap as indexmap_borsh,
     committee::CommitteeInfo,
     NumPreshards,
     ShardGroup,
@@ -20,7 +22,7 @@ use crate::consensus_models::{QcId, VersionedSubstateIdLockIntent};
 
 const LOG_TARGET: &str = "tari::dan::consensus_models::evidence";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -30,6 +32,7 @@ pub struct Evidence {
     // Serialize JSON as an array of objects since ShardGroup is a non-string key
     #[serde(with = "serde_with::vec")]
     #[cfg_attr(feature = "ts", ts(type = "Array<[any, any]>"))]
+    #[borsh(serialize_with = "indexmap_borsh::serialize")]
     evidence: IndexMap<ShardGroup, ShardGroupEvidence>,
 }
 
@@ -199,13 +202,14 @@ impl Display for Evidence {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct ShardGroupEvidence {
+    #[borsh(serialize_with = "indexmap_borsh::serialize")]
     substates: IndexMap<SubstateAddress, SubstateLockType>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     prepare_qc: Option<QcId>,

@@ -2,6 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    fs,
     str::FromStr,
     time::{Duration, Instant},
 };
@@ -16,11 +17,14 @@ use integration_tests::{
 };
 use libp2p::Multiaddr;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
+use notify::Watcher;
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
 use tari_crypto::tari_utilities::ByteArray;
-use tari_dan_common_types::{Epoch, SubstateAddress};
+use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, SubstateAddress};
 use tari_engine_types::substate::SubstateId;
+use tari_sidechain::EvictionProof;
 use tari_validator_node_client::types::{AddPeerRequest, GetBlocksRequest, GetStateRequest, GetTemplateRequest};
+use tokio::{sync::mpsc, time::timeout};
 
 #[given(expr = "a validator node {word} connected to base node {word} and wallet daemon {word}")]
 async fn start_validator_node(world: &mut TariWorld, vn_name: String, bn_name: String, wallet_daemon_name: String) {
@@ -119,7 +123,7 @@ async fn start_multiple_validator_nodes(world: &mut TariWorld, num_nodes: u64, b
 #[given(expr = "validator {word} nodes connect to all other validators")]
 async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: String) {
     let details = world
-        .all_validators_iter()
+        .all_running_validators_iter()
         .filter(|vn| vn.name != name)
         .map(|vn| {
             (
@@ -205,7 +209,7 @@ async fn register_template(world: &mut TariWorld, wallet_name: String, template_
 
 #[then(expr = "all validator nodes are listed as registered")]
 async fn assert_all_vns_are_registered(world: &mut TariWorld) {
-    for vn_ps in world.all_validators_iter() {
+    for vn_ps in world.all_running_validators_iter() {
         // create a base node client
         let base_node_grpc_port = vn_ps.base_node_grpc_port;
         let mut base_node_client: GrpcBaseNodeClient = get_base_node_client(base_node_grpc_port);
@@ -299,7 +303,7 @@ async fn assert_template_is_registered_by_all(world: &mut TariWorld, template_na
     // try to get the template for each VN
     let timer = Instant::now();
     'outer: loop {
-        for vn_ps in world.all_validators_iter() {
+        for vn_ps in world.all_running_validators_iter() {
             let mut client = vn_ps.get_client();
             let req = GetTemplateRequest { template_address };
             let resp = client.get_template(req).await.ok();
@@ -411,9 +415,11 @@ async fn vn_has_scanned_to_height(world: &mut TariWorld, vn_name: String, block_
 }
 
 #[then(expr = "all validators have scanned to height {int}")]
+#[when(expr = "all validators have scanned to height {int}")]
 async fn all_vns_have_scanned_to_height(world: &mut TariWorld, block_height: u64) {
     let all_names = world
-        .all_validators_iter()
+        .all_running_validators_iter()
+        .filter(|vn| !vn.handle.is_finished())
         .map(|vn| vn.name.clone())
         .collect::<Vec<_>>();
     for vn in all_names {
@@ -529,4 +535,109 @@ async fn then_validator_node_switches_epoch(world: &mut TariWorld, vn_name: Stri
         tokio::time::sleep(Duration::from_secs(8)).await;
     }
     panic!("Validator node {vn_name} did not switch to epoch {epoch}");
+}
+
+#[then(expr = "I wait for {word} to list {word} as evicted in {word}")]
+async fn then_i_wait_for_validator_node_to_be_evicted(
+    world: &mut TariWorld,
+    vn_name: String,
+    evict_vn_name: String,
+    proof_name: String,
+) {
+    let vn = world.get_validator_node(&vn_name);
+    let evict_vn = world.get_validator_node(&evict_vn_name);
+
+    let (tx, mut rx) = mpsc::channel(1);
+    let l1_tx_path = vn.layer_one_transaction_path();
+    fs::create_dir_all(&l1_tx_path).unwrap();
+
+    let mut watcher = notify::RecommendedWatcher::new(
+        move |res| {
+            tx.blocking_send(res).unwrap();
+        },
+        notify::Config::default(),
+    )
+    .unwrap();
+
+    watcher.watch(&l1_tx_path, notify::RecursiveMode::NonRecursive).unwrap();
+
+    loop {
+        let event = timeout(Duration::from_secs(2000), rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("Timeout waiting for eviction file at path {}", l1_tx_path.display()))
+            .expect("unexpected channel close")
+            .unwrap_or_else(|err| panic!("Error when watching files {err}"));
+
+        if let notify::Event {
+            kind: notify::EventKind::Access(notify::event::AccessKind::Close(notify::event::AccessMode::Write)),
+            paths,
+            ..
+        } = event
+        {
+            if let Some(json_file) = paths
+                .into_iter()
+                .find(|p| p.extension().is_some_and(|ext| ext == "json") && p.is_file())
+            {
+                eprintln!("🗒️ Found file: {}", json_file.display());
+                let contents = fs::read(json_file).expect("Could not read file");
+                let transaction_def = match serde_json::from_slice::<LayerOneTransactionDef<EvictionProof>>(&contents) {
+                    Ok(def) => def,
+                    Err(err) => {
+                        eprintln!("Error deserializing eviction proof: {}", err);
+                        continue;
+                    },
+                };
+                if *transaction_def.payload.node_to_evict() != evict_vn.public_key {
+                    panic!(
+                        "Got an eviction proof for public key {}, however this did not match the public key of \
+                         validator {evict_vn_name}",
+                        transaction_def.payload.node_to_evict()
+                    );
+                }
+                watcher.unwatch(&l1_tx_path).unwrap();
+                world.add_eviction_proof(proof_name.clone(), transaction_def.payload);
+                break;
+            }
+        }
+    }
+}
+
+#[when(expr = "all validator nodes have started epoch {int}")]
+async fn all_validators_have_started_epoch(world: &mut TariWorld, epoch: u64) {
+    let mut remaining_attempts = 60;
+    for vn in world.all_running_validators_iter().cycle() {
+        let mut client = vn.create_client();
+        let status = client.get_consensus_status().await.unwrap();
+        if status.epoch.as_u64() >= epoch {
+            println!(
+                "Validator {} has started epoch {} (consensus state {}, height {})",
+                vn.name, epoch, status.state, status.height
+            );
+            return;
+        }
+        if remaining_attempts == 0 {
+            panic!(
+                "Validator {} did not start epoch {} (at epoch: {}, status: {})",
+                vn.name, epoch, status.epoch, status.state
+            );
+        }
+        remaining_attempts -= 1;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+#[then(expr = "validator {word} is not a member of the current network according to {word}")]
+async fn validator_not_member_of_network(world: &mut TariWorld, validator: String, base_node: String) {
+    let bn = world.get_base_node(&base_node);
+    let vn = world.get_validator_node(&validator);
+    let mut client = bn.create_client();
+    let tip = client.get_tip_info().await.unwrap();
+    let vns = client.get_validator_nodes(tip.height_of_longest_chain).await.unwrap();
+    let has_vn = vns.iter().any(|v| v.public_key == vn.public_key);
+    if has_vn {
+        panic!(
+            "Validator {} is a member of the network but expected it not to be",
+            validator
+        );
+    }
 }

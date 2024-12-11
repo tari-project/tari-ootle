@@ -149,7 +149,7 @@ loggers:
     additive: false
 
   tari::dan:
-    level: info
+    level: debug
     appenders:
       - dan_layer
       - stdout
@@ -169,19 +169,6 @@ loggers:
     level: debug
     appenders:
       - engine
-
-  # Route log events sent to the "comms" logger to the "network" appender
-  comms:
-    level: debug
-    appenders:
-      - network
-
-    # Route log events sent to the "yamux" logger to the "network" appender
-  yamux:
-    level: info
-    appenders:
-      - network
-
 
   # spits out the whole wasm if in debug mode
   regalloc:

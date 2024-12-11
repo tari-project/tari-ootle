@@ -61,6 +61,15 @@ impl ApplicationConfig {
         config.validator_node.set_base_path(config.common.base_path());
         Ok(config)
     }
+
+    pub fn get_layer_one_transaction_base_path(&self) -> PathBuf {
+        if self.validator_node.layer_one_transaction_path.is_absolute() {
+            return self.validator_node.layer_one_transaction_path.clone();
+        }
+        self.common
+            .base_path()
+            .join(&self.validator_node.layer_one_transaction_path)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -107,6 +116,8 @@ pub struct ValidatorNodeConfig {
     pub template_sidechain_id: Option<RistrettoPublicKey>,
     /// The burnt utxo sidechain id
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
+    /// The path to store layer one transactions.
+    pub layer_one_transaction_path: PathBuf,
 }
 
 impl ValidatorNodeConfig {
@@ -150,6 +161,7 @@ impl Default for ValidatorNodeConfig {
             validator_node_sidechain_id: None,
             template_sidechain_id: None,
             burnt_utxo_sidechain_id: None,
+            layer_one_transaction_path: PathBuf::from("data/layer_one_transactions"),
         }
     }
 }

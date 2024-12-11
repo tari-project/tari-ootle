@@ -13,7 +13,11 @@ pub trait ValidatorSignatureService {
 
 pub trait VoteSignatureService: ValidatorSignatureService {
     fn create_message(&self, block_id: &BlockId, decision: &QuorumDecision) -> FixedHash {
-        vote_signature_hasher().chain(block_id).chain(decision).result()
+        vote_signature_hasher()
+            .chain(block_id)
+            .chain(decision)
+            .finalize()
+            .into()
     }
 
     fn sign_vote(&self, block_id: &BlockId, decision: &QuorumDecision) -> ValidatorSignature {

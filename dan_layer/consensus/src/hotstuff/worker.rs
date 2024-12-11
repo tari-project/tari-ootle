@@ -396,7 +396,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     return Err(e);
                 }
                 Ok(())
-            },
+            }
             MessageValidationResult::ParkedProposal {
                 epoch,
                 missing_txs,
@@ -423,14 +423,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                                 self.local_validator_addr,
                             );
                             request_from_address = addr;
-                        },
+                        }
                         None => {
                             warn!(
                                 target: LOG_TARGET,
                                 "❌NEVERHAPPEN: We're the only validator in the committee but we need to request missing transactions."
                             );
                             return Ok(());
-                        },
+                        }
                     }
                 }
 
@@ -438,7 +438,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     .request_missing_transactions(request_from_address, block_id, epoch, missing_txs)
                     .await?;
                 Ok(())
-            },
+            }
             MessageValidationResult::Discard => Ok(()),
             // In these cases, we want to propagate the error back to the state machine, to allow sync
             MessageValidationResult::Invalid {
@@ -451,12 +451,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             } => {
                 self.hooks.on_error(&err);
                 Err(err)
-            },
+            }
             MessageValidationResult::Invalid { err, from, message } => {
                 self.hooks.on_error(&err);
                 error!(target: LOG_TARGET, "🚨 Invalid new message from {from}: {err} - {message}");
                 Ok(())
-            },
+            }
         }
     }
 
@@ -489,6 +489,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         self.hooks.on_transaction_ready(transaction.id());
 
+        // TODO: trigger template manager to start getting missing template
+        // TODO: to do this, collect all templates from transaction substates and function calls 
+        // TODO: and pass to template manager 
+
         if self
             .check_if_block_can_be_unparked(
                 current_epoch,
@@ -515,7 +519,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     /// Returns true if a block was unparked, otherwise false
     async fn check_if_block_can_be_unparked<
         'a,
-        I: IntoIterator<Item = &'a TransactionId> + ExactSizeIterator + Clone,
+        I: IntoIterator<Item=&'a TransactionId> + ExactSizeIterator + Clone,
     >(
         &mut self,
         current_epoch: Epoch,
@@ -590,7 +594,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
                 // If we can propose a block end, let's not wait for the block time to do it
                 // self.pacemaker.beat();
-            },
+            }
         }
 
         Ok(())
@@ -718,11 +722,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             Some(height) => {
                 debug!(target: LOG_TARGET, "🔥 [force_beat] {} forced {height}", self.local_validator_addr);
                 height + NodeHeight(1)
-            },
+            }
             None => {
                 let leaf_block = self.state_store.with_read_tx(|tx| LeafBlock::get(tx, epoch))?;
                 leaf_block.height() + NodeHeight(1)
-            },
+            }
         };
         let is_leader = self
             .leader_strategy
@@ -845,7 +849,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     local_committee,
                     msg,
                 )
-                .await,
+                    .await,
             ),
             HotstuffMessage::ForeignProposal(msg) => log_err(
                 "on_receive_foreign_proposal (received)",
@@ -885,14 +889,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 self.on_sync_request
                     .handle(from, *local_committee_info, current_epoch, msg);
                 Ok(())
-            },
+            }
             HotstuffMessage::SyncResponse(_) => {
                 warn!(
                     target: LOG_TARGET,
                     "⚠️ Ignoring unrequested SyncResponse from {}",from
                 );
                 Ok(())
-            },
+            }
         }
     }
 
@@ -916,7 +920,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // We decided NOVOTE, so we immediately send a NEWVIEW
                 self.on_leader_timeout(current_epoch, current_height, local_committee)
                     .await
-            },
+            }
             Err(err @ HotStuffError::ProposalValidationError(ProposalValidationError::JustifyBlockNotFound { .. })) => {
                 let vn = self
                     .epoch_manager
@@ -928,7 +932,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 );
                 self.on_catch_up_sync.request_sync(current_epoch, vn.address).await?;
                 Ok(())
-            },
+            }
             Err(err) => Err(err),
         }
     }

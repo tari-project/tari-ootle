@@ -132,8 +132,6 @@ impl ProcessManager {
             if dir_entry.path().is_file() {
                 if let Some(extension) = dir_entry.path().extension() {
                     if extension == "wasm" {
-                        let file_name = dir_entry.file_name();
-                        let file_name = file_name.to_str().ok_or(anyhow!("Can't get file name!"))?;
                         let file_content = tokio::fs::read(dir_entry.path()).await?;
                         let loaded = WasmModule::load_template_from_code(file_content.as_slice())?;
                         let name = loaded.template_def().template_name().to_string();
@@ -488,7 +486,7 @@ impl ProcessManager {
         Ok(())
     }
 
-    async fn register_template(&mut self, data: TemplateData) -> anyhow::Result<()> {
+    async fn register_template(&mut self, _data: TemplateData) -> anyhow::Result<()> {
         // TODO: handle properly on L2 instead of L1
         // let wallet = self.instance_manager.minotari_wallets().next().ok_or_else(|| {
         //     anyhow!("No MinoTariConsoleWallet instances found. Please start a wallet before uploading a template")

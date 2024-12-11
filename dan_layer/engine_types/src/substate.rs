@@ -151,7 +151,7 @@ impl SubstateId {
         }
     }
 
-    pub fn as_published_template(&self) -> Option<PublishedTemplateAddress> {
+    pub fn as_template(&self) -> Option<PublishedTemplateAddress> {
         match self {
             Self::Template(address) => Some(*address),
             _ => None,
@@ -794,6 +794,10 @@ mod tests {
                 .unwrap()
                 .as_non_fungible_index_address()
                 .unwrap();
+            SubstateId::from_str("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff")
+                .unwrap()
+                .as_template()
+                .unwrap();
         }
 
         #[test]
@@ -813,6 +817,7 @@ mod tests {
             check("feeclaim_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("txreceipt_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("commitment_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
+            check("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
         }
     }
 }

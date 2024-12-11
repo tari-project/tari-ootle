@@ -10563,7 +10563,7 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction",
  "tari_transaction_manifest",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]

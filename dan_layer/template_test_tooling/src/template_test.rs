@@ -101,7 +101,7 @@ impl TemplateTest {
 
         let mut name_to_template = HashMap::new();
 
-        for (addr, template) in package.templates().iter() {
+        for (addr, template) in &package.templates() {
             if name_to_template
                 .insert(template.template_name().to_string(), *addr)
                 .is_some()

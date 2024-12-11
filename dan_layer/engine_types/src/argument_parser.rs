@@ -104,12 +104,12 @@ fn try_parse_special_string_arg(s: &str) -> Result<ParsedArg<'_>, ArgParseError>
         return Ok(ParsedArg::Workspace(contents.as_bytes().to_vec()));
     }
 
-    if let Ok(address) = SubstateId::from_str(s) {
-        return Ok(ParsedArg::SubstateId(address));
-    }
-
     if let Some(address) = parse_template_address(s) {
         return Ok(ParsedArg::TemplateAddress(address));
+    }
+
+    if let Ok(address) = SubstateId::from_str(s) {
+        return Ok(ParsedArg::SubstateId(address));
     }
 
     if let Ok(metadata) = Metadata::from_str(s) {
@@ -397,12 +397,12 @@ mod tests {
     #[test]
     fn it_parses_template_addresses() {
         // valid template addreses are parsed
-        let valid_template_address = "template_a9c017256ed22cb004c001b0db965a40b91ad557e1ace408ce306227d95f0f1c";
+        let valid_template_address = "template_d7e6f5cd2b717c83c86d3b3abf046a4caa0947e04b4e88de97a94a63ad19e382";
         let a = parse_arg(valid_template_address).unwrap();
         assert_eq!(
             a,
             arg!(
-                TemplateAddress::from_str("a9c017256ed22cb004c001b0db965a40b91ad557e1ace408ce306227d95f0f1c").unwrap()
+                TemplateAddress::from_str("d7e6f5cd2b717c83c86d3b3abf046a4caa0947e04b4e88de97a94a63ad19e382").unwrap()
             )
         );
 

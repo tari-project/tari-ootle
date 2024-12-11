@@ -8,15 +8,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{config::InstanceType, process_manager::InstanceId, webserver::context::HandlerContext};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ListValidatorNodesRequest {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ListValidatorNodesResponse {
     pub nodes: Vec<ValidatorNodeInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ValidatorNodeInfo {
     pub instance_id: InstanceId,
     pub name: String,
@@ -55,13 +55,14 @@ pub async fn list(
     Ok(ListValidatorNodesResponse { nodes })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ValidatorNodeCreateRequest {
-    pub name: String,
-    pub register: bool,
+    name: Option<String>,
+    register: bool,
+    mine: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ValidatorNodeCreateResponse {
     pub instance_id: InstanceId,
 }
@@ -70,14 +71,24 @@ pub async fn create(
     context: &HandlerContext,
     req: ValidatorNodeCreateRequest,
 ) -> Result<ValidatorNodeCreateResponse, anyhow::Error> {
-    let instance_id = context
-        .process_manager()
-        .create_instance(req.name, InstanceType::TariValidatorNode, HashMap::new())
+    let process_manager = context.process_manager();
+
+    let name = match req.name {
+        Some(name) => name,
+        None => {
+            let all_instances = process_manager.list_instances(None).await?;
+            format!("New VN-#{}", all_instances.len())
+        },
+    };
+    let instance_id = process_manager
+        .create_instance(name, InstanceType::TariValidatorNode, HashMap::new())
         .await?;
 
     if req.register {
-        context.process_manager().register_validator_node(instance_id).await?;
-        context.process_manager().mine_blocks(10).await?;
+        process_manager.register_validator_node(instance_id).await?;
+        if req.mine {
+            process_manager.mine_blocks(10).await?;
+        }
     }
 
     Ok(ValidatorNodeCreateResponse { instance_id })

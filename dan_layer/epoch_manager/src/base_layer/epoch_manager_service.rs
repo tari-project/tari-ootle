@@ -259,10 +259,12 @@ where
             EpochManagerRequest::GetCommitteeForShardGroup {
                 epoch,
                 shard_group,
+                limit,
                 reply,
             } => handle(
                 reply,
-                self.inner.get_committee_for_shard_group(epoch, shard_group),
+                self.inner
+                    .get_committee_for_shard_group(epoch, shard_group, true, limit),
                 context,
             ),
             EpochManagerRequest::GetCommitteesOverlappingShardGroup {

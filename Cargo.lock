@@ -9469,7 +9469,6 @@ dependencies = [
  "indexmap 2.6.0",
  "log",
  "serde",
- "serde_json",
  "tari_common",
  "tari_common_types",
  "tari_crypto",

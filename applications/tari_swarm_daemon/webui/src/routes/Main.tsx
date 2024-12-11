@@ -524,6 +524,10 @@ export default function Main() {
     jsonRpc("start_all", { instance_type: "TariValidatorNode" }).then(getInfo);
   };
 
+  const addValidatorNode = () => {
+    jsonRpc("add_validator_node", { name: null, register: true, mine: false }).then(getInfo);
+  };
+
   return (
     <div className="main">
       <button onClick={() => stopAll()}>Stop all VNs</button>
@@ -532,6 +536,7 @@ export default function Main() {
       <button onClick={() => setAutoRefresh(!autoRefresh)}>{autoRefresh && "Disable" || "Enable"} autorefresh
       </button>
       <button onClick={() => setHorizontal(!horizontal)}>Swap rows/columns</button>
+      <button onClick={() => addValidatorNode()}>Add VN</button>
       <div className="label">Base layer</div>
       <div className="infos">
         <MinotariNodes showLogs={showLogs} />

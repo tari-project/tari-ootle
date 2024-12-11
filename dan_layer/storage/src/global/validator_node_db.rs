@@ -130,9 +130,11 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         &mut self,
         epoch: Epoch,
         shard_group: ShardGroup,
+        shuffle: bool,
+        limit: usize,
     ) -> Result<Committee<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
         self.backend
-            .validator_nodes_get_for_shard_group(self.tx, epoch, shard_group)
+            .validator_nodes_get_for_shard_group(self.tx, epoch, shard_group, shuffle, limit)
             .map_err(TGlobalDbAdapter::Error::into)
     }
 

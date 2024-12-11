@@ -109,6 +109,9 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         max: usize,
         block_id: &BlockId,
     ) -> Result<Vec<TransactionPoolRecord>, TransactionPoolError> {
+        if max == 0 {
+            return Ok(Vec::new());
+        }
         let recs = tx.transaction_pool_get_many_ready(max, block_id)?;
         Ok(recs)
     }
@@ -670,8 +673,11 @@ impl TransactionPoolRecord {
         I: IntoIterator<Item = &'a TransactionId>,
     {
         let recs = tx.transaction_pool_remove_all(transaction_ids)?;
+        let iter = recs.iter().map(|rec| rec.transaction_id());
         // Clear any related foreign pledges
-        tx.foreign_substate_pledges_remove_many(recs.iter().map(|rec| rec.transaction_id()))?;
+        tx.foreign_substate_pledges_remove_many(iter.clone())?;
+        // Clear any related lock_conflicts
+        tx.lock_conflicts_remove_by_transaction_ids(iter)?;
         Ok(recs)
     }
 

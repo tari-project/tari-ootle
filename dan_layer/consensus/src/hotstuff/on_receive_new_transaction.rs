@@ -18,7 +18,7 @@ use crate::{
     traits::{BlockTransactionExecutor, ConsensusSpec},
 };
 
-const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_requested_transactions";
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_new_transaction";
 
 pub struct OnReceiveNewTransaction<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
@@ -126,7 +126,6 @@ where TConsensusSpec: ConsensusSpec
             );
             rec.set_abort_reason(RejectReason::InvalidTransaction(err.to_string()))
                 .save(tx)?;
-            // self.add_to_pool(tx, &rec, true)?;
             return Ok(Some((rec, true)));
         }
 
@@ -136,6 +135,14 @@ where TConsensusSpec: ConsensusSpec
         // foreign_proposal_processor) once we have received the LocalAccept foreign proposal.
         let has_some_local_inputs_or_all_foreign_inputs = rec.has_any_local_inputs(local_committee_info) ||
             rec.has_all_foreign_input_pledges(&**tx, local_committee_info)?;
+
+        if !has_some_local_inputs_or_all_foreign_inputs {
+            debug!(
+                target: LOG_TARGET,
+                "Transaction {} has no local inputs or all foreign inputs. Will sequence once we have received the LocalAccept foreign proposal.",
+                rec.id()
+            );
+        }
 
         Ok(Some((rec, has_some_local_inputs_or_all_foreign_inputs)))
     }

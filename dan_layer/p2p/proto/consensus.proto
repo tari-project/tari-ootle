@@ -13,11 +13,13 @@ message HotStuffMessage {
     NewViewMessage new_view = 1;
     ProposalMessage proposal = 2;
     ForeignProposalMessage foreign_proposal = 3;
-    VoteMessage vote = 4;
-    MissingTransactionsRequest request_missing_transactions = 5;
-    MissingTransactionsResponse requested_transaction = 6;
-    SyncRequest sync_request = 7;
-    SyncResponse sync_response = 8;
+    ForeignProposalNotification foreign_proposal_notification = 4;
+    ForeignProposalRequest foreign_proposal_request = 5;
+    VoteMessage vote = 6;
+    MissingTransactionsRequest request_missing_transactions = 7;
+    MissingTransactionsResponse requested_transaction = 8;
+    SyncRequest sync_request = 9;
+    SyncResponse sync_response = 10;
   }
 }
 
@@ -34,6 +36,30 @@ message ProposalMessage {
 
 message ForeignProposalMessage {
   ForeignProposal proposal = 1;
+}
+
+message ForeignProposalNotification {
+  bytes block_id = 1;
+  uint64 epoch = 2;
+}
+
+message ForeignProposalRequest {
+  oneof request {
+    ForeignProposalRequestByBlockId by_block_id = 1;
+    ForeignProposalRequestByTransactionId by_transaction_id = 2;
+  }
+}
+
+message ForeignProposalRequestByBlockId {
+  bytes block_id = 1;
+  uint32 for_shard_group = 2;
+  uint64 epoch = 3;
+}
+
+message ForeignProposalRequestByTransactionId {
+  bytes transaction_id = 1;
+  uint32 for_shard_group = 2;
+  uint64 epoch = 3;
 }
 
 message ForeignProposal {

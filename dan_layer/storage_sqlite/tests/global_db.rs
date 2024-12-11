@@ -99,7 +99,7 @@ fn change_committee_shard_group() {
     let count = validator_nodes.count(Epoch(3)).unwrap();
     assert_eq!(count, 2);
     let vns = validator_nodes
-        .get_committee_for_shard_group(Epoch(3), ShardGroup::new(4, 5))
+        .get_committee_for_shard_group(Epoch(3), ShardGroup::new(4, 5), false, 100)
         .unwrap();
     assert_eq!(vns.len(), 2);
 }

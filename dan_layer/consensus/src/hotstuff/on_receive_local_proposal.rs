@@ -48,12 +48,11 @@ use crate::{
         HotstuffEvent,
         ProposalValidationError,
     },
-    messages::{ForeignProposalMessage, HotstuffMessage, NewViewMessage, ProposalMessage, VoteMessage},
+    messages::{ForeignProposalNotificationMessage, HotstuffMessage, NewViewMessage, ProposalMessage, VoteMessage},
     tracing::TraceTimer,
     traits::{
         hooks::ConsensusHooks,
         ConsensusSpec,
-        LeaderStrategy,
         OutboundMessaging,
         ValidatorSignatureService,
         VoteSignatureService,
@@ -103,10 +102,15 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             leader_strategy,
             pacemaker: pacemaker.clone(),
             vote_signing_service,
-            outbound_messaging,
+            outbound_messaging: outbound_messaging.clone(),
             hooks,
             tx_events: tx_events.clone(),
-            on_receive_foreign_proposal: OnReceiveForeignProposalHandler::new(store, epoch_manager, pacemaker),
+            on_receive_foreign_proposal: OnReceiveForeignProposalHandler::new(
+                store,
+                epoch_manager,
+                pacemaker,
+                outbound_messaging,
+            ),
             on_ready_to_vote_on_local_block: OnReadyToVoteOnLocalBlock::new(
                 local_validator_pk,
                 config,
@@ -121,10 +125,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     pub async fn handle(
         &mut self,
         current_epoch: Epoch,
-        local_committee_info: CommitteeInfo,
+        local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
         msg: ProposalMessage,
-    ) -> Result<(), HotStuffError> {
+    ) -> Result<bool, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveLocalProposalHandler");
 
         // Do not trigger leader failures while processing a proposal.
@@ -149,12 +153,12 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 return Ok(None);
             }
 
-            self.validate_block(tx, current_epoch, block, local_committee, &local_committee_info)
+            self.validate_block(tx, current_epoch, block, local_committee, local_committee_info)
         })?;
 
         let Some(valid_block) = maybe_valid_block else {
             // Validation failed, this is already logged so we can exit here
-            return Ok(());
+            return Ok(false);
         };
 
         self.pacemaker.suspend_leader_failure().await?;
@@ -208,7 +212,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 self.on_receive_foreign_proposal.validate_and_save(
                     tx,
                     foreign_proposal,
-                    &local_committee_info,
+                    local_committee_info,
                     foreign_committees.get(&shard_group).unwrap(),
                 )?;
             }
@@ -221,7 +225,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         let result = self
             .process_block(
                 current_epoch,
-                local_committee_info,
+                *local_committee_info,
                 local_committee,
                 valid_block,
                 foreign_committees,
@@ -229,7 +233,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .await;
 
         match result {
-            Ok(()) => Ok(()),
+            Ok(is_accept) => Ok(is_accept),
             Err(err) => {
                 if let Err(err) = self.pacemaker.resume_leader_failure().await {
                     error!(target: LOG_TARGET, "Error resuming leader failure: {:?}", err);
@@ -250,7 +254,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         valid_block: ValidBlock,
         foreign_committees: HashMap<ShardGroup, CommitteeInfo>,
-    ) -> Result<(), HotStuffError> {
+    ) -> Result<bool, HotStuffError> {
         let em_epoch = self.epoch_manager.current_epoch().await?;
         let can_propose_epoch_end = em_epoch > current_epoch;
         let is_epoch_end = valid_block.block().is_epoch_end();
@@ -412,7 +416,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             self.pacemaker.beat();
         }
 
-        Ok(())
+        Ok(is_accept_decision)
     }
 
     fn publish_event(&self, event: HotstuffEvent) {
@@ -514,9 +518,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         task::spawn(propose_newly_locked_blocks_task::<TConsensusSpec>(
             self.epoch_manager.clone(),
-            self.leader_strategy.clone(),
             self.outbound_messaging.clone(),
-            self.store.clone(),
             self.config.consensus_constants.num_preshards,
             local_committee_info,
             blocks,
@@ -765,15 +767,21 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         }
 
-        // Check that details included in the justify match previously added blocks
-        let Some(justify_block) = candidate_block.justify().get_block(tx).optional()? else {
-            // This will trigger a sync
-            return Err(ProposalValidationError::JustifyBlockNotFound {
-                proposed_by: candidate_block.proposed_by().to_string(),
-                block_description: candidate_block.to_string(),
-                justify_block: candidate_block.justify().as_leaf_block(),
-            }
-            .into());
+        let justify_block = if candidate_block.justify().justifies_zero_block() {
+            // The justified block is the zero block (epoch 0). However, we instead need the genesis block for the
+            // epoch.
+            Block::get_genesis_for_epoch(tx, candidate_block.epoch())?
+        } else {
+            // Load our local version of the justified block. Check that details included in the justify match
+            // previously added blocks
+            candidate_block.justify().get_block(tx).optional()?.ok_or_else(|| {
+                // This will trigger a sync
+                ProposalValidationError::JustifyBlockNotFound {
+                    proposed_by: candidate_block.proposed_by().to_string(),
+                    block_description: candidate_block.to_string(),
+                    justify_block: candidate_block.justify().as_leaf_block(),
+                }
+            })?
         };
 
         if candidate_block.justifies_parent() && !candidate_block.parent_exists(tx)? {
@@ -852,7 +860,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             // We know that justify_block is safe because we have added it to our chain
             // We know that each dummy block is built in a chain from the justify block to the candidate block
             // We know that last dummy block is the parent of candidate block
-            // Therefore we know that candidate block is safe
+            // Therefore we know that candidate block satisfies the safeNode predicate
             return Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks));
         }
 
@@ -870,19 +878,15 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
 async fn propose_newly_locked_blocks_task<TConsensusSpec: ConsensusSpec>(
     epoch_manager: TConsensusSpec::EpochManager,
-    leader_strategy: TConsensusSpec::LeaderStrategy,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
-    store: TConsensusSpec::StateStore,
     num_preshards: NumPreshards,
     local_committee_info: CommitteeInfo,
     blocks: Vec<(Block, QuorumCertificate)>,
 ) {
-    let _timer = TraceTimer::debug(LOG_TARGET, "ProposeNewlyLockedBlocks").with_iterations(blocks.len());
+    let _timer = TraceTimer::debug(LOG_TARGET, "propose_newly_locked_blocks_task").with_iterations(blocks.len());
     if let Err(err) = propose_newly_locked_blocks_task_inner::<TConsensusSpec>(
         epoch_manager,
-        leader_strategy,
         outbound_messaging,
-        store,
         num_preshards,
         &local_committee_info,
         blocks,
@@ -895,54 +899,21 @@ async fn propose_newly_locked_blocks_task<TConsensusSpec: ConsensusSpec>(
 
 async fn propose_newly_locked_blocks_task_inner<TConsensusSpec: ConsensusSpec>(
     epoch_manager: TConsensusSpec::EpochManager,
-    leader_strategy: TConsensusSpec::LeaderStrategy,
     mut outbound_messaging: TConsensusSpec::OutboundMessaging,
-    store: TConsensusSpec::StateStore,
     num_preshards: NumPreshards,
     local_committee_info: &CommitteeInfo,
     blocks: Vec<(Block, QuorumCertificate)>,
 ) -> Result<(), HotStuffError> {
     for (block, justify_qc) in blocks.into_iter().rev() {
-        debug!(target:LOG_TARGET,"Checking if we need to broadcast the new locked block: {block}");
-        let Some(our_vn) = epoch_manager.get_our_validator_node(block.epoch()).await.optional()? else {
-            info!(
-                target: LOG_TARGET,
-                "❌ Our validator node is not registered for epoch {}. Not proposing {block} to foreign committee", block.epoch(),
-            );
-            continue;
-        };
-
-        let local_committee = epoch_manager
-            .get_committee_by_validator_public_key(block.epoch(), block.proposed_by().clone())
-            .await?;
-        let leader_index = leader_strategy.calculate_leader(&local_committee, block.height()) as usize;
-        let my_index = local_committee
-            .addresses()
-            .position(|addr| *addr == our_vn.address)
-            .ok_or_else(|| HotStuffError::InvariantError("Our address not found in local committee".to_string()))?;
-        // There are other ways to approach this. But for simplicity, it is better just to make sure at least one
-        // honest node will send it to the whole foreign committee. So we select the leader and f other
-        // nodes. It has to be deterministic so we select by index (leader, leader+1, ..., leader+f).
-        // f+1 nodes (including the leader) send the proposal to the foreign committee
-
-        let should_broadcast = if my_index >= leader_index {
-            my_index - leader_index <= local_committee.len() / 3
-        } else {
-            my_index + local_committee.len() - leader_index <= local_committee.len() / 3
-        };
-
-        if should_broadcast {
-            broadcast_foreign_proposal_if_required::<TConsensusSpec>(
-                &mut outbound_messaging,
-                &epoch_manager,
-                &store,
-                num_preshards,
-                local_committee_info,
-                block,
-                justify_qc,
-            )
-            .await?;
-        }
+        broadcast_foreign_proposal_if_required::<TConsensusSpec>(
+            &mut outbound_messaging,
+            &epoch_manager,
+            num_preshards,
+            local_committee_info,
+            block,
+            justify_qc,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -950,7 +921,6 @@ async fn propose_newly_locked_blocks_task_inner<TConsensusSpec: ConsensusSpec>(
 async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     outbound_messaging: &mut TConsensusSpec::OutboundMessaging,
     epoch_manager: &TConsensusSpec::EpochManager,
-    store: &TConsensusSpec::StateStore,
     num_preshards: NumPreshards,
     local_committee_info: &CommitteeInfo,
     block: Block,
@@ -973,6 +943,11 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
         .filter(|shard_group| local_shard_group != *shard_group)
         .collect::<HashSet<_>>();
     if non_local_shard_groups.is_empty() {
+        debug!(
+            target: LOG_TARGET,
+            "🌐 No foreign shards involved for new locked block {}",
+            block,
+        );
         return Ok(());
     }
     info!(
@@ -985,40 +960,30 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
         block.parent()
     );
 
-    let block_pledge = store
-        .with_read_tx(|tx| block.get_block_pledge(tx))
-        .optional()?
-        .ok_or_else(|| HotStuffError::InvariantError(format!("Pledges not found for block {}", block)))?;
-
-    // TODO(perf/message-size): the pledges for a given foreign proposal are not necessarily the same for each shard
-    // group involved in the block. Currently we send all pledges to all shard groups but we could limit the
-    // substates we send to validators to only those that are applicable to the transactions that involve
-    // them.
-
-    // TODO(perf): fetch only applicable committee addresses
-
     for shard_group in non_local_shard_groups {
         info!(
             target: LOG_TARGET,
-            "🌐  FOREIGN PROPOSE: Broadcasting locked block {} with {} pledge(s) to shard group {}.",
+            "🌐 FOREIGN PROPOSE: Broadcasting locked block foreign {} notification to shard group {}.",
             &block,
-            &block_pledge.num_substates_pledged(),
             shard_group,
         );
-
-        // TODO: This message can be much larger than the default maximum for gossipsub (16KiB) For now, the limit is
-        //       increased. We also need to allow committees that are stuck on LocalAccept/LocalPrepare to request the
-        //       foreign proposal through messaging.
-        outbound_messaging
-            .multicast(
+        if let Err(err) = outbound_messaging
+            .broadcast(
                 shard_group,
-                HotstuffMessage::ForeignProposal(ForeignProposalMessage {
-                    block: block.clone(),
-                    block_pledge: block_pledge.clone(),
-                    justify_qc: justify_qc.clone(),
+                HotstuffMessage::ForeignProposalNotification(ForeignProposalNotificationMessage {
+                    block_id: *block.id(),
+                    epoch: block.epoch(),
                 }),
             )
-            .await?;
+            .await
+        {
+            error!(
+                target: LOG_TARGET,
+                "❌ Error broadcasting foreign proposal notification to shard group {}: {}",
+                shard_group,
+                err
+            );
+        }
     }
 
     Ok(())

@@ -112,9 +112,9 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                 // Buffer message for future epoch/height
                 Some((epoch, height)) if epoch == current_epoch && height > next_height => {
                     if msg.proposal().is_some() {
-                        info!(target: LOG_TARGET, "🦴Proposal {msg} is for future view (Current view: {current_epoch}, {next_height})");
+                        info!(target: LOG_TARGET, "🦴Proposal {msg} is for future view (Current view: {current_epoch}, {current_height})");
                     } else {
-                        info!(target: LOG_TARGET, "🦴Message {msg} is for future view (Current view: {current_epoch}, {next_height})");
+                        info!(target: LOG_TARGET, "🦴Message {msg} is for future view (Current view: {current_epoch}, {current_height})");
                     }
                     self.push_to_buffer(epoch, height, from, msg);
                     continue;
@@ -174,7 +174,7 @@ fn msg_epoch_and_height(msg: &HotstuffMessage) -> Option<EpochAndHeight> {
         HotstuffMessage::Vote(msg) => Some((msg.epoch, msg.unverified_block_height.saturating_add(NodeHeight(1)))),
         // We will buffer NEWVIEW messages until the appropriate height is set. This essentially prevents us from being
         // forced to the next height without locally deciding to do so.
-        HotstuffMessage::NewView(msg) => Some((msg.high_qc.epoch(), msg.new_height.saturating_add(NodeHeight(1)))),
+        // HotstuffMessage::NewView(msg) => Some((msg.high_qc.epoch(), msg.new_height.saturating_add(NodeHeight(1)))),
         _ => None,
     }
 }

@@ -17,6 +17,7 @@ use tari_dan_storage::{
 
 use super::vote_collector::VoteCollector;
 use crate::{
+    block_validations::check_quorum_certificate,
     hotstuff::{error::HotStuffError, pacemaker_handle::PaceMakerHandle},
     messages::NewViewMessage,
     tracing::TraceTimer,
@@ -103,8 +104,19 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
-        self.store.with_read_tx(|tx| {
-            self.validate_qc(&high_qc)?;
+        let is_qc_valid = self.store.with_read_tx(|tx| {
+            // If we already have this QC (locally calculated hash matches), we do not need to validate this again
+            if !high_qc.exists(tx)? {
+                if let Err(err) = self.validate_qc(
+                    &high_qc,
+                    local_committee,
+                    local_committee_info,
+                    self.vote_collector.signing_service(),
+                ) {
+                    warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
+                    return Ok(false);
+                }
+            }
 
             if !Block::record_exists(tx, high_qc.block_id())? {
                 // Sync if we do not have the block for this valid QC
@@ -118,8 +130,12 @@ where TConsensusSpec: ConsensusSpec
                 });
             }
 
-            Ok(())
+            Ok(true)
         })?;
+
+        if !is_qc_valid {
+            return Ok(());
+        }
 
         // Check if we are the leader for the view after new_height. We'll set our local view height to the new_height
         // if quorum is reached and propose a block at new_height + 1.
@@ -144,6 +160,7 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
+        let has_vote = last_vote.is_some();
         if let Some(vote) = last_vote {
             debug!(
                 target: LOG_TARGET,
@@ -171,7 +188,8 @@ where TConsensusSpec: ConsensusSpec
 
         info!(
             target: LOG_TARGET,
-            "🌟 Received NEWVIEW (QUORUM: {}/{}) {} with high {}",
+            "🌟 Received NEWVIEW (has_vote={}) (QUORUM: {}/{}) {} with high {}",
+            has_vote,
             newview_count,
             threshold,
             new_height,
@@ -192,8 +210,14 @@ where TConsensusSpec: ConsensusSpec
         Ok(())
     }
 
-    fn validate_qc(&self, _qc: &QuorumCertificate) -> Result<(), HotStuffError> {
-        // TODO
+    fn validate_qc(
+        &self,
+        qc: &QuorumCertificate,
+        committee: &Committee<TConsensusSpec::Addr>,
+        committee_info: &CommitteeInfo,
+        vote_signing_service: &TConsensusSpec::SignatureService,
+    ) -> Result<(), HotStuffError> {
+        check_quorum_certificate::<TConsensusSpec>(qc, committee, committee_info, vote_signing_service)?;
         Ok(())
     }
 }

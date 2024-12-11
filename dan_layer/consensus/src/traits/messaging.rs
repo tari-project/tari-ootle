@@ -26,21 +26,38 @@ use tari_dan_common_types::{NodeAddressable, ShardGroup};
 
 use crate::messages::HotstuffMessage;
 
+/// Defines outbound messaging capabilities for a consensus node
 pub trait OutboundMessaging {
     type Addr: NodeAddressable + Send + 'static;
 
+    /// Send a message to self
     fn send_self<T: Into<HotstuffMessage> + Send>(
         &mut self,
         message: T,
     ) -> impl Future<Output = Result<(), OutboundMessagingError>> + Send;
 
+    /// Send a message to a specific node
     fn send<T: Into<HotstuffMessage> + Send>(
         &mut self,
         to: Self::Addr,
         message: T,
     ) -> impl Future<Output = Result<(), OutboundMessagingError>> + Send;
 
-    fn multicast<T>(
+    /// Send a direct message to all nodes in a shard group. Each message is separately queued and sent directly to each
+    /// node in a shard group.
+    fn multicast<T, I>(
+        &mut self,
+        addresses: I,
+        message: T,
+    ) -> impl Future<Output = Result<(), OutboundMessagingError>> + Send
+    where
+        I: IntoIterator<Item = Self::Addr> + Send,
+        T: Into<HotstuffMessage> + Send;
+
+    /// Broadcast/gossip a message to all nodes in a shard group. This is a best-effort broadcast and may not reach all
+    /// nodes. Since gossiped messages are sent and may be received multiple times, the message byte size should be
+    /// small e.g. <= `6KiB`. If the message is larger, consider using `multicast` instead.
+    fn broadcast<T>(
         &mut self,
         shard_group: ShardGroup,
         message: T,

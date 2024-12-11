@@ -218,22 +218,40 @@ impl EpochManagerReader for TestEpochManager {
     async fn get_committee_info_by_validator_address(
         &self,
         _epoch: Epoch,
-        _address: &Self::Addr,
+        address: &Self::Addr,
     ) -> Result<CommitteeInfo, EpochManagerError> {
-        todo!()
+        let state = self.state_lock().await;
+        let (sg, committee) = state
+            .committees
+            .iter()
+            .find(|(_, committee)| committee.iter().any(|(addr, _)| addr == address))
+            .unwrap_or_else(|| panic!("Validator {address} not found in any committee"));
+        let num_committees = state.committees.len() as u32;
+        let num_members = committee.len();
+        Ok(CommitteeInfo::new(
+            TEST_NUM_PRESHARDS,
+            num_members as u32,
+            num_committees,
+            *sg,
+        ))
     }
 
     async fn get_committee_by_shard_group(
         &self,
         _epoch: Epoch,
         shard_group: ShardGroup,
+        limit: Option<usize>,
     ) -> Result<Committee<Self::Addr>, EpochManagerError> {
         let state = self.state_lock().await;
-        let Some(committee) = state.committees.get(&shard_group) else {
+        let Some(mut committee) = state.committees.get(&shard_group).cloned() else {
             panic!("Committee not found for shard group {}", shard_group);
         };
 
-        Ok(committee.clone())
+        if let Some(limit) = limit {
+            committee.members.truncate(limit);
+        }
+
+        Ok(committee)
     }
 
     async fn get_committees_overlapping_shard_group(
@@ -274,26 +292,6 @@ impl EpochManagerReader for TestEpochManager {
             sg,
         ))
     }
-
-    // async fn get_committees_by_shards(
-    //     &self,
-    //     epoch: Epoch,
-    //     shards: &HashSet<SubstateAddress>,
-    // ) -> Result<HashMap<Shard, Committee<Self::Addr>>, EpochManagerError> { let num_committees =
-    //   self.get_num_committees(epoch).await?;
-    //
-    //     let mut committees = HashMap::new();
-    //     let buckets = shards.iter().map(|shard| shard.to_committee_bucket(num_committees));
-    //     let state = self.state_lock().await;
-    //     for bucket in buckets {
-    //         if committees.contains_key(&bucket) {
-    //             continue;
-    //         }
-    //
-    //         committees.insert(bucket, state.committees.get(&bucket).unwrap().clone());
-    //     }
-    //     Ok(committees)
-    // }
 
     async fn get_validator_node_by_public_key(
         &self,

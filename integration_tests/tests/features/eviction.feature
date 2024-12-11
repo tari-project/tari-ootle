@@ -6,11 +6,17 @@
 Feature: Eviction scenarios
 
   @flaky
+  @doit
   Scenario: Offline validator gets evicted
     # Initialize a base node, wallet, miner and several VNs
     Given a base node BASE
     Given a wallet WALLET connected to base node BASE
     Given a miner MINER connected to base node BASE and wallet WALLET
+
+    # Initialize an indexer
+    Given an indexer IDX connected to base node BASE
+    # Initialize the wallet daemon
+    Given a wallet daemon WALLET_D connected to indexer IDX
 
     # Initialize VNs
     Given a seed validator node VN1 connected to base node BASE and wallet daemon WALLET_D
@@ -18,11 +24,6 @@ Feature: Eviction scenarios
     Given a seed validator node VN3 connected to base node BASE and wallet daemon WALLET_D
     Given a seed validator node VN4 connected to base node BASE and wallet daemon WALLET_D
     Given a seed validator node VN5 connected to base node BASE and wallet daemon WALLET_D
-
-    # Initialize an indexer
-    Given an indexer IDX connected to base node BASE
-    # Initialize the wallet daemon
-    Given a wallet daemon WALLET_D connected to indexer IDX
 
     When miner MINER mines 9 new blocks
     When wallet WALLET has at least 25000 T
@@ -55,9 +56,8 @@ Feature: Eviction scenarios
 
     When miner MINER mines 10 new blocks
     Then all validators have scanned to height 42
-  # fixme: flaky
-#    When all validator nodes have started epoch 4
-#    When miner MINER mines 10 new blocks
-#    Then all validators have scanned to height 52
-#    When all validator nodes have started epoch 5
-#    Then validator VN5 is not a member of the current network according to BASE
+    When all validator nodes have started epoch 4
+    When miner MINER mines 10 new blocks
+    Then all validators have scanned to height 52
+    When all validator nodes have started epoch 5
+    Then validator VN5 is not a member of the current network according to BASE

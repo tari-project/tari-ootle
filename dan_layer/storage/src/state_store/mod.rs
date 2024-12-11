@@ -595,6 +595,13 @@ pub trait StateStoreWriteTransaction {
         conflicts: I,
     ) -> Result<(), StorageError>;
 
+    fn lock_conflicts_remove_by_transaction_ids<'a, I: IntoIterator<Item = &'a TransactionId>>(
+        &mut self,
+        transaction_ids: I,
+    ) -> Result<(), StorageError>;
+
+    fn lock_conflicts_remove_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
+
     // -------------------------------- ParticipationShares -------------------------------- //
     fn validator_epoch_stats_add_participation_share(&mut self, qc_id: &QcId) -> Result<(), StorageError>;
     fn validator_epoch_stats_updates<'a, I: IntoIterator<Item = ValidatorStatsUpdate<'a>>>(

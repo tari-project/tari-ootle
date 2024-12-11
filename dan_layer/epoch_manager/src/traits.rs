@@ -119,6 +119,7 @@ pub trait EpochManagerReader: Send + Sync {
         &self,
         epoch: Epoch,
         shards: ShardGroup,
+        limit: Option<usize>,
     ) -> Result<Committee<Self::Addr>, EpochManagerError>;
     async fn get_committees_overlapping_shard_group(
         &self,

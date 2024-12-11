@@ -20,11 +20,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb
+        limit: 100mb
       roller:
         kind: fixed_window
         base: 1
-        count: 5
+        count: 10
         pattern: "{{log_dir}}/dan_layer.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S)} [{t}] {l:5} {m}// {f}:{L}{n}"
@@ -38,11 +38,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb
+        limit: 100mb
       roller:
         kind: fixed_window
         base: 1
-        count: 5
+        count: 10
         pattern: "{{log_dir}}/network.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [Thread:{I}] {l:5} {m} // {f}:{L}{n}"
@@ -55,11 +55,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb
+        limit: 100mb
       roller:
         kind: fixed_window
         base: 1
-        count: 5
+        count: 10
         pattern: "{{log_dir}}/base_layer.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
@@ -71,11 +71,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb
+        limit: 100mb
       roller:
         kind: fixed_window
         base: 1
-        count: 5
+        count: 10
         pattern: "{{log_dir}}/wallet.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
@@ -87,11 +87,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb
+        limit: 100mb
       roller:
         kind: fixed_window
         base: 1
-        count: 5
+        count: 10
         pattern: "log/validator-node/wallet_daemon.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"
@@ -104,11 +104,11 @@ appenders:
       kind: compound
       trigger:
         kind: size
-        limit: 10mb
+        limit: 100mb
       roller:
         kind: fixed_window
         base: 1
-        count: 5
+        count: 10
         pattern: "log/validator-node/other.{}.log"
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S.%f)} [{t}] [{X(node-public-key)},{X(node-id)}] {l:5} {m} // {f}:{L}{n}"

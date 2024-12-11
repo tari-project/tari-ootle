@@ -30,6 +30,8 @@ use tari_bor::{decode_exact, encode};
 use tari_common_types::types::PublicKey;
 use tari_consensus::messages::{
     ForeignProposalMessage,
+    ForeignProposalNotificationMessage,
+    ForeignProposalRequestMessage,
     FullBlock,
     HotstuffMessage,
     MissingTransactionsRequest,
@@ -92,6 +94,12 @@ impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
             HotstuffMessage::ForeignProposal(msg) => {
                 proto::consensus::hot_stuff_message::Message::ForeignProposal(msg.into())
             },
+            HotstuffMessage::ForeignProposalNotification(msg) => {
+                proto::consensus::hot_stuff_message::Message::ForeignProposalNotification(msg.into())
+            },
+            HotstuffMessage::ForeignProposalRequest(msg) => {
+                proto::consensus::hot_stuff_message::Message::ForeignProposalRequest(msg.into())
+            },
             HotstuffMessage::Vote(msg) => proto::consensus::hot_stuff_message::Message::Vote(msg.into()),
             HotstuffMessage::MissingTransactionsRequest(msg) => {
                 proto::consensus::hot_stuff_message::Message::RequestMissingTransactions(msg.into())
@@ -120,6 +128,12 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
             proto::consensus::hot_stuff_message::Message::Proposal(msg) => HotstuffMessage::Proposal(msg.try_into()?),
             proto::consensus::hot_stuff_message::Message::ForeignProposal(msg) => {
                 HotstuffMessage::ForeignProposal(msg.try_into()?)
+            },
+            proto::consensus::hot_stuff_message::Message::ForeignProposalNotification(msg) => {
+                HotstuffMessage::ForeignProposalNotification(msg.try_into()?)
+            },
+            proto::consensus::hot_stuff_message::Message::ForeignProposalRequest(msg) => {
+                HotstuffMessage::ForeignProposalRequest(msg.try_into()?)
             },
             proto::consensus::hot_stuff_message::Message::Vote(msg) => HotstuffMessage::Vote(msg.try_into()?),
             proto::consensus::hot_stuff_message::Message::RequestMissingTransactions(msg) => {
@@ -257,6 +271,85 @@ impl TryFrom<proto::consensus::ForeignProposal> for ForeignProposal {
                 .ok_or_else(|| anyhow!("Justify QC is missing"))?
                 .try_into()?,
         ))
+    }
+}
+
+impl From<&ForeignProposalNotificationMessage> for proto::consensus::ForeignProposalNotification {
+    fn from(value: &ForeignProposalNotificationMessage) -> Self {
+        Self {
+            block_id: value.block_id.as_bytes().to_vec(),
+            epoch: value.epoch.as_u64(),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalNotificationMessage {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::ForeignProposalNotification) -> Result<Self, Self::Error> {
+        Ok(Self {
+            block_id: BlockId::try_from(value.block_id)?,
+            epoch: Epoch(value.epoch),
+        })
+    }
+}
+
+impl From<&ForeignProposalRequestMessage> for proto::consensus::ForeignProposalRequest {
+    fn from(value: &ForeignProposalRequestMessage) -> Self {
+        match value {
+            ForeignProposalRequestMessage::ByBlockId {
+                block_id,
+                for_shard_group,
+                epoch,
+            } => Self {
+                request: Some(proto::consensus::foreign_proposal_request::Request::ByBlockId(
+                    proto::consensus::ForeignProposalRequestByBlockId {
+                        block_id: block_id.as_bytes().to_vec(),
+                        for_shard_group: for_shard_group.encode_as_u32(),
+                        epoch: epoch.as_u64(),
+                    },
+                )),
+            },
+            ForeignProposalRequestMessage::ByTransactionId {
+                transaction_id,
+                for_shard_group,
+                epoch,
+            } => Self {
+                request: Some(proto::consensus::foreign_proposal_request::Request::ByTransactionId(
+                    proto::consensus::ForeignProposalRequestByTransactionId {
+                        transaction_id: transaction_id.as_bytes().to_vec(),
+                        for_shard_group: for_shard_group.encode_as_u32(),
+                        epoch: epoch.as_u64(),
+                    },
+                )),
+            },
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::ForeignProposalRequest> for ForeignProposalRequestMessage {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::ForeignProposalRequest) -> Result<Self, Self::Error> {
+        let request = value.request.ok_or_else(|| anyhow!("Request is missing"))?;
+        Ok(match request {
+            proto::consensus::foreign_proposal_request::Request::ByBlockId(by_block_id) => {
+                ForeignProposalRequestMessage::ByBlockId {
+                    block_id: BlockId::try_from(by_block_id.block_id)?,
+                    for_shard_group: ShardGroup::decode_from_u32(by_block_id.for_shard_group)
+                        .ok_or_else(|| anyhow!("Invalid ShardGroup"))?,
+                    epoch: Epoch(by_block_id.epoch),
+                }
+            },
+            proto::consensus::foreign_proposal_request::Request::ByTransactionId(by_transaction_id) => {
+                ForeignProposalRequestMessage::ByTransactionId {
+                    transaction_id: TransactionId::try_from(by_transaction_id.transaction_id)?,
+                    for_shard_group: ShardGroup::decode_from_u32(by_transaction_id.for_shard_group)
+                        .ok_or_else(|| anyhow!("Invalid ShardGroup"))?,
+                    epoch: Epoch(by_transaction_id.epoch),
+                }
+            },
+        })
     }
 }
 

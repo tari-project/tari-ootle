@@ -339,6 +339,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                             existing_lock: existing.substate_lock(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
+                            is_local_only: has_local_only_rules,
                         },
                     }
                     .into());
@@ -372,6 +373,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                             existing_lock: existing.substate_lock(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
+                            is_local_only: false,
                         },
                     }
                     .into());
@@ -392,6 +394,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                             existing_lock: existing.substate_lock(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
+                            is_local_only: has_local_only_rules,
                         },
                     }
                     .into());
@@ -425,6 +428,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                             existing_lock: existing.substate_lock(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
+                            is_local_only: has_local_only_rules,
                         },
                     }
                     .into());
@@ -445,6 +449,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                             existing_lock: existing.substate_lock(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
+                            is_local_only: has_local_only_rules,
                         },
                     }
                     .into());

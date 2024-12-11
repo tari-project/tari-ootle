@@ -606,9 +606,6 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
 async fn all_validators_have_started_epoch(world: &mut TariWorld, epoch: u64) {
     let mut remaining_attempts = 60;
     for vn in world.all_running_validators_iter().cycle() {
-        if remaining_attempts == 0 {
-            panic!("Validator {} did not start epoch {}", vn.name, epoch);
-        }
         let mut client = vn.create_client();
         let status = client.get_consensus_status().await.unwrap();
         if status.epoch.as_u64() >= epoch {
@@ -617,6 +614,12 @@ async fn all_validators_have_started_epoch(world: &mut TariWorld, epoch: u64) {
                 vn.name, epoch, status.state, status.height
             );
             return;
+        }
+        if remaining_attempts == 0 {
+            panic!(
+                "Validator {} did not start epoch {} (at epoch: {}, status: {})",
+                vn.name, epoch, status.epoch, status.state
+            );
         }
         remaining_attempts -= 1;
         tokio::time::sleep(Duration::from_secs(1)).await;

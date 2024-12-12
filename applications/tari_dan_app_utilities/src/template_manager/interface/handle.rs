@@ -67,7 +67,7 @@ impl TemplateManagerHandle {
     pub async fn add_template(
         &self,
         author_public_key: PublicKey,
-        template_address: tari_engine_types::TemplateAddress,
+        template_address: TemplateAddress,
         template: TemplateExecutable,
     ) -> Result<(), TemplateManagerError> {
         let (tx, rx) = oneshot::channel();

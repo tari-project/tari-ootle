@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use tari_common_types::types::PublicKey;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_dan_app_utilities::template_manager::interface::TemplateExecutable;
 use tari_dan_storage::{
@@ -30,9 +29,7 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{
     commit_result::TransactionResult,
-    instruction::Instruction,
-    substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
-    TemplateAddress,
+    substate::{SubstateId, SubstateValue},
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
@@ -100,51 +97,40 @@ impl DanNode {
     /// from the given block.
     async fn handle_template_publishes(&self, block: &Block) -> Result<(), anyhow::Error> {
         // add wasm templates to template manager if available in any of the new block's transactions
-        let mut template_counter = 0;
-        let templates: Vec<(PublicKey, TemplateAddress, TemplateExecutable)> = self
+        let templates = self
             .services
             .state_store
             .with_read_tx(|tx| block.get_transactions(tx))?
-            .iter()
-            .filter(|record| {
-                if let Some(decision) = record.final_decision {
-                    if decision == Decision::Commit {
-                        return true;
+            .into_iter()
+            .filter(|record| matches!(record.final_decision, Some(Decision::Commit)))
+            .filter_map(|record| {
+                let result = record.execution_result?;
+                let TransactionResult::Accept(diff) = result.finalize.result else {
+                    return None;
+                };
+                let tx_signature = record.transaction.signatures().first()?;
+                let signer_pub_key = tx_signature.public_key().clone();
+                Some((signer_pub_key, diff))
+            })
+            .flat_map(|(signer_pub_key, diff)| {
+                let mut templates = vec![];
+                for (substate_id, substate) in diff.into_up_iter() {
+                    if let SubstateId::Template(template_address) = substate_id {
+                        let template_address_hash = template_address.as_hash();
+                        if let SubstateValue::Template(template) = substate.into_substate_value() {
+                            templates.push((
+                                signer_pub_key.clone(),
+                                template_address_hash,
+                                TemplateExecutable::CompiledWasm(template.binary),
+                            ));
+                        }
                     }
                 }
-                false
-            })
-            .filter_map(|record| {
-                let tx_signature = record.transaction.signatures().first();
-                if let Some(tx_signature) = tx_signature {
-                    let signer_pub_key = tx_signature.public_key();
-                    return match &record.execution_result {
-                        Some(result) => {
-                            if let TransactionResult::Accept(diff) = &result.finalize.result {
-                                for (substate_id, substate) in diff.up_iter() {
-                                    if let SubstateId::Template(template_address) = substate_id {
-                                        if let Ok(template_address_hash) = template_address.as_hash() {
-                                            if let SubstateValue::Template(template) = substate.substate_value() {
-                                                return Some((
-                                                    signer_pub_key.clone(),
-                                                    TemplateAddress::from(template_address_hash),
-                                                    TemplateExecutable::CompiledWasm(template.binary.clone()),
-                                                ));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            None
-                        },
-                        None => None,
-                    };
-                }
-                None
-            })
-            .collect();
+                templates
+            });
 
         // adding templates to template manager
+        let mut template_counter = 0;
         for (author_pub_key, template_address, template) in templates {
             self.services
                 .template_manager

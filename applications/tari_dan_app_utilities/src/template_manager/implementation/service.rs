@@ -101,7 +101,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                     .download_queue
                     .send(DownloadRequest {
                         template_type: template.template_type,
-                        address: Hash::try_from(template.template_address.into_array()).unwrap(),
+                        address: Hash::from(template.template_address.into_array()),
                         expected_binary_hash: template.expected_hash,
                         url: template.url.unwrap(),
                     })

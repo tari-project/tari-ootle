@@ -5,8 +5,6 @@ use tari_dan_p2p::proto::rpc as proto;
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_rpc_macros::tari_rpc;
 
-// TODO: add new get_template_binary or similar method to request the binary for an unknown template
-
 #[tari_rpc(protocol_name = "/tari/validator/1.0.0", server_struct = ValidatorNodeRpcServer, client_struct = ValidatorNodeRpcClient
 )]
 pub trait ValidatorNodeRpcService: Send + Sync + 'static {
@@ -57,4 +55,10 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
         &self,
         request: Request<proto::SyncStateRequest>,
     ) -> Result<Streaming<proto::SyncStateResponse>, RpcStatus>;
+
+    #[rpc(method = 9)]
+    async fn get_template(
+        &self,
+        request: Request<proto::GetTemplateRequest>,
+    ) -> Result<Response<proto::GetTemplateResponse>, RpcStatus>;
 }

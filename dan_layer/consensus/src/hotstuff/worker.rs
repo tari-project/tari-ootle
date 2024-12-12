@@ -7,13 +7,7 @@ use std::{
 };
 
 use log::*;
-use tari_dan_common_types::{
-    committee::{Committee, CommitteeInfo},
-    optional::Optional,
-    Epoch,
-    NodeHeight,
-    ShardGroup,
-};
+use tari_dan_common_types::{committee::{Committee, CommitteeInfo}, optional::Optional, Epoch, NodeHeight, ShardGroup, TemplateSyncRequest};
 use tari_dan_storage::{
     consensus_models::{
         Block,
@@ -114,6 +108,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         transaction_executor: TConsensusSpec::TransactionExecutor,
         tx_events: broadcast::Sender<HotstuffEvent>,
         hooks: TConsensusSpec::Hooks,
+        template_sync_sender: mpsc::Sender<TemplateSyncRequest>,
         shutdown: ShutdownSignal,
     ) -> Self {
         let (tx_missing_transactions, rx_missing_transactions) = mpsc::unbounded_channel();

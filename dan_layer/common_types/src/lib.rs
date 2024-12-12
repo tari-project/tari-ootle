@@ -57,3 +57,6 @@ mod lock_intent;
 
 pub use lock_intent::*;
 pub mod layer_one_transaction;
+mod template_sync;
+
+pub use template_sync::*;

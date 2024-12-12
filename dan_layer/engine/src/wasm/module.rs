@@ -87,6 +87,10 @@ impl WasmModule {
         &self.code
     }
 
+    pub fn into_code(self) -> Vec<u8> {
+        self.code
+    }
+
     fn create_engine() -> Engine {
         const MEMORY_PAGE_LIMIT: Pages = Pages(32); // 2MiB = 32 * 65,536
         let base = BaseTunables::for_target(&Target::default());

@@ -193,28 +193,39 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         template_name: Option<String>,
         template_status: Option<TemplateStatus>,
     ) -> Result<(), TemplateManagerError> {
+        enum TemplateHash {
+            Hash(Hash),
+            FixedHash(FixedHash),
+        }
+
         let mut compiled_code = None;
         let mut flow_json = None;
         let mut manifest = None;
         let mut template_type = DbTemplateType::Wasm;
-        let template_hash: Hash;
+        let template_hash: TemplateHash;
         let mut template_name = template_name.unwrap_or(String::from("default"));
+        let mut template_url = None;
         match template {
             TemplateExecutable::CompiledWasm(binary) => {
                 let loaded_template = WasmModule::load_template_from_code(binary.as_slice())?;
-                template_hash = template_hasher32().chain(binary.as_slice()).result();
+                template_hash = TemplateHash::Hash(template_hasher32().chain(binary.as_slice()).result());
                 compiled_code = Some(binary);
                 template_name = loaded_template.template_name().to_string();
             },
             TemplateExecutable::Manifest(curr_manifest) => {
-                template_hash = template_hasher32().chain(curr_manifest.as_str()).result();
+                template_hash = TemplateHash::Hash(template_hasher32().chain(curr_manifest.as_str()).result());
                 manifest = Some(curr_manifest);
                 template_type = DbTemplateType::Manifest;
             },
             TemplateExecutable::Flow(curr_flow_json) => {
-                template_hash = template_hasher32().chain(curr_flow_json.as_str()).result();
+                template_hash = TemplateHash::Hash(template_hasher32().chain(curr_flow_json.as_str()).result());
                 flow_json = Some(curr_flow_json);
                 template_type = DbTemplateType::Flow;
+            },
+            TemplateExecutable::DownloadableWasm(url, hash) => {
+                template_url = Some(url.to_string());
+                template_type = DbTemplateType::Wasm;
+                template_hash = TemplateHash::FixedHash(hash);
             },
         }
 
@@ -222,13 +233,17 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             author_public_key: FixedHash::try_from(author_public_key.to_vec().as_slice())?,
             template_name,
             template_address,
-            expected_hash: FixedHash::from(template_hash.into_array()),
+            expected_hash: match template_hash {
+                TemplateHash::Hash(hash) => FixedHash::from(hash.into_array()),
+                TemplateHash::FixedHash(hash) => hash,
+            },
             status: template_status.unwrap_or(TemplateStatus::New),
             compiled_code,
             added_at: Utc::now().naive_utc(),
             template_type,
             flow_json,
             manifest,
+            url: template_url,
         };
 
         let mut tx = self.global_db.create_transaction()?;
@@ -300,6 +315,10 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
                 let definition: FlowFunctionDefinition = serde_json::from_str(&flow_json)?;
                 let factory = FlowFactory::try_create::<Self>(definition)?;
                 LoadedTemplate::Flow(factory)
+            },
+            TemplateExecutable::DownloadableWasm(_, _) => {
+                // impossible case, since there is no separate downloadable wasm type in DB level
+                return Err(Self::Error::UnsupportedTemplateType);
             },
         };
 

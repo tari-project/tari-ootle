@@ -392,7 +392,7 @@ fn print_substate_diff(diff: &SubstateDiff) {
                 println!("        ▶ recipient: {}", fee_claim.validator_public_key);
             },
             SubstateValue::Template(_) => {
-                println!("      ▶ Published template: {}", address);
+                println!("      ▶ Template: {}", address);
             },
         }
         println!();

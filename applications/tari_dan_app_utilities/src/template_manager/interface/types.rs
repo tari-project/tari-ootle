@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use reqwest::Url;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_storage::global::{DbTemplate, DbTemplateType};
 use tari_template_lib::models::TemplateAddress;
@@ -52,6 +53,9 @@ pub enum TemplateExecutable {
     CompiledWasm(Vec<u8>),
     Manifest(String),
     Flow(String),
+    // TODO: remove this when base layer template registration is removed
+    /// WASM binary download URL and binary hash
+    DownloadableWasm(Url, FixedHash),
 }
 
 #[derive(Debug, Clone)]

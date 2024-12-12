@@ -8,6 +8,7 @@ use std::{
 
 use tari_common_types::types::FixedHash;
 use tokio::sync::{mpsc, oneshot};
+use url::Url;
 
 use crate::{
     config::InstanceType,
@@ -65,6 +66,8 @@ pub struct TemplateData {
     pub name: String,
     pub version: u32,
     pub contents_hash: FixedHash,
+    // TODO: remove when base layer registration removed
+    pub contents_url: Option<Url>,
 }
 
 pub struct InstanceInfo {

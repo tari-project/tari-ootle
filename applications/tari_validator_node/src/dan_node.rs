@@ -134,7 +134,7 @@ impl DanNode {
         for (author_pub_key, template_address, template) in templates {
             self.services
                 .template_manager
-                .add_template(author_pub_key, template_address, template)
+                .add_template(author_pub_key, template_address, template, None)
                 .await?;
             template_counter += 1;
         }

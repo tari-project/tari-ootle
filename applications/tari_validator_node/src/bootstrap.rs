@@ -360,6 +360,8 @@ pub async fn spawn_services(
         config.validator_node.base_layer_scanning_interval,
         config.validator_node.validator_node_sidechain_id.clone(),
         config.validator_node.burnt_utxo_sidechain_id.clone(),
+        template_manager_service.clone(),
+        config.validator_node.template_sidechain_id.clone(),
     );
     handles.push(join_handle);
 

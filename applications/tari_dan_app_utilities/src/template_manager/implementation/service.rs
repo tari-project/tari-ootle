@@ -30,7 +30,7 @@ use tari_dan_engine::function_definitions::FlowFunctionDefinition;
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_engine_types::calculate_template_binary_hash;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::{models::TemplateAddress, Hash};
 use tari_validator_node_client::types::{ArgDef, FunctionDef, TemplateAbi};
 use tokio::{
     sync::{mpsc, mpsc::Receiver, oneshot},
@@ -49,14 +49,14 @@ pub struct TemplateManagerService<TAddr> {
     rx_request: Receiver<TemplateManagerRequest>,
     manager: TemplateManager<TAddr>,
     completed_downloads: mpsc::Receiver<DownloadResult>,
-    // download_queue: mpsc::Sender<DownloadRequest>,
+    download_queue: mpsc::Sender<DownloadRequest>,
 }
 
 impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
     pub fn spawn(
         rx_request: Receiver<TemplateManagerRequest>,
         manager: TemplateManager<TAddr>,
-        _download_queue: mpsc::Sender<DownloadRequest>,
+        download_queue: mpsc::Sender<DownloadRequest>,
         completed_downloads: mpsc::Receiver<DownloadResult>,
         shutdown: ShutdownSignal,
     ) -> JoinHandle<anyhow::Result<()>> {
@@ -64,7 +64,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
             Self {
                 rx_request,
                 manager,
-                // download_queue,
+                download_queue,
                 completed_downloads,
             }
             .run(shutdown)
@@ -97,19 +97,19 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         let templates = self.manager.fetch_pending_templates()?;
         for template in templates {
             if template.status == TemplateStatus::Pending {
-                // TODO: handle
-                // let _ignore = self
-                //     .download_queue
-                //     .send(DownloadRequest {
-                //         template_type: template.template_type,
-                //         address: Hash::try_from(template.template_address.as_slice()).unwrap(),
-                //         expected_binary_hash: template.expected_hash,
-                //     })
-                //     .await;
-                // info!(
-                //     target: LOG_TARGET,
-                //     "⏳️️ Template {} queued for download", template.template_address
-                // );
+                let _ignore = self
+                    .download_queue
+                    .send(DownloadRequest {
+                        template_type: template.template_type,
+                        address: Hash::try_from(template.template_address.into_array()).unwrap(),
+                        expected_binary_hash: template.expected_hash,
+                        url: template.url.unwrap(),
+                    })
+                    .await;
+                info!(
+                    target: LOG_TARGET,
+                    "⏳️️ Template {} queued for download", template.template_address
+                );
             }
         }
         Ok(())
@@ -244,13 +244,39 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         template: TemplateExecutable,
         template_name: Option<String>,
     ) -> Result<(), TemplateManagerError> {
+        let template_status = if matches!(template, TemplateExecutable::DownloadableWasm(_, _)) {
+            TemplateStatus::New
+        } else {
+            TemplateStatus::Active
+        };
         self.manager.add_template(
             author_public_key,
             template_address,
-            template,
+            template.clone(),
             template_name,
-            Some(TemplateStatus::Active),
+            Some(template_status),
         )?;
+
+        // TODO: remove when we remove support for base layer template registration
+        // update template status and add to download queue if it's a downloadable template
+        if let TemplateExecutable::DownloadableWasm(url, expected_binary_hash) = template {
+            // We could queue this up much later, at which point we'd update to pending
+            self.manager.update_template(template_address, DbTemplateUpdate {
+                status: Some(TemplateStatus::Pending),
+                ..Default::default()
+            })?;
+
+            let _ignore = self
+                .download_queue
+                .send(DownloadRequest {
+                    address: template_address,
+                    template_type: DbTemplateType::Wasm,
+                    url: url.to_string(),
+                    expected_binary_hash,
+                })
+                .await;
+        }
+
         Ok(())
     }
 }

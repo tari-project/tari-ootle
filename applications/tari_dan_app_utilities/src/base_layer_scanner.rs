@@ -23,6 +23,7 @@
 use std::time::Duration;
 
 use log::*;
+use reqwest::Url;
 use tari_base_node_client::{
     grpc::GrpcBaseNodeClient,
     types::{BaseLayerMetadata, BlockInfo},
@@ -35,7 +36,12 @@ use tari_core::{
     base_node::comms_interface::ValidatorNodeChange,
     transactions::{
         tari_amount::MicroMinotari,
-        transaction_components::{SideChainFeatureData, TransactionOutput, ValidatorNodeRegistration},
+        transaction_components::{
+            CodeTemplateRegistration,
+            SideChainFeatureData,
+            TransactionOutput,
+            ValidatorNodeRegistration,
+        },
     },
 };
 use tari_crypto::{
@@ -56,12 +62,15 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
-use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId};
+use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId, TemplateAddress};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::models::{EncryptedData, UnclaimedConfidentialOutputAddress};
 use tokio::{task, task::JoinHandle, time};
+use url::ParseError;
+
+use crate::template_manager::interface::{TemplateExecutable, TemplateManagerError, TemplateManagerHandle};
 
 const LOG_TARGET: &str = "tari::dan::base_layer_scanner";
 
@@ -76,6 +85,9 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
     base_layer_scanning_interval: Duration,
     validator_node_sidechain_id: Option<RistrettoPublicKey>,
     burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
+    // TODO: remove when base layer template registration is removed too
+    template_manager: TemplateManagerHandle,
+    template_sidechain_id: Option<PublicKey>,
 ) -> JoinHandle<anyhow::Result<()>> {
     task::spawn(async move {
         let base_layer_scanner = BaseLayerScanner::new(
@@ -89,6 +101,8 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
             base_layer_scanning_interval,
             validator_node_sidechain_id,
             burnt_utxo_sidechain_id,
+            template_manager,
+            template_sidechain_id,
         );
 
         base_layer_scanner.start().await?;
@@ -113,6 +127,9 @@ pub struct BaseLayerScanner<TAddr> {
     has_attempted_scan: bool,
     validator_node_sidechain_id: Option<PublicKey>,
     burnt_utxo_sidechain_id: Option<PublicKey>,
+    // TODO: remove template related data, when removed base layer template registration support
+    template_manager: TemplateManagerHandle,
+    template_sidechain_id: Option<PublicKey>,
 }
 
 impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
@@ -127,6 +144,8 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         base_layer_scanning_interval: Duration,
         validator_node_sidechain_id: Option<PublicKey>,
         burnt_utxo_sidechain_id: Option<PublicKey>,
+        template_manager: TemplateManagerHandle,
+        template_sidechain_id: Option<PublicKey>,
     ) -> Self {
         Self {
             global_db,
@@ -145,6 +164,8 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             has_attempted_scan: false,
             validator_node_sidechain_id,
             burnt_utxo_sidechain_id,
+            template_manager,
+            template_sidechain_id,
         }
     }
 
@@ -336,7 +357,22 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                     },
                     // TODO: remove completely SideChainFeature::CodeTemplateRegistration at some point
                     SideChainFeatureData::CodeTemplateRegistration(reg) => {
-                        trace!(target: LOG_TARGET, "New code template registration scanned: {reg:?}");
+                        if sidechain_feature.sidechain_public_key() != self.template_sidechain_id.as_ref() {
+                            debug!(
+                                target: LOG_TARGET,
+                                "Ignoring code template registration for sidechain ID {:?}. Local node's sidechain ID: {:?}",
+                                sidechain_feature.sidechain_public_key(),
+                                self.template_sidechain_id,
+                            );
+                            continue;
+                        }
+                        self.register_code_template_registration(
+                            reg.template_name.to_string(),
+                            (*output_hash).into(),
+                            reg.clone(),
+                            &block_info,
+                        )
+                        .await?;
                     },
                     SideChainFeatureData::ConfidentialOutput(_) => {
                         // Should be checked by the base layer
@@ -424,6 +460,32 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         }
 
         self.epoch_manager.notify_scanning_complete().await?;
+
+        Ok(())
+    }
+
+    async fn register_code_template_registration(
+        &mut self,
+        template_name: String,
+        template_address: TemplateAddress,
+        registration: CodeTemplateRegistration,
+        block_info: &BlockInfo,
+    ) -> Result<(), BaseLayerScannerError> {
+        info!(
+            target: LOG_TARGET,
+            "🌠 new template found with address {} at height {}", template_address, block_info.height
+        );
+        self.template_manager
+            .add_template(
+                registration.author_public_key,
+                template_address,
+                TemplateExecutable::DownloadableWasm(
+                    Url::parse(registration.binary_url.as_str())?,
+                    registration.binary_sha,
+                ),
+                Some(template_name),
+            )
+            .await?;
 
         Ok(())
     }
@@ -610,6 +672,10 @@ pub enum BaseLayerScannerError {
     PublicKeyConversion(ByteArrayError),
     #[error("GRPC conversion error: {0}")]
     GrpcConversion(String),
+    #[error("Template manager error: {0}")]
+    TemplateManagerError(#[from] TemplateManagerError),
+    #[error("URL parse error: {0}")]
+    UrlParse(#[from] ParseError),
 }
 
 enum BlockchainProgression {

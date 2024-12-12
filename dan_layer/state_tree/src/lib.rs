@@ -12,5 +12,7 @@ pub mod memory_store;
 mod staged_store;
 pub use staged_store::*;
 
+mod bit_iter;
 mod tree;
+
 pub use tree::*;

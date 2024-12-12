@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use itertools::Itertools;
 use tari_state_tree::{memory_store::MemoryTreeStore, StaleTreeNode, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
 
-use crate::support::{change, HashTreeTester};
+use crate::support::{change, hash_value_from_seed, make_value, HashTreeTester};
 mod support;
 
 #[test]
@@ -181,4 +181,54 @@ fn serialized_keys_are_strictly_increasing() {
         .unwrap();
     let max_previous_key = previous_keys.iter().max().unwrap();
     assert!(min_next_key > max_previous_key);
+}
+
+#[test]
+fn proofs() {
+    let mut tester = HashTreeTester::new_empty();
+    let root_v1 = tester.put_substate_changes(vec![change(1, Some(30))]);
+    tester.put_substate_changes(vec![change(2, Some(40))]);
+    let root_hash = tester.put_substate_changes(vec![change(3, Some(50))]);
+
+    let tree = tester.create_state_tree();
+    let (key, proof_value, proof) = tree.get_proof(3, &make_value(1)).unwrap();
+    let hash = hash_value_from_seed(30);
+    assert_eq!(proof_value, Some((hash, 1, 1)));
+    proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
+    let (key, proof_value, proof) = tree.get_proof(3, &make_value(2)).unwrap();
+    let hash = hash_value_from_seed(40);
+    assert_eq!(proof_value, Some((hash, 2, 2)));
+    proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
+    let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
+    let hash = hash_value_from_seed(50);
+    assert_eq!(proof_value, Some((hash, 3, 3)));
+    proof.verify_inclusion(&root_hash, &key, &hash).unwrap();
+    let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
+    proof
+        .verify_inclusion(&root_hash, &key, &proof_value.unwrap().0)
+        .unwrap();
+
+    // Fail cases:
+    // Fail to proof exclusion for included value
+    let (key, _, proof) = tree.get_proof(3, &make_value(3)).unwrap();
+    proof.verify_exclusion(&root_hash, &key).unwrap_err();
+    // Fail to proof inclusion for excluded value
+    let (key, _, proof) = tree.get_proof(3, &make_value(1)).unwrap();
+    let hash = hash_value_from_seed(50);
+    proof.verify_inclusion(&root_hash, &key, &hash).unwrap_err();
+    // Fail to proof inclusion for old/incorrect merkle root
+    let (key, proof_value, proof) = tree.get_proof(3, &make_value(3)).unwrap();
+    proof
+        .verify_inclusion(&root_v1, &key, &proof_value.unwrap().0)
+        .unwrap_err();
+
+    // Exclusion proof
+    let (key, proof_value, proof) = tree.get_proof(3, &make_value(4)).unwrap();
+    assert!(proof_value.is_none());
+    proof.verify_exclusion(&root_hash, &key).unwrap();
+
+    // Fail to verify exclusion proof
+    let (key, _, proof) = tree.get_proof(3, &make_value(4)).unwrap();
+    let hash = hash_value_from_seed(50);
+    proof.verify_inclusion(&root_hash, &key, &hash).unwrap_err();
 }

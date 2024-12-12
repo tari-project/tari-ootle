@@ -28,7 +28,7 @@ use tari_dan_common_types::{
     ShardGroup,
     SubstateAddress,
 };
-use tari_state_tree::StateTreeError;
+use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 #[cfg(feature = "ts")]
@@ -78,6 +78,8 @@ const LOG_TARGET: &str = "tari::dan::storage::consensus_models::block";
 pub enum BlockError {
     #[error("Error computing command merkle hash: {0}")]
     StateTreeError(#[from] StateTreeError),
+    #[error("Merke proof generation command index out of bounds: {index}/{len}")]
+    MerkleProofGenerationCommandIndexOutOfBounds { index: usize, len: usize },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,7 +313,7 @@ impl Block {
         self.commands.iter().filter_map(|c| c.foreign_proposal())
     }
 
-    pub fn all_evict_nodes(&self) -> impl Iterator<Item = &EvictNodeAtom> + '_ {
+    pub fn all_node_evictions(&self) -> impl Iterator<Item = &EvictNodeAtom> + '_ {
         self.commands.iter().filter_map(|c| c.evict_node())
     }
 
@@ -457,6 +459,22 @@ impl Block {
 
     pub fn extra_data(&self) -> &ExtraData {
         self.header.extra_data()
+    }
+
+    pub fn compute_command_inclusion_proof(&self, command_index: usize) -> Result<SparseMerkleProofExt, BlockError> {
+        let hashes = self.commands.iter().map(|cmd| TreeHash::from(cmd.hash().into_array()));
+        let command = self.commands.iter().nth(command_index).ok_or(
+            BlockError::MerkleProofGenerationCommandIndexOutOfBounds {
+                index: command_index,
+                len: self.commands.len(),
+            },
+        )?;
+        let hash = TreeHash::new(command.hash().into_array());
+        let (value, proof) = compute_proof_for_hashes(hashes, hash)?;
+        value.expect(
+            "Value not found in proof. This is a bug because the hash is taken from commands that generate the tree",
+        );
+        Ok(proof)
     }
 }
 

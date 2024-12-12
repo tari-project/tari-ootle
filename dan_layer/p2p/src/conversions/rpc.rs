@@ -4,7 +4,6 @@
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::anyhow;
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{shard::Shard, Epoch};
 use tari_dan_storage::consensus_models::{
     EpochCheckpoint,
@@ -16,6 +15,7 @@ use tari_dan_storage::consensus_models::{
     SubstateUpdate,
 };
 use tari_engine_types::substate::{SubstateId, SubstateValue};
+use tari_jellyfish::TreeHash;
 
 use crate::proto;
 
@@ -183,7 +183,7 @@ impl TryFrom<proto::rpc::EpochCheckpoint> for EpochCheckpoint {
         let shard_roots = value
             .shard_roots
             .into_iter()
-            .map(|(k, v)| FixedHash::try_from(v).map(|h| (Shard::from(k), h)))
+            .map(|(k, v)| TreeHash::try_from_bytes(&v).map(|h| (Shard::from(k), h)))
             .collect::<Result<_, _>>()?;
 
         Ok(Self::new(

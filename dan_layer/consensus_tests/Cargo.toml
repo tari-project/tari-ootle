@@ -36,5 +36,5 @@ rand = { workspace = true }
 futures = { workspace = true }
 fern = { workspace = true }
 humantime = { workspace = true }
-itertools = { workspace = true }
+itertools = "0.13.0"
 serde_json = { workspace = true }

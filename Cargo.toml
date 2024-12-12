@@ -122,6 +122,7 @@ tari_common = { git = "https://github.com/tari-project/tari.git", branch = "feat
 tari_common_types = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 tari_hashing = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 tari_sidechain = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
+tari_jellyfish = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 
 # avoid including default features so each crate can choose which ones to import
 tari_core = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2", default-features = false }
@@ -184,7 +185,6 @@ humantime-serde = "1.1.1"
 include_dir = "0.7.2"
 indexmap = "2.6.0"
 indoc = "1.0.6"
-itertools = "0.11.0"
 lazy_static = "1.4.0"
 # Use Tari's libp2p fork that adds support for Schnorr-Ristretto
 libp2p-identity = { git = "https://github.com/tari-project/rust-libp2p.git", rev = "3d918ccbf5ae1cbec0815a2156079b0fba4ba558" }
@@ -279,29 +279,3 @@ overflow-checks = true
 #tari_hashing = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_sidechain = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 
-
-#[patch."https://github.com/tari-project/tari.git"]
-#minotari_app_grpc = { path = "../tari/applications/minotari_app_grpc" }
-#minotari_wallet_grpc_client = { path = "../tari/clients/rust/wallet_grpc_client" }
-#minotari_node_grpc_client = { path = "../tari/clients/rust/base_node_grpc_client" }
-#tari_common = { path = "../tari/common" }
-#tari_common_types = { path = "../tari/base_layer/common_types" }
-#tari_comms = { path = "../tari/comms/core" }
-#tari_comms_rpc_macros = { path = "../tari/comms/rpc_macros" }
-#tari_core = { path = "../tari/base_layer/core" }
-#tari_key_manager = { path = "../tari/base_layer/key_manager" }
-#tari_mmr = { path = "../tari/base_layer/mmr" }
-#tari_p2p = { path = "../tari/base_layer/p2p" }
-#tari_shutdown = { path = "../tari/infrastructure/shutdown" }
-#tari_storage = { path = "../tari/infrastructure/storage" }
-#tari_script = { path = "../tari/infrastructure/tari_script" }
-#minotari_wallet = { path = "../tari/base_layer/wallet" }
-#minotari_console_wallet = { path = "../tari/applications/minotari_console_wallet" }
-#tari_service_framework = { path = "../tari/base_layer/service_framework" }
-#tari_comms_dht = { path = "../tari/comms/dht" }
-#minotari_app_utilities = { path = "../tari/applications/minotari_app_utilities" }
-#minotari_node = { path = "../tari/applications/minotari_node" }
-#tari_metrics = { path = "../tari/infrastructure/metrics" }
-#tari_libtor = { path = "../tari/infrastructure/libtor" }
-#tari_hashing = { path = "../tari/hashing" }
-#tari_sidechain = { path = "../tari/base_layer/sidechain" }

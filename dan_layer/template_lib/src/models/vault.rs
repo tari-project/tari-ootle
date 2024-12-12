@@ -117,6 +117,13 @@ impl TryFrom<&[u8]> for VaultId {
 
 newtype_struct_serde_impl!(VaultId, BorTag<ObjectKey, TAG>);
 
+#[cfg(feature = "borsh")]
+impl borsh::BorshSerialize for VaultId {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+    }
+}
+
 /// Encapsulates all the ways that a vault can be referenced
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum VaultRef {

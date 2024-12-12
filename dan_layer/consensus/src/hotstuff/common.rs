@@ -36,7 +36,7 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_engine_types::substate::SubstateDiff;
-use tari_state_tree::{Hash, JellyfishMerkleTree, StateTreeError};
+use tari_state_tree::{JellyfishMerkleTree, StateTreeError};
 
 use crate::{
     hotstuff::{
@@ -234,7 +234,7 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
     shard_group: ShardGroup,
     pending_tree_diffs: HashMap<Shard, Vec<PendingShardStateTreeDiff>>,
     changes: I,
-) -> Result<(Hash, IndexMap<Shard, VersionedStateHashTreeDiff>), StateTreeError> {
+) -> Result<(FixedHash, IndexMap<Shard, VersionedStateHashTreeDiff>), StateTreeError> {
     let mut change_map = IndexMap::new();
 
     changes.into_iter().for_each(|ch| {
@@ -244,7 +244,10 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
     let mut sharded_tree = ShardedStateTree::new(tx).with_pending_diffs(pending_tree_diffs);
     let root_hash = sharded_tree.put_substate_tree_changes(shard_group, change_map)?;
 
-    Ok((root_hash, sharded_tree.into_shard_tree_diffs()))
+    Ok((
+        FixedHash::new(root_hash.into_array()),
+        sharded_tree.into_shard_tree_diffs(),
+    ))
 }
 
 pub(crate) fn create_epoch_checkpoint<TTx>(

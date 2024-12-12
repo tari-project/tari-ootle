@@ -74,3 +74,9 @@ impl FromStr for UnclaimedConfidentialOutputAddress {
         Self::from_hex(s)
     }
 }
+#[cfg(feature = "borsh")]
+impl borsh::BorshSerialize for UnclaimedConfidentialOutputAddress {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+    }
+}

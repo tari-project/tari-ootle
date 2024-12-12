@@ -344,6 +344,12 @@ pub struct SubstateDestroyedProof {
     pub destroyed_by_transaction: TransactionId,
 }
 
+impl SubstateDestroyedProof {
+    pub fn to_versioned_substate_id(&self) -> VersionedSubstateId {
+        VersionedSubstateId::new(self.substate_id.clone(), self.version)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SubstateData {
     pub substate_id: SubstateId,
@@ -353,6 +359,10 @@ pub struct SubstateData {
 }
 
 impl SubstateData {
+    pub fn to_versioned_substate_id(&self) -> VersionedSubstateId {
+        VersionedSubstateId::new(self.substate_id.clone(), self.version)
+    }
+
     pub fn into_substate(self) -> Substate {
         Substate::new(self.version, self.substate_value)
     }

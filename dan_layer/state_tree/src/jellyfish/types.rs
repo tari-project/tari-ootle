@@ -81,7 +81,7 @@
 // Copyright (c) Aptos
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fmt, io, ops::Range};
+use std::{fmt, fmt::Display, io, ops::Range};
 
 use blake2::{digest::consts::U32, Blake2b};
 use indexmap::IndexMap;
@@ -94,7 +94,10 @@ use tari_crypto::{
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_engine_types::serde_with;
 
-use crate::jellyfish::store::TreeStoreReader;
+use crate::{
+    bit_iter::BitIterator,
+    jellyfish::{error::JmtProofVerifyError, store::TreeStoreReader},
+};
 
 pub type Hash = tari_common_types::types::FixedHash;
 
@@ -146,7 +149,7 @@ pub struct SparseMerkleProofExt {
 
 impl SparseMerkleProofExt {
     /// Constructs a new `SparseMerkleProofExt` using leaf and a list of sibling nodes.
-    pub fn new(leaf: Option<SparseMerkleLeafNode>, siblings: Vec<NodeInProof>) -> Self {
+    pub(crate) fn new(leaf: Option<SparseMerkleLeafNode>, siblings: Vec<NodeInProof>) -> Self {
         Self { leaf, siblings }
     }
 
@@ -158,6 +161,106 @@ impl SparseMerkleProofExt {
     /// Returns the list of siblings in this proof.
     pub fn siblings(&self) -> &[NodeInProof] {
         &self.siblings
+    }
+
+    /// Verifies an element whose key is `element_key` and value is `element_value` exists in the Sparse Merkle Tree
+    /// using the provided proof
+    pub fn verify_inclusion(
+        &self,
+        expected_root_hash: &Hash,
+        element_key: &LeafKey,
+        element_value_hash: &Hash,
+    ) -> Result<(), JmtProofVerifyError> {
+        self.verify(expected_root_hash, element_key, Some(element_value_hash))
+    }
+
+    /// Verifies the proof is a valid non-inclusion proof that shows this key doesn't exist in the tree.
+    pub fn verify_exclusion(
+        &self,
+        expected_root_hash: &Hash,
+        element_key: &LeafKey,
+    ) -> Result<(), JmtProofVerifyError> {
+        self.verify(expected_root_hash, element_key, None)
+    }
+
+    /// If `element_value` is present, verifies an element whose key is `element_key` and value is
+    /// `element_value` exists in the Sparse Merkle Tree using the provided proof. Otherwise,
+    /// verifies the proof is a valid non-inclusion proof that shows this key doesn't exist in the
+    /// tree.
+    fn verify(
+        &self,
+        expected_root_hash: &Hash,
+        element_key: &LeafKey,
+        element_value: Option<&Hash>,
+    ) -> Result<(), JmtProofVerifyError> {
+        if self.siblings.len() > 256 {
+            return Err(JmtProofVerifyError::TooManySiblings {
+                num_siblings: self.siblings.len(),
+            });
+        }
+
+        match (element_value, &self.leaf) {
+            (Some(value_hash), Some(leaf)) => {
+                // This is an inclusion proof, so the key and value hash provided in the proof
+                // should match element_key and element_value_hash. `siblings` should prove the
+                // route from the leaf node to the root.
+                if element_key != leaf.key() {
+                    return Err(JmtProofVerifyError::KeyMismatch {
+                        actual_key: *leaf.key(),
+                        expected_key: *element_key,
+                    });
+                }
+                if *value_hash != leaf.value_hash {
+                    return Err(JmtProofVerifyError::ValueMismatch {
+                        actual: leaf.value_hash,
+                        expected: *value_hash,
+                    });
+                }
+            },
+            (Some(_), None) => return Err(JmtProofVerifyError::ExpectedInclusionProof),
+            (None, Some(leaf)) => {
+                // This is a non-inclusion proof. The proof intends to show that if a leaf node
+                // representing `element_key` is inserted, it will break a currently existing leaf
+                // node represented by `proof_key` into a branch. `siblings` should prove the
+                // route from that leaf node to the root.
+                if element_key == leaf.key() {
+                    return Err(JmtProofVerifyError::ExpectedNonInclusionProof);
+                }
+                if element_key.common_prefix_bits_len(leaf.key()) < self.siblings.len() {
+                    return Err(JmtProofVerifyError::InvalidNonInclusionProof);
+                }
+            },
+            (None, None) => {
+                // This is a non-inclusion proof. The proof intends to show that if a leaf node
+                // representing `element_key` is inserted, it will show up at a currently empty
+                // position. `sibling` should prove the route from this empty position to the root.
+            },
+        }
+
+        let current_hash = self
+            .leaf
+            .clone()
+            .map_or(SPARSE_MERKLE_PLACEHOLDER_HASH, |leaf| leaf.hash());
+        let actual_root_hash = self
+            .siblings
+            .iter()
+            .zip(element_key.iter_bits().rev().skip(256 - self.siblings.len()))
+            .fold(current_hash, |hash, (sibling_node, bit)| {
+                if bit {
+                    SparseMerkleInternalNode::new(sibling_node.hash(), hash).hash()
+                } else {
+                    SparseMerkleInternalNode::new(hash, sibling_node.hash()).hash()
+                }
+            });
+
+        if actual_root_hash != *expected_root_hash {
+            return Err(JmtProofVerifyError::RootHashMismatch {
+                actual_root_hash,
+                expected_root_hash: *expected_root_hash,
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -552,8 +655,8 @@ impl NibblePath {
     }
 
     /// Get a bit iterator iterates over the whole nibble path.
-    pub fn bits(&self) -> BitIterator {
-        BitIterator {
+    pub fn bits(&self) -> NibbleBitIterator {
+        NibbleBitIterator {
             nibble_path: self,
             pos: (0..self.num_nibbles * 4),
         }
@@ -599,12 +702,12 @@ pub trait Peekable: Iterator {
 }
 
 /// BitIterator iterates a nibble path by bit.
-pub struct BitIterator<'a> {
+pub struct NibbleBitIterator<'a> {
     nibble_path: &'a NibblePath,
     pos: Range<usize>,
 }
 
-impl<'a> Peekable for BitIterator<'a> {
+impl<'a> Peekable for NibbleBitIterator<'a> {
     /// Returns the `next()` value without advancing the iterator.
     fn peek(&self) -> Option<Self::Item> {
         if self.pos.start < self.pos.end {
@@ -616,7 +719,7 @@ impl<'a> Peekable for BitIterator<'a> {
 }
 
 /// BitIterator spits out a boolean each time. True/false denotes 1/0.
-impl<'a> Iterator for BitIterator<'a> {
+impl<'a> Iterator for NibbleBitIterator<'a> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -625,7 +728,7 @@ impl<'a> Iterator for BitIterator<'a> {
 }
 
 /// Support iterating bits in reversed order.
-impl<'a> DoubleEndedIterator for BitIterator<'a> {
+impl<'a> DoubleEndedIterator for NibbleBitIterator<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.pos.next_back().map(|i| self.nibble_path.get_bit(i))
     }
@@ -690,8 +793,8 @@ impl<'a> NibbleIterator<'a> {
     }
 
     /// Turn it into a `BitIterator`.
-    pub fn bits(&self) -> BitIterator<'a> {
-        BitIterator {
+    pub fn bits(&self) -> NibbleBitIterator<'a> {
+        NibbleBitIterator {
             nibble_path: self.nibble_path,
             pos: (self.pos.start * 4..self.pos.end * 4),
         }
@@ -717,7 +820,7 @@ impl<'a> NibbleIterator<'a> {
 
 // INITIAL-MODIFICATION: We will use this type (instead of `Hash`) to allow for arbitrary key length
 /// A leaf key (i.e. a complete nibble path).
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct LeafKey {
     /// The underlying bytes.
     /// All leaf keys of the same tree must be of the same length - otherwise the tree's behavior
@@ -736,6 +839,23 @@ impl LeafKey {
 
     pub fn as_ref(&self) -> LeafKeyRef<'_> {
         LeafKeyRef::new(self.bytes.as_slice())
+    }
+
+    pub fn iter_bits(&self) -> BitIterator<'_> {
+        BitIterator::new(self.bytes.as_slice())
+    }
+
+    pub fn common_prefix_bits_len(&self, other: &LeafKey) -> usize {
+        self.iter_bits()
+            .zip(other.iter_bits())
+            .take_while(|(x, y)| x == y)
+            .count()
+    }
+}
+
+impl Display for LeafKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.bytes.fmt(f)
     }
 }
 

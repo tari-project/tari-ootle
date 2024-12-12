@@ -10,6 +10,7 @@ pub use tree::*;
 mod types;
 pub use types::*;
 
+mod error;
 mod store;
 
 pub use store::*;

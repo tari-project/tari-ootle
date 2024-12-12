@@ -4,7 +4,9 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
+    net::SocketAddr,
     path::PathBuf,
+    str::FromStr,
     time::Duration,
 };
 
@@ -17,6 +19,7 @@ use tari_engine_types::{calculate_template_binary_hash, TemplateAddress};
 use tari_shutdown::ShutdownSignal;
 use tari_validator_node_client::types::GetTemplatesRequest;
 use tokio::{sync::mpsc, time::sleep};
+use url::Url;
 
 use crate::{
     config::{Config, InstanceType},
@@ -37,6 +40,7 @@ pub struct ProcessManager {
     skip_registration: bool,
     disable_template_auto_register: bool,
     base_dir: PathBuf,
+    web_server_port: u16,
 }
 
 impl ProcessManager {
@@ -58,6 +62,10 @@ impl ProcessManager {
             shutdown_signal,
             disable_template_auto_register: !config.auto_register_previous_templates,
             base_dir: config.base_dir.clone(),
+            web_server_port: match config.webserver.bind_address {
+                SocketAddr::V4(addr) => addr.port(),
+                SocketAddr::V6(addr) => addr.port(),
+            },
         };
         (this, ProcessManagerHandle::new(tx_request))
     }
@@ -91,7 +99,7 @@ impl ProcessManager {
                     name: template_data.name.clone(),
                     version: template_data.version,
                     contents_hash: template_data.contents_hash,
-                    contents_url: None,
+                    contents_url: template_data.contents_url.clone(),
                 });
             }
         }
@@ -134,6 +142,8 @@ impl ProcessManager {
             if dir_entry.path().is_file() {
                 if let Some(extension) = dir_entry.path().extension() {
                     if extension == "wasm" {
+                        let file_name = dir_entry.file_name();
+                        let file_name = file_name.to_str().unwrap();
                         let file_content = tokio::fs::read(dir_entry.path()).await?;
                         let loaded = WasmModule::load_template_from_code(file_content.as_slice())?;
                         let name = loaded.template_def().template_name().to_string();
@@ -142,7 +152,9 @@ impl ProcessManager {
                             name,
                             version: 0,
                             contents_hash: hash,
-                            contents_url: None,
+                            contents_url: Some(Url::parse(
+                                format!("http://localhost:{}/templates/{}", self.web_server_port, file_name).as_str(),
+                            )?),
                         })
                     }
                 }
@@ -511,7 +523,10 @@ impl ProcessManager {
                     commit_hash: vec![],
                 }),
                 binary_sha: data.contents_hash.to_vec(),
-                binary_url: data.contents_url.unwrap().to_string(),
+                binary_url: data
+                    .contents_url
+                    .ok_or(anyhow!("WASM download URL is missing!"))?
+                    .to_string(),
                 sidechain_deployment_key: vec![],
             })
             .await?

@@ -6,7 +6,6 @@
 Feature: Eviction scenarios
 
   @flaky
-  @doit
   Scenario: Offline validator gets evicted
     # Initialize a base node, wallet, miner and several VNs
     Given a base node BASE

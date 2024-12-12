@@ -207,11 +207,11 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
                     let change = match &transition.update {
                         SubstateUpdate::Create(create) => SubstateTreeChange::Up {
-                            id: create.substate.substate_id.clone(),
+                            id: create.substate.to_versioned_substate_id(),
                             value_hash: hash_substate(&create.substate.substate_value, create.substate.version),
                         },
                         SubstateUpdate::Destroy(destroy) => SubstateTreeChange::Down {
-                            id: destroy.substate_id.clone(),
+                            id: destroy.to_versioned_substate_id()
                         },
                     };
 

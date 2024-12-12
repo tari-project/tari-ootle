@@ -375,7 +375,7 @@ impl<'a, R: 'a + TreeStoreReader<P>, P: Clone> JellyfishMerkleTree<'a, R, P> {
 
         if kvs.len() == 1 && kvs[0].0 == existing_leaf_key {
             if let (key, Some((value_hash, payload))) = kvs[0] {
-                let new_leaf_node = Node::new_leaf(key.clone(), *value_hash, payload.clone(), version);
+                let new_leaf_node = Node::new_leaf(*key, *value_hash, payload.clone(), version);
                 Ok(Some(new_leaf_node))
             } else {
                 Ok(None)
@@ -454,7 +454,7 @@ impl<'a, R: 'a + TreeStoreReader<P>, P: Clone> JellyfishMerkleTree<'a, R, P> {
     ) -> Result<Option<Node<P>>, JmtStorageError> {
         if kvs.len() == 1 {
             if let (key, Some((value_hash, payload))) = kvs[0] {
-                let new_leaf_node = Node::new_leaf(key.clone(), *value_hash, payload.clone(), version);
+                let new_leaf_node = Node::new_leaf(*key, *value_hash, payload.clone(), version);
                 Ok(Some(new_leaf_node))
             } else {
                 Ok(None)

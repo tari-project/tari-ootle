@@ -511,7 +511,7 @@ impl ProcessManager {
                     commit_hash: vec![],
                 }),
                 binary_sha: data.contents_hash.to_vec(),
-                binary_url: data.contents_url.unwrap().to_string(),
+                binary_url: data.contents_url.unwrap_or_default(),
                 sidechain_deployment_key: vec![],
             })
             .await?

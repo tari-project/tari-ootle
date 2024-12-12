@@ -20,13 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::FixedHash;
-use tari_core::transactions::transaction_components::CodeTemplateRegistration;
+use tari_common_types::types::PublicKey;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{types::TemplateManagerRequest, Template, TemplateManagerError, TemplateMetadata};
+use super::{types::TemplateManagerRequest, Template, TemplateExecutable, TemplateManagerError, TemplateMetadata};
 
 #[derive(Debug, Clone)]
 pub struct TemplateManagerHandle {
@@ -36,18 +35,6 @@ pub struct TemplateManagerHandle {
 impl TemplateManagerHandle {
     pub fn new(request_tx: mpsc::Sender<TemplateManagerRequest>) -> Self {
         Self { request_tx }
-    }
-
-    pub async fn add_template(&self, template: TemplateRegistration) -> Result<(), TemplateManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.request_tx
-            .send(TemplateManagerRequest::AddTemplate {
-                template: Box::new(template),
-                reply: tx,
-            })
-            .await
-            .map_err(|_| TemplateManagerError::ChannelClosed)?;
-        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
     }
 
     pub async fn get_template(&self, address: TemplateAddress) -> Result<Template, TemplateManagerError> {
@@ -76,13 +63,25 @@ impl TemplateManagerHandle {
             .map_err(|_| TemplateManagerError::ChannelClosed)?;
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct TemplateRegistration {
-    pub template_name: String,
-    pub template_address: TemplateAddress,
-    pub registration: CodeTemplateRegistration,
-    pub mined_height: u64,
-    pub mined_hash: FixedHash,
+    pub async fn add_template(
+        &self,
+        author_public_key: PublicKey,
+        template_address: TemplateAddress,
+        template: TemplateExecutable,
+        template_name: Option<String>,
+    ) -> Result<(), TemplateManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(TemplateManagerRequest::AddTemplate {
+                author_public_key,
+                template_address,
+                template,
+                template_name,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| TemplateManagerError::ChannelClosed)?;
+        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
 }

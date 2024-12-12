@@ -9658,6 +9658,7 @@ dependencies = [
  "thiserror 1.0.68",
  "tokio",
  "tokio-stream",
+ "url",
 ]
 
 [[package]]
@@ -9783,6 +9784,8 @@ dependencies = [
  "tari_crypto",
  "tari_dan_common_types",
  "tari_dan_storage",
+ "tari_engine_types",
+ "tari_template_lib",
  "tari_utilities",
  "thiserror 1.0.68",
 ]
@@ -10574,6 +10577,7 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction",
  "tari_transaction_manifest",
+ "thiserror 1.0.68",
 ]
 
 [[package]]

@@ -145,6 +145,7 @@ where
                         },
                         SubstateValue::UnclaimedConfidentialOutput(_) => {},
                         SubstateValue::FeeClaim(_) => {},
+                        SubstateValue::Template(_) => {},
                     }
                 },
             }

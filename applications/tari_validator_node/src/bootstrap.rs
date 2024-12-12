@@ -353,15 +353,15 @@ pub async fn spawn_services(
         global_db.clone(),
         base_node_client.clone(),
         epoch_manager.clone(),
-        template_manager_service.clone(),
         shutdown.clone(),
         consensus_constants,
         state_store.clone(),
         config.validator_node.scan_base_layer,
         config.validator_node.base_layer_scanning_interval,
         config.validator_node.validator_node_sidechain_id.clone(),
-        config.validator_node.template_sidechain_id.clone(),
         config.validator_node.burnt_utxo_sidechain_id.clone(),
+        template_manager_service.clone(),
+        config.validator_node.template_sidechain_id.clone(),
     );
     handles.push(join_handle);
 

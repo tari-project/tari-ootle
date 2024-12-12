@@ -192,12 +192,8 @@ pub struct TemplateMetadata {
     pub name: String,
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub address: TemplateAddress,
-    pub url: String,
     /// SHA hash of binary
     pub binary_sha: String,
-    /// Block height in which the template was published
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub height: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

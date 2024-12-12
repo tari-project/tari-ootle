@@ -586,7 +586,10 @@ impl JsonRpcHandlers {
             TemplateExecutable::CompiledWasm(code) => WasmModule::from_code(code)
                 .load_template()
                 .map_err(|e| Self::internal_error(answer_id, format!("Error loading template: {}", e)))?,
-            TemplateExecutable::Manifest(_) | TemplateExecutable::Flow(_) => {
+            // TemplateExecutable::DownloadableWasm is never returned ad there is no DB type for that
+            TemplateExecutable::DownloadableWasm(_, _) |
+            TemplateExecutable::Manifest(_) |
+            TemplateExecutable::Flow(_) => {
                 return Err(JsonRpcResponse::error(
                     answer_id,
                     JsonRpcError::new(
@@ -618,9 +621,7 @@ impl JsonRpcHandlers {
                 .map(|t| TemplateMetadata {
                     name: t.name,
                     address: t.address,
-                    url: t.url,
                     binary_sha: to_hex(t.binary_sha.as_slice()),
-                    height: t.height,
                 })
                 .collect(),
         }))

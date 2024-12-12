@@ -34,10 +34,12 @@ use tari_engine_types::{
     confidential::{get_commitment_factory, get_range_proof_service, ConfidentialClaim, ConfidentialOutput},
     entity_id_provider::EntityIdProvider,
     events::Event,
+    hashing::{hasher32, template_hasher32, EngineHashDomainLabel},
     indexed_value::IndexedValue,
     instruction_result::InstructionResult,
     lock::LockFlag,
     logs::LogEntry,
+    published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
@@ -2341,6 +2343,26 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         };
 
         Ok(InvokeResult::encode(&address)?)
+    }
+
+    fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {
+        self.tracker.write_with(|state| {
+            let binary_hash = template_hasher32().chain(&template).result();
+            let template_address = PublishedTemplateAddress::from_hash(
+                hasher32(EngineHashDomainLabel::TemplateAddress)
+                    .chain(&self.transaction_signer_public_key)
+                    .chain(&binary_hash)
+                    .result(),
+            );
+            state.new_substate(
+                template_address,
+                SubstateValue::Template(PublishedTemplate { binary: template }),
+            )?;
+            let scope_mut = state.current_call_scope_mut()?;
+            scope_mut.move_node_to_owned(&template_address.into())?;
+
+            Ok(())
+        })
     }
 }
 

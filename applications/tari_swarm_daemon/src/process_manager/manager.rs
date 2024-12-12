@@ -4,16 +4,15 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
+    net::SocketAddr,
     path::PathBuf,
-    str::FromStr,
     time::Duration,
 };
 
 use anyhow::{anyhow, Context};
 use log::info;
-use minotari_node_grpc_client::grpc;
+use minotari_wallet_grpc_client::grpc;
 use tari_common_types::types::FixedHash;
-use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_engine::wasm::WasmModule;
 use tari_engine_types::{calculate_template_binary_hash, TemplateAddress};
 use tari_shutdown::ShutdownSignal;
@@ -62,7 +61,10 @@ impl ProcessManager {
             shutdown_signal,
             disable_template_auto_register: !config.auto_register_previous_templates,
             base_dir: config.base_dir.clone(),
-            web_server_port: config.webserver.bind_address.port(),
+            web_server_port: match config.webserver.bind_address {
+                SocketAddr::V4(addr) => addr.port(),
+                SocketAddr::V6(addr) => addr.port(),
+            },
         };
         (this, ProcessManagerHandle::new(tx_request))
     }
@@ -140,7 +142,7 @@ impl ProcessManager {
                 if let Some(extension) = dir_entry.path().extension() {
                     if extension == "wasm" {
                         let file_name = dir_entry.file_name();
-                        let file_name = file_name.to_str().ok_or(anyhow!("Can't get file name!"))?;
+                        let file_name = file_name.to_str().unwrap();
                         let file_content = tokio::fs::read(dir_entry.path()).await?;
                         let loaded = WasmModule::load_template_from_code(file_content.as_slice())?;
                         let name = loaded.template_def().template_name().to_string();
@@ -149,10 +151,9 @@ impl ProcessManager {
                             name,
                             version: 0,
                             contents_hash: hash,
-                            contents_url: Url::parse(&format!(
-                                "http://localhost:{}/templates/{}",
-                                self.web_server_port, file_name
-                            ))?,
+                            contents_url: Some(Url::parse(
+                                format!("http://localhost:{}/templates/{}", self.web_server_port, file_name).as_str(),
+                            )?),
                         })
                     }
                 }
@@ -176,22 +177,11 @@ impl ProcessManager {
             .await?
             .templates
             .iter()
-            .map(|metadata| {
-                let url = if let Ok(url) = Url::from_str(metadata.url.as_str()) {
-                    url
-                } else {
-                    Url::parse(&format!(
-                        "http://localhost:{}/templates/{}",
-                        self.web_server_port, metadata.name
-                    ))
-                    .unwrap()
-                };
-                TemplateData {
-                    name: metadata.name.clone(),
-                    version: 0,
-                    contents_hash: FixedHash::try_from(metadata.binary_sha.as_slice()).unwrap_or_default(),
-                    contents_url: url,
-                }
+            .map(|metadata| TemplateData {
+                name: metadata.name.clone(),
+                version: 0,
+                contents_hash: FixedHash::try_from(metadata.binary_sha.as_slice()).unwrap_or_default(),
+                contents_url: None,
             })
             .collect())
     }
@@ -532,7 +522,10 @@ impl ProcessManager {
                     commit_hash: vec![],
                 }),
                 binary_sha: data.contents_hash.to_vec(),
-                binary_url: data.contents_url.to_string(),
+                binary_url: data
+                    .contents_url
+                    .ok_or(anyhow!("WASM download URL is missing!"))?
+                    .to_string(),
                 sidechain_deployment_key: vec![],
             })
             .await?

@@ -135,10 +135,8 @@ impl TransactionBuilder {
     }
 
     /// Publishing a WASM template.
-    pub fn publish_template<T: AsRef<[u8]>>(self, binary: T) -> Self {
-        self.add_instruction(Instruction::PublishTemplate {
-            binary: binary.as_ref().to_vec(),
-        })
+    pub fn publish_template(self, binary: Vec<u8>) -> Self {
+        self.add_instruction(Instruction::PublishTemplate { binary })
     }
 
     pub fn claim_burn(self, claim: ConfidentialClaim) -> Self {

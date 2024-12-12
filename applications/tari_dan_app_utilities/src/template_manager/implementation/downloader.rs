@@ -20,6 +20,9 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+// TODO: rewrite downloader to get template from other peer(s) OR completely drop this concept and implement somewhere
+// else
+
 use bytes::Bytes;
 use futures::{future::BoxFuture, stream::FuturesUnordered};
 use prost::bytes;

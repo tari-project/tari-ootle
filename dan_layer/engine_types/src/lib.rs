@@ -33,6 +33,7 @@ pub mod entity_id_provider;
 pub mod id_provider;
 
 mod argument_parser;
+pub mod published_template;
 
 pub use argument_parser::parse_arg;
 

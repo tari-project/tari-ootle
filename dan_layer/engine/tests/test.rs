@@ -115,8 +115,8 @@ fn state_create_multiple_in_one_call() {
 fn test_composed() {
     let mut template_test = TemplateTest::new(vec!["tests/templates/state", "tests/templates/hello_world"]);
 
-    let functions = template_test
-        .get_module("HelloWorld")
+    let module = template_test.get_module("HelloWorld");
+    let functions = module
         .template_def()
         .functions()
         .iter()
@@ -124,8 +124,8 @@ fn test_composed() {
         .collect::<Vec<_>>();
     assert_eq!(functions, vec!["greet", "new", "custom_greeting"]);
 
-    let functions = template_test
-        .get_module("State")
+    let module = template_test.get_module("State");
+    let functions = module
         .template_def()
         .functions()
         .iter()
@@ -197,8 +197,8 @@ fn test_private_function() {
     let mut template_test = TemplateTest::new(vec!["tests/templates/private_function"]);
 
     // check that the private method and function are not exported
-    let functions = template_test
-        .get_module("PrivateCounter")
+    let module = template_test.get_module("PrivateCounter");
+    let functions = module
         .template_def()
         .functions()
         .iter()

@@ -24,6 +24,7 @@ use std::str::FromStr;
 
 use chrono::NaiveDateTime;
 use tari_common_types::types::FixedHash;
+use tari_engine_types::TemplateAddress;
 
 use crate::global::GlobalDbAdapter;
 
@@ -64,16 +65,15 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
 
 #[derive(Debug, Clone)]
 pub struct DbTemplate {
+    pub author_public_key: FixedHash,
+    pub template_address: TemplateAddress,
     pub template_name: String,
-    // TODO: change to TemplateAddress type
-    pub template_address: FixedHash,
     pub expected_hash: FixedHash,
-    pub url: String,
-    pub height: u64,
     pub template_type: DbTemplateType,
     pub compiled_code: Option<Vec<u8>>,
     pub flow_json: Option<String>,
     pub manifest: Option<String>,
+    pub url: Option<String>,
     pub status: TemplateStatus,
     pub added_at: NaiveDateTime,
 }

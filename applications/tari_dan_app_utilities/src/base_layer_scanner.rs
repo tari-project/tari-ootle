@@ -23,6 +23,7 @@
 use std::time::Duration;
 
 use log::*;
+use reqwest::Url;
 use tari_base_node_client::{
     grpc::GrpcBaseNodeClient,
     types::{BaseLayerMetadata, BlockInfo},
@@ -61,14 +62,15 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
-use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId};
+use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId, TemplateAddress};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_template_lib::models::{EncryptedData, TemplateAddress, UnclaimedConfidentialOutputAddress};
+use tari_template_lib::models::{EncryptedData, UnclaimedConfidentialOutputAddress};
 use tokio::{task, task::JoinHandle, time};
+use url::ParseError;
 
-use crate::template_manager::interface::{TemplateManagerError, TemplateManagerHandle, TemplateRegistration};
+use crate::template_manager::interface::{TemplateExecutable, TemplateManagerError, TemplateManagerHandle};
 
 const LOG_TARGET: &str = "tari::dan::base_layer_scanner";
 
@@ -76,30 +78,31 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
     global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
     base_node_client: GrpcBaseNodeClient,
     epoch_manager: EpochManagerHandle<TAddr>,
-    template_manager: TemplateManagerHandle,
     shutdown: ShutdownSignal,
     consensus_constants: ConsensusConstants,
     shard_store: SqliteStateStore<TAddr>,
     scan_base_layer: bool,
     base_layer_scanning_interval: Duration,
     validator_node_sidechain_id: Option<RistrettoPublicKey>,
-    template_sidechain_id: Option<RistrettoPublicKey>,
     burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
+    // TODO: remove when base layer template registration is removed too
+    template_manager: TemplateManagerHandle,
+    template_sidechain_id: Option<PublicKey>,
 ) -> JoinHandle<anyhow::Result<()>> {
     task::spawn(async move {
         let base_layer_scanner = BaseLayerScanner::new(
             global_db,
             base_node_client,
             epoch_manager,
-            template_manager,
             shutdown,
             consensus_constants,
             shard_store,
             scan_base_layer,
             base_layer_scanning_interval,
             validator_node_sidechain_id,
-            template_sidechain_id,
             burnt_utxo_sidechain_id,
+            template_manager,
+            template_sidechain_id,
         );
 
         base_layer_scanner.start().await?;
@@ -116,7 +119,6 @@ pub struct BaseLayerScanner<TAddr> {
     next_block_hash: Option<FixedHash>,
     base_node_client: GrpcBaseNodeClient,
     epoch_manager: EpochManagerHandle<TAddr>,
-    template_manager: TemplateManagerHandle,
     shutdown: ShutdownSignal,
     consensus_constants: ConsensusConstants,
     state_store: SqliteStateStore<TAddr>,
@@ -124,8 +126,10 @@ pub struct BaseLayerScanner<TAddr> {
     base_layer_scanning_interval: Duration,
     has_attempted_scan: bool,
     validator_node_sidechain_id: Option<PublicKey>,
-    template_sidechain_id: Option<PublicKey>,
     burnt_utxo_sidechain_id: Option<PublicKey>,
+    // TODO: remove template related data, when removed base layer template registration support
+    template_manager: TemplateManagerHandle,
+    template_sidechain_id: Option<PublicKey>,
 }
 
 impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
@@ -133,15 +137,15 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
         base_node_client: GrpcBaseNodeClient,
         epoch_manager: EpochManagerHandle<TAddr>,
-        template_manager: TemplateManagerHandle,
         shutdown: ShutdownSignal,
         consensus_constants: ConsensusConstants,
         state_store: SqliteStateStore<TAddr>,
         scan_base_layer: bool,
         base_layer_scanning_interval: Duration,
         validator_node_sidechain_id: Option<PublicKey>,
-        template_sidechain_id: Option<PublicKey>,
         burnt_utxo_sidechain_id: Option<PublicKey>,
+        template_manager: TemplateManagerHandle,
+        template_sidechain_id: Option<PublicKey>,
     ) -> Self {
         Self {
             global_db,
@@ -152,7 +156,6 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             next_block_hash: None,
             base_node_client,
             epoch_manager,
-            template_manager,
             shutdown,
             consensus_constants,
             state_store,
@@ -160,8 +163,9 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             base_layer_scanning_interval,
             has_attempted_scan: false,
             validator_node_sidechain_id,
-            template_sidechain_id,
             burnt_utxo_sidechain_id,
+            template_manager,
+            template_sidechain_id,
         }
     }
 
@@ -344,14 +348,14 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                         if sidechain_feature.sidechain_public_key() != self.validator_node_sidechain_id.as_ref() {
                             debug!(
                                 target: LOG_TARGET,
-                                "Ignoring code template registration for sidechain ID {:?}. Local node's sidechain ID: {:?}",
+                                "Ignoring code template registration for sidechain ID {:?}.",
                                 sidechain_feature.sidechain_public_key(),
-                                self.template_sidechain_id,
                             );
                             continue;
                         }
                         trace!(target: LOG_TARGET, "New validator node registration scanned: {reg:?}");
                     },
+                    // TODO: remove completely SideChainFeature::CodeTemplateRegistration at some point
                     SideChainFeatureData::CodeTemplateRegistration(reg) => {
                         if sidechain_feature.sidechain_public_key() != self.template_sidechain_id.as_ref() {
                             debug!(
@@ -460,6 +464,32 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         Ok(())
     }
 
+    async fn register_code_template_registration(
+        &mut self,
+        template_name: String,
+        template_address: TemplateAddress,
+        registration: CodeTemplateRegistration,
+        block_info: &BlockInfo,
+    ) -> Result<(), BaseLayerScannerError> {
+        info!(
+            target: LOG_TARGET,
+            "🌠 new template found with address {} at height {}", template_address, block_info.height
+        );
+        self.template_manager
+            .add_template(
+                registration.author_public_key,
+                template_address,
+                TemplateExecutable::DownloadableWasm(
+                    Url::parse(registration.binary_url.as_str())?,
+                    registration.binary_sha,
+                ),
+                Some(template_name),
+            )
+            .await?;
+
+        Ok(())
+    }
+
     async fn update_validators(&mut self, epoch: Epoch) -> Result<(), BaseLayerScannerError> {
         info!(
             target: LOG_TARGET,
@@ -508,8 +538,8 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
     ) -> Result<(), BaseLayerScannerError> {
         let commitment_address = UnclaimedConfidentialOutputAddress::try_from_commitment(output.commitment.as_bytes())
             .map_err(|e|
-            // Technically impossible, but anyway
-            BaseLayerScannerError::InvalidSideChainUtxoResponse(format!("Invalid commitment: {}", e)))?;
+                // Technically impossible, but anyway
+                BaseLayerScannerError::InvalidSideChainUtxoResponse(format!("Invalid commitment: {}", e)))?;
         let substate_id = SubstateId::UnclaimedConfidentialOutput(commitment_address);
         let consensus_constants = self.epoch_manager.get_base_layer_consensus_constants().await?;
         let epoch = consensus_constants.height_to_epoch(block_info.height);
@@ -605,29 +635,6 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
         Ok(())
     }
 
-    async fn register_code_template_registration(
-        &mut self,
-        template_name: String,
-        template_address: TemplateAddress,
-        registration: CodeTemplateRegistration,
-        block_info: &BlockInfo,
-    ) -> Result<(), BaseLayerScannerError> {
-        info!(
-            target: LOG_TARGET,
-            "🌠 new template found with address {} at height {}", template_address, block_info.height
-        );
-        let template = TemplateRegistration {
-            template_name,
-            template_address,
-            registration,
-            mined_height: block_info.height,
-            mined_hash: block_info.hash,
-        };
-        self.template_manager.add_template(template).await?;
-
-        Ok(())
-    }
-
     fn set_last_scanned_block(&mut self, tip: FixedHash, block_info: &BlockInfo) -> Result<(), BaseLayerScannerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut metadata = self.global_db.metadata(&mut tx);
@@ -652,8 +659,6 @@ pub enum BaseLayerScannerError {
     SqliteStorageError(#[from] SqliteStorageError),
     #[error("Epoch manager error: {0}")]
     EpochManagerError(#[from] EpochManagerError),
-    #[error("Template manager error: {0}")]
-    TemplateManagerError(#[from] TemplateManagerError),
     #[error("Base node client error: {0}")]
     BaseNodeError(#[from] BaseNodeClientError),
     #[error("Invalid side chain utxo response: {0}")]
@@ -667,6 +672,10 @@ pub enum BaseLayerScannerError {
     PublicKeyConversion(ByteArrayError),
     #[error("GRPC conversion error: {0}")]
     GrpcConversion(String),
+    #[error("Template manager error: {0}")]
+    TemplateManagerError(#[from] TemplateManagerError),
+    #[error("URL parse error: {0}")]
+    UrlParse(#[from] ParseError),
 }
 
 enum BlockchainProgression {

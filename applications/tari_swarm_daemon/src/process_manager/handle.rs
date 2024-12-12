@@ -66,7 +66,8 @@ pub struct TemplateData {
     pub name: String,
     pub version: u32,
     pub contents_hash: FixedHash,
-    pub contents_url: Url,
+    // TODO: remove when base layer registration removed
+    pub contents_url: Option<Url>,
 }
 
 pub struct InstanceInfo {

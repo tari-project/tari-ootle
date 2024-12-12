@@ -22,7 +22,15 @@
 
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_dan_storage::{consensus_models::Block, StateStore};
+use tari_dan_app_utilities::template_manager::interface::TemplateExecutable;
+use tari_dan_storage::{
+    consensus_models::{Block, Decision},
+    StateStore,
+};
+use tari_engine_types::{
+    commit_result::TransactionResult,
+    substate::{SubstateId, SubstateValue},
+};
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
@@ -85,6 +93,59 @@ impl DanNode {
         Ok(())
     }
 
+    /// Handles template publishes, adds all the committed templates to template manager
+    /// from the given block.
+    async fn handle_template_publishes(&self, block: &Block) -> Result<(), anyhow::Error> {
+        // add wasm templates to template manager if available in any of the new block's transactions
+        let templates = self
+            .services
+            .state_store
+            .with_read_tx(|tx| block.get_transactions(tx))?
+            .into_iter()
+            .filter(|record| matches!(record.final_decision, Some(Decision::Commit)))
+            .filter_map(|record| {
+                let result = record.execution_result?;
+                let TransactionResult::Accept(diff) = result.finalize.result else {
+                    return None;
+                };
+                let tx_signature = record.transaction.signatures().first()?;
+                let signer_pub_key = tx_signature.public_key().clone();
+                Some((signer_pub_key, diff))
+            })
+            .flat_map(|(signer_pub_key, diff)| {
+                let mut templates = vec![];
+                for (substate_id, substate) in diff.into_up_iter() {
+                    if let SubstateId::Template(template_address) = substate_id {
+                        let template_address_hash = template_address.as_hash();
+                        if let SubstateValue::Template(template) = substate.into_substate_value() {
+                            templates.push((
+                                signer_pub_key.clone(),
+                                template_address_hash,
+                                TemplateExecutable::CompiledWasm(template.binary),
+                            ));
+                        }
+                    }
+                }
+                templates
+            });
+
+        // adding templates to template manager
+        let mut template_counter = 0;
+        for (author_pub_key, template_address, template) in templates {
+            self.services
+                .template_manager
+                .add_template(author_pub_key, template_address, template, None)
+                .await?;
+            template_counter += 1;
+        }
+
+        if template_counter > 0 {
+            info!(target: LOG_TARGET, "🏁 {} new template(s) have been persisted locally.", template_counter);
+        }
+
+        Ok(())
+    }
+
     async fn handle_hotstuff_event(&self, event: HotstuffEvent) -> Result<(), anyhow::Error> {
         info!(target: LOG_TARGET, "🔥 consensus event: {event}");
 
@@ -93,7 +154,11 @@ impl DanNode {
         };
 
         let block = self.services.state_store.with_read_tx(|tx| Block::get(tx, &block_id))?;
+
         info!(target: LOG_TARGET, "🏁 Block {} committed", block);
+
+        self.handle_template_publishes(&block).await?;
+
         let committed_transactions = block
             .commands()
             .iter()

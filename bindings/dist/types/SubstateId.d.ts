@@ -2,6 +2,7 @@ import type { ComponentAddress } from "./ComponentAddress";
 import type { FeeClaimAddress } from "./FeeClaimAddress";
 import type { NonFungibleAddress } from "./NonFungibleAddress";
 import type { NonFungibleIndexAddress } from "./NonFungibleIndexAddress";
+import type { PublishedTemplateAddress } from "./PublishedTemplateAddress";
 import type { ResourceAddress } from "./ResourceAddress";
 import type { TransactionReceiptAddress } from "./TransactionReceiptAddress";
 import type { UnclaimedConfidentialOutputAddress } from "./UnclaimedConfidentialOutputAddress";
@@ -22,4 +23,6 @@ export type SubstateId = {
     TransactionReceipt: TransactionReceiptAddress;
 } | {
     FeeClaim: FeeClaimAddress;
+} | {
+    Template: PublishedTemplateAddress;
 };

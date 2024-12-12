@@ -42,7 +42,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     arg,
     args,
-    args::{Arg, LogLevel, WorkspaceAction},
+    args::{Arg, WorkspaceAction},
     auth::OwnerRule,
     crypto::RistrettoPublicKeyBytes,
     invoke_args,
@@ -365,7 +365,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(())
     }
 
-    /// Load, validate template binary and adds to the cache of TemplateProvider.
+    /// Load, validate template binary and adds it to TemplateProvider.
     pub fn publish_template(
         config: &TransactionProcessorConfig,
         runtime: &Runtime,
@@ -377,13 +377,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 config.template_binary_max_size_bytes,
             ));
         }
-        let template = WasmModule::load_template_from_code(binary.as_slice())?;
-        // TODO: delete debug log when implemented
-        runtime.interface().emit_log(
-            LogLevel::Debug,
-            format!("Template name: \"{}\"", template.template_name()),
-        )?;
-        // TODO: implement
+
+        // validate binary
+        WasmModule::load_template_from_code(binary.as_slice())?;
+
+        // creating new substate
+        runtime.interface().publish_template(binary)?;
+
         Ok(InstructionResult::empty())
     }
 

@@ -50,6 +50,7 @@ use crate::{
     hashing::{hasher32, substate_value_hasher32, EngineHashDomainLabel},
     non_fungible::NonFungibleContainer,
     non_fungible_index::NonFungibleIndex,
+    published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     serde_with,
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
@@ -125,6 +126,7 @@ pub enum SubstateId {
     NonFungibleIndex(#[serde(with = "serde_with::string")] NonFungibleIndexAddress),
     TransactionReceipt(#[serde(with = "serde_with::string")] TransactionReceiptAddress),
     FeeClaim(#[serde(with = "serde_with::string")] FeeClaimAddress),
+    Template(#[serde(with = "serde_with::string")] PublishedTemplateAddress),
 }
 
 impl SubstateId {
@@ -156,6 +158,13 @@ impl SubstateId {
         }
     }
 
+    pub fn as_template(&self) -> Option<PublishedTemplateAddress> {
+        match self {
+            Self::Template(address) => Some(*address),
+            _ => None,
+        }
+    }
+
     /// Returns true for any substate that has is "versionable" i.e. can have a version > 0, otherwise false.
     pub fn is_versioned(&self) -> bool {
         match self {
@@ -163,6 +172,7 @@ impl SubstateId {
             SubstateId::Resource(_) |
             SubstateId::Vault(_) |
             SubstateId::NonFungibleIndex(_) |
+            SubstateId::Template(_) |
             SubstateId::NonFungible(_) => true,
             SubstateId::UnclaimedConfidentialOutput(_) |
             SubstateId::TransactionReceipt(_) |
@@ -205,6 +215,7 @@ impl SubstateId {
             SubstateId::UnclaimedConfidentialOutput(addr) => *addr.as_object_key(),
             SubstateId::TransactionReceipt(addr) => *addr.as_object_key(),
             SubstateId::FeeClaim(addr) => *addr.as_object_key(),
+            SubstateId::Template(addr) => *addr.as_object_key(),
         }
     }
 
@@ -322,6 +333,12 @@ impl From<TransactionReceiptAddress> for SubstateId {
     }
 }
 
+impl From<PublishedTemplateAddress> for SubstateId {
+    fn from(address: PublishedTemplateAddress) -> Self {
+        Self::Template(address)
+    }
+}
+
 impl TryFrom<SubstateId> for ComponentAddress {
     type Error = SubstateId;
 
@@ -344,6 +361,7 @@ impl Display for SubstateId {
             SubstateId::UnclaimedConfidentialOutput(commitment_address) => write!(f, "{}", commitment_address),
             SubstateId::TransactionReceipt(addr) => write!(f, "{}", addr),
             SubstateId::FeeClaim(addr) => write!(f, "{}", addr),
+            SubstateId::Template(addr) => write!(f, "{}", addr),
         }
     }
 }
@@ -395,6 +413,10 @@ impl FromStr for SubstateId {
                 let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::FeeClaim(addr.into()))
             },
+            Some(("template", addr)) => {
+                let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                Ok(SubstateId::Template(addr.into()))
+            },
             Some(_) | None => Err(InvalidSubstateIdFormat(s.to_string())),
         }
     }
@@ -424,6 +446,7 @@ impl_partial_eq!(UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput
 impl_partial_eq!(NonFungibleAddress, NonFungible);
 impl_partial_eq!(TransactionReceiptAddress, TransactionReceipt);
 impl_partial_eq!(FeeClaimAddress, FeeClaim);
+impl_partial_eq!(PublishedTemplateAddress, Template);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -440,6 +463,7 @@ pub enum SubstateValue {
     UnclaimedConfidentialOutput(UnclaimedConfidentialOutput),
     TransactionReceipt(TransactionReceipt),
     FeeClaim(FeeClaim),
+    Template(PublishedTemplate),
 }
 
 impl SubstateValue {
@@ -460,6 +484,13 @@ impl SubstateValue {
     pub fn component_mut(&mut self) -> Option<&mut ComponentHeader> {
         match self {
             SubstateValue::Component(component) => Some(component),
+            _ => None,
+        }
+    }
+
+    pub fn published_template(&self) -> Option<&PublishedTemplate> {
+        match self {
+            SubstateValue::Template(template) => Some(template),
             _ => None,
         }
     }
@@ -654,6 +685,12 @@ impl From<UnclaimedConfidentialOutput> for SubstateValue {
     }
 }
 
+impl From<PublishedTemplate> for SubstateValue {
+    fn from(template: PublishedTemplate) -> Self {
+        Self::Template(template)
+    }
+}
+
 impl Display for SubstateValue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // TODO: improve output
@@ -666,6 +703,7 @@ impl Display for SubstateValue {
             SubstateValue::UnclaimedConfidentialOutput(commitment) => write!(f, "{:?}", commitment),
             SubstateValue::TransactionReceipt(tx_receipt) => write!(f, "{:?}", tx_receipt),
             SubstateValue::FeeClaim(fee_claim) => write!(f, "{:?}", fee_claim),
+            SubstateValue::Template(template) => write!(f, "{:?}", template),
         }
     }
 }
@@ -764,12 +802,16 @@ mod tests {
             SubstateId::from_str(
                 "nft_a7cf4fd18ada7f367b1c102a9c158abc3754491665033231c5eb907fffffffff_uuid_7f19c3fe5fa13ff66a0d379fe5f9e3508acbd338db6bedd7350d8d565b2c5d32",
             )
-            .unwrap()
-            .as_non_fungible_address()
-            .unwrap();
+                .unwrap()
+                .as_non_fungible_address()
+                .unwrap();
             SubstateId::from_str("nftindex_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_0")
                 .unwrap()
                 .as_non_fungible_index_address()
+                .unwrap();
+            SubstateId::from_str("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff")
+                .unwrap()
+                .as_template()
                 .unwrap();
         }
 
@@ -790,6 +832,7 @@ mod tests {
             check("feeclaim_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("txreceipt_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("commitment_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
+            check("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
         }
     }
 }

@@ -178,12 +178,8 @@ pub struct TemplateMetadata {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::string")]
     pub address: TemplateAddress,
-    pub url: String,
     /// SHA hash of binary
     pub binary_sha: Vec<u8>,
-    /// Block height in which the template was published
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub height: u64,
 }
 
 /// A request to submit a transaction

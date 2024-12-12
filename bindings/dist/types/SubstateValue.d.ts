@@ -2,6 +2,7 @@ import type { ComponentHeader } from "./ComponentHeader";
 import type { FeeClaim } from "./FeeClaim";
 import type { NonFungibleContainer } from "./NonFungibleContainer";
 import type { NonFungibleIndex } from "./NonFungibleIndex";
+import type { PublishedTemplate } from "./PublishedTemplate";
 import type { Resource } from "./Resource";
 import type { TransactionReceipt } from "./TransactionReceipt";
 import type { UnclaimedConfidentialOutput } from "./UnclaimedConfidentialOutput";
@@ -22,4 +23,6 @@ export type SubstateValue = {
     TransactionReceipt: TransactionReceipt;
 } | {
     FeeClaim: FeeClaim;
+} | {
+    Template: PublishedTemplate;
 };

@@ -89,7 +89,7 @@ impl TemplateTest {
         let package = builder.build();
 
         let mut test = Self::from_package(package);
-        test.bootstrap_state(100_000.into());
+        test.bootstrap_state(1_000_000.into());
         test
     }
 
@@ -101,7 +101,7 @@ impl TemplateTest {
 
         let mut name_to_template = HashMap::new();
 
-        for (addr, template) in package.iter() {
+        for (addr, template) in &package.templates() {
             if name_to_template
                 .insert(template.template_name().to_string(), *addr)
                 .is_some()
@@ -255,7 +255,7 @@ impl TemplateTest {
         }
     }
 
-    pub fn get_module(&self, module_name: &str) -> &LoadedWasmTemplate {
+    pub fn get_module(&self, module_name: &str) -> LoadedWasmTemplate {
         let addr = self.name_to_template.get(module_name).unwrap();
         match self.package.get_template_by_address(addr).unwrap() {
             LoadedTemplate::Wasm(wasm) => wasm,
@@ -409,15 +409,23 @@ impl TemplateTest {
         (component, owner_proof, secret_key)
     }
 
-    pub fn create_custom_funded_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
+    pub fn create_custom_funded_account(
+        &mut self,
+        amount: Amount,
+    ) -> (
+        ComponentAddress,
+        NonFungibleAddress,
+        RistrettoSecretKey,
+        RistrettoPublicKey,
+    ) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
         let result = self.execute_expect_success(
             Transaction::builder()
-                .call_method(test_faucet_component(), "take_free_coins", args![])
+                .call_method(test_faucet_component(), "take_free_coins_custom", args![amount])
                 .put_last_instruction_output_on_workspace("bucket")
-                .create_account_with_bucket(public_key, "bucket")
+                .create_account_with_bucket(public_key.clone(), "bucket")
                 .sign(&secret_key)
                 .build(),
             vec![owner_proof.clone()],
@@ -428,7 +436,7 @@ impl TemplateTest {
             .unwrap();
 
         self.enable_fees = old_fail_fees;
-        (component, owner_proof, secret_key)
+        (component, owner_proof, secret_key, public_key)
     }
 
     fn next_key_seed(&mut self) -> u8 {

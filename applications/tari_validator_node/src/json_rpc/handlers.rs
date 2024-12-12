@@ -479,9 +479,7 @@ impl JsonRpcHandlers {
                 .map(|t| TemplateMetadata {
                     name: t.name,
                     address: t.address,
-                    url: t.url,
                     binary_sha: t.binary_sha.to_vec(),
-                    height: t.height,
                 })
                 .collect(),
         }))
@@ -507,9 +505,7 @@ impl JsonRpcHandlers {
             registration_metadata: TemplateMetadata {
                 name: template.metadata.name,
                 address: template.metadata.address,
-                url: template.metadata.url,
                 binary_sha: template.metadata.binary_sha.to_vec(),
-                height: template.metadata.height,
             },
             abi,
         }))

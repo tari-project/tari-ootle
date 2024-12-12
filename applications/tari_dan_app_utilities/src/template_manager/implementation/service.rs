@@ -20,11 +20,11 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::convert::TryFrom;
+// TODO: rewrite downloader to get template from other peer(s) OR completely drop this concept and implement somewhere
+// else
 
 use log::*;
-use tari_common_types::types::FixedHash;
-use tari_core::transactions::transaction_components::TemplateType;
+use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{services::template_provider::TemplateProvider, NodeAddressable};
 use tari_dan_engine::function_definitions::FlowFunctionDefinition;
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
@@ -41,7 +41,7 @@ use super::{
     downloader::{DownloadRequest, DownloadResult},
     TemplateManager,
 };
-use crate::template_manager::interface::{TemplateManagerError, TemplateManagerRequest, TemplateRegistration};
+use crate::template_manager::interface::{TemplateExecutable, TemplateManagerError, TemplateManagerRequest};
 
 const LOG_TARGET: &str = "tari::template_manager";
 
@@ -101,9 +101,9 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                     .download_queue
                     .send(DownloadRequest {
                         template_type: template.template_type,
-                        address: Hash::try_from(template.template_address.as_slice()).unwrap(),
-                        url: template.url.clone(),
+                        address: Hash::from(template.template_address.into_array()),
                         expected_binary_hash: template.expected_hash,
+                        url: template.url.unwrap(),
                     })
                     .await;
                 info!(
@@ -119,8 +119,18 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         #[allow(clippy::enum_glob_use)]
         use TemplateManagerRequest::*;
         match req {
-            AddTemplate { template, reply } => {
-                handle(reply, self.handle_add_template(*template).await);
+            AddTemplate {
+                author_public_key,
+                template_address,
+                template,
+                template_name,
+                reply,
+            } => {
+                handle(
+                    reply,
+                    self.handle_add_template(author_public_key, template_address, template, template_name)
+                        .await,
+                );
             },
             GetTemplate { address, reply } => {
                 handle(reply, self.manager.fetch_template(&address));
@@ -227,33 +237,46 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         Ok(())
     }
 
-    async fn handle_add_template(&mut self, template: TemplateRegistration) -> Result<(), TemplateManagerError> {
-        let address = template.template_address;
-        let url = template.registration.binary_url.to_string();
-        let template_type = match template.registration.template_type {
-            TemplateType::Wasm { .. } => DbTemplateType::Wasm,
-            TemplateType::Flow => DbTemplateType::Flow,
-            TemplateType::Manifest => DbTemplateType::Manifest,
+    async fn handle_add_template(
+        &mut self,
+        author_public_key: PublicKey,
+        template_address: tari_engine_types::TemplateAddress,
+        template: TemplateExecutable,
+        template_name: Option<String>,
+    ) -> Result<(), TemplateManagerError> {
+        let template_status = if matches!(template, TemplateExecutable::DownloadableWasm(_, _)) {
+            TemplateStatus::New
+        } else {
+            TemplateStatus::Active
         };
-        let expected_binary_hash = FixedHash::try_from(template.registration.binary_sha.as_ref())
-            .map_err(|_| TemplateManagerError::InvalidBaseLayerTemplate)?;
-        self.manager.add_template(template)?;
-        // We could queue this up much later, at which point we'd update to pending
-        self.manager.update_template(address, DbTemplateUpdate {
-            status: Some(TemplateStatus::Pending),
-            ..Default::default()
-        })?;
+        self.manager.add_template(
+            author_public_key,
+            template_address,
+            template.clone(),
+            template_name,
+            Some(template_status),
+        )?;
 
-        let _ignore = self
-            .download_queue
-            .send(DownloadRequest {
-                template_type,
-                address,
-                url,
-                expected_binary_hash,
-            })
-            .await;
-        info!(target: LOG_TARGET, "⏳️️ Template {} queued for download", address);
+        // TODO: remove when we remove support for base layer template registration
+        // update template status and add to download queue if it's a downloadable template
+        if let TemplateExecutable::DownloadableWasm(url, expected_binary_hash) = template {
+            // We could queue this up much later, at which point we'd update to pending
+            self.manager.update_template(template_address, DbTemplateUpdate {
+                status: Some(TemplateStatus::Pending),
+                ..Default::default()
+            })?;
+
+            let _ignore = self
+                .download_queue
+                .send(DownloadRequest {
+                    address: template_address,
+                    template_type: DbTemplateType::Wasm,
+                    url: url.to_string(),
+                    expected_binary_hash,
+                })
+                .await;
+        }
+
         Ok(())
     }
 }

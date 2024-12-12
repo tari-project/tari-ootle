@@ -542,6 +542,9 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
                     to_hex(fee_claim.validator_public_key.as_bytes())
                 );
             },
+            SubstateValue::Template(_) => {
+                println!("      ▶ Template: {}", address);
+            },
         }
         println!();
     }
@@ -834,6 +837,7 @@ impl CliArg {
                 SubstateId::NonFungibleIndex(v) => arg!(v),
                 SubstateId::TransactionReceipt(v) => arg!(v),
                 SubstateId::FeeClaim(v) => arg!(v),
+                SubstateId::Template(v) => arg!(v),
             },
             CliArg::TemplateAddress(v) => arg!(v),
             CliArg::NonFungibleId(v) => arg!(v),

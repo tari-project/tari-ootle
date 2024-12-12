@@ -1,21 +1,27 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::Infallible, path::Path};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
+use tari_common_types::types::PublicKey;
 use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_dan_engine::{
     abi::TemplateDef,
-    template::{LoadedTemplate, TemplateModuleLoader},
+    template::{LoadedTemplate, TemplateLoaderError, TemplateModuleLoader},
     wasm::{compile::compile_template, WasmModule},
 };
 use tari_engine_types::hashing::template_hasher32;
 use tari_template_builtin::get_template_builtin;
 use tari_template_lib::models::TemplateAddress;
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct Package {
-    templates: HashMap<TemplateAddress, LoadedTemplate>,
+    templates: Arc<Mutex<HashMap<TemplateAddress, LoadedTemplate>>>,
 }
 
 impl Package {
@@ -23,23 +29,25 @@ impl Package {
         PackageBuilder::new()
     }
 
-    pub fn get_template_by_address(&self, addr: &TemplateAddress) -> Option<&LoadedTemplate> {
-        self.templates.get(addr)
+    pub fn get_template_by_address(&self, addr: &TemplateAddress) -> Option<LoadedTemplate> {
+        self.templates.lock().unwrap().get(addr).cloned()
     }
 
     pub fn get_template_defs(&self) -> HashMap<TemplateAddress, TemplateDef> {
         self.templates
+            .lock()
+            .unwrap()
             .iter()
             .map(|(addr, template)| (*addr, template.template_def().clone()))
             .collect()
     }
 
     pub fn total_code_byte_size(&self) -> usize {
-        self.templates.values().map(|t| t.code_size()).sum()
+        self.templates.lock().unwrap().values().map(|t| t.code_size()).sum()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&TemplateAddress, &LoadedTemplate)> {
-        self.templates.iter()
+    pub fn templates(&self) -> HashMap<TemplateAddress, LoadedTemplate> {
+        self.templates.lock().unwrap().clone()
     }
 }
 
@@ -82,19 +90,37 @@ impl PackageBuilder {
 
     pub fn build(&mut self) -> Package {
         Package {
-            templates: self.templates.drain().collect(),
+            templates: Arc::new(Mutex::new(self.templates.drain().collect())),
         }
     }
 }
 
+#[derive(Error, Debug)]
+pub enum PackageError {
+    #[error("Template load error: {0}")]
+    TemplateLoad(#[from] TemplateLoaderError),
+}
 impl TemplateProvider for Package {
-    type Error = Infallible;
+    type Error = PackageError;
     type Template = LoadedTemplate;
 
     fn get_template_module(
         &self,
         id: &tari_engine_types::TemplateAddress,
     ) -> Result<Option<Self::Template>, Self::Error> {
-        Ok(self.templates.get(id).cloned())
+        Ok(self.templates.lock().unwrap().get(id).cloned())
+    }
+
+    fn add_wasm_template(
+        &self,
+        _author_public_key: PublicKey,
+        template_address: tari_engine_types::TemplateAddress,
+        template: &[u8],
+    ) -> Result<(), Self::Error> {
+        self.templates
+            .lock()
+            .unwrap()
+            .insert(template_address, WasmModule::load_template_from_code(template)?);
+        Ok(())
     }
 }

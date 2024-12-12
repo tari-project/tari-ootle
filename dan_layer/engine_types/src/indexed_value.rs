@@ -24,6 +24,7 @@ use ts_rs::TS;
 
 use crate::{
     fee_claim::FeeClaimAddress,
+    published_template::PublishedTemplateAddress,
     serde_with,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
@@ -140,6 +141,7 @@ pub struct IndexedWellKnownTypes {
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
+    published_template_addresses: Vec<PublishedTemplateAddress>,
 }
 
 impl IndexedWellKnownTypes {
@@ -154,6 +156,7 @@ impl IndexedWellKnownTypes {
             vault_ids: vec![],
             metadata: vec![],
             unclaimed_confidential_output_address: vec![],
+            published_template_addresses: vec![],
         }
     }
 
@@ -175,6 +178,7 @@ impl IndexedWellKnownTypes {
             vault_ids: visitor.vault_ids,
             metadata: visitor.metadata,
             unclaimed_confidential_output_address: visitor.unclaimed_confidential_output_addresses,
+            published_template_addresses: visitor.published_templates,
         })
     }
 
@@ -204,6 +208,9 @@ impl IndexedWellKnownTypes {
                         found = *address == addr;
                     },
                     WellKnownTariValue::UnclaimedConfidentialOutputAddress(addr) => {
+                        found = *address == addr;
+                    },
+                    WellKnownTariValue::PublishedTemplateAddress(addr) => {
                         found = *address == addr;
                     },
                     WellKnownTariValue::BucketId(_) |
@@ -277,6 +284,10 @@ impl IndexedWellKnownTypes {
                 &self.unclaimed_confidential_output_address,
                 &other.unclaimed_confidential_output_address,
             ),
+            published_template_addresses: diff_vec(
+                &self.published_template_addresses,
+                &other.published_template_addresses,
+            ),
         }
     }
 }
@@ -318,6 +329,7 @@ pub enum WellKnownTariValue {
     FeeClaim(FeeClaimAddress),
     ProofId(ProofId),
     UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
+    PublishedTemplateAddress(PublishedTemplateAddress),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
@@ -367,6 +379,10 @@ impl FromTagAndValue for WellKnownTariValue {
                 let value: ObjectKey = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::UnclaimedConfidentialOutputAddress(value.into()))
             },
+            BinaryTag::TemplateAddress => {
+                let value: Hash = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::PublishedTemplateAddress(value.into()))
+            },
         }
     }
 }
@@ -382,6 +398,7 @@ pub struct IndexedValueVisitor {
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
     unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
+    published_templates: Vec<PublishedTemplateAddress>,
 }
 
 impl IndexedValueVisitor {
@@ -396,6 +413,7 @@ impl IndexedValueVisitor {
             vault_ids: vec![],
             metadata: vec![],
             unclaimed_confidential_output_addresses: vec![],
+            published_templates: vec![],
         }
     }
 }
@@ -434,6 +452,9 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             },
             WellKnownTariValue::FeeClaim(_) => {
                 // Do nothing
+            },
+            WellKnownTariValue::PublishedTemplateAddress(template) => {
+                self.published_templates.push(template);
             },
         }
         Ok(ControlFlow::Continue(()))

@@ -24,7 +24,8 @@ use std::{collections::HashMap, convert::TryFrom, fs, sync::Arc};
 
 use chrono::Utc;
 use log::*;
-use tari_core::transactions::transaction_components::TemplateType;
+use tari_common_types::types::{FixedHash, PublicKey};
+use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{optional::Optional, services::template_provider::TemplateProvider, NodeAddressable};
 use tari_dan_engine::{
     flow::FlowFactory,
@@ -34,19 +35,19 @@ use tari_dan_engine::{
 };
 use tari_dan_storage::global::{DbTemplate, DbTemplateType, DbTemplateUpdate, GlobalDb, TemplateStatus};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_engine_types::calculate_template_binary_hash;
+use tari_engine_types::{calculate_template_binary_hash, hashing::template_hasher32};
 use tari_template_builtin::{
     get_template_builtin,
     ACCOUNT_NFT_TEMPLATE_ADDRESS,
     ACCOUNT_TEMPLATE_ADDRESS,
     FAUCET_TEMPLATE_ADDRESS,
 };
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::{models::TemplateAddress, Hash};
 
 use super::TemplateConfig;
 use crate::template_manager::{
     implementation::cmap_semaphore,
-    interface::{Template, TemplateExecutable, TemplateManagerError, TemplateMetadata, TemplateRegistration},
+    interface::{Template, TemplateExecutable, TemplateManagerError, TemplateMetadata},
 };
 
 const LOG_TARGET: &str = "tari::validator_node::template_manager";
@@ -118,9 +119,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             metadata: TemplateMetadata {
                 name: name.to_string(),
                 address,
-                url: "".to_string(),
                 binary_sha,
-                height: 0,
             },
             executable: TemplateExecutable::CompiledWasm(compiled_code),
         }
@@ -186,28 +185,70 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         Ok(templates)
     }
 
-    pub(super) fn add_template(&self, template: TemplateRegistration) -> Result<(), TemplateManagerError> {
-        let template = DbTemplate {
-            template_name: template.template_name,
-            template_address: template.template_address.into_array().into(),
-            expected_hash: template.registration.binary_sha.as_ref().try_into()?,
-            url: template.registration.binary_url.into_string(),
-            height: template.mined_height,
-            status: TemplateStatus::New,
-            compiled_code: None,
-            added_at: Utc::now().naive_utc(),
-            template_type: match template.registration.template_type {
-                TemplateType::Wasm { .. } => DbTemplateType::Wasm,
-                TemplateType::Flow { .. } => DbTemplateType::Flow,
-                TemplateType::Manifest { .. } => DbTemplateType::Manifest,
+    pub(super) fn add_template(
+        &self,
+        author_public_key: PublicKey,
+        template_address: tari_engine_types::TemplateAddress,
+        template: TemplateExecutable,
+        template_name: Option<String>,
+        template_status: Option<TemplateStatus>,
+    ) -> Result<(), TemplateManagerError> {
+        enum TemplateHash {
+            Hash(Hash),
+            FixedHash(FixedHash),
+        }
+
+        let mut compiled_code = None;
+        let mut flow_json = None;
+        let mut manifest = None;
+        let mut template_type = DbTemplateType::Wasm;
+        let template_hash: TemplateHash;
+        let mut template_name = template_name.unwrap_or(String::from("default"));
+        let mut template_url = None;
+        match template {
+            TemplateExecutable::CompiledWasm(binary) => {
+                let loaded_template = WasmModule::load_template_from_code(binary.as_slice())?;
+                template_hash = TemplateHash::Hash(template_hasher32().chain(binary.as_slice()).result());
+                compiled_code = Some(binary);
+                template_name = loaded_template.template_name().to_string();
             },
-            flow_json: None,
-            manifest: None,
+            TemplateExecutable::Manifest(curr_manifest) => {
+                template_hash = TemplateHash::Hash(template_hasher32().chain(curr_manifest.as_str()).result());
+                manifest = Some(curr_manifest);
+                template_type = DbTemplateType::Manifest;
+            },
+            TemplateExecutable::Flow(curr_flow_json) => {
+                template_hash = TemplateHash::Hash(template_hasher32().chain(curr_flow_json.as_str()).result());
+                flow_json = Some(curr_flow_json);
+                template_type = DbTemplateType::Flow;
+            },
+            TemplateExecutable::DownloadableWasm(url, hash) => {
+                template_url = Some(url.to_string());
+                template_type = DbTemplateType::Wasm;
+                template_hash = TemplateHash::FixedHash(hash);
+            },
+        }
+
+        let template = DbTemplate {
+            author_public_key: FixedHash::try_from(author_public_key.to_vec().as_slice())?,
+            template_name,
+            template_address,
+            expected_hash: match template_hash {
+                TemplateHash::Hash(hash) => FixedHash::from(hash.into_array()),
+                TemplateHash::FixedHash(hash) => hash,
+            },
+            status: template_status.unwrap_or(TemplateStatus::New),
+            compiled_code,
+            added_at: Utc::now().naive_utc(),
+            template_type,
+            flow_json,
+            manifest,
+            url: template_url,
         };
 
         let mut tx = self.global_db.create_transaction()?;
         let mut templates_db = self.global_db.templates(&mut tx);
-        if templates_db.get_template(&*template.template_address)?.is_some() {
+        if templates_db.get_template(&template.template_address)?.is_some() {
             return Ok(());
         }
         templates_db.insert_template(template)?;
@@ -275,11 +316,30 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
                 let factory = FlowFactory::try_create::<Self>(definition)?;
                 LoadedTemplate::Flow(factory)
             },
+            TemplateExecutable::DownloadableWasm(_, _) => {
+                // impossible case, since there is no separate downloadable wasm type in DB level
+                return Err(Self::Error::UnsupportedTemplateType);
+            },
         };
 
         self.cache.insert(*address, loaded.clone());
 
         Ok(Some(loaded))
+    }
+
+    fn add_wasm_template(
+        &self,
+        author_public_key: PublicKey,
+        template_address: tari_engine_types::TemplateAddress,
+        template: &[u8],
+    ) -> Result<(), Self::Error> {
+        self.add_template(
+            author_public_key,
+            template_address,
+            TemplateExecutable::CompiledWasm(template.to_vec()),
+            None,
+            Some(TemplateStatus::Active),
+        )
     }
 }
 

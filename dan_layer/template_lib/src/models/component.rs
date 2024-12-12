@@ -105,3 +105,10 @@ impl AsRef<[u8]> for ComponentAddress {
 }
 
 newtype_struct_serde_impl!(ComponentAddress, BorTag<ObjectKey, TAG>);
+
+#[cfg(feature = "borsh")]
+impl borsh::BorshSerialize for ComponentAddress {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        self.as_object_key().array().serialize(writer)
+    }
+}

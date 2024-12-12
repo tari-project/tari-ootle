@@ -28,7 +28,7 @@ pub fn generate_eviction_proofs<TTx: StateStoreReadTransaction>(
 ) -> Result<Vec<EvictionProof>, HotStuffError> {
     let num_evictions = committed_blocks_with_evictions
         .iter()
-        .map(|b| b.all_evict_nodes().count())
+        .map(|b| b.all_node_evictions().count())
         .sum();
 
     let mut proofs = Vec::with_capacity(num_evictions);
@@ -36,11 +36,14 @@ pub fn generate_eviction_proofs<TTx: StateStoreReadTransaction>(
         // First generate a commit proof for the block which is shared by all EvictionProofs
         let block_commit_proof = generate_block_commit_proof(tx, tip_qc, block)?;
 
-        for atom in block.all_evict_nodes() {
+        for (idx, command) in block.commands().iter().enumerate() {
+            let Some(atom) = command.evict_node() else {
+                continue;
+            };
             info!(target: LOG_TARGET, "🦶 Generating eviction proof for validator: {atom}");
-            // TODO: command inclusion proof
+            let inclusion_proof = block.compute_command_inclusion_proof(idx)?;
             let atom = EvictNodeAtom::new(atom.public_key.clone());
-            let commit_command_proof = CommandCommitProof::new(atom, block_commit_proof.clone());
+            let commit_command_proof = CommandCommitProof::new(atom, block_commit_proof.clone(), inclusion_proof);
             let proof = EvictionProof::new(commit_command_proof);
             proofs.push(proof);
         }

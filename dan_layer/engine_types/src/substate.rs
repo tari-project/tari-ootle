@@ -25,6 +25,7 @@ use std::{
     str::FromStr,
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, decode_exact, encode, BorError};
 use tari_common_types::types::FixedHash;
@@ -41,8 +42,6 @@ use tari_template_lib::{
     prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
     Hash,
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::{
     component::ComponentHeader,
@@ -58,7 +57,11 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct Substate {
     substate: SubstateValue,
     version: u32,
@@ -107,8 +110,12 @@ pub fn hash_substate(substate: &SubstateValue, version: u32) -> FixedHash {
 }
 
 /// Base object address, version tuples
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum SubstateId {
     Component(#[serde(with = "serde_with::string")] ComponentAddress),
     Resource(#[serde(with = "serde_with::string")] ResourceAddress),
@@ -419,7 +426,11 @@ impl_partial_eq!(TransactionReceiptAddress, TransactionReceipt);
 impl_partial_eq!(FeeClaimAddress, FeeClaim);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum SubstateValue {
     Component(ComponentHeader),
     Resource(Resource),
@@ -660,7 +671,11 @@ impl Display for SubstateValue {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct SubstateDiff {
     up_substates: Vec<(SubstateId, Substate)>,
     down_substates: Vec<(SubstateId, u32)>,

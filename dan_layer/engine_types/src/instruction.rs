@@ -5,7 +5,6 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
-use tari_crypto::tari_utilities::hex::Hex;
 use tari_template_lib::{
     args::{Arg, LogLevel},
     auth::OwnerRule,
@@ -122,9 +121,9 @@ impl Display for Instruction {
                     f,
                     "ClaimBurn {{ commitment_address: {}, proof_of_knowledge: nonce({}), u({}) v({}) }}",
                     claim.output_address,
-                    claim.proof_of_knowledge.public_nonce().to_hex(),
-                    claim.proof_of_knowledge.u().to_hex(),
-                    claim.proof_of_knowledge.v().to_hex()
+                    claim.proof_of_knowledge.public_nonce().as_public_key(),
+                    claim.proof_of_knowledge.u().reveal(),
+                    claim.proof_of_knowledge.v().reveal(),
                 )
             },
             Self::ClaimValidatorFees {

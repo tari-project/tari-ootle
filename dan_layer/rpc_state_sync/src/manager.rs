@@ -42,7 +42,7 @@ use tari_dan_storage::{
 use tari_engine_types::substate::hash_substate;
 use tari_epoch_manager::EpochManagerReader;
 use tari_rpc_framework::RpcError;
-use tari_state_tree::{Hash, SpreadPrefixStateTree, SubstateTreeChange, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service::ValidatorNodeRpcClient,
@@ -249,7 +249,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         &self,
         shard: Shard,
         version: Option<Version>,
-    ) -> Result<Hash, CommsRpcConsensusSyncError> {
+    ) -> Result<TreeHash, CommsRpcConsensusSyncError> {
         let Some(version) = version else {
             return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
         };
@@ -457,7 +457,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                                     actual = state_root,
                                 );
                                 last_error = Some(CommsRpcConsensusSyncError::StateRootMismatch {
-                                    expected: *checkpoint.block().state_merkle_root(),
+                                    expected: TreeHash::from(checkpoint.block().state_merkle_root().into_array()),
                                     actual: state_root,
                                 });
                                 // TODO: rollback state

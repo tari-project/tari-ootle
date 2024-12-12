@@ -160,7 +160,7 @@ where TConsensusSpec: ConsensusSpec
                     if commit_block.is_epoch_end() {
                         end_of_epoch = Some(commit_block.epoch());
                     }
-                    if commit_block.all_evict_nodes().next().is_some() {
+                    if commit_block.all_node_evictions().next().is_some() {
                         committed_blocks_with_evictions.push(commit_block);
                     }
                     if !committed.is_empty() {
@@ -1751,7 +1751,7 @@ where TConsensusSpec: ConsensusSpec
             atom.delete(tx)?;
         }
 
-        for atom in block.all_evict_nodes() {
+        for atom in block.all_node_evictions() {
             atom.mark_as_committed_in_epoch(tx, block.epoch())?;
         }
 

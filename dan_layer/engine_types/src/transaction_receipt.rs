@@ -60,6 +60,12 @@ impl FromStr for TransactionReceiptAddress {
     }
 }
 
+impl borsh::BorshSerialize for TransactionReceiptAddress {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub struct TransactionReceipt {

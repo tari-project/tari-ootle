@@ -60,6 +60,7 @@ diesel::table! {
         compiled_code -> Nullable<Binary>,
         flow_json -> Nullable<Text>,
         manifest -> Nullable<Text>,
+        url -> Nullable<Text>,
         status -> Text,
         added_at -> Timestamp,
     }

@@ -36,6 +36,7 @@ pub struct TemplateModel {
     pub compiled_code: Option<Vec<u8>>,
     pub flow_json: Option<String>,
     pub manifest: Option<String>,
+    pub url: Option<String>,
     pub status: String,
     pub added_at: NaiveDateTime,
 }

@@ -224,6 +224,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 compiled_code: t.compiled_code,
                 flow_json: t.flow_json,
                 manifest: t.manifest,
+                url: t.url,
                 status: t.status.parse().expect("DB status corrupted"),
                 added_at: t.added_at,
             })),
@@ -260,6 +261,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                     compiled_code: t.compiled_code,
                     flow_json: t.flow_json,
                     manifest: t.manifest,
+                    url: t.url,
                     status: t.status.parse().expect("DB status corrupted"),
                     added_at: t.added_at,
                 })
@@ -294,6 +296,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                     compiled_code: t.compiled_code,
                     flow_json: t.flow_json,
                     manifest: t.manifest,
+                    url: t.url,
                     status: t.status.parse().expect("DB status corrupted"),
                     added_at: t.added_at,
                 })

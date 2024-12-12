@@ -1,6 +1,8 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use std::iter;
+
 use rand::random;
 use tari_dan_engine::wasm::compile::compile_template;
 use tari_engine_types::{
@@ -29,7 +31,7 @@ fn publish_template_success() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, Amount(200_000))
-            .publish_template(template.code())
+            .publish_template(template.code().to_vec())
             .sign(&account_key)
             .build(),
         vec![owner_proof],
@@ -62,7 +64,7 @@ fn publish_template_invalid_binary() {
     let result = test.execute_expect_failure(
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, Amount(200_000))
-            .publish_template([1, 2, 3])
+            .publish_template(vec![1, 2, 3])
             .sign(&account_key)
             .build(),
         vec![owner_proof],
@@ -103,10 +105,6 @@ fn publish_template_too_big_binary() {
     }
 }
 
-fn generate_random_binary(size_in_bytes: u64) -> Vec<u8> {
-    let mut result = vec![];
-    for _ in 1..=size_in_bytes {
-        result.push(random::<u8>());
-    }
-    result
+fn generate_random_binary(size_in_bytes: usize) -> Vec<u8> {
+    iter::repeat_with(random).take(size_in_bytes).collect()
 }

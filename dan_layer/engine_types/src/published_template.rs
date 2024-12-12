@@ -11,7 +11,6 @@ use tari_bor::{BorTag, Deserialize, Serialize};
 use tari_template_lib::{
     models::{BinaryTag, KeyParseError, ObjectKey},
     Hash,
-    HashParseError,
 };
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
@@ -38,8 +37,8 @@ impl PublishedTemplateAddress {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
     }
 
-    pub fn as_hash(&self) -> Result<Hash, HashParseError> {
-        Hash::try_from_vec(self.0.inner().to_vec())
+    pub fn as_hash(&self) -> Hash {
+        Hash::from_array(self.as_object_key().into_array())
     }
 }
 

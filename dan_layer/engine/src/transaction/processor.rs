@@ -382,7 +382,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         WasmModule::load_template_from_code(binary.as_slice())?;
 
         // creating new substate
-        runtime.interface().publish_template(binary.as_slice())?;
+        runtime.interface().publish_template(binary)?;
 
         Ok(InstructionResult::empty())
     }

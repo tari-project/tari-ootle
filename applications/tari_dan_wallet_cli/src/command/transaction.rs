@@ -543,7 +543,7 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
                 );
             },
             SubstateValue::Template(_) => {
-                println!("      ▶ Published template: {}", address);
+                println!("      ▶ Template: {}", address);
             },
         }
         println!();

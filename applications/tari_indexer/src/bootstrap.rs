@@ -143,7 +143,7 @@ pub async fn spawn_services(
 
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
-    let (_template_manager_service, _) =
+    let (template_manager_service, _) =
         template_manager::implementation::spawn(template_manager.clone(), shutdown.clone());
 
     // Base Node scanner
@@ -162,6 +162,8 @@ pub async fn spawn_services(
         config.indexer.base_layer_scanning_interval,
         config.indexer.sidechain_id.clone(),
         config.indexer.burnt_utxo_sidechain_id.clone(),
+        template_manager_service,
+        config.indexer.templates_sidechain_id.clone(),
     );
 
     // Save final node identity after comms has initialized. This is required because the public_address can be

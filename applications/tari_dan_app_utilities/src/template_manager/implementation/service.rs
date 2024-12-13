@@ -214,6 +214,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                             .await
                         {
                             Ok(resp) => {
+                                // TODO: have a proof that this template was added before truly and validate here
                                 if let Err(error) = template_manager.add_template(
                                     PublicKey::from_canonical_bytes(resp.author_public_key.as_slice())
                                         .map_err(|error| TemplateManagerServiceError::ByteArray(error))?, // TODO: handle properly

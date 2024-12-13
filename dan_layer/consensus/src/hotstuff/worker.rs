@@ -7,7 +7,15 @@ use std::{
 };
 
 use log::*;
-use tari_dan_common_types::{committee::{Committee, CommitteeInfo}, optional::Optional, Epoch, NodeHeight, ShardGroup, TemplateSyncRequest};
+use tari_common_types::types::FixedHash;
+use tari_dan_common_types::{
+    committee::{Committee, CommitteeInfo},
+    optional::Optional,
+    Epoch,
+    NodeHeight,
+    ShardGroup,
+    TemplateSyncRequest,
+};
 use tari_dan_storage::{
     consensus_models::{
         Block,
@@ -24,6 +32,7 @@ use tari_dan_storage::{
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
+use tari_state_tree::SPARSE_MERKLE_PLACEHOLDER_HASH;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{broadcast, mpsc};
 
@@ -485,8 +494,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.hooks.on_transaction_ready(transaction.id());
 
         // TODO: trigger template manager to start getting missing template
-        // TODO: to do this, collect all templates from transaction substates and function calls 
-        // TODO: and pass to template manager 
+        // TODO: to do this, collect all templates from transaction substates and function calls
+        // TODO: and pass to template manager
 
         if self
             .check_if_block_can_be_unparked(
@@ -939,7 +948,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             let state_merkle_root = checkpoint
                 .map(|cp| cp.compute_state_merkle_root())
                 .transpose()?
-                .unwrap_or_default();
+                .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH);
             // The parent for genesis blocks refer to this zero block
             let mut zero_block = Block::zero_block(self.config.network, self.config.consensus_constants.num_preshards);
             if !zero_block.exists(&**tx)? {
@@ -954,7 +963,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 self.config.network,
                 epoch,
                 shard_group,
-                state_merkle_root,
+                FixedHash::from(state_merkle_root.into_array()),
                 self.config.sidechain_id.clone(),
             );
             if !genesis.exists(&**tx)? {

@@ -179,7 +179,7 @@ impl EpochManagerReader for TestEpochManager {
         Ok(CommitteeInfo::new(
             TEST_NUM_PRESHARDS,
             num_shard_group_members as u32,
-            num_committees as u32,
+            num_committees,
             sg,
         ))
     }

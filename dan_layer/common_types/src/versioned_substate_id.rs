@@ -3,6 +3,7 @@
 
 use std::{borrow::Borrow, fmt::Display, str::FromStr};
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{serde_with, substate::SubstateId};
 
@@ -159,7 +160,7 @@ impl std::hash::Hash for SubstateRequirement {
 #[error("Failed to parse substate requirement {0}")]
 pub struct SubstateRequirementParseError(String);
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

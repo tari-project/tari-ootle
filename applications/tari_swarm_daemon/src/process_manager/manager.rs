@@ -6,7 +6,6 @@ use std::{
     fs::File,
     net::SocketAddr,
     path::PathBuf,
-    str::FromStr,
     time::Duration,
 };
 

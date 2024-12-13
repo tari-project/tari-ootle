@@ -14,12 +14,12 @@ tari_common_types = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
 tari_hashing = { workspace = true }
 tari_template_abi = { workspace = true, features = ["std"] }
-tari_template_lib = { workspace = true }
-tari_utilities = { workspace = true }
+tari_template_lib = { workspace = true, features = ["borsh"] }
 
 # if we set this version in the workspace it would break other crates
 base64 = "0.21.0"
 blake2 = { workspace = true }
+borsh = { workspace = true }
 rand = { workspace = true }
 digest = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
@@ -32,7 +32,7 @@ ts-rs = { workspace = true, optional = true }
 
 [features]
 default = []
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_template_lib/ts", "tari_template_abi/ts"]
 # This feature is used to temporarily fix the issue with the ts-rs crate. Because when we run cargo test --all-feature 
 # it will trigger the ts files generation. But there are some problems that are fixed during the npm run build. But 
 # not on cargo test.

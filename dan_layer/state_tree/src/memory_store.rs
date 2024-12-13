@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, fmt, fmt::Debug};
 
-use crate::jellyfish::{JmtStorageError, Node, NodeKey, StaleTreeNode, TreeNode, TreeStoreReader, TreeStoreWriter};
+use tari_jellyfish::{JmtStorageError, Node, NodeKey, StaleTreeNode, TreeNode, TreeStoreReader, TreeStoreWriter};
 
 #[derive(Debug, Default)]
 pub struct MemoryTreeStore<P> {

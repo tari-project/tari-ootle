@@ -34,6 +34,7 @@ use super::ResourceAddress;
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct NonFungibleIndexAddress {
     resource_address: ResourceAddress,
     #[cfg_attr(feature = "ts", ts(type = "number"))]

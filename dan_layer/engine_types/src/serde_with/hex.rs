@@ -21,11 +21,10 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::{Deserialize, Deserializer, Serializer};
-use tari_utilities::hex::{from_hex, to_hex};
 
 pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
     if s.is_human_readable() {
-        let st = to_hex(v.as_ref());
+        let st = hex::encode(v.as_ref());
         s.serialize_str(&st)
     } else {
         s.serialize_bytes(v.as_ref())
@@ -40,7 +39,7 @@ where
 {
     let bytes = if d.is_human_readable() {
         let hex = <String as Deserialize>::deserialize(d)?;
-        from_hex(&hex).map_err(serde::de::Error::custom)?
+        hex::decode(&hex).map_err(serde::de::Error::custom)?
     } else {
         <Vec<u8> as Deserialize>::deserialize(d)?
     };
@@ -58,7 +57,7 @@ pub mod vec {
         if s.is_human_readable() {
             let mut seq = s.serialize_seq(Some(v.len()))?;
             for item in v {
-                seq.serialize_element(&to_hex(item.as_ref()))?;
+                seq.serialize_element(&hex::encode(item.as_ref()))?;
             }
             seq.end()
         } else {
@@ -78,7 +77,7 @@ pub mod vec {
         let vec = if d.is_human_readable() {
             let strs = <Vec<String> as Deserialize>::deserialize(d)?;
             strs.iter()
-                .map(|s| from_hex(s).map_err(serde::de::Error::custom))
+                .map(|s| hex::decode(s).map_err(serde::de::Error::custom))
                 .collect::<Result<Vec<_>, _>>()?
         } else {
             <Vec<Vec<u8>> as Deserialize>::deserialize(d)?
@@ -99,7 +98,7 @@ pub mod option {
         if s.is_human_readable() {
             match v {
                 Some(v) => {
-                    let st = to_hex(v.as_ref());
+                    let st = hex::encode(v.as_ref());
                     s.serialize_some(&st)
                 },
                 None => s.serialize_none(),
@@ -120,7 +119,7 @@ pub mod option {
         let bytes = if d.is_human_readable() {
             let hex = <Option<String> as Deserialize>::deserialize(d)?;
             hex.as_ref()
-                .map(|s| from_hex(s))
+                .map(hex::decode)
                 .transpose()
                 .map_err(serde::de::Error::custom)?
         } else {

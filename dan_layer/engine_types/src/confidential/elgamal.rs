@@ -5,8 +5,7 @@ use std::convert;
 
 use tari_bor::{Deserialize, Serialize};
 use tari_common_types::types::{PrivateKey, PublicKey};
-use tari_crypto::keys::PublicKey as _;
-use tari_utilities::ByteArray;
+use tari_crypto::{keys::PublicKey as _, tari_utilities::ByteArray};
 
 use crate::confidential::value_lookup_table::ValueLookupTable;
 

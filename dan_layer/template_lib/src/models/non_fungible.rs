@@ -28,6 +28,7 @@ use crate::{
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub enum NonFungibleId {
     U256(#[serde_as(as = "serde_with::Bytes")] [u8; 32]),
     String(String),
@@ -210,6 +211,13 @@ const TAG: u64 = BinaryTag::NonFungibleAddress.as_u64();
 )]
 pub struct NonFungibleAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<NonFungibleAddressContents, TAG>);
 
+#[cfg(feature = "borsh")]
+impl borsh::BorshSerialize for NonFungibleAddress {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.0.inner(), writer)
+    }
+}
+
 /// Data used to build a `NonFungibleAddress`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(
@@ -217,6 +225,7 @@ pub struct NonFungibleAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] B
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct NonFungibleAddressContents {
     resource_address: ResourceAddress,
     id: NonFungibleId,

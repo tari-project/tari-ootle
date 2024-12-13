@@ -2,10 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 // Adapted from https://github.com/radixdlt/radixdlt-scrypto/blob/868ba44ec3b806992864af27c706968c797eb961/radix-engine-stores/src/hash_tree/test.rs
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
-use itertools::Itertools;
-use tari_state_tree::{memory_store::MemoryTreeStore, StaleTreeNode, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_jellyfish::{StaleTreeNode, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::memory_store::MemoryTreeStore;
 
 use crate::support::{change, hash_value_from_seed, make_value, HashTreeTester};
 mod support;
@@ -160,10 +160,8 @@ fn records_stale_tree_node_keys() {
             };
             key.version()
         })
-        .unique()
-        .sorted()
-        .collect::<Vec<Version>>();
-    assert_eq!(stale_versions, vec![1, 2]);
+        .collect::<BTreeSet<Version>>();
+    assert_eq!(stale_versions.into_iter().collect::<Vec<_>>(), vec![1, 2]);
 }
 
 #[test]

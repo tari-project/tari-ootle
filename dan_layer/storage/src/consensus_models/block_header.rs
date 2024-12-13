@@ -11,7 +11,7 @@ use tari_common::configuration::Network;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{hashing, shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
-use tari_state_tree::compute_merkle_root_for_hashes;
+use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
@@ -100,11 +100,6 @@ impl BlockHeader {
         header.id = header.calculate_id();
 
         Ok(header)
-    }
-
-    pub fn compute_command_merkle_root(commands: &BTreeSet<Command>) -> Result<FixedHash, BlockError> {
-        let hashes = commands.iter().map(|cmd| cmd.hash()).peekable();
-        compute_merkle_root_for_hashes(hashes).map_err(BlockError::StateTreeError)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -405,6 +400,15 @@ impl BlockHeader {
 
     pub fn extra_data(&self) -> &ExtraData {
         &self.extra_data
+    }
+
+    pub fn compute_command_merkle_root(commands: &BTreeSet<Command>) -> Result<FixedHash, BlockError> {
+        let hashes = commands
+            .iter()
+            .map(|cmd| TreeHash::from(cmd.hash().into_array()))
+            .peekable();
+        let hash = compute_merkle_root_for_hashes(hashes).map_err(BlockError::StateTreeError)?;
+        Ok(FixedHash::from(hash.into_array()))
     }
 }
 

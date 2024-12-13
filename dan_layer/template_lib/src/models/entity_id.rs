@@ -159,6 +159,10 @@ impl ObjectKey {
         self.0
     }
 
+    pub fn array(&self) -> &[u8; Self::LENGTH] {
+        &self.0
+    }
+
     pub fn from_hex(s: &str) -> Result<Self, KeyParseError> {
         from_hex(s).map(Self::from_array)
     }

@@ -5,8 +5,9 @@ use std::collections::{HashMap, VecDeque};
 
 use log::debug;
 use tari_dan_common_types::option::DisplayContainer;
+use tari_jellyfish::{JmtStorageError, Node, NodeKey, StaleTreeNode, TreeStoreReader, TreeStoreWriter};
 
-use crate::{JmtStorageError, Node, NodeKey, StaleTreeNode, StateHashTreeDiff, TreeStoreReader, TreeStoreWriter};
+use crate::StateHashTreeDiff;
 
 const LOG_TARGET: &str = "tari::dan::consensus::sharded_state_tree";
 

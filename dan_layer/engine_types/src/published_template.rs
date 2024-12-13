@@ -63,6 +63,12 @@ impl FromStr for PublishedTemplateAddress {
     }
 }
 
+impl borsh::BorshSerialize for PublishedTemplateAddress {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",

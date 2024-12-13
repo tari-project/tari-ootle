@@ -40,7 +40,7 @@ use tari_dan_app_utilities::{
     seed_peer::SeedPeer,
     template_manager::{self, implementation::TemplateManager},
 };
-use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
+use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress, TemplateSyncRequest};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -52,6 +52,7 @@ use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, Relay
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
+use tokio::sync::broadcast;
 
 use crate::{substate_storage_sqlite::sqlite_substate_store_factory::SqliteSubstateStore, ApplicationConfig};
 
@@ -142,9 +143,10 @@ pub async fn spawn_services(
     );
 
     // Template manager
+    let (_, rx_template_sync) = broadcast::channel::<TemplateSyncRequest>(100);
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
     let (template_manager_service, _) =
-        template_manager::implementation::spawn(template_manager.clone(), shutdown.clone());
+        template_manager::implementation::spawn(template_manager.clone(), rx_template_sync, shutdown.clone());
 
     // Base Node scanner
     base_layer_scanner::spawn(

@@ -26,7 +26,12 @@ use chrono::Utc;
 use log::*;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_crypto::tari_utilities::ByteArray;
-use tari_dan_common_types::{optional::Optional, services::template_provider::TemplateProvider, NodeAddressable};
+use tari_dan_common_types::{
+    optional::Optional,
+    services::template_provider::TemplateProvider,
+    NodeAddressable,
+    TemplateSyncRequest,
+};
 use tari_dan_engine::{
     flow::FlowFactory,
     function_definitions::FlowFunctionDefinition,
@@ -43,6 +48,7 @@ use tari_template_builtin::{
     FAUCET_TEMPLATE_ADDRESS,
 };
 use tari_template_lib::{models::TemplateAddress, Hash};
+use tokio::sync::broadcast;
 
 use super::TemplateConfig;
 use crate::template_manager::{

@@ -33,8 +33,8 @@ use super::TemplateManagerError;
 pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
-    /// SHA hash of binary
     pub binary_sha: FixedHash,
+    pub author_public_key: FixedHash,
 }
 
 // TODO: Allow fetching of just the template metadata without the compiled code
@@ -44,6 +44,7 @@ impl From<DbTemplate> for TemplateMetadata {
             name: record.template_name,
             address: record.template_address,
             binary_sha: FixedHash::zero(),
+            author_public_key: record.author_public_key,
         }
     }
 }

@@ -57,6 +57,7 @@ use tari_dan_common_types::{
     NumPreshards,
     PeerAddress,
     ShardGroup,
+    TemplateSyncRequest,
     VersionedSubstateId,
 };
 use tari_dan_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
@@ -253,9 +254,10 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
+    let (tx_template_sync, rx_template_sync) = broadcast::channel::<TemplateSyncRequest>(100);
     let template_manager = TemplateManager::initialize(global_db.clone(), config.validator_node.templates.clone())?;
     let (template_manager_service, join_handle) =
-        template_manager::implementation::spawn(template_manager.clone(), shutdown.clone());
+        template_manager::implementation::spawn(template_manager.clone(), rx_template_sync, shutdown.clone());
     handles.push(join_handle);
 
     info!(target: LOG_TARGET, "Payload processor initializing");
@@ -331,6 +333,7 @@ pub async fn spawn_services(
         transaction_executor,
         tx_hotstuff_events,
         consensus_constants.clone(),
+        tx_template_sync.clone(),
     )
     .await;
     handles.push(consensus_join_handle);

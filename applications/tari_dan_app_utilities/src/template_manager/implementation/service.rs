@@ -23,17 +23,38 @@
 // TODO: rewrite downloader to get template from other peer(s) OR completely drop this concept and implement somewhere
 // else
 
+use std::{string::FromUtf8Error, sync::Arc};
+
 use log::*;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{services::template_provider::TemplateProvider, NodeAddressable};
+use tari_crypto::tari_utilities::{ByteArray, ByteArrayError};
+use tari_dan_common_types::{
+    services::template_provider::TemplateProvider,
+    NodeAddressable,
+    PeerAddress,
+    SubstateAddress,
+    TemplateSyncRequest,
+};
 use tari_dan_engine::function_definitions::FlowFunctionDefinition;
+use tari_dan_p2p::proto::{
+    rpc as proto,
+    rpc::{SyncTemplateResponse, TemplateType},
+};
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
-use tari_engine_types::calculate_template_binary_hash;
+use tari_engine_types::{calculate_template_binary_hash, substate::SubstateId};
+use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
+use tari_rpc_framework::RpcError;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::{models::TemplateAddress, Hash};
 use tari_validator_node_client::types::{ArgDef, FunctionDef, TemplateAbi};
+use tari_validator_node_rpc::{
+    client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
+    rpc_service::ValidatorNodeRpcClient,
+    ValidatorNodeRpcClientError,
+};
+use thiserror::Error;
 use tokio::{
-    sync::{mpsc, mpsc::Receiver, oneshot},
+    sync::{broadcast, mpsc, mpsc::Receiver, oneshot},
     task::JoinHandle,
 };
 
@@ -45,30 +66,57 @@ use crate::template_manager::interface::{TemplateExecutable, TemplateManagerErro
 
 const LOG_TARGET: &str = "tari::template_manager";
 
+#[derive(Error, Debug)]
+pub enum TemplateManagerServiceError {
+    #[error("Template manager error: {0}")]
+    TemplateManager(#[from] TemplateManagerError),
+    #[error("Epoch manager error: {0}")]
+    EpochManager(#[from] EpochManagerError),
+    #[error("Invalid substate ID: {0}")]
+    InvalidSubstateId(&'static str),
+    #[error("VN RPC client error: {0}")]
+    VnRpcClient(#[from] ValidatorNodeRpcClientError),
+    #[error("RPC error: {0}")]
+    Rpc(#[from] RpcError),
+    #[error("Byte array error: {0}")]
+    ByteArray(ByteArrayError),
+    #[error("UTF-8 bytes to string conversion error: {0}")]
+    BytesUtf8Conversion(#[from] FromUtf8Error),
+}
+
 pub struct TemplateManagerService<TAddr> {
     rx_request: Receiver<TemplateManagerRequest>,
     manager: TemplateManager<TAddr>,
+    epoch_manager: EpochManagerHandle<PeerAddress>,
     completed_downloads: mpsc::Receiver<DownloadResult>,
     download_queue: mpsc::Sender<DownloadRequest>,
+    rx_template_sync: broadcast::Receiver<TemplateSyncRequest>,
+    client_factory: Arc<TariValidatorNodeRpcClientFactory>,
 }
 
 impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
     pub fn spawn(
         rx_request: Receiver<TemplateManagerRequest>,
         manager: TemplateManager<TAddr>,
+        epoch_manager: EpochManagerHandle<PeerAddress>,
         download_queue: mpsc::Sender<DownloadRequest>,
         completed_downloads: mpsc::Receiver<DownloadResult>,
+        rx_template_sync: broadcast::Receiver<TemplateSyncRequest>,
+        client_factory: Arc<TariValidatorNodeRpcClientFactory>,
         shutdown: ShutdownSignal,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {
             Self {
                 rx_request,
                 manager,
+                epoch_manager,
                 download_queue,
                 completed_downloads,
+                rx_template_sync,
+                client_factory,
             }
-            .run(shutdown)
-            .await?;
+                .run(shutdown)
+                .await?;
             Ok(())
         })
     }
@@ -83,7 +131,11 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                         error!(target: LOG_TARGET, "Error handling completed download: {}", err);
                     }
                 },
-
+                Ok(req) = self.rx_template_sync.recv() => {
+                    if let Err(error) = self.handle_template_sync_request(req).await {
+                        error!(target: LOG_TARGET, "Failed to handle template sync request: {}", error);
+                    }
+                }
                 _ = shutdown.wait() => {
                     dbg!("Shutting down epoch manager");
                     break;
@@ -115,6 +167,96 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         Ok(())
     }
 
+    /// Handles request to check if a template by address (substate ID and version) is present locally or needs syncing.
+    /// If needs syncing, just does it.
+    async fn handle_template_sync_request(
+        &mut self,
+        req: TemplateSyncRequest,
+    ) -> Result<(), TemplateManagerServiceError> {
+        // converting to template address from substate ID
+        let template_address =
+            req.substate_id()
+                .substate_id
+                .as_template()
+                .ok_or(TemplateManagerServiceError::InvalidSubstateId(
+                    "Substate ID is not a template ID!",
+                ))?;
+        let template_address = TemplateAddress::from(template_address.as_hash());
+
+        // we have the template stored already, so no need to do anything with it
+        if self.manager.template_exists(&template_address)? {
+            return Ok(());
+        }
+
+        // sync
+        let mut owner_committee = self
+            .epoch_manager
+            .get_committee_for_substate(
+                self.epoch_manager.current_epoch().await?,
+                SubstateAddress::from_substate_id(&req.substate_id().substate_id, req.substate_id().version),
+            )
+            .await?;
+        owner_committee.shuffle();
+
+        // start a task to not block other calls
+        // TODO: handle result of spawned task, if failed, send again the same TemplateSyncRequest
+        // TODO: to the broadcast channel (self.rx_template_sync's sender part)
+        let client_factory = self.client_factory.clone();
+        let template_manager = Arc::new(self.manager.clone());
+        tokio::spawn(async move {
+            for (addr, _) in &owner_committee.members {
+                match Self::vn_client(client_factory.clone(), addr).await {
+                    Ok(mut client) => {
+                        match client
+                            .sync_template(proto::SyncTemplateRequest {
+                                address: template_address.to_vec(),
+                            })
+                            .await
+                        {
+                            Ok(resp) => {
+                                if let Err(error) = template_manager.add_template(
+                                    PublicKey::from_canonical_bytes(resp.author_public_key.as_slice())
+                                        .map_err(|error| TemplateManagerServiceError::ByteArray(error))?, // TODO: handle properly
+                                    template_address,
+                                    match resp.template_type() {
+                                        TemplateType::Wasm => TemplateExecutable::CompiledWasm(resp.binary),
+                                        TemplateType::Manifest => TemplateExecutable::Manifest(String::from_utf8(resp.binary)?),
+                                        TemplateType::Flow => TemplateExecutable::Flow(String::from_utf8(resp.binary)?),
+                                    },
+                                    None,
+                                    Some(TemplateStatus::Active),
+                                ) {
+                                    error!(target: LOG_TARGET, "Failed to add new template: {error:?}");
+                                    return Err(error);
+                                }
+                                info!(target: LOG_TARGET, "✅ Template synced successfully: {}", template_address);
+                            }
+                            Err(error) => {
+                                warn!(target: LOG_TARGET, "Failed to sync template from VN at address {:?}: {error:?}", addr);
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        warn!(target: LOG_TARGET, "Failed to obtain connection to VN at address {:?}: {error:?}", addr);
+                    }
+                }
+            }
+
+            Ok(())
+        });
+
+        Ok(())
+    }
+
+    async fn vn_client(
+        client_factory: Arc<TariValidatorNodeRpcClientFactory>,
+        addr: &PeerAddress,
+    ) -> Result<ValidatorNodeRpcClient, TemplateManagerServiceError> {
+        let mut rpc_client = client_factory.create_client(addr);
+        let client = rpc_client.client_connection().await?;
+        Ok(client)
+    }
+
     async fn handle_request(&mut self, req: TemplateManagerRequest) {
         #[allow(clippy::enum_glob_use)]
         use TemplateManagerRequest::*;
@@ -131,10 +273,10 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                     self.handle_add_template(author_public_key, template_address, template, template_name)
                         .await,
                 );
-            },
+            }
             GetTemplate { address, reply } => {
                 handle(reply, self.manager.fetch_template(&address));
-            },
+            }
             GetTemplates { limit, reply } => handle(reply, self.manager.fetch_template_metadata(limit)),
             LoadTemplateAbi { address, reply } => handle(reply, self.handle_load_template_abi(address)),
         }
@@ -212,7 +354,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                                     target: LOG_TARGET,
                                     "⚠️ Template {} is not valid json: {}", download.template_address, e
                                 );
-                            },
+                            }
                         };
 
                         DbTemplateUpdate {
@@ -220,11 +362,11 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                             status: Some(status),
                             ..Default::default()
                         }
-                    },
+                    }
                     DbTemplateType::Manifest => todo!(),
                 };
                 self.manager.update_template(download.template_address, update)?;
-            },
+            }
             Err(err) => {
                 warn!(target: LOG_TARGET, "🚨 Failed to download template: {}", err);
                 self.manager
@@ -232,7 +374,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                         status: Some(TemplateStatus::DownloadFailed),
                         ..Default::default()
                     })?;
-            },
+            }
         }
         Ok(())
     }

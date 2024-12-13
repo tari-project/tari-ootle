@@ -22,19 +22,15 @@
 // DAMAGE.
 use std::convert::{TryFrom, TryInto};
 
-use crate::{
-    consensus::ConsensusHandle,
-    p2p::{
-        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
-        services::mempool::MempoolHandle,
-    },
-    virtual_substate::VirtualSubstateManager,
-};
 use log::*;
 use tari_bor::{decode_exact, encode};
-use tari_dan_app_utilities::template_manager::interface::{Template, TemplateExecutable, TemplateManagerError, TemplateManagerHandle};
+use tari_dan_app_utilities::template_manager::interface::{
+    Template,
+    TemplateExecutable,
+    TemplateManagerError,
+    TemplateManagerHandle,
+};
 use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateAddress};
-use tari_dan_p2p::proto::rpc::{GetTemplateRequest, GetTemplateResponse, TemplateType};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{
@@ -52,20 +48,31 @@ use tari_dan_p2p::{
         SyncBlocksResponse,
         SyncStateRequest,
         SyncStateResponse,
+        SyncTemplateRequest,
+        SyncTemplateResponse,
+        TemplateType,
     },
 };
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
-use tari_engine_types::virtual_substate::VirtualSubstateId;
-use tari_engine_types::TemplateAddress;
+use tari_engine_types::{virtual_substate::VirtualSubstateId, TemplateAddress};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
+
+use crate::{
+    consensus::ConsensusHandle,
+    p2p::{
+        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
+        services::mempool::MempoolHandle,
+    },
+    virtual_substate::VirtualSubstateManager,
+};
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";
 
@@ -289,10 +296,10 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             match start_block_id {
                 Some(id) => {
                     if !Block::record_exists(&tx, &id).map_err(RpcStatus::log_internal_error(LOG_TARGET))? {
-                        return Err(RpcStatus::not_found(format!("start_block_id {id} not found", )));
+                        return Err(RpcStatus::not_found(format!("start_block_id {id} not found",)));
                     }
                     id
-                }
+                },
                 None => {
                     let epoch = req
                         .epoch
@@ -316,7 +323,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                     }
 
                     block_id
-                }
+                },
             }
         };
 
@@ -393,58 +400,48 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 last_state_transition_for_chain,
                 end_epoch,
             )
-                .run(),
+            .run(),
         );
 
         Ok(Streaming::new(receiver))
     }
 
-    async fn get_template(&self, request: Request<GetTemplateRequest>) -> Result<Response<GetTemplateResponse>, RpcStatus> {
+    async fn sync_template(
+        &self,
+        request: Request<SyncTemplateRequest>,
+    ) -> Result<Response<SyncTemplateResponse>, RpcStatus> {
         let req = request.into_message();
         let template_address = TemplateAddress::try_from(req.address)
             .map_err(|error| RpcStatus::bad_request(format!("Invalid template address: {}", error)))?;
         match self.template_manager.get_template(template_address).await {
             Ok(template) => match template.executable {
-                TemplateExecutable::CompiledWasm(binary) => {
-                    Ok(Response::new(
-                        GetTemplateResponse {
-                            binary,
-                            template_type: TemplateType::Wasm.into(),
-                        }
-                    ))
-                }
-                TemplateExecutable::Manifest(manifest) => {
-                    Ok(Response::new(
-                        GetTemplateResponse {
-                            binary: manifest.into_bytes(),
-                            template_type: TemplateType::Manifest.into(),
-                        }
-                    ))
-                }
-                TemplateExecutable::Flow(flow) => {
-                    Ok(Response::new(
-                        GetTemplateResponse {
-                            binary: flow.into_bytes(),
-                            template_type: TemplateType::Flow.into(),
-                        }
-                    ))
-                }
+                TemplateExecutable::CompiledWasm(binary) => Ok(Response::new(SyncTemplateResponse {
+                    author_public_key: template.metadata.author_public_key.to_vec(),
+                    binary,
+                    template_type: TemplateType::Wasm.into(),
+                })),
+                TemplateExecutable::Manifest(manifest) => Ok(Response::new(SyncTemplateResponse {
+                    author_public_key: template.metadata.author_public_key.to_vec(),
+                    binary: manifest.into_bytes(),
+                    template_type: TemplateType::Manifest.into(),
+                })),
+                TemplateExecutable::Flow(flow) => Ok(Response::new(SyncTemplateResponse {
+                    author_public_key: template.metadata.author_public_key.to_vec(),
+                    binary: flow.into_bytes(),
+                    template_type: TemplateType::Flow.into(),
+                })),
                 // this case won't happen as there is no DB type for downloadable WASM
-                TemplateExecutable::DownloadableWasm(_, _) => {
-                    Err(RpcStatus::not_implemented("Unsupported type!"))
-                }
-            }
+                TemplateExecutable::DownloadableWasm(_, _) => Err(RpcStatus::not_implemented("Unsupported type!")),
+            },
             Err(error) => match error {
-                TemplateManagerError::TemplateNotFound { address } => {
-                    Err(RpcStatus::not_found(format!("Template not found: {}", address).as_str()))
-                }
-                TemplateManagerError::TemplateUnavailable => {
-                    Err(RpcStatus::not_found(format!("Template unavailable: {}", template_address.to_string()).as_str()))
-                }
-                _ => {
-                    Err(RpcStatus::general(format!("General error: {}", error).as_str()))
-                }
-            }
+                TemplateManagerError::TemplateNotFound { address } => Err(RpcStatus::not_found(
+                    format!("Template not found: {}", address).as_str(),
+                )),
+                TemplateManagerError::TemplateUnavailable => Err(RpcStatus::not_found(
+                    format!("Template unavailable: {}", template_address.to_string()).as_str(),
+                )),
+                _ => Err(RpcStatus::general(format!("General error: {}", error).as_str())),
+            },
         }
     }
 }

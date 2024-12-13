@@ -3,7 +3,7 @@
 
 use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_common_types::{Epoch, NodeHeight, VersionedSubstateIdError};
+use tari_dan_common_types::{Epoch, NodeHeight, TemplateSyncRequest, VersionedSubstateIdError};
 use tari_dan_storage::{
     consensus_models::{BlockError, BlockId, LeafBlock, LockedBlock, QcId, TransactionPoolError},
     StorageError,
@@ -11,7 +11,7 @@ use tari_dan_storage::{
 use tari_epoch_manager::EpochManagerError;
 use tari_state_tree::StateTreeError;
 use tari_transaction::TransactionId;
-use tokio::task::JoinError;
+use tokio::{sync::broadcast::error::SendError, task::JoinError};
 
 use crate::{
     hotstuff::substate_store::SubstateStoreError,
@@ -106,6 +106,8 @@ pub enum HotStuffError {
     },
     #[error("Block building error: {0}")]
     BlockBuildingError(#[from] BlockError),
+    #[error("Failed to send template address to sync: {0}")]
+    TemplateSyncSend(#[from] SendError<TemplateSyncRequest>),
 }
 
 impl From<EpochManagerError> for HotStuffError {

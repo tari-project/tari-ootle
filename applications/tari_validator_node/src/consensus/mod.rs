@@ -11,7 +11,7 @@ use tari_dan_app_utilities::{
     template_manager::implementation::TemplateManager,
     transaction_executor::TariDanTransactionProcessor,
 };
-use tari_dan_common_types::PeerAddress;
+use tari_dan_common_types::{PeerAddress, TemplateSyncRequest};
 use tari_dan_storage::consensus_models::TransactionPool;
 use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncManager;
@@ -75,6 +75,7 @@ pub async fn spawn(
     >,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
+    tx_template_sync: broadcast::Sender<TemplateSyncRequest>,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
@@ -101,6 +102,7 @@ pub async fn spawn(
         transaction_executor,
         tx_hotstuff_events.clone(),
         hooks,
+        tx_template_sync,
         shutdown_signal.clone(),
     );
     let current_view = hotstuff_worker.pacemaker().current_view().clone();

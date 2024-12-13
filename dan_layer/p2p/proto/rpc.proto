@@ -267,11 +267,12 @@ enum TemplateType {
   Flow = 2;
 }
 
-message GetTemplateRequest {
+message SyncTemplateRequest {
   bytes address = 1;
 }
 
-message GetTemplateResponse {
-  bytes binary = 1;
+message SyncTemplateResponse {
+  bytes author_public_key = 1;
   TemplateType template_type = 2;
+  bytes binary = 3;
 }

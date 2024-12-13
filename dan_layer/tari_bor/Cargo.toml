@@ -11,8 +11,8 @@ license.workspace = true
 ciborium = { workspace = true }
 ciborium-io = { workspace = true }
 serde = { workspace = true, default-features = false, features = [
-  "alloc",
-  "derive",
+    "alloc",
+    "derive",
 ] }
 
 [dev-dependencies]

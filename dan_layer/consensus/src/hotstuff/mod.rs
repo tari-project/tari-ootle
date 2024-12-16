@@ -29,14 +29,15 @@ mod pacemaker;
 mod pacemaker_handle;
 mod state_machine;
 pub mod substate_store;
+mod template_sync;
 mod transaction_manager;
 mod vote_collector;
 mod worker;
-
 pub use common::*;
 pub use config::HotstuffConfig;
 pub use current_view::*;
 pub use error::*;
 pub use event::*;
 pub use state_machine::*;
+pub use template_sync::*;
 pub use worker::*;

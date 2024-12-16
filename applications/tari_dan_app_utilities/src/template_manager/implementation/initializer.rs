@@ -20,8 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_dan_common_types::{NodeAddressable, TemplateSyncRequest};
+use tari_dan_common_types::{NodeAddressable, PeerAddress, TemplateSyncRequest};
+use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_shutdown::ShutdownSignal;
+use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
     sync::{broadcast, mpsc},
     task::JoinHandle,
@@ -32,6 +34,8 @@ use crate::template_manager::interface::TemplateManagerHandle;
 
 pub fn spawn<TAddr: NodeAddressable + 'static>(
     manager: TemplateManager<TAddr>,
+    epoch_manager: EpochManagerHandle<PeerAddress>,
+    client_factory: TariValidatorNodeRpcClientFactory,
     rx_template_sync: broadcast::Receiver<TemplateSyncRequest>,
     shutdown: ShutdownSignal,
 ) -> (TemplateManagerHandle, JoinHandle<anyhow::Result<()>>) {
@@ -44,9 +48,11 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
     let join_handle = TemplateManagerService::spawn(
         rx_request,
         manager,
+        epoch_manager,
         tx_download_queue,
         rx_completed_downloads,
         rx_template_sync,
+        client_factory,
         shutdown,
     );
     TemplateDownloadWorker::new(rx_download_queue, tx_completed_downloads).spawn();

@@ -252,12 +252,19 @@ pub async fn spawn_services(
     }
     handles.push(epoch_manager_join_handle);
 
+    let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
+
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
     let (tx_template_sync, rx_template_sync) = broadcast::channel::<TemplateSyncRequest>(100);
     let template_manager = TemplateManager::initialize(global_db.clone(), config.validator_node.templates.clone())?;
-    let (template_manager_service, join_handle) =
-        template_manager::implementation::spawn(template_manager.clone(), rx_template_sync, shutdown.clone());
+    let (template_manager_service, join_handle) = template_manager::implementation::spawn(
+        template_manager.clone(),
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        rx_template_sync,
+        shutdown.clone(),
+    );
     handles.push(join_handle);
 
     info!(target: LOG_TARGET, "Payload processor initializing");
@@ -316,7 +323,6 @@ pub async fn spawn_services(
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
 
-    let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
     let signing_service = consensus::TariSignatureService::new(keypair.clone());
     let (consensus_join_handle, consensus_handle) = consensus::spawn(
         config.network,
@@ -391,6 +397,7 @@ pub async fn spawn_services(
         config,
         &mut networking,
         epoch_manager.clone(),
+        template_manager_service.clone(),
         state_store.clone(),
         mempool.clone(),
         virtual_substate_manager,
@@ -498,6 +505,7 @@ async fn spawn_p2p_rpc(
     config: &ApplicationConfig,
     networking: &mut NetworkingHandle<TariMessagingSpec>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
+    template_manager: TemplateManagerHandle,
     shard_store_store: SqliteStateStore<PeerAddress>,
     mempool: MempoolHandle,
     virtual_substate_manager: VirtualSubstateManager<SqliteStateStore<PeerAddress>, EpochManagerHandle<PeerAddress>>,
@@ -509,6 +517,7 @@ async fn spawn_p2p_rpc(
         .finish()
         .add_service(create_tari_validator_node_rpc_service(
             epoch_manager,
+            template_manager,
             shard_store_store,
             mempool,
             virtual_substate_manager,

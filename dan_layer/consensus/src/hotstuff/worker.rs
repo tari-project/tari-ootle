@@ -46,6 +46,7 @@ use super::{
     calculate_last_dummy_block,
     config::HotstuffConfig,
     on_receive_new_transaction::OnReceiveNewTransaction,
+    sync_templates,
     ProposalValidationError,
 };
 use crate::{
@@ -142,7 +143,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             config: config.clone(),
             tx_events: tx_events.clone(),
-            tx_template_sync,
+            tx_template_sync: tx_template_sync.clone(),
             rx_new_transactions,
             rx_missing_transactions,
 
@@ -200,6 +201,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 transaction_pool.clone(),
                 transaction_executor.clone(),
                 tx_missing_transactions,
+                tx_template_sync.clone(),
             ),
             on_propose: OnPropose::new(
                 config,
@@ -501,7 +503,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         self.hooks.on_transaction_ready(transaction.id());
 
-        self.sync_templates(&transaction).await?;
+        sync_templates(self.tx_template_sync.clone(), &transaction).await?;
 
         if self
             .check_if_block_can_be_unparked(
@@ -521,23 +523,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         // able.
         if num_pending_txs == 0 {
             self.pacemaker.beat();
-        }
-
-        Ok(())
-    }
-
-    /// Sends all inputs of the transaction where the input is a template to template manager,
-    /// so it can do synchronization if needed.
-    async fn sync_templates(&self, transaction: &TransactionRecord) -> Result<(), HotStuffError> {
-        if let Some(inputs) = &transaction.resolved_inputs {
-            for versioned_substate_id in inputs {
-                if matches!(versioned_substate_id.substate_id(), SubstateId::Template(_)) {
-                    self.tx_template_sync.send(TemplateSyncRequest::new(
-                        versioned_substate_id.substate_id().clone(),
-                        versioned_substate_id.version(),
-                    ))?;
-                }
-            }
         }
 
         Ok(())

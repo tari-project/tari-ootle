@@ -1,20 +1,22 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::mpsc::SendError;
+
 use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_common_types::{Epoch, NodeHeight, TemplateSyncRequest, VersionedSubstateIdError};
+use tari_dan_common_types::{Epoch, NodeHeight, VersionedSubstateIdError};
 use tari_dan_storage::{
-    consensus_models::{BlockError, BlockId, LeafBlock, LockedBlock, QcId, TransactionPoolError},
+    consensus_models::{BlockError, BlockId, LeafBlock, LockedBlock, QcId, TransactionPoolError, TransactionRecord},
     StorageError,
 };
 use tari_epoch_manager::EpochManagerError;
 use tari_state_tree::StateTreeError;
 use tari_transaction::TransactionId;
-use tokio::{sync::broadcast::error::SendError, task::JoinError};
+use tokio::task::JoinError;
 
 use crate::{
-    hotstuff::substate_store::SubstateStoreError,
+    hotstuff::{substate_store::SubstateStoreError, TemplateSyncError},
     traits::{InboundMessagingError, OutboundMessagingError},
 };
 
@@ -106,8 +108,10 @@ pub enum HotStuffError {
     },
     #[error("Block building error: {0}")]
     BlockBuildingError(#[from] BlockError),
-    #[error("Failed to send template address to sync: {0}")]
-    TemplateSyncSend(#[from] SendError<TemplateSyncRequest>),
+    #[error("Template sync error: {0}")]
+    TemplateSync(#[from] TemplateSyncError),
+    #[error("Transaction templates sync send error: {0}")]
+    TransactionTemplateSyncSend(#[from] SendError<TransactionRecord>),
 }
 
 impl From<EpochManagerError> for HotStuffError {

@@ -2,17 +2,17 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, Epoch};
+use tari_dan_common_types::{committee::CommitteeInfo, Epoch, TemplateSyncRequest};
 use tari_dan_storage::{
     consensus_models::{TransactionPool, TransactionRecord},
     StateStore,
 };
 use tari_engine_types::commit_result::RejectReason;
 use tari_transaction::TransactionId;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::{
-    hotstuff::error::HotStuffError,
+    hotstuff::{error::HotStuffError, sync_templates},
     messages::MissingTransactionsResponse,
     tracing::TraceTimer,
     traits::{BlockTransactionExecutor, ConsensusSpec},
@@ -25,6 +25,7 @@ pub struct OnReceiveNewTransaction<TConsensusSpec: ConsensusSpec> {
     transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
     executor: TConsensusSpec::TransactionExecutor,
     tx_missing_transactions: mpsc::UnboundedSender<Vec<TransactionId>>,
+    tx_template_sync: broadcast::Sender<TemplateSyncRequest>,
 }
 
 impl<TConsensusSpec> OnReceiveNewTransaction<TConsensusSpec>
@@ -35,12 +36,14 @@ where TConsensusSpec: ConsensusSpec
         transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
         executor: TConsensusSpec::TransactionExecutor,
         tx_missing_transactions: mpsc::UnboundedSender<Vec<TransactionId>>,
+        tx_template_sync: broadcast::Sender<TemplateSyncRequest>,
     ) -> Self {
         Self {
             store,
             transaction_pool,
             executor,
             tx_missing_transactions,
+            tx_template_sync,
         }
     }
 
@@ -53,13 +56,28 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<(), HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveRequestedTransactions");
         info!(target: LOG_TARGET, "Receiving {} requested transactions for block {} from {:?}", msg.transactions.len(), msg.block_id, from);
+
+        // send transactions to check for templates to be synced
+        let template_sync_sender = self.tx_template_sync.clone();
+        let (tx_template_sync, rx_template_sync) = std::sync::mpsc::channel::<TransactionRecord>();
+        tokio::spawn(async move {
+            while let Ok(tx) = rx_template_sync.recv() {
+                if let Err(error) = sync_templates(template_sync_sender.clone(), &tx).await {
+                    error!(target: LOG_TARGET, "Failed to sync templates from transaction: {error:?}");
+                }
+            }
+        });
+
         self.store.with_write_tx(|tx| {
             let recs = TransactionRecord::get_any_or_build(&**tx, msg.transactions)?;
             let mut batch = Vec::with_capacity(recs.len());
+            let tx_template_sync = tx_template_sync.clone();
             for transaction in recs {
                 if let Some(transaction_and_is_ready) =
                     self.validate_new_transaction(tx, current_epoch, transaction, local_committee_info)?
                 {
+                    // trigger any template download if needed before putting into tx pool
+                    tx_template_sync.send(transaction_and_is_ready.0.clone())?;
                     batch.push(transaction_and_is_ready);
                 }
             }

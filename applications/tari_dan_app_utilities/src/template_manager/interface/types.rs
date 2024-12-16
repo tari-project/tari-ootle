@@ -75,6 +75,7 @@ impl From<DbTemplate> for Template {
                 address: record.template_address,
                 // TODO: add field to db
                 binary_sha: FixedHash::zero(),
+                author_public_key: record.author_public_key,
             },
             executable: match record.template_type {
                 DbTemplateType::Wasm => TemplateExecutable::CompiledWasm(record.compiled_code.unwrap()),

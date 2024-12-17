@@ -41,7 +41,11 @@ use tari_dan_p2p::proto::{
     rpc::{SyncTemplateResponse, TemplateType},
 };
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
-use tari_engine_types::{calculate_template_binary_hash, substate::SubstateId};
+use tari_engine_types::{
+    calculate_template_binary_hash,
+    published_template::PublishedTemplateAddress,
+    substate::SubstateId,
+};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::RpcError;
 use tari_shutdown::ShutdownSignal;
@@ -175,17 +179,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
     ) -> Result<(), TemplateManagerServiceError> {
         info!(target: LOG_TARGET, "New template sync request: {req:?}"); // TODO: remove, only for testing
 
-        // converting to template address from substate ID
-        let template_address =
-            req.substate_id()
-                .substate_id
-                .as_template()
-                .ok_or(TemplateManagerServiceError::InvalidSubstateId(
-                    "Substate ID is not a template ID!",
-                ))?;
-        let template_address = TemplateAddress::from(template_address.as_hash());
-
-        info!(target: LOG_TARGET, "New template to sync: {template_address}"); // TODO: remove, only for testing
+        let template_address = req.address();
 
         // we have the template stored already, so no need to do anything with it
         if self.manager.template_exists(&template_address)? {
@@ -200,7 +194,10 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
             .epoch_manager
             .get_committee_for_substate(
                 self.epoch_manager.current_epoch().await?,
-                SubstateAddress::from_substate_id(&req.substate_id().substate_id, req.substate_id().version),
+                SubstateAddress::from_substate_id(
+                    &SubstateId::from(PublishedTemplateAddress::from_hash(req.address())),
+                    0,
+                ), // TODO: get version somehow
             )
             .await?;
         owner_committee.shuffle();

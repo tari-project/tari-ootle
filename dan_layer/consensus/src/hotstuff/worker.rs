@@ -503,6 +503,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         self.hooks.on_transaction_ready(transaction.id());
 
+        info!(
+            target: LOG_TARGET,
+            "🔥 checking tx for templates: {} ({} pending)",
+            transaction.id(),
+            num_pending_txs,
+        );
         sync_templates(self.tx_template_sync.clone(), &transaction).await?;
 
         if self

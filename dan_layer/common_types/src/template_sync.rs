@@ -1,25 +1,21 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::substate::SubstateId;
-
-use crate::VersionedSubstateId;
+use tari_template_lib::models::TemplateAddress;
 
 /// A request for a template to be downloaded from another shard group that owns it.
 #[derive(Debug, Clone)]
 pub struct TemplateSyncRequest {
-    /// Versioned substate ID parsed from a transaction input.
-    substate_id: VersionedSubstateId,
+    /// Address of the template to sync.
+    address: TemplateAddress,
 }
 
 impl TemplateSyncRequest {
-    pub fn new(substate_id: SubstateId, version: u32) -> Self {
-        Self {
-            substate_id: VersionedSubstateId::new(substate_id, version),
-        }
+    pub fn new(address: TemplateAddress) -> Self {
+        Self { address }
     }
 
-    pub fn substate_id(&self) -> &VersionedSubstateId {
-        &self.substate_id
+    pub fn address(&self) -> TemplateAddress {
+        self.address
     }
 }

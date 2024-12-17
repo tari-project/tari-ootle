@@ -1,10 +1,13 @@
 // Copyright 2024 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use log::info;
 use tari_dan_common_types::TemplateSyncRequest;
 use tari_dan_storage::consensus_models::TransactionRecord;
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{commit_result::TransactionResult, instruction::Instruction, substate::SubstateId};
 use tokio::sync::{broadcast, broadcast::error::SendError};
+
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::worker";
 
 #[derive(Debug, thiserror::Error)]
 pub enum TemplateSyncError {
@@ -18,14 +21,12 @@ pub async fn sync_templates(
     tx_template_sync: broadcast::Sender<TemplateSyncRequest>,
     transaction: &TransactionRecord,
 ) -> Result<(), TemplateSyncError> {
-    if let Some(inputs) = &transaction.resolved_inputs {
-        for versioned_substate_id in inputs {
-            if matches!(versioned_substate_id.substate_id(), SubstateId::Template(_)) {
-                tx_template_sync.send(TemplateSyncRequest::new(
-                    versioned_substate_id.substate_id().clone(),
-                    versioned_substate_id.version(),
-                ))?;
-            }
+    info!(target: LOG_TARGET, "Start template sync for {transaction:?}"); // TODO: remove, only for testing
+
+    // check for instructions
+    for instruction in transaction.transaction.instructions() {
+        if let Instruction::CallFunction { template_address, .. } = instruction {
+            tx_template_sync.send(TemplateSyncRequest::new(*template_address))?;
         }
     }
 

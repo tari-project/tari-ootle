@@ -25,7 +25,9 @@ pub async fn sync_templates(
 
     // check for instructions
     for instruction in transaction.transaction.instructions() {
+        info!(target: LOG_TARGET, "Current instruction: {instruction:?}..."); // TODO: remove, only for testing
         if let Instruction::CallFunction { template_address, .. } = instruction {
+            info!(target: LOG_TARGET, "Template sync checking for {template_address}..."); // TODO: remove, only for testing
             tx_template_sync.send(TemplateSyncRequest::new(*template_address))?;
         }
     }

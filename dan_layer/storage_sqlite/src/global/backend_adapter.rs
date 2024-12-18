@@ -69,6 +69,7 @@ use tari_engine_types::TemplateAddress;
 use tari_utilities::ByteArray;
 
 use super::{models, models::DbValidatorNode};
+use crate::global::schema::templates::template_type;
 use crate::{
     error::SqliteStorageError,
     global::{
@@ -334,6 +335,9 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         template: DbTemplateUpdate,
     ) -> Result<(), Self::Error> {
         let model = TemplateUpdateModel {
+            author_public_key: template.author_public_key.map(|hash| hash.to_vec()),
+            expected_hash: template.expected_hash.map(|hash| hash.to_vec()),
+            template_type: template.template_type.map(|tmpl_type| tmpl_type.as_str().to_string()),
             compiled_code: template.compiled_code,
             flow_json: template.flow_json,
             manifest: template.manifest,
@@ -467,13 +471,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             "SELECT COUNT(distinct public_key) as cnt FROM validator_nodes WHERE start_epoch <= ? AND (end_epoch IS \
              NULL OR end_epoch > ?)",
         )
-        .bind::<BigInt, _>(epoch.as_u64() as i64)
-        .bind::<BigInt, _>(epoch.as_u64() as i64)
-        .get_result::<Count>(tx.connection())
-        .map_err(|source| SqliteStorageError::DieselError {
-            source,
-            operation: "count_validator_nodes".to_string(),
-        })?;
+            .bind::<BigInt, _>(epoch.as_u64() as i64)
+            .bind::<BigInt, _>(epoch.as_u64() as i64)
+            .get_result::<Count>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "count_validator_nodes".to_string(),
+            })?;
 
         Ok(count.cnt as u64)
     }

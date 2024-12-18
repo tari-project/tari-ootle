@@ -167,10 +167,10 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 TemplateExecutable::CompiledWasm(wasm) => {
                     let binary = fs::read(dbg_replacement).expect("Could not read debug file");
                     *wasm = binary;
-                },
+                }
                 TemplateExecutable::Flow(_) => {
                     todo!("debug replacements for flow templates not implemented");
-                },
+                }
                 _ => return Err(TemplateManagerError::TemplateUnavailable),
             }
 
@@ -190,6 +190,24 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         templates.append(&mut builtin_metadata);
 
         Ok(templates)
+    }
+
+    pub(super) fn add_pending_template(
+        &self,
+        template_address: tari_engine_types::TemplateAddress,
+    ) -> Result<(), TemplateManagerError> {
+        let template = DbTemplate::empty_pending(template_address);
+
+        let mut tx = self.global_db.create_transaction()?;
+        let mut templates_db = self.global_db.templates(&mut tx);
+        match templates_db.get_template(&template.template_address)? {
+            Some(_) => templates_db.update_template(&template.template_address, DbTemplateUpdate::status(TemplateStatus::Pending))?,
+            None => templates_db.insert_template(template)?,
+        }
+
+        tx.commit()?;
+
+        Ok(())
     }
 
     pub(super) fn add_template(
@@ -218,22 +236,22 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 template_hash = TemplateHash::Hash(template_hasher32().chain(binary.as_slice()).result());
                 compiled_code = Some(binary);
                 template_name = loaded_template.template_name().to_string();
-            },
+            }
             TemplateExecutable::Manifest(curr_manifest) => {
                 template_hash = TemplateHash::Hash(template_hasher32().chain(curr_manifest.as_str()).result());
                 manifest = Some(curr_manifest);
                 template_type = DbTemplateType::Manifest;
-            },
+            }
             TemplateExecutable::Flow(curr_flow_json) => {
                 template_hash = TemplateHash::Hash(template_hasher32().chain(curr_flow_json.as_str()).result());
                 flow_json = Some(curr_flow_json);
                 template_type = DbTemplateType::Flow;
-            },
+            }
             TemplateExecutable::DownloadableWasm(url, hash) => {
                 template_url = Some(url.to_string());
                 template_type = DbTemplateType::Wasm;
                 template_hash = TemplateHash::FixedHash(hash);
-            },
+            }
         }
 
         let template = DbTemplate {
@@ -316,17 +334,17 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
             TemplateExecutable::CompiledWasm(wasm) => {
                 let module = WasmModule::from_code(wasm);
                 module.load_template()?
-            },
+            }
             TemplateExecutable::Manifest(_) => return Err(TemplateManagerError::UnsupportedTemplateType),
             TemplateExecutable::Flow(flow_json) => {
                 let definition: FlowFunctionDefinition = serde_json::from_str(&flow_json)?;
                 let factory = FlowFactory::try_create::<Self>(definition)?;
                 LoadedTemplate::Flow(factory)
-            },
+            }
             TemplateExecutable::DownloadableWasm(_, _) => {
                 // impossible case, since there is no separate downloadable wasm type in DB level
                 return Err(Self::Error::UnsupportedTemplateType);
-            },
+            }
         };
 
         self.cache.insert(*address, loaded.clone());

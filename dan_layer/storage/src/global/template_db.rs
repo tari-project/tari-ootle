@@ -22,7 +22,7 @@
 
 use std::str::FromStr;
 
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use tari_common_types::types::FixedHash;
 use tari_engine_types::TemplateAddress;
 
@@ -78,12 +78,66 @@ pub struct DbTemplate {
     pub added_at: NaiveDateTime,
 }
 
+impl DbTemplate {
+    pub fn empty_pending(template_address: TemplateAddress) -> Self {
+        Self {
+            author_public_key: FixedHash::zero(),
+            template_name: String::new(),
+            template_address,
+            expected_hash: FixedHash::zero(),
+            status: TemplateStatus::Pending,
+            compiled_code: None,
+            added_at: Utc::now().naive_utc(),
+            template_type: DbTemplateType::Wasm,
+            flow_json: None,
+            manifest: None,
+            url: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DbTemplateUpdate {
+    pub author_public_key: Option<FixedHash>,
+    pub expected_hash: Option<FixedHash>,
+    pub template_type: Option<DbTemplateType>,
     pub compiled_code: Option<Vec<u8>>,
     pub flow_json: Option<String>,
     pub manifest: Option<String>,
     pub status: Option<TemplateStatus>,
+}
+
+impl DbTemplateUpdate {
+    pub fn status(status: TemplateStatus) -> Self {
+        Self {
+            author_public_key: None,
+            expected_hash: None,
+            template_type: None,
+            compiled_code: None,
+            flow_json: None,
+            manifest: None,
+            status: Some(status),
+        }
+    }
+
+    // TODO: continue
+    pub fn template(
+        author_public_key: FixedHash,
+        template_type: DbTemplateType,
+        compiled_code: Option<Vec<u8>>,
+        flow_json: Option<String>,
+        manifest: Option<String>,
+    ) -> Self {
+        Self {
+            author_public_key: None,
+            expected_hash: None,
+            template_type: None,
+            compiled_code: None,
+            flow_json: None,
+            manifest: None,
+            status: Some(status),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

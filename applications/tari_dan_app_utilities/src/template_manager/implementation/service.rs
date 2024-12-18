@@ -181,6 +181,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
 
         let template_address = req.address();
 
+        // TODO: check template status
         // we have the template stored already, so no need to do anything with it
         if self.manager.template_exists(&template_address)? {
             warn!(target: LOG_TARGET, "We have the template: {template_address}"); // TODO: remove, only for testing
@@ -188,6 +189,9 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         }
 
         warn!(target: LOG_TARGET, "We dont have the template({template_address}), let sync!"); // TODO: remove, only for testing
+
+        // add new template as pending
+        self.manager.add_pending_template(template_address)?;
 
         // sync
         let mut owner_committee = self
@@ -201,9 +205,6 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
             )
             .await?;
         owner_committee.shuffle();
-
-        // add new template as pending
-        self.manager.add_pending_template(template_address)?;
 
         // start a task to not block other calls
         // TODO: handle result of spawned task, if failed, send again the same TemplateSyncRequest

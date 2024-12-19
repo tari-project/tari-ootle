@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tari_engine_types::TemplateAddress;
@@ -29,6 +29,7 @@ use tari_engine_types::TemplateAddress;
 pub struct TemplateConfig {
     max_cache_size_bytes: u64,
     debug_replacements: Vec<String>,
+    pending_templates_wait_timeout: Duration,
 }
 
 impl Default for TemplateConfig {
@@ -36,6 +37,7 @@ impl Default for TemplateConfig {
         Self {
             max_cache_size_bytes: 200 * 1024 * 1024,
             debug_replacements: Vec::new(),
+            pending_templates_wait_timeout: Duration::from_secs(30),
         }
     }
 }
@@ -53,5 +55,9 @@ impl TemplateConfig {
 
     pub fn max_cache_size_bytes(&self) -> u64 {
         self.max_cache_size_bytes
+    }
+
+    pub fn pending_templates_wait_timeout(&self) -> Duration {
+        self.pending_templates_wait_timeout
     }
 }

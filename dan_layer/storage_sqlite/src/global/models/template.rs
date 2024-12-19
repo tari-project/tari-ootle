@@ -61,6 +61,7 @@ pub struct TemplateUpdateModel {
     pub author_public_key: Option<Vec<u8>>,
     pub expected_hash: Option<Vec<u8>>,
     pub template_type: Option<String>,
+    pub template_name: Option<String>,
     pub compiled_code: Option<Vec<u8>>,
     pub flow_json: Option<String>,
     pub manifest: Option<String>,

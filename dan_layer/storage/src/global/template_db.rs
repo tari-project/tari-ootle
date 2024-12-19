@@ -58,8 +58,8 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
         self.backend.update_template(self.tx, key, update)
     }
 
-    pub fn template_exists(&mut self, key: &[u8]) -> Result<bool, TGlobalDbAdapter::Error> {
-        self.backend.template_exists(self.tx, key)
+    pub fn template_exists(&mut self, key: &[u8], status: TemplateStatus) -> Result<bool, TGlobalDbAdapter::Error> {
+        self.backend.template_exists(self.tx, key, status)
     }
 }
 
@@ -100,6 +100,7 @@ impl DbTemplate {
 pub struct DbTemplateUpdate {
     pub author_public_key: Option<FixedHash>,
     pub expected_hash: Option<FixedHash>,
+    pub template_name: Option<String>,
     pub template_type: Option<DbTemplateType>,
     pub compiled_code: Option<Vec<u8>>,
     pub flow_json: Option<String>,
@@ -112,6 +113,7 @@ impl DbTemplateUpdate {
         Self {
             author_public_key: None,
             expected_hash: None,
+            template_name: None,
             template_type: None,
             compiled_code: None,
             flow_json: None,
@@ -120,22 +122,24 @@ impl DbTemplateUpdate {
         }
     }
 
-    // TODO: continue
     pub fn template(
         author_public_key: FixedHash,
+        expected_hash: Option<FixedHash>,
+        template_name: String,
         template_type: DbTemplateType,
         compiled_code: Option<Vec<u8>>,
         flow_json: Option<String>,
         manifest: Option<String>,
     ) -> Self {
         Self {
-            author_public_key: None,
-            expected_hash: None,
-            template_type: None,
-            compiled_code: None,
-            flow_json: None,
-            manifest: None,
-            status: Some(status),
+            author_public_key: Some(author_public_key),
+            expected_hash,
+            template_name: Some(template_name),
+            template_type: Some(template_type),
+            compiled_code,
+            flow_json,
+            manifest,
+            status: Some(TemplateStatus::Active),
         }
     }
 }

@@ -274,5 +274,6 @@ message SyncTemplateRequest {
 message SyncTemplateResponse {
   bytes author_public_key = 1;
   TemplateType template_type = 2;
-  bytes binary = 3;
+  string template_name = 3;
+  bytes binary = 4;
 }

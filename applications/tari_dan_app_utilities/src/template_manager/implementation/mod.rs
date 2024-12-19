@@ -26,7 +26,8 @@ mod initializer;
 pub use initializer::spawn;
 
 mod manager;
-pub use manager::TemplateManager;
+pub use manager::{TemplateManager, TemplateResult};
+
 mod service;
 
 mod cmap_semaphore;

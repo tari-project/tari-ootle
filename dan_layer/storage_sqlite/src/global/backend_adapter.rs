@@ -30,9 +30,10 @@ use std::{
 
 use diesel::{
     sql_query,
-    sql_types::{BigInt, Bigint},
+    sql_types::{BigInt, Bigint, Text},
     BoolExpressionMethods,
     ExpressionMethods,
+    IntoSql,
     JoinOnDsl,
     OptionalExtension,
     QueryDsl,
@@ -69,7 +70,6 @@ use tari_engine_types::TemplateAddress;
 use tari_utilities::ByteArray;
 
 use super::{models, models::DbValidatorNode};
-use crate::global::schema::templates::template_type;
 use crate::{
     error::SqliteStorageError,
     global::{
@@ -82,7 +82,7 @@ use crate::{
             TemplateModel,
             TemplateUpdateModel,
         },
-        schema::templates,
+        schema::{templates, templates::template_type},
         serialization::serialize_json,
     },
     SqliteTransaction,
@@ -338,6 +338,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             author_public_key: template.author_public_key.map(|hash| hash.to_vec()),
             expected_hash: template.expected_hash.map(|hash| hash.to_vec()),
             template_type: template.template_type.map(|tmpl_type| tmpl_type.as_str().to_string()),
+            template_name: template.template_name,
             compiled_code: template.compiled_code,
             flow_json: template.flow_json,
             manifest: template.manifest,
@@ -355,10 +356,16 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(())
     }
 
-    fn template_exists(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8]) -> Result<bool, Self::Error> {
+    fn template_exists(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        key: &[u8],
+        status: TemplateStatus,
+    ) -> Result<bool, Self::Error> {
         use crate::global::schema::templates::dsl;
-        let result = dsl::templates
+        let mut result = dsl::templates
             .filter(templates::template_address.eq(key))
+            .filter(templates::status.eq(status.as_str()))
             .count()
             .limit(1)
             .get_result::<i64>(tx.connection())
@@ -471,13 +478,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             "SELECT COUNT(distinct public_key) as cnt FROM validator_nodes WHERE start_epoch <= ? AND (end_epoch IS \
              NULL OR end_epoch > ?)",
         )
-            .bind::<BigInt, _>(epoch.as_u64() as i64)
-            .bind::<BigInt, _>(epoch.as_u64() as i64)
-            .get_result::<Count>(tx.connection())
-            .map_err(|source| SqliteStorageError::DieselError {
-                source,
-                operation: "count_validator_nodes".to_string(),
-            })?;
+        .bind::<BigInt, _>(epoch.as_u64() as i64)
+        .bind::<BigInt, _>(epoch.as_u64() as i64)
+        .get_result::<Count>(tx.connection())
+        .map_err(|source| SqliteStorageError::DieselError {
+            source,
+            operation: "count_validator_nodes".to_string(),
+        })?;
 
         Ok(count.cnt as u64)
     }

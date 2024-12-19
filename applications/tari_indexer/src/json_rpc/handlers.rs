@@ -37,7 +37,10 @@ use tari_dan_app_utilities::{
     json_encoding::{encode_finalize_result_into_json, encode_finalized_result_into_json},
     keypair::RistrettoKeypair,
     substate_file_cache::SubstateFileCache,
-    template_manager::{implementation::TemplateManager, interface::TemplateExecutable},
+    template_manager::{
+        implementation::{TemplateManager, TemplateResult},
+        interface::{TemplateExecutable, TemplateManagerError},
+    },
 };
 use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
@@ -578,10 +581,15 @@ impl JsonRpcHandlers {
     pub async fn get_template_definition(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let request: GetTemplateDefinitionRequest = value.parse_params()?;
-        let template = self
+        let template_result = self
             .template_manager
             .fetch_template(&request.template_address)
             .map_err(|e| Self::internal_error(answer_id, e))?;
+        let TemplateResult::Template(template) = template_result else {
+            return Err(
+                Self::internal_error(answer_id, TemplateManagerError::TemplateUnavailable)
+            );
+        };
         let template = match template.executable {
             TemplateExecutable::CompiledWasm(code) => WasmModule::from_code(code)
                 .load_template()

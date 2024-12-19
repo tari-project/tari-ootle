@@ -419,16 +419,19 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                     author_public_key: template.metadata.author_public_key.to_vec(),
                     binary,
                     template_type: TemplateType::Wasm.into(),
+                    template_name: template.metadata.name,
                 })),
                 TemplateExecutable::Manifest(manifest) => Ok(Response::new(SyncTemplateResponse {
                     author_public_key: template.metadata.author_public_key.to_vec(),
                     binary: manifest.into_bytes(),
                     template_type: TemplateType::Manifest.into(),
+                    template_name: template.metadata.name,
                 })),
                 TemplateExecutable::Flow(flow) => Ok(Response::new(SyncTemplateResponse {
                     author_public_key: template.metadata.author_public_key.to_vec(),
                     binary: flow.into_bytes(),
                     template_type: TemplateType::Flow.into(),
+                    template_name: template.metadata.name,
                 })),
                 // this case won't happen as there is no DB type for downloadable WASM
                 TemplateExecutable::DownloadableWasm(_, _) => Err(RpcStatus::not_implemented("Unsupported type!")),

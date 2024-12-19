@@ -26,7 +26,7 @@
 use std::{string::FromUtf8Error, sync::Arc};
 
 use log::*;
-use tari_common_types::types::PublicKey;
+use tari_common_types::types::{FixedHash, FixedHashSizeError, PublicKey};
 use tari_crypto::tari_utilities::{ByteArray, ByteArrayError};
 use tari_dan_common_types::{
     services::template_provider::TemplateProvider,
@@ -35,7 +35,7 @@ use tari_dan_common_types::{
     SubstateAddress,
     TemplateSyncRequest,
 };
-use tari_dan_engine::function_definitions::FlowFunctionDefinition;
+use tari_dan_engine::{function_definitions::FlowFunctionDefinition, wasm::WasmModule};
 use tari_dan_p2p::proto::{
     rpc as proto,
     rpc::{SyncTemplateResponse, TemplateType},
@@ -43,6 +43,7 @@ use tari_dan_p2p::proto::{
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_engine_types::{
     calculate_template_binary_hash,
+    hashing::template_hasher32,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
@@ -66,7 +67,10 @@ use super::{
     downloader::{DownloadRequest, DownloadResult},
     TemplateManager,
 };
-use crate::template_manager::interface::{TemplateExecutable, TemplateManagerError, TemplateManagerRequest};
+use crate::template_manager::{
+    implementation::manager::TemplateResult,
+    interface::{TemplateExecutable, TemplateManagerError, TemplateManagerRequest},
+};
 
 const LOG_TARGET: &str = "tari::template_manager";
 
@@ -86,6 +90,8 @@ pub enum TemplateManagerServiceError {
     ByteArray(ByteArrayError),
     #[error("UTF-8 bytes to string conversion error: {0}")]
     BytesUtf8Conversion(#[from] FromUtf8Error),
+    #[error("Fixed hash conversion error: {0}")]
+    FixedHashConversion(#[from] FixedHashSizeError),
 }
 
 pub struct TemplateManagerService<TAddr> {
@@ -119,8 +125,8 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                 rx_template_sync,
                 client_factory: Arc::new(client_factory),
             }
-                .run(shutdown)
-                .await?;
+            .run(shutdown)
+            .await?;
             Ok(())
         })
     }
@@ -181,9 +187,11 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
 
         let template_address = req.address();
 
-        // TODO: check template status
-        // we have the template stored already, so no need to do anything with it
-        if self.manager.template_exists(&template_address)? {
+        // we have the template stored already as active, so no need to do anything with it
+        if self
+            .manager
+            .template_exists(&template_address, TemplateStatus::Active)?
+        {
             warn!(target: LOG_TARGET, "We have the template: {template_address}"); // TODO: remove, only for testing
             return Ok(());
         }
@@ -223,51 +231,54 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                         {
                             Ok(resp) => {
                                 // TODO: have a proof that this template was added before truly and validate here
-
-                                // TODO: continue
+                                let mut compiled_code = None;
+                                let mut flow_json = None;
+                                let mut manifest = None;
+                                let template_type: DbTemplateType;
+                                let bin_hash = FixedHash::from(
+                                    template_hasher32().chain(resp.binary.as_slice()).result().into_array(),
+                                );
+                                match resp.template_type() {
+                                    TemplateType::Wasm => {
+                                        compiled_code = Some(resp.binary);
+                                        template_type = DbTemplateType::Wasm;
+                                    },
+                                    TemplateType::Manifest => {
+                                        manifest = Some(String::from_utf8(resp.binary)?);
+                                        template_type = DbTemplateType::Manifest;
+                                    },
+                                    TemplateType::Flow => {
+                                        flow_json = Some(String::from_utf8(resp.binary)?);
+                                        template_type = DbTemplateType::Flow;
+                                    },
+                                }
                                 if let Err(error) = template_manager.update_template(
                                     template_address,
-                                    DbTemplateUpdate {
-                                        author_public_key: None,
-                                        expected_hash: None,
-                                        template_type: None,
-                                        compiled_code: None,
-                                        flow_json: None,
-                                        manifest: None,
-                                        status: None,
-                                    },
+                                    DbTemplateUpdate::template(
+                                        FixedHash::try_from(resp.author_public_key.to_vec())?,
+                                        Some(bin_hash),
+                                        resp.template_name,
+                                        template_type,
+                                        compiled_code,
+                                        flow_json,
+                                        manifest,
+                                    ),
                                 ) {
                                     error!(target: LOG_TARGET, "Failed to add new template: {error:?}");
                                     return Err(TemplateManagerServiceError::TemplateManager(error));
                                 }
-                                // if let Err(error) = template_manager.add_template(
-                                //     PublicKey::from_canonical_bytes(resp.author_public_key.as_slice())
-                                //         .map_err(TemplateManagerServiceError::ByteArray)?,
-                                //     template_address,
-                                //     match resp.template_type() {
-                                //         TemplateType::Wasm => TemplateExecutable::CompiledWasm(resp.binary),
-                                //         TemplateType::Manifest => {
-                                //             TemplateExecutable::Manifest(String::from_utf8(resp.binary)?)
-                                //         }
-                                //         TemplateType::Flow => TemplateExecutable::Flow(String::from_utf8(resp.binary)?),
-                                //     },
-                                //     None,
-                                //     Some(TemplateStatus::Active),
-                                // ) {
-                                //     error!(target: LOG_TARGET, "Failed to add new template: {error:?}");
-                                //     return Err(TemplateManagerServiceError::TemplateManager(error));
-                                // }
+
                                 warn!(target: LOG_TARGET, "✅ Template synced successfully: {}", template_address); // TODO: change to info!
                                 break;
-                            }
+                            },
                             Err(error) => {
                                 warn!(target: LOG_TARGET, "Failed to sync template from VN at address {:?}: {error:?}", addr);
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(error) => {
                         warn!(target: LOG_TARGET, "Failed to obtain connection to VN at address {:?}: {error:?}", addr);
-                    }
+                    },
                 }
             }
 
@@ -302,10 +313,14 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                     self.handle_add_template(author_public_key, template_address, template, template_name)
                         .await,
                 );
-            }
-            GetTemplate { address, reply } => {
-                handle(reply, self.manager.fetch_template(&address));
-            }
+            },
+            GetTemplate { address, reply } => match self.manager.fetch_template(&address) {
+                Ok(result) => match result {
+                    TemplateResult::Template(template) => handle(reply, Ok(*template)),
+                    TemplateResult::PendingTemplate => handle(reply, Err(TemplateManagerError::TemplateUnavailable)),
+                },
+                Err(error) => handle(reply, Err(error)),
+            },
             GetTemplates { limit, reply } => handle(reply, self.manager.fetch_template_metadata(limit)),
             LoadTemplateAbi { address, reply } => handle(reply, self.handle_load_template_abi(address)),
         }
@@ -383,7 +398,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                                     target: LOG_TARGET,
                                     "⚠️ Template {} is not valid json: {}", download.template_address, e
                                 );
-                            }
+                            },
                         };
 
                         DbTemplateUpdate {
@@ -391,11 +406,11 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                             status: Some(status),
                             ..Default::default()
                         }
-                    }
+                    },
                     DbTemplateType::Manifest => todo!(),
                 };
                 self.manager.update_template(download.template_address, update)?;
-            }
+            },
             Err(err) => {
                 warn!(target: LOG_TARGET, "🚨 Failed to download template: {}", err);
                 self.manager
@@ -403,7 +418,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                         status: Some(TemplateStatus::DownloadFailed),
                         ..Default::default()
                     })?;
-            }
+            },
         }
         Ok(())
     }

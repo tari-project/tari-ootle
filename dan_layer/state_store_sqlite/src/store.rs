@@ -13,7 +13,8 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use log::log;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
-use tari_dan_storage::{StateStore, StorageError};
+use tari_dan_storage::{StateStore, StateStoreReadTransaction, StorageError};
+use tari_engine_types::substate::SubstateId;
 
 use crate::{
     error::SqliteStorageError,
@@ -69,14 +70,24 @@ impl<TAddr> fmt::Debug for SqliteStateStore<TAddr> {
     }
 }
 
+impl<TAddr: NodeAddressable + Serialize + DeserializeOwned> crate::SubstateStore for SqliteStateStore<TAddr> {
+    fn get_latest_version(&self, substate_id: &SubstateId) -> Result<u32, StorageError> {
+        let mut tx = self.create_read_tx()?;
+        let (version, _) = tx.substates_get_max_version_for_substate(substate_id)?;
+        Ok(version)
+    }
+}
+
 impl<TAddr: NodeAddressable + Serialize + DeserializeOwned> StateStore for SqliteStateStore<TAddr> {
     type Addr = TAddr;
     type ReadTransaction<'a>
-        = SqliteStateStoreReadTransaction<'a, Self::Addr>
-    where TAddr: 'a;
+    = SqliteStateStoreReadTransaction<'a, Self::Addr>
+    where
+        TAddr: 'a;
     type WriteTransaction<'a>
-        = SqliteStateStoreWriteTransaction<'a, Self::Addr>
-    where TAddr: 'a;
+    = SqliteStateStoreWriteTransaction<'a, Self::Addr>
+    where
+        TAddr: 'a;
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
         let tx = SqliteTransaction::begin(self.connection.lock().unwrap())?;

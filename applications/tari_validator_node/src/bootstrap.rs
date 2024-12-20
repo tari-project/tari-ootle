@@ -263,6 +263,7 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         rx_template_sync,
+        state_store.clone(),
         shutdown.clone(),
     );
     handles.push(join_handle);

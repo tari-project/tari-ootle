@@ -150,6 +150,7 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         rx_template_sync,
+        substate_store.clone(),
         shutdown.clone(),
     );
 

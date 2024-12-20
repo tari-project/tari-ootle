@@ -92,6 +92,11 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
         }
         Ok(substate.into_substate())
     }
+
+    fn get_latest_version(&self, substate_id: &SubstateId) -> Result<u32, Self::Error> {
+        let (version, _) = SubstateRecord::get_latest_version(self.read_transaction(), substate_id)?;
+        Ok(version)
+    }
 }
 
 impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingSubstateStore<'a, 'tx, TStore> {

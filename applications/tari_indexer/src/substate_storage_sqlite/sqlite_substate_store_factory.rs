@@ -40,7 +40,10 @@ use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::*;
 use tari_crypto::tari_utilities::hex::to_hex;
 use tari_dan_common_types::{substate_type::SubstateType, Epoch, ShardGroup};
-use tari_dan_storage::{consensus_models::BlockId, StorageError};
+use tari_dan_storage::{
+    consensus_models::{BlockId, SubstateRecord},
+    StorageError,
+};
 use tari_dan_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::types::ListSubstateItem;
@@ -132,6 +135,18 @@ pub trait SubstateStore {
         let mut tx = self.create_read_tx()?;
         let ret = f(&mut tx)?;
         Ok(ret)
+    }
+}
+
+impl tari_state_store_sqlite::SubstateStore for SqliteSubstateStore {
+    fn get_latest_version(&self, substate_id: &SubstateId) -> Result<u32, StorageError> {
+        let mut tx = self.create_read_tx()?;
+        tx.get_latest_version_for_substate(substate_id)?
+            .map(|version| version as u32)
+            .ok_or(StorageError::NotFound {
+                item: "substate",
+                key: substate_id.to_string(),
+            })
     }
 }
 

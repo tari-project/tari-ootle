@@ -32,11 +32,12 @@ use tokio::{
 use super::{downloader::TemplateDownloadWorker, service::TemplateManagerService, TemplateManager};
 use crate::template_manager::interface::TemplateManagerHandle;
 
-pub fn spawn<TAddr: NodeAddressable + 'static>(
+pub fn spawn<TAddr: NodeAddressable + 'static, S: tari_state_store_sqlite::SubstateStore + Send + Sync + 'static>(
     manager: TemplateManager<TAddr>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_factory: TariValidatorNodeRpcClientFactory,
     rx_template_sync: broadcast::Receiver<TemplateSyncRequest>,
+    state_store: S,
     shutdown: ShutdownSignal,
 ) -> (TemplateManagerHandle, JoinHandle<anyhow::Result<()>>) {
     let (tx_request, rx_request) = mpsc::channel(1);
@@ -53,6 +54,7 @@ pub fn spawn<TAddr: NodeAddressable + 'static>(
         rx_completed_downloads,
         rx_template_sync,
         client_factory,
+        state_store,
         shutdown,
     );
     TemplateDownloadWorker::new(rx_download_queue, tx_completed_downloads).spawn();

@@ -9,6 +9,8 @@ mod sql_models;
 mod sqlite_transaction;
 mod store;
 // mod tree_store;
+mod substate;
 mod writer;
 
 pub use store::SqliteStateStore;
+pub use substate::SubstateStore;

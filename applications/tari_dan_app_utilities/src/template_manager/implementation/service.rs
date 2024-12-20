@@ -27,6 +27,7 @@ use std::{string::FromUtf8Error, sync::Arc};
 
 use log::*;
 use tari_common_types::types::{FixedHash, FixedHashSizeError, PublicKey};
+use tari_consensus::traits::{ReadableSubstateStore, SubstateStore};
 use tari_crypto::tari_utilities::{ByteArray, ByteArrayError};
 use tari_dan_common_types::{
     services::template_provider::TemplateProvider,
@@ -40,7 +41,12 @@ use tari_dan_p2p::proto::{
     rpc as proto,
     rpc::{SyncTemplateResponse, TemplateType},
 };
-use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
+use tari_dan_storage::{
+    consensus_models::SubstateRecord,
+    global::{DbTemplateType, DbTemplateUpdate, TemplateStatus},
+    StateStore,
+    StorageError,
+};
 use tari_engine_types::{
     calculate_template_binary_hash,
     hashing::template_hasher32,
@@ -50,6 +56,7 @@ use tari_engine_types::{
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::RpcError;
 use tari_shutdown::ShutdownSignal;
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::{models::TemplateAddress, Hash};
 use tari_validator_node_client::types::{ArgDef, FunctionDef, TemplateAbi};
 use tari_validator_node_rpc::{
@@ -59,7 +66,7 @@ use tari_validator_node_rpc::{
 };
 use thiserror::Error;
 use tokio::{
-    sync::{broadcast, mpsc, mpsc::Receiver, oneshot},
+    sync::{broadcast, mpsc, mpsc::Receiver, oneshot, Mutex},
     task::JoinHandle,
 };
 
@@ -80,21 +87,19 @@ pub enum TemplateManagerServiceError {
     TemplateManager(#[from] TemplateManagerError),
     #[error("Epoch manager error: {0}")]
     EpochManager(#[from] EpochManagerError),
-    #[error("Invalid substate ID: {0}")]
-    InvalidSubstateId(&'static str),
     #[error("VN RPC client error: {0}")]
     VnRpcClient(#[from] ValidatorNodeRpcClientError),
     #[error("RPC error: {0}")]
     Rpc(#[from] RpcError),
-    #[error("Byte array error: {0}")]
-    ByteArray(ByteArrayError),
     #[error("UTF-8 bytes to string conversion error: {0}")]
     BytesUtf8Conversion(#[from] FromUtf8Error),
     #[error("Fixed hash conversion error: {0}")]
     FixedHashConversion(#[from] FixedHashSizeError),
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
 }
 
-pub struct TemplateManagerService<TAddr> {
+pub struct TemplateManagerService<TAddr, S> {
     rx_request: Receiver<TemplateManagerRequest>,
     manager: TemplateManager<TAddr>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
@@ -102,9 +107,12 @@ pub struct TemplateManagerService<TAddr> {
     download_queue: mpsc::Sender<DownloadRequest>,
     rx_template_sync: broadcast::Receiver<TemplateSyncRequest>,
     client_factory: Arc<TariValidatorNodeRpcClientFactory>,
+    state_store: S,
 }
 
-impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
+impl<TAddr: NodeAddressable + 'static, S: tari_state_store_sqlite::SubstateStore + Send + Sync + 'static>
+    TemplateManagerService<TAddr, S>
+{
     pub fn spawn(
         rx_request: Receiver<TemplateManagerRequest>,
         manager: TemplateManager<TAddr>,
@@ -113,6 +121,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         completed_downloads: mpsc::Receiver<DownloadResult>,
         rx_template_sync: broadcast::Receiver<TemplateSyncRequest>,
         client_factory: TariValidatorNodeRpcClientFactory,
+        state_store: S,
         shutdown: ShutdownSignal,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {
@@ -124,6 +133,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                 completed_downloads,
                 rx_template_sync,
                 client_factory: Arc::new(client_factory),
+                state_store,
             }
             .run(shutdown)
             .await?;
@@ -179,10 +189,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
 
     /// Handles request to check if a template by address (substate ID and version) is present locally or needs syncing.
     /// If needs syncing, just does it.
-    async fn handle_template_sync_request(
-        &mut self,
-        req: TemplateSyncRequest,
-    ) -> Result<(), TemplateManagerServiceError> {
+    async fn handle_template_sync_request(&self, req: TemplateSyncRequest) -> Result<(), TemplateManagerServiceError> {
         warn!(target: LOG_TARGET, "New template sync request: {req:?}"); // TODO: remove, only for testing
 
         let template_address = req.address();
@@ -202,14 +209,13 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         self.manager.add_pending_template(template_address)?;
 
         // sync
+        let substate_id = SubstateId::from(PublishedTemplateAddress::from_hash(req.address()));
+        let version = self.state_store.get_latest_version(&substate_id).unwrap_or(0);
         let mut owner_committee = self
             .epoch_manager
             .get_committee_for_substate(
                 self.epoch_manager.current_epoch().await?,
-                SubstateAddress::from_substate_id(
-                    &SubstateId::from(PublishedTemplateAddress::from_hash(req.address())),
-                    0,
-                ), // TODO: get version somehow
+                SubstateAddress::from_substate_id(&substate_id, version),
             )
             .await?;
         owner_committee.shuffle();

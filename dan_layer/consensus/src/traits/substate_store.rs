@@ -6,7 +6,7 @@ use tari_dan_storage::{
     consensus_models::{SubstateChange, SubstateRecord},
     StateStoreReadTransaction,
 };
-use tari_engine_types::substate::{Substate, SubstateDiff};
+use tari_engine_types::substate::{Substate, SubstateDiff, SubstateId};
 use tari_transaction::TransactionId;
 
 use crate::hotstuff::substate_store::SubstateStoreError;
@@ -15,6 +15,8 @@ pub trait ReadableSubstateStore {
     type Error;
 
     fn get(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, Self::Error>;
+
+    fn get_latest_version(&self, substate_id: &SubstateId) -> Result<u32, Self::Error>;
 }
 
 pub trait WriteableSubstateStore: ReadableSubstateStore {
@@ -33,5 +35,10 @@ impl<T: StateStoreReadTransaction> ReadableSubstateStore for &T {
     fn get(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, Self::Error> {
         let substate = SubstateRecord::get(*self, &id.to_substate_address())?;
         Ok(substate.into_substate())
+    }
+
+    fn get_latest_version(&self, substate_id: &SubstateId) -> Result<u32, Self::Error> {
+        let (version, _) = SubstateRecord::get_latest_version(*self, substate_id)?;
+        Ok(version)
     }
 }

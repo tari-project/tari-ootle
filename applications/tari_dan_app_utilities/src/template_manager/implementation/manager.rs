@@ -25,6 +25,7 @@ use std::{
     convert::TryFrom,
     fs,
     sync::Arc,
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -369,6 +370,8 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
                     if let Some(TemplateResult::Template(fetched_template)) = self.fetch_template(address).optional()? {
                         template = Some(fetched_template);
                     }
+                    // sleeping here to not overload the local database while waiting for the template to be ready
+                    thread::sleep(std::time::Duration::from_millis(100));
                 }
                 debug!(target: LOG_TARGET, "Failed to fetch template {} within {:?}", address, self.config.pending_templates_wait_timeout());
                 template.ok_or(Self::Error::TemplateUnavailable)?

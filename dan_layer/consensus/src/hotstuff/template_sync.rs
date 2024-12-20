@@ -23,6 +23,8 @@ pub async fn sync_templates(
 ) -> Result<(), TemplateSyncError> {
     info!(target: LOG_TARGET, "Start template sync for {transaction:?}"); // TODO: remove, only for testing
 
+    // TODO: check method call as well if it works or needs syncing too
+
     // check for instructions
     for instruction in transaction.transaction.instructions() {
         info!(target: LOG_TARGET, "Current instruction: {instruction:?}..."); // TODO: remove, only for testing

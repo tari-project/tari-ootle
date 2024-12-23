@@ -865,7 +865,7 @@ impl<'a> Deref for SqliteSubstateStoreWriteTransaction<'a> {
     }
 }
 
-impl<'a> DerefMut for SqliteSubstateStoreWriteTransaction<'a> {
+impl DerefMut for SqliteSubstateStoreWriteTransaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.transaction.as_mut().unwrap()
     }

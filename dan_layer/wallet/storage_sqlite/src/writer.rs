@@ -935,7 +935,7 @@ impl<'a> Deref for WriteTransaction<'a> {
     }
 }
 
-impl<'a> DerefMut for WriteTransaction<'a> {
+impl DerefMut for WriteTransaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.transaction
     }

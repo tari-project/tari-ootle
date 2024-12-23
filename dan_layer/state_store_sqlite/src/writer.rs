@@ -832,6 +832,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             transactions::abort_details.eq(tx_rec.abort_reason().map(serialize_json).transpose()?),
             transactions::min_epoch.eq(transaction.min_epoch().map(|e| e.as_u64() as i64)),
             transactions::max_epoch.eq(transaction.max_epoch().map(|e| e.as_u64() as i64)),
+            transactions::schema_version.eq(transaction.schema_version() as i64),
         );
 
         diesel::insert_into(transactions::table)

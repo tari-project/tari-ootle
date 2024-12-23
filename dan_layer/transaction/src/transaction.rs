@@ -8,15 +8,16 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_dan_common_types::{committee::CommitteeInfo, Epoch, SubstateRequirement, VersionedSubstateId};
-use tari_engine_types::{
-    hashing::{hasher32, EngineHashDomainLabel},
-    indexed_value::{IndexedValue, IndexedValueError},
-    instruction::Instruction,
-    substate::SubstateId,
-};
+use tari_engine_types::{indexed_value::IndexedValueError, instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{models::ComponentAddress, Hash};
 
-use crate::{builder::TransactionBuilder, transaction_id::TransactionId, TransactionSignature, UnsignedTransaction};
+use crate::{
+    builder::TransactionBuilder,
+    transaction_id::TransactionId,
+    v1::TransactionV1,
+    TransactionSignature,
+    UnsignedTransaction,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -24,14 +25,8 @@ use crate::{builder::TransactionBuilder, transaction_id::TransactionId, Transact
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct Transaction {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    id: TransactionId,
-    #[serde(flatten)]
-    transaction: UnsignedTransaction,
-    signatures: Vec<TransactionSignature>,
-    /// Inputs filled by some authority. These are not part of the transaction hash nor the signature
-    filled_inputs: IndexSet<VersionedSubstateId>,
+pub enum Transaction {
+    V1(TransactionV1),
 }
 
 impl Transaction {
@@ -40,80 +35,80 @@ impl Transaction {
     }
 
     pub fn new(unsigned_transaction: UnsignedTransaction, signatures: Vec<TransactionSignature>) -> Self {
-        let mut tx = Self {
-            id: TransactionId::default(),
-            transaction: unsigned_transaction,
-            filled_inputs: IndexSet::new(),
-            signatures,
-        };
-        tx.id = tx.calculate_hash();
-        tx
+        Self::V1(TransactionV1::new(unsigned_transaction, signatures))
     }
 
-    pub fn sign(mut self, secret: &RistrettoSecretKey) -> Self {
-        let sig = TransactionSignature::sign(secret, &self.transaction);
-        self.signatures.push(sig);
-        self.id = self.calculate_hash();
-        self
+    pub fn sign(self, secret: &RistrettoSecretKey) -> Self {
+        match self {
+            Self::V1(tx) => Self::V1(tx.sign(secret)),
+        }
     }
 
     pub fn with_filled_inputs(self, filled_inputs: IndexSet<VersionedSubstateId>) -> Self {
-        Self { filled_inputs, ..self }
-    }
-
-    fn calculate_hash(&self) -> TransactionId {
-        hasher32(EngineHashDomainLabel::Transaction)
-            .chain(&self.signatures)
-            .chain(&self.transaction)
-            .result()
-            .into_array()
-            .into()
+        match self {
+            Self::V1(tx) => Self::V1(tx.with_filled_inputs(filled_inputs)),
+        }
     }
 
     pub fn id(&self) -> &TransactionId {
-        &self.id
+        match self {
+            Self::V1(tx) => tx.id(),
+        }
     }
 
     pub fn check_id(&self) -> bool {
-        let id = self.calculate_hash();
-        id == self.id
+        match self {
+            Self::V1(tx) => tx.check_id(),
+        }
     }
 
     pub fn unsigned_transaction(&self) -> &UnsignedTransaction {
-        &self.transaction
+        match self {
+            Self::V1(tx) => tx.unsigned_transaction(),
+        }
     }
 
     pub fn hash(&self) -> Hash {
-        self.id.into_array().into()
+        match self {
+            Self::V1(tx) => tx.hash(),
+        }
     }
 
     pub fn fee_instructions(&self) -> &[Instruction] {
-        &self.transaction.fee_instructions
+        match self {
+            Self::V1(tx) => tx.fee_instructions(),
+        }
     }
 
     pub fn instructions(&self) -> &[Instruction] {
-        &self.transaction.instructions
+        match self {
+            Self::V1(tx) => tx.instructions(),
+        }
     }
 
     pub fn signatures(&self) -> &[TransactionSignature] {
-        &self.signatures
+        match self {
+            Self::V1(tx) => tx.signatures(),
+        }
     }
 
     pub fn verify_all_signatures(&self) -> bool {
-        if self.signatures.is_empty() {
-            return false;
+        match self {
+            Self::V1(tx) => tx.verify_all_signatures(),
         }
-
-        self.signatures().iter().all(|sig| sig.verify(&self.transaction))
     }
 
     pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
-        &self.transaction.inputs
+        match self {
+            Self::V1(tx) => tx.inputs(),
+        }
     }
 
     /// Returns (fee instructions, instructions)
     pub fn into_instructions(self) -> (Vec<Instruction>, Vec<Instruction>) {
-        (self.transaction.fee_instructions, self.transaction.instructions)
+        match self {
+            Self::V1(tx) => tx.into_instructions(),
+        }
     }
 
     pub fn into_parts(
@@ -123,16 +118,15 @@ impl Transaction {
         Vec<TransactionSignature>,
         IndexSet<VersionedSubstateId>,
     ) {
-        (self.transaction, self.signatures, self.filled_inputs)
+        match self {
+            Self::V1(tx) => tx.into_parts(),
+        }
     }
 
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirement> + '_ {
-        self.inputs()
-            .iter()
-            // Filled inputs override other inputs as they are likely filled with versions
-            .filter(|i| self.filled_inputs().iter().all(|fi| fi.substate_id() != i.substate_id()))
-            .cloned()
-            .chain(self.filled_inputs().iter().cloned().map(Into::into))
+        match self {
+            Self::V1(tx) => tx.all_inputs_iter(),
+        }
     }
 
     pub fn all_inputs_substate_ids_iter(&self) -> impl Iterator<Item = &SubstateId> + '_ {
@@ -155,100 +149,65 @@ impl Transaction {
     }
 
     pub fn filled_inputs(&self) -> &IndexSet<VersionedSubstateId> {
-        &self.filled_inputs
+        match self {
+            Self::V1(tx) => tx.filled_inputs(),
+        }
     }
 
     pub fn filled_inputs_mut(&mut self) -> &mut IndexSet<VersionedSubstateId> {
-        &mut self.filled_inputs
+        match self {
+            Self::V1(tx) => tx.filled_inputs_mut(),
+        }
     }
 
     pub fn fee_claims(&self) -> impl Iterator<Item = (Epoch, PublicKey)> + '_ {
-        self.instructions()
-            .iter()
-            .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::ClaimValidatorFees {
-                    epoch,
-                    validator_public_key,
-                } = instruction
-                {
-                    Some((Epoch(*epoch), validator_public_key.clone()))
-                } else {
-                    None
-                }
-            })
+        match self {
+            Self::V1(tx) => tx.fee_claims(),
+        }
     }
 
     pub fn min_epoch(&self) -> Option<Epoch> {
-        self.transaction.min_epoch
+        match self {
+            Self::V1(tx) => tx.min_epoch(),
+        }
     }
 
     pub fn max_epoch(&self) -> Option<Epoch> {
-        self.transaction.max_epoch
+        match self {
+            Self::V1(tx) => tx.max_epoch(),
+        }
+    }
+
+    pub fn schema_version(&self) -> u64 {
+        match self {
+            Self::V1(_) => 1,
+        }
     }
 
     pub fn as_referenced_components(&self) -> impl Iterator<Item = &ComponentAddress> + '_ {
-        self.instructions()
-            .iter()
-            .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::CallMethod { component_address, .. } = instruction {
-                    Some(component_address)
-                } else {
-                    None
-                }
-            })
+        match self {
+            Self::V1(tx) => tx.as_referenced_components(),
+        }
     }
 
     /// Returns all substates addresses referenced by this transaction
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
-        let all_instructions = self.instructions().iter().chain(self.fee_instructions());
-
-        let mut substates = HashSet::new();
-        for instruction in all_instructions {
-            match instruction {
-                Instruction::CallFunction { args, .. } => {
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
-                        let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
-                    }
-                },
-                Instruction::CallMethod {
-                    component_address,
-                    args,
-                    ..
-                } => {
-                    substates.insert(SubstateId::Component(*component_address));
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
-                        let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
-                    }
-                },
-                Instruction::ClaimBurn { claim } => {
-                    substates.insert(SubstateId::UnclaimedConfidentialOutput(claim.output_address));
-                },
-                _ => {},
-            }
+        match self {
+            Self::V1(tx) => tx.to_referenced_substates(),
         }
-        Ok(substates)
     }
 
     pub fn has_inputs_without_version(&self) -> bool {
-        self.inputs().iter().any(|i| i.version().is_none())
+        match self {
+            Self::V1(tx) => tx.has_inputs_without_version(),
+        }
     }
 }
 
 impl Display for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Transaction[{}, Inputs: {}, Fee Instructions: {}, Instructions: {}, Signatures: {}, Filled Inputs: {}]",
-            self.id,
-            self.transaction.inputs.len(),
-            self.transaction.fee_instructions.len(),
-            self.transaction.instructions.len(),
-            self.signatures.len(),
-            self.filled_inputs.len(),
-        )
+        match self {
+            Transaction::V1(tx) => write!(f, "{tx}"),
+        }
     }
 }

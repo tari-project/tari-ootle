@@ -33,8 +33,6 @@ import type {
   AccountsGetBalancesResponse,
   AccountsListRequest,
   AccountsListResponse,
-  AuthGetAllJwtRequest,
-  AuthGetAllJwtResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -77,8 +75,14 @@ import type {
   TemplatesGetResponse,
   SubstatesListRequest,
   SubstatesListResponse,
-} from "@tari-project/typescript-bindings/wallet-daemon-client";
-import { AccountGetDefaultRequest, TemplatesGetRequest, WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
+} from "@tari-project/wallet_jrpc_client";
+import {
+  AccountGetDefaultRequest,
+  TemplatesGetRequest,
+  WalletDaemonClient,
+  AuthGetAllJwtResponse,
+  AuthGetAllJwtRequest,
+} from "@tari-project/wallet_jrpc_client";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;

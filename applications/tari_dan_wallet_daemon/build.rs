@@ -28,10 +28,12 @@ fn exit_on_ci() {
     }
 }
 
-const BUILD: &[(&str, &str)] = &[
-    ("../../bindings", "tsc"),
-    ("../../clients/javascript/wallet_daemon_client", "build"),
-    ("../tari_dan_wallet_web_ui", "build"),
+const BUILD: &[(&str, &[&str])] = &[
+    ("../../bindings", &["ci"]),
+    ("../../bindings", &["run", "tsc"]),
+    ("../../clients/javascript/wallet_daemon_client", &["ci"]),
+    ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
+    ("../tari_dan_wallet_web_ui", &["run", "build"]),
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,14 +47,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
-    for (target, build_cmd) in BUILD {
+    for (target, args) in BUILD {
         if let Err(error) = Command::new(npm).arg("ci").current_dir(target).status() {
             println!("cargo:warning='npm ci' error : {:?}", error);
             exit_on_ci();
+            break;
         }
-        match Command::new(npm).args(["run", build_cmd]).current_dir(target).output() {
+        match Command::new(npm).args(*args).current_dir(target).output() {
             Ok(output) if !output.status.success() => {
-                println!("cargo:warning='npm run build' exited with non-zero status code");
+                println!(
+                    "cargo:warning='npm {}' in {} exited with non-zero status code",
+                    args.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" "),
+                    target
+                );
+                println!("cargo:warning=Status: {}", output.status);
                 println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
                 println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
                 exit_on_ci();

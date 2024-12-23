@@ -34,8 +34,11 @@ import {
 } from "../../utils/json_rpc";
 import { apiError } from "../helpers/types";
 import queryClient from "../queryClient";
-import type { ComponentAccessRules, ConfidentialTransferInputSelection } from "@tari-project/typescript-bindings";
-import type { ComponentAddressOrName } from "@tari-project/typescript-bindings/wallet-daemon-client";
+import type {
+  ComponentAccessRules,
+  ConfidentialTransferInputSelection,
+  ComponentAddressOrName,
+} from "@tari-project/typescript-bindings";
 
 //   Fees are passed as strings because Amount is tagged
 export const useAccountsClaimBurn = (account: string, claimProof: string, fee: number) => {

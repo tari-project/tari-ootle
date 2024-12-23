@@ -289,6 +289,7 @@ create table transactions
     abort_details     text      NULL,
     min_epoch         BIGINT    NULL,
     max_epoch         BIGINT    NULL,
+    schema_version    BIGINT    NOT NULL,
     created_at        timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

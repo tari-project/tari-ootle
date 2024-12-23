@@ -31,13 +31,11 @@ import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
 import { useParams } from "react-router-dom";
 import { useAccountsGetBalances, useAccountsGet, useAccountNFTsList } from "../../api/hooks/useAccounts";
-import { renderJson, shortenString } from "../../utils/helpers";
+import { shortenString } from "../../utils/helpers";
 import { DataTableCell } from "../../Components/StyledComponents";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import { substateIdToString } from "@tari-project/typescript-bindings";
-import type { BalanceEntry } from "@tari-project/typescript-bindings/wallet-daemon-client";
-import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
+import { substateIdToString, BalanceEntry } from "@tari-project/typescript-bindings";
 import NFTList from "../../Components/NFTList";
 
 function BalanceRow(props: BalanceEntry) {

@@ -45,7 +45,7 @@ impl<'a, S, M> StateTree<'a, S, M> {
     }
 }
 
-impl<'a, S: TreeStoreReader<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'a, S, M> {
+impl<S: TreeStoreReader<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
     pub fn get_proof(
         &self,
         version: Version,
@@ -64,7 +64,7 @@ impl<'a, S: TreeStoreReader<Version>, M: DbKeyMapper<VersionedSubstateId>> State
     }
 }
 
-impl<'a, S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'a, S, M> {
+impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
     fn calculate_substate_changes<I: IntoIterator<Item = SubstateTreeChange>>(
         &mut self,
         current_version: Option<Version>,
@@ -103,7 +103,7 @@ impl<'a, S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'
     }
 }
 
-impl<'a, S: TreeStore<()>, M: DbKeyMapper<TreeHash>> StateTree<'a, S, M> {
+impl<S: TreeStore<()>, M: DbKeyMapper<TreeHash>> StateTree<'_, S, M> {
     pub fn put_changes<I: IntoIterator<Item = TreeHash>>(
         &mut self,
         current_version: Option<Version>,

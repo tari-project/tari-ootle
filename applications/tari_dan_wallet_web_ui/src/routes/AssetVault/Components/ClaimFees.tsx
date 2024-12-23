@@ -23,20 +23,18 @@
 import { useState } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
-import CheckBox from "@mui/material/Checkbox";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import FormControlLabel from "@mui/material/FormControlLabel";
 import Box from "@mui/material/Box";
-import { useAccountsList, useAccountsTransfer } from "../../../api/hooks/useAccounts";
+import { useAccountsList } from "../../../api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
 import { FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
 import { useKeysList } from "../../../api/hooks/useKeys";
 import { validatorsClaimFees } from "../../../utils/json_rpc";
-import type { AccountInfo } from "@tari-project/typescript-bindings/wallet-daemon-client";
+import type { AccountInfo } from "@tari-project/typescript-bindings";
 
 export default function ClaimFees() {
   const [open, setOpen] = useState(false);

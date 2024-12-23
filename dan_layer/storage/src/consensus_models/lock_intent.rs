@@ -121,7 +121,7 @@ impl LockIntent for VersionedSubstateIdLockIntent {
     }
 }
 
-impl<'a> LockIntent for &'a VersionedSubstateIdLockIntent {
+impl LockIntent for &VersionedSubstateIdLockIntent {
     fn substate_id(&self) -> &SubstateId {
         self.versioned_substate_id.substate_id()
     }
@@ -204,7 +204,7 @@ impl SubstateRequirementLockIntent {
     }
 }
 
-impl<'a> LockIntent for &'a SubstateRequirementLockIntent {
+impl LockIntent for &SubstateRequirementLockIntent {
     fn substate_id(&self) -> &SubstateId {
         self.substate_requirement.substate_id()
     }

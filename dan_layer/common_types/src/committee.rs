@@ -256,7 +256,7 @@ impl CommitteeInfo {
             .any(|substate_address| self.includes_substate_address(substate_address.borrow()))
     }
 
-    pub fn filter<'a, I, B>(&'a self, items: I) -> impl Iterator<Item = B> + '_
+    pub fn filter<'a, I, B>(&'a self, items: I) -> impl Iterator<Item = B> + 'a
     where
         I: IntoIterator<Item = B> + 'a,
         B: Borrow<SubstateAddress>,

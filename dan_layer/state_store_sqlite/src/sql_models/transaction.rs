@@ -30,6 +30,7 @@ pub struct Transaction {
     pub abort_details: Option<String>,
     pub min_epoch: Option<i64>,
     pub max_epoch: Option<i64>,
+    pub schema_version: i64,
     pub created_at: PrimitiveDateTime,
 }
 
@@ -37,6 +38,14 @@ impl TryFrom<Transaction> for tari_transaction::Transaction {
     type Error = StorageError;
 
     fn try_from(value: Transaction) -> Result<Self, Self::Error> {
+        if value.schema_version != 1 {
+            return Err(StorageError::DecodingError {
+                operation: "TryFrom<Transaction> for tari_transaction::Transaction",
+                item: "schema_version",
+                details: format!("Unsupported schema version: {}", value.schema_version),
+            });
+        }
+
         let fee_instructions = deserialize_json(&value.fee_instructions)?;
         let instructions = deserialize_json(&value.instructions)?;
         let signatures = deserialize_json(&value.signatures)?;

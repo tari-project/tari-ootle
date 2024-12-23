@@ -521,6 +521,7 @@ diesel::table! {
         abort_details -> Nullable<Text>,
         min_epoch -> Nullable<BigInt>,
         max_epoch -> Nullable<BigInt>,
+        schema_version -> BigInt,
         created_at -> Timestamp,
     }
 }

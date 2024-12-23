@@ -108,7 +108,7 @@ export default function TransactionDetails() {
     const handleDownload = () => {
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: "application/json" });
-      const filename = `tx-${data?.transaction?.id}.json` || "tx-unknown_id.json";
+      const filename = `tx-${data?.transaction?.V1?.id}.json` || "tx-unknown_id.json";
       saveAs(blob, filename);
     };
 
@@ -129,6 +129,8 @@ export default function TransactionDetails() {
       }
     };
 
+    const transaction = data.transaction.V1;
+
     if (data.status === "Rejected" || data.status === "InvalidTransaction") {
       return (
         <>
@@ -137,7 +139,7 @@ export default function TransactionDetails() {
               <TableBody>
                 <TableRow>
                   <TableCell>Transaction Hash</TableCell>
-                  <DataTableCell>{data.transaction.id}</DataTableCell>
+                  <DataTableCell>{transaction.id}</DataTableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell>Timestamp</TableCell>
@@ -177,7 +179,7 @@ export default function TransactionDetails() {
                 <TableBody>
                   <TableRow>
                     <TableCell>Transaction Hash</TableCell>
-                    <DataTableCell>{data.transaction.id}</DataTableCell>
+                    <DataTableCell>{transaction.id}</DataTableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>Timestamp</TableCell>
@@ -258,8 +260,8 @@ export default function TransactionDetails() {
               <Typography>Fee Instructions</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {data.transaction?.fee_instructions?.length ? (
-                <FeeInstructions data={data.transaction.fee_instructions} />
+              {transaction?.fee_instructions?.length ? (
+                <FeeInstructions data={transaction?.fee_instructions} />
               ) : (
                 <span>Empty</span>
               )}
@@ -270,8 +272,8 @@ export default function TransactionDetails() {
               <Typography>Instructions</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {data.transaction?.instructions?.length ? (
-                <Instructions data={data.transaction.instructions} />
+              {transaction?.instructions?.length ? (
+                <Instructions data={transaction.instructions} />
               ) : (
                 <span>Empty</span>
               )}
@@ -312,11 +314,11 @@ export default function TransactionDetails() {
               <Typography>Signers</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {data.transaction?.signatures?.length ? (
+              {transaction?.signatures?.length ? (
                 <TableContainer>
                   <Table>
                     <TableBody>
-                      {data.transaction.signatures.map((item: TransactionSignature, i: number) => {
+                      {transaction.signatures.map((item: TransactionSignature, i: number) => {
                         return (
                           <TableRow key={i}>
                             <DataTableCell>{item.public_key}</DataTableCell>

@@ -25,6 +25,7 @@ mod signature;
 mod transaction;
 mod transaction_id;
 mod unsigned_transaction;
+mod v1;
 
 pub use builder::TransactionBuilder;
 pub use signature::TransactionSignature;

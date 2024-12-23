@@ -61,7 +61,7 @@ export const renderJson = (json: any) => {
 
 export function toHexString(byteArray: any): string {
   if (Array.isArray(byteArray)) {
-    return Array.from(byteArray, function(byte) {
+    return Array.from(byteArray, function (byte) {
       return ("0" + (byte & 0xff).toString(16)).slice(-2);
     }).join("");
   }
@@ -110,11 +110,7 @@ export function shortenString(string: string | null | undefined, start: number =
   return string.substring(0, start) + "..." + string.slice(-end);
 }
 
-export function emptyRows(
-  page: number,
-  rowsPerPage: number,
-  array: Array<[Transaction, FinalizeResult | null, TransactionStatus, string]> | undefined,
-) {
+export function emptyRows(page: number, rowsPerPage: number, array: Array<any> | undefined) {
   if (array === undefined) {
     return 0;
   }

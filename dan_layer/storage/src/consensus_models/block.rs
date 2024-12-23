@@ -289,7 +289,7 @@ impl Block {
     pub fn all_transaction_ids_in_committee<'a>(
         &'a self,
         committee_info: &'a CommitteeInfo,
-    ) -> impl Iterator<Item = &TransactionId> + 'a {
+    ) -> impl Iterator<Item = &'a TransactionId> + 'a {
         self.commands
             .iter()
             .filter_map(|cmd| cmd.transaction())

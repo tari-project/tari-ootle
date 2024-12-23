@@ -51,7 +51,7 @@ impl<'s, S: TreeStoreReader<P>, P> StagedTreeStore<'s, S, P> {
     }
 }
 
-impl<'s, S: TreeStoreReader<P>, P: Clone> TreeStoreReader<P> for StagedTreeStore<'s, S, P> {
+impl<S: TreeStoreReader<P>, P: Clone> TreeStoreReader<P> for StagedTreeStore<'_, S, P> {
     fn get_node(&self, key: &NodeKey) -> Result<Node<P>, JmtStorageError> {
         if let Some(node) = self.new_tree_nodes.get(key).cloned() {
             return Ok(node);
@@ -64,7 +64,7 @@ impl<'s, S: TreeStoreReader<P>, P: Clone> TreeStoreReader<P> for StagedTreeStore
     }
 }
 
-impl<'s, S, P> TreeStoreWriter<P> for StagedTreeStore<'s, S, P> {
+impl<S, P> TreeStoreWriter<P> for StagedTreeStore<'_, S, P> {
     fn insert_node(&mut self, key: NodeKey, node: Node<P>) -> Result<(), JmtStorageError> {
         if self.new_tree_nodes.insert(key.clone(), node).is_some() {
             return Err(JmtStorageError::Conflict(key));

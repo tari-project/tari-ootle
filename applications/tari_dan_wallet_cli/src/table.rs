@@ -30,7 +30,7 @@ pub struct Table<'t, 's> {
     is_row_count_enabled: bool,
 }
 
-impl<'t, 's> Table<'t, 's> {
+impl<'t> Table<'t, '_> {
     pub fn new() -> Self {
         Self {
             titles: None,
@@ -141,7 +141,7 @@ impl<'t, 's> Table<'t, 's> {
     }
 }
 
-impl<'t, 's> Default for Table<'t, 's> {
+impl Default for Table<'_, '_> {
     fn default() -> Self {
         Self::new()
     }

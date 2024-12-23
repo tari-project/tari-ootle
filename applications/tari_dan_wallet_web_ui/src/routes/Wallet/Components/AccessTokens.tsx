@@ -220,7 +220,7 @@ export default function AccessTokens() {
               {data?.jwt
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map(({ id, name, permissions, exp }: Claims) => {
-                  const date = new Date(exp * 1000);
+                  const date = new Date(Number(exp * 1000n));
                   const formattedDate = `${date.toISOString().slice(0, 10)} ${date.toISOString().slice(11, 16)}`;
                   return (
                     <RowData key={id} id={id} name={name} permissions={permissions} formattedDate={formattedDate} />

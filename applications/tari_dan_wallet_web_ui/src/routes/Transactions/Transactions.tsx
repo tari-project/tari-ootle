@@ -77,40 +77,43 @@ export default function Transactions({ accountName }: { accountName: string }) {
             <TableBody>
               {data?.transactions
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                .map((t: [Transaction, FinalizeResult | null, TransactionStatus, string]) => {
-                  if (t?.[0]?.id !== undefined) {
-                    const hash = t[0].id;
-                    return (
-                      <TableRow key={hash}>
-                        <DataTableCell>
-                          <Link
-                            to={`/transactions/${hash}`}
-                            style={{
-                              textDecoration: "none",
-                              color: theme.palette.text.secondary,
-                            }}
-                          >
-                            {hash}
-                          </Link>
-                        </DataTableCell>
-                        <DataTableCell>
-                          <StatusChip status={t[2]} showTitle />
-                        </DataTableCell>
-                        <DataTableCell>{t?.[1]?.fee_receipt.total_fees_paid || 0}</DataTableCell>
-                        <DataTableCell>
-                          <IconButton
-                            component={Link}
-                            to={`/transactions/${hash}`}
-                            style={{
-                              color: theme.palette.text.secondary,
-                            }}
-                          >
-                            <ChevronRight />
-                          </IconButton>
-                        </DataTableCell>
-                      </TableRow>
-                    );
+                .map(([t, result, status, _s]: [Transaction, FinalizeResult | null, TransactionStatus, string]) => {
+                  const tx = t.V1;
+                  if (!tx?.id) {
+                    return <></>;
                   }
+
+                  const hash = tx.id;
+                  return (
+                    <TableRow key={hash}>
+                      <DataTableCell>
+                        <Link
+                          to={`/transactions/${hash}`}
+                          style={{
+                            textDecoration: "none",
+                            color: theme.palette.text.secondary,
+                          }}
+                        >
+                          {hash}
+                        </Link>
+                      </DataTableCell>
+                      <DataTableCell>
+                        <StatusChip status={status} showTitle />
+                      </DataTableCell>
+                      <DataTableCell>{result?.fee_receipt.total_fees_paid || 0}</DataTableCell>
+                      <DataTableCell>
+                        <IconButton
+                          component={Link}
+                          to={`/transactions/${hash}`}
+                          style={{
+                            color: theme.palette.text.secondary,
+                          }}
+                        >
+                          <ChevronRight />
+                        </IconButton>
+                      </DataTableCell>
+                    </TableRow>
+                  );
                 })}
               {emptyRows(page, rowsPerPage, data?.transactions) > 0 && (
                 <TableRow

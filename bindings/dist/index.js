@@ -114,6 +114,7 @@ export * from "./types/TransactionReceiptAddress";
 export * from "./types/TransactionResult";
 export * from "./types/TransactionSignature";
 export * from "./types/TransactionStatus";
+export * from "./types/TransactionV1";
 export * from "./types/Type";
 export * from "./types/UnclaimedConfidentialOutput";
 export * from "./types/UnclaimedConfidentialOutputAddress";

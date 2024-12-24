@@ -384,7 +384,8 @@ mod errors {
         match result.finalize.result.full_reject().unwrap() {
             RejectReason::ExecutionFailure(message) => {
                 assert!(message.starts_with(
-                    "Panic! failed to decode argument at position 0 for function 'please_pass_invalid_args':"
+                    "Panic! failed to decode argument at position 0 (tari_template_lib::models::amount::Amount) for \
+                     function 'please_pass_invalid_args':"
                 ),);
             },
             reason => panic!("Unexpected failure reason: {}", reason),

@@ -26,7 +26,7 @@ use anyhow::anyhow;
 use tari_bor::{decode_exact, encode};
 use tari_common_types::types::{Commitment, PrivateKey, PublicKey};
 use tari_crypto::{ristretto::RistrettoComSig, tari_utilities::ByteArray};
-use tari_dan_common_types::{Epoch, SubstateRequirement, VersionedSubstateId};
+use tari_dan_common_types::{SubstateRequirement, VersionedSubstateId};
 use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
     args::Arg,
@@ -43,7 +43,7 @@ use tari_template_lib::{
     },
     prelude::AccessRules,
 };
-use tari_transaction::{Transaction, UnsignedTransaction};
+use tari_transaction::Transaction;
 
 use crate::{
     proto::{
@@ -81,103 +81,76 @@ impl TryFrom<proto::transaction::NewTransactionMessage> for NewTransactionMessag
 impl TryFrom<proto::transaction::Transaction> for Transaction {
     type Error = anyhow::Error;
 
-    fn try_from(request: proto::transaction::Transaction) -> Result<Self, Self::Error> {
-        let signatures = request
-            .signatures
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-
-        let filled_inputs = request
-            .filled_inputs
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-
-        let transaction = Transaction::new(
-            request
-                .transaction
-                .map(TryInto::try_into)
-                .transpose()?
-                .ok_or_else(|| anyhow!("Unsigned transaction not provided"))?,
-            signatures,
-        )
-        .with_filled_inputs(filled_inputs);
-
-        Ok(transaction)
+    fn try_from(transaction: proto::transaction::Transaction) -> Result<Self, Self::Error> {
+        decode_exact(&transaction.bor_encoded).map_err(|e| anyhow!("tari_bor::decode failed for transaction: {}", e))
     }
 }
 
 impl From<&Transaction> for proto::transaction::Transaction {
     fn from(transaction: &Transaction) -> Self {
-        let signatures = transaction.signatures().iter().map(Into::into).collect();
-        let filled_inputs = transaction.filled_inputs().iter().map(Into::into).collect();
-
         proto::transaction::Transaction {
-            transaction: Some(transaction.unsigned_transaction().into()),
-            signatures,
-            filled_inputs,
+            bor_encoded: encode(transaction).expect("tari_bor::encode failed for transaction"),
         }
     }
 }
 
 //---------------------------------- UnsignedTransaction --------------------------------------------//
 
-impl TryFrom<proto::transaction::UnsignedTransaction> for UnsignedTransaction {
-    type Error = anyhow::Error;
-
-    fn try_from(request: proto::transaction::UnsignedTransaction) -> Result<Self, Self::Error> {
-        let instructions = request
-            .instructions
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let fee_instructions = request
-            .fee_instructions
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let inputs = request
-            .inputs
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-
-        let min_epoch = request.min_epoch.map(|epoch| Epoch(epoch.epoch));
-        let max_epoch = request.max_epoch.map(|epoch| Epoch(epoch.epoch));
-        Ok(Self {
-            fee_instructions,
-            instructions,
-            inputs,
-            min_epoch,
-            max_epoch,
-        })
-    }
-}
-
-impl From<&UnsignedTransaction> for proto::transaction::UnsignedTransaction {
-    fn from(transaction: &UnsignedTransaction) -> Self {
-        let inputs = transaction.inputs().iter().map(Into::into).collect();
-        let min_epoch = transaction
-            .min_epoch()
-            .map(|epoch| proto::common::Epoch { epoch: epoch.0 });
-        let max_epoch = transaction
-            .max_epoch()
-            .map(|epoch| proto::common::Epoch { epoch: epoch.0 });
-        let fee_instructions = transaction.fee_instructions().iter().cloned().map(Into::into).collect();
-        let instructions = transaction.instructions().iter().cloned().map(Into::into).collect();
-
-        proto::transaction::UnsignedTransaction {
-            fee_instructions,
-            instructions,
-            inputs,
-            min_epoch,
-            max_epoch,
-        }
-    }
-}
+// impl TryFrom<proto::transaction::UnsignedTransactionV1> for UnsignedTransactionV1 {
+//     type Error = anyhow::Error;
+//
+//     fn try_from(request: proto::transaction::UnsignedTransactionV1) -> Result<Self, Self::Error> {
+//         let instructions = request
+//             .instructions
+//             .into_iter()
+//             .map(TryInto::try_into)
+//             .collect::<Result<Vec<_>, _>>()?;
+//
+//         let fee_instructions = request
+//             .fee_instructions
+//             .into_iter()
+//             .map(TryInto::try_into)
+//             .collect::<Result<Vec<_>, _>>()?;
+//
+//         let inputs = request
+//             .inputs
+//             .into_iter()
+//             .map(TryInto::try_into)
+//             .collect::<Result<_, _>>()?;
+//
+//         let min_epoch = request.min_epoch.map(|epoch| Epoch(epoch.epoch));
+//         let max_epoch = request.max_epoch.map(|epoch| Epoch(epoch.epoch));
+//         Ok(Self {
+//             fee_instructions,
+//             instructions,
+//             inputs,
+//             min_epoch,
+//             max_epoch,
+//         })
+//     }
+// }
+//
+// impl From<&UnsignedTransactionV1> for proto::transaction::UnsignedTransaction {
+//     fn from(transaction: &UnsignedTransactionV1) -> Self {
+//         let inputs = transaction.inputs().iter().map(Into::into).collect();
+//         let min_epoch = transaction
+//             .min_epoch()
+//             .map(|epoch| proto::common::Epoch { epoch: epoch.0 });
+//         let max_epoch = transaction
+//             .max_epoch()
+//             .map(|epoch| proto::common::Epoch { epoch: epoch.0 });
+//         let fee_instructions = transaction.fee_instructions().iter().cloned().map(Into::into).collect();
+//         let instructions = transaction.instructions().iter().cloned().map(Into::into).collect();
+//
+//         proto::transaction::UnsignedTransaction {
+//             fee_instructions,
+//             instructions,
+//             inputs,
+//             min_epoch,
+//             max_epoch,
+//         }
+//     }
+// }
 
 // -------------------------------- Instruction -------------------------------- //
 

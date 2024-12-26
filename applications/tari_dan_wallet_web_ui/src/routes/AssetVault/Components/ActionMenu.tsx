@@ -28,6 +28,7 @@ import ClaimBurn from "./ClaimBurn";
 import useAccountStore from "../../../store/accountStore";
 import SendMoney from "./SendMoney";
 import ClaimFees from "./ClaimFees";
+import PublishTemplate from "./PublishTemplate";
 
 function ActionMenu() {
   const { mutate } = useAccountsCreateFreeTestCoins();
@@ -37,7 +38,7 @@ function ActionMenu() {
   const onClaimFreeCoins = () => {
     mutate({
       accountName: accountName,
-      amount: 200000,
+      amount: 1_000_000_000,
       fee: 1000,
     });
   };
@@ -56,6 +57,7 @@ function ActionMenu() {
         Claim Free Testnet Coins
       </Button>
       <ClaimBurn />
+      <PublishTemplate />
     </Box>
   );
 }

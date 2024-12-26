@@ -465,7 +465,7 @@ where
             builder = builder.drop_all_proofs_in_workspace();
         }
 
-        let transaction = builder.sign(&account_secret.key).build();
+        let transaction = builder.build_and_seal(&account_secret.key);
 
         self.outputs_api
             .proofs_set_transaction_hash(inputs_to_spend.proof_id, *transaction.id())?;

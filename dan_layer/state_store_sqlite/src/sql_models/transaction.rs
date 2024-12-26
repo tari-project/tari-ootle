@@ -3,25 +3,28 @@
 
 use std::str::FromStr;
 
-use diesel::Queryable;
+use diesel::{Queryable, Selectable};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::{consensus_models, consensus_models::Decision, StorageError};
-use tari_transaction::UnsignedTransaction;
+use tari_transaction::{UnsealedTransactionV1, UnsignedTransactionV1};
 use time::PrimitiveDateTime;
 
-use crate::serialization::deserialize_json;
+use crate::{schema::transactions, serialization::deserialize_json};
 
-#[derive(Debug, Clone, Queryable)]
+#[derive(Debug, Clone, Queryable, Selectable)]
 pub struct Transaction {
     pub id: i32,
+    pub network: i32,
     pub transaction_id: String,
     pub fee_instructions: String,
     pub instructions: String,
-    pub signatures: String,
     pub inputs: String,
     pub filled_inputs: String,
     pub resolved_inputs: Option<String>,
     pub resulting_outputs: Option<String>,
+    pub signatures: String,
+    pub seal_signature: String,
+    pub is_seal_signer_authorized: bool,
     pub result: Option<String>,
     pub execution_time_ms: Option<i64>,
     pub final_decision: Option<String>,
@@ -55,16 +58,28 @@ impl TryFrom<Transaction> for tari_transaction::Transaction {
         let filled_inputs = deserialize_json(&value.filled_inputs)?;
         let min_epoch = value.min_epoch.map(|epoch| Epoch(epoch as u64));
         let max_epoch = value.max_epoch.map(|epoch| Epoch(epoch as u64));
+        let seal_signature = deserialize_json(&value.seal_signature)?;
+        let is_seal_signer_authorized = value.is_seal_signer_authorized;
+        let network = value.network.try_into().map_err(|_| StorageError::DecodingError {
+            operation: "TryFrom<Transaction> for tari_transaction::Transaction",
+            item: "network",
+            details: format!("Invalid network value {}", value.network),
+        })?;
 
         Ok(Self::new(
-            UnsignedTransaction {
-                fee_instructions,
-                instructions,
-                inputs,
-                min_epoch,
-                max_epoch,
-            },
-            signatures,
+            UnsealedTransactionV1::new(
+                UnsignedTransactionV1 {
+                    network,
+                    fee_instructions,
+                    instructions,
+                    inputs,
+                    min_epoch,
+                    max_epoch,
+                    is_seal_signer_authorized,
+                },
+                signatures,
+            ),
+            seal_signature,
         )
         .with_filled_inputs(filled_inputs))
     }

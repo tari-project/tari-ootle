@@ -273,14 +273,17 @@ CREATE INDEX locked_block_idx_epoch ON locked_block (epoch);
 create table transactions
 (
     id                integer   not null primary key AUTOINCREMENT,
+    network           integer   not NULL,
     transaction_id    text      not null,
     fee_instructions  text      not NULL,
     instructions      text      not NULL,
-    signatures        text      not NULL,
     inputs            text      not NULL,
     filled_inputs     text      not NULL,
     resolved_inputs   text      NULL,
     resulting_outputs text      NULL,
+    signatures        text      not NULL,
+    seal_signature    text      not NULL,
+    is_seal_signer_authorized boolean not NULL,
     result            text      NULL,
     execution_time_ms bigint    NULL,
     final_decision    text      NULL,

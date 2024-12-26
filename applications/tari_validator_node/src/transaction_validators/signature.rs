@@ -16,13 +16,6 @@ impl Validator<Transaction> for TransactionSignatureValidator {
     type Error = TransactionValidationError;
 
     fn validate(&self, _context: &(), transaction: &Transaction) -> Result<(), TransactionValidationError> {
-        if transaction.signatures().is_empty() {
-            warn!(target: LOG_TARGET, "TransactionSignatureValidator - FAIL: No signatures");
-            return Err(TransactionValidationError::TransactionNotSigned {
-                transaction_id: *transaction.id(),
-            });
-        }
-
         if !transaction.verify_all_signatures() {
             warn!(target: LOG_TARGET, "TransactionSignatureValidator - FAIL: Invalid signature");
             return Err(TransactionValidationError::InvalidSignature);

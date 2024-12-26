@@ -396,8 +396,7 @@ impl TemplateTest {
                 .call_method(test_faucet_component(), "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key, "bucket")
-                .sign(&secret_key)
-                .build(),
+                .build_and_seal(&secret_key),
             vec![owner_proof.clone()],
         );
 
@@ -426,8 +425,7 @@ impl TemplateTest {
                 .call_method(test_faucet_component(), "take_free_coins_custom", args![amount])
                 .put_last_instruction_output_on_workspace("bucket")
                 .create_account_with_bucket(public_key.clone(), "bucket")
-                .sign(&secret_key)
-                .build(),
+                .build_and_seal(&secret_key),
             vec![owner_proof.clone()],
         );
 
@@ -461,8 +459,7 @@ impl TemplateTest {
         let transaction = Transaction::builder()
             .with_fee_instructions(fee_instructions)
             .with_instructions(instructions)
-            .sign(&self.secret_key)
-            .build();
+            .build_and_seal(&self.secret_key);
 
         self.try_execute(transaction, proofs)
     }

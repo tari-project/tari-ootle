@@ -11,7 +11,7 @@ use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_transaction::{Transaction, TransactionId};
 
 fn build_transaction() -> Transaction {
-    Transaction::builder().sign(&PrivateKey::default()).build()
+    Transaction::builder().build_and_seal(&PrivateKey::default())
 }
 
 #[test]

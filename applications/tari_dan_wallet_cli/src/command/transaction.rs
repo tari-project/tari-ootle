@@ -317,8 +317,7 @@ async fn handle_submit_manifest(
                     component_address: fee_account.address.as_component_address().unwrap(),
                     method: "pay_fee".to_string(),
                     args: args![Amount::try_from(common.max_fee.unwrap_or(1000))?],
-                }])
-                .collect(),
+                }]),
         )
         .with_instructions(instructions.instructions)
         .with_inputs(common.inputs)
@@ -472,12 +471,12 @@ fn summarize_transaction(transaction: &UnsignedTransaction) {
     }
     println!();
     println!("🌟 Submitting fee instructions:");
-    for instruction in &transaction.fee_instructions {
+    for instruction in transaction.fee_instructions() {
         println!("- {}", instruction);
     }
     println!();
     println!("🌟 Submitting instructions:");
-    for instruction in &transaction.instructions {
+    for instruction in transaction.instructions() {
         println!("- {}", instruction);
     }
     println!();

@@ -478,8 +478,7 @@ async fn multishard_local_inputs_foreign_outputs() {
     let tx1 = build_transaction_from(
         Transaction::builder()
             .with_inputs(inputs.iter().cloned().map(|i| i.into()))
-            .sign(&PrivateKey::default())
-            .build(),
+            .build_and_seal(&PrivateKey::default()),
         Decision::Commit,
     );
     test.create_execution_at_destination_for_transaction(
@@ -541,8 +540,7 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
     let tx1 = build_transaction_from(
         Transaction::builder()
             .with_inputs(inputs_0.iter().chain(&inputs_1).cloned().map(|i| i.into()))
-            .sign(&PrivateKey::default())
-            .build(),
+            .build_and_seal(&PrivateKey::default()),
         Decision::Commit,
     );
     test.create_execution_at_destination_for_transaction(
@@ -616,8 +614,7 @@ async fn multishard_output_conflict_abort() {
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
     let tx = Transaction::builder()
         .with_inputs(inputs.iter().cloned().map(|i| i.into()))
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx, Decision::Commit);
     assert_ne!(tx1.id(), tx2.id());
     test.create_execution_at_destination_for_transaction(
@@ -680,8 +677,7 @@ async fn single_shard_inputs_from_previous_outputs() {
 
     let tx2 = Transaction::builder()
         .with_inputs(prev_outputs.clone())
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx2.clone(), Decision::Commit);
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
@@ -745,8 +741,7 @@ async fn multishard_inputs_from_previous_outputs() {
 
     let tx2 = Transaction::builder()
         .with_inputs(prev_outputs.clone())
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx2.clone(), Decision::Commit);
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
@@ -799,14 +794,12 @@ async fn single_shard_input_conflict() {
 
     let tx1 = Transaction::builder()
         .add_input(substate_id.clone())
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
     let tx2 = Transaction::builder()
         .add_input(substate_id.clone())
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = TransactionRecord::new(tx2);
 
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
@@ -1048,8 +1041,7 @@ async fn single_shard_unversioned_inputs() {
         .map(|i| SubstateRequirement::new(i.substate_id.clone(), None));
     let tx = Transaction::builder()
         .with_inputs(unversioned_inputs)
-        .sign(&PrivateKey::default())
-        .build();
+        .build_and_seal(&PrivateKey::default());
     let tx = TransactionRecord::new(tx);
 
     test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
@@ -1125,15 +1117,13 @@ async fn multi_shard_unversioned_input_conflict() {
     let tx1 = Transaction::builder()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
     let tx2 = Transaction::builder()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = TransactionRecord::new(tx2);
 
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {

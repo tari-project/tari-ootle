@@ -240,8 +240,7 @@ pub async fn submit_transaction(
     let transaction = Transaction::builder()
         .with_instructions(instructions)
         .with_inputs(inputs)
-        .sign(&key.secret_key)
-        .build();
+        .build_and_seal(&key.secret_key);
 
     let request = SubmitTransactionRequest {
         transaction,

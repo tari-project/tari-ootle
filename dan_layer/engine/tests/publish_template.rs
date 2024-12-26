@@ -32,8 +32,7 @@ fn publish_template_success() {
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, Amount(200_000))
             .publish_template(template.code().to_vec())
-            .sign(&account_key)
-            .build(),
+            .build_and_seal(&account_key),
         vec![owner_proof],
     );
 
@@ -65,8 +64,7 @@ fn publish_template_invalid_binary() {
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, Amount(200_000))
             .publish_template(vec![1, 2, 3])
-            .sign(&account_key)
-            .build(),
+            .build_and_seal(&account_key),
         vec![owner_proof],
     );
 
@@ -87,8 +85,7 @@ fn publish_template_too_big_binary() {
         Transaction::builder()
             .fee_transaction_pay_from_component(account_address, Amount(200_000))
             .publish_template(random_wasm_binary)
-            .sign(&account_key)
-            .build(),
+            .build_and_seal(&account_key),
         vec![owner_proof],
     );
 

@@ -259,11 +259,12 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
 
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let is_input_shard = transaction.is_involved_inputs(&local_committee_shard);
-        let is_output_shard = local_committee_shard.includes_any_address(
-            // Known output shards
-            // This is to allow for the txreceipt output and indicates shard involvement.
-            iter::once(&tx_substate_address).chain(claim_shards.iter()),
-        );
+        let is_output_shard = transaction.is_global() ||
+            local_committee_shard.includes_any_address(
+                // Known output shards
+                // This is to allow for the txreceipt output and indicates shard involvement.
+                iter::once(&tx_substate_address).chain(claim_shards.iter()),
+            );
 
         if is_input_shard || is_output_shard {
             debug!(target: LOG_TARGET, "🎱 New transaction {} in mempool", transaction.id());

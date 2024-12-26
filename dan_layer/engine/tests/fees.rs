@@ -25,8 +25,7 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
         Transaction::builder()
             .fee_transaction_pay_from_component(account, Amount(1000))
             .call_function(test.get_template_address("State"), "new", args![])
-            .sign(&private_key)
-            .build(),
+            .build_and_seal(&private_key),
         vec![owner_token],
     );
 
@@ -53,8 +52,7 @@ fn deducts_fees_when_transaction_fails() {
         Transaction::builder()
             .fee_transaction_pay_from_component(account, Amount(1000))
             .call_function(test.get_template_address("State"), "this_doesnt_exist", args![])
-            .sign(&private_key)
-            .build(),
+            .build_and_seal(&private_key),
         vec![owner_token],
     );
 
@@ -100,8 +98,7 @@ fn deposit_from_faucet_then_pay() {
                 },
             ])
             .call_function(test.get_template_address("State"), "new", args![])
-            .sign(&private_key)
-            .build(),
+            .build_and_seal(&private_key),
         vec![owner_token],
     );
 
@@ -139,8 +136,7 @@ fn another_account_pays_partially_for_fees() {
                 .call_method(test_faucet_component(), "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("bucket")
                 .call_method(account, "deposit", args![Workspace("bucket")])
-                .sign(&private_key)
-                .build(),
+                .build_and_seal(&private_key),
         vec![owner_token_fee, owner_token],
     );
 
@@ -181,8 +177,7 @@ fn failed_fee_transaction() {
                     args: args![],
                 }])
                 .call_function(test.get_template_address("State"), "new", args![])
-                .sign(&private_key)
-                .build(),
+                .build_and_seal(&private_key),
             vec![owner_token],
         )
         .unwrap();
@@ -218,8 +213,7 @@ fn fail_partial_paid_fees() {
                 ])
                 .put_last_instruction_output_on_workspace("bucket")
                 .call_method(account, "deposit", args![Workspace("bucket")])
-                .sign(&private_key)
-                .build(),
+                .build_and_seal(&private_key),
         vec![owner_token, owner_token2],
     );
 
@@ -266,7 +260,6 @@ fn fail_pay_less_fees_than_fee_transaction() {
                             args: args![Amount(100)],
                         }
                     ))
-                    .collect()
                 )
                 // These instructions should not be applied
                 .call_method(account2, "withdraw", args![
@@ -275,8 +268,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
                 ])
                 .put_last_instruction_output_on_workspace("bucket")
                 .call_method(account, "deposit", args![Workspace("bucket")])
-                .sign(&private_key)
-                .build(),
+                .build_and_seal(&private_key),
             vec![owner_token, owner_token2],
         )
         .unwrap();
@@ -318,8 +310,7 @@ fn fail_pay_too_little_no_fee_instruction() {
                 .put_last_instruction_output_on_workspace("bucket")
                 .call_method(account, "deposit", args![Workspace("bucket")])
                 .call_method(account,"pay_fee",  args![Amount(10)])
-                .sign(&private_key)
-                .build(),
+                .build_and_seal(&private_key),
         vec![owner_token, owner_token2],
     );
 
@@ -351,8 +342,7 @@ fn success_pay_fee_in_main_instructions() {
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
             .call_method(account, "pay_fee", args![Amount(1000)])
-            .sign(&private_key)
-            .build(),
+            .build_and_seal(&private_key),
         vec![owner_token, owner_token2],
     );
 
@@ -382,8 +372,7 @@ fn dangling_bucket_pay_fees() {
                 Amount(10)
             ])
             .put_last_instruction_output_on_workspace("dangling_bucket")
-            .sign(&private_key)
-            .build(),
+            .build_and_seal(&private_key),
         vec![owner_token],
     );
 

@@ -163,6 +163,38 @@ pub struct TransactionSubmitDryRunResponse {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
+pub struct PublishTemplateRequest {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::base64")]
+    pub binary: Vec<u8>,
+    #[serde(deserialize_with = "opt_string_or_struct")]
+    pub fee_account: Option<ComponentAddressOrName>,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub max_fee: u64,
+    /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
+    /// contain the required inputs.
+    pub detect_inputs: bool,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct PublishTemplateResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub transaction_id: TransactionId,
+    pub dry_run_fee: Option<Amount>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
 pub struct TransactionGetRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,

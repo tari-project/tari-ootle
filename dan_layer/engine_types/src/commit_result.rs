@@ -234,6 +234,14 @@ impl TransactionResult {
         }
     }
 
+    pub fn into_accept(self) -> Option<SubstateDiff> {
+        match self {
+            Self::Accept(substate_diff) => Some(substate_diff),
+            Self::AcceptFeeRejectRest(substate_diff, _) => Some(substate_diff),
+            Self::Reject(_) => None,
+        }
+    }
+
     pub fn reject(&self) -> Option<&RejectReason> {
         match self {
             Self::Accept(_) => None,

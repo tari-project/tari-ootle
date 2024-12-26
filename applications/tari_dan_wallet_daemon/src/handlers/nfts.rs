@@ -210,8 +210,7 @@ async fn mint_account_nft(
     let transaction = Transaction::builder()
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .with_instructions(instructions)
-        .sign(owner_sk)
-        .build();
+        .build_and_seal(owner_sk);
 
     let mut events = context.notifier().subscribe();
     let tx_id = context
@@ -254,8 +253,7 @@ async fn create_account_nft(
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .call_function(ACCOUNT_NFT_TEMPLATE_ADDRESS, "create", args![owner_token,])
         .with_inputs(inputs)
-        .sign(owner_sk)
-        .build();
+        .build_and_seal(owner_sk);
 
     let tx_id = sdk
         .transaction_api()

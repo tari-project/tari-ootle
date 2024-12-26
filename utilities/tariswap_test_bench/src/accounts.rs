@@ -37,8 +37,7 @@ impl Runner {
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
                 SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
             ])
-            .sign(&key.key)
-            .build();
+            .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.accept().unwrap();
@@ -95,8 +94,7 @@ impl Runner {
                 SubstateRequirement::unversioned(pay_fee_vault.address),
                 SubstateRequirement::unversioned(pay_fee_vault.resource_address),
             ])
-            .sign(&key.key)
-            .build();
+            .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.accept().unwrap();
@@ -167,8 +165,7 @@ impl Runner {
                 SubstateRequirement::unversioned(fee_vault.account_address),
                 SubstateRequirement::unversioned(fee_vault.address),
             ])
-            .sign(&key.key)
-            .build();
+            .build_and_seal(&key.key);
 
         let result = self.submit_transaction_and_wait(transaction).await?;
 

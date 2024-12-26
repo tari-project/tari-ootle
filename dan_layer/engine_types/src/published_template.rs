@@ -8,10 +8,13 @@ use std::{
 };
 
 use tari_bor::{BorTag, Deserialize, Serialize};
+use tari_common_types::types::PublicKey;
 use tari_template_lib::{
     models::{BinaryTag, KeyParseError, ObjectKey},
     Hash,
 };
+
+use crate::hashing::{hasher32, template_hasher32, EngineHashDomainLabel};
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 
@@ -27,6 +30,15 @@ impl PublishedTemplateAddress {
     pub const fn from_hash(hash: Hash) -> Self {
         let key = ObjectKey::from_array(hash.into_array());
         Self(BorTag::new(key))
+    }
+
+    pub fn from_author_and_code(author_public_key: &PublicKey, code: &[u8]) -> Self {
+        let binary_hash = template_hasher32().chain(&code).result();
+        let hash = hasher32(EngineHashDomainLabel::TemplateAddress)
+            .chain(author_public_key)
+            .chain(&binary_hash)
+            .result();
+        Self::from_hash(hash)
     }
 
     pub fn as_object_key(&self) -> &ObjectKey {

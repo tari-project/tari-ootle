@@ -164,16 +164,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         let tracker = StateTracker::new(state_db, virtual_substates, initial_call_scope, transaction.hash());
 
-        // TODO: We'll have a "notarized" transaction that is signed by a single key. It signs a challenge incl. all the
-        // signatures of the transaction. We could define this signature as the "default" owner or we
-        // could remove the idea of a default owner (OwnedBySigner) entirely.
-        // For now the first signature in the list is used.
-        let transaction_signer_public_key = transaction
-            .signatures()
-            .first()
-            .map(|sig| sig.public_key().clone())
+        // TODO: If the seal signer is authorized we use this as the signer public key, if not we use the first
+        // signature as the "default" owner. This is due to limitations of the current transaction model.
+        // We could remove the idea of a default owner (OwnedBySigner) entirely.
+        let transaction_signer_public_key = Some(transaction.seal_signature())
+            .filter(|_| transaction.is_seal_signer_authorized())
+            .map(|s| s.public_key())
+            .or(transaction.signatures().first().map(|s| s.public_key()))
+            .cloned()
             .ok_or_else(|| TransactionError::InvariantError {
-                details: "Transaction must have at least one signature".to_string(),
+                details: "Transaction must have at least one authorized signature".to_string(),
             })?;
 
         let runtime_interface = RuntimeInterfaceImpl::initialize(

@@ -223,8 +223,7 @@ fn test_engine_errors() {
         .try_execute(
             Transaction::builder()
                 .call_function(test.get_template_address("Errors"), "invalid_engine_call", args![])
-                .sign(&Default::default())
-                .build(),
+                .build_and_seal(&Default::default()),
             vec![],
         )
         .unwrap();
@@ -327,8 +326,7 @@ fn test_errors_on_infinite_loop() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(test.get_template_address("InfinityLoopTest"), "infinity_loop", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
     // Transaction failed: Execution failure: RuntimeError: unreachable\n    at tari_free (<module>[327]:0x2390c)
@@ -1126,8 +1124,7 @@ mod tickets {
         let result = template_test.execute_expect_success(
             Transaction::builder()
                 .call_function(faucet_template, "mint", args![initial_supply])
-                .sign(&secret)
-                .build(),
+                .build_and_seal(&secret),
             vec![],
         );
         let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
@@ -1152,8 +1149,7 @@ mod tickets {
                     price,
                     event_description
                 ])
-                .sign(&secret)
-                .build(),
+                .build_and_seal(&secret),
             vec![owner_proof.clone()],
         );
         let ticket_seller: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
@@ -1175,8 +1171,7 @@ mod tickets {
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("coins")
                 .call_method(account_address, "deposit", args![Workspace("coins")])
-                .sign(&secret)
-                .build(),
+                .build_and_seal(&secret),
             vec![],
         );
 
@@ -1188,8 +1183,7 @@ mod tickets {
                 .call_method(ticket_seller, "buy_ticket", args![Workspace("payment")])
                 .put_last_instruction_output_on_workspace("nft_bucket")
                 .call_method(account_address, "deposit", args![Workspace("nft_bucket")])
-                .sign(&secret)
-                .build(),
+                .build_and_seal(&secret),
             vec![owner_proof],
         );
 

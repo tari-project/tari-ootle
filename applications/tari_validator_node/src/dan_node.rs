@@ -23,14 +23,7 @@
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_dan_app_utilities::template_manager::interface::TemplateExecutable;
-use tari_dan_storage::{
-    consensus_models::{Block, Decision},
-    StateStore,
-};
-use tari_engine_types::{
-    commit_result::TransactionResult,
-    substate::{SubstateId, SubstateValue},
-};
+use tari_dan_storage::{consensus_models::Block, StateStore};
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
@@ -63,11 +56,11 @@ impl DanNode {
                      break;
                 },
 
-                Ok(event) = hotstuff_events.recv() => if let Err(err) = self.handle_hotstuff_event(event).await{
+                Ok(event) = hotstuff_events.recv() => if let Err(err) = self.handle_hotstuff_event(event).await {
                     error!(target: LOG_TARGET, "Error handling hotstuff event: {}", err);
                 },
 
-                Ok(event) = epoch_manager_events.recv() => if let Err(err) = self.handle_epoch_manager_event(event).await{
+                Ok(event) = epoch_manager_events.recv() => if let Err(err) = self.handle_epoch_manager_event(event).await {
                     error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
                 },
 
@@ -97,49 +90,54 @@ impl DanNode {
     /// from the given block.
     async fn handle_template_publishes(&self, block: &Block) -> Result<(), anyhow::Error> {
         // add wasm templates to template manager if available in any of the new block's transactions
-        let templates = self
+        let transactions = self
             .services
             .state_store
-            .with_read_tx(|tx| block.get_transactions(tx))?
+            .with_read_tx(|tx| block.get_committing_transactions(tx))?;
+
+        let templates = transactions
             .into_iter()
-            .filter(|record| matches!(record.final_decision, Some(Decision::Commit)))
             .filter_map(|record| {
                 let result = record.execution_result?;
-                let TransactionResult::Accept(diff) = result.finalize.result else {
-                    return None;
-                };
-                let tx_signature = record.transaction.signatures().first()?;
-                let signer_pub_key = tx_signature.public_key().clone();
+                let diff = result.finalize.result.into_accept()?;
+                let signer_pub_key = record.transaction.seal_signature().public_key().clone();
                 Some((signer_pub_key, diff))
             })
             .flat_map(|(signer_pub_key, diff)| {
-                let mut templates = vec![];
-                for (substate_id, substate) in diff.into_up_iter() {
-                    if let SubstateId::Template(template_address) = substate_id {
-                        let template_address_hash = template_address.as_hash();
-                        if let SubstateValue::Template(template) = substate.into_substate_value() {
-                            templates.push((
-                                signer_pub_key.clone(),
-                                template_address_hash,
-                                TemplateExecutable::CompiledWasm(template.binary),
-                            ));
-                        }
-                    }
-                }
-                templates
+                diff.into_up_iter().flat_map(move |(substate_id, substate)| {
+                    let template_address = substate_id.as_template()?;
+                    let template = substate.into_substate_value().into_template()?;
+                    Some((
+                        signer_pub_key.clone(),
+                        template_address.as_hash(),
+                        TemplateExecutable::CompiledWasm(template.binary),
+                    ))
+                })
             });
 
         // adding templates to template manager
         let mut template_counter = 0;
         for (author_pub_key, template_address, template) in templates {
-            self.services
+            info!(
+                target: LOG_TARGET,
+                "📰 Adding template {} from block {}",
+                template_address,
+                block
+            );
+            if let Err(err) = self
+                .services
                 .template_manager
                 .add_template(author_pub_key, template_address, template, None)
-                .await?;
+                .await
+            {
+                error!(target: LOG_TARGET, "🚨Failed to add template: {}", err);
+            }
             template_counter += 1;
         }
 
-        if template_counter > 0 {
+        if template_counter == 0 {
+            debug!(target: LOG_TARGET, "No new templates published in block {}", block);
+        } else {
             info!(target: LOG_TARGET, "🏁 {} new template(s) have been persisted locally.", template_counter);
         }
 
@@ -157,8 +155,6 @@ impl DanNode {
 
         info!(target: LOG_TARGET, "🏁 Block {} committed", block);
 
-        self.handle_template_publishes(&block).await?;
-
         let committed_transactions = block
             .commands()
             .iter()
@@ -169,6 +165,8 @@ impl DanNode {
         if committed_transactions.is_empty() {
             return Ok(());
         }
+
+        self.handle_template_publishes(&block).await?;
 
         info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", committed_transactions.len());
         if let Err(err) = self.services.mempool.remove_transactions(committed_transactions).await {

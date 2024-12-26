@@ -1,20 +1,22 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use anyhow::anyhow;
+use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
 use tari_dan_app_utilities::json_encoding;
 use tari_dan_common_types::{optional::Optional, Epoch, SubstateRequirement};
 use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
-use tari_engine_types::{indexed_value::IndexedValue, instruction::Instruction, substate::SubstateId};
-use tari_template_lib::{args, args::Arg, models::Amount};
+use tari_template_lib::{args, models::Amount};
 use tari_transaction::Transaction;
 use tari_wallet_daemon_client::types::{
     AccountGetRequest,
     AccountGetResponse,
     CallInstructionRequest,
+    PublishTemplateRequest,
+    PublishTemplateResponse,
     TransactionGetAllRequest,
     TransactionGetAllResponse,
     TransactionGetRequest,
@@ -31,7 +33,10 @@ use tari_wallet_daemon_client::types::{
 use tokio::time;
 
 use super::{accounts, context::HandlerContext};
-use crate::{handlers::HandlerError, services::WalletEvent};
+use crate::{
+    handlers::{helpers::get_account_or_default, HandlerError},
+    services::WalletEvent,
+};
 
 const LOG_TARGET: &str = "tari::dan::wallet_daemon::handlers::transaction";
 
@@ -100,8 +105,7 @@ pub async fn handle_submit(
     let autofill_inputs = req.autofill_inputs;
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
-        let mut substates = get_referenced_substate_addresses(&req.transaction.instructions)?;
-        substates.extend(get_referenced_substate_addresses(&req.transaction.fee_instructions)?);
+        let substates = req.transaction.to_referenced_substates()?;
         let substates = substates.into_iter().collect::<Vec<_>>();
         let loaded_substates = sdk.substate_api().locate_dependent_substates(&substates).await?;
         loaded_substates
@@ -129,8 +133,7 @@ pub async fn handle_submit(
     let transaction = Transaction::builder()
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
-        .sign(&key.key)
-        .build();
+        .build_and_seal(&key.key);
 
     for input in transaction.inputs() {
         debug!(target: LOG_TARGET, "Input: {}", input)
@@ -173,8 +176,7 @@ pub async fn handle_submit_dry_run(
     let autofill_inputs = req.autofill_inputs;
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
-        let mut substates = get_referenced_substate_addresses(&req.transaction.instructions)?;
-        substates.extend(get_referenced_substate_addresses(&req.transaction.fee_instructions)?);
+        let substates = req.transaction.to_referenced_substates()?;
         let substates = substates.into_iter().collect::<Vec<_>>();
         sdk.substate_api().locate_dependent_substates(&substates).await?
     } else {
@@ -184,8 +186,7 @@ pub async fn handle_submit_dry_run(
     let transaction = Transaction::builder()
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
-        .sign(&key.key)
-        .build();
+        .build_and_seal(&key.key);
 
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
@@ -200,7 +201,7 @@ pub async fn handle_submit_dry_run(
     );
     let exec_result = context
         .transaction_service()
-        .submit_dry_run_transaction(transaction, autofill_inputs.clone())
+        .submit_dry_run_transaction(transaction, autofill_inputs)
         .await?;
 
     let json_result = json_encoding::encode_finalize_result_into_json(&exec_result.finalize)?;
@@ -371,33 +372,56 @@ pub async fn handle_wait_result(
     }
 }
 
-fn get_referenced_substate_addresses(instructions: &[Instruction]) -> anyhow::Result<HashSet<SubstateId>> {
-    let mut substates = HashSet::new();
-    for instruction in instructions {
-        match instruction {
-            Instruction::CallMethod {
-                component_address,
-                args,
-                ..
-            } => {
-                substates.insert(SubstateId::Component(*component_address));
-                for arg in args {
-                    if let Arg::Literal(bytes) = arg {
-                        let val = IndexedValue::from_raw(bytes)?;
-                        substates.extend(val.referenced_substates());
-                    }
-                }
-            },
-            Instruction::CallFunction { args, .. } => {
-                for arg in args {
-                    if let Arg::Literal(bytes) = arg {
-                        let val = IndexedValue::from_raw(bytes)?;
-                        substates.extend(val.referenced_substates());
-                    }
-                }
-            },
-            _ => {},
+pub async fn handle_publish_template(
+    context: &HandlerContext,
+    token: Option<String>,
+    req: PublishTemplateRequest,
+) -> Result<PublishTemplateResponse, anyhow::Error> {
+    let sdk = context.wallet_sdk();
+
+    let fee_account = get_account_or_default(req.fee_account, &sdk.accounts_api())?;
+
+    let transaction = Transaction::builder()
+        .fee_transaction_pay_from_component(
+            fee_account.address.as_component_address().unwrap(),
+            req.max_fee.try_into()?,
+        )
+        .publish_template(req.binary)
+        .build_unsigned_transaction();
+
+    if req.dry_run {
+        let request = TransactionSubmitDryRunRequest {
+            transaction,
+            signing_key_index: Some(fee_account.key_index),
+            autofill_inputs: vec![],
+            detect_inputs: req.detect_inputs,
+            proof_ids: vec![],
+        };
+        let resp = handle_submit_dry_run(context, token, request).await?;
+        if let Some(reject) = resp.result.finalize.full_reject() {
+            return Err(JsonRpcError::new(
+                JsonRpcErrorReason::ApplicationError(5),
+                format!("Dry-run transaction rejected: {reject}"),
+                serde_json::Value::Null,
+            )
+            .into());
         }
+        return Ok(PublishTemplateResponse {
+            transaction_id: resp.transaction_id,
+            dry_run_fee: Some(resp.result.finalize.fee_receipt.total_fees_charged()),
+        });
     }
-    Ok(substates)
+    let request = TransactionSubmitRequest {
+        transaction,
+        signing_key_index: Some(fee_account.key_index),
+        autofill_inputs: vec![],
+        detect_inputs: req.detect_inputs,
+        detect_inputs_use_unversioned: true,
+        proof_ids: vec![],
+    };
+    let resp = handle_submit(context, token, request).await?;
+    Ok(PublishTemplateResponse {
+        transaction_id: resp.transaction_id,
+        dry_run_fee: None,
+    })
 }

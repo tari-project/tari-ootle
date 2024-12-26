@@ -84,8 +84,7 @@ fn mint_more_later() {
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
-            .sign(&user_key)
-            .build(),
+            .build_and_seal(&user_key),
         vec![user_proof],
     );
 }
@@ -434,8 +433,7 @@ fn mint_and_transfer_revealed() {
             .put_last_instruction_output_on_workspace("b")
             .call_method(user_account, "deposit", args![Workspace("b")])
             .call_method(user_account, "balance", args![faucet_resx])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -452,8 +450,7 @@ fn mint_revealed_with_invalid_proof() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(faucet, "mint_revealed_with_range_proof", args![Amount(123)])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -488,8 +485,7 @@ fn mint_with_view_key() {
             .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(user_account, "deposit", args![Workspace("coins")])
-            .sign(&user_key)
-            .build(),
+            .build_and_seal(&user_key),
         vec![user_proof],
     );
 

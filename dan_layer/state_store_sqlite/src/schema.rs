@@ -505,14 +505,17 @@ diesel::table! {
 diesel::table! {
     transactions (id) {
         id -> Integer,
+        network -> Integer,
         transaction_id -> Text,
         fee_instructions -> Text,
         instructions -> Text,
-        signatures -> Text,
         inputs -> Text,
         filled_inputs -> Text,
         resolved_inputs -> Nullable<Text>,
         resulting_outputs -> Nullable<Text>,
+        signatures -> Text,
+        seal_signature -> Text,
+        is_seal_signer_authorized -> Bool,
         result -> Nullable<Text>,
         execution_time_ms -> Nullable<BigInt>,
         final_decision -> Nullable<Text>,

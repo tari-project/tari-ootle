@@ -807,6 +807,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         let transaction = tx_rec.transaction();
         let insert = (
             transactions::transaction_id.eq(serialize_hex(transaction.id())),
+            transactions::network.eq(i32::from(transaction.network())),
             transactions::fee_instructions.eq(serialize_json(transaction.fee_instructions())?),
             transactions::instructions.eq(serialize_json(transaction.instructions())?),
             transactions::signatures.eq(serialize_json(transaction.signatures())?),
@@ -814,6 +815,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             transactions::filled_inputs.eq(serialize_json(transaction.filled_inputs())?),
             transactions::resolved_inputs.eq(tx_rec.resolved_inputs().map(serialize_json).transpose()?),
             transactions::resulting_outputs.eq(tx_rec.resulting_outputs().map(serialize_json).transpose()?),
+            transactions::seal_signature.eq(serialize_json(transaction.seal_signature())?),
+            transactions::is_seal_signer_authorized.eq(transaction.is_seal_signer_authorized()),
             transactions::result.eq(tx_rec.execution_result().map(serialize_json).transpose()?),
             transactions::execution_time_ms.eq(tx_rec
                 .execution_time()

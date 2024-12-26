@@ -78,10 +78,14 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
     jsonRpc2(url, "get_tx_pool").then((resp) => {
       setPool(resp.tx_pool);
       addTxToPool(resp.tx_pool.filter((tx: any) => Boolean(tx?.transaction)).map((tx: any) => tx.transaction.id).sort());
+    }).catch((resp) => {
+      console.error("err", resp);
     });
     jsonRpc2(url, "get_identity").then((resp) => {
       setPublicKey(resp.public_key);
       setPeerId(resp.peer_id);
+    }).catch((resp) => {
+      console.error("err", resp);
     });
     let missing_tx = new Set();
     for (const k in state) {
@@ -113,6 +117,8 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
       if (JSON.stringify(newState) != JSON.stringify(missingTxStates)) {
         setMissingTxStates(newState);
       }
+    }).catch((resp) => {
+      console.error("all settled err", resp);
     });
     // for (let tx of missing_tx) {
     //   jsonRpc2(url, "get_transaction", [tx]).then((resp) => {

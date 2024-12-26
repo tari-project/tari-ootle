@@ -134,8 +134,7 @@ pub fn build_transaction(decision: Decision, inputs: Vec<SubstateRequirement>) -
     let tx = Transaction::builder()
         .call_function(Default::default(), "foo", args![])
         .with_inputs(inputs)
-        .sign(&k)
-        .build();
+        .build_and_seal(&k);
     let mut tx = TransactionRecord::new(tx);
     if decision.is_abort() {
         tx.set_abort_reason(RejectReason::ExecutionFailure("Test aborted".to_string()));

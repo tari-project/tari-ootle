@@ -114,14 +114,18 @@ impl IndexedValue {
     where for<'a> T: serde::Deserialize<'a> {
         decode_value_at_path(&self.value, path)
     }
+
+    pub const fn empty() -> Self {
+        Self {
+            indexed: IndexedWellKnownTypes::new(),
+            value: tari_bor::Value::Null,
+        }
+    }
 }
 
 impl Default for IndexedValue {
     fn default() -> Self {
-        Self {
-            indexed: IndexedWellKnownTypes::default(),
-            value: tari_bor::Value::Null,
-        }
+        Self::empty()
     }
 }
 

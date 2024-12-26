@@ -30,6 +30,7 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{
     commit_result::RejectReason,
+    published_template::PublishedTemplateAddress,
     substate::Substate,
     transaction_receipt::TransactionReceiptAddress,
 };
@@ -163,6 +164,14 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             TransactionReceiptAddress::from(transaction_id),
             0,
         ));
+
+        for binary in transaction.transaction().publish_templates_iter() {
+            let author = transaction.transaction().seal_signature().public_key();
+            outputs.insert(VersionedSubstateId::new(
+                PublishedTemplateAddress::from_author_and_code(author, binary),
+                0,
+            ));
+        }
 
         let (local_versions, non_local_inputs) = match self.resolve_local_versions(
             store,

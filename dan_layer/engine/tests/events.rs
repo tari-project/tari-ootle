@@ -46,8 +46,7 @@ fn cannot_use_standard_topic() {
     let reason = template_test.execute_expect_failure(
         Transaction::builder()
             .call_function(event_emitter_template, "test_function", args![invalid_topic])
-            .sign(&private_key)
-            .build(),
+            .build_and_seal(&private_key),
         [].into(),
     );
     assert_reject_reason(reason, RuntimeError::InvalidEventTopic {

@@ -74,8 +74,7 @@ fn successful_assert() {
             .put_last_instruction_output_on_workspace("faucet_bucket")
             .assert_bucket_contains("faucet_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
-            .sign(&test.account_key)
-            .build(),
+            .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
     );
 }
@@ -93,8 +92,7 @@ fn it_fails_with_invalid_resource() {
             .put_last_instruction_output_on_workspace("faucet_bucket")
             .assert_bucket_contains("faucet_bucket", invalid_resource_address, FAUCET_WITHDRAWAL_AMOUNT)
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
-            .sign(&test.account_key)
-            .build(),
+            .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
     );
 
@@ -120,8 +118,7 @@ fn it_fails_with_invalid_amount() {
             .put_last_instruction_output_on_workspace("faucet_bucket")
             .assert_bucket_contains("faucet_bucket", test.faucet_resource, min_amount)
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
-            .sign(&test.account_key)
-            .build(),
+            .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
     );
 
@@ -146,8 +143,7 @@ fn it_fails_with_invalid_bucket() {
             .put_last_instruction_output_on_workspace("invalid_bucket")
             .assert_bucket_contains("invalid_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
-            .sign(&test.account_key)
-            .build(),
+            .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
     );
 
@@ -165,8 +161,7 @@ fn it_fails_with_invalid_workspace_key() {
             // we are going to assert a key that does not exist in the workspace
             .assert_bucket_contains("invalid_key", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
-            .sign(&test.account_key)
-            .build(),
+            .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
     );
 

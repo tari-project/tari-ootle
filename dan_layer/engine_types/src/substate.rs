@@ -280,6 +280,10 @@ impl SubstateId {
         matches!(self, Self::TransactionReceipt(_))
     }
 
+    pub fn is_published_template(&self) -> bool {
+        matches!(self, Self::Template(_))
+    }
+
     pub fn is_read_only(&self) -> bool {
         matches!(self, Self::TransactionReceipt(_) | Self::Resource(_))
     }
@@ -554,6 +558,13 @@ impl SubstateValue {
     pub fn into_transaction_receipt(self) -> Option<TransactionReceipt> {
         match self {
             SubstateValue::TransactionReceipt(tx_receipt) => Some(tx_receipt),
+            _ => None,
+        }
+    }
+
+    pub fn into_template(self) -> Option<PublishedTemplate> {
+        match self {
+            SubstateValue::Template(template) => Some(template),
             _ => None,
         }
     }

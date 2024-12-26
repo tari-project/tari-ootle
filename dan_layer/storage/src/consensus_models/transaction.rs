@@ -301,6 +301,9 @@ impl TransactionRecord {
         tx_ids: I,
     ) -> Result<(Vec<Self>, HashSet<TransactionId>), StorageError> {
         let mut tx_ids = tx_ids.into_iter().copied().collect::<HashSet<_>>();
+        if tx_ids.is_empty() {
+            return Ok((vec![], tx_ids));
+        }
         let recs = tx.transactions_get_any(tx_ids.iter())?;
         for rec in &recs {
             tx_ids.remove(rec.transaction.id());

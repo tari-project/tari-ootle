@@ -36,8 +36,8 @@ impl Runner {
                 SubstateRequirement::unversioned(fee_vault.address.clone()),
                 SubstateRequirement::unversioned(fee_vault.resource_address),
             ])
-            .sign(&key.key)
-            .build();
+            .with_authorized_seal_signer()
+            .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.accept().unwrap();

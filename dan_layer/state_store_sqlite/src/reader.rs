@@ -21,6 +21,7 @@ use diesel::{
     QueryDsl,
     QueryableByName,
     RunQueryDsl,
+    SelectableHelper,
     SqliteConnection,
     TextExpressionMethods,
 };
@@ -697,6 +698,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         use crate::schema::transactions;
 
         let transaction = transactions::table
+            .select(sql_models::Transaction::as_select())
             .filter(transactions::transaction_id.eq(serialize_hex(tx_id)))
             .first::<sql_models::Transaction>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {

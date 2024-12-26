@@ -31,6 +31,7 @@ import {
   accountsList,
   accountsTransfer,
   nftList,
+  transactionsPublishTemplate,
 } from "../../utils/json_rpc";
 import { apiError } from "../helpers/types";
 import queryClient from "../queryClient";

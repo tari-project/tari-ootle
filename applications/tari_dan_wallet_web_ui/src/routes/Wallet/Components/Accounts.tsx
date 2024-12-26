@@ -161,7 +161,7 @@ function Accounts() {
   const onClaimFreeCoins = async () => {
     await mutateCreateFeeTestCoins({
       accountName: "TestAccount",
-      amount: 200000,
+      amount: 1_000_000_000,
       fee: 1000,
     });
   };

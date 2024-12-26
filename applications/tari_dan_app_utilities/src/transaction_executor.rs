@@ -117,7 +117,9 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
         let initial_ownership_proofs = transaction
             .signatures()
             .iter()
-            .map(|sig| public_key_to_fungible_address(sig.public_key()))
+            .map(|p| p.public_key())
+            .chain(Some(transaction.seal_signature().public_key()).filter(|_| transaction.is_seal_signer_authorized()))
+            .map(public_key_to_fungible_address)
             .collect();
         let auth_params = AuthParams {
             initial_ownership_proofs,

@@ -21,7 +21,7 @@ tari_dan_storage = { workspace = true }
 
 bigdecimal = { workspace = true }
 chrono = { workspace = true }
-diesel = { workspace = true, features = ["default", "sqlite", "chrono"] }
+diesel = { workspace = true, features = ["default", "sqlite", "chrono", "numeric"] }
 diesel_migrations = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }

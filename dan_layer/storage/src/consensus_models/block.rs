@@ -804,6 +804,27 @@ impl Block {
         Ok(found)
     }
 
+    /// Returns the transactions that are/will be committed by this block when this block.
+    pub fn get_committing_transactions<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+    ) -> Result<Vec<TransactionRecord>, StorageError> {
+        let tx_ids = self.commands().iter().filter_map(|t| t.committing()).map(|t| t.id());
+        let (found, missing) = TransactionRecord::get_any(tx, tx_ids)?;
+        if !missing.is_empty() {
+            return Err(StorageError::NotFound {
+                item: "Transaction (get_committed_transactions)",
+                key: missing
+                    .into_iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
+        }
+
+        Ok(found)
+    }
+
     pub fn get_substate_updates<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,

@@ -13,8 +13,7 @@ fn it_uses_allocation_address() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(test.get_template_address("AddressAllocationTest"), "create", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -43,8 +42,7 @@ fn it_fails_if_allocation_is_not_used() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "drop_allocation", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 

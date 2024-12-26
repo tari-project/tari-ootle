@@ -869,6 +869,7 @@ where TConsensusSpec: ConsensusSpec
             .iter()
             .filter(|o| {
                 o.substate_id().is_transaction_receipt() ||
+                    o.substate_id().is_published_template() ||
                     local_committee_info.includes_substate_address(&o.to_substate_address())
             })
             .map(|output| SubstateRequirementLockIntent::from(output.clone()));

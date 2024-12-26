@@ -22,7 +22,7 @@ pub fn builder<P: AsRef<Path>>(
         Transaction::builder()
             .with_fee_instructions(instructions.fee_instructions.clone())
             .with_instructions(instructions.instructions.clone())
-            .sign(&signer_secret_key)
-            .build()
+            .with_authorized_seal_signer()
+            .build_and_seal(&signer_secret_key)
     }))
 }

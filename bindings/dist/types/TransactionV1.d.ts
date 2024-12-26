@@ -1,15 +1,9 @@
-import type { Epoch } from "./Epoch";
-import type { Instruction } from "./Instruction";
-import type { SubstateRequirement } from "./SubstateRequirement";
-import type { TransactionSignature } from "./TransactionSignature";
+import type { TransactionSealSignature } from "./TransactionSealSignature";
+import type { UnsealedTransactionV1 } from "./UnsealedTransactionV1";
 import type { VersionedSubstateId } from "./VersionedSubstateId";
 export interface TransactionV1 {
     id: string;
-    fee_instructions: Array<Instruction>;
-    instructions: Array<Instruction>;
-    inputs: Array<SubstateRequirement>;
-    min_epoch: Epoch | null;
-    max_epoch: Epoch | null;
-    signatures: Array<TransactionSignature>;
+    body: UnsealedTransactionV1;
+    seal_signature: TransactionSealSignature;
     filled_inputs: Array<VersionedSubstateId>;
 }

@@ -12,7 +12,7 @@ use tari_template_lib::{
     prelude::AccessRules,
 };
 
-use crate::{unsigned_transaction::UnsignedTransaction, Transaction, TransactionSignature};
+use crate::{unsigned_transaction::UnsignedTransaction, Transaction, TransactionSignature, UnsealedTransactionV1};
 
 #[derive(Debug, Clone, Default)]
 pub struct TransactionBuilder {
@@ -28,11 +28,26 @@ impl TransactionBuilder {
         }
     }
 
-    pub fn with_unsigned_transaction(self, unsigned_transaction: UnsignedTransaction) -> Self {
+    pub fn with_unsigned_transaction<T: Into<UnsignedTransaction>>(self, unsigned_transaction: T) -> Self {
         Self {
-            unsigned_transaction,
+            unsigned_transaction: unsigned_transaction.into(),
             signatures: vec![],
         }
+    }
+
+    pub fn then<F: FnOnce(Self) -> Self>(self, f: F) -> Self {
+        f(self)
+    }
+
+    pub fn for_network<N: Into<u8>>(mut self, network: N) -> Self {
+        self.unsigned_transaction.set_network(network);
+        self
+    }
+
+    pub fn with_authorized_seal_signer(mut self) -> Self {
+        self.unsigned_transaction.authorized_sealed_signer();
+        self.clear_signatures();
+        self
     }
 
     /// Adds a fee instruction that calls the "take_fee" method on a component.
@@ -152,68 +167,68 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn with_fee_instructions(mut self, instructions: Vec<Instruction>) -> Self {
-        self.unsigned_transaction.fee_instructions = instructions;
+    pub fn with_fee_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
+        self.unsigned_transaction.fee_instructions_mut().extend(instructions);
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
     pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
         let builder = f(TransactionBuilder::new());
-        self.unsigned_transaction.fee_instructions = builder.unsigned_transaction.instructions;
+        *self.unsigned_transaction.fee_instructions_mut() = builder.unsigned_transaction.into_instructions();
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
     pub fn add_fee_instruction(mut self, instruction: Instruction) -> Self {
-        self.unsigned_transaction.fee_instructions.push(instruction);
+        self.unsigned_transaction.fee_instructions_mut().push(instruction);
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
     pub fn add_instruction(mut self, instruction: Instruction) -> Self {
-        self.unsigned_transaction.instructions.push(instruction);
+        self.unsigned_transaction.instructions_mut().push(instruction);
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
-    pub fn with_instructions(mut self, instructions: Vec<Instruction>) -> Self {
-        self.unsigned_transaction.instructions.extend(instructions);
+    pub fn with_instructions<I: IntoIterator<Item = Instruction>>(mut self, instructions: I) -> Self {
+        self.unsigned_transaction.instructions_mut().extend(instructions);
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
     /// Add an input to use in the transaction
     pub fn add_input<I: Into<SubstateRequirement>>(mut self, input_object: I) -> Self {
-        self.unsigned_transaction.inputs.insert(input_object.into());
+        self.unsigned_transaction.inputs_mut().insert(input_object.into());
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
     pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
-        self.unsigned_transaction.inputs.extend(inputs);
+        self.unsigned_transaction.inputs_mut().extend(inputs);
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
     pub fn with_min_epoch(mut self, min_epoch: Option<Epoch>) -> Self {
-        self.unsigned_transaction.min_epoch = min_epoch;
+        self.unsigned_transaction.set_min_epoch(min_epoch);
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
     pub fn with_max_epoch(mut self, max_epoch: Option<Epoch>) -> Self {
-        self.unsigned_transaction.max_epoch = max_epoch;
+        self.unsigned_transaction.set_max_epoch(max_epoch);
         // Reset the signatures as they are no longer valid
-        self.signatures = vec![];
+        self.clear_signatures();
         self
     }
 
@@ -221,13 +236,36 @@ impl TransactionBuilder {
         self.unsigned_transaction
     }
 
-    pub fn sign(mut self, secret_key: &PrivateKey) -> Self {
-        self.signatures
-            .push(TransactionSignature::sign(secret_key, &self.unsigned_transaction));
+    pub fn add_signature(mut self, sealed_signer: &PublicKey, secret_key: &PrivateKey) -> Self {
+        let signature = match &self.unsigned_transaction {
+            UnsignedTransaction::V1(tx) => TransactionSignature::sign_v1(secret_key, sealed_signer, tx),
+        };
+        self.signatures.push(signature);
         self
     }
 
-    pub fn build(self) -> Transaction {
-        Transaction::new(self.unsigned_transaction, self.signatures)
+    fn clear_signatures(&mut self) {
+        self.signatures = vec![];
+    }
+
+    pub fn build(self) -> UnsealedTransactionV1 {
+        // Obviously this will not work if we have more than one version - dealing with that is left for another time
+        match self.unsigned_transaction {
+            UnsignedTransaction::V1(tx) => UnsealedTransactionV1::new(tx, self.signatures),
+        }
+    }
+
+    pub fn build_and_seal(self, secret_key: &PrivateKey) -> Transaction {
+        self.then(|builder| {
+            // This is so that we dont have to add this in a lot of places - TODO: this is an assumption that may not
+            // apply to all transactions
+            if builder.signatures.is_empty() {
+                builder.with_authorized_seal_signer()
+            } else {
+                builder
+            }
+        })
+        .build()
+        .seal(secret_key)
     }
 }

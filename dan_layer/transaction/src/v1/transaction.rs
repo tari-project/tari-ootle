@@ -4,19 +4,29 @@
 use std::{collections::HashSet, fmt::Display};
 
 use indexmap::IndexSet;
+use log::*;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
-use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_dan_common_types::{committee::CommitteeInfo, Epoch, SubstateRequirement, VersionedSubstateId};
+use tari_dan_common_types::{
+    Epoch,
+    NumPreshards,
+    ShardGroup,
+    SubstateAddress,
+    SubstateRequirement,
+    VersionedSubstateId,
+};
 use tari_engine_types::{
     hashing::{hasher32, EngineHashDomainLabel},
     indexed_value::{IndexedValue, IndexedValueError},
     instruction::Instruction,
+    published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
 use tari_template_lib::{models::ComponentAddress, Hash};
 
-use crate::{TransactionId, TransactionSignature, UnsignedTransaction};
+use crate::{v1::signature::TransactionSignature, TransactionId, TransactionSealSignature, UnsealedTransactionV1};
+
+const LOG_TARGET: &str = "tari::dan::transaction::transaction";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -27,30 +37,26 @@ use crate::{TransactionId, TransactionSignature, UnsignedTransaction};
 pub struct TransactionV1 {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     id: TransactionId,
-    #[serde(flatten)]
-    transaction: UnsignedTransaction,
-    signatures: Vec<TransactionSignature>,
+    body: UnsealedTransactionV1,
+    seal_signature: TransactionSealSignature,
     /// Inputs filled by some authority. These are not part of the transaction hash nor the signature
     filled_inputs: IndexSet<VersionedSubstateId>,
 }
 
 impl TransactionV1 {
-    pub fn new(unsigned_transaction: UnsignedTransaction, signatures: Vec<TransactionSignature>) -> Self {
+    pub fn new(transaction: UnsealedTransactionV1, seal_signature: TransactionSealSignature) -> Self {
         let mut tx = Self {
             id: TransactionId::default(),
-            transaction: unsigned_transaction,
+            body: transaction,
+            seal_signature,
             filled_inputs: IndexSet::new(),
-            signatures,
         };
         tx.id = tx.calculate_hash();
         tx
     }
 
-    pub fn sign(mut self, secret: &RistrettoSecretKey) -> Self {
-        let sig = TransactionSignature::sign(secret, &self.transaction);
-        self.signatures.push(sig);
-        self.id = self.calculate_hash();
-        self
+    pub const fn schema_version(&self) -> u64 {
+        self.body.schema_version()
     }
 
     pub fn with_filled_inputs(self, filled_inputs: IndexSet<VersionedSubstateId>) -> Self {
@@ -59,8 +65,8 @@ impl TransactionV1 {
 
     fn calculate_hash(&self) -> TransactionId {
         hasher32(EngineHashDomainLabel::Transaction)
-            .chain(&self.signatures)
-            .chain(&self.transaction)
+            .chain(&self.seal_signature)
+            .chain(&self.body)
             .result()
             .into_array()
             .into()
@@ -75,51 +81,63 @@ impl TransactionV1 {
         id == self.id
     }
 
-    pub fn unsigned_transaction(&self) -> &UnsignedTransaction {
-        &self.transaction
-    }
-
     pub fn hash(&self) -> Hash {
         self.id.into_array().into()
     }
 
+    pub fn network(&self) -> u8 {
+        self.body.unsigned_transaction().network
+    }
+
     pub fn fee_instructions(&self) -> &[Instruction] {
-        &self.transaction.fee_instructions
+        self.body.fee_instructions()
     }
 
     pub fn instructions(&self) -> &[Instruction] {
-        &self.transaction.instructions
+        self.body.instructions()
     }
 
     pub fn signatures(&self) -> &[TransactionSignature] {
-        &self.signatures
+        self.body.signatures()
+    }
+
+    pub fn seal_signature(&self) -> &TransactionSealSignature {
+        &self.seal_signature
+    }
+
+    pub fn is_seal_signer_authorized(&self) -> bool {
+        self.body.unsigned_transaction().is_seal_signer_authorized
     }
 
     pub fn verify_all_signatures(&self) -> bool {
-        if self.signatures.is_empty() {
+        if !self.seal_signature.verify(&self.body) {
+            debug!(target: LOG_TARGET, "Transaction seal signature is valid");
             return false;
         }
 
-        self.signatures().iter().all(|sig| sig.verify(&self.transaction))
+        self.body.verify_all_signatures(self.seal_signature.public_key())
     }
 
     pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
-        &self.transaction.inputs
+        self.body.inputs()
     }
 
-    /// Returns (fee instructions, instructions)
-    pub fn into_instructions(self) -> (Vec<Instruction>, Vec<Instruction>) {
-        (self.transaction.fee_instructions, self.transaction.instructions)
+    pub fn unsealed_transaction(&self) -> &UnsealedTransactionV1 {
+        &self.body
+    }
+
+    pub fn into_unsealed_transaction(self) -> UnsealedTransactionV1 {
+        self.body
     }
 
     pub fn into_parts(
         self,
     ) -> (
-        UnsignedTransaction,
-        Vec<TransactionSignature>,
+        UnsealedTransactionV1,
+        TransactionSealSignature,
         IndexSet<VersionedSubstateId>,
     ) {
-        (self.transaction, self.signatures, self.filled_inputs)
+        (self.body, self.seal_signature, self.filled_inputs)
     }
 
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirement> + '_ {
@@ -140,14 +158,28 @@ impl TransactionV1 {
             .chain(self.filled_inputs().iter().map(|fi| fi.substate_id()))
     }
 
-    /// Returns true if the provided committee is involved in at least one input of this transaction.
-    pub fn is_involved_inputs(&self, committee_info: &CommitteeInfo) -> bool {
-        self.all_inputs_iter()
-            .any(|id| committee_info.includes_substate_id(id.substate_id()))
+    pub fn to_all_involved_shards(&self, num_shards: NumPreshards, num_committees: u32) -> HashSet<ShardGroup> {
+        self.all_inputs_substate_ids_iter()
+            .map(|id| {
+                // version doesnt affect shard
+                let addr = SubstateAddress::from_substate_id(id, 0);
+                addr.to_shard_group(num_shards, num_committees)
+            })
+            .collect()
     }
 
-    pub fn num_unique_inputs(&self) -> usize {
-        self.all_inputs_substate_ids_iter().count()
+    pub fn all_published_templates_iter(&self) -> impl Iterator<Item = PublishedTemplateAddress> + '_ {
+        let sealed_pk = self.seal_signature.public_key();
+        self.instructions()
+            .iter()
+            .chain(self.fee_instructions())
+            .filter_map(|instruction| {
+                if let Instruction::PublishTemplate { binary } = instruction {
+                    Some(PublishedTemplateAddress::from_author_and_code(sealed_pk, binary))
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn filled_inputs(&self) -> &IndexSet<VersionedSubstateId> {
@@ -176,11 +208,11 @@ impl TransactionV1 {
     }
 
     pub fn min_epoch(&self) -> Option<Epoch> {
-        self.transaction.min_epoch
+        self.body.min_epoch()
     }
 
     pub fn max_epoch(&self) -> Option<Epoch> {
-        self.transaction.max_epoch
+        self.body.max_epoch()
     }
 
     pub fn as_referenced_components(&self) -> impl Iterator<Item = &ComponentAddress> + '_ {
@@ -240,10 +272,10 @@ impl Display for TransactionV1 {
             f,
             "TransactionV1[{}, Inputs: {}, Fee Instructions: {}, Instructions: {}, Signatures: {}, Filled Inputs: {}]",
             self.id,
-            self.transaction.inputs.len(),
-            self.transaction.fee_instructions.len(),
-            self.transaction.instructions.len(),
-            self.signatures.len(),
+            self.body.inputs().len(),
+            self.body.fee_instructions().len(),
+            self.body.instructions().len(),
+            self.signatures().len(),
             self.filled_inputs.len(),
         )
     }

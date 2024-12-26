@@ -15,10 +15,14 @@ tari_crypto = { workspace = true, features = ["borsh"] }
 tari_template_lib = { workspace = true }
 
 borsh = { workspace = true }
+log = { workspace = true }
 rand = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true, default-features = true }
 ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+tari_bor = { workspace = true }
 
 [features]
 ts = ["ts-rs"]

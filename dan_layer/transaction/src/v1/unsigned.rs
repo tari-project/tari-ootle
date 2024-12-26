@@ -13,79 +13,78 @@ use tari_engine_types::{
 };
 use tari_template_lib::models::ComponentAddress;
 
-use crate::UnsignedTransactionV1;
+use crate::builder::TransactionBuilder;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub enum UnsignedTransaction {
-    V1(UnsignedTransactionV1),
+pub struct UnsignedTransactionV1 {
+    pub network: u8,
+    pub fee_instructions: Vec<Instruction>,
+    pub instructions: Vec<Instruction>,
+
+    /// Input objects that may be read/write
+    pub inputs: IndexSet<SubstateRequirement>,
+    pub min_epoch: Option<Epoch>,
+    pub max_epoch: Option<Epoch>,
+    pub is_seal_signer_authorized: bool,
 }
 
-impl UnsignedTransaction {
-    pub fn set_network<N: Into<u8>>(&mut self, network: N) -> &mut Self {
-        match self {
-            Self::V1(tx) => tx.set_network(network),
-        };
-        self
+impl UnsignedTransactionV1 {
+    pub fn builder() -> TransactionBuilder {
+        TransactionBuilder::new()
     }
 
-    pub fn authorized_sealed_signer(&mut self) -> &mut Self {
-        match self {
-            Self::V1(tx) => tx.is_seal_signer_authorized = true,
+    pub fn new<N: Into<u8>>(
+        network: N,
+        fee_instructions: Vec<Instruction>,
+        instructions: Vec<Instruction>,
+        inputs: IndexSet<SubstateRequirement>,
+        min_epoch: Option<Epoch>,
+        max_epoch: Option<Epoch>,
+    ) -> Self {
+        Self {
+            network: network.into(),
+            fee_instructions,
+            instructions,
+            inputs,
+            min_epoch,
+            max_epoch,
+            is_seal_signer_authorized: false,
         }
+    }
+
+    pub fn set_network<N: Into<u8>>(&mut self, network: N) -> &mut Self {
+        self.network = network.into();
         self
     }
 
     pub fn fee_instructions(&self) -> &[Instruction] {
-        match self {
-            Self::V1(tx) => tx.fee_instructions(),
-        }
-    }
-
-    pub(crate) fn fee_instructions_mut(&mut self) -> &mut Vec<Instruction> {
-        match self {
-            Self::V1(tx) => &mut tx.fee_instructions,
-        }
+        &self.fee_instructions
     }
 
     pub fn instructions(&self) -> &[Instruction] {
-        match self {
-            Self::V1(tx) => tx.instructions(),
-        }
-    }
-
-    pub(crate) fn instructions_mut(&mut self) -> &mut Vec<Instruction> {
-        match self {
-            Self::V1(tx) => &mut tx.instructions,
-        }
-    }
-
-    pub fn into_instructions(self) -> Vec<Instruction> {
-        match self {
-            Self::V1(tx) => tx.instructions,
-        }
+        &self.instructions
     }
 
     pub fn inputs(&self) -> &IndexSet<SubstateRequirement> {
-        match self {
-            Self::V1(tx) => tx.inputs(),
-        }
+        &self.inputs
+    }
+
+    /// Returns (fee instructions, instructions)
+    pub fn into_instructions(self) -> (Vec<Instruction>, Vec<Instruction>) {
+        (self.fee_instructions, self.instructions)
     }
 
     pub fn min_epoch(&self) -> Option<Epoch> {
-        match self {
-            Self::V1(tx) => tx.min_epoch(),
-        }
+        self.min_epoch
     }
 
     pub fn max_epoch(&self) -> Option<Epoch> {
-        match self {
-            Self::V1(tx) => tx.max_epoch(),
-        }
+        self.max_epoch
     }
 
     pub fn as_referenced_components(&self) -> impl Iterator<Item = &ComponentAddress> + '_ {
@@ -136,37 +135,5 @@ impl UnsignedTransaction {
 
     pub fn has_inputs_without_version(&self) -> bool {
         self.inputs().iter().any(|i| i.version().is_none())
-    }
-
-    pub fn set_min_epoch(&mut self, min_epoch: Option<Epoch>) -> &mut Self {
-        match self {
-            Self::V1(tx) => tx.min_epoch = min_epoch,
-        }
-        self
-    }
-
-    pub fn set_max_epoch(&mut self, max_epoch: Option<Epoch>) -> &mut Self {
-        match self {
-            Self::V1(tx) => tx.max_epoch = max_epoch,
-        }
-        self
-    }
-
-    pub(crate) fn inputs_mut(&mut self) -> &mut IndexSet<SubstateRequirement> {
-        match self {
-            Self::V1(tx) => &mut tx.inputs,
-        }
-    }
-}
-
-impl From<UnsignedTransactionV1> for UnsignedTransaction {
-    fn from(tx: UnsignedTransactionV1) -> Self {
-        Self::V1(tx)
-    }
-}
-
-impl Default for UnsignedTransaction {
-    fn default() -> Self {
-        Self::V1(UnsignedTransactionV1::default())
     }
 }

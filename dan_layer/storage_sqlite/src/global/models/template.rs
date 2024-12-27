@@ -28,16 +28,17 @@ use crate::global::schema::*;
 #[diesel(table_name = templates)]
 pub struct TemplateModel {
     pub id: i32,
-    pub author_public_key: Vec<u8>,
-    pub template_address: Vec<u8>,
     pub template_name: String,
     pub expected_hash: Vec<u8>,
+    pub template_address: Vec<u8>,
+    pub url: Option<String>,
+    pub epoch: i64,
     pub template_type: String,
+    pub author_public_key: Vec<u8>,
     pub compiled_code: Option<Vec<u8>>,
     pub flow_json: Option<String>,
-    pub manifest: Option<String>,
-    pub url: Option<String>,
     pub status: String,
+    pub manifest: Option<String>,
     pub added_at: NaiveDateTime,
 }
 
@@ -50,6 +51,7 @@ pub struct NewTemplateModel {
     pub expected_hash: Vec<u8>,
     pub template_type: String,
     pub compiled_code: Option<Vec<u8>>,
+    pub epoch: i64,
     pub flow_json: Option<String>,
     pub status: String,
     pub manifest: Option<String>,

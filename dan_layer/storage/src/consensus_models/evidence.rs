@@ -65,23 +65,24 @@ impl Evidence {
         Evidence { evidence }
     }
 
-    pub fn all_addresses_accepted(&self) -> bool {
+    pub fn all_objects_accepted(&self) -> bool {
         // CASE: all inputs and outputs are accept justified. If they have been accept justified, they have implicitly
         // been prepare justified. This may happen if the local node is only involved in outputs (and therefore
         // sequences using the LocalAccept foreign proposal)
         self.evidence.values().all(|e| e.is_accept_justified())
     }
 
-    pub fn all_inputs_prepared(&self) -> bool {
+    pub fn all_shard_groups_prepared(&self) -> bool {
         self.evidence
             .values()
+            // .filter(|e| {
+            //     // CASE: we only require input shard groups to prepare
+            //     e.substates().values().any(|e| e.is_input())
+            // })
             // CASE: we use prepare OR accept because inputs can only be accept justified if they were prepared. Prepared
             // may be implicit (null) if the local node is only involved in outputs (and therefore sequences using the LocalAccept
             // foreign proposal)
-            .all(|e| {
-                e.is_prepare_justified() || e.is_accept_justified()
-
-            })
+            .all(|e| e.is_prepare_justified() || e.is_accept_justified())
     }
 
     /// Returns true if all substates in the given shard group are output locks.
@@ -234,13 +235,11 @@ impl ShardGroupEvidence {
     }
 
     pub fn is_prepare_justified(&self) -> bool {
-        // No substates means that we have no pledges yet, so we cannot count this as justified
-        !self.substates.is_empty() && self.prepare_qc.is_some()
+        self.prepare_qc.is_some()
     }
 
     pub fn is_accept_justified(&self) -> bool {
-        // No substates means that we have no pledges yet, so we cannot count this as justified
-        !self.substates.is_empty() && self.accept_qc.is_some()
+        self.accept_qc.is_some()
     }
 
     pub fn substates(&self) -> &IndexMap<SubstateAddress, SubstateLockType> {

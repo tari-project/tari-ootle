@@ -284,6 +284,10 @@ impl SubstateId {
         matches!(self, Self::Template(_))
     }
 
+    pub fn is_global(&self) -> bool {
+        self.is_published_template()
+    }
+
     pub fn is_read_only(&self) -> bool {
         matches!(self, Self::TransactionReceipt(_) | Self::Resource(_))
     }

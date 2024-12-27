@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_common_types::types::PublicKey;
+use tari_dan_common_types::Epoch;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
@@ -70,6 +71,7 @@ impl TemplateManagerHandle {
         template_address: TemplateAddress,
         template: TemplateExecutable,
         template_name: Option<String>,
+        epoch: Epoch,
     ) -> Result<(), TemplateManagerError> {
         let (tx, rx) = oneshot::channel();
         self.request_tx
@@ -78,6 +80,7 @@ impl TemplateManagerHandle {
                 template_address,
                 template,
                 template_name,
+                epoch,
                 reply: tx,
             })
             .await

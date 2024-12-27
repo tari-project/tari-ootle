@@ -475,6 +475,8 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             target: LOG_TARGET,
             "🌠 new template found with address {} at height {}", template_address, block_info.height
         );
+        let consensus_constants = self.epoch_manager.get_base_layer_consensus_constants().await?;
+        let epoch = consensus_constants.height_to_epoch(block_info.height);
         self.template_manager
             .add_template(
                 registration.author_public_key,
@@ -484,6 +486,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                     registration.binary_sha,
                 ),
                 Some(template_name),
+                epoch,
             )
             .await?;
 

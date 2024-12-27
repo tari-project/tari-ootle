@@ -452,6 +452,7 @@ diesel::table! {
         pending_stage -> Nullable<Text>,
         is_ready -> Bool,
         confirm_stage -> Nullable<Text>,
+        is_global -> Bool,
         updated_at -> Timestamp,
         created_at -> Timestamp,
     }

@@ -44,9 +44,8 @@ impl BlockDiff {
                 .into_iter()
                 // Commit all substates included in this shard. Every involved validator commits the transaction receipt.
                 .filter(|change|
-                    change.versioned_substate_id().substate_id.is_published_template() ||
                         change.versioned_substate_id().substate_id.is_transaction_receipt() ||
-                        info.includes_substate_address(&change.to_substate_address())
+                        info.includes_substate_id(change.versioned_substate_id().substate_id())
                 )
                 .collect(),
         }

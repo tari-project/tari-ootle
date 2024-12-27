@@ -16,16 +16,7 @@ use tari_dan_common_types::{
     ShardGroup,
 };
 use tari_dan_storage::{
-    consensus_models::{
-        Block,
-        HighQc,
-        LastSentVote,
-        QuorumCertificate,
-        QuorumDecision,
-        TransactionPool,
-        ValidBlock,
-        Vote,
-    },
+    consensus_models::{Block, HighQc, LastSentVote, QuorumDecision, TransactionPool, ValidBlock, Vote},
     StateStore,
     StateStoreWriteTransaction,
 };
@@ -507,11 +498,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         Ok(())
     }
 
-    fn propose_newly_locked_blocks(
-        &mut self,
-        local_committee_info: CommitteeInfo,
-        blocks: Vec<(Block, QuorumCertificate)>,
-    ) {
+    fn propose_newly_locked_blocks(&mut self, local_committee_info: CommitteeInfo, blocks: Vec<Block>) {
         if blocks.is_empty() {
             return;
         }
@@ -881,7 +868,7 @@ async fn propose_newly_locked_blocks_task<TConsensusSpec: ConsensusSpec>(
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     num_preshards: NumPreshards,
     local_committee_info: CommitteeInfo,
-    blocks: Vec<(Block, QuorumCertificate)>,
+    blocks: Vec<Block>,
 ) {
     let _timer = TraceTimer::debug(LOG_TARGET, "propose_newly_locked_blocks_task").with_iterations(blocks.len());
     if let Err(err) = propose_newly_locked_blocks_task_inner::<TConsensusSpec>(
@@ -902,16 +889,15 @@ async fn propose_newly_locked_blocks_task_inner<TConsensusSpec: ConsensusSpec>(
     mut outbound_messaging: TConsensusSpec::OutboundMessaging,
     num_preshards: NumPreshards,
     local_committee_info: &CommitteeInfo,
-    blocks: Vec<(Block, QuorumCertificate)>,
+    blocks: Vec<Block>,
 ) -> Result<(), HotStuffError> {
-    for (block, justify_qc) in blocks.into_iter().rev() {
+    for block in blocks.into_iter().rev() {
         broadcast_foreign_proposal_if_required::<TConsensusSpec>(
             &mut outbound_messaging,
             &epoch_manager,
             num_preshards,
             local_committee_info,
             block,
-            justify_qc,
         )
         .await?;
     }
@@ -924,7 +910,6 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     num_preshards: NumPreshards,
     local_committee_info: &CommitteeInfo,
     block: Block,
-    justify_qc: QuorumCertificate,
 ) -> Result<(), HotStuffError> {
     let num_committees = epoch_manager.get_num_committees(block.epoch()).await?;
 
@@ -939,25 +924,28 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
                 .filter(|atom| !atom.evidence.is_committee_output_only(local_committee_info))
                 .or_else(|| c.local_accept())
         })
-        .flat_map(|p| p.evidence.shard_groups_iter().copied())
+        .flat_map(|p| {
+            debug!(
+                target: LOG_TARGET,
+                "🌐 FOREIGN PROPOSE: atom {p}",
+            );
+            p.evidence.shard_groups_iter().copied()
+        })
         .filter(|shard_group| local_shard_group != *shard_group)
         .collect::<HashSet<_>>();
     if non_local_shard_groups.is_empty() {
         debug!(
             target: LOG_TARGET,
-            "🌐 No foreign shards involved for new locked block {}",
+            "🌐 No foreign shards apply to new locked block {}",
             block,
         );
         return Ok(());
     }
     info!(
         target: LOG_TARGET,
-        "🌐 BROADCASTING new locked block {} to {} foreign shard groups. justify: {} ({}), parent: {}",
-        block,
+        "🌐 FOREIGN PROPOSE: new locked block to {} foreign shard groups. {}",
         non_local_shard_groups.len(),
-        justify_qc.block_id(),
-        justify_qc.block_height(),
-        block.parent()
+        block,
     );
 
     for shard_group in non_local_shard_groups {

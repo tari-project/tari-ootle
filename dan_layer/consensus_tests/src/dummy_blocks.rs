@@ -12,7 +12,7 @@ use tari_crypto::{keys::PublicKey as _, tari_utilities::ByteArray};
 use tari_dan_common_types::{committee::Committee, DerivableFromPublicKey, Epoch, NodeHeight, PeerAddress, ShardGroup};
 use tari_dan_storage::consensus_models::Block;
 
-use crate::support::{load_fixture, RoundRobinLeaderStrategy};
+use crate::support::{load_json_fixture, RoundRobinLeaderStrategy};
 
 #[test]
 fn dummy_blocks() {
@@ -74,9 +74,9 @@ fn public_key_from_seed(seed: u8) -> PublicKey {
 
 #[test]
 fn last_matches_generated_using_real_data() {
-    let candidate = load_fixture::<Block>("block_with_dummies.json");
+    let candidate = load_json_fixture::<Block>("block_with_dummies.json");
 
-    let committee = load_fixture::<serde_json::Value>("committee.json");
+    let committee = load_json_fixture::<serde_json::Value>("committee.json");
     let committee: Vec<(PeerAddress, PublicKey)> = serde_json::from_value(committee["members"].clone()).unwrap();
     let committee = Committee::new(committee);
 

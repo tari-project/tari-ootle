@@ -223,7 +223,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             )));
         }
 
-        if non_local_inputs.is_empty() {
+        if !transaction.transaction.is_global() && non_local_inputs.is_empty() {
             // CASE: All inputs are local and we can execute the transaction.
             //       Outputs may or may not be local
             let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.clone(), *v)))?;
@@ -305,6 +305,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
                 transaction.set_abort_reason(RejectReason::FailedToLockInputs(err.to_string()));
             }
+
             // CASE: Multishard transaction, not executed
             Ok(PreparedTransaction::new_multishard(
                 transaction.into_execution(),

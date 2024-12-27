@@ -7,7 +7,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_dan_engine::{
     abi::TemplateDef,
@@ -109,18 +108,5 @@ impl TemplateProvider for Package {
         id: &tari_engine_types::TemplateAddress,
     ) -> Result<Option<Self::Template>, Self::Error> {
         Ok(self.templates.lock().unwrap().get(id).cloned())
-    }
-
-    fn add_wasm_template(
-        &self,
-        _author_public_key: PublicKey,
-        template_address: tari_engine_types::TemplateAddress,
-        template: &[u8],
-    ) -> Result<(), Self::Error> {
-        self.templates
-            .lock()
-            .unwrap()
-            .insert(template_address, WasmModule::load_template_from_code(template)?);
-        Ok(())
     }
 }

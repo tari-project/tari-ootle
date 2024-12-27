@@ -31,6 +31,7 @@ pub struct TransactionPoolRecord {
     pub is_ready: bool,
     #[allow(dead_code)]
     pub confirm_stage: Option<String>,
+    pub is_global: bool,
     #[allow(dead_code)]
     pub updated_at: PrimitiveDateTime,
     #[allow(dead_code)]
@@ -72,6 +73,7 @@ impl TransactionPoolRecord {
         Ok(consensus_models::TransactionPoolRecord::load(
             deserialize_hex_try_from(&self.transaction_id)?,
             evidence,
+            self.is_global,
             transaction_fee as u64,
             leader_fee,
             parse_from_string(&self.stage)?,

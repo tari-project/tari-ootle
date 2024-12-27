@@ -149,9 +149,9 @@ where TConsensusSpec: ConsensusSpec
             // Update nodes
             let high_qc = valid_block.block().update_nodes(
                 tx,
-                |tx, _prev_locked, block, justify_qc| {
+                |tx, _prev_locked, block, _justify_qc| {
                     if !block.is_dummy() {
-                        locked_blocks.push((block.clone(), justify_qc.clone()));
+                        locked_blocks.push(block.clone());
                     }
                     self.on_lock_block(tx, block)
                 },
@@ -987,14 +987,14 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
-        if !tx_rec.evidence().all_inputs_prepared() {
+        if !tx_rec.evidence().all_shard_groups_prepared() {
             warn!(
                 target: LOG_TARGET,
-                "❌ NO VOTE: AllPrepare disagreement for transaction {} in block {}. Leader proposed that all inputs are justified, but not all inputs are justified",
+                "❌ NO VOTE: AllPrepare disagreement for transaction {} in block {}. Leader proposed that all shard groups have prepared, but this is not the case",
                 tx_rec.transaction_id(),
                 block,
             );
-            return Ok(Some(NoVoteReason::NotAllInputsPrepared));
+            return Ok(Some(NoVoteReason::NotAllShardGroupsPrepared));
         }
 
         let maybe_execution = if tx_rec.current_decision().is_commit() {
@@ -1029,7 +1029,7 @@ where TConsensusSpec: ConsensusSpec
                 // Lock all local outputs
                 let local_outputs = execution.resulting_outputs().iter().filter(|o| {
                     o.substate_id().is_transaction_receipt() ||
-                        local_committee_info.includes_substate_address(&o.to_substate_address())
+                        local_committee_info.includes_substate_id(o.substate_id())
                 });
                 let lock_status = substate_store.try_lock_all(*tx_rec.transaction_id(), local_outputs, false)?;
                 if let Some(err) = lock_status.failures().first() {

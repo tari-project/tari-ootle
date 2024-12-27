@@ -1047,6 +1047,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         tx_id: TransactionId,
         decision: Decision,
         is_ready: bool,
+        is_global: bool,
     ) -> Result<(), StorageError> {
         use crate::schema::transaction_pool;
 
@@ -1055,6 +1056,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             transaction_pool::original_decision.eq(decision.to_string()),
             transaction_pool::stage.eq(TransactionPoolStage::New.to_string()),
             transaction_pool::is_ready.eq(is_ready),
+            transaction_pool::is_global.eq(is_global),
         );
 
         diesel::insert_into(transaction_pool::table)

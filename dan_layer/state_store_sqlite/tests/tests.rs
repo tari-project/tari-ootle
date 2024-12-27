@@ -72,9 +72,12 @@ mod confirm_all_transitions {
         .unwrap();
         block1.insert(&mut tx).unwrap();
 
-        tx.transaction_pool_insert_new(atom1.id, atom1.decision, true).unwrap();
-        tx.transaction_pool_insert_new(atom2.id, atom2.decision, true).unwrap();
-        tx.transaction_pool_insert_new(atom3.id, atom3.decision, true).unwrap();
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, true, false)
+            .unwrap();
+        tx.transaction_pool_insert_new(atom2.id, atom2.decision, true, false)
+            .unwrap();
+        tx.transaction_pool_insert_new(atom3.id, atom3.decision, true, false)
+            .unwrap();
         let block_id = *block1.id();
 
         let transactions = tx.transaction_pool_get_all().unwrap();

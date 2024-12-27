@@ -221,6 +221,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 expected_hash: t.expected_hash.try_into()?,
                 template_address: t.template_address.try_into()?,
                 template_type: t.template_type.parse().expect("DB template type corrupted"),
+                epoch: Epoch(t.epoch as u64),
                 compiled_code: t.compiled_code,
                 flow_json: t.flow_json,
                 manifest: t.manifest,
@@ -264,6 +265,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                     url: t.url,
                     status: t.status.parse().expect("DB status corrupted"),
                     added_at: t.added_at,
+                    epoch: Epoch(t.epoch as u64),
                 })
             })
             .collect()
@@ -299,6 +301,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                     url: t.url,
                     status: t.status.parse().expect("DB status corrupted"),
                     added_at: t.added_at,
+                    epoch: Epoch(t.epoch as u64),
                 })
             })
             .collect()
@@ -312,6 +315,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             template_address: item.template_address.to_vec(),
             template_type: item.template_type.as_str().to_string(),
             compiled_code: item.compiled_code,
+            epoch: item.epoch.as_u64() as i64,
             flow_json: item.flow_json,
             status: item.status.as_str().to_string(),
             manifest: item.manifest,

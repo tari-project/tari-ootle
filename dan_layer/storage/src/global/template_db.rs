@@ -24,6 +24,7 @@ use std::str::FromStr;
 
 use chrono::NaiveDateTime;
 use tari_common_types::types::FixedHash;
+use tari_dan_common_types::Epoch;
 use tari_engine_types::TemplateAddress;
 
 use crate::global::GlobalDbAdapter;
@@ -69,6 +70,7 @@ pub struct DbTemplate {
     pub template_address: TemplateAddress,
     pub template_name: String,
     pub expected_hash: FixedHash,
+    pub epoch: Epoch,
     pub template_type: DbTemplateType,
     pub compiled_code: Option<Vec<u8>>,
     pub flow_json: Option<String>,

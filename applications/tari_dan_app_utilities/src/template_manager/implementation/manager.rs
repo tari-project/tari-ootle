@@ -26,7 +26,12 @@ use chrono::Utc;
 use log::*;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_crypto::tari_utilities::ByteArray;
-use tari_dan_common_types::{optional::Optional, services::template_provider::TemplateProvider, NodeAddressable};
+use tari_dan_common_types::{
+    optional::Optional,
+    services::template_provider::TemplateProvider,
+    Epoch,
+    NodeAddressable,
+};
 use tari_dan_engine::{
     flow::FlowFactory,
     function_definitions::FlowFunctionDefinition,
@@ -192,6 +197,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         template: TemplateExecutable,
         template_name: Option<String>,
         template_status: Option<TemplateStatus>,
+        epoch: Epoch,
     ) -> Result<(), TemplateManagerError> {
         enum TemplateHash {
             Hash(Hash),
@@ -244,6 +250,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             flow_json,
             manifest,
             url: template_url,
+            epoch,
         };
 
         let mut tx = self.global_db.create_transaction()?;
@@ -325,21 +332,6 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
         self.cache.insert(*address, loaded.clone());
 
         Ok(Some(loaded))
-    }
-
-    fn add_wasm_template(
-        &self,
-        author_public_key: PublicKey,
-        template_address: tari_engine_types::TemplateAddress,
-        template: &[u8],
-    ) -> Result<(), Self::Error> {
-        self.add_template(
-            author_public_key,
-            template_address,
-            TemplateExecutable::CompiledWasm(template.to_vec()),
-            None,
-            Some(TemplateStatus::Active),
-        )
     }
 }
 

@@ -22,6 +22,7 @@
 
 use reqwest::Url;
 use tari_common_types::types::{FixedHash, PublicKey};
+use tari_dan_common_types::Epoch;
 use tari_dan_storage::global::{DbTemplate, DbTemplateType};
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
@@ -91,6 +92,7 @@ pub enum TemplateManagerRequest {
         template_address: tari_engine_types::TemplateAddress,
         template: TemplateExecutable,
         template_name: Option<String>,
+        epoch: Epoch,
         reply: oneshot::Sender<Result<(), TemplateManagerError>>,
     },
     GetTemplate {

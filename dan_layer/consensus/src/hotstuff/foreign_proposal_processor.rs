@@ -187,7 +187,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                             tx_rec.current_stage()
                         );
                     }
-                } else if tx_rec.current_stage().is_local_prepared() && tx_rec.evidence().all_inputs_prepared() {
+                } else if tx_rec.current_stage().is_local_prepared() && tx_rec.evidence().all_shard_groups_prepared() {
                     // If all shards are complete, and we've already received our LocalPrepared, we can set out
                     // LocalPrepared transaction as ready to propose ACCEPT. If we have not received
                     // the local LocalPrepared, the transition will happen when we receive the local
@@ -209,7 +209,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
-                         tx_rec.evidence().all_inputs_prepared()
+                         tx_rec.evidence().all_shard_groups_prepared()
                     );
                     // Update the evidence
                     proposed_block_change_set.set_next_transaction_update(tx_rec)?;
@@ -363,7 +363,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
-                        tx_rec.evidence().all_addresses_accepted()
+                        tx_rec.evidence().all_objects_accepted()
                     );
                     // Still need to update the evidence
                     proposed_block_change_set.set_next_transaction_update(tx_rec)?;

@@ -25,7 +25,7 @@ use std::{collections::HashSet, fmt::Display, iter};
 use libp2p::{gossipsub, PeerId};
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_dan_common_types::{optional::Optional, NumPreshards, PeerAddress, ShardGroup, ToSubstateAddress};
+use tari_dan_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubstateAddress};
 use tari_dan_p2p::{DanMessage, NewTransactionMessage, TariMessagingSpec};
 use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 use tari_engine_types::commit_result::RejectReason;
@@ -67,7 +67,6 @@ impl<TValidator> MempoolService<TValidator>
 where TValidator: Validator<Transaction, Context = (), Error = TransactionValidationError>
 {
     pub(super) fn new(
-        num_preshards: NumPreshards,
         mempool_requests: mpsc::Receiver<MempoolRequest>,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         before_execute_validator: TValidator,
@@ -78,7 +77,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
         #[cfg(feature = "metrics")] metrics: PrometheusMempoolMetrics,
     ) -> Self {
         Self {
-            gossip: MempoolGossip::new(num_preshards, epoch_manager.clone(), networking, rx_gossip),
+            gossip: MempoolGossip::new(epoch_manager.clone(), networking, rx_gossip),
             transactions: Default::default(),
             mempool_requests,
             epoch_manager,

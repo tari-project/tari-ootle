@@ -4,11 +4,11 @@
 use tari_consensus::hotstuff::eviction_proof::convert_block_to_sidechain_block_header;
 use tari_dan_storage::consensus_models::Block;
 
-use crate::support::load_fixture;
+use crate::support::load_json_fixture;
 
 #[test]
 fn it_produces_a_summarized_header_that_hashes_to_the_original() {
-    let block = load_fixture::<Block>("block.json");
+    let block = load_json_fixture::<Block>("block.json");
     let sidechain_block = convert_block_to_sidechain_block_header(block.header());
     assert_eq!(sidechain_block.extra_data_hash, block.header().create_extra_data_hash());
     assert_eq!(

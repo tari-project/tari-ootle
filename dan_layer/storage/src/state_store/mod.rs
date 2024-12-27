@@ -463,6 +463,7 @@ pub trait StateStoreWriteTransaction {
         tx_id: TransactionId,
         decision: Decision,
         is_ready: bool,
+        is_global: bool,
     ) -> Result<(), StorageError>;
     fn transaction_pool_add_pending_update(
         &mut self,

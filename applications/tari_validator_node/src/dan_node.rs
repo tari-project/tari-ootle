@@ -94,7 +94,6 @@ impl DanNode {
             .services
             .state_store
             .with_read_tx(|tx| block.get_committing_transactions(tx))?;
-
         let templates = transactions
             .into_iter()
             .filter_map(|record| {
@@ -115,6 +114,7 @@ impl DanNode {
                 })
             });
 
+        let epoch = self.services.consensus_handle.current_epoch();
         // adding templates to template manager
         let mut template_counter = 0;
         for (author_pub_key, template_address, template) in templates {
@@ -127,7 +127,7 @@ impl DanNode {
             if let Err(err) = self
                 .services
                 .template_manager
-                .add_template(author_pub_key, template_address, template, None)
+                .add_template(author_pub_key, template_address, template, None, epoch)
                 .await
             {
                 error!(target: LOG_TARGET, "🚨Failed to add template: {}", err);

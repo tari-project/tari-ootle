@@ -132,8 +132,8 @@ impl MultiShardPreparedTransaction {
             outputs,
         );
 
-        // Add foreign involved shard groups without adding any substates (because we do not know the pledged version
-        // yet)
+        // Add foreign involved shard groups without adding any substates (because we do not know the pledged
+        // version yet)
         self.foreign_inputs()
             .iter()
             .map(|r| {

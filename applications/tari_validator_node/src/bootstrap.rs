@@ -336,7 +336,6 @@ pub async fn spawn_services(
     handles.push(consensus_join_handle);
 
     let (mempool, join_handle) = mempool::spawn(
-        consensus_constants.num_preshards,
         epoch_manager.clone(),
         create_mempool_transaction_validator(template_manager.clone()),
         state_store.clone(),

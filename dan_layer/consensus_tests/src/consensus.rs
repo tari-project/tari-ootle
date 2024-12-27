@@ -12,13 +12,23 @@ use std::time::Duration;
 
 use tari_common_types::types::PrivateKey;
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage};
-use tari_dan_common_types::{optional::Optional, Epoch, LockIntent, NodeHeight, SubstateRequirement};
+use tari_dan_common_types::{
+    crypto::create_key_pair,
+    optional::Optional,
+    Epoch,
+    LockIntent,
+    NodeHeight,
+    SubstateRequirement,
+    ToSubstateAddress,
+    VersionedSubstateId,
+};
 use tari_dan_storage::{
     consensus_models::{
         AbortReason,
         BlockId,
         Command,
         Decision,
+        SubstateRecord,
         SubstateRequirementLockIntent,
         TransactionRecord,
         VersionedSubstateIdLockIntent,
@@ -26,12 +36,17 @@ use tari_dan_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
-use tari_engine_types::commit_result::RejectReason;
+use tari_engine_types::{
+    commit_result::RejectReason,
+    published_template::PublishedTemplateAddress,
+    substate::SubstateId,
+};
 use tari_transaction::Transaction;
 
 use crate::support::{
     build_transaction_from,
     helpers,
+    load_binary_fixture,
     logging::setup_logger,
     ExecuteSpec,
     Test,
@@ -974,7 +989,6 @@ async fn leader_failure_node_goes_down() {
 async fn foreign_block_distribution() {
     setup_logger();
     let mut test = Test::builder()
-        .debug_sql("/tmp/test{}.db")
         .with_test_timeout(Duration::from_secs(60))
         .with_message_filter(Box::new(move |from: &TestAddress, to: &TestAddress, msg| {
             if !matches!(msg, HotstuffMessage::ForeignProposalNotification(_)) {
@@ -1305,6 +1319,73 @@ async fn leader_failure_node_goes_down_and_gets_evicted() {
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
     test.assert_clean_shutdown_except(&[failure_node]).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multishard_publish_template() {
+    setup_logger();
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .add_committee(2, vec!["5", "6"])
+        .add_committee(3, vec!["7", "8"])
+        .start()
+        .await;
+    // First get transaction in the mempool
+    let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
+    let (sk, pk) = create_key_pair();
+    let wasm = load_binary_fixture("state.wasm");
+    let tx = Transaction::builder()
+        .publish_template(wasm.clone())
+        .with_inputs(inputs.iter().cloned().map(Into::into))
+        .build_and_seal(&sk);
+    let tx = TransactionRecord::new(tx);
+
+    test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
+        .await;
+    let template_id = PublishedTemplateAddress::from_author_and_code(&pk, &wasm);
+    test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: tx.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1,
+        inputs: inputs
+            .into_iter()
+            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .collect(),
+        new_outputs: vec![SubstateId::Template(template_id)],
+    });
+
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(30) {
+            panic!("Not all transaction committed after {} blocks", leaf.height);
+        }
+    }
+
+    test.assert_all_validators_at_same_height().await;
+    test.assert_all_validators_committed();
+
+    // Assert all LocalOnly
+    let template_substate = test
+        .get_validator(&TestAddress::new("1"))
+        .state_store
+        .with_read_tx(|tx| SubstateRecord::get(tx, &VersionedSubstateId::new(template_id, 0).to_substate_address()))
+        .unwrap();
+    let binary = template_substate
+        .substate_value
+        .into_template()
+        .expect("Expected template substate")
+        .binary;
+    assert_eq!(binary, wasm, "Template binary does not match");
+
+    test.assert_clean_shutdown().await;
 }
 
 // mod dump_data {

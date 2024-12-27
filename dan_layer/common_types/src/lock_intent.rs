@@ -51,6 +51,10 @@ impl SubstateLockType {
     pub fn is_output(&self) -> bool {
         matches!(self, Self::Output)
     }
+
+    pub fn is_input(&self) -> bool {
+        !self.is_output()
+    }
 }
 
 impl fmt::Display for SubstateLockType {

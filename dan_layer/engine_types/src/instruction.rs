@@ -72,6 +72,15 @@ pub enum Instruction {
     },
 }
 
+impl Instruction {
+    pub fn published_template_binary(&self) -> Option<&[u8]> {
+        match self {
+            Self::PublishTemplate { binary } => Some(binary),
+            _ => None,
+        }
+    }
+}
+
 impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {

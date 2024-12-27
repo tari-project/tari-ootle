@@ -272,28 +272,28 @@ CREATE INDEX locked_block_idx_epoch ON locked_block (epoch);
 
 create table transactions
 (
-    id                integer   not null primary key AUTOINCREMENT,
-    network           integer   not NULL,
-    transaction_id    text      not null,
-    fee_instructions  text      not NULL,
-    instructions      text      not NULL,
-    inputs            text      not NULL,
-    filled_inputs     text      not NULL,
-    resolved_inputs   text      NULL,
-    resulting_outputs text      NULL,
-    signatures        text      not NULL,
-    seal_signature    text      not NULL,
-    is_seal_signer_authorized boolean not NULL,
-    result            text      NULL,
-    execution_time_ms bigint    NULL,
-    final_decision    text      NULL,
-    finalized_at      timestamp NULL,
-    outcome           TEXT      NULL,
-    abort_details     text      NULL,
-    min_epoch         BIGINT    NULL,
-    max_epoch         BIGINT    NULL,
-    schema_version    BIGINT    NOT NULL,
-    created_at        timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                        integer   not null primary key AUTOINCREMENT,
+    network                   integer   not NULL,
+    transaction_id            text      not null,
+    fee_instructions          text      not NULL,
+    instructions              text      not NULL,
+    inputs                    text      not NULL,
+    filled_inputs             text      not NULL,
+    resolved_inputs           text      NULL,
+    resulting_outputs         text      NULL,
+    signatures                text      not NULL,
+    seal_signature            text      not NULL,
+    is_seal_signer_authorized boolean   not NULL,
+    result                    text      NULL,
+    execution_time_ms         bigint    NULL,
+    final_decision            text      NULL,
+    finalized_at              timestamp NULL,
+    outcome                   TEXT      NULL,
+    abort_details             text      NULL,
+    min_epoch                 BIGINT    NULL,
+    max_epoch                 BIGINT    NULL,
+    schema_version            BIGINT    NOT NULL,
+    created_at                timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 create unique index transactions_uniq_idx_id on transactions (transaction_id);
@@ -343,6 +343,7 @@ create table transaction_pool
     pending_stage     text      null,
     is_ready          boolean   not null,
     confirm_stage     text      null,
+    is_global         boolean   not NULL,
     updated_at        timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at        timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (transaction_id) REFERENCES transactions (transaction_id)

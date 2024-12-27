@@ -22,7 +22,7 @@
 
 use libp2p::{gossipsub, PeerId};
 use log::*;
-use tari_dan_common_types::{NumPreshards, PeerAddress};
+use tari_dan_common_types::PeerAddress;
 use tari_dan_p2p::TariMessagingSpec;
 use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_networking::NetworkingHandle;
@@ -42,7 +42,6 @@ use crate::{
 const LOG_TARGET: &str = "tari::dan::validator_node::mempool";
 
 pub fn spawn<TValidator>(
-    num_preshards: NumPreshards,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     transaction_validator: TValidator,
     state_store: SqliteStateStore<PeerAddress>,
@@ -61,7 +60,6 @@ where
     #[cfg(feature = "metrics")]
     let metrics = PrometheusMempoolMetrics::new(metrics_registry);
     let mempool = MempoolService::new(
-        num_preshards,
         rx_mempool_request,
         epoch_manager,
         transaction_validator,

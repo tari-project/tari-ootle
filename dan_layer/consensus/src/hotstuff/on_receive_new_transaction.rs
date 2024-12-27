@@ -153,8 +153,13 @@ where TConsensusSpec: ConsensusSpec
         transaction: &TransactionRecord,
         is_ready: bool,
     ) -> Result<(), HotStuffError> {
-        self.transaction_pool
-            .insert_new(tx, *transaction.id(), transaction.current_decision(), is_ready)?;
+        self.transaction_pool.insert_new(
+            tx,
+            *transaction.id(),
+            transaction.current_decision(),
+            is_ready,
+            transaction.transaction().is_global(),
+        )?;
         Ok(())
     }
 }

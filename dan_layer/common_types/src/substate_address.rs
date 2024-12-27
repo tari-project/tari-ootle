@@ -601,6 +601,22 @@ mod tests {
         }
 
         #[test]
+        fn it_matches_num_preshard_all_shard_iter() {
+            const NUM_COMMITTEES: u32 = 11;
+            let groups = (0..NUM_COMMITTEES).map(|i| {
+                address_at(i * (256 / NUM_COMMITTEES + 1), 256).to_shard_group(NumPreshards::P256, NUM_COMMITTEES)
+            });
+            let mut iter = NumPreshards::P256.all_shard_groups_iter(NUM_COMMITTEES);
+            let mut total_length = 0;
+            for (i, group) in groups.enumerate() {
+                assert_eq!(iter.next(), Some(group), "Failed at {group} (i={i})");
+                total_length += group.len();
+            }
+            assert_eq!(iter.next(), None);
+            assert_eq!(total_length, 256);
+        }
+
+        #[test]
         fn it_returns_the_correct_shard_group_for_odd_num_committees() {
             // All shard groups except the last have 3 shards each
 

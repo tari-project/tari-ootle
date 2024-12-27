@@ -232,6 +232,9 @@ impl CommitteeInfo {
     }
 
     pub fn includes_substate_id(&self, substate_id: &SubstateId) -> bool {
+        if substate_id.is_global() {
+            return true;
+        }
         // version doesnt affect shard
         let addr = SubstateAddress::from_substate_id(substate_id, 0);
         let shard = addr.to_shard(self.num_shards);
@@ -264,6 +267,10 @@ impl CommitteeInfo {
         items
             .into_iter()
             .filter(|substate_address| self.includes_substate_address(substate_address.borrow()))
+    }
+
+    pub fn all_shard_groups_iter(&self) -> impl Iterator<Item = ShardGroup> {
+        self.num_shards.all_shard_groups_iter(self.num_committees)
     }
 }
 

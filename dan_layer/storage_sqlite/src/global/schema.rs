@@ -52,16 +52,17 @@ diesel::table! {
 diesel::table! {
     templates (id) {
         id -> Integer,
-        author_public_key -> Binary,
-        template_address -> Binary,
         template_name -> Text,
         expected_hash -> Binary,
+        template_address -> Binary,
+        url -> Nullable<Text>,
+        epoch -> BigInt,
         template_type -> Text,
+        author_public_key -> Binary,
         compiled_code -> Nullable<Binary>,
         flow_json -> Nullable<Text>,
-        manifest -> Nullable<Text>,
-        url -> Nullable<Text>,
         status -> Text,
+        manifest -> Nullable<Text>,
         added_at -> Timestamp,
     }
 }

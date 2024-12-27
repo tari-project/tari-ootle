@@ -24,7 +24,6 @@ use tari_dan_storage::{
         LockedBlock,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        QuorumCertificate,
         QuorumDecision,
         SubstateChange,
         SubstateLock,
@@ -59,9 +58,8 @@ const MEM_MAX_PROPOSED_UTXO_MINTS_SIZE: usize = 1000;
 #[derive(Debug, Clone)]
 pub struct BlockDecision {
     pub quorum_decision: Option<QuorumDecision>,
-    /// Contains newly-locked non-dummy blocks and the QC that justifies each block i.e. typically the parent block's
-    /// QC
-    pub locked_blocks: Vec<(Block, QuorumCertificate)>,
+    /// Contains newly-locked non-dummy blocks
+    pub locked_blocks: Vec<Block>,
     pub finalized_transactions: Vec<Vec<TransactionPoolRecord>>,
     pub end_of_epoch: Option<Epoch>,
     pub high_qc: HighQc,

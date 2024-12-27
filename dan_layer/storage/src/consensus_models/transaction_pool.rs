@@ -86,8 +86,9 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         tx_id: TransactionId,
         decision: Decision,
         is_ready: bool,
+        is_global: bool,
     ) -> Result<(), TransactionPoolError> {
-        tx.transaction_pool_insert_new(tx_id, decision, is_ready)?;
+        tx.transaction_pool_insert_new(tx_id, decision, is_ready, is_global)?;
         Ok(())
     }
 
@@ -98,7 +99,12 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
     ) -> Result<(), TransactionPoolError> {
         // TODO(perf)
         for (transaction, is_ready) in transactions {
-            tx.transaction_pool_insert_new(*transaction.id(), transaction.current_decision(), is_ready)?;
+            tx.transaction_pool_insert_new(
+                *transaction.id(),
+                transaction.current_decision(),
+                is_ready,
+                transaction.transaction().is_global(),
+            )?;
         }
         Ok(())
     }
@@ -332,6 +338,7 @@ pub struct TransactionPoolRecord {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     transaction_id: TransactionId,
     evidence: Evidence,
+    is_global: bool,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     transaction_fee: u64,
     leader_fee: Option<LeaderFee>,
@@ -347,6 +354,7 @@ impl TransactionPoolRecord {
     pub fn load(
         id: TransactionId,
         evidence: Evidence,
+        is_global: bool,
         transaction_fee: u64,
         leader_fee: Option<LeaderFee>,
         stage: TransactionPoolStage,
@@ -359,6 +367,7 @@ impl TransactionPoolRecord {
         Self {
             transaction_id: id,
             evidence,
+            is_global,
             transaction_fee,
             leader_fee,
             stage,
@@ -381,12 +390,12 @@ impl TransactionPoolRecord {
         match next_stage {
             TransactionPoolStage::New => self.is_ready,
             TransactionPoolStage::Prepared => true,
-            TransactionPoolStage::LocalPrepared => self.evidence.all_inputs_prepared(),
+            TransactionPoolStage::LocalPrepared => self.evidence.all_shard_groups_prepared(),
             TransactionPoolStage::AllPrepared | TransactionPoolStage::SomePrepared => true,
             TransactionPoolStage::LocalAccepted => match self.current_decision() {
-                Decision::Commit => self.evidence.all_addresses_accepted(),
+                Decision::Commit => self.evidence.all_objects_accepted(),
                 // If we have decided to abort, we can continue if all input addresses are justified
-                Decision::Abort(_) => self.evidence.all_inputs_prepared(),
+                Decision::Abort(_) => self.evidence.all_shard_groups_prepared(),
             },
             TransactionPoolStage::AllAccepted |
             TransactionPoolStage::SomeAccepted |
@@ -487,6 +496,10 @@ impl TransactionPoolRecord {
         }
     }
 
+    pub fn is_global(&self) -> bool {
+        self.is_global
+    }
+
     pub fn calculate_leader_fee(&self, num_involved_shards: NonZeroU64, exhaust_divisor: u64) -> LeaderFee {
         let target_burn = self.transaction_fee.checked_div(exhaust_divisor).unwrap_or(0);
         let block_fee_after_burn = self.transaction_fee - target_burn;
@@ -551,11 +564,21 @@ impl TransactionPoolRecord {
         let involved_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
 
         for lock in involved_locks {
-            let addr = lock.to_substate_address();
-            let shard_group = addr.to_shard_group(num_preshards, num_committees);
-            self.evidence_mut()
-                .add_shard_group(shard_group)
-                .insert(addr, lock.lock_type());
+            if lock.versioned_substate_id().substate_id().is_global() {
+                // If global, all shard groups have this evidence
+                let addr = lock.to_substate_address();
+                for shard_group in num_preshards.all_shard_groups_iter(num_committees) {
+                    self.evidence_mut()
+                        .add_shard_group(shard_group)
+                        .insert(addr, lock.lock_type());
+                }
+            } else {
+                let addr = lock.to_substate_address();
+                let shard_group = addr.to_shard_group(num_preshards, num_committees);
+                self.evidence_mut()
+                    .add_shard_group(shard_group)
+                    .insert(addr, lock.lock_type());
+            }
         }
         // Only change the local decision if we haven't already decided to ABORT
         if self.local_decision().map_or(true, |d| d.is_commit()) {
@@ -773,6 +796,7 @@ mod tests {
                 transaction_fee: fee,
                 leader_fee: None,
                 stage: TransactionPoolStage::New,
+                is_global: false,
                 pending_stage: None,
                 local_decision: None,
                 remote_decision: None,

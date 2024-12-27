@@ -247,7 +247,7 @@ where TConsensusSpec: ConsensusSpec
         if local_committee_info.num_shard_group_members() <= 1 {
             info!(
                 target: LOG_TARGET,
-            "🌿 Only member of local committee. No need to multicast proposal {leaf_block}",
+                "🌿 This node is the only member of the local committee. No need to multicast proposal {leaf_block}",
             );
         } else {
             let committee = self
@@ -816,6 +816,11 @@ where TConsensusSpec: ConsensusSpec
                             tx_rec
                                 .evidence_mut()
                                 .update(&multishard.to_initial_evidence(local_committee_info));
+                            if true {
+                                for shard_group in local_committee_info.all_shard_groups_iter() {
+                                    tx_rec.evidence_mut().add_shard_group(shard_group);
+                                }
+                            }
                         }
                     },
                     Decision::Abort(reason) => {
@@ -868,9 +873,7 @@ where TConsensusSpec: ConsensusSpec
             .resulting_outputs()
             .iter()
             .filter(|o| {
-                o.substate_id().is_transaction_receipt() ||
-                    o.substate_id().is_published_template() ||
-                    local_committee_info.includes_substate_address(&o.to_substate_address())
+                o.substate_id().is_transaction_receipt() || local_committee_info.includes_substate_id(o.substate_id())
             })
             .map(|output| SubstateRequirementLockIntent::from(output.clone()));
         let lock_status = substate_store.try_lock_all(*tx_rec.transaction_id(), local_outputs, false)?;

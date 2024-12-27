@@ -28,8 +28,8 @@ pub enum NoVoteReason {
     LocalOnlyProposedForMultiShard,
     #[error("Multi shard proposed for local only")]
     MultiShardProposedForLocalOnly,
-    #[error("Not all inputs prepared")]
-    NotAllInputsPrepared,
+    #[error("Not all shard groups are prepared")]
+    NotAllShardGroupsPrepared,
     #[error("Foreign proposal command in block missing")]
     ForeignProposalCommandInBlockMissing,
     #[error("Foreign proposal already proposed")]
@@ -74,7 +74,7 @@ impl NoVoteReason {
             Self::NoLeaderFee => "NoLeaderFee",
             Self::LocalOnlyProposedForMultiShard => "LocalOnlyProposedForMultiShard",
             Self::MultiShardProposedForLocalOnly => "MultiShardProposedForLocalOnly",
-            Self::NotAllInputsPrepared => "NotAllInputsPrepared",
+            Self::NotAllShardGroupsPrepared => "NotAllShardGroupsPrepared",
             Self::ForeignProposalCommandInBlockMissing => "ForeignProposalCommandInBlockMissing",
             Self::ForeignProposalAlreadyProposed => "ForeignProposalAlreadyProposed",
             Self::ForeignProposalNotReceived => "ForeignProposalNotReceived",

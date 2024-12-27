@@ -25,7 +25,7 @@
 
 use log::*;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{services::template_provider::TemplateProvider, NodeAddressable};
+use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch, NodeAddressable};
 use tari_dan_engine::function_definitions::FlowFunctionDefinition;
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_engine_types::calculate_template_binary_hash;
@@ -124,11 +124,12 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                 template_address,
                 template,
                 template_name,
+                epoch,
                 reply,
             } => {
                 handle(
                     reply,
-                    self.handle_add_template(author_public_key, template_address, template, template_name)
+                    self.handle_add_template(author_public_key, template_address, template, template_name, epoch)
                         .await,
                 );
             },
@@ -243,6 +244,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         template_address: tari_engine_types::TemplateAddress,
         template: TemplateExecutable,
         template_name: Option<String>,
+        epoch: Epoch,
     ) -> Result<(), TemplateManagerError> {
         let template_status = if matches!(template, TemplateExecutable::DownloadableWasm(_, _)) {
             TemplateStatus::New
@@ -255,6 +257,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
             template.clone(),
             template_name,
             Some(template_status),
+            epoch,
         )?;
 
         // TODO: remove when we remove support for base layer template registration

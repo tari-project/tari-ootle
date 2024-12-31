@@ -30,7 +30,11 @@ use crate::{
 )]
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub enum NonFungibleId {
-    U256(#[serde_as(as = "serde_with::Bytes")] [u8; 32]),
+    U256(
+        #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
+        #[serde_as(as = "serde_with::Bytes")]
+        [u8; 32],
+    ),
     String(String),
     Uint32(u32),
     Uint64(#[cfg_attr(feature = "ts", ts(type = "number"))] u64),

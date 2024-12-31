@@ -6,7 +6,6 @@ use std::{sync::Arc, time::Duration};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use serde_with::{serde_as, DisplayFromStr};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{substate_type::SubstateType, Epoch, SubstateRequirement};
@@ -74,7 +73,6 @@ pub struct ListSubstateItem {
     )
 )]
 pub struct GetSubstateRequest {
-    #[serde(with = "serde_tools::string")]
     pub address: SubstateId,
     pub version: Option<u32>,
     #[serde(default)]
@@ -92,7 +90,6 @@ pub struct GetSubstateRequest {
     )
 )]
 pub struct GetSubstateResponse {
-    #[serde(with = "serde_tools::string")]
     pub address: SubstateId,
     pub version: u32,
     pub substate: Substate,
@@ -100,7 +97,6 @@ pub struct GetSubstateResponse {
     pub created_by_transaction: TransactionId,
 }
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
@@ -108,12 +104,10 @@ pub struct GetSubstateResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct InspectSubstateRequest {
-    #[serde_as(as = "DisplayFromStr")]
     pub address: SubstateId,
     pub version: Option<u32>,
 }
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
@@ -121,7 +115,6 @@ pub struct InspectSubstateRequest {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct InspectSubstateResponse {
-    #[serde_as(as = "DisplayFromStr")]
     pub address: SubstateId,
     pub version: u32,
     pub substate: Substate,
@@ -303,7 +296,6 @@ pub struct GetNonFungibleCollectionsResponse {
     pub collections: Vec<(String, i64)>,
 }
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
@@ -311,7 +303,6 @@ pub struct GetNonFungibleCollectionsResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct GetNonFungibleCountRequest {
-    #[serde_as(as = "DisplayFromStr")]
     pub address: SubstateId,
 }
 
@@ -326,7 +317,6 @@ pub struct GetNonFungibleCountResponse {
     pub count: u64,
 }
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
@@ -334,7 +324,6 @@ pub struct GetNonFungibleCountResponse {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct GetNonFungiblesRequest {
-    #[serde_as(as = "DisplayFromStr")]
     pub address: SubstateId,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub start_index: u64,
@@ -352,7 +341,6 @@ pub struct GetNonFungiblesResponse {
     pub non_fungibles: Vec<NonFungibleSubstate>,
 }
 
-#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
@@ -362,12 +350,10 @@ pub struct GetNonFungiblesResponse {
 pub struct NonFungibleSubstate {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub index: u64,
-    #[serde_as(as = "DisplayFromStr")]
     pub address: SubstateId,
     pub substate: Substate,
 }
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
@@ -375,7 +361,6 @@ pub struct NonFungibleSubstate {
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
 pub struct GetRelatedTransactionsRequest {
-    #[serde_as(as = "DisplayFromStr")]
     pub address: SubstateId,
     pub version: Option<u32>,
 }

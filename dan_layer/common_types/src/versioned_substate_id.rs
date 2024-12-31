@@ -5,7 +5,7 @@ use std::{borrow::Borrow, fmt::Display, str::FromStr};
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_engine_types::{serde_with, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 
 use crate::{shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
@@ -16,7 +16,6 @@ use crate::{shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateA
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct SubstateRequirement {
-    #[serde(with = "serde_with::string")]
     pub substate_id: SubstateId,
     pub version: Option<u32>,
 }
@@ -167,7 +166,6 @@ pub struct SubstateRequirementParseError(String);
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct VersionedSubstateId {
-    #[serde(with = "serde_with::string")]
     pub substate_id: SubstateId,
     pub version: u32,
 }

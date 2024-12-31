@@ -85,16 +85,19 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         tx: &mut TStateStore::WriteTransaction<'_>,
         tx_id: TransactionId,
         decision: Decision,
+        initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
     ) -> Result<(), TransactionPoolError> {
-        tx.transaction_pool_insert_new(tx_id, decision, is_ready, is_global)?;
+        tx.transaction_pool_insert_new(tx_id, decision, initial_evidence, is_ready, is_global)?;
         Ok(())
     }
 
     pub fn insert_new_batched<'a, I: IntoIterator<Item = (&'a TransactionRecord, bool)>>(
         &self,
         tx: &mut TStateStore::WriteTransaction<'_>,
+        num_preshards: NumPreshards,
+        num_committees: u32,
         transactions: I,
     ) -> Result<(), TransactionPoolError> {
         // TODO(perf)
@@ -102,6 +105,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
             tx.transaction_pool_insert_new(
                 *transaction.id(),
                 transaction.current_decision(),
+                &transaction.to_initial_evidence(num_preshards, num_committees),
                 is_ready,
                 transaction.transaction().is_global(),
             )?;
@@ -390,11 +394,11 @@ impl TransactionPoolRecord {
         match next_stage {
             TransactionPoolStage::New => self.is_ready,
             TransactionPoolStage::Prepared => true,
-            TransactionPoolStage::LocalPrepared => self.evidence.all_shard_groups_prepared(),
+            TransactionPoolStage::LocalPrepared => self.evidence.all_input_shard_groups_prepared(),
             TransactionPoolStage::AllPrepared | TransactionPoolStage::SomePrepared => true,
             TransactionPoolStage::LocalAccepted => match self.current_decision() {
                 Decision::Commit => self.evidence.all_objects_accepted(),
-                // If we have decided to abort, we can continue if all input addresses are justified
+                // If we have decided to abort, we can continue if all inputs are justified
                 Decision::Abort(_) => self.evidence.all_shard_groups_prepared(),
             },
             TransactionPoolStage::AllAccepted |
@@ -566,18 +570,17 @@ impl TransactionPoolRecord {
         for lock in involved_locks {
             if lock.versioned_substate_id().substate_id().is_global() {
                 // If global, all shard groups have this evidence
-                let addr = lock.to_substate_address();
                 for shard_group in num_preshards.all_shard_groups_iter(num_committees) {
                     self.evidence_mut()
                         .add_shard_group(shard_group)
-                        .insert(addr, lock.lock_type());
+                        .insert_from_lock_intent(lock);
                 }
             } else {
                 let addr = lock.to_substate_address();
                 let shard_group = addr.to_shard_group(num_preshards, num_committees);
                 self.evidence_mut()
                     .add_shard_group(shard_group)
-                    .insert(addr, lock.lock_type());
+                    .insert_from_lock_intent(lock);
             }
         }
         // Only change the local decision if we haven't already decided to ABORT

@@ -3,7 +3,13 @@
 
 use std::fmt;
 
-use tari_dan_common_types::{SubstateAddress, SubstateLockType, VersionedSubstateId};
+use tari_dan_common_types::{
+    SubstateAddress,
+    SubstateLockType,
+    SubstateRequirement,
+    ToSubstateAddress,
+    VersionedSubstateId,
+};
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
 
@@ -84,7 +90,16 @@ impl LockedSubstateValue {
         )
     }
 
-    pub fn to_substate_address(&self) -> SubstateAddress {
+    pub fn substate_id(&self) -> &SubstateId {
+        &self.substate_id
+    }
+
+    pub fn satisfies_requirements(&self, requirement: &SubstateRequirement) -> bool {
+        requirement.version().map_or(true, |v| v == self.lock.version) && *requirement.substate_id() == self.substate_id
+    }
+}
+impl ToSubstateAddress for LockedSubstateValue {
+    fn to_substate_address(&self) -> SubstateAddress {
         SubstateAddress::from_substate_id(&self.substate_id, self.lock.version())
     }
 }

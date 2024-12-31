@@ -816,11 +816,6 @@ where TConsensusSpec: ConsensusSpec
                             tx_rec
                                 .evidence_mut()
                                 .update(&multishard.to_initial_evidence(local_committee_info));
-                            if true {
-                                for shard_group in local_committee_info.all_shard_groups_iter() {
-                                    tx_rec.evidence_mut().add_shard_group(shard_group);
-                                }
-                            }
                         }
                     },
                     Decision::Abort(reason) => {
@@ -865,8 +860,18 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(Command::SomePrepare(tx_rec.get_current_transaction_atom())));
         }
 
-        let mut execution =
-            self.execute_transaction(tx, &parent_block.block_id, parent_block.epoch, tx_rec.transaction_id())?;
+        let transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
+        if !transaction.has_all_required_input_pledges(tx, local_committee_info)? {
+            // TODO: investigate - this case does occur when all_input_shard_groups_prepared is used vs
+            //       all_shard_groups_prepared in can_continue_to, not sure why.
+            error!(
+                target: LOG_TARGET,
+                "BUG: attempted to propose transaction {} as AllPrepared but not all input pledges were found. This transaction should not have been marked as ready.",
+                tx_rec.transaction_id(),
+            );
+            return Ok(None);
+        }
+        let mut execution = self.execute_transaction(tx, &parent_block.block_id, parent_block.epoch, transaction)?;
 
         // Try to lock all local outputs
         let local_outputs = execution
@@ -967,17 +972,16 @@ where TConsensusSpec: ConsensusSpec
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         parent_block_id: &BlockId,
         current_epoch: Epoch,
-        transaction_id: &TransactionId,
+        transaction: TransactionRecord,
     ) -> Result<TransactionExecution, HotStuffError> {
-        let transaction = TransactionRecord::get(tx, transaction_id)?;
         // Might have been executed already if all inputs are local
         if let Some(execution) =
-            BlockTransactionExecution::get_pending_for_block(tx, transaction_id, parent_block_id).optional()?
+            BlockTransactionExecution::get_pending_for_block(tx, transaction.id(), parent_block_id).optional()?
         {
             info!(
                 target: LOG_TARGET,
                 "👨‍🔧 PROPOSE: Using existing transaction execution {} ({})",
-                transaction_id, execution.execution.decision(),
+                transaction.id(), execution.execution.decision(),
             );
             return Ok(execution.into_transaction_execution());
         }
@@ -987,7 +991,7 @@ where TConsensusSpec: ConsensusSpec
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PROPOSE: Executing transaction {} (pledges: {} local, {} foreign)",
-            transaction_id, pledged.local_pledges.len(), pledged.foreign_pledges.len(),
+            pledged.id(), pledged.local_pledges.len(), pledged.foreign_pledges.len(),
         );
 
         let executed = self

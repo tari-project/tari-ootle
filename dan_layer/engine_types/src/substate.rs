@@ -52,7 +52,6 @@ use crate::{
     non_fungible_index::NonFungibleIndex,
     published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
-    serde_with,
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     vault::Vault,
 };
@@ -111,22 +110,22 @@ pub fn hash_substate(substate: &SubstateValue, version: u32) -> FixedHash {
 }
 
 /// Base object address, version tuples
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub enum SubstateId {
-    Component(#[serde(with = "serde_with::string")] ComponentAddress),
-    Resource(#[serde(with = "serde_with::string")] ResourceAddress),
-    Vault(#[serde(with = "serde_with::string")] VaultId),
-    UnclaimedConfidentialOutput(#[serde(with = "serde_with::string")] UnclaimedConfidentialOutputAddress),
-    NonFungible(#[serde(with = "serde_with::string")] NonFungibleAddress),
-    NonFungibleIndex(#[serde(with = "serde_with::string")] NonFungibleIndexAddress),
-    TransactionReceipt(#[serde(with = "serde_with::string")] TransactionReceiptAddress),
-    FeeClaim(#[serde(with = "serde_with::string")] FeeClaimAddress),
-    Template(#[serde(with = "serde_with::string")] PublishedTemplateAddress),
+    Component(ComponentAddress),
+    Resource(ResourceAddress),
+    Vault(VaultId),
+    UnclaimedConfidentialOutput(UnclaimedConfidentialOutputAddress),
+    NonFungible(NonFungibleAddress),
+    NonFungibleIndex(NonFungibleIndexAddress),
+    TransactionReceipt(TransactionReceiptAddress),
+    FeeClaim(FeeClaimAddress),
+    Template(PublishedTemplateAddress),
 }
 
 impl SubstateId {

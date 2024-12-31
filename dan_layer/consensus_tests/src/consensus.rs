@@ -302,6 +302,7 @@ async fn node_requests_missing_transaction_from_local_leader() {
 async fn multi_shard_single_transaction() {
     setup_logger();
     let mut test = Test::builder()
+        .debug_sql("/tmp/test{}.db")
         .add_committee(0, vec!["1"])
         .add_committee(1, vec!["2"])
         .start()
@@ -1331,7 +1332,7 @@ async fn multishard_publish_template() {
         .add_committee(3, vec!["7", "8"])
         .start()
         .await;
-    // First get transaction in the mempool
+    // Create and send publish template transaction
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
     let (sk, pk) = create_key_pair();
     let wasm = load_binary_fixture("state.wasm");

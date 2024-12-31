@@ -32,6 +32,7 @@ fn create_tx_atom() -> TransactionAtom {
 
 mod confirm_all_transitions {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
+    use tari_dan_storage::consensus_models::Evidence;
 
     use super::*;
 
@@ -72,11 +73,11 @@ mod confirm_all_transitions {
         .unwrap();
         block1.insert(&mut tx).unwrap();
 
-        tx.transaction_pool_insert_new(atom1.id, atom1.decision, true, false)
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false)
             .unwrap();
-        tx.transaction_pool_insert_new(atom2.id, atom2.decision, true, false)
+        tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false)
             .unwrap();
-        tx.transaction_pool_insert_new(atom3.id, atom3.decision, true, false)
+        tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false)
             .unwrap();
         let block_id = *block1.id();
 

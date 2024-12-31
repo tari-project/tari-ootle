@@ -13,15 +13,17 @@ use tari_template_lib::{
     models::{BinaryTag, KeyParseError, ObjectKey},
     Hash,
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::{events::Event, fees::FeeReceipt, logs::LogEntry};
 
 const TAG: u64 = BinaryTag::TransactionReceipt.as_u64();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct TransactionReceiptAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl TransactionReceiptAddress {
@@ -67,7 +69,11 @@ impl borsh::BorshSerialize for TransactionReceiptAddress {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct TransactionReceipt {
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub transaction_hash: Hash,

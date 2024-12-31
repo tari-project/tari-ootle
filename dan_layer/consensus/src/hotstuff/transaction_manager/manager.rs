@@ -85,7 +85,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 },
                 None => {
                     let version = store.get_latest_version(&input.substate_id)?;
-                    info!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input}");
+                    info!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input} to version {version}");
                     resolved_substates.insert(input, version);
                 },
             }

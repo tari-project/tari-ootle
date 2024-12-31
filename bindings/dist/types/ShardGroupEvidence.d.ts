@@ -1,7 +1,6 @@
-import type { SubstateAddress } from "./SubstateAddress";
-import type { SubstateLockType } from "./SubstateLockType";
 export interface ShardGroupEvidence {
-    substates: Record<SubstateAddress, SubstateLockType>;
+    inputs: Record<string, any>;
+    outputs: Record<string, number>;
     prepare_qc: string | null;
     accept_qc: string | null;
 }

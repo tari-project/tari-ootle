@@ -255,7 +255,11 @@ impl Borrow<SubstateId> for SubstateRequirementLockIntent {
 
 impl fmt::Display for SubstateRequirementLockIntent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({})", self.substate_requirement, self.lock_type)
+        write!(
+            f,
+            "{} lock ver: {} ({})",
+            self.substate_requirement, self.version_to_lock, self.lock_type
+        )
     }
 }
 

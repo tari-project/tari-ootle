@@ -38,8 +38,8 @@ pub struct OnMessageValidate<TConsensusSpec: ConsensusSpec> {
     vote_signing_service: TConsensusSpec::SignatureService,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     tx_events: broadcast::Sender<HotstuffEvent>,
-    /// Keep track of max 16 in-flight requests
-    active_missing_transaction_requests: SimpleFixedArray<u32, 16>,
+    /// Keep track of max 32 in-flight requests
+    active_missing_transaction_requests: SimpleFixedArray<u32, 32>,
     current_request_id: u32,
 }
 
@@ -90,6 +90,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     warn!(target: LOG_TARGET, "❓Received missing transactions (req_id = {}) from {} that we did not request. Discarding message", msg.request_id, from);
                     return Ok(MessageValidationResult::Discard);
                 }
+                // TODO: validate that only requested transactions are returned
                 if msg.transactions.len() > 1000 {
                     warn!(target: LOG_TARGET, "⚠️Peer sent more than the maximum amount of transactions. Discarding message");
                     return Ok(MessageValidationResult::Discard);

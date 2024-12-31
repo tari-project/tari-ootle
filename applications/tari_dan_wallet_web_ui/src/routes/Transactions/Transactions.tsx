@@ -49,7 +49,7 @@ export default function Transactions({ accountName }: { accountName: string }) {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const { data, isLoading, error, isError, refetch } = useGetAllTransactions(
     null,
-    (accountsData && "Component" in accountsData?.account.address && accountsData?.account.address.Component) || null,
+    (accountsData && (accountsData?.account.address as unknown as string)) || null,
   );
   useEffect(() => {
     refetch();

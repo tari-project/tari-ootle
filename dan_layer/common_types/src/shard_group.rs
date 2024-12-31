@@ -123,7 +123,7 @@ impl ShardGroup {
 
 impl Display for ShardGroup {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ShardGroup[{}, {}]", self.start, self.end_inclusive)
+        write!(f, "ShardGroup({}-{})", self.start.as_u32(), self.end_inclusive.as_u32())
     }
 }
 

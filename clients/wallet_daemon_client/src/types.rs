@@ -514,7 +514,6 @@ pub struct AccountsGetBalancesResponse {
 )]
 pub struct BalanceEntry {
     pub vault_address: SubstateId,
-    #[serde(with = "serde_with::string")]
     pub resource_address: ResourceAddress,
     pub balance: Amount,
     pub resource_type: ResourceType,

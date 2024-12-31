@@ -38,6 +38,7 @@ use crate::{
         BurntUtxo,
         Decision,
         EpochCheckpoint,
+        Evidence,
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalAtom,
@@ -462,6 +463,7 @@ pub trait StateStoreWriteTransaction {
         &mut self,
         tx_id: TransactionId,
         decision: Decision,
+        initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
     ) -> Result<(), StorageError>;

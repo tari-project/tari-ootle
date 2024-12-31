@@ -2,11 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::{Queryable, QueryableByName};
-use tari_dan_storage::{
-    consensus_models,
-    consensus_models::{Evidence, LeaderFee},
-    StorageError,
-};
+use tari_dan_storage::{consensus_models, consensus_models::LeaderFee, StorageError};
 use time::PrimitiveDateTime;
 
 use crate::serialization::{deserialize_hex_try_from, deserialize_json, parse_from_string};
@@ -19,7 +15,7 @@ pub struct TransactionPoolRecord {
     pub original_decision: String,
     pub local_decision: Option<String>,
     pub remote_decision: Option<String>,
-    pub evidence: Option<String>,
+    pub evidence: String,
     pub transaction_fee: i64,
     pub leader_fee: Option<String>,
     pub stage: String,
@@ -43,12 +39,7 @@ impl TransactionPoolRecord {
         self,
         update: Option<TransactionPoolStateUpdate>,
     ) -> Result<consensus_models::TransactionPoolRecord, StorageError> {
-        let mut evidence = self
-            .evidence
-            .as_deref()
-            .map(deserialize_json::<Evidence>)
-            .transpose()?
-            .unwrap_or_default();
+        let mut evidence = deserialize_json(&self.evidence)?;
         let mut pending_stage = None;
         let mut local_decision = self.local_decision;
         let mut is_ready = self.is_ready;

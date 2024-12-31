@@ -230,7 +230,6 @@ impl ProposedBlockChangeSet {
         self.evict_nodes.len()
     }
 
-    #[allow(clippy::mutable_key_type)]
     pub fn add_foreign_pledges(
         &mut self,
         transaction_id: &TransactionId,
@@ -314,8 +313,24 @@ impl ProposedBlockChangeSet {
             .entry(*transaction.transaction_id())
             .or_default();
 
+        debug!(
+            target: LOG_TARGET,
+            "set_next_transaction_update: evidence: {}",
+            transaction.evidence(),
+        );
         let ready_now = transaction.is_ready_for_pending_stage();
-        change_mut.next_update = Some(TransactionPoolStatusUpdate::new(transaction, ready_now));
+        let next_update = TransactionPoolStatusUpdate::new(transaction, ready_now);
+        debug!(
+            target: LOG_TARGET,
+            "📝 next transaction update ({} {} {} is_ready_now={}, {:#}) in block {}",
+            next_update.transaction().transaction_id(),
+            next_update.transaction().current_stage(),
+            next_update.decision(),
+            next_update.is_ready_now(),
+            next_update.transaction().evidence(),
+            self.block
+        );
+        change_mut.next_update = Some(next_update);
         Ok(self)
     }
 }

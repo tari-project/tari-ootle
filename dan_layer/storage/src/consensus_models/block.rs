@@ -293,11 +293,7 @@ impl Block {
         self.commands
             .iter()
             .filter_map(|cmd| cmd.transaction())
-            .filter(|t| {
-                t.evidence
-                    .shard_groups_iter()
-                    .any(|sg| *sg == committee_info.shard_group())
-            })
+            .filter(|t| t.evidence.has_and_not_empty(&committee_info.shard_group()))
             .map(|t| t.id())
     }
 
@@ -1021,7 +1017,7 @@ impl Block {
             // atom, so we need to exclude them.
             let locks = locked_values
                 .into_iter()
-                .filter(|lock| evidence.contains(&lock.to_substate_address()));
+                .filter(|lock| evidence.contains(lock.substate_id()));
 
             pledges.reserve(locks.clone().count());
             for locked_value in locks {

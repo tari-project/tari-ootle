@@ -243,13 +243,14 @@ where TConsensusSpec: ConsensusSpec
                 );
                 pool_tx.add_prepare_qc_evidence(local_committee_info, justify_id);
             } else if cmd.is_local_accept() {
+                pool_tx.add_accept_qc_evidence(local_committee_info, justify_id);
                 debug!(
                     target: LOG_TARGET,
-                    "🔍 Updating evidence for LocalAccept command in block {} for transaction {}",
+                    "🔍 Updating evidence for LocalAccept command in block {} for transaction {}. {:#}",
                     leaf,
                     atom.id(),
+                    pool_tx.evidence()
                 );
-                pool_tx.add_accept_qc_evidence(local_committee_info, justify_id);
             } else {
                 // Nothing
             }
@@ -987,7 +988,7 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
-        if !tx_rec.evidence().all_shard_groups_prepared() {
+        if !tx_rec.evidence().all_input_shard_groups_prepared() {
             warn!(
                 target: LOG_TARGET,
                 "❌ NO VOTE: AllPrepare disagreement for transaction {} in block {}. Leader proposed that all shard groups have prepared, but this is not the case",
@@ -1002,7 +1003,7 @@ where TConsensusSpec: ConsensusSpec
             // requested for a read-locked substate.
 
             let transaction = tx_rec.get_transaction(tx)?;
-            if !transaction.has_all_foreign_input_pledges(tx, local_committee_info)? {
+            if !transaction.has_all_required_input_pledges(tx, local_committee_info)? {
                 warn!(
                     target: LOG_TARGET,
                     "❌ NO VOTE AllPrepare: transaction {} in block {} has not received all foreign input pledges",

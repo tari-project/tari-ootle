@@ -2,10 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, Epoch, ShardGroup};
+use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{Block, ForeignProposal, ForeignReceiveCounters, QuorumCertificate},
     StateStore,
+    StorageError,
 };
 use tari_epoch_manager::EpochManagerReader;
 
@@ -165,12 +166,19 @@ where TConsensusSpec: ConsensusSpec
                 for_shard_group,
                 ..
             } => {
-                let (block, justify_qc, mut block_pledge) = self.store.with_read_tx(|tx| {
+                let Some((block, justify_qc, mut block_pledge)) = self.store.with_read_tx(|tx| {
                     let block = Block::get(tx, &block_id)?;
                     let justify_qc = QuorumCertificate::get_by_block_id(tx, &block_id)?;
                     let block_pledge = block.get_block_pledge(tx)?;
-                    Ok::<_, HotStuffError>((block, justify_qc, block_pledge))
-                })?;
+                    Ok::<_, StorageError>((block, justify_qc, block_pledge))
+                }).optional()? else {
+                    warn!(
+                        target: LOG_TARGET,
+                        "FOREIGN PROPOSAL: Requested block {} not found. Ignoring.",
+                        block_id,
+                    );
+                    return Ok(());
+                };
 
                 info!(
                     target: LOG_TARGET,

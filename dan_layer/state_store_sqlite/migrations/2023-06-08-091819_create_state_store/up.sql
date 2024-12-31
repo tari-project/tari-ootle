@@ -336,7 +336,7 @@ create table transaction_pool
     original_decision text      not null,
     local_decision    text      null,
     remote_decision   text      null,
-    evidence          text      null,
+    evidence          text      not null,
     transaction_fee   bigint    not null DEFAULT 0,
     leader_fee        text      null,
     stage             text      not null,

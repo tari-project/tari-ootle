@@ -13,7 +13,7 @@ if [ -f "$SOURCE_PATH/$TYPES_DIR" ]; then
   npx shx rm -rf $SOURCE_PATH/$TYPES_DIR
 fi
 if [ -f "$SOURCE_PATH/$MAIN_INDEX_FILE" ]; then
-  npx shx rm -rf $SOURCE_PATH/$MAIN_INDEX_FILE
+  npx shx rm $SOURCE_PATH/$MAIN_INDEX_FILE
 fi
 if [ -f "$SOURCE_PATH/$DIST_DIR" ]; then
   npx shx rm -rf ./$DIST_DIR
@@ -24,7 +24,7 @@ npx shx mv ../dan_layer/bindings/src/types/* ./src/types/
 npx shx rm -rf ../dan_layer/bindings/
 
 # Add the license header
-echo "//   Copyright 2023 The Tari Project" >> $SOURCE_PATH/$MAIN_INDEX_FILE
+echo "//   Copyright $(date +%Y) The Tari Project" >> $SOURCE_PATH/$MAIN_INDEX_FILE
 echo "//   SPDX-License-Identifier: BSD-3-Clause" >> $SOURCE_PATH/$MAIN_INDEX_FILE
 echo "" >> $SOURCE_PATH/$MAIN_INDEX_FILE
 
@@ -41,7 +41,7 @@ for dir in $(find $TYPES_DIR -mindepth 1 -maxdepth 1 -type d | sort); do
   if [ -f "$module_export_file" ]; then
     npx shx rm "$module_export_file"
   fi
-  echo "//   Copyright 2023 The Tari Project" >> "$module_export_file"
+  echo "//   Copyright $(date +%Y) The Tari Project" >> "$module_export_file"
   echo "//   SPDX-License-Identifier: BSD-3-Clause" >> "$module_export_file"
   echo "" >> "$module_export_file"
   for file in $(find $dir -name "*.ts" -maxdepth 1); do

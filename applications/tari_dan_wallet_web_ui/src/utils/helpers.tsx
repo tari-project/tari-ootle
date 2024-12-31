@@ -83,15 +83,22 @@ export function fromHexString(hexString: string) {
   return res;
 }
 
-export function substateIdToString(substateId: SubstateId | null | undefined) {
+export function substateIdToString(substateId: SubstateId | string | null | undefined) {
   if (substateId === null || substateId === undefined) {
     return "";
+  }
+  if (typeof substateId === "string") {
+    return substateId;
   }
   const key = Object.keys(substateId)[0] as keyof SubstateId;
   return substateId[key];
 }
 
-export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 8, end: number = 8) {
+export function shortenSubstateId(
+  substateId: SubstateId | string | null | undefined,
+  start: number = 8,
+  end: number = 8,
+) {
   if (substateId === null || substateId === undefined) {
     return "";
   }

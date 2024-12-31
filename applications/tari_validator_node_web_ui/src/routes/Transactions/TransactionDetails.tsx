@@ -147,7 +147,7 @@ export default function TransactionDetails() {
     return <></>;
   }
   const { result, transaction: container, finalized_time, final_decision } = state;
-  const transaction = container.V1;
+  const transaction = container.V1.body.transaction;
   const decision = typeof final_decision === "object" ? "Abort" : final_decision;
   const abortReason = final_decision !== null && typeof final_decision === "object" ? final_decision.Abort : null;
   return (

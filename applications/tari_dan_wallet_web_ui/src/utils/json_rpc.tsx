@@ -100,7 +100,12 @@ export async function getClientAddress(): Promise<URL> {
   try {
     let resp = await fetch("/json_rpc_address");
     if (resp.status === 200) {
-      return new URL(await resp.text());
+      const url = await resp.text();
+      try {
+        return new URL(url);
+      } catch (e) {
+        throw new Error(`Invalid URL: ${url} : {e}`);
+      }
     }
   } catch (e) {
     console.warn(e);

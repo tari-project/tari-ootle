@@ -1,4 +1,4 @@
-//   Copyright 2023 The Tari Project
+//   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 export * from "./types/validator-node-client/GetCommitteeRequest";
 export * from "./types/validator-node-client/GetRecentTransactionsResponse";

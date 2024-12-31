@@ -122,7 +122,12 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
         );
 
         let executed = ExecutedTransaction::new(transaction, result, resolved_inputs);
-        log::info!("Transaction {} executed. {}", id, executed.result().finalize.result);
+        log::info!(
+            "Transaction {} executed in {:.2?}. {}",
+            id,
+            executed.execution_time(),
+            executed.result().finalize.result
+        );
         Ok(executed)
     }
 }

@@ -57,11 +57,12 @@ impl ConsensusGossipHandle {
         let topic = shard_group_to_topic(shard_group);
 
         let message = proto::consensus::HotStuffMessage::from(&message);
-        let mut buf = Vec::with_capacity(message.encoded_len());
+        let encoded_len = message.encoded_len();
+        let mut buf = Vec::with_capacity(encoded_len);
 
         debug!(
             target: LOG_TARGET,
-            "multicast: topic: {} Message size: {}bytes", topic, buf.len()
+            "GOSSIP PUBLISH: topic: {topic} Message size: {encoded_len} bytes",
         );
         self.codec
             .encode_to(&mut buf, message)

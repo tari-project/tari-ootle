@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_engine_types::substate::SubstateId;
 
-use crate::{shard::Shard, Epoch, NumPreshards, ShardGroup, SubstateAddress};
+use crate::{NumPreshards, ShardGroup, SubstateAddress};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default, Hash)]
 #[cfg_attr(
@@ -18,7 +18,7 @@ use crate::{shard::Shard, Epoch, NumPreshards, ShardGroup, SubstateAddress};
 )]
 pub struct Committee<TAddr> {
     // TODO: not pub
-    #[cfg_attr(feature = "ts", ts(type = "Array<[TAddr, string]>"))]
+    #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
     pub members: Vec<(TAddr, PublicKey)>,
 }
 
@@ -272,30 +272,6 @@ impl CommitteeInfo {
     pub fn all_shard_groups_iter(&self) -> impl Iterator<Item = ShardGroup> {
         self.num_shards.all_shard_groups_iter(self.num_committees)
     }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub struct NetworkCommitteeInfo<TAddr> {
-    pub epoch: Epoch,
-    pub committees: Vec<CommitteeShardInfo<TAddr>>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub struct CommitteeShardInfo<TAddr> {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub shard: Shard,
-    pub substate_address_range: RangeInclusive<SubstateAddress>,
-    pub validators: Committee<TAddr>,
 }
 
 #[cfg(test)]

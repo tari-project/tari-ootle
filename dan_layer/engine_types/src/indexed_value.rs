@@ -19,8 +19,6 @@ use tari_template_lib::{
     prelude::{ComponentAddress, Metadata, NonFungibleAddress},
     Hash,
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::{
     fee_claim::FeeClaimAddress,
@@ -33,7 +31,11 @@ use crate::{
 const MAX_VISITOR_DEPTH: usize = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct IndexedValue {
     indexed: IndexedWellKnownTypes,
     #[serde(with = "serde_with::cbor_value")]
@@ -130,18 +132,19 @@ impl Default for IndexedValue {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct IndexedWellKnownTypes {
     bucket_ids: Vec<BucketId>,
     proof_ids: Vec<ProofId>,
-    #[serde(with = "serde_with::hex::vec")]
     component_addresses: Vec<ComponentAddress>,
-    #[serde(with = "serde_with::hex::vec")]
     resource_addresses: Vec<ResourceAddress>,
     transaction_receipt_addresses: Vec<TransactionReceiptAddress>,
     // #[serde(with = "serde_with::hex::vec")]
     non_fungible_addresses: Vec<NonFungibleAddress>,
-    #[serde(with = "serde_with::hex::vec")]
     vault_ids: Vec<VaultId>,
     metadata: Vec<Metadata>,
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,

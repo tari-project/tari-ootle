@@ -34,6 +34,7 @@ pub mod id_provider;
 
 mod argument_parser;
 pub mod published_template;
+mod substate_serde;
 
 pub use argument_parser::parse_arg;
 

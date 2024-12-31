@@ -36,7 +36,6 @@ pub enum Instruction {
         args: Vec<Arg>,
     },
     CallMethod {
-        #[serde(with = "serde_with::string")]
         component_address: ComponentAddress,
         method: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
@@ -63,7 +62,6 @@ pub enum Instruction {
     DropAllProofsInWorkspace,
     AssertBucketContains {
         key: Vec<u8>,
-        #[serde(with = "serde_with::string")]
         resource_address: ResourceAddress,
         min_amount: Amount,
     },

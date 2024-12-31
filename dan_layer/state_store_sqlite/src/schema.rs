@@ -445,7 +445,7 @@ diesel::table! {
         original_decision -> Text,
         local_decision -> Nullable<Text>,
         remote_decision -> Nullable<Text>,
-        evidence -> Nullable<Text>,
+        evidence -> Text,
         transaction_fee -> BigInt,
         leader_fee -> Nullable<Text>,
         stage -> Text,

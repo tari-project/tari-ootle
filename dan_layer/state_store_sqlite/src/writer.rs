@@ -39,6 +39,7 @@ use tari_dan_storage::{
         BurntUtxo,
         Decision,
         EpochCheckpoint,
+        Evidence,
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalStatus,
@@ -1046,6 +1047,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         &mut self,
         tx_id: TransactionId,
         decision: Decision,
+        initial_evidence: &Evidence,
         is_ready: bool,
         is_global: bool,
     ) -> Result<(), StorageError> {
@@ -1057,6 +1059,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             transaction_pool::stage.eq(TransactionPoolStage::New.to_string()),
             transaction_pool::is_ready.eq(is_ready),
             transaction_pool::is_global.eq(is_global),
+            transaction_pool::evidence.eq(serialize_json(&initial_evidence)?),
         );
 
         diesel::insert_into(transaction_pool::table)
@@ -1226,7 +1229,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             local_decision: Option<String>,
             transaction_fee: Option<i64>,
             leader_fee: Option<Option<String>>,
-            evidence: Option<Option<String>>,
+            evidence: Option<String>,
             is_ready: Option<bool>,
             confirm_stage: Option<Option<String>>,
             remote_decision: Option<Option<String>>,
@@ -1246,7 +1249,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 // Only update if Some. This isn't technically necessary since leader fee should be in every update, but
                 // it does shorten the update query FWIW.
                 leader_fee: update.leader_fee.map(Some),
-                evidence: Some(Some(update.evidence)),
+                evidence: Some(update.evidence),
                 is_ready: Some(update.is_ready),
                 confirm_stage,
                 remote_decision: Some(update.remote_decision),

@@ -64,8 +64,12 @@ where TConsensusSpec: ConsensusSpec
                 }
             }
 
-            self.transaction_pool
-                .insert_new_batched(tx, batch.iter().map(|(t, is_ready)| (t, *is_ready)))?;
+            self.transaction_pool.insert_new_batched(
+                tx,
+                local_committee_info.num_preshards(),
+                local_committee_info.num_committees(),
+                batch.iter().map(|(t, is_ready)| (t, *is_ready)),
+            )?;
 
             // TODO: Could this cause a race-condition? Transaction could be proposed as Prepare before the
             // unparked block is processed (however, if there's a parked block it's probably not our turn to
@@ -92,7 +96,7 @@ where TConsensusSpec: ConsensusSpec
                 return Ok(None);
             };
 
-            self.add_to_pool(tx, &transaction, is_ready)?;
+            self.add_to_pool(tx, &transaction, local_committee_info, is_ready)?;
             Ok(Some(transaction))
         })
     }
@@ -151,12 +155,24 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         transaction: &TransactionRecord,
+        local_committee_info: &CommitteeInfo,
         is_ready: bool,
     ) -> Result<(), HotStuffError> {
+        info!(
+            target: LOG_TARGET,
+            "🔥 Adding transaction {} ({} input(s)) to pool. Is ready: {}",
+            transaction.id(),
+            transaction.transaction().inputs().len(),
+            is_ready
+        );
         self.transaction_pool.insert_new(
             tx,
             *transaction.id(),
             transaction.current_decision(),
+            &transaction.to_initial_evidence(
+                local_committee_info.num_preshards(),
+                local_committee_info.num_committees(),
+            ),
             is_ready,
             transaction.transaction().is_global(),
         )?;

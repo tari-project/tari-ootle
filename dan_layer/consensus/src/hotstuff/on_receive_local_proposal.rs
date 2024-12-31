@@ -499,7 +499,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     }
 
     fn propose_newly_locked_blocks(&mut self, local_committee_info: CommitteeInfo, blocks: Vec<Block>) {
-        if blocks.is_empty() {
+        if blocks.is_empty() || blocks.iter().all(|b| b.commands().is_empty()) {
             return;
         }
 
@@ -921,18 +921,30 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
         .filter_map(|c| {
             c.local_prepare()
                 // No need to broadcast LocalPrepare if the committee is output only
-                .filter(|atom| !atom.evidence.is_committee_output_only(local_committee_info))
-                .or_else(|| c.local_accept())
+                .filter(|atom| if atom.evidence.is_committee_output_only(local_committee_info) {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🌐 FOREIGN PROPOSE: Skipping LocalPrepare({atom}) because local SG is output only",
+                    );
+                    false
+                } else {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🌐 FOREIGN PROPOSE: LocalPrepare({atom})",
+                    );
+                    true
+                })
+                .or_else(|| c.local_accept().inspect(|atom| {
+                    debug!(
+                        target: LOG_TARGET,
+                        "🌐 FOREIGN PROPOSE: LocalAccept({atom})",
+                    );
+                }))
         })
-        .flat_map(|p| {
-            debug!(
-                target: LOG_TARGET,
-                "🌐 FOREIGN PROPOSE: atom {p}",
-            );
-            p.evidence.shard_groups_iter().copied()
-        })
+        .flat_map(|p| p.evidence.shard_groups_iter().copied())
         .filter(|shard_group| local_shard_group != *shard_group)
         .collect::<HashSet<_>>();
+
     if non_local_shard_groups.is_empty() {
         debug!(
             target: LOG_TARGET,
@@ -943,7 +955,7 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     }
     info!(
         target: LOG_TARGET,
-        "🌐 FOREIGN PROPOSE: new locked block to {} foreign shard groups. {}",
+        "🌐 FOREIGN PROPOSE: new locked block to {} foreign shard group(s). {}",
         non_local_shard_groups.len(),
         block,
     );

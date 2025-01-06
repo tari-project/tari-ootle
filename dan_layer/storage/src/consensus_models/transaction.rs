@@ -412,7 +412,7 @@ impl TransactionRecord {
                     return Ok(false);
                 }
             } else if pledges.iter().all(|p| !p.satisfies_requirement(&input)) {
-                let remote_shard_group = input.to_shard_group(
+                let remote_shard_group = input.to_substate_address_zero_version().to_shard_group(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),
                 );

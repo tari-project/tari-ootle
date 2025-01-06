@@ -516,6 +516,10 @@ where TConsensusSpec: ConsensusSpec
                     .and_then(|tx| tx.leader_fee.as_ref())
                     .map(|f| f.fee)
                     .unwrap_or(0);
+                // TODO: a BTreeSet changes the order from the original batch. Uncertain if this is a problem since the
+                // proposer also processes transactions in the completed block order, however on_propose does perform
+                // some operations (e.g. prepare, execute) in batch order. To ensure safety, we should process
+                // on_propose in canonical order.
                 commands.insert(command);
             }
         }

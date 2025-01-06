@@ -203,7 +203,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, All Justified: {}. Waiting for local proposal.",
+                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, \
+                        All Justified: {}. Waiting for local proposal and/or additional foreign proposals for all other shard groups.",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
@@ -561,7 +562,8 @@ fn has_all_foreign_input_pledges<TTx: StateStoreReadTransaction>(
 
     for (id, data) in foreign_inputs {
         let Some(data) = data else {
-            // Case: Foreign shard group evidence is not yet fully populated therefore we do not consider the input pledged
+            // Case: Foreign shard group evidence is not yet fully populated therefore we do not consider the input
+            // pledged
             return Ok(false);
         };
         // Check the current block change set to see if the pledge is included

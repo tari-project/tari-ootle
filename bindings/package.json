@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "sh build.sh && tsc",
-    "tsc": "tsc"
+    "ts-build": "tsc"
   },
   "author": "",
   "license": "ISC",

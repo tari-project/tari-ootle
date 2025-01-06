@@ -412,12 +412,17 @@ impl TransactionRecord {
                     return Ok(false);
                 }
             } else if pledges.iter().all(|p| !p.satisfies_requirement(&input)) {
+                let remote_shard_group = input.to_shard_group(
+                    local_committee_info.num_preshards(),
+                    local_committee_info.num_committees(),
+                );
                 debug!(
                     target: LOG_TARGET,
-                    "{} Transaction {} is missing a pledge for input {} ({} pledge(s) found)",
+                    "{} Transaction {} is missing a pledge for input {} from {} ({} pledge(s) found)",
                     local_committee_info.shard_group(),
                     self.id(),
                     input.substate_id(),
+                    remote_shard_group,
                     pledges.len(),
                 );
                 return Ok(false);

@@ -25,9 +25,8 @@ import CopyToClipboard from "../../../Components/CopyToClipboard";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { GridHeadCell, GridDataCell } from "../../../Components/StyledComponents";
 import { useAccountsGet } from "../../../api/hooks/useAccounts";
-import { shortenString } from "../../../utils/helpers";
+import { shortenString, shortenSubstateId, substateIdToString } from "../../../utils/helpers";
 import { styled } from "@mui/material/styles";
-import { substateIdToString } from "@tari-project/typescript-bindings";
 
 const GridContainer = styled(Box)(({ theme }) => ({
   display: "grid",
@@ -69,7 +68,7 @@ function AccountDetails({ accountName }: { accountName: string }) {
               <GridHeadCell className="head3">Public Key</GridHeadCell>
               <GridDataCell className="content1">{accountsData.account.name}</GridDataCell>
               <GridDataCell className="content2">
-                {shortenString(substateIdToString(accountsData.account.address))}
+                {shortenSubstateId(accountsData.account.address)}
                 <CopyToClipboard copy={substateIdToString(accountsData.account.address)} />
               </GridDataCell>
               <GridDataCell className="content3">

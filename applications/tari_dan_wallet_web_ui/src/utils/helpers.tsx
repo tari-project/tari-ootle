@@ -96,14 +96,15 @@ export function substateIdToString(substateId: SubstateId | string | null | unde
 
 export function shortenSubstateId(
   substateId: SubstateId | string | null | undefined,
-  start: number = 8,
-  end: number = 8,
+  start: number = 4,
+  end: number = 4,
 ) {
   if (substateId === null || substateId === undefined) {
     return "";
   }
   const string = substateIdToString(substateId);
-  return shortenString(string, start, end);
+  const parts = string.split("_", 2);
+  return parts[0] + "_" + shortenString(parts[1], start, end);
 }
 
 export function shortenString(string: string | null | undefined, start: number = 8, end: number = 8) {

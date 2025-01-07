@@ -38,11 +38,8 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::{
     consensus_models::{
-        Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, SubstateChange, SubstateLock, SubstatePledge, SubstatePledges, SubstateRecord, TransactionPool, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
-    },
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
+        Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, StateTransition, StateTransitionId, SubstateChange, SubstateCreatedProof, SubstateData, SubstateLock, SubstatePledge, SubstatePledges, SubstateRecord, SubstateUpdate, TransactionPool, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
+    }, Ordering, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError
 };
 use tari_engine_types::substate::SubstateId;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeNode, Version};
@@ -52,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, state_transition::StateTransitionModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -1611,26 +1608,52 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn substates_create(&mut self, substate: &SubstateRecord) -> Result<(), StorageError> {
-        /*
         if substate.is_destroyed() {
             return Err(StorageError::QueryError {
                 reason: format!(
                     "calling substates_create with a destroyed SubstateRecord is not valid. substate_id = {}",
-                    substate.substate_id
+                    &substate.substate_id
                 ),
             });
         }
 
+        let operation = "substates_create";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        SubstateModel::put(self.db.clone(), tx, "substates_create", &substate)?;
-        */
-        todo!()
+        SubstateModel::put(self.db.clone(), tx, operation, &substate)?;
 
-        // StateTransition: get maximum "seq" field for all transition for the shard
+        // Calculate the index ("seq" field) of the state transition for the shard
+        let shard_seq_cf = StateTransitionModel::CF_SHARD_SEQ;
+        let key_prefix = StateTransitionModel::key_prefix_shard_seq(&substate.created_by_shard);
+        // TODO: this could be optimized by a new model function that allows to specify the we only want one key
+        let shard_transition_keys = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, shard_seq_cf, &key_prefix, Ordering::Descending)?;
+        let next_seq = match shard_transition_keys.first() {
+            Some(key) => {
+                let value = StateTransitionModel::get(tx, operation, key)?;
+                value.seq
+            },
+            None => 1,
+        };
 
+        // Insert the next state transition
+        let state_transition = StateTransitionModel {
+            data: StateTransition {
+                id: StateTransitionId::new(substate.created_at_epoch, substate.created_by_shard, next_seq),
+                update: SubstateUpdate::Create(SubstateCreatedProof {
+                    substate: SubstateData {
+                        substate_id: substate.substate_id.clone(),
+                        version: substate.version,
+                        substate_value: substate.substate_value.clone(),
+                        created_by_transaction: substate.created_by_transaction,
+                    },
+                }),
+            },
+            shard: substate.created_by_shard,
+            seq: next_seq,
+        };
+        StateTransitionModel::put(self.db.clone(), tx, operation, &state_transition)?;
 
-        // let version = self.state_tree_versions_get_latest(substate.created_by_shard)?;
-        // insert the next state transition
+        Ok(())
+        
 
         /*
         use crate::schema::{state_transitions, substates};
@@ -1700,6 +1723,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         Ok(())
         */
+        
     }
 
     fn substates_down(
@@ -2007,8 +2031,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         */
     }
 
-    fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {
-        todo!()
+    fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {    
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        let value = StateTreeShardVersionModel {
+            version
+        };
+        Ok(StateTreeShardVersionModel::put(self.db.clone(), tx, "state_tree_shard_versions_set", &shard, &value)?)
+
+
         /*
         use crate::schema::state_tree_shard_versions;
 

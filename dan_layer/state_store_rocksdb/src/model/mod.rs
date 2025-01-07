@@ -22,6 +22,9 @@
 
 pub mod block_transaction_execution;
 pub mod block;
+pub mod state_transition;
+pub mod state_tree_shard_versions;
+pub mod substate;
 pub mod transaction_pool_state_update;
 pub mod transaction_pool;
 pub mod transaction;

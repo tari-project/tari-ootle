@@ -7,11 +7,12 @@ use std::{
     mem,
 };
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, Epoch};
 
 use crate::{consensus_models::SubstateUpdate, StateStoreReadTransaction, StorageError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateTransition {
     pub id: StateTransitionId,
     pub update: SubstateUpdate,
@@ -41,7 +42,7 @@ impl Display for StateTransition {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateTransitionId {
     epoch: Epoch,
     shard: Shard,

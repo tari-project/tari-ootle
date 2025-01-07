@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1670,7 +1670,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError> {
-        todo!()
+        Ok(SubstateModel::get(&self.tx, "substates_get", address)?)
+
         /*
         use crate::schema::substates;
 
@@ -2178,7 +2179,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError> {
-        todo!()
+        let operation = "state_tree_versions_get_latest";
+        if !StateTreeShardVersionModel::key_exists(&self.tx, operation, &shard)? {
+            return Ok(None)
+        }
+
+        let value = StateTreeShardVersionModel::get(&self.tx, operation, &shard)?;
+        Ok(Some(value.version))
+
         /*
         use crate::schema::state_tree_shard_versions;
 

@@ -108,6 +108,8 @@ use crate::{
         KeysListResponse,
         KeysSetActiveRequest,
         KeysSetActiveResponse,
+        PublishTemplateRequest,
+        PublishTemplateResponse,
         RevealFundsRequest,
         RevealFundsResponse,
         TransactionGetRequest,
@@ -480,6 +482,14 @@ impl WalletDaemonClient {
         req: T,
     ) -> Result<WebRtcStartResponse, WalletDaemonClientError> {
         self.send_request("webrtc.start", req.borrow()).await
+    }
+
+    pub async fn publish_template<T: Borrow<PublishTemplateRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<PublishTemplateResponse, WalletDaemonClientError> {
+        self.send_request("transactions.publish_template", request.borrow())
+            .await
     }
 
     fn next_request_id(&mut self) -> i64 {

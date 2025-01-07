@@ -173,7 +173,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             foreign_committees.insert(shard_group, foreign_committee_info);
         }
 
-        self.store.with_write_tx(|tx| {
+        let is_all_foreign_proposals_valid = self.store.with_write_tx(|tx| {
             // TODO: Implement guaranteed finality in the face of a non-cooperating remote shard group.
             // Suggested strategy:
             // Given a transaction that is awaiting a foreign proposal for REQUEST_FOREIGN_PROPOSAL_TIMEOUT (e.g. 50)
@@ -200,18 +200,29 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 }
                 let shard_group = foreign_proposal.block().shard_group();
 
-                self.on_receive_foreign_proposal.validate_and_save(
+                if let Err(err) = self.on_receive_foreign_proposal.validate_and_save(
                     tx,
                     foreign_proposal,
                     local_committee_info,
                     foreign_committees.get(&shard_group).unwrap(),
-                )?;
+                ) {
+                    error!(target: LOG_TARGET, "Error processing foreign proposal: {:?}", err);
+                    if err.validation_error().is_some() {
+                        // if a node sent us an invalid foreign proposal, we immediately reject the block
+                        return Ok(false);
+                    }
+                    return Err(err);
+                }
             }
 
             self.save_block(tx, &valid_block)?;
             info!(target: LOG_TARGET, "✅ Block {} is valid and persisted.", valid_block);
-            Ok::<_, HotStuffError>(())
+            Ok::<_, HotStuffError>(true)
         })?;
+
+        if !is_all_foreign_proposals_valid {
+            return Ok(false);
+        }
 
         let result = self
             .process_block(
@@ -921,7 +932,7 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
         .filter_map(|c| {
             c.local_prepare()
                 // No need to broadcast LocalPrepare if the committee is output only
-                .filter(|atom| if atom.evidence.is_committee_output_only(local_committee_info) {
+                .filter(|atom| if atom.evidence.is_committee_output_only(local_committee_info.shard_group()) {
                     debug!(
                         target: LOG_TARGET,
                         "🌐 FOREIGN PROPOSE: Skipping LocalPrepare({atom}) because local SG is output only",

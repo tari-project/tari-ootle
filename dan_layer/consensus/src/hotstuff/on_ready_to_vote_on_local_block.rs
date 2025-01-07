@@ -7,6 +7,7 @@ use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
+    option::DisplayContainer,
     optional::Optional,
     Epoch,
     ShardGroup,
@@ -25,12 +26,14 @@ use tari_dan_storage::{
         ForeignProposalAtom,
         ForeignProposalStatus,
         HighQc,
+        InvalidEvidenceReason,
         LastExecuted,
         LastVoted,
         LockedBlock,
         MintConfidentialOutputAtom,
         NoVoteReason,
         PendingShardStateTreeDiff,
+        QcId,
         QuorumDecision,
         SubstateChange,
         SubstateRecord,
@@ -123,7 +126,13 @@ where TConsensusSpec: ConsensusSpec
             let mut justified_block = valid_block.justify().get_block(&**tx)?;
             // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
             if !justified_block.is_justified() {
-                self.process_newly_justified_block(tx, &justified_block, local_committee_info, change_set)?;
+                self.process_newly_justified_block(
+                    tx,
+                    &justified_block,
+                    *valid_block.justify().id(),
+                    local_committee_info,
+                    change_set,
+                )?;
                 justified_block.set_as_justified(tx)?;
             }
 
@@ -203,6 +212,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         new_leaf_block: &Block,
+        justify_id: QcId,
         local_committee_info: &CommitteeInfo,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
@@ -216,7 +226,6 @@ where TConsensusSpec: ConsensusSpec
 
         let mut num_applicable_commands = 0;
         let leaf = new_leaf_block.as_leaf_block();
-        let justify_id = *new_leaf_block.justify().id();
         for cmd in new_leaf_block.commands() {
             if !cmd.is_local_prepare() && !cmd.is_local_accept() {
                 continue;
@@ -241,9 +250,15 @@ where TConsensusSpec: ConsensusSpec
                     leaf,
                     atom.id(),
                 );
-                pool_tx.add_prepare_qc_evidence(local_committee_info, justify_id);
+                pool_tx
+                    .evidence_mut()
+                    .add_shard_group(local_committee_info.shard_group())
+                    .set_prepare_qc(justify_id);
             } else if cmd.is_local_accept() {
-                pool_tx.add_accept_qc_evidence(local_committee_info, justify_id);
+                pool_tx
+                    .evidence_mut()
+                    .add_shard_group(local_committee_info.shard_group())
+                    .set_accept_qc(justify_id);
                 debug!(
                     target: LOG_TARGET,
                     "🔍 Updating evidence for LocalAccept command in block {} for transaction {}. {:#}",
@@ -344,9 +359,14 @@ where TConsensusSpec: ConsensusSpec
                     }
                 },
                 Command::LocalPrepare(atom) => {
-                    if let Some(reason) =
-                        self.evaluate_local_prepare_command(tx, block, &locked_block, atom, proposed_block_change_set)?
-                    {
+                    if let Some(reason) = self.evaluate_local_prepare_command(
+                        tx,
+                        block,
+                        &locked_block,
+                        atom,
+                        local_committee_info,
+                        proposed_block_change_set,
+                    )? {
                         proposed_block_change_set.no_vote(reason);
                         return Ok(());
                     }
@@ -739,6 +759,7 @@ where TConsensusSpec: ConsensusSpec
         Ok(None)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn evaluate_prepare_command(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
@@ -822,7 +843,29 @@ where TConsensusSpec: ConsensusSpec
 
                 match multishard.current_decision() {
                     Decision::Commit => {
+                        if !atom.evidence.contains(&local_committee_info.shard_group()) {
+                            warn!(
+                                target: LOG_TARGET,
+                                "❌ Prepare command for transaction {} has invalid evidence {} missing local shard group {} in {}",
+                                tx_rec.transaction_id(),
+                                atom.evidence,
+                                local_committee_info.shard_group(),
+                                block,
+                            );
+                            return Ok(Some(NoVoteReason::InvalidEvidence {
+                                reason: InvalidEvidenceReason::MissingInvolvedShardGroup {
+                                    shard_group: local_committee_info.shard_group(),
+                                },
+                            }));
+                        };
+
                         if multishard.is_executed() {
+                            debug!(
+                                target: LOG_TARGET,
+                                "👨‍🔧 PREPARE: Transaction {} in block {} is executed",
+                                tx_rec.transaction_id(),
+                                block,
+                            );
                             // CASE: All inputs are local and outputs are foreign (i.e. the transaction is executed), or
                             let execution = multishard.into_execution().expect("Abort should have execution");
                             tx_rec.update_from_execution(
@@ -832,6 +875,12 @@ where TConsensusSpec: ConsensusSpec
                             );
                             proposed_block_change_set.add_transaction_execution(execution)?;
                         } else {
+                            debug!(
+                                target: LOG_TARGET,
+                                "👨‍🔧 PREPARE: Transaction {} in block {} is not executed. Using partial evidence.",
+                                tx_rec.transaction_id(),
+                                block,
+                            );
                             // CASE: All local inputs were resolved. We need to continue with consensus to get the
                             // foreign inputs/outputs.
                             tx_rec.set_local_decision(Decision::Commit);
@@ -840,6 +889,36 @@ where TConsensusSpec: ConsensusSpec
                                 .evidence_mut()
                                 .update(&multishard.to_initial_evidence(local_committee_info));
                         }
+                        // Check the local evidence only since in this phase that is all that should be included.
+                        // Aside from data reduction, on_propose may propose a foreign proposal that updates the
+                        // evidence in the same block. However, because on_propose does not
+                        // include the evidence from the foreign proposal since it is processed here for the proposer,
+                        // foreign shard evidence will mismatch in this case.
+                        if atom.evidence.get(&local_committee_info.shard_group()) !=
+                            tx_rec.evidence().get(&local_committee_info.shard_group())
+                        {
+                            warn!(
+                                target: LOG_TARGET,
+                                "❌ Prepare command for transaction {} has invalid evidence in {}",
+                                tx_rec.transaction_id(),
+                                block,
+                            );
+                            warn!(
+                                target: LOG_TARGET,
+                                "❌ Prepare command evidence {} {}",
+                                local_committee_info.shard_group(),
+                                atom.evidence.get(&local_committee_info.shard_group()).display()
+                            );
+                            warn!(
+                                target: LOG_TARGET,
+                                "❌ local evidence {} {}",
+                                local_committee_info.shard_group(),
+                                tx_rec.evidence().get(&local_committee_info.shard_group()).display()
+                            );
+                            return Ok(Some(NoVoteReason::InvalidEvidence {
+                                reason: InvalidEvidenceReason::MismatchedEvidence,
+                            }));
+                        };
                     },
                     Decision::Abort(reason) => {
                         // CASE: The transaction was ABORTed due to a lock conflict
@@ -868,6 +947,7 @@ where TConsensusSpec: ConsensusSpec
         block: &Block,
         locked_block: &LockedBlock,
         atom: &TransactionAtom,
+        local_committee_info: &CommitteeInfo,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let Some(mut tx_rec) =
@@ -924,6 +1004,22 @@ where TConsensusSpec: ConsensusSpec
                 tx_rec.transaction_fee()
             );
             return Ok(Some(NoVoteReason::FeeDisagreement));
+        }
+
+        if atom.evidence.get(&local_committee_info.shard_group()) !=
+            tx_rec.evidence().get(&local_committee_info.shard_group())
+        {
+            warn!(
+                target: LOG_TARGET,
+                "❌ LocalPrepared evidence disagreement tx {} in block {}. Leader proposed {}, local {}",
+                tx_rec.transaction_id(),
+                block,
+                atom.evidence,
+                tx_rec.evidence()
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MismatchedEvidence,
+            }));
         }
 
         tx_rec.set_next_stage(TransactionPoolStage::LocalPrepared)?;
@@ -998,6 +1094,19 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::NotAllShardGroupsPrepared));
         }
 
+        if !atom.evidence.all_input_shard_groups_prepared() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: AllPrepare disagreement for transaction {} in block {}. {}",
+                tx_rec.transaction_id(),
+                block,
+                InvalidEvidenceReason::NotAllShardGroupsPrepared,
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::NotAllShardGroupsPrepared,
+            }));
+        }
+
         let maybe_execution = if tx_rec.current_decision().is_commit() {
             // TODO: provide the current input locks to the executor, the executor must fail if a write lock is
             // requested for a read-locked substate.
@@ -1015,11 +1124,9 @@ where TConsensusSpec: ConsensusSpec
             let execution = self.execute_transaction(tx, block.id(), block.epoch(), transaction)?;
             let mut execution = execution.into_transaction_execution();
 
-            // TODO: check the diff is valid against the provided input evidence (correct locks etc).
-
-            // TODO: can we modify the locks at this point? For multi-shard input transactions, we locked all inputs
+            // TODO: can we modify input locks at this point? For multi-shard input transactions, we locked all inputs
             // as Read due to lack of information. We now know what locks are necessary, and this
-            // block has the correct evidence (TODO: verify the atom) so this should be fine.
+            // block has the correct evidence so this should be fine.
             tx_rec.update_from_execution(
                 local_committee_info.num_preshards(),
                 local_committee_info.num_committees(),
@@ -1052,8 +1159,8 @@ where TConsensusSpec: ConsensusSpec
                     info!(
                         target: LOG_TARGET,
                         "⚠️ Failed to lock outputs for transaction {} in block {}. Error: {}",
-                        block,
                         tx_rec.transaction_id(),
+                        block,
                         err
                     );
 
@@ -1115,6 +1222,20 @@ where TConsensusSpec: ConsensusSpec
                 tx_rec.transaction_fee()
             );
             return Ok(Some(NoVoteReason::FeeDisagreement));
+        }
+
+        if !tx_rec.evidence().eq_pledges(&atom.evidence) {
+            warn!(
+                target: LOG_TARGET,
+                "❌ AllPrepare evidence disagreement tx {} in block {}. Leader proposed {}, we calculated {}",
+                tx_rec.transaction_id(),
+                block,
+                atom.evidence,
+                tx_rec.evidence()
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MismatchedEvidence,
+            }));
         }
 
         // maybe_execution is only None if the transaction is not committed
@@ -1306,6 +1427,22 @@ where TConsensusSpec: ConsensusSpec
             tx_rec.set_leader_fee(calculated_leader_fee);
         }
 
+        // on_propose does not process foreign proposals, so the QC evidence may not match the evidence here.
+        // We only check that the input/output pledges match
+        if !tx_rec.evidence().eq_pledges(&atom.evidence) {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: LocalAccept disagreement for transaction {} in block {}. Leader proposed evidence {}, but we calculated {}",
+                tx_rec.transaction_id(),
+                block,
+                atom.evidence,
+                tx_rec.evidence()
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MismatchedEvidence,
+            }));
+        }
+
         tx_rec.set_next_stage(TransactionPoolStage::LocalAccepted)?;
         proposed_block_change_set.set_next_transaction_update(tx_rec)?;
 
@@ -1415,6 +1552,50 @@ where TConsensusSpec: ConsensusSpec
                 local_leader_fee
             );
             return Ok(Some(NoVoteReason::LeaderFeeDisagreement));
+        }
+
+        if !tx_rec.evidence().all_objects_accepted() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed that all shard groups have accepted the atom but locally this is not the case",
+                tx_rec.transaction_id(),
+                block,
+            );
+            return Ok(Some(NoVoteReason::NotAllInputsOutputsAccepted));
+        }
+
+        if !tx_rec.has_all_required_foreign_pledges(tx, local_committee_info)? {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed that all foreign pledges have been received but locally this is not the case",
+                tx_rec.transaction_id(),
+                block,
+            );
+            return Ok(Some(NoVoteReason::NotAllForeignInputPledges));
+        }
+
+        if !atom.evidence.all_objects_accepted() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed an atom which did not indicate that all shard groups have accepted the transaction",
+                tx_rec.transaction_id(),
+                block,
+            );
+            return Ok(Some(NoVoteReason::NotAllInputsOutputsAccepted));
+        }
+
+        if *tx_rec.evidence() != atom.evidence {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed evidence {}, but we calculated {}",
+                tx_rec.transaction_id(),
+                block,
+                atom.evidence,
+                tx_rec.evidence()
+            );
+            return Ok(Some(NoVoteReason::InvalidEvidence {
+                reason: InvalidEvidenceReason::MismatchedEvidence,
+            }));
         }
 
         let execution = BlockTransactionExecution::get_pending_for_block(tx, tx_rec.transaction_id(), block.parent())
@@ -1583,7 +1764,7 @@ where TConsensusSpec: ConsensusSpec
             // TODO: split validation errors from HotStuff errors so that we can selectively crash or not vote
             warn!(
                 target: LOG_TARGET,
-                "❌ NO VOTE: Failed to process foreign proposal for local block {block} (foreign block: {foreign_block_id} shard group: {shard_group}). Error: {error}",
+                "❌ NO VOTE: Failed to process foreign proposal {foreign_block_id} from {shard_group} for local block {block} Error: {error}",
                 block = local_block,
                 foreign_block_id = fp_atom.block_id,
                 error = err,

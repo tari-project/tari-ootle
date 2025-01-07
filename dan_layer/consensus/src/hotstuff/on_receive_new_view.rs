@@ -89,6 +89,7 @@ where TConsensusSpec: ConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveNewView");
+
         let NewViewMessage {
             high_qc,
             new_height,
@@ -100,19 +101,14 @@ where TConsensusSpec: ConsensusSpec
             "🌟 NEWVIEW from {from} with new height {new_height} with qc {high_qc}",
         );
         if new_height < current_height {
-            warn!(target: LOG_TARGET, "❌ Ignoring NEWVIEW for {new_height} less than or equal the current {current_height}.");
+            warn!(target: LOG_TARGET, "❌ Ignoring NEWVIEW for {new_height} less than the current {current_height}.");
             return Ok(());
         }
 
         let is_qc_valid = self.store.with_read_tx(|tx| {
             // If we already have this QC (locally calculated hash matches), we do not need to validate this again
             if !high_qc.exists(tx)? {
-                if let Err(err) = self.validate_qc(
-                    &high_qc,
-                    local_committee,
-                    local_committee_info,
-                    self.vote_collector.signing_service(),
-                ) {
+                if let Err(err) = self.validate_qc(&high_qc, local_committee, self.vote_collector.signing_service()) {
                     warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
                     return Ok(false);
                 }
@@ -150,12 +146,12 @@ where TConsensusSpec: ConsensusSpec
 
         // Are nodes requesting to create more than the minimum number of dummy blocks?
         let height_diff = high_qc.block_height().saturating_sub(new_height).as_u64();
-        if height_diff > u64::from(local_committee_info.quorum_threshold()) {
+        if height_diff > u64::try_from(local_committee.quorum_threshold()).unwrap_or(u64::MAX) {
             warn!(
                 target: LOG_TARGET,
                 "❌ Validator {from} sent NEWVIEW that attempts to create a larger than necessary number of dummy blocks. Expected requested {} < quorum threshold {}",
                 height_diff,
-                local_committee_info.quorum_threshold()
+                local_committee.quorum_threshold()
             );
             return Ok(());
         }
@@ -214,10 +210,9 @@ where TConsensusSpec: ConsensusSpec
         &self,
         qc: &QuorumCertificate,
         committee: &Committee<TConsensusSpec::Addr>,
-        committee_info: &CommitteeInfo,
         vote_signing_service: &TConsensusSpec::SignatureService,
     ) -> Result<(), HotStuffError> {
-        check_quorum_certificate::<TConsensusSpec>(qc, committee, committee_info, vote_signing_service)?;
+        check_quorum_certificate::<TConsensusSpec>(qc, committee, vote_signing_service)?;
         Ok(())
     }
 }

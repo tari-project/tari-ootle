@@ -1,9 +1,10 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::fmt;
+use std::{fmt, fmt::Display};
 
 use tari_dan_common_types::{
+    LockIntent,
     SubstateAddress,
     SubstateLockType,
     SubstateRequirement,
@@ -13,7 +14,11 @@ use tari_dan_common_types::{
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
 
-use crate::consensus_models::{BlockId, VersionedSubstateIdLockIntent};
+use crate::{
+    consensus_models::{BlockId, VersionedSubstateIdLockIntent},
+    StateStoreReadTransaction,
+    StorageError,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct SubstateLock {
@@ -37,7 +42,7 @@ impl SubstateLock {
         &self.transaction_id
     }
 
-    pub fn substate_lock(&self) -> SubstateLockType {
+    pub fn lock_type(&self) -> SubstateLockType {
         self.lock_type
     }
 
@@ -85,7 +90,7 @@ impl LockedSubstateValue {
     pub(crate) fn to_substate_lock_intent(&self) -> VersionedSubstateIdLockIntent {
         VersionedSubstateIdLockIntent::new(
             VersionedSubstateId::new(self.substate_id.clone(), self.lock.version()),
-            self.lock.substate_lock(),
+            self.lock.lock_type(),
             true,
         )
     }
@@ -97,9 +102,35 @@ impl LockedSubstateValue {
     pub fn satisfies_requirements(&self, requirement: &SubstateRequirement) -> bool {
         requirement.version().map_or(true, |v| v == self.lock.version) && *requirement.substate_id() == self.substate_id
     }
+
+    pub fn satisfies_lock_intent<T: LockIntent>(&self, lock_intent: T) -> bool {
+        lock_intent.version_to_lock() == self.lock.version &&
+            self.lock.lock_type.allows(lock_intent.lock_type()) &&
+            *lock_intent.substate_id() == self.substate_id
+    }
 }
+
+impl LockedSubstateValue {
+    pub fn get_all_for_transaction<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<Vec<LockedSubstateValue>, StorageError> {
+        tx.substate_locks_get_locked_substates_for_transaction(transaction_id)
+    }
+}
+
 impl ToSubstateAddress for LockedSubstateValue {
     fn to_substate_address(&self) -> SubstateAddress {
         SubstateAddress::from_substate_id(&self.substate_id, self.lock.version())
+    }
+}
+
+impl Display for LockedSubstateValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "LockedSubstate(substate_id: {}, lock: {}, locked_by_block: {})",
+            self.substate_id, self.lock, self.locked_by_block
+        )
     }
 }

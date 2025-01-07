@@ -9,7 +9,6 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
     borsh::indexmap as indexmap_borsh,
-    committee::CommitteeInfo,
     option::DisplayContainer,
     LockIntent,
     NumPreshards,
@@ -65,6 +64,8 @@ impl Evidence {
             evidence.add_shard_group(sg).insert_output(obj.substate_id, obj.version);
         }
 
+        evidence.evidence.sort_keys();
+
         evidence
     }
 
@@ -94,7 +95,35 @@ impl Evidence {
             evidence.add_shard_group(sg).insert_from_lock_intent(obj);
         }
 
+        evidence.evidence.sort_keys();
+
         evidence
+    }
+
+    pub fn to_includes_only_shard_group(&self, shard_group: ShardGroup) -> Self {
+        let mut evidence = Self::empty();
+        if let Some(ev) = self.get(&shard_group) {
+            *evidence.add_shard_group(shard_group) = ev.clone();
+        }
+        evidence
+    }
+
+    pub fn all_inputs_iter(&self) -> impl Iterator<Item = (&ShardGroup, &SubstateId, &Option<EvidenceInputLockData>)> {
+        self.evidence.iter().flat_map(|(sg, evidence)| {
+            evidence
+                .inputs
+                .iter()
+                .map(move |(substate_id, lock)| (sg, substate_id, lock))
+        })
+    }
+
+    pub fn all_outputs_iter(&self) -> impl Iterator<Item = (&ShardGroup, &SubstateId, &u32)> {
+        self.evidence.iter().flat_map(|(sg, evidence)| {
+            evidence
+                .outputs
+                .iter()
+                .map(move |(substate_id, version)| (sg, substate_id, version))
+        })
     }
 
     pub fn all_objects_accepted(&self) -> bool {
@@ -129,10 +158,8 @@ impl Evidence {
     /// Returns true if all substates in the given shard group are output locks.
     /// This assumes the provided evidence is complete before this is called.
     /// If no evidence is present for the shard group, false is returned.
-    pub fn is_committee_output_only(&self, committee_info: &CommitteeInfo) -> bool {
-        self.evidence
-            .get(&committee_info.shard_group())
-            .map_or(true, |e| e.inputs().is_empty())
+    pub fn is_committee_output_only(&self, shard_group: ShardGroup) -> bool {
+        self.evidence.get(&shard_group).map_or(true, |e| e.inputs().is_empty())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -145,6 +172,10 @@ impl Evidence {
 
     pub fn get(&self, shard_group: &ShardGroup) -> Option<&ShardGroupEvidence> {
         self.evidence.get(shard_group)
+    }
+
+    pub fn get_mut(&mut self, shard_group: &ShardGroup) -> Option<&mut ShardGroupEvidence> {
+        self.evidence.get_mut(shard_group)
     }
 
     pub fn has(&self, shard_group: &ShardGroup) -> bool {
@@ -163,32 +194,6 @@ impl Evidence {
 
     pub fn contains(&self, shard_group: &ShardGroup) -> bool {
         self.evidence.contains_key(shard_group)
-    }
-
-    pub fn add_prepare_qc_evidence(&mut self, committee_info: &CommitteeInfo, qc_id: QcId) -> &mut Self {
-        if let Some(evidence_mut) = self.evidence.get_mut(&committee_info.shard_group()) {
-            debug!(
-                target: LOG_TARGET,
-                "add_prepare_qc_evidence {} QC[{qc_id}]",
-                committee_info.shard_group(),
-            );
-            evidence_mut.prepare_qc = Some(qc_id);
-        }
-
-        self
-    }
-
-    pub fn add_accept_qc_evidence(&mut self, committee_info: &CommitteeInfo, qc_id: QcId) -> &mut Self {
-        if let Some(evidence_mut) = self.evidence.get_mut(&committee_info.shard_group()) {
-            debug!(
-                target: LOG_TARGET,
-                "add_accept_qc_evidence {} QC[{qc_id}]",
-                committee_info.shard_group(),
-            );
-            evidence_mut.accept_qc = Some(qc_id);
-        }
-
-        self
     }
 
     pub fn qc_ids_iter(&self) -> impl Iterator<Item = &QcId> + '_ {
@@ -223,9 +228,26 @@ impl Evidence {
     pub fn update(&mut self, other: &Evidence) -> &mut Self {
         for (sg, evidence) in other.iter() {
             let evidence_mut = self.evidence.entry(*sg).or_default();
-            evidence_mut
-                .inputs
-                .extend(evidence.inputs.iter().map(|(id, lock)| (id.clone(), *lock)));
+            let inputs_mut = &mut evidence_mut.inputs;
+
+            for (substate_id, evidence) in evidence.inputs.iter().map(|(id, lock)| (id.clone(), *lock)) {
+                if let Some(e_mut) = inputs_mut.get_mut(&substate_id) {
+                    match evidence {
+                        Some(e) => match e_mut {
+                            Some(e_mut) => {
+                                e_mut.is_write = e.is_write;
+                                e_mut.version = e.version;
+                            },
+                            None => {
+                                *e_mut = Some(e);
+                            },
+                        },
+                        None => continue,
+                    }
+                } else {
+                    inputs_mut.insert(substate_id, evidence);
+                }
+            }
             evidence_mut
                 .outputs
                 .extend(evidence.outputs.iter().map(|(id, version)| (id.clone(), *version)));
@@ -233,6 +255,47 @@ impl Evidence {
         }
         self.evidence.sort_keys();
         self
+    }
+
+    pub fn eq_pledges(&self, other: &Evidence) -> bool {
+        if self.len() != other.len() {
+            debug!(
+                target: LOG_TARGET,
+                "Evidence length mismatch: self={}, other={}",
+                self.len(),
+                other.len()
+            );
+            return false;
+        }
+
+        for (sg, evidence) in self.iter() {
+            if let Some(other_evidence) = other.get(sg) {
+                if evidence.inputs() != other_evidence.inputs() {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Inputs mismatch for shard group {}: self={:?}, other={:?}",
+                        sg,
+                        evidence.inputs(),
+                        other_evidence.inputs()
+                    );
+                    return false;
+                }
+                if evidence.outputs() != other_evidence.outputs() {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Outputs mismatch for shard group {}: self={:?}, other={:?}",
+                        sg,
+                        evidence.outputs(),
+                        other_evidence.outputs()
+                    );
+                    return false;
+                }
+            } else {
+                debug!(target: LOG_TARGET, "Missing shard group evidence for {}", sg);
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -247,6 +310,11 @@ impl FromIterator<(ShardGroup, ShardGroupEvidence)> for Evidence {
 impl Display for Evidence {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if f.alternate() {
+            if self.is_empty() {
+                write!(f, "{{EMPTY}}")?;
+                return Ok(());
+            }
+
             for (i, (shard_group, shard_evidence)) in self.evidence.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
@@ -261,6 +329,10 @@ impl Display for Evidence {
                 }
             }
         } else {
+            if self.is_empty() {
+                write!(f, "{{EMPTY}}")?;
+                return Ok(());
+            }
             write!(f, "{{")?;
             for (i, (substate_address, shard_evidence)) in self.evidence.iter().enumerate() {
                 if i > 0 {
@@ -311,12 +383,12 @@ impl ShardGroupEvidence {
     }
 
     pub fn insert_empty_input(&mut self, substate_id: SubstateId) -> &mut Self {
-        self.inputs.insert(substate_id, None);
+        self.inputs.insert_sorted(substate_id, None);
         self
     }
 
     pub fn insert_output(&mut self, substate_id: SubstateId, version: u32) -> &mut Self {
-        self.outputs.insert(substate_id, version);
+        self.outputs.insert_sorted(substate_id, version);
         self
     }
 
@@ -326,6 +398,10 @@ impl ShardGroupEvidence {
 
     pub fn is_accept_justified(&self) -> bool {
         self.accept_qc.is_some()
+    }
+
+    pub fn is_all_inputs_pledged(&self) -> bool {
+        self.inputs.iter().all(|(_, lock)| lock.is_some())
     }
 
     pub fn inputs(&self) -> &IndexMap<SubstateId, Option<EvidenceInputLockData>> {
@@ -341,21 +417,78 @@ impl ShardGroupEvidence {
         self.outputs.sort_keys();
     }
 
-    pub fn contains(&self, substate_id: &SubstateId) -> bool {
-        self.inputs.contains_key(substate_id) || self.outputs.contains_key(substate_id)
+    pub fn contains_pledge(&self, substate_id: &SubstateId, version: u32, is_input: bool) -> bool {
+        if is_input {
+            return self
+                .inputs
+                .get(substate_id)
+                .map_or(false, |e| e.as_ref().map_or(false, |e| e.version == version));
+        }
+
+        self.outputs.get(substate_id).map_or(false, |v| *v == version)
+    }
+
+    pub fn update(&mut self, other: &ShardGroupEvidence) -> &mut Self {
+        for (substate_id, lock) in &other.inputs {
+            if let Some(e) = lock {
+                if let Some(ev_mut) = self.inputs.get_mut(substate_id) {
+                    *ev_mut = Some(*e);
+                } else {
+                    self.inputs.insert_sorted(substate_id.clone(), Some(*e));
+                }
+            } else if !self.inputs.contains_key(substate_id) {
+                self.inputs.insert_sorted(substate_id.clone(), None);
+            } else {
+                // Do nothing
+            }
+        }
+        for (substate_id, version) in &other.outputs {
+            if let Some(v) = self.outputs.get_mut(substate_id) {
+                *v = *version;
+            } else {
+                self.outputs.insert_sorted(substate_id.clone(), *version);
+            }
+        }
+        self
+    }
+
+    pub fn set_prepare_qc(&mut self, qc_id: QcId) -> &mut Self {
+        debug!(
+            target: LOG_TARGET,
+            "set_prepare_qc: QC[{qc_id}]",
+        );
+        self.prepare_qc = Some(qc_id);
+        self
+    }
+
+    pub fn set_accept_qc(&mut self, qc_id: QcId) -> &mut Self {
+        debug!(
+            target: LOG_TARGET,
+            "set_accept_qc: QC[{qc_id}]",
+        );
+        self.accept_qc = Some(qc_id);
+        self
     }
 }
 
 impl Display for ShardGroupEvidence {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{")?;
+        write!(f, "inputs[")?;
         for (i, (substate_id, lock)) in self.inputs.iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
             write!(f, "{}: {}", substate_id, lock.display())?;
         }
-        write!(f, "}}")?;
+        write!(f, "],")?;
+        write!(f, "outputs[")?;
+        for (i, (substate_id, version)) in self.outputs.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}: {}", substate_id, version)?;
+        }
+        write!(f, "]")?;
         if let Some(qc_id) = self.prepare_qc {
             write!(f, " Prepare[{}]", qc_id)?;
         } else {

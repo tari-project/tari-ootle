@@ -310,24 +310,36 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
         // Local-Only-Rules apply if: current lock is local-only AND requested lock is local only
         let has_local_only_rules = existing.is_local_only() && is_local_only;
         let same_transaction = *existing.transaction_id() == transaction_id;
+        let same_transaction_lock = same_transaction && existing.lock_type() == requested_lock_type;
+
+        debug!(
+            target: LOG_TARGET,
+            "🔒️ Found existing lock: {} {}",
+            versioned_substate_id,
+            existing
+        );
 
         // Duplicate lock requests on the same transaction are idempotent
-        if same_transaction {
+        if same_transaction_lock {
+            debug!(
+                target: LOG_TARGET,
+                "🔒️ Duplicate lock request: {}",
+                requested_lock
+            );
             return Ok(());
         }
 
-        match existing.substate_lock() {
+        match existing.lock_type() {
             // If a substate is already locked as READ:
             // - it MAY be locked as READ
-            // - it MUST NOT be locked as WRITE or OUTPUT, unless
-            // - if Same-Transaction OR Local-Only-Rules:
-            //   - it MAY be locked as requested.
+            // - if Local-Only-Rules:
+            //   - it MAY be locked as READ or OUTPUT.
             SubstateLockType::Read => {
                 // Cannot write to or create an output for a substate that is already read locked
-                if !has_local_only_rules && !requested_lock_type.is_read() {
+                if has_local_only_rules && requested_lock_type.is_write() {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Lock conflict: [{}] Read lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        "⚠️ Lock conflict(1): [{}] Read lock(local_only={}) is present. Requested lock is {}(local_only={})",
                         versioned_substate_id,
                         existing.is_local_only(),
                         requested_lock_type,
@@ -336,7 +348,49 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                     return Err(LockFailedError::LockConflict {
                         substate_id: versioned_substate_id,
                         conflict: LockConflict {
-                            existing_lock: existing.substate_lock(),
+                            existing_lock: existing.lock_type(),
+                            requested_lock: requested_lock_type,
+                            transaction_id: *existing.transaction_id(),
+                            is_local_only: has_local_only_rules,
+                        },
+                    }
+                    .into());
+                }
+
+                if !has_local_only_rules && !same_transaction && !requested_lock_type.is_read() {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ Lock conflict(2): [{}] Read lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        versioned_substate_id,
+                        existing.is_local_only(),
+                        requested_lock_type,
+                        is_local_only
+                    );
+                    return Err(LockFailedError::LockConflict {
+                        substate_id: versioned_substate_id,
+                        conflict: LockConflict {
+                            existing_lock: existing.lock_type(),
+                            requested_lock: requested_lock_type,
+                            transaction_id: *existing.transaction_id(),
+                            is_local_only: has_local_only_rules,
+                        },
+                    }
+                    .into());
+                }
+
+                if !has_local_only_rules && same_transaction && !requested_lock_type.is_output() {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ Lock conflict(3): [{}] Read lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        versioned_substate_id,
+                        existing.is_local_only(),
+                        requested_lock_type,
+                        is_local_only
+                    );
+                    return Err(LockFailedError::LockConflict {
+                        substate_id: versioned_substate_id,
+                        conflict: LockConflict {
+                            existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
                             is_local_only: has_local_only_rules,
@@ -353,24 +407,26 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
             },
 
             // If a substate is already locked as WRITE:
-            // - it MUST NOT be locked as READ, WRITE or OUTPUT, unless
+            // - it MUST NOT be locked as READ, WRITE
             // - if Same-Transaction OR Local-Only-Rules:
             //   - it MAY be locked as OUTPUT
             SubstateLockType::Write => {
-                // Cannot lock a non-local_only WRITE locked substate
-                if !has_local_only_rules {
+                // Cannot lock a non-local-only WRITE locked substate
+                if !same_transaction && !has_local_only_rules {
                     warn!(
                         target: LOG_TARGET,
-                        "⚠️ Lock conflict: [{}] Write lock(local_only={}) is present. Requested lock is {}(local_only={})",
+                        "⚠️ Lock conflict: [{}] Write lock(local_only={}, tx={}) is present. Requested lock is {}(local_only={}, tx={})",
                         versioned_substate_id,
                         existing.is_local_only(),
+                        existing.transaction_id(),
                         requested_lock_type,
-                        is_local_only
+                        is_local_only,
+                        transaction_id,
                     );
                     return Err(LockFailedError::LockConflict {
                         substate_id: versioned_substate_id,
                         conflict: LockConflict {
-                            existing_lock: existing.substate_lock(),
+                            existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
                             is_local_only: false,
@@ -391,7 +447,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                     return Err(LockFailedError::LockConflict {
                         substate_id: versioned_substate_id,
                         conflict: LockConflict {
-                            existing_lock: existing.substate_lock(),
+                            existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
                             is_local_only: has_local_only_rules,
@@ -425,7 +481,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                     return Err(LockFailedError::LockConflict {
                         substate_id: versioned_substate_id,
                         conflict: LockConflict {
-                            existing_lock: existing.substate_lock(),
+                            existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
                             is_local_only: has_local_only_rules,
@@ -446,7 +502,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
                     return Err(LockFailedError::LockConflict {
                         substate_id: versioned_substate_id,
                         conflict: LockConflict {
-                            existing_lock: existing.substate_lock(),
+                            existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
                             transaction_id: *existing.transaction_id(),
                             is_local_only: has_local_only_rules,
@@ -499,6 +555,12 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
     }
 
     fn add_new_lock(&mut self, substate_id: SubstateId, lock: SubstateLock) {
+        debug!(
+            target: LOG_TARGET,
+            "🔒️ Adding new lock: {} {}",
+            substate_id,
+            lock
+        );
         self.new_locks.entry(substate_id).or_default().push(lock);
     }
 

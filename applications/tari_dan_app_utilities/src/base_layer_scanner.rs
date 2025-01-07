@@ -353,7 +353,7 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
                             );
                             continue;
                         }
-                        trace!(target: LOG_TARGET, "New validator node registration scanned: {reg:?}");
+                        info!(target: LOG_TARGET, "🖥️ New validator node registration: {}", reg.public_key());
                     },
                     // TODO: remove completely SideChainFeature::CodeTemplateRegistration at some point
                     SideChainFeatureData::CodeTemplateRegistration(reg) => {
@@ -459,7 +459,22 @@ impl<TAddr: NodeAddressable + 'static> BaseLayerScanner<TAddr> {
             }
         }
 
-        self.epoch_manager.notify_scanning_complete().await?;
+        let latest = self.base_node_client.get_tip_info().await?;
+        if latest
+            .height_of_longest_chain
+            .saturating_sub(self.consensus_constants.base_layer_confirmations) >
+            end_height
+        {
+            info!(
+                target: LOG_TARGET,
+                "Base layer blockchain has progressed since the last scan. Last scanned block height: {}. \
+                 Latest block height: {}",
+                end_height,
+                latest.height_of_longest_chain
+            );
+        } else {
+            self.epoch_manager.notify_scanning_complete().await?;
+        }
 
         Ok(())
     }

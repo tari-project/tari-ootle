@@ -9,8 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
-    NumPreshards,
-    ShardGroup,
+    LockIntent,
     SubstateAddress,
     SubstateLockType,
     SubstateRequirement,
@@ -55,25 +54,12 @@ impl BlockPledge {
         self.pledges.remove(transaction_id)
     }
 
-    pub fn num_substates_pledged(&self) -> usize {
-        self.pledges.values().map(|s| s.len()).sum()
+    pub fn get_transaction_pledges(&self, transaction_id: &TransactionId) -> Option<&SubstatePledges> {
+        self.pledges.get(transaction_id)
     }
 
-    pub fn into_filtered_for_shard_group(
-        mut self,
-        num_preshards: NumPreshards,
-        num_committees: u32,
-        shard_group: ShardGroup,
-    ) -> Self {
-        self.pledges.retain(|_, substate_pledges| {
-            substate_pledges.iter().any(|pledge| {
-                pledge
-                    .to_substate_address()
-                    .to_shard_group(num_preshards, num_committees) ==
-                    shard_group
-            })
-        });
-        self
+    pub fn num_substates_pledged(&self) -> usize {
+        self.pledges.values().map(|s| s.len()).sum()
     }
 
     pub fn retain_transactions(&mut self, transaction_ids: &HashSet<TransactionId>) -> &mut Self {
@@ -81,16 +67,9 @@ impl BlockPledge {
         self
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&TransactionId, &SubstatePledges)> + '_ {
+    /// Returns an iterator over the pledges in a random order. This should not be used in some cases e.g. hashes.
+    pub fn randomly_ordered_iter(&self) -> impl Iterator<Item = (&TransactionId, &SubstatePledges)> + '_ {
         self.pledges.iter()
-    }
-
-    pub fn substate_pledges_iter(&self) -> impl Iterator<Item = &SubstatePledges> {
-        self.pledges.values()
-    }
-
-    pub fn reserve(&mut self, additional: usize) {
-        self.pledges.reserve(additional);
     }
 }
 
@@ -99,6 +78,19 @@ impl FromIterator<(TransactionId, SubstatePledges)> for BlockPledge {
         Self {
             pledges: iter.into_iter().collect(),
         }
+    }
+}
+
+impl Display for BlockPledge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (_tx_id, pledges) in self.randomly_ordered_iter() {
+            write!(f, "{_tx_id}:[")?;
+            for pledge in pledges {
+                write!(f, "{pledge}, ")?;
+            }
+            write!(f, "],")?;
+        }
+        Ok(())
     }
 }
 
@@ -158,6 +150,19 @@ impl SubstatePledge {
         self.versioned_substate_id().substate_id()
     }
 
+    pub fn as_substate_lock_type(&self) -> SubstateLockType {
+        match self {
+            Self::Input { is_write, .. } => {
+                if *is_write {
+                    SubstateLockType::Write
+                } else {
+                    SubstateLockType::Read
+                }
+            },
+            Self::Output { .. } => SubstateLockType::Output,
+        }
+    }
+
     pub fn to_substate_address(&self) -> SubstateAddress {
         self.versioned_substate_id().to_substate_address()
     }
@@ -172,18 +177,36 @@ impl SubstatePledge {
     pub fn satisfies_substate_and_version(&self, substate_id: &SubstateId, version: u32) -> bool {
         self.versioned_substate_id().version == version && self.substate_id() == substate_id
     }
+
+    pub fn satisfies_lock_intent<T: LockIntent>(&self, lock_intent: T) -> bool {
+        if lock_intent.version_to_lock() != self.versioned_substate_id().version() {
+            return false;
+        }
+        let lock_type = self.as_substate_lock_type();
+        if !lock_type.allows(lock_intent.lock_type()) {
+            return false;
+        }
+
+        if lock_intent.substate_id() != self.substate_id() {
+            return false;
+        }
+        true
+    }
 }
 
-/// These are to detect and prevent duplicates in pledging. A pledge may only
+/// These are to detect and prevent duplicates in pledging.
 impl Hash for SubstatePledge {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.substate_id().hash(state);
+        self.versioned_substate_id().version.hash(state);
+        self.as_substate_lock_type().hash(state);
     }
 }
 
 impl PartialEq for SubstatePledge {
     fn eq(&self, other: &Self) -> bool {
-        self.substate_id() == other.substate_id()
+        self.as_substate_lock_type() == other.as_substate_lock_type() &&
+            self.versioned_substate_id() == other.versioned_substate_id()
     }
 }
 

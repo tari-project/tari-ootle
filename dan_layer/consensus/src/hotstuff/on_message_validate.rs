@@ -79,6 +79,14 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         let _timer = TraceTimer::debug(LOG_TARGET, "on_message_validate");
         match msg {
             HotstuffMessage::Proposal(msg) => {
+                if !local_committee.contains(&from) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "❌ Received message from non-committee member {}. Discarding message.",
+                        from
+                    );
+                    return Ok(MessageValidationResult::Discard);
+                }
                 self.process_local_proposal(current_height, from, local_committee_info, local_committee, msg)
             },
             HotstuffMessage::ForeignProposal(proposal) => {
@@ -99,6 +107,21 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     from,
                     message: HotstuffMessage::MissingTransactionsResponse(msg),
                 })
+            },
+            msg @ HotstuffMessage::NewView(_) |
+            msg @ HotstuffMessage::Vote(_) |
+            msg @ HotstuffMessage::CatchUpSyncRequest(_) |
+            msg @ HotstuffMessage::SyncResponse(_) => {
+                if !local_committee.contains(&from) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ Received {} message from non-committee member {}. Discarding message.",
+                        msg.as_type_str(),
+                        from
+                    );
+                    return Ok(MessageValidationResult::Discard);
+                }
+                Ok(MessageValidationResult::Ready { from, message: msg })
             },
             msg => Ok(MessageValidationResult::Ready { from, message: msg }),
         }
@@ -160,7 +183,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Discard);
         }
 
-        if let Err(err) = self.check_local_proposal(&proposal.block, local_committee, local_committee_info) {
+        if let Err(err) = self.check_local_proposal(&proposal.block, local_committee) {
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::Proposal(proposal),
@@ -211,12 +234,10 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         &self,
         block: &Block,
         committee_for_block: &Committee<TConsensusSpec::Addr>,
-        committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
         block_validations::check_local_proposal::<TConsensusSpec>(
             self.current_view.get_epoch(),
             block,
-            committee_info,
             committee_for_block,
             &self.vote_signing_service,
             &self.leader_strategy,
@@ -228,11 +249,9 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         &self,
         block: &Block,
         committee_for_block: &Committee<TConsensusSpec::Addr>,
-        committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
         block_validations::check_proposal::<TConsensusSpec>(
             block,
-            committee_info,
             committee_for_block,
             &self.vote_signing_service,
             &self.leader_strategy,
@@ -342,12 +361,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             .epoch_manager
             .get_committee_by_validator_public_key(msg.block.epoch(), msg.block.proposed_by().clone())
             .await?;
-        let committee_info = self
-            .epoch_manager
-            .get_committee_info_by_validator_public_key(msg.block.epoch(), msg.block.proposed_by().clone())
-            .await?;
 
-        if let Err(err) = self.check_foreign_proposal(&msg.block, &committee, &committee_info) {
+        if let Err(err) = self.check_foreign_proposal(&msg.block, &committee) {
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::ForeignProposal(msg),
@@ -356,12 +371,12 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         }
 
         self.store.with_write_tx(|tx| {
-            let mut all_involved_transactions = msg
+            let all_involved_transactions = msg
                 .block
-                .all_transaction_ids_in_committee(local_committee_info)
-                .peekable();
+                .all_transaction_ids_in_committee(local_committee_info);
             // CASE: all foreign proposals must include evidence
-            if all_involved_transactions.peek().is_none() {
+            let num_transactions = all_involved_transactions.clone().count();
+            if num_transactions == 0 {
                 warn!(
                     target: LOG_TARGET,
                     "❌ Foreign Block {} has no transactions involving our committee", msg.block
@@ -383,7 +398,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             if missing_tx_ids.is_empty() {
                 debug!(
                     target: LOG_TARGET,
-                    "✅ Foreign Block {} has no missing transactions", msg.block
+                    "✅ Foreign Block {} has no missing transactions (out of {} transaction(s) involving this shard group)", msg.block,
+                    num_transactions
                 );
                 return Ok(MessageValidationResult::Ready {
                     from,

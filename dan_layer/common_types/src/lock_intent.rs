@@ -55,6 +55,14 @@ impl SubstateLockType {
     pub fn is_input(&self) -> bool {
         !self.is_output()
     }
+
+    pub fn allows(&self, other: SubstateLockType) -> bool {
+        match self {
+            Self::Read => matches!(other, Self::Read),
+            Self::Write => matches!(other, Self::Read | Self::Write),
+            Self::Output => matches!(other, Self::Output),
+        }
+    }
 }
 
 impl fmt::Display for SubstateLockType {
@@ -83,3 +91,21 @@ impl FromStr for SubstateLockType {
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to parse SubstateLockFlag")]
 pub struct SubstateLockFlagParseError;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_allows_read_lock_if_write_lock() {
+        assert!(SubstateLockType::Write.allows(SubstateLockType::Read));
+        assert!(SubstateLockType::Write.allows(SubstateLockType::Write));
+        assert!(!SubstateLockType::Write.allows(SubstateLockType::Output));
+        assert!(!SubstateLockType::Read.allows(SubstateLockType::Write));
+        assert!(SubstateLockType::Read.allows(SubstateLockType::Read));
+        assert!(!SubstateLockType::Read.allows(SubstateLockType::Output));
+        assert!(!SubstateLockType::Output.allows(SubstateLockType::Read));
+        assert!(!SubstateLockType::Output.allows(SubstateLockType::Write));
+        assert!(SubstateLockType::Output.allows(SubstateLockType::Output));
+    }
+}

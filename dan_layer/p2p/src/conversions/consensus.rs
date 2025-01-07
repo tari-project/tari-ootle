@@ -240,7 +240,7 @@ impl From<&ForeignProposalMessage> for proto::consensus::ForeignProposal {
         Self {
             block: Some(proto::consensus::Block::from(&value.block)),
             justify_qc: Some(proto::consensus::QuorumCertificate::from(&value.justify_qc)),
-            block_pledge: value.block_pledge.iter().map(Into::into).collect(),
+            block_pledge: value.block_pledge.randomly_ordered_iter().map(Into::into).collect(),
         }
     }
 }
@@ -250,7 +250,7 @@ impl From<&ForeignProposal> for proto::consensus::ForeignProposal {
         Self {
             block: Some(proto::consensus::Block::from(&value.block)),
             justify_qc: Some(proto::consensus::QuorumCertificate::from(&value.justify_qc)),
-            block_pledge: value.block_pledge.iter().map(Into::into).collect(),
+            block_pledge: value.block_pledge.randomly_ordered_iter().map(Into::into).collect(),
         }
     }
 }

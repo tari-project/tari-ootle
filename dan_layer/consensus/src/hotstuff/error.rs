@@ -1,9 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::FixedHash;
+use tari_common_types::types::{FixedHash, PublicKey};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_common_types::{Epoch, NodeHeight, VersionedSubstateIdError};
+use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError};
 use tari_dan_storage::{
     consensus_models::{BlockError, BlockId, LeafBlock, LockedBlock, QcId, TransactionPoolError},
     StorageError,
@@ -108,6 +108,15 @@ pub enum HotStuffError {
     BlockBuildingError(#[from] BlockError),
 }
 
+impl HotStuffError {
+    pub fn validation_error(&self) -> Option<&ProposalValidationError> {
+        match self {
+            Self::ProposalValidationError(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
 impl From<EpochManagerError> for HotStuffError {
     fn from(err: EpochManagerError) -> Self {
         Self::EpochManagerError(err.into())
@@ -189,9 +198,11 @@ pub enum ProposalValidationError {
     #[error("Proposed block {block_id} {height} has invalid signature")]
     InvalidSignature { block_id: BlockId, height: NodeHeight },
     #[error("QC has invalid signature: {qc}")]
-    QCInvalidSignature { qc: QcId },
-    #[error("Quorum was not reached: {qc}")]
-    QuorumWasNotReached { qc: QcId },
+    QcInvalidSignature { qc: QcId },
+    #[error("QC has duplicate signature: {qc} by {validator}")]
+    QcDuplicateSignature { qc: QcId, validator: PublicKey },
+    #[error("Quorum was not reached on QC {qc}. {got} out of {required} signatures")]
+    QuorumWasNotReached { qc: QcId, got: usize, required: usize },
     #[error("Invalid network in block {block_id}: expected {expected_network}, given {block_network}")]
     InvalidNetwork {
         expected_network: String,
@@ -204,8 +215,6 @@ pub enum ProposalValidationError {
         calculated: FixedHash,
         from_block: FixedHash,
     },
-    #[error("Problem converting values")]
-    QCConversionError,
     #[error("Validator {validator} is not in the expected committee: {details}")]
     ValidatorNotInCommittee { validator: String, details: String },
     #[error("Base layer block hash for block with height {proposed} too high, current height {current}")]
@@ -221,11 +230,23 @@ pub enum ProposalValidationError {
         block_id: BlockId,
         base_layer_block_height: u64,
     },
-    #[error("Foreign node submitted invalid pledge for block {block_id}, transaction {transaction_id}: {details}")]
+    #[error(
+        "Foreign node in {shard_group} submitted invalid pledge for block {block_id}, transaction {transaction_id}: \
+         {details}"
+    )]
     ForeignInvalidPledge {
         block_id: BlockId,
         transaction_id: TransactionId,
+        shard_group: ShardGroup,
         details: String,
+    },
+    #[error(
+        "Foreign node in {shard_group} submitted proposal {block_id} but justify QC justifies {justify_qc_block_id}"
+    )]
+    ForeignJustifyQcDoesNotJustifyProposal {
+        block_id: BlockId,
+        justify_qc_block_id: BlockId,
+        shard_group: ShardGroup,
     },
     #[error(
         "Foreign node submitted an foreign proposal {block_id} that did not contain any transaction evidence for this \

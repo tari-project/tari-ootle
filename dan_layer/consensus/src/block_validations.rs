@@ -1,15 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashSet;
+
 use log::{debug, warn};
 use tari_common::configuration::Network;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_dan_common_types::{
-    committee::{Committee, CommitteeInfo},
-    DerivableFromPublicKey,
-    Epoch,
-    ExtraFieldKey,
-};
+use tari_dan_common_types::{committee::Committee, DerivableFromPublicKey, Epoch, ExtraFieldKey};
 use tari_dan_storage::consensus_models::{Block, QuorumCertificate};
 use tari_epoch_manager::EpochManagerReader;
 
@@ -22,7 +19,6 @@ const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::block_validations";
 pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
     current_epoch: Epoch,
     block: &Block,
-    committee_info: &CommitteeInfo,
     committee_for_block: &Committee<TConsensusSpec::Addr>,
     vote_signing_service: &TConsensusSpec::SignatureService,
     leader_strategy: &TConsensusSpec::LeaderStrategy,
@@ -30,7 +26,6 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
 ) -> Result<(), HotStuffError> {
     check_proposal::<TConsensusSpec>(
         block,
-        committee_info,
         committee_for_block,
         vote_signing_service,
         leader_strategy,
@@ -43,7 +38,6 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
 
 pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     block: &Block,
-    committee_info: &CommitteeInfo,
     committee_for_block: &Committee<TConsensusSpec::Addr>,
     vote_signing_service: &TConsensusSpec::SignatureService,
     leader_strategy: &TConsensusSpec::LeaderStrategy,
@@ -69,12 +63,7 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     check_proposed_by_leader(leader_strategy, committee_for_block, block)?;
     check_signature(block)?;
     check_block(block)?;
-    check_quorum_certificate::<TConsensusSpec>(
-        block.justify(),
-        committee_for_block,
-        committee_info,
-        vote_signing_service,
-    )?;
+    check_quorum_certificate::<TConsensusSpec>(block.justify(), committee_for_block, vote_signing_service)?;
     Ok(())
 }
 
@@ -226,9 +215,8 @@ pub fn check_block(candidate_block: &Block) -> Result<(), ProposalValidationErro
 pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
     qc: &QuorumCertificate,
     committee: &Committee<TConsensusSpec::Addr>,
-    committee_info: &CommitteeInfo,
     vote_signing_service: &TConsensusSpec::SignatureService,
-) -> Result<(), HotStuffError> {
+) -> Result<(), ProposalValidationError> {
     if qc.justifies_zero_block() {
         // TODO: This is potentially dangerous. There should be a check
         // to make sure this is the start of the chain.
@@ -236,10 +224,15 @@ pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
         return Ok(());
     }
 
-    if qc.signatures().is_empty() {
-        return Err(ProposalValidationError::QuorumWasNotReached { qc: *qc.id() }.into());
+    if qc.signatures().len() < committee.quorum_threshold() {
+        return Err(ProposalValidationError::QuorumWasNotReached {
+            qc: *qc.id(),
+            got: qc.signatures().len(),
+            required: committee.quorum_threshold(),
+        });
     }
 
+    let mut check_dups = HashSet::with_capacity(qc.signatures().len());
     for signature in qc.signatures() {
         if !committee.contains_public_key(signature.public_key()) {
             return Err(ProposalValidationError::ValidatorNotInCommittee {
@@ -247,25 +240,22 @@ pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
                 details: format!(
                     "QC signed with validator {} that is not in committee {}",
                     signature.public_key(),
-                    committee_info.shard_group()
+                    qc.shard_group(),
                 ),
-            }
-            .into());
+            });
         }
-    }
-
-    for sign in qc.signatures() {
+        if !check_dups.insert(signature.public_key()) {
+            return Err(ProposalValidationError::QcDuplicateSignature {
+                qc: *qc.id(),
+                validator: signature.public_key().clone(),
+            });
+        }
         let message = vote_signing_service.create_message(qc.block_id(), &qc.decision());
-        if !sign.verify(message) {
-            return Err(ProposalValidationError::QCInvalidSignature { qc: *qc.id() }.into());
+        if !signature.verify(message) {
+            return Err(ProposalValidationError::QcInvalidSignature { qc: *qc.id() });
         }
     }
 
-    if committee_info.quorum_threshold() >
-        u32::try_from(qc.signatures().len()).map_err(|_| ProposalValidationError::QCConversionError)?
-    {
-        return Err(ProposalValidationError::QuorumWasNotReached { qc: *qc.id() }.into());
-    }
     Ok(())
 }
 

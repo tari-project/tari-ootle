@@ -300,7 +300,11 @@ pub enum RejectReason {
     OneOrMoreInputsNotFound(String),
     FailedToLockInputs(String),
     FailedToLockOutputs(String),
-    ForeignShardGroupDecidedToAbort { start_shard: u32, end_shard: u32 },
+    ForeignShardGroupDecidedToAbort {
+        start_shard: u32,
+        end_shard: u32,
+        abort_reason: String,
+    },
     FeesNotPaid(String),
     Unknown,
 }
@@ -313,8 +317,15 @@ impl Display for RejectReason {
             RejectReason::OneOrMoreInputsNotFound(msg) => write!(f, "One or more inputs not found: {}", msg),
             RejectReason::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
             RejectReason::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
-            RejectReason::ForeignShardGroupDecidedToAbort { start_shard, end_shard } => {
-                write!(f, "Foreign shard group ({start_shard}-{end_shard}) decided to abort")
+            RejectReason::ForeignShardGroupDecidedToAbort {
+                start_shard,
+                end_shard,
+                abort_reason,
+            } => {
+                write!(
+                    f,
+                    "Foreign shard group ({start_shard}-{end_shard}) decided to abort: {abort_reason}"
+                )
             },
             RejectReason::FeesNotPaid(msg) => write!(f, "Fee not paid: {}", msg),
             RejectReason::Unknown => write!(f, "<unknown reject reason - this is not valid>"),

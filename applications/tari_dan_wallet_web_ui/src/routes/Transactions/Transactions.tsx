@@ -100,7 +100,7 @@ export default function Transactions({ accountName }: { accountName: string }) {
                       <DataTableCell>
                         <StatusChip status={status} showTitle />
                       </DataTableCell>
-                      <DataTableCell>{result?.fee_receipt.total_fees_paid || 0}</DataTableCell>
+                      <DataTableCell>{result?.fee_receipt.total_fees_paid || "--"}</DataTableCell>
                       <DataTableCell>
                         <IconButton
                           component={Link}

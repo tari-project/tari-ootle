@@ -42,6 +42,7 @@ use super::{
     ForeignProposalAtom,
     ForeignSendCounters,
     HighQc,
+    LockedSubstateValue,
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
     QuorumCertificate,
@@ -289,7 +290,7 @@ impl Block {
     pub fn all_transaction_ids_in_committee<'a>(
         &'a self,
         committee_info: &'a CommitteeInfo,
-    ) -> impl Iterator<Item = &'a TransactionId> + 'a {
+    ) -> impl Iterator<Item = &'a TransactionId> + Clone + 'a {
         self.commands
             .iter()
             .filter_map(|cmd| cmd.transaction())
@@ -989,11 +990,11 @@ impl Block {
 
     pub fn get_block_pledge<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<BlockPledge, StorageError> {
         let mut pledges = BlockPledge::new();
-        for atom in self
-            .commands()
-            .iter()
-            .filter_map(|cmd| cmd.local_prepare().or_else(|| cmd.local_accept()))
-        {
+        for atom in self.commands().iter().filter_map(|cmd| {
+            cmd.local_prepare()
+                .filter(|atom| !atom.evidence.is_committee_output_only(self.shard_group()))
+                .or_else(|| cmd.local_accept())
+        }) {
             // No pledges for aborted transactions
             if atom.decision.is_abort() {
                 continue;
@@ -1009,24 +1010,50 @@ impl Block {
             };
 
             // TODO(perf): O(n) queries
-            let locked_values = tx.substate_locks_get_locked_substates_for_transaction(&atom.id)?;
+            let locked_values = LockedSubstateValue::get_all_for_transaction(tx, &atom.id)?;
 
+            let num_locked = locked_values.len();
             // CASE: We're retrieving pledges for the LocalPrepared and LocalAccept commands. If all other pledges were
             // provided already, we may have progressed to AllPrepared, executed the transaction and locked
             // local outputs. However, these are not provided in the original LocalPrepare evidence for this
             // atom, so we need to exclude them.
-            let locks = locked_values
-                .into_iter()
-                .filter(|lock| evidence.contains(lock.substate_id()));
+            let locks = locked_values.into_iter().filter(|lock| {
+                // It is possible that evidence has "downgraded" a write lock to a read lock. However, we do not
+                // downgrade the actual lock so we only discern between inputs and outputs, not read/write locks.
+                // TODO: this is because we Write lock inputs initially (before execution) due to lack of information
+                evidence.contains_pledge(
+                    lock.substate_id(),
+                    lock.lock.version(),
+                    lock.lock.lock_type().is_input(),
+                )
+            });
 
-            pledges.reserve(locks.clone().count());
+            let count = locks.clone().count();
+            debug!(
+                "get_block_pledge: {} out of {} locked for atom {} in block {}",
+                count, num_locked, atom.id, self
+            );
+
             for locked_value in locks {
                 let lock_intent = locked_value.to_substate_lock_intent();
-                let pledge = SubstatePledge::try_create(lock_intent.clone(), locked_value.value).ok_or_else(|| {
-                    StorageError::DataInconsistency {
-                        details: format!("SubstatePledge ({}) is not valid", lock_intent),
-                    }
-                })?;
+                let LockedSubstateValue {
+                    substate_id,
+                    lock,
+                    value,
+                    ..
+                } = locked_value;
+
+                let pledge =
+                    SubstatePledge::try_create(lock_intent, value).ok_or_else(|| StorageError::DataInconsistency {
+                        details: format!(
+                            "{} {} has no value however an input lock requires a value",
+                            substate_id, lock
+                        ),
+                    })?;
+                debug!(
+                    "get_block_pledge: Adding pledge {} for atom {} in block {}",
+                    pledge, atom.id, self
+                );
                 pledges.add_substate_pledge(*locked_value.lock.transaction_id(), pledge);
             }
         }

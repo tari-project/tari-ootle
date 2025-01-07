@@ -128,7 +128,7 @@ function PublishTemplateDialog(props: DialogProps) {
       publishTemplate({
         fee_account: { Name: accountName },
         binary: base64FromArrayBuffer(formState.binary!),
-        max_fee: isDryRun ? 1_000_000 : formState.maxFee || 0,
+        max_fee: isDryRun ? 1_000_000 : Number(formState.maxFee) || 0,
         detect_inputs: true,
         dry_run: isDryRun,
       })
@@ -246,8 +246,9 @@ function PublishTemplateDialog(props: DialogProps) {
             {fpErrors[0] && <p style={{ color: "red" }}>{fpErrors[0].name}</p>}
           </Box>
           <TextField
-            name="fee"
+            name="maxFee"
             label="Fee"
+            type="number"
             value={formState.maxFee}
             placeholder="Enter max fee"
             onChange={setFormValue}

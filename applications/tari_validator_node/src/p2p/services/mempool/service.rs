@@ -24,11 +24,12 @@ use std::{collections::HashSet, fmt::Display, iter};
 
 use libp2p::{gossipsub, PeerId};
 use log::*;
-use tari_dan_common_types::{optional::Optional, NumPreshards, PeerAddress, ShardGroup, ToSubstateAddress};
+use tari_consensus::hotstuff::HotstuffEvent;
+use tari_dan_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubstateAddress};
 use tari_dan_p2p::{DanMessage, NewTransactionMessage, TariMessagingSpec};
 use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 use tari_engine_types::commit_result::RejectReason;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerEvent, EpochManagerReader};
+use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
@@ -63,7 +64,6 @@ impl<TValidator> MempoolService<TValidator>
 where TValidator: Validator<Transaction, Context = (), Error = TransactionValidationError>
 {
     pub(super) fn new(
-        num_preshards: NumPreshards,
         mempool_requests: mpsc::Receiver<MempoolRequest>,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         before_execute_validator: TValidator,
@@ -74,7 +74,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
         #[cfg(feature = "metrics")] metrics: PrometheusMempoolMetrics,
     ) -> Self {
         Self {
-            gossip: MempoolGossip::new(num_preshards, epoch_manager.clone(), networking, rx_gossip),
+            gossip: MempoolGossip::new(epoch_manager.clone(), networking, rx_gossip),
             transactions: Default::default(),
             mempool_requests,
             epoch_manager,
@@ -87,7 +87,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let mut events = self.epoch_manager.subscribe();
+        let mut consensus_events = self.consensus_handle.subscribe_to_hotstuff_events();
 
         loop {
             tokio::select! {
@@ -97,11 +97,13 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
                         warn!(target: LOG_TARGET, "Mempool rejected transaction: {}", e);
                     }
                 }
-                Ok(event) = events.recv() => {
-                    let EpochManagerEvent::EpochChanged { epoch, registered_shard_group} = event;
+                Ok(HotstuffEvent::EpochChanged { epoch, registered_shard_group}) = consensus_events.recv() => {
                     if let Some(shard_group) = registered_shard_group {
                         info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
                         self.gossip.subscribe(shard_group).await?;
+                    } else {
+                        info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip");
+                        self.gossip.unsubscribe().await?;
                     }
                 },
 
@@ -253,11 +255,12 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
 
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let is_input_shard = transaction.is_involved_inputs(&local_committee_shard);
-        let is_output_shard = local_committee_shard.includes_any_address(
-            // Known output shards
-            // This is to allow for the txreceipt output and indicates shard involvement.
-            iter::once(&tx_substate_address).chain(claim_shards.iter()),
-        );
+        let is_output_shard = transaction.is_global() ||
+            local_committee_shard.includes_any_address(
+                // Known output shards
+                // This is to allow for the txreceipt output and indicates shard involvement.
+                iter::once(&tx_substate_address).chain(claim_shards.iter()),
+            );
 
         if is_input_shard || is_output_shard {
             debug!(target: LOG_TARGET, "🎱 New transaction {} in mempool", transaction.id());

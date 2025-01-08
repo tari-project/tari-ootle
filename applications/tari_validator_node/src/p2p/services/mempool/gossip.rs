@@ -5,7 +5,7 @@ use std::{collections::HashSet, iter};
 
 use libp2p::{gossipsub, PeerId};
 use log::*;
-use tari_dan_common_types::{Epoch, NumPreshards, PeerAddress, ShardGroup, ToSubstateAddress};
+use tari_dan_common_types::{Epoch, PeerAddress, ShardGroup, ToSubstateAddress};
 use tari_dan_p2p::{proto, DanMessage, NewTransactionMessage, TariMessagingSpec};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_networking::{NetworkingHandle, NetworkingService};
@@ -47,7 +47,6 @@ impl MempoolGossipCodec {
 
 #[derive(Debug)]
 pub(super) struct MempoolGossip<TAddr> {
-    num_preshards: NumPreshards,
     epoch_manager: EpochManagerHandle<TAddr>,
     is_subscribed: Option<ShardGroup>,
     networking: NetworkingHandle<TariMessagingSpec>,
@@ -57,13 +56,11 @@ pub(super) struct MempoolGossip<TAddr> {
 
 impl MempoolGossip<PeerAddress> {
     pub fn new(
-        num_preshards: NumPreshards,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,
     ) -> Self {
         Self {
-            num_preshards,
             epoch_manager,
             is_subscribed: None,
             networking,
@@ -143,28 +140,37 @@ impl MempoolGossip<PeerAddress> {
         exclude_shard_group: Option<ShardGroup>,
     ) -> Result<(), MempoolError> {
         let n = self.epoch_manager.get_num_committees(epoch).await?;
-        let committee_shard = self.epoch_manager.get_local_committee_info(epoch).await?;
-        let local_shard_group = committee_shard.shard_group();
-        let shard_groups = msg
-            .transaction
-            .all_inputs_iter()
-            .map(|s| {
-                s.or_zero_version()
-                    .to_substate_address()
-                    .to_shard_group(self.num_preshards, n)
-            })
-            .chain(iter::once(
-                msg.transaction
-                    .id()
-                    .to_substate_address()
-                    .to_shard_group(self.num_preshards, n),
-            ))
-            .filter(|sg| exclude_shard_group.as_ref() != Some(sg) && sg != &local_shard_group)
-            .collect::<HashSet<_>>();
-        // If the only shard group involved is the excluded one.
-        if shard_groups.is_empty() {
-            return Ok(());
-        }
+        let committee_info = self.epoch_manager.get_local_committee_info(epoch).await?;
+        let local_shard_group = committee_info.shard_group();
+        let shard_groups = if msg.transaction.is_global() {
+            Box::new(
+                committee_info
+                    .all_shard_groups_iter()
+                    .filter(|sg| exclude_shard_group.as_ref() != Some(sg) && sg != &local_shard_group),
+            )
+        } else {
+            let shard_groups = msg
+                .transaction
+                .all_inputs_iter()
+                .map(|s| {
+                    s.or_zero_version()
+                        .to_substate_address()
+                        .to_shard_group(committee_info.num_preshards(), n)
+                })
+                .chain(iter::once(
+                    msg.transaction
+                        .id()
+                        .to_substate_address()
+                        .to_shard_group(committee_info.num_preshards(), n),
+                ))
+                .filter(|sg| exclude_shard_group.as_ref() != Some(sg) && sg != &local_shard_group)
+                .collect::<HashSet<_>>();
+            // If the only shard group involved is the excluded one.
+            if shard_groups.is_empty() {
+                return Ok(());
+            }
+            Box::new(shard_groups.into_iter()) as Box<dyn Iterator<Item = ShardGroup> + Send>
+        };
 
         let msg = self
             .codec

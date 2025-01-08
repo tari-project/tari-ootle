@@ -128,7 +128,7 @@ fn get_function_block(template_ident: &Ident, ast: FunctionAst) -> Expr {
                 args.push(parse_quote! { #arg_ident });
                 stmts.push(parse_quote! {
                     let #arg_ident = from_value::<#type_path>(&call_info.args[#i])
-                        .unwrap_or_else(|e| panic!("failed to decode argument at position {} for function '{}': {}", #i, #func_name, e));
+                        .unwrap_or_else(|e| panic!("failed to decode argument at position {} ({}) for function '{}': {}", #i, rust::any::type_name::<#type_path>(), #func_name, e));
                 })
             },
             TypeAst::Tuple { type_tuple, .. } => {

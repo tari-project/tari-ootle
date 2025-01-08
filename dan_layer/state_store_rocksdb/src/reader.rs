@@ -85,7 +85,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, TreeNode, Version};
 use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
@@ -2284,21 +2284,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         */
     }
 
-    fn burnt_utxos_get(&self, substate_id: &SubstateId) -> Result<BurntUtxo, StorageError> {
+    fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError> {
         todo!()
-        /*
-        use crate::schema::burnt_utxos;
-
-        let burnt_utxo = burnt_utxos::table
-            .filter(burnt_utxos::substate_id.eq(substate_id.to_string()))
-            .first::<sql_models::BurntUtxo>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "burnt_utxos_get",
-                source: e,
-            })?;
-
-        burnt_utxo.try_into()
-        */
     }
 
     fn burnt_utxos_get_all_unproposed(
@@ -2413,155 +2400,22 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         })
         */
     }
-
-    fn validator_epoch_stats_get_nodes_to_suspend(
+    
+    fn validator_epoch_stats_get_nodes_to_evict(
         &self,
         block_id: &BlockId,
-        min_missed_proposals: u64,
-        limit: usize,
+        threshold: u64,
+        limit: u64,
     ) -> Result<Vec<PublicKey>, StorageError> {
         todo!()
-        /*
-        use crate::schema::{suspended_nodes, validator_epoch_stats};
-        if limit == 0 {
-            return Ok(vec![]);
-        }
-        let commit_block = self.get_commit_block()?;
-
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id)?;
-
-        let pks = validator_epoch_stats::table
-            .select(validator_epoch_stats::public_key)
-            .filter(
-                validator_epoch_stats::public_key.ne_all(
-                    suspended_nodes::table.select(suspended_nodes::public_key).filter(
-                        // Not already suspended in uncommitted blocks
-                        suspended_nodes::suspended_in_block
-                                .eq_any(block_ids)
-                                // Not suspended in committed blocks
-                                .or(suspended_nodes::suspended_in_block_height.lt(commit_block.height().as_u64() as i64)),
-                    ),
-                ),
-            )
-            .filter(validator_epoch_stats::missed_proposals.ge(min_missed_proposals as i64))
-            .filter(validator_epoch_stats::epoch.eq(commit_block.epoch().as_u64() as i64))
-            .limit(limit as i64)
-            .get_results::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_get_nodes_to_suspend",
-                source: e,
-            })?;
-
-        pks.iter()
-            .map(|s| {
-                PublicKey::from_hex(s).map_err(|e| StorageError::DecodingError {
-                    operation: "validator_epoch_stats_get_nodes_to_suspend",
-                    item: "public key",
-                    details: format!("Failed to decode public key: {e}"),
-                })
-            })
-            .collect()
-            */
     }
-
-    fn validator_epoch_stats_get_nodes_to_resume(
-        &self,
-        block_id: &BlockId,
-        limit: usize,
-    ) -> Result<Vec<PublicKey>, StorageError> {
+    
+    fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
         todo!()
-        /*
-        use crate::schema::{suspended_nodes, validator_epoch_stats};
-        if limit == 0 {
-            return Ok(vec![]);
-        }
-
-        let commit_block = self.get_commit_block()?;
-
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id)?;
-
-        let pks = validator_epoch_stats::table
-            .select(validator_epoch_stats::public_key)
-            .filter(
-                // Must be suspended
-                validator_epoch_stats::public_key.eq_any(
-                    suspended_nodes::table.select(suspended_nodes::public_key).filter(
-                        suspended_nodes::resumed_in_block
-                            .ne_all(block_ids)
-                            .or(suspended_nodes::resumed_in_block_height.is_null())
-                            .or(suspended_nodes::resumed_in_block_height
-                                .lt(Some(commit_block.height().as_u64() as i64))),
-                    ),
-                ),
-            )
-            .filter(validator_epoch_stats::missed_proposals.eq(0i64))
-            .filter(validator_epoch_stats::epoch.eq(commit_block.epoch().as_u64() as i64))
-            .limit(limit as i64)
-            .get_results::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_get_nodes_to_resume",
-                source: e,
-            })?;
-
-        pks.iter()
-            .map(|s| {
-                PublicKey::from_hex(s).map_err(|e| StorageError::DecodingError {
-                    operation: "validator_epoch_stats_get_nodes_to_resume",
-                    item: "public key",
-                    details: format!("Failed to decode public key: {e}"),
-                })
-            })
-            .collect()
-            */
     }
-
-    fn suspended_nodes_is_suspended(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
+    
+    fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError> {
         todo!()
-        /*
-        use crate::schema::suspended_nodes;
-
-        if !self.blocks_exists(block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("block {} not found", block_id),
-            });
-        }
-
-        let commit_block = self.get_commit_block()?;
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id)?;
-
-        let count = suspended_nodes::table
-            .count()
-            .filter(suspended_nodes::public_key.eq(public_key.to_hex()))
-            .filter(
-                suspended_nodes::resumed_in_block
-                    .is_null()
-                    .or(suspended_nodes::resumed_in_block.ne_all(block_ids)),
-            )
-            .first::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "suspended_nodes_exists",
-                source: e,
-            })?;
-
-        Ok(count > 0)
-        */
-    }
-
-    fn suspended_nodes_count(&self) -> Result<u64, StorageError> {
-        todo!()
-        /*
-        use crate::schema::suspended_nodes;
-
-        let count = suspended_nodes::table
-            .count()
-            .first::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "suspended_nodes_exists",
-                source: e,
-            })?;
-
-        Ok(count as u64)
-         */
     }
 }
 

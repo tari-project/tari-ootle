@@ -1,11 +1,15 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::Deref;
+use std::{
+    hash::{DefaultHasher, Hasher},
+    ops::Deref,
+};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{hashing::vote_hasher, optional::Optional, Epoch};
+use tari_crypto::tari_utilities::ByteArray;
+use tari_dan_common_types::{optional::Optional, Epoch};
 
 use crate::{
     consensus_models::{BlockId, QuorumDecision, ValidatorSignature},
@@ -24,8 +28,17 @@ pub struct Vote {
 }
 
 impl Vote {
-    pub fn calculate_hash(&self) -> FixedHash {
-        vote_hasher().chain(self).result()
+    /// Returns a SIPHASH hash used to uniquely identify this vote
+    pub fn get_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        hasher.write_u64(self.epoch.as_u64());
+        hasher.write(self.block_id.as_bytes());
+        hasher.write_u8(self.decision.as_u8());
+        hasher.write(self.sender_leaf_hash.as_slice());
+        hasher.write(self.signature.public_key.as_bytes());
+        hasher.write(self.signature.signature.get_public_nonce().as_bytes());
+        hasher.write(self.signature.signature.get_signature().as_bytes());
+        hasher.finish()
     }
 
     pub fn signature(&self) -> &ValidatorSignature {

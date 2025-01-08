@@ -18,7 +18,7 @@ use crate::{
     traits::{BlockTransactionExecutor, ConsensusSpec},
 };
 
-const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_requested_transactions";
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_new_transaction";
 
 pub struct OnReceiveNewTransaction<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
@@ -64,8 +64,12 @@ where TConsensusSpec: ConsensusSpec
                 }
             }
 
-            self.transaction_pool
-                .insert_new_batched(tx, batch.iter().map(|(t, is_ready)| (t, *is_ready)))?;
+            self.transaction_pool.insert_new_batched(
+                tx,
+                local_committee_info.num_preshards(),
+                local_committee_info.num_committees(),
+                batch.iter().map(|(t, is_ready)| (t, *is_ready)),
+            )?;
 
             // TODO: Could this cause a race-condition? Transaction could be proposed as Prepare before the
             // unparked block is processed (however, if there's a parked block it's probably not our turn to
@@ -92,7 +96,7 @@ where TConsensusSpec: ConsensusSpec
                 return Ok(None);
             };
 
-            self.add_to_pool(tx, &transaction, is_ready)?;
+            self.add_to_pool(tx, &transaction, local_committee_info, is_ready)?;
             Ok(Some(transaction))
         })
     }
@@ -126,7 +130,6 @@ where TConsensusSpec: ConsensusSpec
             );
             rec.set_abort_reason(RejectReason::InvalidTransaction(err.to_string()))
                 .save(tx)?;
-            // self.add_to_pool(tx, &rec, true)?;
             return Ok(Some((rec, true)));
         }
 
@@ -137,6 +140,14 @@ where TConsensusSpec: ConsensusSpec
         let has_some_local_inputs_or_all_foreign_inputs = rec.has_any_local_inputs(local_committee_info) ||
             rec.has_all_foreign_input_pledges(&**tx, local_committee_info)?;
 
+        if !has_some_local_inputs_or_all_foreign_inputs {
+            debug!(
+                target: LOG_TARGET,
+                "Transaction {} has no local inputs or all foreign inputs. Will sequence once we have received the LocalAccept foreign proposal.",
+                rec.id()
+            );
+        }
+
         Ok(Some((rec, has_some_local_inputs_or_all_foreign_inputs)))
     }
 
@@ -144,10 +155,27 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         transaction: &TransactionRecord,
+        local_committee_info: &CommitteeInfo,
         is_ready: bool,
     ) -> Result<(), HotStuffError> {
-        self.transaction_pool
-            .insert_new(tx, *transaction.id(), transaction.current_decision(), is_ready)?;
+        info!(
+            target: LOG_TARGET,
+            "🔥 Adding transaction {} ({} input(s)) to pool. Is ready: {}",
+            transaction.id(),
+            transaction.transaction().inputs().len(),
+            is_ready
+        );
+        self.transaction_pool.insert_new(
+            tx,
+            *transaction.id(),
+            transaction.current_decision(),
+            &transaction.to_initial_evidence(
+                local_committee_info.num_preshards(),
+                local_committee_info.num_committees(),
+            ),
+            is_ready,
+            transaction.transaction().is_global(),
+        )?;
         Ok(())
     }
 }

@@ -30,4 +30,5 @@ mod error;
 pub use error::EpochManagerError;
 
 mod event;
+
 pub use event::*;

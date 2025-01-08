@@ -67,6 +67,10 @@ impl ValidatorNodeClient {
         self.send_request("get_epoch_manager_stats", json!({})).await
     }
 
+    pub async fn get_consensus_status(&mut self) -> Result<GetConsensusStatusResponse, ValidatorNodeClientError> {
+        self.send_request("get_consensus_status", json!({})).await
+    }
+
     pub async fn get_active_templates(
         &mut self,
         request: GetTemplatesRequest,

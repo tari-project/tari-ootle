@@ -1,7 +1,6 @@
+import type { EvictNodeAtom } from "./EvictNodeAtom";
 import type { ForeignProposalAtom } from "./ForeignProposalAtom";
 import type { MintConfidentialOutputAtom } from "./MintConfidentialOutputAtom";
-import type { ResumeNodeAtom } from "./ResumeNodeAtom";
-import type { SuspendNodeAtom } from "./SuspendNodeAtom";
 import type { TransactionAtom } from "./TransactionAtom";
 export type Command = {
     LocalOnly: TransactionAtom;
@@ -24,7 +23,5 @@ export type Command = {
 } | {
     MintConfidentialOutput: MintConfidentialOutputAtom;
 } | {
-    SuspendNode: SuspendNodeAtom;
-} | {
-    ResumeNode: ResumeNodeAtom;
+    EvictNode: EvictNodeAtom;
 } | "EndEpoch";

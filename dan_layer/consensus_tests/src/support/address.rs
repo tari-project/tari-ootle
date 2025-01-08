@@ -8,7 +8,7 @@ use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{DerivableFromPublicKey, NodeAddressable};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct TestAddress(pub String);
+pub struct TestAddress(String);
 
 impl TestAddress {
     pub fn new<T: Into<String>>(s: T) -> Self {
@@ -17,6 +17,10 @@ impl TestAddress {
 
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -57,5 +61,11 @@ impl From<String> for TestAddress {
 impl From<&str> for TestAddress {
     fn from(value: &str) -> Self {
         Self(value.to_string())
+    }
+}
+
+impl PartialEq<str> for TestAddress {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
     }
 }

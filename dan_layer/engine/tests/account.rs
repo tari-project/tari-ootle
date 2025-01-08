@@ -159,8 +159,7 @@ fn withdraw_from_account_prevented() {
             .call_method(source_account, "withdraw", args![faucet_resource, Amount(100)])
             .put_last_instruction_output_on_workspace("stolen_coins")
             .call_method(source_account, "deposit", args![Workspace("stolen_coins")])
-            .sign(&non_owning_key)
-            .build(),
+            .build_and_seal(&non_owning_key),
         // VNs provide the token that signed the transaction, which in this case is the non_owning_token
         vec![non_owning_token],
     );
@@ -204,8 +203,7 @@ fn attempt_to_overwrite_account() {
             // Create component with the same ID
             .create_account(source_account_pk)
             // Signed by source account so that it can pay the fees for the new account creation
-            .sign(&source_account_sk)
-            .build(),
+            .build_and_seal(&source_account_sk),
         vec![source_account_proof],
     );
 
@@ -217,8 +215,7 @@ fn attempt_to_overwrite_account() {
     let result = template_test.execute_expect_success(
         Transaction::builder()
             .call_method(source_account, "get_balances", args![])
-            .sign(&source_account_sk)
-            .build(),
+            .build_and_seal(&source_account_sk),
         vec![],
     );
 
@@ -240,6 +237,8 @@ fn gasless() {
     let (user_account, user_account_proof, user_account_sk) = test.create_funded_account();
     let (user2_account, _, _) = test.create_empty_account();
 
+    let fee_account_pk = RistrettoPublicKey::from_secret_key(&fee_account_sk);
+
     let result = test.execute_expect_success(
         Transaction::builder()
             .fee_transaction_pay_from_component(fee_account, Amount(1000))
@@ -247,9 +246,8 @@ fn gasless() {
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
             .call_method(user2_account, "get_balances", args![])
-            .build()
-            .sign(&fee_account_sk)
-            .sign(&user_account_sk),
+            .add_signature(&fee_account_pk, &user_account_sk)
+            .build_and_seal(&fee_account_sk),
         vec![fee_account_proof, user_account_proof],
     );
 
@@ -285,8 +283,7 @@ fn custom_access_rules() {
                 Some("bucket"),
             )
             // Signed by source account so that it can pay the fees for the new account creation
-            .sign(&secret_key)
-            .build(),
+            .build_and_seal(&secret_key),
         vec![owner_proof],
     );
     let user_account = result.finalize.execution_results[2].decode().unwrap();
@@ -298,8 +295,7 @@ fn custom_access_rules() {
             .call_method(user_account, "withdraw", args![XTR, Amount(100)])
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
-            .build()
-            .sign(&user2_secret_key),
+            .build_and_seal(&user2_secret_key),
         vec![user2_account_proof],
     );
 }

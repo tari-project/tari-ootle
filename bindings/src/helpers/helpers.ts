@@ -7,9 +7,12 @@ import { SubstateDiff } from "../types/SubstateDiff";
 import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
 
-export function substateIdToString(substateId: SubstateId | null): string {
+export function substateIdToString(substateId: SubstateId | string | null): string {
   if (substateId === null) {
     return "";
+  }
+  if (typeof substateId === "string") {
+    return substateId;
   }
   if ("Component" in substateId) {
     return substateId.Component;

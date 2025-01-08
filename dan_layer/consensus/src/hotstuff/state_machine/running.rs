@@ -12,6 +12,7 @@ use crate::{
             worker::ConsensusWorkerContext,
         },
         HotStuffError,
+        ProposalValidationError,
     },
     traits::ConsensusSpec,
 };
@@ -39,7 +40,8 @@ where TSpec: ConsensusSpec
                 info!(target: LOG_TARGET, "Not registered for current epoch ({err})");
                 Ok(ConsensusStateEvent::NotRegisteredForEpoch { epoch })
             },
-            Err(err @ HotStuffError::FallenBehind { .. }) => {
+            Err(err @ HotStuffError::FallenBehind { .. }) |
+            Err(err @ HotStuffError::ProposalValidationError(ProposalValidationError::FutureEpoch { .. })) => {
                 info!(target: LOG_TARGET, "⚠️ Behind peers, starting sync ({err})");
                 Ok(ConsensusStateEvent::NeedSync)
             },

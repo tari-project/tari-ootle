@@ -49,4 +49,8 @@ export type Instruction = {
         resource_address: ResourceAddress;
         min_amount: Amount;
     };
+} | {
+    PublishTemplate: {
+        binary: Array<number>;
+    };
 };

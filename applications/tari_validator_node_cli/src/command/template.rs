@@ -52,10 +52,7 @@ async fn handle_get(template_address: TemplateAddress, mut client: ValidatorNode
         registration_metadata,
         abi,
     } = client.get_template(GetTemplateRequest { template_address }).await?;
-    println!(
-        "Template {} | Mined at {}",
-        registration_metadata.address, registration_metadata.height
-    );
+    println!("Template {}", registration_metadata.address);
     println!();
 
     let mut table = Table::new();
@@ -80,17 +77,9 @@ async fn handle_list(mut client: ValidatorNodeClient) -> Result<(), anyhow::Erro
     let templates = client.get_active_templates(GetTemplatesRequest { limit: 10 }).await?;
 
     let mut table = Table::new();
-    table
-        .set_titles(vec!["Name", "Address", "Download Url", "Mined Height", "Status"])
-        .enable_row_count();
+    table.set_titles(vec!["Name", "Address", "Status"]).enable_row_count();
     for template in templates.templates {
-        table.add_row(table_row![
-            template.name,
-            template.address,
-            template.url,
-            template.height,
-            "Active"
-        ]);
+        table.add_row(table_row![template.name, template.address, "Active"]);
     }
     table.print_stdout();
     Ok(())

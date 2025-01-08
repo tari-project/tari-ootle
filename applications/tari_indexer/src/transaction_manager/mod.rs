@@ -79,13 +79,13 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, TransactionManagerError> {
-        let tx_hash = *transaction.id();
+        let tx_id = *transaction.id();
 
         info!(
             target: LOG_TARGET,
-            "Submitting transaction with hash {} to the validator node", tx_hash
+            "Submitting transaction {} to the validator node", tx_id
         );
-        let transaction_substate_address = tx_hash.to_substate_address();
+        let transaction_substate_address = tx_id.to_substate_address();
 
         if transaction.all_inputs_iter().next().is_none() {
             self.try_with_committee(iter::once(transaction_substate_address), 2, |mut client| {

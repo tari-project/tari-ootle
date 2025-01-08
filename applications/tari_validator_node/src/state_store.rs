@@ -24,6 +24,7 @@ use std::ops::Deref;
 
 use anyhow::Context;
 use tari_dan_common_types::{NodeAddressable, PeerAddress};
+use tari_dan_storage::consensus_models::{Decision, Evidence};
 use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
@@ -32,6 +33,8 @@ use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 use tari_dan_common_types::NodeHeight;
 use tari_dan_common_types::ShardGroup;
 use tari_dan_common_types::Epoch;
+use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
+use tari_transaction::TransactionId;
 
 use crate::{config::DatabaseType, ApplicationConfig};
 
@@ -416,16 +419,18 @@ impl<'tx> StateStoreWriteTransaction
             ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.transaction_executions_remove_any_by_block_id(block_id),
         }
     }
-    
+
     fn transaction_pool_insert_new(
         &mut self,
-        tx_id: tari_transaction::TransactionId,
-        decision: tari_dan_storage::consensus_models::Decision,
+        tx_id: TransactionId,
+        decision: Decision,
+        initial_evidence: &Evidence,
         is_ready: bool,
+        is_global: bool,
     ) -> Result<(), tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.transaction_pool_insert_new(tx_id, decision, is_ready),
-            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.transaction_pool_insert_new(tx_id, decision, is_ready),
+            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.transaction_pool_insert_new(tx_id, decision, initial_evidence, is_ready, is_global),
+            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.transaction_pool_insert_new(tx_id, decision, initial_evidence, is_ready, is_global),
         }
     }
     
@@ -679,12 +684,12 @@ impl<'tx> StateStoreWriteTransaction
     
     fn burnt_utxos_set_proposed_block(
         &mut self,
-        substate_id: &tari_engine_types::substate::SubstateId,
+        commitment: &UnclaimedConfidentialOutputAddress,
         proposed_in_block: &tari_dan_storage::consensus_models::BlockId,
     ) -> Result<(), tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.burnt_utxos_set_proposed_block(substate_id, proposed_in_block),
-            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.burnt_utxos_set_proposed_block(substate_id, proposed_in_block),
+            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.burnt_utxos_set_proposed_block(commitment, proposed_in_block),
+            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.burnt_utxos_set_proposed_block(commitment, proposed_in_block),
         }
     }
     
@@ -695,10 +700,10 @@ impl<'tx> StateStoreWriteTransaction
         }
     }
     
-    fn burnt_utxos_delete(&mut self, substate_id: &tari_engine_types::substate::SubstateId) -> Result<(), tari_dan_storage::StorageError> {
+    fn burnt_utxos_delete(&mut self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<(), tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.burnt_utxos_delete(substate_id),
-            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.burnt_utxos_delete(substate_id),
+            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.burnt_utxos_delete(commitment),
+            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.burnt_utxos_delete(commitment),
         }
     }
     
@@ -731,40 +736,43 @@ impl<'tx> StateStoreWriteTransaction
         }
     }
     
-    fn suspended_nodes_insert(
-        &mut self,
-        public_key: &tari_common_types::types::PublicKey,
-        suspended_in_block: tari_dan_storage::consensus_models::BlockId,
-    ) -> Result<(), tari_dan_storage::StorageError> {
-        match self {
-            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.suspended_nodes_insert(public_key, suspended_in_block),
-            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.suspended_nodes_insert(public_key, suspended_in_block),
-        }
-    }
-    
-    fn suspended_nodes_mark_for_removal(
-        &mut self,
-        public_key: &tari_common_types::types::PublicKey,
-        resumed_in_block: tari_dan_storage::consensus_models::BlockId,
-    ) -> Result<(), tari_dan_storage::StorageError> {
-        match self {
-            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.suspended_nodes_mark_for_removal(public_key, resumed_in_block),
-            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.suspended_nodes_mark_for_removal(public_key, resumed_in_block),
-        }
-    }
-    
-    fn suspended_nodes_delete(&mut self, public_key: &tari_common_types::types::PublicKey) -> Result<(), tari_dan_storage::StorageError> {
-        match self {
-            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.suspended_nodes_delete(public_key),
-            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.suspended_nodes_delete(public_key),
-        }
-    }
-    
     fn diagnostics_add_no_vote(&mut self, block_id: tari_dan_storage::consensus_models::BlockId, reason: tari_dan_storage::consensus_models::NoVoteReason) -> Result<(), tari_dan_storage::StorageError> {
         match self {
             ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.diagnostics_add_no_vote(block_id, reason),
             ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.diagnostics_add_no_vote(block_id, reason),
         }
+    }
+    
+    fn lock_conflicts_remove_by_transaction_ids<'a, I: IntoIterator<Item = &'a TransactionId>>(
+        &mut self,
+        transaction_ids: I,
+    ) -> Result<(), tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.lock_conflicts_remove_by_transaction_ids(transaction_ids),
+            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.lock_conflicts_remove_by_transaction_ids(transaction_ids),
+        }
+    }
+    
+    fn lock_conflicts_remove_by_block_id(&mut self, block_id: &tari_dan_storage::consensus_models::BlockId) -> Result<(), tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.lock_conflicts_remove_by_block_id(block_id),
+            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.lock_conflicts_remove_by_block_id(block_id),
+        }
+    }
+    
+    fn evicted_nodes_evict(&mut self, public_key: &tari_common_types::types::PublicKey, evicted_in_block: tari_dan_storage::consensus_models::BlockId) -> Result<(), tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.evicted_nodes_evict(public_key, evicted_in_block),
+            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.evicted_nodes_evict(public_key, evicted_in_block),
+        }
+    }
+    
+    fn evicted_nodes_mark_eviction_as_committed(
+        &mut self,
+        public_key: &tari_common_types::types::PublicKey,
+        epoch: Epoch,
+    ) -> Result<(), tari_dan_storage::StorageError> {
+        todo!()
     }
 }
 
@@ -1407,10 +1415,10 @@ impl<'tx> StateStoreReadTransaction
         }
     }
     
-    fn burnt_utxos_get(&self, substate_id: &tari_engine_types::substate::SubstateId) -> Result<tari_dan_storage::consensus_models::BurntUtxo, tari_dan_storage::StorageError> {
+    fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<tari_dan_storage::consensus_models::BurntUtxo, tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.burnt_utxos_get(substate_id),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.burnt_utxos_get(substate_id),
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.burnt_utxos_get(commitment),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.burnt_utxos_get(commitment),
         }
     }
     
@@ -1450,42 +1458,30 @@ impl<'tx> StateStoreReadTransaction
         }
     }
     
-    fn validator_epoch_stats_get_nodes_to_suspend(
+    fn validator_epoch_stats_get_nodes_to_evict(
         &self,
         block_id: &tari_dan_storage::consensus_models::BlockId,
-        min_missed_proposals: u64,
-        limit: usize,
+        threshold: u64,
+        limit: u64,
     ) -> Result<Vec<tari_common_types::types::PublicKey>, tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.validator_epoch_stats_get_nodes_to_suspend(block_id, min_missed_proposals, limit),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.validator_epoch_stats_get_nodes_to_suspend(block_id, min_missed_proposals, limit),
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.validator_epoch_stats_get_nodes_to_evict(block_id, threshold, limit),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.validator_epoch_stats_get_nodes_to_evict(block_id, threshold, limit),
         }
     }
     
-    fn validator_epoch_stats_get_nodes_to_resume(
-        &self,
-        block_id: &tari_dan_storage::consensus_models::BlockId,
-        limit: usize,
-    ) -> Result<Vec<tari_common_types::types::PublicKey>, tari_dan_storage::StorageError> {
+    fn suspended_nodes_is_evicted(&self, block_id: &tari_dan_storage::consensus_models::BlockId, public_key: &tari_common_types::types::PublicKey) -> Result<bool, tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.validator_epoch_stats_get_nodes_to_resume(block_id, limit),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.validator_epoch_stats_get_nodes_to_resume(block_id, limit),
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.suspended_nodes_is_evicted(block_id, public_key),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.suspended_nodes_is_evicted(block_id, public_key),
         }
     }
     
-    fn suspended_nodes_is_suspended(&self, block_id: &tari_dan_storage::consensus_models::BlockId, public_key: &tari_common_types::types::PublicKey) -> Result<bool, tari_dan_storage::StorageError> {
+    fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.suspended_nodes_is_suspended(block_id, public_key),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.suspended_nodes_is_suspended(block_id, public_key),
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.evicted_nodes_count(epoch),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.evicted_nodes_count(epoch),
         }
     }
-    
-    fn suspended_nodes_count(&self) -> Result<u64, tari_dan_storage::StorageError> {
-        match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.suspended_nodes_count(),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.suspended_nodes_count(),
-        }
-    }
-
 
 }

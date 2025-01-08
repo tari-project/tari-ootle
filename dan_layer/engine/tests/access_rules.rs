@@ -65,8 +65,7 @@ mod component_access_rules {
                     // Badge recall rule
                     AccessRule::DenyAll,
                 ])
-                .sign(&owner1_key)
-                .build(),
+                .build_and_seal(&owner1_key),
             // Because we deny_all on deposits, we need to supply the owner proof to be able to deposit the initial
             // tokens into the new vaults
             vec![owner1_proof.clone()],
@@ -79,8 +78,7 @@ mod component_access_rules {
         test.execute_expect_success(
             Transaction::builder()
                 .call_method(component_address, "set_value", args![1])
-                .sign(&owner2_key)
-                .build(),
+                .build_and_seal(&owner2_key),
             vec![owner2_proof],
         );
 
@@ -89,8 +87,7 @@ mod component_access_rules {
         let reason = test.execute_expect_failure(
             Transaction::builder()
                 .call_method(component_address, "set_value", args![1])
-                .sign(&unauth_key)
-                .build(),
+                .build_and_seal(&unauth_key),
             vec![unauth_proof],
         );
 
@@ -122,8 +119,7 @@ mod component_access_rules {
                     // Badge recall rule
                     AccessRule::DenyAll
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -135,8 +131,7 @@ mod component_access_rules {
         let reason = test.execute_expect_failure(
             Transaction::builder()
                 .call_method(component_address, "set_value", args![1])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -153,16 +148,14 @@ mod component_access_rules {
                         .add_method_rule("set_value", rule!(non_fungible(user_proof.clone())))
                         .default(AccessRule::DenyAll)
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof],
         );
 
         test.execute_expect_success(
             Transaction::builder()
                 .call_method(component_address, "set_value", args![1])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -171,8 +164,7 @@ mod component_access_rules {
                 .call_method(component_address, "set_component_access_rules", args![
                     ComponentAccessRules::new().default(AccessRule::AllowAll)
                 ])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof],
         );
     }
@@ -198,8 +190,7 @@ mod component_access_rules {
                     // Badge recall rule
                     AccessRule::DenyAll,
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -213,8 +204,7 @@ mod component_access_rules {
                 .call_method(component_address, "set_component_access_rules", args![
                     ComponentAccessRules::new().default(AccessRule::AllowAll)
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof],
         );
 
@@ -252,8 +242,7 @@ mod resource_access_rules {
                     // Badge recall rule
                     AccessRule::DenyAll,
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -267,8 +256,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -280,8 +268,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -291,8 +278,7 @@ mod resource_access_rules {
                 .call_method(component_address, "set_tokens_access_rules", args![
                     ResourceAccessRules::new().withdrawable(rule!(non_fungible(user_proof.clone())))
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof],
         );
 
@@ -302,8 +288,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof],
         );
     }
@@ -331,8 +316,7 @@ mod resource_access_rules {
                     // Badge recall rule
                     AccessRule::DenyAll
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -349,8 +333,7 @@ mod resource_access_rules {
                 .put_last_instruction_output_on_workspace("deposit_perm")
                 .call_method(user_account, "deposit", args![Workspace("withdraw_perm")])
                 .call_method(user_account, "deposit", args![Workspace("deposit_perm")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -371,8 +354,7 @@ mod resource_access_rules {
                     user_badge_vault_id,
                     "withdraw"
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -393,8 +375,7 @@ mod resource_access_rules {
         let result = test.execute_expect_success(
             Transaction::builder()
                 .call_function(access_rules_template, "using_badge_rules", args![])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -421,8 +402,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -437,8 +417,7 @@ mod resource_access_rules {
                 .put_last_instruction_output_on_workspace("deposit_perm")
                 .call_method(user_account, "deposit", args![Workspace("withdraw_perm")])
                 .call_method(user_account, "deposit", args![Workspace("deposit_perm")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -461,8 +440,7 @@ mod resource_access_rules {
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .drop_all_proofs_in_workspace()
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -479,8 +457,7 @@ mod resource_access_rules {
                     user_badge_vault_id,
                     "withdraw"
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -493,8 +470,7 @@ mod resource_access_rules {
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .drop_all_proofs_in_workspace()
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof],
         );
 
@@ -514,8 +490,7 @@ mod resource_access_rules {
         let result = test.execute_expect_success(
             Transaction::builder()
                 .call_function(access_rules_template, "using_resource_rules", args![])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -541,8 +516,7 @@ mod resource_access_rules {
                 .call_method(access_rules_component, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -554,8 +528,7 @@ mod resource_access_rules {
                 .call_method(access_rules_component, "mint_new_badge", args![])
                 .put_last_instruction_output_on_workspace("permission")
                 .call_method(user_account, "deposit", args![Workspace("permission")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -571,8 +544,7 @@ mod resource_access_rules {
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .drop_all_proofs_in_workspace()
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
     }
@@ -598,8 +570,7 @@ mod resource_access_rules {
                     // Badge recall rule
                     AccessRule::DenyAll
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -633,8 +604,7 @@ mod resource_access_rules {
                 .call_method(owner_account, "withdraw", args![token_resource, Amount(1000)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -655,8 +625,7 @@ mod resource_access_rules {
                 .call_method(owner_account, "withdraw", args![token_resource, Amount(1000)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
     }
@@ -673,8 +642,7 @@ mod resource_access_rules {
         let result = test.execute_expect_success(
             Transaction::builder()
                 .call_function(access_rules_template, "using_resource_rules", args![])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -707,8 +675,7 @@ mod resource_access_rules {
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .drop_all_proofs_in_workspace()
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -741,8 +708,7 @@ mod resource_access_rules {
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
                 .drop_all_proofs_in_workspace()
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
     }
@@ -761,8 +727,7 @@ mod resource_access_rules {
         let result = test.execute_expect_success(
             Transaction::builder()
                 .call_function(access_rules_template, "using_badge_rules", args![])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -788,8 +753,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -804,8 +768,7 @@ mod resource_access_rules {
                 .put_last_instruction_output_on_workspace("deposit_perm")
                 .call_method(user_account, "deposit", args![Workspace("withdraw_perm")])
                 .call_method(user_account, "deposit", args![Workspace("deposit_perm")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -841,8 +804,7 @@ mod resource_access_rules {
                 // Deposit before dropping the proof
                 .call_method(user_account, "deposit", args![Workspace("badges")])
                 .drop_all_proofs_in_workspace()
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![user_proof.clone()],
         );
 
@@ -883,8 +845,7 @@ mod resource_access_rules {
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
                 .drop_all_proofs_in_workspace()
                 .call_method(user_account, "deposit", args![Workspace("badges")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![user_proof],
         );
     }
@@ -905,8 +866,7 @@ mod resource_access_rules {
                     "resource_actions_restricted_to_component",
                     args![],
                 )
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -932,8 +892,7 @@ mod resource_access_rules {
                 .call_function(access_rules_template, "mint_resource", args![token_resource])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -945,8 +904,7 @@ mod resource_access_rules {
                 .call_method(component_address, "mint_more_tokens", args![Amount(1000)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof],
         );
     }
@@ -963,8 +921,7 @@ mod resource_access_rules {
         let result = test.execute_expect_success(
             Transaction::builder()
                 .call_function(access_rules_template, "with_auth_hook", args![true, "valid_auth_hook"])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -977,8 +934,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
     }
@@ -994,8 +950,7 @@ mod resource_access_rules {
         let result = test.execute_expect_success(
             Transaction::builder()
                 .call_function(access_rules_template, "with_auth_hook", args![false, "valid_auth_hook"])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -1008,8 +963,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -1034,8 +988,7 @@ mod resource_access_rules {
                     true,
                     "malicious_auth_hook_set_state"
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -1048,8 +1001,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -1074,8 +1026,7 @@ mod resource_access_rules {
                     true,
                     "malicious_auth_hook_call_mut"
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -1088,8 +1039,7 @@ mod resource_access_rules {
                 .call_method(component_address, "take_tokens", args![Amount(10)])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -1113,8 +1063,7 @@ mod resource_access_rules {
         let result = test.execute_expect_success(
             Transaction::builder()
                 .call_function(state_template, "restricted", args![])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![owner_proof.clone()],
         );
 
@@ -1129,8 +1078,7 @@ mod resource_access_rules {
                 .call_function(access_rules_template, "with_auth_hook_attack_component", args![
                     state_component
                 ])
-                .sign(&owner_key)
-                .build(),
+                .build_and_seal(&owner_key),
             vec![owner_proof.clone()],
         );
 
@@ -1145,8 +1093,7 @@ mod resource_access_rules {
                 .call_method(state_component, "set", args![1])
                 // The hook should not be able to set the state component to 123
                 .call_method(user_account, "deposit", args![Workspace("tokens")])
-                .sign(&user_key)
-                .build(),
+                .build_and_seal(&user_key),
             vec![user_proof.clone()],
         );
 
@@ -1177,8 +1124,7 @@ mod resource_access_rules {
             let reason = test.execute_expect_failure(
                 Transaction::builder()
                     .call_function(access_rules_template, "with_auth_hook", args![true, hook])
-                    .sign(test.get_test_secret_key())
-                    .build(),
+                    .build_and_seal(test.get_test_secret_key()),
                 vec![test.get_test_proof()],
             );
 

@@ -128,9 +128,10 @@ async fn main() {
     shutdown.trigger();
 }
 
+#[then(expr = "I stop validator node {word}")]
 #[when(expr = "I stop validator node {word}")]
 async fn stop_validator_node(world: &mut TariWorld, vn_name: String) {
-    let vn_ps = world.validator_nodes.get_mut(&vn_name).unwrap();
+    let vn_ps = world.get_validator_node_mut(&vn_name);
     vn_ps.stop();
 }
 
@@ -385,9 +386,16 @@ async fn call_wallet_daemon_method_and_check_result(
     method_call: String,
     expected_result: String,
 ) -> anyhow::Result<()> {
-    let resp =
-        wallet_daemon_cli::call_component(world, account_name, output_ref, wallet_daemon_name, method_call, None)
-            .await?;
+    let resp = wallet_daemon_cli::call_component(
+        world,
+        account_name,
+        output_ref,
+        wallet_daemon_name,
+        method_call,
+        None,
+        true,
+    )
+    .await?;
 
     let finalize_result = resp
         .result
@@ -416,7 +424,16 @@ async fn call_wallet_daemon_method(
     output_ref: String,
     method_call: String,
 ) -> anyhow::Result<()> {
-    wallet_daemon_cli::call_component(world, account_name, output_ref, wallet_daemon_name, method_call, None).await?;
+    wallet_daemon_cli::call_component(
+        world,
+        account_name,
+        output_ref,
+        wallet_daemon_name,
+        method_call,
+        None,
+        true,
+    )
+    .await?;
 
     Ok(())
 }
@@ -439,6 +456,7 @@ async fn call_wallet_daemon_method_with_output_name(
         wallet_daemon_name,
         method_call,
         Some(new_output_name),
+        true,
     )
     .await?;
 
@@ -464,6 +482,8 @@ async fn call_wallet_daemon_method_with_output_name_error_result(
         wallet_daemon_name,
         method_call,
         Some(new_output_name),
+        // We expect this to fail due to a substate being downed so we need to use versioned inputs
+        false,
     )
     .await
     {
@@ -477,7 +497,7 @@ async fn call_wallet_daemon_method_with_output_name_error_result(
             );
         }
     } else {
-        bail!("Error expected, but none was happening!");
+        bail!("Error expected, but the transaction succeeded.");
     }
 
     Ok(())
@@ -550,6 +570,7 @@ async fn create_transaction_signing_key(world: &mut TariWorld, name: String) {
     validator_node_cli::create_or_use_key(world, name);
 }
 
+#[then(expr = "I create an account {word} on {word}")]
 #[when(expr = "I create an account {word} on {word}")]
 async fn create_account(world: &mut TariWorld, account_name: String, vn_name: String) {
     validator_node_cli::create_account(world, account_name, vn_name).await;

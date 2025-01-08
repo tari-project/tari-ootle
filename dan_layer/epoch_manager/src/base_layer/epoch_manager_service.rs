@@ -23,7 +23,7 @@
 use log::{error, info, trace};
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{DerivableFromPublicKey, NodeAddressable};
+use tari_dan_common_types::{optional::IsNotFoundError, DerivableFromPublicKey, NodeAddressable};
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
@@ -39,18 +39,22 @@ use crate::{
         types::EpochManagerRequest,
     },
     error::EpochManagerError,
+    traits::LayerOneTransactionSubmitter,
     EpochManagerEvent,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::epoch_manager";
 
-pub struct EpochManagerService<TAddr, TGlobalStore, TBaseNodeClient> {
+pub struct EpochManagerService<TAddr, TGlobalStore, TBaseNodeClient, TLayerOneSubmitter> {
     rx_request: Receiver<EpochManagerRequest<TAddr>>,
-    inner: BaseLayerEpochManager<TGlobalStore, TBaseNodeClient>,
+    inner: BaseLayerEpochManager<TGlobalStore, TBaseNodeClient, TLayerOneSubmitter>,
 }
 
-impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
-    EpochManagerService<TAddr, SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
+impl<TAddr, TLayerOneSubmitter>
+    EpochManagerService<TAddr, SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient, TLayerOneSubmitter>
+where
+    TAddr: NodeAddressable + DerivableFromPublicKey + 'static,
+    TLayerOneSubmitter: LayerOneTransactionSubmitter + Send + Sync + 'static,
 {
     pub fn spawn(
         config: EpochManagerConfig,
@@ -59,12 +63,20 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
         shutdown: ShutdownSignal,
         global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
         base_node_client: GrpcBaseNodeClient,
+        layer_one_transaction_submitter: TLayerOneSubmitter,
         node_public_key: PublicKey,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {
             EpochManagerService {
                 rx_request,
-                inner: BaseLayerEpochManager::new(config, global_db, base_node_client, events, node_public_key),
+                inner: BaseLayerEpochManager::new(
+                    config,
+                    global_db,
+                    base_node_client,
+                    layer_one_transaction_submitter,
+                    events,
+                    node_public_key,
+                ),
             }
             .run(shutdown)
             .await?;
@@ -74,7 +86,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
 
     pub async fn run(&mut self, mut shutdown: ShutdownSignal) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Starting epoch manager");
-        info!(target: LOG_TARGET, "Loading initial state");
         // first, load initial state
         self.inner.load_initial_state().await?;
 
@@ -193,14 +204,25 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
                 handle(reply, self.inner.get_validator_nodes_per_epoch(epoch), context)
             },
             EpochManagerRequest::AddValidatorNodeRegistration {
-                block_height,
+                activation_epoch,
                 registration,
                 value: _value,
                 reply,
             } => handle(
                 reply,
                 self.inner
-                    .add_validator_node_registration(block_height, registration)
+                    .add_validator_node_registration(activation_epoch, registration)
+                    .await,
+                context,
+            ),
+            EpochManagerRequest::DeactivateValidatorNode {
+                public_key,
+                deactivation_epoch,
+                reply,
+            } => handle(
+                reply,
+                self.inner
+                    .deactivate_validator_node(public_key, deactivation_epoch)
                     .await,
                 context,
             ),
@@ -210,9 +232,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
             },
             EpochManagerRequest::WaitForInitialScanningToComplete { reply } => {
                 self.inner.add_notify_on_scanning_complete(reply);
-            },
-            EpochManagerRequest::RemainingRegistrationEpochs { reply } => {
-                handle(reply, self.inner.remaining_registration_epochs().await, context)
             },
             EpochManagerRequest::GetBaseLayerConsensusConstants { reply } => handle(
                 reply,
@@ -237,13 +256,24 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
             EpochManagerRequest::GetNumCommittees { epoch, reply } => {
                 handle(reply, self.inner.get_num_committees(epoch), context)
             },
-            EpochManagerRequest::GetCommitteesForShardGroup {
+            EpochManagerRequest::GetCommitteeForShardGroup {
+                epoch,
+                shard_group,
+                limit,
+                reply,
+            } => handle(
+                reply,
+                self.inner
+                    .get_committee_for_shard_group(epoch, shard_group, true, limit),
+                context,
+            ),
+            EpochManagerRequest::GetCommitteesOverlappingShardGroup {
                 epoch,
                 shard_group,
                 reply,
             } => handle(
                 reply,
-                self.inner.get_committees_for_shard_group(epoch, shard_group),
+                self.inner.get_committees_overlapping_shard_group(epoch, shard_group),
                 context,
             ),
             EpochManagerRequest::GetFeeClaimPublicKey { reply } => {
@@ -253,7 +283,10 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey + 'static>
                 handle(reply, self.inner.set_fee_claim_public_key(public_key), context)
             },
             EpochManagerRequest::GetBaseLayerBlockHeight { hash, reply } => {
-                handle(reply, self.inner.get_base_layer_block_height(hash).await, context)
+                handle(reply, self.inner.get_base_layer_block_height(hash), context)
+            },
+            EpochManagerRequest::AddIntentToEvictValidator { proof, reply } => {
+                handle(reply, self.inner.add_intent_to_evict_validator(*proof).await, context)
             },
         }
     }
@@ -265,7 +298,10 @@ fn handle<T>(
     context: &str,
 ) {
     if let Err(ref e) = result {
-        error!(target: LOG_TARGET, "Request {} failed with error: {}", context, e);
+        // These responses are not errors
+        if !e.is_not_registered_error() && !e.is_not_found_error() {
+            error!(target: LOG_TARGET, "Request {} failed with error: {}", context, e);
+        }
     }
     if reply.send(result).is_err() {
         error!(target: LOG_TARGET, "Requester abandoned request");

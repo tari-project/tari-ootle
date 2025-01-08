@@ -9,6 +9,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
+    NumPreshards,
+    ShardGroup,
     SubstateAddress,
     SubstateLockType,
     SubstateRequirement,
@@ -33,11 +35,19 @@ impl BlockPledge {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.pledges.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pledges.is_empty()
+    }
+
     pub fn contains(&self, transaction_id: &TransactionId) -> bool {
         self.pledges.contains_key(transaction_id)
     }
 
-    pub fn add_substate_pledge(&mut self, transaction_id: TransactionId, pledge: SubstatePledge) -> bool {
+    pub(crate) fn add_substate_pledge(&mut self, transaction_id: TransactionId, pledge: SubstatePledge) -> bool {
         self.pledges.entry(transaction_id).or_default().insert(pledge)
     }
 
@@ -49,8 +59,34 @@ impl BlockPledge {
         self.pledges.values().map(|s| s.len()).sum()
     }
 
+    pub fn into_filtered_for_shard_group(
+        mut self,
+        num_preshards: NumPreshards,
+        num_committees: u32,
+        shard_group: ShardGroup,
+    ) -> Self {
+        self.pledges.retain(|_, substate_pledges| {
+            substate_pledges.iter().any(|pledge| {
+                pledge
+                    .to_substate_address()
+                    .to_shard_group(num_preshards, num_committees) ==
+                    shard_group
+            })
+        });
+        self
+    }
+
+    pub fn retain_transactions(&mut self, transaction_ids: &HashSet<TransactionId>) -> &mut Self {
+        self.pledges.retain(|tx, _| transaction_ids.contains(tx));
+        self
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&TransactionId, &SubstatePledges)> + '_ {
         self.pledges.iter()
+    }
+
+    pub fn substate_pledges_iter(&self) -> impl Iterator<Item = &SubstatePledges> {
+        self.pledges.values()
     }
 
     pub fn reserve(&mut self, additional: usize) {
@@ -133,8 +169,8 @@ impl SubstatePledge {
             self.substate_id() == req.substate_id()
     }
 
-    pub fn satisfies_address(&self, substate_address: &SubstateAddress) -> bool {
-        self.to_substate_address() == *substate_address
+    pub fn satisfies_substate_and_version(&self, substate_id: &SubstateId, version: u32) -> bool {
+        self.versioned_substate_id().version == version && self.substate_id() == substate_id
     }
 }
 

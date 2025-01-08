@@ -3,8 +3,9 @@
 
 use std::{borrow::Borrow, fmt::Display, str::FromStr};
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_engine_types::{serde_with, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 
 use crate::{shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
@@ -15,7 +16,6 @@ use crate::{shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateA
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct SubstateRequirement {
-    #[serde(with = "serde_with::string")]
     pub substate_id: SubstateId,
     pub version: Option<u32>,
 }
@@ -159,21 +159,23 @@ impl std::hash::Hash for SubstateRequirement {
 #[error("Failed to parse substate requirement {0}")]
 pub struct SubstateRequirementParseError(String);
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct VersionedSubstateId {
-    #[serde(with = "serde_with::string")]
     pub substate_id: SubstateId,
     pub version: u32,
 }
 
 impl VersionedSubstateId {
-    pub fn new(substate_id: SubstateId, version: u32) -> Self {
-        Self { substate_id, version }
+    pub fn new<T: Into<SubstateId>>(substate_id: T, version: u32) -> Self {
+        Self {
+            substate_id: substate_id.into(),
+            version,
+        }
     }
 
     pub fn substate_id(&self) -> &SubstateId {

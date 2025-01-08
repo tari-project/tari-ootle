@@ -126,8 +126,7 @@ pub async fn handle_create(
         .fee_transaction_pay_from_component(default_account.address.as_component_address().unwrap(), max_fee)
         .create_account(owner_pk.clone())
         .with_inputs(inputs)
-        .sign(&signing_key.key)
-        .build();
+        .build_and_seal(&signing_key.key);
 
     let mut events = context.notifier().subscribe();
     let tx_id = context
@@ -227,8 +226,7 @@ pub async fn handle_invoke(
         .fee_transaction_pay_from_component(account_address, req.max_fee.unwrap_or(DEFAULT_FEE))
         .call_method(account_address, &req.method, req.args)
         .with_inputs(inputs)
-        .sign(&signing_key.key)
-        .build();
+        .build_and_seal(&signing_key.key);
 
     let mut events = context.notifier().subscribe();
     let tx_id = context
@@ -433,7 +431,7 @@ pub async fn handle_reveal_funds(
             .into_iter()
             .map(|addr| SubstateRequirement::new(addr.substate_id.clone(), Some(addr.version)));
 
-        let transaction = builder.with_inputs(inputs).sign(&account_key.key).build();
+        let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
 
         sdk.confidential_outputs_api()
             .proofs_set_transaction_hash(proof_id, *transaction.id())?;
@@ -698,8 +696,7 @@ async fn finish_claiming<T: WalletStore>(
     let transaction = Transaction::builder()
         .with_fee_instructions(instructions)
         .with_inputs(inputs)
-        .sign(&account_secret_key.key)
-        .build();
+        .build_and_seal(&account_secret_key.key);
     let is_first_account = accounts_api.count()? == 0;
     let mut events = context.notifier().subscribe();
     let tx_id = context
@@ -948,8 +945,7 @@ pub async fn handle_transfer(
         .with_fee_instructions(fee_instructions)
         .with_instructions(instructions)
         .with_inputs(vec![resource_substate_address])
-        .sign(&account_secret_key.key)
-        .build();
+        .build_and_seal(&account_secret_key.key);
 
     let required_inputs = inputs.into_iter().map(Into::into).collect();
     // If dry run we can return the result immediately

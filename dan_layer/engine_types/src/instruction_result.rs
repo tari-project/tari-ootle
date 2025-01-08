@@ -36,9 +36,9 @@ pub struct InstructionResult {
 }
 
 impl InstructionResult {
-    pub fn empty() -> Self {
-        InstructionResult {
-            indexed: IndexedValue::default(),
+    pub const fn empty() -> Self {
+        Self {
+            indexed: IndexedValue::empty(),
             return_type: Type::Unit,
         }
     }

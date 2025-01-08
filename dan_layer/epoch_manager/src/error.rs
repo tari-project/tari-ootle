@@ -33,8 +33,8 @@ pub enum EpochManagerError {
     ValidatorNodeNotRegistered { address: String, epoch: Epoch },
     #[error("Base layer consensus constants not set")]
     BaseLayerConsensusConstantsNotSet,
-    #[error("Base layer could not return shard key for {public_key} at height {block_height}")]
-    ShardKeyNotFound { public_key: PublicKey, block_height: u64 },
+    #[error("Base layer could not return shard key for {public_key} at {epoch}")]
+    ShardKeyNotFound { public_key: PublicKey, epoch: Epoch },
     #[error("Integer overflow: {func}")]
     IntegerOverflow { func: &'static str },
     #[error("Invalid epoch: {epoch}")]
@@ -44,6 +44,8 @@ pub enum EpochManagerError {
         actual: Option<String>,
         expected: Option<String>,
     },
+    #[error("Failed to submit layer one transaction: {details}")]
+    FailedToSubmitLayerOneTransaction { details: String },
 }
 
 impl EpochManagerError {

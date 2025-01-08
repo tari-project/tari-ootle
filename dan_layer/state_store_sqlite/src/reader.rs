@@ -1,6 +1,5 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
@@ -22,6 +21,7 @@ use diesel::{
     QueryDsl,
     QueryableByName,
     RunQueryDsl,
+    SelectableHelper,
     SqliteConnection,
     TextExpressionMethods,
 };
@@ -84,7 +84,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, TreeNode, Version};
 use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
@@ -574,7 +574,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         use crate::schema::foreign_proposals;
 
         let foreign_proposals = foreign_proposals::table
-            .filter(foreign_proposals::epoch.eq(epoch.as_u64() as i64))
+            .filter(foreign_proposals::epoch.le(epoch.as_u64() as i64))
             .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
             .count()
             .limit(1)
@@ -606,7 +606,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let foreign_proposals = foreign_proposals::table
             .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
-            .filter(foreign_proposals::epoch.eq(locked.epoch.as_u64() as i64))
+            .filter(foreign_proposals::epoch.le(locked.epoch.as_u64() as i64))
+            .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
             .filter(
                 foreign_proposals::proposed_in_block
                     .is_null()
@@ -697,6 +698,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         use crate::schema::transactions;
 
         let transaction = transactions::table
+            .select(sql_models::Transaction::as_select())
             .filter(transactions::transaction_id.eq(serialize_hex(tx_id)))
             .first::<sql_models::Transaction>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -1444,6 +1446,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError> {
         use crate::schema::block_diffs;
+        if !Block::record_exists(self, block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "block_diffs_get_last_change_for_substate: Block {} does not exist",
+                    block_id
+                ),
+            });
+        }
+
         let commit_block = self.get_commit_block()?;
         let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
 
@@ -1614,11 +1625,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        let mut ready_txs = transaction_pool::table
+        let ready_txs = transaction_pool::table
             // Exclude new transactions
             .filter(transaction_pool::stage.ne(TransactionPoolStage::New.to_string()))
             .filter(transaction_pool::is_ready.eq(true))
             .order_by(transaction_pool::transaction_id.asc())
+            .limit(max_txs as i64)
             .get_results::<sql_models::TransactionPoolRecord>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "transaction_pool_get_many_ready",
@@ -1631,35 +1643,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             block_id,
             ready_txs.len()
         );
-
-        let new_limit = max_txs.saturating_sub(ready_txs.len());
-        if new_limit > 0 {
-            let new_txs = transaction_pool::table
-                .filter(transaction_pool::stage.eq(TransactionPoolStage::New.to_string()))
-                .filter(transaction_pool::is_ready.eq(true))
-                // Filter out any transactions that are in lock conflict
-                .filter(transaction_pool::transaction_id.ne_all(lock_conflicts::table.select(lock_conflicts::transaction_id)))
-                .order_by(transaction_pool::transaction_id.asc())
-                .limit(new_limit as i64)
-                .get_results::<sql_models::TransactionPoolRecord>(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "transaction_pool_get_many_ready",
-                    source: e,
-                })?;
-
-            debug!(
-                target: LOG_TARGET,
-                "🛢️ transaction_pool_get_many_ready: block_id={}, new ready_txs={}, total ready_txs={}",
-                block_id,
-                new_txs.len(),
-                ready_txs.len() + new_txs.len()
-            );
-            ready_txs.extend(new_txs);
-        }
-
-        if ready_txs.is_empty() {
-            return Ok(Vec::new());
-        }
 
         // Fetch all applicable block ids between the locked block and the given block
         let locked = self.get_current_locked_block()?;
@@ -1678,16 +1661,68 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             ready_txs.len(),
             updates.len()
         );
-
-        ready_txs
+        let num_ready = ready_txs.len();
+        let ready_txs = ready_txs
             .into_iter()
             .map(|rec| {
                 let maybe_update = updates.swap_remove(&rec.transaction_id);
                 rec.try_convert(maybe_update)
             })
             // Filter only Ok where is_ready == true (after update) or Err
-            .filter(|result| result.as_ref().map_or(true, |rec| rec.is_ready()))
-            .take(max_txs)
+            .filter(|result| result.as_ref().map_or(true, |rec| rec.is_ready()));
+
+        // Prioritise already sequenced transactions, if there is still space, add transactions that are not previously
+        // sequenced (new)
+        let new_limit = max_txs.saturating_sub(num_ready);
+        if new_limit == 0 {
+            debug!(
+                target: LOG_TARGET,
+                "transaction_pool_get_many_ready: locked.block_id={}, leaf.block_id={}, len(ready_txs)={}",
+                locked.block_id,
+                block_id,
+                num_ready
+            );
+
+            return ready_txs.collect();
+        }
+
+        let new_txs = transaction_pool::table
+                .filter(transaction_pool::stage.eq(TransactionPoolStage::New.to_string()))
+                // Filter out any transactions that are in lock conflict
+                .filter(transaction_pool::transaction_id.ne_all(lock_conflicts::table.select(lock_conflicts::transaction_id).filter(lock_conflicts::is_local_only.eq(false))))
+                .order_by(transaction_pool::transaction_id.asc())
+                .limit(new_limit as i64)
+                .get_results::<sql_models::TransactionPoolRecord>(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "transaction_pool_get_many_ready",
+                    source: e,
+                })?;
+        let mut updates = self.get_transaction_atom_state_updates_between_blocks(
+            &locked.block_id,
+            block_id,
+            new_txs.iter().map(|s| s.transaction_id.as_str()),
+        )?;
+
+        debug!(
+            target: LOG_TARGET,
+            "🛢️ transaction_pool_get_many_ready: block_id={}, new ready_txs={}, total ready_txs={}, updates={}",
+            block_id,
+            new_txs.len(),
+            num_ready + new_txs.len(),
+            updates.len()
+        );
+
+        ready_txs
+            .chain(
+                new_txs
+                .into_iter()
+                .map(|rec| {
+                    let maybe_update = updates.swap_remove(&rec.transaction_id);
+                    rec.try_convert(maybe_update)
+                })
+                // Filter only Ok where is_ready == true (after update) or Err
+                .filter(|result| result.as_ref().map_or(true, |rec| rec.is_ready())),
+            )
             .collect()
     }
 
@@ -2181,7 +2216,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // Get the last committed block
         let commit_block = self.get_commit_block()?;
 
-        // Block may modify state with zero commands because the justify a block that changes state
+        // Block may modify state with zero commands because it justifies a block that changes state
         let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 1000)?;
 
         if block_ids.is_empty() {
@@ -2191,6 +2226,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let diff_recs = pending_state_tree_diffs::table
             .filter(pending_state_tree_diffs::block_id.eq_any(block_ids))
             .order_by(pending_state_tree_diffs::block_height.asc())
+            .then_order_by(pending_state_tree_diffs::id.asc())
             .get_results::<sql_models::PendingStateTreeDiff>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "pending_state_tree_diffs_get_all_pending",
@@ -2355,7 +2391,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         #[allow(clippy::mutable_key_type)]
         let mut pledges = SubstatePledges::with_capacity(recs.len());
         for pledge in recs {
-            let substate_id = parse_from_string(&pledge.substate_id)?;
+            let substate_id = parse_from_string::<SubstateId>(&pledge.substate_id)?;
             let version = pledge.version as u32;
             let id = VersionedSubstateId::new(substate_id, version);
             let lock_type = parse_from_string(&pledge.lock_type)?;
@@ -2372,11 +2408,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(pledges)
     }
 
-    fn burnt_utxos_get(&self, substate_id: &SubstateId) -> Result<BurntUtxo, StorageError> {
+    fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError> {
         use crate::schema::burnt_utxos;
 
         let burnt_utxo = burnt_utxos::table
-            .filter(burnt_utxos::substate_id.eq(substate_id.to_string()))
+            .filter(burnt_utxos::commitment.eq(commitment.to_string()))
             .first::<sql_models::BurntUtxo>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "burnt_utxos_get",
@@ -2487,13 +2523,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         })
     }
 
-    fn validator_epoch_stats_get_nodes_to_suspend(
+    fn validator_epoch_stats_get_nodes_to_evict(
         &self,
         block_id: &BlockId,
-        min_missed_proposals: u64,
-        limit: usize,
+        threshold: u64,
+        limit: u64,
     ) -> Result<Vec<PublicKey>, StorageError> {
-        use crate::schema::{suspended_nodes, validator_epoch_stats};
+        use crate::schema::{evicted_nodes, validator_epoch_stats};
         if limit == 0 {
             return Ok(vec![]);
         }
@@ -2503,30 +2539,35 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let pks = validator_epoch_stats::table
             .select(validator_epoch_stats::public_key)
+            .left_join(evicted_nodes::table.on(evicted_nodes::public_key.eq(validator_epoch_stats::public_key)))
             .filter(
-                validator_epoch_stats::public_key.ne_all(
-                    suspended_nodes::table.select(suspended_nodes::public_key).filter(
-                        // Not already suspended in uncommitted blocks
-                        suspended_nodes::suspended_in_block
-                                .eq_any(block_ids)
-                                // Not suspended in committed blocks
-                                .or(suspended_nodes::suspended_in_block_height.lt(commit_block.height().as_u64() as i64)),
-                    ),
+                // Not evicted
+                evicted_nodes::evicted_in_block
+                    .is_null()
+                    // Not already evicted in uncommitted blocks
+                    .or(evicted_nodes::evicted_in_block
+                    .ne_all(block_ids)
+                    // Not evicted in committed blocks
+                    .and(evicted_nodes::evicted_in_block_height.le(commit_block.height().as_u64() as i64))
                 ),
             )
-            .filter(validator_epoch_stats::missed_proposals.ge(min_missed_proposals as i64))
+            // Only suspended nodes can be evicted
+            // .filter(evicted_nodes::suspended_in_block.is_not_null())
+            // Not already evicted
+            .filter(evicted_nodes::eviction_committed_in_epoch.is_null())
+            .filter(validator_epoch_stats::missed_proposals.ge(threshold as i64))
             .filter(validator_epoch_stats::epoch.eq(commit_block.epoch().as_u64() as i64))
             .limit(limit as i64)
             .get_results::<String>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_get_nodes_to_suspend",
+                operation: "validator_epoch_stats_get_nodes_to_evict",
                 source: e,
             })?;
 
         pks.iter()
             .map(|s| {
                 PublicKey::from_hex(s).map_err(|e| StorageError::DecodingError {
-                    operation: "validator_epoch_stats_get_nodes_to_suspend",
+                    operation: "validator_epoch_stats_get_nodes_to_evict",
                     item: "public key",
                     details: format!("Failed to decode public key: {e}"),
                 })
@@ -2534,56 +2575,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
-    fn validator_epoch_stats_get_nodes_to_resume(
-        &self,
-        block_id: &BlockId,
-        limit: usize,
-    ) -> Result<Vec<PublicKey>, StorageError> {
-        use crate::schema::{suspended_nodes, validator_epoch_stats};
-        if limit == 0 {
-            return Ok(vec![]);
-        }
-
-        let commit_block = self.get_commit_block()?;
-
-        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 1000)?;
-
-        let pks = validator_epoch_stats::table
-            .select(validator_epoch_stats::public_key)
-            .filter(
-                // Must be suspended
-                validator_epoch_stats::public_key.eq_any(
-                    suspended_nodes::table.select(suspended_nodes::public_key).filter(
-                        suspended_nodes::resumed_in_block
-                            .ne_all(block_ids)
-                            .or(suspended_nodes::resumed_in_block_height.is_null())
-                            .or(suspended_nodes::resumed_in_block_height
-                                .lt(Some(commit_block.height().as_u64() as i64))),
-                    ),
-                ),
-            )
-            .filter(validator_epoch_stats::missed_proposals_capped.eq(0i64))
-            .filter(validator_epoch_stats::epoch.eq(commit_block.epoch().as_u64() as i64))
-            .limit(limit as i64)
-            .get_results::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_get_nodes_to_resume",
-                source: e,
-            })?;
-
-        pks.iter()
-            .map(|s| {
-                PublicKey::from_hex(s).map_err(|e| StorageError::DecodingError {
-                    operation: "validator_epoch_stats_get_nodes_to_resume",
-                    item: "public key",
-                    details: format!("Failed to decode public key: {e}"),
-                })
-            })
-            .collect()
-    }
-
-    fn suspended_nodes_is_suspended(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
-        use crate::schema::suspended_nodes;
+    fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
+        use crate::schema::evicted_nodes;
 
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::QueryError {
@@ -2594,31 +2587,35 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let commit_block = self.get_commit_block()?;
         let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 1000)?;
 
-        let count = suspended_nodes::table
+        let count = evicted_nodes::table
             .count()
-            .filter(suspended_nodes::public_key.eq(public_key.to_hex()))
+            .filter(evicted_nodes::public_key.eq(public_key.to_hex()))
             .filter(
-                suspended_nodes::resumed_in_block
-                    .is_null()
-                    .or(suspended_nodes::resumed_in_block.ne_all(block_ids)),
+                evicted_nodes::evicted_in_block.is_not_null().and(
+                    evicted_nodes::evicted_in_block_height
+                        .le(commit_block.height().as_u64() as i64)
+                        .or(evicted_nodes::evicted_in_block.ne_all(block_ids)),
+                ),
             )
             .first::<i64>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
-                operation: "suspended_nodes_exists",
+                operation: "suspended_nodes_is_evicted",
                 source: e,
             })?;
 
         Ok(count > 0)
     }
 
-    fn suspended_nodes_count(&self) -> Result<u64, StorageError> {
-        use crate::schema::suspended_nodes;
+    fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError> {
+        use crate::schema::evicted_nodes;
 
-        let count = suspended_nodes::table
+        let count = evicted_nodes::table
             .count()
+            .filter(evicted_nodes::evicted_in_block.is_not_null())
+            .filter(evicted_nodes::eviction_committed_in_epoch.eq(epoch.as_u64() as i64))
             .first::<i64>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
-                operation: "suspended_nodes_exists",
+                operation: "evicted_nodes_count",
                 source: e,
             })?;
 

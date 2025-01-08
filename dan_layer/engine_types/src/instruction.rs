@@ -5,7 +5,6 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
-use tari_crypto::tari_utilities::hex::Hex;
 use tari_template_lib::{
     args::{Arg, LogLevel},
     auth::OwnerRule,
@@ -37,7 +36,6 @@ pub enum Instruction {
         args: Vec<Arg>,
     },
     CallMethod {
-        #[serde(with = "serde_with::string")]
         component_address: ComponentAddress,
         method: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
@@ -64,10 +62,21 @@ pub enum Instruction {
     DropAllProofsInWorkspace,
     AssertBucketContains {
         key: Vec<u8>,
-        #[serde(with = "serde_with::string")]
         resource_address: ResourceAddress,
         min_amount: Amount,
     },
+    PublishTemplate {
+        binary: Vec<u8>,
+    },
+}
+
+impl Instruction {
+    pub fn published_template_binary(&self) -> Option<&[u8]> {
+        match self {
+            Self::PublishTemplate { binary } => Some(binary),
+            _ => None,
+        }
+    }
 }
 
 impl Display for Instruction {
@@ -119,9 +128,9 @@ impl Display for Instruction {
                     f,
                     "ClaimBurn {{ commitment_address: {}, proof_of_knowledge: nonce({}), u({}) v({}) }}",
                     claim.output_address,
-                    claim.proof_of_knowledge.public_nonce().to_hex(),
-                    claim.proof_of_knowledge.u().to_hex(),
-                    claim.proof_of_knowledge.v().to_hex()
+                    claim.proof_of_knowledge.public_nonce().as_public_key(),
+                    claim.proof_of_knowledge.u().reveal(),
+                    claim.proof_of_knowledge.v().reveal(),
                 )
             },
             Self::ClaimValidatorFees {
@@ -148,6 +157,9 @@ impl Display for Instruction {
                     "AssertBucketContains {{ key: {:?}, resource_address: {}, min_amount: {} }}",
                     key, resource_address, min_amount
                 )
+            },
+            Instruction::PublishTemplate { .. } => {
+                write!(f, "PublishTemplate")
             },
         }
     }

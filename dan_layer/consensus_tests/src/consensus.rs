@@ -11,14 +11,24 @@
 use std::time::Duration;
 
 use tari_common_types::types::PrivateKey;
-use tari_consensus::hotstuff::HotStuffError;
-use tari_dan_common_types::{optional::Optional, Epoch, LockIntent, NodeHeight, SubstateRequirement};
+use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage};
+use tari_dan_common_types::{
+    crypto::create_key_pair,
+    optional::Optional,
+    Epoch,
+    LockIntent,
+    NodeHeight,
+    SubstateRequirement,
+    ToSubstateAddress,
+    VersionedSubstateId,
+};
 use tari_dan_storage::{
     consensus_models::{
         AbortReason,
         BlockId,
         Command,
         Decision,
+        SubstateRecord,
         SubstateRequirementLockIntent,
         TransactionRecord,
         VersionedSubstateIdLockIntent,
@@ -26,12 +36,17 @@ use tari_dan_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
-use tari_engine_types::commit_result::RejectReason;
+use tari_engine_types::{
+    commit_result::RejectReason,
+    published_template::PublishedTemplateAddress,
+    substate::SubstateId,
+};
 use tari_transaction::Transaction;
 
 use crate::support::{
     build_transaction_from,
     helpers,
+    load_binary_fixture,
     logging::setup_logger,
     ExecuteSpec,
     Test,
@@ -287,6 +302,7 @@ async fn node_requests_missing_transaction_from_local_leader() {
 async fn multi_shard_single_transaction() {
     setup_logger();
     let mut test = Test::builder()
+        .debug_sql("/tmp/test{}.db")
         .add_committee(0, vec!["1"])
         .add_committee(1, vec!["2"])
         .start()
@@ -478,8 +494,7 @@ async fn multishard_local_inputs_foreign_outputs() {
     let tx1 = build_transaction_from(
         Transaction::builder()
             .with_inputs(inputs.iter().cloned().map(|i| i.into()))
-            .sign(&PrivateKey::default())
-            .build(),
+            .build_and_seal(&PrivateKey::default()),
         Decision::Commit,
     );
     test.create_execution_at_destination_for_transaction(
@@ -541,8 +556,7 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
     let tx1 = build_transaction_from(
         Transaction::builder()
             .with_inputs(inputs_0.iter().chain(&inputs_1).cloned().map(|i| i.into()))
-            .sign(&PrivateKey::default())
-            .build(),
+            .build_and_seal(&PrivateKey::default()),
         Decision::Commit,
     );
     test.create_execution_at_destination_for_transaction(
@@ -616,8 +630,7 @@ async fn multishard_output_conflict_abort() {
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
     let tx = Transaction::builder()
         .with_inputs(inputs.iter().cloned().map(|i| i.into()))
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx, Decision::Commit);
     assert_ne!(tx1.id(), tx2.id());
     test.create_execution_at_destination_for_transaction(
@@ -680,8 +693,7 @@ async fn single_shard_inputs_from_previous_outputs() {
 
     let tx2 = Transaction::builder()
         .with_inputs(prev_outputs.clone())
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx2.clone(), Decision::Commit);
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
@@ -745,8 +757,7 @@ async fn multishard_inputs_from_previous_outputs() {
 
     let tx2 = Transaction::builder()
         .with_inputs(prev_outputs.clone())
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = build_transaction_from(tx2.clone(), Decision::Commit);
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
@@ -799,14 +810,12 @@ async fn single_shard_input_conflict() {
 
     let tx1 = Transaction::builder()
         .add_input(substate_id.clone())
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
     let tx2 = Transaction::builder()
         .add_input(substate_id.clone())
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = TransactionRecord::new(tx2);
 
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
@@ -918,8 +927,9 @@ async fn leader_failure_node_goes_down() {
         // Allow enough time for leader failures
         .with_test_timeout(Duration::from_secs(60))
         .modify_consensus_constants(|config_mut| {
-            // Prevent suspends
+            // Prevent evictions
             config_mut.missed_proposal_suspend_threshold = 10;
+            config_mut.missed_proposal_evict_threshold = 10;
             config_mut.pacemaker_block_time = Duration::from_secs(2);
         })
         .add_committee(0, vec!["1", "2", "3", "4", "5"])
@@ -977,103 +987,21 @@ async fn leader_failure_node_goes_down() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn leader_failure_node_goes_down_and_gets_suspended() {
-    setup_logger();
-    let failure_node = TestAddress::new("4");
-
-    let mut test = Test::builder()
-        // Allow enough time for leader failures
-        .with_test_timeout(Duration::from_secs(30))
-        .modify_consensus_constants(|config_mut| {
-            // The node will be suspended after one missed proposal
-            config_mut.missed_proposal_suspend_threshold = 2;
-            config_mut.pacemaker_block_time = Duration::from_secs(5);
-        })
-        .add_committee(0, vec!["1", "2", "3", "4", "5"])
-        .add_failure_node(failure_node.clone())
-        .start()
-        .await;
-
-    for _ in 0..10 {
-        test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
-    }
-
-    // Take the VN offline - if we do it in the loop below, all transactions may have already been finalized (local
-    // only) by committed block 1
-    log::info!("😴 {failure_node} is offline");
-    test.network()
-        .go_offline(TestVnDestination::Address(failure_node.clone()))
-        .await;
-
-    test.start_epoch(Epoch(1)).await;
-
-    loop {
-        let (_, _, _, committed_height) = test.on_block_committed().await;
-
-        // Takes missed_proposal_suspend_threshold * 5 + 3 blocks for nodes to suspend. So we need to keep the
-        // transactions coming to speed up this test.
-        if committed_height >= NodeHeight(1) && committed_height < NodeHeight(20) {
-            // This allows a few more leader failures to occur
-            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
-            // test.wait_for_pool_count(TestVnDestination::All, 1).await;
-        }
-
-        // if test.validators_iter().filter(|vn| vn.address != failure_node).all(|v| {
-        //     let c = v.get_transaction_pool_count();
-        //     log::info!("{} has {} transactions in pool", v.address, c);
-        //     c == 0
-        // }) {
-        //     break;
-        // }
-
-        if committed_height >= NodeHeight(20) {
-            break;
-            // panic!("Not all transaction committed after {} blocks", committed_height);
-        }
-    }
-
-    test.assert_all_validators_at_same_height_except(&[failure_node.clone()])
-        .await;
-
-    test.validators_iter()
-        .filter(|vn| vn.address != failure_node)
-        .for_each(|v| {
-            assert!(v.has_committed_substates(), "Validator {} did not commit", v.address);
-        });
-
-    let (_, suspended_public_key) = helpers::derive_keypair_from_address(&failure_node);
-    test.validators()
-        .get(&TestAddress::new("1"))
-        .unwrap()
-        .state_store()
-        .with_read_tx(|tx| {
-            let leaf = tx.leaf_block_get(Epoch(1))?;
-            assert!(
-                tx.suspended_nodes_is_suspended(leaf.block_id(), &suspended_public_key)
-                    .unwrap(),
-                "{failure_node} is not suspended"
-            );
-            Ok::<_, HotStuffError>(())
-        })
-        .unwrap();
-
-    log::info!("total messages sent: {}", test.network().total_messages_sent());
-    test.assert_clean_shutdown_except(&[failure_node]).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn foreign_block_distribution() {
     setup_logger();
     let mut test = Test::builder()
         .with_test_timeout(Duration::from_secs(60))
-        .with_message_filter(Box::new(move |from: &TestAddress, to: &TestAddress, _| {
-            match from.0.as_str() {
-                // We filter our message from each leader to the foreign committees. So we will rely on other members of
-                // the local committees to send the message to the foreign committee members. And then on
-                // the distribution within the foreign committee.
-                "1" => *to == TestAddress::new("1") || *to == TestAddress::new("2") || *to == TestAddress::new("3"),
-                "4" => *to == TestAddress::new("4") || *to == TestAddress::new("5") || *to == TestAddress::new("6"),
-                "7" => *to == TestAddress::new("7") || *to == TestAddress::new("8") || *to == TestAddress::new("9"),
+        .with_message_filter(Box::new(move |from: &TestAddress, to: &TestAddress, msg| {
+            if !matches!(msg, HotstuffMessage::ForeignProposalNotification(_)) {
+                return true;
+            }
+
+            match from.as_str() {
+                // We filter out some messages from each node to foreign committees to ensure we sometimes have to
+                // rely on other members of the foreign and local committees to receive the foreign proposal.
+                "1" => to == "1" || to == "2" || to == "3",
+                "4" => to == "4" || to == "5" || to == "6",
+                "7" => to == "7" || to == "8" || to == "9",
                 _ => true,
             }
         }))
@@ -1128,8 +1056,7 @@ async fn single_shard_unversioned_inputs() {
         .map(|i| SubstateRequirement::new(i.substate_id.clone(), None));
     let tx = Transaction::builder()
         .with_inputs(unversioned_inputs)
-        .sign(&PrivateKey::default())
-        .build();
+        .build_and_seal(&PrivateKey::default());
     let tx = TransactionRecord::new(tx);
 
     test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
@@ -1205,15 +1132,13 @@ async fn multi_shard_unversioned_input_conflict() {
     let tx1 = Transaction::builder()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx1 = TransactionRecord::new(tx1);
 
     let tx2 = Transaction::builder()
         .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
         .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
-        .sign(&Default::default())
-        .build();
+        .build_and_seal(&Default::default());
     let tx2 = TransactionRecord::new(tx2);
 
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
@@ -1295,3 +1220,234 @@ async fn multi_shard_unversioned_input_conflict() {
     test.assert_clean_shutdown().await;
     log::info!("total messages sent: {}", test.network().total_messages_sent());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn leader_failure_node_goes_down_and_gets_evicted() {
+    setup_logger();
+    let failure_node = TestAddress::new("4");
+
+    let mut test = Test::builder()
+        // Allow enough time for leader failures
+        .with_test_timeout(Duration::from_secs(30))
+        .modify_consensus_constants(|config_mut| {
+            // The node will be evicted after three missed proposals
+            config_mut.missed_proposal_suspend_threshold = 1;
+            config_mut.missed_proposal_evict_threshold = 3;
+            config_mut.pacemaker_block_time = Duration::from_secs(5);
+        })
+        .add_committee(0, vec!["1", "2", "3", "4", "5"])
+        .add_failure_node(failure_node.clone())
+        .start()
+        .await;
+
+    for _ in 0..10 {
+        test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+    }
+
+    // Take the VN offline - if we do it in the loop below, all transactions may have already been finalized (local
+    // only) by committed block 1
+    log::info!("😴 {failure_node} is offline");
+    test.network()
+        .go_offline(TestVnDestination::Address(failure_node.clone()))
+        .await;
+
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        let (_, _, _, committed_height) = test.on_block_committed().await;
+
+        // Takes missed_proposal_evict_threshold * 5 (members) + 3 (chain) blocks for nodes to evict. So we need to keep
+        // the transactions coming to speed up this test.
+        if committed_height >= NodeHeight(1) && committed_height < NodeHeight(20) {
+            // This allows a few more leader failures to occur
+            test.send_transaction_to_all(Decision::Commit, 1, 2, 1).await;
+        }
+
+        let eviction_proofs = test
+            .validators()
+            .get(&TestAddress::new("1"))
+            .unwrap()
+            .epoch_manager()
+            .eviction_proofs()
+            .await;
+        if !eviction_proofs.is_empty() {
+            break;
+        }
+
+        if committed_height >= NodeHeight(40) {
+            panic!("Not all transaction committed after {} blocks", committed_height);
+        }
+    }
+
+    test.assert_all_validators_at_same_height_except(&[failure_node.clone()])
+        .await;
+
+    test.validators_iter()
+        .filter(|vn| vn.address != failure_node)
+        .for_each(|v| {
+            assert!(v.has_committed_substates(), "Validator {} did not commit", v.address);
+        });
+
+    let (_, failure_node_pk) = helpers::derive_keypair_from_address(&failure_node);
+    test.validators()
+        .get(&TestAddress::new("1"))
+        .unwrap()
+        .state_store()
+        .with_read_tx(|tx| {
+            let leaf = tx.leaf_block_get(Epoch(1))?;
+            assert!(
+                tx.suspended_nodes_is_evicted(leaf.block_id(), &failure_node_pk)
+                    .unwrap(),
+                "{failure_node} is not evicted"
+            );
+            Ok::<_, HotStuffError>(())
+        })
+        .unwrap();
+
+    let eviction_proofs = test
+        .validators()
+        .get(&TestAddress::new("1"))
+        .unwrap()
+        .epoch_manager()
+        .eviction_proofs()
+        .await;
+    for proof in &eviction_proofs {
+        assert_eq!(proof.node_to_evict(), &failure_node_pk);
+    }
+
+    // Epoch manager state is shared between all validators, so each working validator (4) should create a proof.
+    assert_eq!(eviction_proofs.len(), 4);
+
+    log::info!("total messages sent: {}", test.network().total_messages_sent());
+    test.assert_clean_shutdown_except(&[failure_node]).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multishard_publish_template() {
+    setup_logger();
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .add_committee(2, vec!["5", "6"])
+        .add_committee(3, vec!["7", "8"])
+        .start()
+        .await;
+    // Create and send publish template transaction
+    let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
+    let (sk, pk) = create_key_pair();
+    let wasm = load_binary_fixture("state.wasm");
+    let tx = Transaction::builder()
+        .publish_template(wasm.clone())
+        .with_inputs(inputs.iter().cloned().map(Into::into))
+        .build_and_seal(&sk);
+    let tx = TransactionRecord::new(tx);
+
+    test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
+        .await;
+    let template_id = PublishedTemplateAddress::from_author_and_code(&pk, &wasm);
+    test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: tx.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1,
+        inputs: inputs
+            .into_iter()
+            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .collect(),
+        new_outputs: vec![SubstateId::Template(template_id)],
+    });
+
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(30) {
+            panic!("Not all transaction committed after {} blocks", leaf.height);
+        }
+    }
+
+    test.assert_all_validators_at_same_height().await;
+    test.assert_all_validators_committed();
+
+    // Assert all LocalOnly
+    let template_substate = test
+        .get_validator(&TestAddress::new("1"))
+        .state_store
+        .with_read_tx(|tx| SubstateRecord::get(tx, &VersionedSubstateId::new(template_id, 0).to_substate_address()))
+        .unwrap();
+    let binary = template_substate
+        .substate_value
+        .into_template()
+        .expect("Expected template substate")
+        .binary;
+    assert_eq!(binary, wasm, "Template binary does not match");
+
+    test.assert_clean_shutdown().await;
+}
+
+// mod dump_data {
+//     use super::*;
+//     use std::fs::File;
+//     use tari_crypto::tari_utilities::hex::from_hex;
+//     use tari_consensus::hotstuff::eviction_proof::convert_block_to_sidechain_block_header;
+//     use tari_state_store_sqlite::SqliteStateStore;
+//
+//    fn asd() {
+//            let store = SqliteStateStore::<PeerAddress>::connect(
+//                "data/swarm/processes/validator-node-01/localnet/data/validator_node/state.db",
+//            )
+//                .unwrap();
+//            let p = store
+//                .with_read_tx(|tx| {
+//                    let block = tari_dan_storage::consensus_models::Block::get(
+//                        tx,
+//                        &BlockId::try_from(
+//                            from_hex("891d186d2d46b990cc0974dc68734f701eaeb418a1bba487de93905d3986e0e3").unwrap(),
+//                        )
+//                            .unwrap(),
+//                    )?;
+//
+//                    let commit_block = tari_dan_storage::consensus_models::Block::get(
+//                        tx,
+//                        &BlockId::try_from(
+//                            from_hex("1cdbe5c1a894bcc254b47cf017d4d17608839b7048d1c02162bccd39e7635288").unwrap(),
+//                        )
+//                            .unwrap(),
+//                    )
+//                        .unwrap();
+//
+//                    let mut p = tari_consensus::hotstuff::eviction_proof::generate_eviction_proofs(tx,
+// block.justify(), &[                        commit_block.clone(),
+//                    ])
+//                        .unwrap();
+//
+//                    eprintln!();
+//                    eprintln!("{}", serde_json::to_string_pretty(&commit_block).unwrap());
+//                    eprintln!();
+//                    eprintln!();
+//
+//                    let h = convert_block_to_sidechain_block_header(commit_block.header());
+//
+//                    assert_eq!(h.calculate_hash(), commit_block.header().calculate_hash());
+//                    let b = p[0].proof().header().calculate_block_id();
+//                    assert_eq!(
+//                        p[0].proof().header().calculate_hash(),
+//                        commit_block.header().calculate_hash()
+//                    );
+//                    assert_eq!(b, *commit_block.id().hash());
+//                    Ok::<_, HotStuffError>(p.remove(0))
+//                })
+//                .unwrap();
+//            let f = File::options()
+//                .create(true)
+//                .write(true)
+//                .truncate(true)
+//                .open("/tmp/eviction_proof.json")
+//                .unwrap();
+//            serde_json::to_writer_pretty(f, &p).unwrap();
+//    }
+// }

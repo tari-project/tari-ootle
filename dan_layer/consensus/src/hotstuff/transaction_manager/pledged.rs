@@ -4,9 +4,9 @@
 use tari_dan_storage::{
     consensus_models::{SubstatePledges, TransactionRecord},
     StateStoreReadTransaction,
+    StorageError,
 };
-
-use crate::hotstuff::HotStuffError;
+use tari_transaction::TransactionId;
 
 #[derive(Debug, Clone)]
 pub struct PledgedTransaction {
@@ -28,18 +28,19 @@ impl PledgedTransaction {
             local_pledges,
         }
     }
+
+    pub fn id(&self) -> &TransactionId {
+        self.transaction.id()
+    }
 }
 
 impl PledgedTransaction {
     pub fn load_pledges<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         transaction: TransactionRecord,
-    ) -> Result<PledgedTransaction, HotStuffError> {
-        #[allow(clippy::mutable_key_type)]
+    ) -> Result<PledgedTransaction, StorageError> {
         let local_pledges = transaction.get_local_pledges(tx)?;
-        #[allow(clippy::mutable_key_type)]
         let foreign_pledges = transaction.get_foreign_pledges(tx)?;
-
         Ok(PledgedTransaction::new(transaction, local_pledges, foreign_pledges))
     }
 }

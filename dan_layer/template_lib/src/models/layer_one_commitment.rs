@@ -37,8 +37,12 @@ impl UnclaimedConfidentialOutputAddress {
         &self.0
     }
 
-    pub fn to_vec(&self) -> Vec<u8> {
-        self.0.to_vec()
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyParseError> {
+        Ok(Self(BorTag::new(ObjectKey::try_from(bytes)?)))
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.inner()
     }
 }
 
@@ -52,7 +56,7 @@ impl TryFrom<&[u8]> for UnclaimedConfidentialOutputAddress {
     type Error = KeyParseError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        Ok(Self(BorTag::new(ObjectKey::try_from(value)?)))
+        Self::from_bytes(value)
     }
 }
 
@@ -68,5 +72,11 @@ impl FromStr for UnclaimedConfidentialOutputAddress {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.strip_prefix("commitment_").unwrap_or(s);
         Self::from_hex(s)
+    }
+}
+#[cfg(feature = "borsh")]
+impl borsh::BorshSerialize for UnclaimedConfidentialOutputAddress {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
     }
 }

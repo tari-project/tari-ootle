@@ -23,6 +23,7 @@
 use std::time::Duration;
 
 use log::*;
+use reqwest::Url;
 use tari_base_node_client::{
     grpc::GrpcBaseNodeClient,
     types::{BaseLayerMetadata, BlockInfo},
@@ -31,20 +32,29 @@ use tari_base_node_client::{
 };
 use tari_common_types::types::{Commitment, FixedHash, FixedHashSizeError, PublicKey};
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_core::transactions::{
-    tari_amount::MicroMinotari,
-    transaction_components::{
-        CodeTemplateRegistration,
-        SideChainFeature,
-        TransactionOutput,
-        ValidatorNodeRegistration,
+use tari_core::{
+    base_node::comms_interface::ValidatorNodeChange,
+    transactions::{
+        tari_amount::MicroMinotari,
+        transaction_components::{
+            CodeTemplateRegistration,
+            SideChainFeatureData,
+            TransactionOutput,
+            ValidatorNodeRegistration,
+        },
     },
 };
 use tari_crypto::{
     ristretto::RistrettoPublicKey,
-    tari_utilities::{hex::Hex, ByteArray},
+    tari_utilities::{ByteArray, ByteArrayError},
 };
-use tari_dan_common_types::{optional::Optional, NodeAddressable, VersionedSubstateId};
+use tari_dan_common_types::{
+    option::DisplayContainer,
+    optional::Optional,
+    Epoch,
+    NodeAddressable,
+    VersionedSubstateId,
+};
 use tari_dan_storage::{
     consensus_models::{BurntUtxo, SubstateRecord},
     global::{GlobalDb, MetadataKey},
@@ -52,17 +62,15 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
-use tari_engine_types::{
-    confidential::UnclaimedConfidentialOutput,
-    substate::{SubstateId, SubstateValue},
-};
+use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId, TemplateAddress};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_template_lib::models::{EncryptedData, TemplateAddress, UnclaimedConfidentialOutputAddress};
+use tari_template_lib::models::{EncryptedData, UnclaimedConfidentialOutputAddress};
 use tokio::{task, task::JoinHandle, time};
+use url::ParseError;
 
-use crate::template_manager::interface::{TemplateManagerError, TemplateManagerHandle, TemplateRegistration};
+use crate::template_manager::interface::{TemplateExecutable, TemplateManagerError, TemplateManagerHandle};
 
 const LOG_TARGET: &str = "tari::dan::base_layer_scanner";
 
@@ -70,30 +78,31 @@ pub fn spawn<TAddr: NodeAddressable + 'static, TStore: StateStore + Send + 'stat
     global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
     base_node_client: GrpcBaseNodeClient,
     epoch_manager: EpochManagerHandle<TAddr>,
-    template_manager: TemplateManagerHandle,
     shutdown: ShutdownSignal,
     consensus_constants: ConsensusConstants,
     shard_store: TStore,
     scan_base_layer: bool,
     base_layer_scanning_interval: Duration,
     validator_node_sidechain_id: Option<RistrettoPublicKey>,
-    template_sidechain_id: Option<RistrettoPublicKey>,
     burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
+    // TODO: remove when base layer template registration is removed too
+    template_manager: TemplateManagerHandle,
+    template_sidechain_id: Option<PublicKey>,
 ) -> JoinHandle<anyhow::Result<()>> {
     task::spawn(async move {
         let base_layer_scanner = BaseLayerScanner::new(
             global_db,
             base_node_client,
             epoch_manager,
-            template_manager,
             shutdown,
             consensus_constants,
             shard_store,
             scan_base_layer,
             base_layer_scanning_interval,
             validator_node_sidechain_id,
-            template_sidechain_id,
             burnt_utxo_sidechain_id,
+            template_manager,
+            template_sidechain_id,
         );
 
         base_layer_scanner.start().await?;
@@ -106,10 +115,10 @@ pub struct BaseLayerScanner<TAddr, TStore> {
     last_scanned_height: u64,
     last_scanned_tip: Option<FixedHash>,
     last_scanned_hash: Option<FixedHash>,
+    last_scanned_validator_node_mr: Option<FixedHash>,
     next_block_hash: Option<FixedHash>,
     base_node_client: GrpcBaseNodeClient,
     epoch_manager: EpochManagerHandle<TAddr>,
-    template_manager: TemplateManagerHandle,
     shutdown: ShutdownSignal,
     consensus_constants: ConsensusConstants,
     state_store: TStore,
@@ -117,8 +126,10 @@ pub struct BaseLayerScanner<TAddr, TStore> {
     base_layer_scanning_interval: Duration,
     has_attempted_scan: bool,
     validator_node_sidechain_id: Option<PublicKey>,
-    template_sidechain_id: Option<PublicKey>,
     burnt_utxo_sidechain_id: Option<PublicKey>,
+    // TODO: remove template related data, when removed base layer template registration support
+    template_manager: TemplateManagerHandle,
+    template_sidechain_id: Option<PublicKey>,
 }
 
 impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAddr, TStore> {
@@ -126,25 +137,25 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
         global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
         base_node_client: GrpcBaseNodeClient,
         epoch_manager: EpochManagerHandle<TAddr>,
-        template_manager: TemplateManagerHandle,
         shutdown: ShutdownSignal,
         consensus_constants: ConsensusConstants,
         state_store: TStore,
         scan_base_layer: bool,
         base_layer_scanning_interval: Duration,
         validator_node_sidechain_id: Option<PublicKey>,
-        template_sidechain_id: Option<PublicKey>,
         burnt_utxo_sidechain_id: Option<PublicKey>,
+        template_manager: TemplateManagerHandle,
+        template_sidechain_id: Option<PublicKey>,
     ) -> Self {
         Self {
             global_db,
             last_scanned_tip: None,
             last_scanned_height: 0,
             last_scanned_hash: None,
+            last_scanned_validator_node_mr: None,
             next_block_hash: None,
             base_node_client,
             epoch_manager,
-            template_manager,
             shutdown,
             consensus_constants,
             state_store,
@@ -152,8 +163,9 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
             base_layer_scanning_interval,
             has_attempted_scan: false,
             validator_node_sidechain_id,
-            template_sidechain_id,
             burnt_utxo_sidechain_id,
+            template_manager,
+            template_sidechain_id,
         }
     }
 
@@ -214,7 +226,7 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
                     tip.height_of_longest_chain
                         .saturating_sub(self.consensus_constants.base_layer_confirmations)
                 );
-                self.sync_blockchain().await?;
+                self.sync_blockchain(tip).await?;
             },
             BlockchainProgression::Reorged => {
                 error!(
@@ -223,8 +235,9 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
                 );
                 // TODO: we need to figure out where the fork happened, and delete data after the fork.
                 self.last_scanned_hash = None;
+                self.last_scanned_validator_node_mr = None;
                 self.last_scanned_height = 0;
-                self.sync_blockchain().await?;
+                self.sync_blockchain(tip).await?;
             },
             BlockchainProgression::NoProgress => {
                 trace!(target: LOG_TARGET, "No new blocks to scan.");
@@ -245,6 +258,9 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
         &mut self,
         tip: &BaseLayerMetadata,
     ) -> Result<BlockchainProgression, BaseLayerScannerError> {
+        if tip.height_of_longest_chain == 0 {
+            return Ok(BlockchainProgression::NoProgress);
+        }
         match self.last_scanned_tip {
             Some(hash) if hash == tip.tip_hash => Ok(BlockchainProgression::NoProgress),
             Some(hash) => {
@@ -260,10 +276,9 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn sync_blockchain(&mut self) -> Result<(), BaseLayerScannerError> {
+    async fn sync_blockchain(&mut self, tip: BaseLayerMetadata) -> Result<(), BaseLayerScannerError> {
         let start_scan_height = self.last_scanned_height;
         let mut current_hash = self.last_scanned_hash;
-        let tip = self.base_node_client.get_tip_info().await?;
         let end_height = match tip
             .height_of_longest_chain
             .checked_sub(self.consensus_constants.base_layer_confirmations)
@@ -277,22 +292,16 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
             },
             Some(end_height) => end_height,
         };
-        let mut scan = tip.tip_hash;
-        loop {
-            let header = self.base_node_client.get_header_by_hash(scan).await?;
-            if let Some(last_tip) = self.last_scanned_tip {
-                if last_tip == scan {
-                    // This was processed on the previous call to this function.
-                    break;
-                }
+
+        // Recover the last scanned validator node MR if it is not set yet, i.e the node has scanned BL blocks
+        // previously.
+        if self.last_scanned_validator_node_mr.is_none() {
+            if let Some(hash) = self.last_scanned_hash {
+                let header = self.base_node_client.get_header_by_hash(hash).await?;
+                self.last_scanned_validator_node_mr = Some(header.validator_node_mr);
             }
-            if header.height == end_height {
-                // This will be processed down below.
-                break;
-            }
-            self.epoch_manager.add_block_hash(header.height, scan).await?;
-            scan = header.prev_hash;
         }
+
         for current_height in start_scan_height..=end_height {
             let utxos = self
                 .base_node_client
@@ -306,10 +315,11 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
                     ))
                 })?;
             let block_info = utxos.block_info;
+
             // TODO: Because we don't know the next hash when we're done scanning to the tip, we need to load the
             //       previous scanned block again to get it.  This isn't ideal, but won't be an issue when we scan a few
             //       blocks back.
-            if self.last_scanned_hash.map(|h| h == block_info.hash).unwrap_or(false) {
+            if self.last_scanned_hash.is_some_and(|h| h == block_info.hash) {
                 if let Some(hash) = block_info.next_block_hash {
                     current_hash = Some(hash);
                     continue;
@@ -321,43 +331,39 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
                 "⛓️ Scanning base layer block {} of {}", block_info.height, end_height
             );
 
+            let header = self.base_node_client.get_header_by_hash(block_info.hash).await?;
+            let current_validator_node_mr = header.validator_node_mr;
+            self.epoch_manager
+                .add_block_hash(header.height, block_info.hash)
+                .await?;
+
             for output in utxos.outputs {
                 let output_hash = output.hash();
                 let Some(sidechain_feature) = output.features.sidechain_feature.as_ref() else {
                     warn!(target: LOG_TARGET, "Base node returned invalid data: Sidechain utxo output must have sidechain features");
                     continue;
                 };
-                match sidechain_feature {
-                    SideChainFeature::ValidatorNodeRegistration(reg) => {
-                        info!(
-                            target: LOG_TARGET,
-                            "⛓️ Validator node registration UTXO for {} sidechain {} found at height {}",
-                            reg.public_key(),
-                            reg.sidechain_id().map(|v| v.to_hex()).unwrap_or("None".to_string()),
-                            current_height,
-                        );
-                        if reg.sidechain_id() == self.validator_node_sidechain_id.as_ref() {
-                            self.register_validator_node_registration(
-                                current_height,
-                                reg.clone(),
-                                output.minimum_value_promise,
-                            )
-                            .await?;
-                        } else {
-                            warn!(
+                match sidechain_feature.data() {
+                    SideChainFeatureData::ValidatorNodeRegistration(reg) => {
+                        if sidechain_feature.sidechain_public_key() != self.validator_node_sidechain_id.as_ref() {
+                            debug!(
                                 target: LOG_TARGET,
-                                "Ignoring validator node registration for sidechain ID {:?}. Expected sidechain ID: {:?}",
-                                reg.sidechain_id().map(|v| v.to_hex()),
-                                self.validator_node_sidechain_id.as_ref().map(|v| v.to_hex()));
+                                "Ignoring code template registration for sidechain ID {:?}.",
+                                sidechain_feature.sidechain_public_key(),
+                            );
+                            continue;
                         }
+                        trace!(target: LOG_TARGET, "New validator node registration scanned: {reg:?}");
                     },
-                    SideChainFeature::CodeTemplateRegistration(reg) => {
-                        if reg.sidechain_id != self.template_sidechain_id {
-                            warn!(
+                    // TODO: remove completely SideChainFeature::CodeTemplateRegistration at some point
+                    SideChainFeatureData::CodeTemplateRegistration(reg) => {
+                        if sidechain_feature.sidechain_public_key() != self.template_sidechain_id.as_ref() {
+                            debug!(
                                 target: LOG_TARGET,
-                                "Ignoring code template registration for sidechain ID {:?}. Expected sidechain ID: {:?}",
-                                reg.sidechain_id.as_ref().map(|v| v.to_hex()),
-                                self.template_sidechain_id.as_ref().map(|v| v.to_hex()));
+                                "Ignoring code template registration for sidechain ID {:?}. Local node's sidechain ID: {:?}",
+                                sidechain_feature.sidechain_public_key(),
+                                self.template_sidechain_id,
+                            );
                             continue;
                         }
                         self.register_code_template_registration(
@@ -368,7 +374,7 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
                         )
                         .await?;
                     },
-                    SideChainFeature::ConfidentialOutput(data) => {
+                    SideChainFeatureData::ConfidentialOutput(_) => {
                         // Should be checked by the base layer
                         if !output.is_burned() {
                             warn!(
@@ -379,12 +385,13 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
                             );
                             continue;
                         }
-                        if data.sidechain_id.as_ref() != self.burnt_utxo_sidechain_id.as_ref() {
-                            warn!(
+                        if sidechain_feature.sidechain_public_key() != self.burnt_utxo_sidechain_id.as_ref() {
+                            debug!(
                                 target: LOG_TARGET,
-                                "Ignoring burnt UTXO for sidechain ID {:?}. Expected sidechain ID: {:?}",
-                                data.sidechain_id.as_ref().map(|v| v.to_hex()),
-                                self.burnt_utxo_sidechain_id.as_ref().map(|v| v.to_hex()));
+                                "Ignoring burnt UTXO for sidechain ID {:?}. Local node's sidechain ID: {:?}",
+                                sidechain_feature.sidechain_public_key(),
+                                self.burnt_utxo_sidechain_id,
+                            );
                             continue;
                         }
                         info!(
@@ -395,10 +402,37 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
                         );
                         self.register_burnt_utxo(output, &block_info).await?;
                     },
+                    SideChainFeatureData::EvictionProof(proof) => {
+                        if sidechain_feature.sidechain_public_key() != self.validator_node_sidechain_id.as_ref() {
+                            debug!(
+                                target: LOG_TARGET,
+                                "Ignoring eviction for sidechain ID {:?}. Local node's sidechain ID: {:?}",
+                                sidechain_feature.sidechain_public_key(),
+                                self.validator_node_sidechain_id,
+                            );
+                            continue;
+                        }
+                        trace!(target: LOG_TARGET, "Eviction proof scanned: {proof:?}");
+                    },
                 }
             }
 
-            // Once we have all the UTXO data, we "activate" the new epoch if applicable.
+            debug!(
+                target: LOG_TARGET,
+                "⛓️ last_scanned_validator_node_mr = {} current = {}", self.last_scanned_validator_node_mr.display(), current_validator_node_mr
+            );
+            // if the validator node MR has changed, we need to update the active validator node set
+            if self
+                .last_scanned_validator_node_mr
+                .map_or(true, |last| last != current_validator_node_mr)
+            {
+                let constants = self.base_node_client.get_consensus_constants(block_info.height).await?;
+                let scanned_epoch = constants.height_to_epoch(block_info.height);
+                self.update_validators(scanned_epoch).await?;
+                self.last_scanned_validator_node_mr = Some(current_validator_node_mr);
+            }
+
+            // Once we have all the UTXO and validator data, we "activate" the new epoch if applicable.
             self.epoch_manager
                 .update_epoch(block_info.height, block_info.hash)
                 .await?;
@@ -430,16 +464,86 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
         Ok(())
     }
 
+    async fn register_code_template_registration(
+        &mut self,
+        template_name: String,
+        template_address: TemplateAddress,
+        registration: CodeTemplateRegistration,
+        block_info: &BlockInfo,
+    ) -> Result<(), BaseLayerScannerError> {
+        info!(
+            target: LOG_TARGET,
+            "🌠 new template found with address {} at height {}", template_address, block_info.height
+        );
+        let consensus_constants = self.epoch_manager.get_base_layer_consensus_constants().await?;
+        let epoch = consensus_constants.height_to_epoch(block_info.height);
+        self.template_manager
+            .add_template(
+                registration.author_public_key,
+                template_address,
+                TemplateExecutable::DownloadableWasm(
+                    Url::parse(registration.binary_url.as_str())?,
+                    registration.binary_sha,
+                ),
+                Some(template_name),
+                epoch,
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn update_validators(&mut self, epoch: Epoch) -> Result<(), BaseLayerScannerError> {
+        info!(
+            target: LOG_TARGET,
+            "⛓️ Updating active validator node set (sidechain ID: {:?}) from base node for epoch {epoch}",
+            self.validator_node_sidechain_id,
+        );
+
+        let node_changes = self
+            .base_node_client
+            .get_validator_node_changes(epoch, self.validator_node_sidechain_id.as_ref())
+            .await
+            .map_err(BaseLayerScannerError::BaseNodeError)?;
+
+        info!(
+            target: LOG_TARGET,
+            "⛓️ {} validator node change(s) for epoch {}", node_changes.len(), epoch,
+        );
+
+        for node_change in node_changes {
+            match node_change {
+                ValidatorNodeChange::Add {
+                    registration,
+                    activation_epoch,
+                    minimum_value_promise,
+                } => {
+                    self.add_validator_node_registration(
+                        Epoch(activation_epoch.as_u64()),
+                        registration,
+                        minimum_value_promise,
+                    )
+                    .await?;
+                },
+                ValidatorNodeChange::Remove { public_key } => {
+                    self.remove_validator_node_registration(public_key, epoch).await?;
+                },
+            }
+        }
+
+        Ok(())
+    }
+
     async fn register_burnt_utxo(
         &mut self,
         output: TransactionOutput,
         block_info: &BlockInfo,
     ) -> Result<(), BaseLayerScannerError> {
-        let substate_id = SubstateId::UnclaimedConfidentialOutput(
-            UnclaimedConfidentialOutputAddress::try_from_commitment(output.commitment.as_bytes()).map_err(|e|
+        let commitment_address = UnclaimedConfidentialOutputAddress::try_from_commitment(output.commitment.as_bytes())
+            .map_err(|e|
                 // Technically impossible, but anyway
-                BaseLayerScannerError::InvalidSideChainUtxoResponse(format!("Invalid commitment: {}", e)))?,
-        );
+                BaseLayerScannerError::InvalidSideChainUtxoResponse(format!("Invalid commitment: {}", e)))?;
+        let substate_id = SubstateId::UnclaimedConfidentialOutput(commitment_address);
         let consensus_constants = self.epoch_manager.get_base_layer_consensus_constants().await?;
         let epoch = consensus_constants.height_to_epoch(block_info.height);
         let Some(local_committee_info) = self.epoch_manager.get_local_committee_info(epoch).await.optional()? else {
@@ -465,10 +569,10 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
             ))
         })?;
 
-        let substate = SubstateValue::UnclaimedConfidentialOutput(UnclaimedConfidentialOutput {
+        let substate = UnclaimedConfidentialOutput {
             commitment: output.commitment.clone(),
             encrypted_data,
-        });
+        };
 
         info!(
             target: LOG_TARGET,
@@ -486,55 +590,50 @@ impl<TAddr: NodeAddressable + 'static, TStore: StateStore> BaseLayerScanner<TAdd
                     return Ok(());
                 }
 
-                BurntUtxo::new(substate_id, substate, block_info.height).insert(tx)
+                BurntUtxo::new(commitment_address, substate, block_info.height).insert(tx)
             })
             .map_err(|source| BaseLayerScannerError::CouldNotRegisterBurntUtxo {
-                commitment: Box::new(output.commitment.clone()),
+                commitment: Box::new(output.commitment),
                 source,
             })?;
 
         Ok(())
     }
 
-    async fn register_validator_node_registration(
+    async fn add_validator_node_registration(
         &mut self,
-        height: u64,
+        activation_epoch: Epoch,
         registration: ValidatorNodeRegistration,
         minimum_value_promise: MicroMinotari,
     ) -> Result<(), BaseLayerScannerError> {
         info!(
             target: LOG_TARGET,
-            "⛓️ Validator node registration UTXO for {} found at height {}",
+            "⛓️ Validator node {} activated at {}",
             registration.public_key(),
-            height,
+            activation_epoch,
         );
 
         self.epoch_manager
-            .add_validator_node_registration(height, registration, minimum_value_promise)
+            .add_validator_node_registration(activation_epoch, registration, minimum_value_promise)
             .await?;
 
         Ok(())
     }
 
-    async fn register_code_template_registration(
+    async fn remove_validator_node_registration(
         &mut self,
-        template_name: String,
-        template_address: TemplateAddress,
-        registration: CodeTemplateRegistration,
-        block_info: &BlockInfo,
+        public_key: PublicKey,
+        deactivation_epoch: Epoch,
     ) -> Result<(), BaseLayerScannerError> {
         info!(
             target: LOG_TARGET,
-            "🌠 new template found with address {} at height {}", template_address, block_info.height
+            "⛓️ Deactivating validator node registration for {}",
+            public_key,
         );
-        let template = TemplateRegistration {
-            template_name,
-            template_address,
-            registration,
-            mined_height: block_info.height,
-            mined_hash: block_info.hash,
-        };
-        self.template_manager.add_template(template).await?;
+
+        self.epoch_manager
+            .deactivate_validator_node(public_key, deactivation_epoch)
+            .await?;
 
         Ok(())
     }
@@ -563,8 +662,6 @@ pub enum BaseLayerScannerError {
     SqliteStorageError(#[from] SqliteStorageError),
     #[error("Epoch manager error: {0}")]
     EpochManagerError(#[from] EpochManagerError),
-    #[error("Template manager error: {0}")]
-    TemplateManagerError(#[from] TemplateManagerError),
     #[error("Base node client error: {0}")]
     BaseNodeError(#[from] BaseNodeClientError),
     #[error("Invalid side chain utxo response: {0}")]
@@ -574,6 +671,14 @@ pub enum BaseLayerScannerError {
         commitment: Box<Commitment>,
         source: StorageError,
     },
+    #[error("Public key conversion error: {0}")]
+    PublicKeyConversion(ByteArrayError),
+    #[error("GRPC conversion error: {0}")]
+    GrpcConversion(String),
+    #[error("Template manager error: {0}")]
+    TemplateManagerError(#[from] TemplateManagerError),
+    #[error("URL parse error: {0}")]
+    UrlParse(#[from] ParseError),
 }
 
 enum BlockchainProgression {

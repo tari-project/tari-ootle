@@ -30,21 +30,24 @@ CREATE UNIQUE INDEX config_uniq_key on config (key);
 -- Transaction
 CREATE TABLE transactions
 (
-    id               INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    hash             TEXT     NOT NULL,
-    instructions     TEXT     NOT NULL,
-    signatures       TEXT     NOT NULL,
-    fee_instructions TEXT     NOT NULL,
-    inputs           TEXT     NOT NULL,
-    result           TEXT     NULL,
-    qcs              TEXT     NULL,
-    final_fee        BIGINT   NULL,
-    status           TEXT     NOT NULL,
-    dry_run          BOOLEAN  NOT NULL,
-    min_epoch        BIGINT   NULL,
-    max_epoch        BIGINT   NULL,
-    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                        INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    hash                      TEXT     NOT NULL,
+    network                   INTEGER  NOT NULL,
+    instructions              TEXT     NOT NULL,
+    fee_instructions          TEXT     NOT NULL,
+    inputs                    TEXT     NOT NULL,
+    signatures                TEXT     NOT NULL,
+    seal_signature            TEXT     NOT NULL,
+    is_seal_signer_authorized BOOLEAN  NOT NULL,
+    result                    TEXT     NULL,
+    qcs                       TEXT     NULL,
+    final_fee                 BIGINT   NULL,
+    status                    TEXT     NOT NULL,
+    dry_run                   BOOLEAN  NOT NULL,
+    min_epoch                 BIGINT   NULL,
+    max_epoch                 BIGINT   NULL,
+    created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX transactions_uniq_hash ON transactions (hash);

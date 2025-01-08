@@ -75,7 +75,8 @@ where
 }
 
 pub fn encode<T: Serialize + ?Sized>(val: &T) -> Result<Vec<u8>, BorError> {
-    let mut buf = Vec::with_capacity(512);
+    let len = encoded_len(val)?;
+    let mut buf = Vec::with_capacity(len);
     encode_into_writer(val, &mut buf).map_err(|e| BorError::new(format!("{:?}", e)))?;
     Ok(buf)
 }

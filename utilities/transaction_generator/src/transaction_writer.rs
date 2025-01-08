@@ -8,7 +8,7 @@ use indexmap::IndexSet;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::VersionedSubstateId;
-use tari_transaction::{Transaction, TransactionSignature, UnsignedTransaction};
+use tari_transaction::{Transaction, TransactionSealSignature, UnsealedTransactionV1};
 
 use crate::BoxedTransactionBuilder;
 
@@ -52,8 +52,8 @@ pub fn write_transactions<W: Write>(
 // TODO: This hack can be removed if/when we remove #[serde(flatten)] from Transaction
 #[derive(Serialize, Deserialize)]
 pub struct FixBincodeTransaction {
-    transaction: UnsignedTransaction,
-    signatures: Vec<TransactionSignature>,
+    transaction: UnsealedTransactionV1,
+    seal_signature: TransactionSealSignature,
     filled_inputs: IndexSet<VersionedSubstateId>,
 }
 
@@ -62,19 +62,19 @@ impl FixBincodeTransaction {
     pub fn into_transaction(self) -> Transaction {
         let FixBincodeTransaction {
             transaction,
-            signatures,
+            seal_signature,
             filled_inputs,
         } = self;
-        Transaction::new(transaction, signatures).with_filled_inputs(filled_inputs)
+        Transaction::new(transaction, seal_signature).with_filled_inputs(filled_inputs)
     }
 }
 
 impl From<Transaction> for FixBincodeTransaction {
     fn from(value: Transaction) -> Self {
-        let (transaction, signatures, filled_inputs) = value.into_parts();
+        let (transaction, seal_signature, filled_inputs) = value.into_parts();
         Self {
             transaction,
-            signatures,
+            seal_signature,
             filled_inputs,
         }
     }

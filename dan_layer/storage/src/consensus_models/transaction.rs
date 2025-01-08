@@ -9,7 +9,7 @@ use std::{
 
 use log::*;
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{committee::CommitteeInfo, SubstateLockType};
+use tari_dan_common_types::{committee::CommitteeInfo, NumPreshards, SubstateLockType, VersionedSubstateId};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason},
     transaction_receipt::TransactionReceiptAddress,
@@ -21,6 +21,7 @@ use crate::{
         AbortReason,
         BlockId,
         Decision,
+        Evidence,
         ExecutedTransaction,
         SubstatePledge,
         SubstatePledges,
@@ -232,6 +233,14 @@ impl TransactionRecord {
             }
         })
     }
+
+    pub fn to_initial_evidence(&self, num_preshards: NumPreshards, num_committees: u32) -> Evidence {
+        let inputs = self.transaction.all_inputs_iter();
+        let receipt = self.transaction.id().into_receipt_address();
+        Evidence::from_initial_substates(num_preshards, num_committees, inputs, [VersionedSubstateId::new(
+            receipt, 0,
+        )])
+    }
 }
 
 impl TransactionRecord {
@@ -301,6 +310,9 @@ impl TransactionRecord {
         tx_ids: I,
     ) -> Result<(Vec<Self>, HashSet<TransactionId>), StorageError> {
         let mut tx_ids = tx_ids.into_iter().copied().collect::<HashSet<_>>();
+        if tx_ids.is_empty() {
+            return Ok((vec![], tx_ids));
+        }
         let recs = tx.transactions_get_any(tx_ids.iter())?;
         for rec in &recs {
             tx_ids.remove(rec.transaction.id());
@@ -375,6 +387,52 @@ impl TransactionRecord {
         tx.transactions_finalize_all(block_id, transactions)
     }
 
+    pub fn has_all_required_input_pledges<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        local_committee_info: &CommitteeInfo,
+    ) -> Result<bool, StorageError> {
+        let inputs = self
+            .transaction()
+            .all_inputs_iter()
+            .map(|req| (local_committee_info.includes_substate_id(req.substate_id()), req));
+        let locks = tx.substate_locks_get_locked_substates_for_transaction(self.id())?;
+        let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
+        for (is_local, input) in inputs {
+            if is_local {
+                if locks.iter().all(|i| !i.satisfies_requirements(&input)) {
+                    debug!(
+                        target: LOG_TARGET,
+                        "{} Transaction {} is missing a local lock for input {} ({} lock(s) found)",
+                        local_committee_info.shard_group(),
+                        self.id(),
+                        input.substate_id(),
+                        locks.len(),
+                    );
+                    return Ok(false);
+                }
+            } else if pledges.iter().all(|p| !p.satisfies_requirement(&input)) {
+                let remote_shard_group = input.to_substate_address_zero_version().to_shard_group(
+                    local_committee_info.num_preshards(),
+                    local_committee_info.num_committees(),
+                );
+                debug!(
+                    target: LOG_TARGET,
+                    "{} Transaction {} is missing a pledge for input {} from {} ({} pledge(s) found)",
+                    local_committee_info.shard_group(),
+                    self.id(),
+                    input.substate_id(),
+                    remote_shard_group,
+                    pledges.len(),
+                );
+                return Ok(false);
+            } else {
+                // We have a lock/pledge for the input, continue
+            }
+        }
+        Ok(true)
+    }
+
     pub fn has_all_foreign_input_pledges<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
@@ -385,15 +443,15 @@ impl TransactionRecord {
             .all_inputs_iter()
             .filter(|i| !local_committee_info.includes_substate_id(i.substate_id()));
         // TODO(perf): this could be a bespoke DB query
-        #[allow(clippy::mutable_key_type)]
         let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
         for input in foreign_inputs {
             if pledges.iter().all(|p| !p.satisfies_requirement(&input)) {
                 debug!(
                     target: LOG_TARGET,
-                    "Transaction {} is missing a pledge for input {}",
+                    "Transaction {} is missing a pledge for input {} ({} pledge(s) found)",
                     self.id(),
-                    input.substate_id()
+                    input.substate_id(),
+                    pledges.len(),
                 );
                 return Ok(false);
             }

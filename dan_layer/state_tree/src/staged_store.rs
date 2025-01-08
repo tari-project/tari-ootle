@@ -4,8 +4,10 @@
 use std::collections::{HashMap, VecDeque};
 
 use log::debug;
+use tari_dan_common_types::option::DisplayContainer;
+use tari_jellyfish::{JmtStorageError, Node, NodeKey, StaleTreeNode, TreeStoreReader, TreeStoreWriter};
 
-use crate::{JmtStorageError, Node, NodeKey, StaleTreeNode, StateHashTreeDiff, TreeStoreReader, TreeStoreWriter};
+use crate::StateHashTreeDiff;
 
 const LOG_TARGET: &str = "tari::dan::consensus::sharded_state_tree";
 
@@ -29,7 +31,7 @@ impl<'s, S: TreeStoreReader<P>, P> StagedTreeStore<'s, S, P> {
     pub fn apply_pending_diff(&mut self, diff: StateHashTreeDiff<P>) {
         self.preceding_pending_state.reserve(diff.new_nodes.len());
         for (key, node) in diff.new_nodes {
-            debug!(target: LOG_TARGET, "PENDING INSERT: node {}", key);
+            debug!(target: LOG_TARGET, "PENDING INSERT: node {} leaf: {}", key, node.leaf().map(|l| l.value_hash()).display());
             self.preceding_pending_state.insert(key, node);
         }
 
@@ -49,7 +51,7 @@ impl<'s, S: TreeStoreReader<P>, P> StagedTreeStore<'s, S, P> {
     }
 }
 
-impl<'s, S: TreeStoreReader<P>, P: Clone> TreeStoreReader<P> for StagedTreeStore<'s, S, P> {
+impl<S: TreeStoreReader<P>, P: Clone> TreeStoreReader<P> for StagedTreeStore<'_, S, P> {
     fn get_node(&self, key: &NodeKey) -> Result<Node<P>, JmtStorageError> {
         if let Some(node) = self.new_tree_nodes.get(key).cloned() {
             return Ok(node);
@@ -62,7 +64,7 @@ impl<'s, S: TreeStoreReader<P>, P: Clone> TreeStoreReader<P> for StagedTreeStore
     }
 }
 
-impl<'s, S, P> TreeStoreWriter<P> for StagedTreeStore<'s, S, P> {
+impl<S, P> TreeStoreWriter<P> for StagedTreeStore<'_, S, P> {
     fn insert_node(&mut self, key: NodeKey, node: Node<P>) -> Result<(), JmtStorageError> {
         if self.new_tree_nodes.insert(key.clone(), node).is_some() {
             return Err(JmtStorageError::Conflict(key));

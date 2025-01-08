@@ -37,8 +37,8 @@ pub use validator_node_db::ValidatorNodeDb;
 mod epoch_db;
 pub use epoch_db::{DbEpoch, EpochDb};
 
-mod base_layer_hashes_db;
-pub use base_layer_hashes_db::{BaseLayerHashesDb, DbBaseLayerBlockInfo};
+mod base_layer_db;
+pub use base_layer_db::*;
 
 mod bmt_db;
 pub use bmt_db::{BmtDb, DbBmt};

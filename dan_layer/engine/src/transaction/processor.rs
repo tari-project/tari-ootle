@@ -66,38 +66,80 @@ use crate::{
     template::LoadedTemplate,
     traits::Invokable,
     transaction::TransactionError,
-    wasm::WasmProcess,
+    wasm::{WasmModule, WasmProcess},
 };
 
 const LOG_TARGET: &str = "tari::dan::engine::instruction_processor";
 pub const MAX_CALL_DEPTH: usize = 10;
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
 
+#[derive(Clone, Debug)]
+pub struct TransactionProcessorConfig {
+    pub network: Network,
+    pub template_binary_max_size_bytes: usize,
+}
+
+impl TransactionProcessorConfig {
+    pub fn builder() -> TransactionProcessorConfigBuilder {
+        TransactionProcessorConfigBuilder::default()
+    }
+}
+
+impl Default for TransactionProcessorConfig {
+    fn default() -> Self {
+        Self {
+            network: Default::default(),
+            template_binary_max_size_bytes: 1000 * 1000 * 5, // 5MB
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct TransactionProcessorConfigBuilder {
+    config: TransactionProcessorConfig,
+}
+
+impl TransactionProcessorConfigBuilder {
+    pub fn with_network(&mut self, network: Network) -> &mut Self {
+        self.config.network = network;
+        self
+    }
+
+    pub fn with_template_binary_max_size_bytes(&mut self, max_size: usize) -> &mut Self {
+        self.config.template_binary_max_size_bytes = max_size;
+        self
+    }
+
+    pub fn build(&self) -> TransactionProcessorConfig {
+        self.config.clone()
+    }
+}
+
 pub struct TransactionProcessor<TTemplateProvider> {
+    config: TransactionProcessorConfig,
     template_provider: Arc<TTemplateProvider>,
     state_db: ReadOnlyMemoryStateStore,
     auth_params: AuthParams,
     virtual_substates: VirtualSubstates,
     modules: Vec<Arc<dyn RuntimeModule>>,
-    network: Network,
 }
 
 impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> TransactionProcessor<TTemplateProvider> {
     pub fn new(
+        config: TransactionProcessorConfig,
         template_provider: Arc<TTemplateProvider>,
         state_db: ReadOnlyMemoryStateStore,
         auth_params: AuthParams,
         virtual_substates: VirtualSubstates,
         modules: Vec<Arc<dyn RuntimeModule>>,
-        network: Network,
     ) -> Self {
         Self {
+            config,
             template_provider,
             state_db,
             auth_params,
             virtual_substates,
             modules,
-            network,
         }
     }
 
@@ -105,12 +147,12 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let timer = Instant::now();
         let entity_id_provider = EntityIdProvider::new(transaction.hash(), 1000);
         let Self {
+            config,
             template_provider,
             state_db,
             auth_params,
             virtual_substates,
             modules,
-            network,
         } = self;
 
         let initial_auth_scope = AuthorizationScope::new(auth_params.initial_ownership_proofs);
@@ -122,16 +164,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         let tracker = StateTracker::new(state_db, virtual_substates, initial_call_scope, transaction.hash());
 
-        // TODO: We'll have a "notarized" transaction that is signed by a single key. It signs a challenge incl. all the
-        // signatures of the transaction. We could define this signature as the "default" owner or we
-        // could remove the idea of a default owner (OwnedBySigner) entirely.
-        // For now the first signature in the list is used.
-        let transaction_signer_public_key = transaction
-            .signatures()
-            .first()
-            .map(|sig| sig.public_key().clone())
+        // TODO: If the seal signer is authorized we use this as the signer public key, if not we use the first
+        // signature as the "default" owner. This is due to limitations of the current transaction model.
+        // We could remove the idea of a default owner (OwnedBySigner) entirely.
+        let transaction_signer_public_key = Some(transaction.seal_signature())
+            .filter(|_| transaction.is_seal_signer_authorized())
+            .map(|s| s.public_key())
+            .or(transaction.signatures().first().map(|s| s.public_key()))
+            .cloned()
             .ok_or_else(|| TransactionError::InvariantError {
-                details: "Transaction must have at least one signature".to_string(),
+                details: "Transaction must have at least one authorized signature".to_string(),
             })?;
 
         let runtime_interface = RuntimeInterfaceImpl::initialize(
@@ -141,7 +183,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             entity_id_provider,
             modules,
             MAX_CALL_DEPTH,
-            network,
+            config.network,
         )?;
 
         let runtime = Runtime::new(Arc::new(runtime_interface));
@@ -149,7 +191,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         let (fee_instructions, instructions) = transaction.into_instructions();
 
-        let fee_exec_results = Self::process_instructions(&template_provider, &runtime, fee_instructions);
+        let fee_exec_results = Self::process_instructions(&config, &template_provider, &runtime, fee_instructions);
 
         let fee_exec_result = match fee_exec_results {
             Ok(execution_results) => {
@@ -177,7 +219,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             },
         };
 
-        let instruction_result = Self::process_instructions(&*template_provider, &runtime, instructions);
+        let instruction_result = Self::process_instructions(&config, &*template_provider, &runtime, instructions);
 
         match instruction_result {
             Ok(execution_results) => {
@@ -217,13 +259,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     fn process_instructions(
+        config: &TransactionProcessorConfig,
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         instructions: Vec<Instruction>,
     ) -> Result<Vec<InstructionResult>, TransactionError> {
         let result: Result<_, _> = instructions
             .into_iter()
-            .map(|instruction| Self::process_instruction(template_provider, runtime, instruction))
+            .map(|instruction| Self::process_instruction(config, template_provider, runtime, instruction))
             .collect();
 
         // check that the finalized state is valid
@@ -235,6 +278,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     fn process_instruction(
+        config: &TransactionProcessorConfig,
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
         instruction: Instruction,
@@ -303,6 +347,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 )?;
                 Ok(InstructionResult::empty())
             },
+            Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),
         }
     }
 
@@ -318,6 +363,28 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             .interface()
             .workspace_invoke(WorkspaceAction::DropAllProofs, invoke_args![].into())?;
         Ok(())
+    }
+
+    /// Load, validate template binary and adds it to TemplateProvider.
+    pub fn publish_template(
+        config: &TransactionProcessorConfig,
+        runtime: &Runtime,
+        binary: Vec<u8>,
+    ) -> Result<InstructionResult, TransactionError> {
+        if binary.len() > config.template_binary_max_size_bytes {
+            return Err(TransactionError::WasmBinaryTooBig(
+                binary.len(),
+                config.template_binary_max_size_bytes,
+            ));
+        }
+
+        // validate binary
+        WasmModule::load_template_from_code(binary.as_slice())?;
+
+        // creating new substate
+        runtime.interface().publish_template(binary)?;
+
+        Ok(InstructionResult::empty())
     }
 
     pub fn create_account(

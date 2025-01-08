@@ -36,6 +36,7 @@ mod state_store;
 mod substate_resolver;
 mod virtual_substate;
 
+mod file_l1_submitter;
 pub mod transaction_validators;
 mod validator;
 mod validator_registration_file;
@@ -50,7 +51,7 @@ use tari_common::{
     exit_codes::{ExitCode, ExitError},
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_dan_app_utilities::keypair::setup_keypair_prompt;
+use tari_dan_app_utilities::{common::verify_correct_network, keypair::setup_keypair_prompt};
 use tari_dan_common_types::SubstateAddress;
 use tari_dan_storage::global::DbFactory;
 use tari_dan_storage_sqlite::SqliteDbFactory;
@@ -120,7 +121,8 @@ pub async fn run_validator_node(
     let metrics_registry = create_metrics_registry(keypair.public_key());
 
     let consensus_constants = ConsensusConstants::from(config.network);
-    let base_node_client = create_base_layer_client(config).await?;
+    let mut base_node_client = create_base_layer_client(config).await?;
+    verify_correct_network(&mut base_node_client, config.network).await?;
     let services = spawn_services(
         config,
         shutdown_signal.clone(),

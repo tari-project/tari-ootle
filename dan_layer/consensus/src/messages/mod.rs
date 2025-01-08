@@ -9,6 +9,9 @@ pub use new_view::*;
 mod proposal;
 pub use proposal::*;
 
+mod foreign_proposal;
+pub use foreign_proposal::*;
+
 mod vote;
 pub use vote::*;
 
@@ -19,4 +22,5 @@ mod requested_transaction;
 pub use requested_transaction::*;
 
 mod sync;
+
 pub use sync::*;

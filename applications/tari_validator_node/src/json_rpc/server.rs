@@ -23,7 +23,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{extract::Extension, routing::post, Router};
-use axum_jrpc::{JrpcResult, JsonRpcAnswer, JsonRpcExtractor};
+use axum_jrpc::{error::JsonRpcErrorReason, JrpcResult, JsonRpcAnswer, JsonRpcExtractor};
 use log::*;
 use tower_http::cors::CorsLayer;
 
@@ -91,6 +91,8 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "get_shard_key" => handlers.get_shard_key(value).await,
         "get_committee" => handlers.get_committee(value).await,
         "get_all_vns" => handlers.get_all_vns(value).await,
+        "get_base_layer_validator_changes" => handlers.get_base_layer_validator_changes(value).await,
+        "get_consensus_status" => handlers.get_consensus_status(value).await,
         // "get_network_committees" => handlers.get_network_committees(value).await,
         "get_fees" => handlers.get_validator_fees(value).await,
         // Comms
@@ -109,8 +111,12 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
                     serde_json::to_string_pretty(val).unwrap_or_else(|e| e.to_string())
                 );
             },
+            // Log application errors as debug as these are typically intentional
+            JsonRpcAnswer::Error(err) if matches!(err.error_reason(), JsonRpcErrorReason::ApplicationError(_)) => {
+                debug!(target: LOG_TARGET, "JSON-RPC: {}", err);
+            },
             JsonRpcAnswer::Error(err) => {
-                error!(target: LOG_TARGET, "🚨 JSON-RPC request failed: {}", err);
+                error!(target: LOG_TARGET, "JSON-RPC request failed: {}", err);
             },
         }
     }

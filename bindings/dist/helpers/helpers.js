@@ -4,6 +4,9 @@ export function substateIdToString(substateId) {
     if (substateId === null) {
         return "";
     }
+    if (typeof substateId === "string") {
+        return substateId;
+    }
     if ("Component" in substateId) {
         return substateId.Component;
     }

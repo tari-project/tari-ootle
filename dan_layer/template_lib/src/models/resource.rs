@@ -104,6 +104,13 @@ impl TryFrom<&[u8]> for ResourceAddress {
 
 newtype_struct_serde_impl!(ResourceAddress, BorTag<ObjectKey, TAG>);
 
+#[cfg(feature = "borsh")]
+impl borsh::BorshSerialize for ResourceAddress {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

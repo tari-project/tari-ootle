@@ -166,6 +166,7 @@ impl ManifestInstructionGenerator {
                                 SubstateId::UnclaimedConfidentialOutput(addr) => Ok(arg!(*addr)),
                                 SubstateId::NonFungibleIndex(addr) => Ok(arg!(addr)),
                                 SubstateId::FeeClaim(addr) => Ok(arg!(*addr)),
+                                SubstateId::Template(addr) => Ok(arg!(*addr)),
                             },
                             ManifestValue::Literal(lit) => lit_to_arg(lit),
                             ManifestValue::NonFungibleId(id) => Ok(arg!(id.clone())),

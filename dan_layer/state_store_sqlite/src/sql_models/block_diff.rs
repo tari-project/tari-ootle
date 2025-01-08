@@ -1,9 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::str::FromStr;
+
 use diesel::Queryable;
 use tari_dan_common_types::{shard::Shard, VersionedSubstateId};
 use tari_dan_storage::{consensus_models, consensus_models::BlockId, StorageError};
+use tari_engine_types::substate::SubstateId;
 use time::PrimitiveDateTime;
 
 use crate::serialization::{deserialize_hex_try_from, deserialize_json};
@@ -20,6 +23,7 @@ pub struct BlockDiff {
     pub shard: i32,
     pub change: String,
     pub state: Option<String>,
+    pub _state_hash: Option<String>,
     #[allow(dead_code)]
     pub created_at: PrimitiveDateTime,
 }
@@ -34,7 +38,7 @@ impl BlockDiff {
     }
 
     pub fn try_convert_change(d: Self) -> Result<consensus_models::SubstateChange, StorageError> {
-        let substate_id = d.substate_id.parse().map_err(|err| StorageError::DataInconsistency {
+        let substate_id = SubstateId::from_str(&d.substate_id).map_err(|err| StorageError::DataInconsistency {
             details: format!("Invalid substate id {}: {}", d.substate_id, err),
         })?;
         let id = VersionedSubstateId::new(substate_id, d.version as u32);

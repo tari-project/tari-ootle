@@ -22,7 +22,12 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use axum::{extract::Extension, middleware, routing::post, Router};
+use axum::{
+    extract::{DefaultBodyLimit, Extension},
+    middleware,
+    routing::post,
+    Router,
+};
 use axum_jrpc::{JrpcResult, JsonRpcExtractor};
 use log::*;
 use tower_http::cors::CorsLayer;
@@ -37,6 +42,8 @@ pub fn spawn_json_rpc(preferred_address: SocketAddr, handlers: JsonRpcHandlers) 
         .route("/json_rpc", post(handler))
         .layer(middleware::from_fn(logger::middleware_fn))
         .layer(Extension(Arc::new(handlers)))
+        // Limit the body size to 5MB to allow for large transactions (wasm uploads)
+        .layer(DefaultBodyLimit::max(5*1024*1024))
         .layer(CorsLayer::permissive());
 
     let server = axum::Server::try_bind(&preferred_address).or_else(|_| {

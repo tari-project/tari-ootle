@@ -46,6 +46,10 @@ where TConsensusSpec: ConsensusSpec
         }
     }
 
+    pub fn signing_service(&self) -> &TConsensusSpec::SignatureService {
+        &self.vote_signature_service
+    }
+
     /// Returns Some if quorum is reached
     pub async fn check_and_collect_vote(
         &self,
@@ -261,7 +265,8 @@ fn create_qc(vote_data: VoteData) -> QuorumCertificate {
         block,
     } = vote_data;
     QuorumCertificate::new(
-        *block.id(),
+        block.header().calculate_hash(),
+        *block.parent(),
         block.height(),
         block.epoch(),
         block.shard_group(),

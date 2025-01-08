@@ -1,10 +1,4 @@
-import type { Epoch } from "./Epoch";
-import type { Instruction } from "./Instruction";
-import type { SubstateRequirement } from "./SubstateRequirement";
-export interface UnsignedTransaction {
-    fee_instructions: Array<Instruction>;
-    instructions: Array<Instruction>;
-    inputs: Array<SubstateRequirement>;
-    min_epoch: Epoch | null;
-    max_epoch: Epoch | null;
-}
+import type { UnsignedTransactionV1 } from "./UnsignedTransactionV1";
+export type UnsignedTransaction = {
+    V1: UnsignedTransactionV1;
+};

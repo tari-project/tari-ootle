@@ -8,6 +8,8 @@ import type { ValidatorSignature } from "./ValidatorSignature";
 export interface QuorumCertificate {
   qc_id: string;
   block_id: string;
+  header_hash: string;
+  parent_id: string;
   block_height: NodeHeight;
   epoch: Epoch;
   shard_group: ShardGroup;

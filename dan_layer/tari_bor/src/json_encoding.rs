@@ -75,7 +75,7 @@ impl<'de> serde::Deserialize<'de> for CborValueJsonDeserializeWrapper {
         }
         #[doc(hidden)]
         struct __FieldVisitor;
-        impl<'de> serde::de::Visitor<'de> for __FieldVisitor {
+        impl serde::de::Visitor<'_> for __FieldVisitor {
             type Value = __Field;
 
             fn expecting(&self, __formatter: &mut Formatter) -> fmt::Result {

@@ -13,7 +13,6 @@ use tari_dan_storage::{
 };
 use tari_state_tree::{
     memory_store::MemoryTreeStore,
-    Hash,
     JmtStorageError,
     RootStateTree,
     SpreadPrefixStateTree,
@@ -21,6 +20,7 @@ use tari_state_tree::{
     StateHashTreeDiff,
     StateTreeError,
     SubstateTreeChange,
+    TreeHash,
     TreeStoreWriter,
     Version,
     SPARSE_MERKLE_PLACEHOLDER_HASH,
@@ -84,7 +84,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         &mut self,
         shard_group: ShardGroup,
         changes: IndexMap<Shard, Vec<SubstateTreeChange>>,
-    ) -> Result<Hash, StateTreeError> {
+    ) -> Result<TreeHash, StateTreeError> {
         let mut shard_state_roots = HashMap::with_capacity(changes.len());
         for (shard, changes) in changes {
             let current_version = self.get_current_version(shard)?;
@@ -113,7 +113,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
             let mut state_tree = SpreadPrefixStateTree::new(&mut store);
             debug!(target: LOG_TARGET, "v{next_version} contains {} tree change(s) for shard {shard}", changes.len());
             let shard_state_hash = state_tree.put_substate_changes(current_version, next_version, changes)?;
-            shard_state_roots.insert(shard, shard_state_hash);
+            shard_state_roots.insert(shard, TreeHash::from(shard_state_hash.into_array()));
             self.shard_tree_diffs
                 .insert(shard, VersionedStateHashTreeDiff::new(next_version, store.into_diff()));
         }
@@ -125,8 +125,8 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
     fn get_shard_group_root(
         &self,
         shard_group: ShardGroup,
-        mut shard_state_roots: HashMap<Shard, Hash>,
-    ) -> Result<Hash, StateTreeError> {
+        mut shard_state_roots: HashMap<Shard, TreeHash>,
+    ) -> Result<TreeHash, StateTreeError> {
         let mut mem_store = MemoryTreeStore::new();
         let mut root_tree = RootStateTree::new(&mut mem_store);
         let mut hashes = Vec::with_capacity(shard_group.len());
@@ -143,7 +143,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         Ok(hash)
     }
 
-    fn get_state_root_for_shard(&self, shard: Shard) -> Result<Hash, StateTreeError> {
+    fn get_state_root_for_shard(&self, shard: Shard) -> Result<TreeHash, StateTreeError> {
         let Some(version) = self.get_current_version(shard)? else {
             // At v0 there have been no state changes
             return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);

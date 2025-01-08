@@ -63,7 +63,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                 }
 
                 if leaf_block.height.is_zero() {
-                    info!(target: LOG_TARGET, "This node is at height 0 so cannot return any syn blocks. Ignoring request");
+                    info!(target: LOG_TARGET, "This node is at height 0 so cannot return any sync blocks. Ignoring request");
                     return Ok(vec![]);
                 }
 

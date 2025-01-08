@@ -50,7 +50,7 @@ import {
 } from "../../../api/hooks/useAccounts";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import queryClient from "../../../api/queryClient";
-import type { AccountInfo } from "@tari-project/typescript-bindings/wallet-daemon-client";
+import type { AccountInfo } from "@tari-project/typescript-bindings";
 
 function Account(account: AccountInfo, index: number) {
   const { pathname } = useLocation();
@@ -161,7 +161,7 @@ function Accounts() {
   const onClaimFreeCoins = async () => {
     await mutateCreateFeeTestCoins({
       accountName: "TestAccount",
-      amount: 200000,
+      amount: 1_000_000_000,
       fee: 1000,
     });
   };

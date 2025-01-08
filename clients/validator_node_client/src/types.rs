@@ -30,6 +30,7 @@ use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     shard::Shard,
     Epoch,
+    NodeHeight,
     PeerAddress,
     SubstateAddress,
 };
@@ -177,12 +178,8 @@ pub struct TemplateMetadata {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::string")]
     pub address: TemplateAddress,
-    pub url: String,
     /// SHA hash of binary
     pub binary_sha: Vec<u8>,
-    /// Block height in which the template was published
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub height: u64,
 }
 
 /// A request to submit a transaction
@@ -256,6 +253,59 @@ pub struct GetAllVnsRequest {
 )]
 pub struct GetAllVnsResponse {
     pub vns: Vec<BaseLayerValidatorNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
+)]
+pub struct GetBaseLayerEpochChangesRequest {
+    pub start_epoch: Epoch,
+    pub end_epoch: Epoch,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
+)]
+pub struct GetBaseLayerEpochChangesResponse {
+    pub changes: Vec<(Epoch, Vec<ValidatorNodeChange>)>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
+)]
+pub struct GetConsensusStatusResponse {
+    pub epoch: Epoch,
+    pub height: NodeHeight,
+    pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
+)]
+/// Represents a validator node state change
+pub enum ValidatorNodeChange {
+    Add {
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        public_key: PublicKey,
+        activation_epoch: Epoch,
+        minimum_value_promise: u64,
+    },
+    Remove {
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        public_key: PublicKey,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -513,7 +563,6 @@ pub struct ValidatorNode {
     pub public_key: PublicKey,
     pub shard_key: SubstateAddress,
     pub start_epoch: Epoch,
-    pub end_epoch: Epoch,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub fee_claim_public_key: PublicKey,
 }
@@ -525,7 +574,6 @@ impl From<models::ValidatorNode<PeerAddress>> for ValidatorNode {
             public_key: value.public_key,
             shard_key: value.shard_key,
             start_epoch: value.start_epoch,
-            end_epoch: value.end_epoch,
             fee_claim_public_key: value.fee_claim_public_key,
         }
     }
@@ -538,8 +586,7 @@ impl From<models::ValidatorNode<PeerAddress>> for ValidatorNode {
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetShardKeyRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub height: u64,
+    pub epoch: Epoch,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: PublicKey,
 }
@@ -675,6 +722,7 @@ pub struct GetEpochManagerStatsResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub current_block_hash: FixedHash,
     pub is_valid: bool,
+    pub start_epoch: Option<Epoch>,
     pub committee_info: Option<CommitteeInfo>,
 }
 

@@ -181,7 +181,7 @@ pub struct Executables<'a> {
     executables: &'a [Executable],
 }
 
-impl<'a> Executables<'a> {
+impl Executables<'_> {
     pub fn get(&self, instance_type: InstanceType) -> Option<&Executable> {
         self.executables.iter().find(|e| e.instance_type == instance_type)
     }

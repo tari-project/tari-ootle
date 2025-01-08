@@ -250,8 +250,7 @@ fn it_fails_on_invalid_calls() {
         .try_execute(
             Transaction::builder()
                 .call_method(components.composability_component, "invalid_state_call", args![])
-                .sign(&private_key)
-                .build(),
+                .build_and_seal(&private_key),
             vec![],
         )
         .unwrap();
@@ -286,8 +285,7 @@ fn it_does_not_propagate_permissions() {
                     fungible_resource,
                     Amount(100)
                 ])
-                .sign(&attacker_key)
-                .build(),
+                .build_and_seal(&attacker_key),
             // note that we are actually passing a valid proof of ownership for the victim. In reality, the engine only
             // passes the transaction signer proof but we are assuming the attacker was able to somehow
             // inject into the auth scope so that we can assert that proofs are not propagated in cross-template calls.
@@ -357,8 +355,7 @@ fn it_fails_when_surpassing_recursion_limit() {
         .try_execute(
             Transaction::builder()
                 .call_method(last_composability_component, "get_nested_value", args![])
-                .sign(&private_key)
-                .build(),
+                .build_and_seal(&private_key),
             vec![],
         )
         .unwrap();

@@ -10,6 +10,7 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::{ComponentBody, ComponentHeader},
     fees::{FeeBreakdown, FeeReceipt},
+    published_template::PublishedTemplate,
     substate::{Substate, SubstateDiff, SubstateId},
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
 };
@@ -45,31 +46,48 @@ pub fn create_execution_result_for_transaction(
             if output.substate_id().is_transaction_receipt() {
                 continue;
             }
-            assert!(
-                output.substate_id().is_component(),
-                "create_execution_result_for_transaction: Test harness only supports generating component outputs. \
-                 Got {output}"
-            );
 
-            // Generate consistent state for the component by simply using the ID
-            let state = tari_bor::to_value(output.versioned_substate_id()).unwrap();
-            diff.up(
-                output.versioned_substate_id().substate_id.clone(),
-                Substate::new(output.versioned_substate_id().version, ComponentHeader {
-                    template_address: Default::default(),
-                    module_name: "Test".to_string(),
-                    owner_key: Default::default(),
-                    owner_rule: Default::default(),
-                    access_rules: Default::default(),
-                    entity_id: output
-                        .versioned_substate_id()
-                        .substate_id
-                        .as_component_address()
-                        .unwrap()
-                        .entity_id(),
-                    body: ComponentBody { state },
-                }),
-            )
+            match output.substate_id() {
+                SubstateId::Component(_) => {
+                    // Generate consistent state for the component by simply using the ID
+                    let state = tari_bor::to_value(output.versioned_substate_id()).unwrap();
+                    diff.up(
+                        output.versioned_substate_id().substate_id.clone(),
+                        Substate::new(output.versioned_substate_id().version, ComponentHeader {
+                            template_address: Default::default(),
+                            module_name: "Test".to_string(),
+                            owner_key: Default::default(),
+                            owner_rule: Default::default(),
+                            access_rules: Default::default(),
+                            entity_id: output
+                                .versioned_substate_id()
+                                .substate_id
+                                .as_component_address()
+                                .unwrap()
+                                .entity_id(),
+                            body: ComponentBody { state },
+                        }),
+                    );
+                },
+                SubstateId::Template(_) => {
+                    let binary = transaction
+                        .instructions()
+                        .iter()
+                        .find_map(|i| i.published_template_binary())
+                        .expect("No publish template instruction found in transaction")
+                        .to_vec();
+                    diff.up(
+                        output.versioned_substate_id().substate_id.clone(),
+                        Substate::new(output.versioned_substate_id().version, PublishedTemplate { binary }),
+                    );
+                },
+                _ => {
+                    panic!(
+                        "create_execution_result_for_transaction: Test harness only supports generating component and \
+                         template outputs. Got {output}"
+                    );
+                },
+            }
         }
         // We MUST create the transaction receipt
         diff.up(
@@ -134,8 +152,7 @@ pub fn build_transaction(decision: Decision, inputs: Vec<SubstateRequirement>) -
     let tx = Transaction::builder()
         .call_function(Default::default(), "foo", args![])
         .with_inputs(inputs)
-        .sign(&k)
-        .build();
+        .build_and_seal(&k);
     let mut tx = TransactionRecord::new(tx);
     if decision.is_abort() {
         tx.set_abort_reason(RejectReason::ExecutionFailure("Test aborted".to_string()));

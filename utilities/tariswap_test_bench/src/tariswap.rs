@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use log::info;
+use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_engine_types::indexed_value::decode_value_at_path;
@@ -30,32 +31,34 @@ impl Runner {
         num_tariswaps: usize,
     ) -> anyhow::Result<Vec<TariSwap>> {
         let key = self.sdk.key_manager_api().derive_key(TRANSACTION_BRANCH, 0)?;
-        let mut builder = Transaction::builder().fee_transaction_pay_from_component(
-            in_account.address.as_component_address().unwrap(),
-            Amount(1000 * num_tariswaps as i64),
-        );
-        for _ in 0..num_tariswaps {
-            builder = builder.call_function(self.tariswap_template.address, "new", args![
-                XTR,
-                faucet.resource_address,
-                Amount(1)
-            ]);
-        }
 
         let fee_vault = self
             .sdk
             .accounts_api()
             .get_vault_by_resource(&in_account.address, &XTR)?;
 
-        let transaction = builder
+        let transaction = Transaction::builder()
+            .fee_transaction_pay_from_component(
+                in_account.address.as_component_address().unwrap(),
+                Amount(1000 * num_tariswaps as i64),
+            )
+            .then(|mut builder| {
+                for _ in 0..num_tariswaps {
+                    builder = builder.call_function(self.tariswap_template.address, "new", args![
+                        XTR,
+                        faucet.resource_address,
+                        Amount(1)
+                    ]);
+                }
+                builder
+            })
             .with_inputs([
                 SubstateRequirement::unversioned(in_account.address.clone()),
                 SubstateRequirement::unversioned(fee_vault.address.clone()),
                 SubstateRequirement::unversioned(XTR),
                 SubstateRequirement::unversioned(faucet.resource_address),
             ])
-            .sign(&key.key)
-            .build();
+            .build_and_seal(&key.key);
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.accept().unwrap();
@@ -95,6 +98,7 @@ impl Runner {
             .key_manager_api()
             .derive_key(TRANSACTION_BRANCH, primary_account.key_index)?;
         let mut tx_ids = Vec::with_capacity(200);
+        let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key);
 
         for i in 0..5 {
             for (i, tariswap) in tariswaps.iter().enumerate().skip(i * 200).take(200) {
@@ -144,9 +148,14 @@ impl Runner {
                     .call_method(account.address.as_component_address().unwrap(), "deposit", args![
                         Workspace("lp")
                     ])
-                    .sign(&primary_account_key.key)
-                    .sign(&key.key)
-                    .build();
+                    .with_authorized_seal_signer()
+                    .add_signature(&primary_account_pk, &key.key)
+                    .build_and_seal(&primary_account_key.key);
+
+                assert!(
+                    transaction.verify_all_signatures(),
+                    "Transaction signature verification failed"
+                );
 
                 tx_ids.push((
                     account.address.clone(),
@@ -200,6 +209,7 @@ impl Runner {
             .sdk
             .key_manager_api()
             .derive_key(TRANSACTION_BRANCH, primary_account.key_index)?;
+        let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key);
 
         let mut tx_ids = vec![];
         // Swap XTR for faucet
@@ -255,9 +265,9 @@ impl Runner {
                     .call_method(account.address.as_component_address().unwrap(), "deposit", args![
                         Workspace("swapped")
                     ])
-                    .sign(&primary_account_key.key)
-                    .sign(&key.key)
-                    .build();
+                    .with_authorized_seal_signer()
+                    .add_signature(&primary_account_pk, &key.key)
+                    .build_and_seal(&primary_account_key.key);
 
                 tx_ids.push(self.submit_transaction(transaction).await?);
             }
@@ -321,8 +331,7 @@ impl Runner {
                     .call_method(account.address.as_component_address().unwrap(), "deposit", args![
                         Workspace("swapped")
                     ])
-                    .sign(&key.key)
-                    .build();
+                    .build_and_seal(&key.key);
 
                 tx_ids.push(self.submit_transaction(transaction).await?);
             }

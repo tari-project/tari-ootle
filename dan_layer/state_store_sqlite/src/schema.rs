@@ -10,6 +10,7 @@ diesel::table! {
         shard -> Integer,
         change -> Text,
         state -> Nullable<Text>,
+        state_hash -> Nullable<Text>,
         created_at -> Timestamp,
     }
 }
@@ -48,8 +49,8 @@ diesel::table! {
 diesel::table! {
     burnt_utxos (id) {
         id -> Integer,
-        substate_id -> Text,
-        substate -> Text,
+        commitment -> Text,
+        output -> Text,
         base_layer_block_height -> BigInt,
         proposed_in_block -> Nullable<Text>,
         proposed_in_block_height -> Nullable<BigInt>,
@@ -106,6 +107,18 @@ diesel::table! {
         commit_block -> Text,
         qcs -> Text,
         shard_roots -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    evicted_nodes (id) {
+        id -> Integer,
+        epoch -> BigInt,
+        public_key -> Text,
+        evicted_in_block -> Nullable<Text>,
+        evicted_in_block_height -> Nullable<BigInt>,
+        eviction_committed_in_epoch -> Nullable<BigInt>,
         created_at -> Timestamp,
     }
 }
@@ -262,6 +275,7 @@ diesel::table! {
         transaction_id -> Text,
         depends_on_tx -> Text,
         lock_type -> Text,
+        is_local_only -> Bool,
         created_at -> Timestamp,
     }
 }
@@ -411,19 +425,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    suspended_nodes (id) {
-        id -> Integer,
-        epoch -> BigInt,
-        public_key -> Text,
-        suspended_in_block -> Text,
-        suspended_in_block_height -> BigInt,
-        resumed_in_block -> Nullable<Text>,
-        resumed_in_block_height -> Nullable<BigInt>,
-        created_at -> Timestamp,
-    }
-}
-
-diesel::table! {
     transaction_executions (id) {
         id -> Integer,
         block_id -> Text,
@@ -444,13 +445,14 @@ diesel::table! {
         original_decision -> Text,
         local_decision -> Nullable<Text>,
         remote_decision -> Nullable<Text>,
-        evidence -> Nullable<Text>,
+        evidence -> Text,
         transaction_fee -> BigInt,
         leader_fee -> Nullable<Text>,
         stage -> Text,
         pending_stage -> Nullable<Text>,
         is_ready -> Bool,
         confirm_stage -> Nullable<Text>,
+        is_global -> Bool,
         updated_at -> Timestamp,
         created_at -> Timestamp,
     }
@@ -504,14 +506,17 @@ diesel::table! {
 diesel::table! {
     transactions (id) {
         id -> Integer,
+        network -> Integer,
         transaction_id -> Text,
         fee_instructions -> Text,
         instructions -> Text,
-        signatures -> Text,
         inputs -> Text,
         filled_inputs -> Text,
         resolved_inputs -> Nullable<Text>,
         resulting_outputs -> Nullable<Text>,
+        signatures -> Text,
+        seal_signature -> Text,
+        is_seal_signer_authorized -> Bool,
         result -> Nullable<Text>,
         execution_time_ms -> Nullable<BigInt>,
         final_decision -> Nullable<Text>,
@@ -520,6 +525,7 @@ diesel::table! {
         abort_details -> Nullable<Text>,
         min_epoch -> Nullable<BigInt>,
         max_epoch -> Nullable<BigInt>,
+        schema_version -> BigInt,
         created_at -> Timestamp,
     }
 }
@@ -539,7 +545,7 @@ diesel::table! {
 diesel::table! {
     votes (id) {
         id -> Integer,
-        hash -> Text,
+        siphash -> BigInt,
         epoch -> BigInt,
         block_id -> Text,
         decision -> Integer,
@@ -558,6 +564,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     diagnostic_deleted_blocks,
     diagnostics_no_votes,
     epoch_checkpoints,
+    evicted_nodes,
     foreign_missing_transactions,
     foreign_parked_blocks,
     foreign_proposals,
@@ -581,7 +588,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     state_tree_shard_versions,
     substate_locks,
     substates,
-    suspended_nodes,
     transaction_executions,
     transaction_pool,
     transaction_pool_history,

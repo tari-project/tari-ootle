@@ -1,20 +1,45 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use log::{debug, warn};
 use tari_common::configuration::Network;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     DerivableFromPublicKey,
+    Epoch,
     ExtraFieldKey,
 };
-use tari_dan_storage::consensus_models::Block;
+use tari_dan_storage::consensus_models::{Block, QuorumCertificate};
 use tari_epoch_manager::EpochManagerReader;
 
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, ProposalValidationError},
     traits::{ConsensusSpec, LeaderStrategy, VoteSignatureService},
 };
+
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::block_validations";
+pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
+    current_epoch: Epoch,
+    block: &Block,
+    committee_info: &CommitteeInfo,
+    committee_for_block: &Committee<TConsensusSpec::Addr>,
+    vote_signing_service: &TConsensusSpec::SignatureService,
+    leader_strategy: &TConsensusSpec::LeaderStrategy,
+    config: &HotstuffConfig,
+) -> Result<(), HotStuffError> {
+    check_proposal::<TConsensusSpec>(
+        block,
+        committee_info,
+        committee_for_block,
+        vote_signing_service,
+        leader_strategy,
+        config,
+    )?;
+    // This proposal is valid, if it is for an epoch ahead of us, we need to sync
+    check_current_epoch(block, current_epoch)?;
+    Ok(())
+}
 
 pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     block: &Block,
@@ -27,16 +52,42 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     // TODO: in order to do the base layer block has validation, we need to ensure that we have synced to the tip.
     //       If not, we need some strategy for "parking" the blocks until we are at least at the provided hash or the
     //       tip. Without this, the check has a race condition between the base layer scanner and consensus.
+    //       A simpler suggestion is to use the BL epoch block which does not change within epochs
     // check_base_layer_block_hash::<TConsensusSpec>(block, epoch_manager, config).await?;
     check_network(block, config.network)?;
+    if block.is_genesis() {
+        return Err(ProposalValidationError::ProposingGenesisBlock {
+            proposed_by: block.proposed_by().to_string(),
+            hash: *block.id(),
+        }
+        .into());
+    }
     check_sidechain_id(block, config)?;
     if block.is_dummy() {
         check_dummy(block)?;
     }
-    check_hash_and_height(block)?;
     check_proposed_by_leader(leader_strategy, committee_for_block, block)?;
     check_signature(block)?;
-    check_quorum_certificate::<TConsensusSpec>(block, committee_for_block, committee_info, vote_signing_service)?;
+    check_block(block)?;
+    check_quorum_certificate::<TConsensusSpec>(
+        block.justify(),
+        committee_for_block,
+        committee_info,
+        vote_signing_service,
+    )?;
+    Ok(())
+}
+
+pub fn check_current_epoch(candidate_block: &Block, current_epoch: Epoch) -> Result<(), ProposalValidationError> {
+    if candidate_block.epoch() > current_epoch {
+        warn!(target: LOG_TARGET, "⚠️ Proposal for future epoch {} received. Current epoch is {}", candidate_block.epoch(), current_epoch);
+        return Err(ProposalValidationError::FutureEpoch {
+            block_id: *candidate_block.id(),
+            current_epoch,
+            block_epoch: candidate_block.epoch(),
+        });
+    }
+
     Ok(())
 }
 
@@ -113,26 +164,6 @@ pub async fn check_base_layer_block_hash<TConsensusSpec: ConsensusSpec>(
     Ok(())
 }
 
-pub fn check_hash_and_height(candidate_block: &Block) -> Result<(), ProposalValidationError> {
-    if candidate_block.is_genesis() {
-        return Err(ProposalValidationError::ProposingGenesisBlock {
-            proposed_by: candidate_block.proposed_by().to_string(),
-            hash: *candidate_block.id(),
-        });
-    }
-
-    let calculated_hash = candidate_block.calculate_hash().into();
-    if calculated_hash != *candidate_block.id() {
-        return Err(ProposalValidationError::BlockIdMismatch {
-            proposed_by: candidate_block.proposed_by().to_string(),
-            block_id: *candidate_block.id(),
-            calculated_hash,
-        });
-    }
-
-    Ok(())
-}
-
 pub fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
@@ -164,6 +195,13 @@ pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidation
             block_id: *candidate_block.id(),
             height: candidate_block.height(),
         })?;
+    debug!(
+        target: LOG_TARGET,
+        "Validating signature block_id={}, P={}, R={}",
+        candidate_block.id(),
+        candidate_block.proposed_by(),
+        validator_signature.get_public_nonce(),
+    );
     if !validator_signature.verify(candidate_block.proposed_by(), candidate_block.id()) {
         return Err(ProposalValidationError::InvalidSignature {
             block_id: *candidate_block.id(),
@@ -173,25 +211,29 @@ pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidation
     Ok(())
 }
 
-pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
-    candidate_block: &Block,
-    committee: &Committee<TConsensusSpec::Addr>,
-    committee_info: &CommitteeInfo,
-    vote_signing_service: &TConsensusSpec::SignatureService,
-) -> Result<(), HotStuffError> {
+pub fn check_block(candidate_block: &Block) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
-    if qc.is_zero() {
-        // TODO: This is potentially dangerous. There should be a check
-        // to make sure this is the start of the chain.
-
-        return Ok(());
-    }
     if candidate_block.height() <= qc.block_height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
             justify_block_height: qc.block_height(),
             candidate_block_height: candidate_block.height(),
-        }
-        .into());
+        });
+    }
+
+    Ok(())
+}
+
+pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
+    qc: &QuorumCertificate,
+    committee: &Committee<TConsensusSpec::Addr>,
+    committee_info: &CommitteeInfo,
+    vote_signing_service: &TConsensusSpec::SignatureService,
+) -> Result<(), HotStuffError> {
+    if qc.justifies_zero_block() {
+        // TODO: This is potentially dangerous. There should be a check
+        // to make sure this is the start of the chain.
+
+        return Ok(());
     }
 
     if qc.signatures().is_empty() {

@@ -197,7 +197,8 @@ async fn start(cli: &Cli) -> anyhow::Result<()> {
     let lock_file = config.base_dir.join("tari_swarm.pid");
     let _pid = lockfile::Lockfile::create(&lock_file).with_context(|| {
         anyhow!(
-            "Failed to acquire lockfile at {}. Is another instance already running?",
+            "Failed to acquire lockfile at '{}'. Is another instance already running? If not, swarm may have \
+             previously crashed and you may remove the lockfile.",
             lock_file.display()
         )
     })?;

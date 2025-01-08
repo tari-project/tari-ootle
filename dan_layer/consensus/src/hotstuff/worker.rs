@@ -7,6 +7,7 @@ use std::{
 };
 
 use log::*;
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     optional::Optional,
@@ -30,6 +31,7 @@ use tari_dan_storage::{
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
+use tari_state_tree::SPARSE_MERKLE_PLACEHOLDER_HASH;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{broadcast, mpsc};
 
@@ -139,6 +141,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 config.clone(),
                 state_store.clone(),
                 epoch_manager.clone(),
+                pacemaker.clone_handle().current_view().clone(),
                 leader_strategy.clone(),
                 signing_service.clone(),
                 outbound_messaging.clone(),
@@ -168,6 +171,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 state_store.clone(),
                 epoch_manager.clone(),
                 pacemaker.clone_handle(),
+                outbound_messaging.clone(),
             ),
             on_receive_vote: OnReceiveVoteHandler::new(pacemaker.clone_handle(), vote_receiver.clone()),
             on_receive_new_view: OnReceiveNewViewHandler::new(
@@ -240,6 +244,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.pacemaker
             .start(current_epoch, current_height, high_qc.block_height())
             .await?;
+        self.publish_event(HotstuffEvent::EpochChanged {
+            epoch: current_epoch,
+            registered_shard_group: Some(local_committee_info.shard_group()),
+        });
 
         let local_committee = self.epoch_manager.get_local_committee(current_epoch).await?;
         self.run(local_committee_info, local_committee).await?;
@@ -318,7 +326,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
                 Some(result) = self.on_inbound_message.next_message(current_epoch, current_height) => {
                     if let Err(e) = self.on_unvalidated_message(current_epoch, current_height, result, &local_committee_info, &local_committee).await {
-                        self.on_failure("on_inbound_message", &e).await;
+                        self.on_failure("on_unvalidated_message", &e).await;
                         return Err(e);
                     }
                 },
@@ -434,6 +442,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 Ok(())
             },
             MessageValidationResult::Discard => Ok(()),
+            // In these cases, we want to propagate the error back to the state machine, to allow sync
+            MessageValidationResult::Invalid {
+                err: err @ HotStuffError::FallenBehind { .. },
+                ..
+            } |
+            MessageValidationResult::Invalid {
+                err: err @ HotStuffError::ProposalValidationError(ProposalValidationError::FutureEpoch { .. }),
+                ..
+            } => {
+                self.hooks.on_error(&err);
+                Err(err)
+            },
             MessageValidationResult::Invalid { err, from, message } => {
                 self.hooks.on_error(&err);
                 error!(target: LOG_TARGET, "🚨 Invalid new message from {from}: {err} - {message}");
@@ -513,7 +533,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let is_any_block_unparked = !local_proposals.is_empty() || !foreign_proposals.is_empty();
 
         for msg in foreign_proposals {
-            if let Err(e) = self.on_receive_foreign_proposal.handle(msg, local_committee_info).await {
+            if let Err(e) = self
+                .on_receive_foreign_proposal
+                .handle_received(msg, local_committee_info)
+                .await
+            {
                 self.on_failure("check_if_block_can_be_unparked -> on_receive_foreign_proposal", &e)
                     .await;
                 return Err(e);
@@ -522,7 +546,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         for msg in local_proposals {
             if let Err(e) = self
-                .on_proposal_message(current_epoch, *local_committee_info, local_committee, msg)
+                .on_proposal_message(
+                    current_epoch,
+                    current_height,
+                    local_committee_info,
+                    local_committee,
+                    msg,
+                )
                 .await
             {
                 self.on_failure("check_if_block_can_be_unparked -> on_proposal_message", &e)
@@ -547,6 +577,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     );
                     return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
                 }
+                info!(
+                    target: LOG_TARGET,
+                    "🌟 This validator is registered for epoch {}.", epoch
+                );
 
                 // Edge case: we have started a VN and have progressed a few epochs quickly and have no blocks in
                 // previous epochs to update the current view. This only really applies when mining is
@@ -806,12 +840,32 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             ),
             HotstuffMessage::Proposal(msg) => log_err(
                 "on_receive_local_proposal",
-                self.on_proposal_message(current_epoch, *local_committee_info, local_committee, msg)
-                    .await,
+                self.on_proposal_message(
+                    current_epoch,
+                    current_height,
+                    local_committee_info,
+                    local_committee,
+                    msg,
+                )
+                .await,
             ),
             HotstuffMessage::ForeignProposal(msg) => log_err(
-                "on_receive_foreign_proposal",
-                self.on_receive_foreign_proposal.handle(msg, local_committee_info).await,
+                "on_receive_foreign_proposal (received)",
+                self.on_receive_foreign_proposal
+                    .handle_received(msg, local_committee_info)
+                    .await,
+            ),
+            HotstuffMessage::ForeignProposalNotification(msg) => log_err(
+                "on_receive_foreign_proposal (notification)",
+                self.on_receive_foreign_proposal
+                    .handle_notification_received(from, current_epoch, msg, local_committee_info)
+                    .await,
+            ),
+            HotstuffMessage::ForeignProposalRequest(msg) => log_err(
+                "on_receive_foreign_proposal (request)",
+                self.on_receive_foreign_proposal
+                    .handle_requested(from, msg, local_committee_info)
+                    .await,
             ),
             HotstuffMessage::Vote(msg) => log_err(
                 "on_receive_vote",
@@ -847,7 +901,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     async fn on_proposal_message(
         &mut self,
         current_epoch: Epoch,
-        local_committee_info: CommitteeInfo,
+        current_height: NodeHeight,
+        local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
         msg: ProposalMessage,
     ) -> Result<(), HotStuffError> {
@@ -858,7 +913,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .handle(current_epoch, local_committee_info, local_committee, msg)
                 .await,
         ) {
-            Ok(_) => Ok(()),
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                // We decided NOVOTE, so we immediately send a NEWVIEW
+                self.on_leader_timeout(current_epoch, current_height, local_committee)
+                    .await
+            },
             Err(err @ HotStuffError::ProposalValidationError(ProposalValidationError::JustifyBlockNotFound { .. })) => {
                 let vn = self
                     .epoch_manager
@@ -882,7 +942,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             let state_merkle_root = checkpoint
                 .map(|cp| cp.compute_state_merkle_root())
                 .transpose()?
-                .unwrap_or_default();
+                .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH);
             // The parent for genesis blocks refer to this zero block
             let mut zero_block = Block::zero_block(self.config.network, self.config.consensus_constants.num_preshards);
             if !zero_block.exists(&**tx)? {
@@ -897,7 +957,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 self.config.network,
                 epoch,
                 shard_group,
-                state_merkle_root,
+                FixedHash::from(state_merkle_root.into_array()),
                 self.config.sidechain_id.clone(),
             );
             if !genesis.exists(&**tx)? {

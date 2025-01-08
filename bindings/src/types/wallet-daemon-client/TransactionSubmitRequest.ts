@@ -7,5 +7,6 @@ export interface TransactionSubmitRequest {
   signing_key_index: number | null;
   autofill_inputs: Array<SubstateRequirement>;
   detect_inputs: boolean;
+  detect_inputs_use_unversioned: boolean;
   proof_ids: Array<number>;
 }

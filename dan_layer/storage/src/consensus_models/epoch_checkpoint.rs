@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use indexmap::IndexMap;
 use tari_dan_common_types::{shard::Shard, Epoch};
-use tari_state_tree::{compute_merkle_root_for_hashes, Hash, StateTreeError, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash, SPARSE_MERKLE_PLACEHOLDER_HASH};
 
 use crate::{
     consensus_models::{Block, QuorumCertificate},
@@ -18,11 +18,11 @@ use crate::{
 pub struct EpochCheckpoint {
     block: Block,
     linked_qcs: Vec<QuorumCertificate>,
-    shard_roots: IndexMap<Shard, Hash>,
+    shard_roots: IndexMap<Shard, TreeHash>,
 }
 
 impl EpochCheckpoint {
-    pub fn new(block: Block, linked_qcs: Vec<QuorumCertificate>, shard_roots: IndexMap<Shard, Hash>) -> Self {
+    pub fn new(block: Block, linked_qcs: Vec<QuorumCertificate>, shard_roots: IndexMap<Shard, TreeHash>) -> Self {
         Self {
             block,
             linked_qcs,
@@ -38,18 +38,18 @@ impl EpochCheckpoint {
         &self.block
     }
 
-    pub fn shard_roots(&self) -> &IndexMap<Shard, Hash> {
+    pub fn shard_roots(&self) -> &IndexMap<Shard, TreeHash> {
         &self.shard_roots
     }
 
-    pub fn get_shard_root(&self, shard: Shard) -> Hash {
+    pub fn get_shard_root(&self, shard: Shard) -> TreeHash {
         self.shard_roots
             .get(&shard)
             .copied()
             .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH)
     }
 
-    pub fn compute_state_merkle_root(&self) -> Result<Hash, StateTreeError> {
+    pub fn compute_state_merkle_root(&self) -> Result<TreeHash, StateTreeError> {
         let shard_group = self.block().shard_group();
         let hashes = shard_group
             .shard_iter()

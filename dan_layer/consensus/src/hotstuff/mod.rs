@@ -21,6 +21,7 @@ mod on_receive_request_missing_transactions;
 mod on_receive_vote;
 // mod on_sync_response;
 mod block_change_set;
+pub mod eviction_proof;
 mod foreign_proposal_processor;
 mod on_catch_up_sync;
 mod on_message_validate;

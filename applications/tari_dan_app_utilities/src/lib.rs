@@ -21,6 +21,7 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 pub mod base_layer_scanner;
+pub mod common;
 pub mod configuration;
 pub mod json_encoding;
 pub mod keypair;

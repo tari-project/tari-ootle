@@ -54,7 +54,7 @@ pub struct ConcurrentMapSemaphoreGuard<'a, K: Hash + Eq> {
     key: K,
 }
 
-impl<'a, K: Hash + Eq> ConcurrentMapSemaphoreGuard<'a, K> {
+impl<K: Hash + Eq> ConcurrentMapSemaphoreGuard<'_, K> {
     pub fn access(&self) -> MutexGuard<'_, ()> {
         // Unwrap: only errors if the mutex is poisoned, which is a bug
         self.map_mutex.lock().unwrap()

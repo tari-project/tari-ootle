@@ -31,13 +31,13 @@ pub struct TemplateModel {
     pub template_name: String,
     pub expected_hash: Vec<u8>,
     pub template_address: Vec<u8>,
-    pub url: String,
-    pub height: i64,
+    pub url: Option<String>,
+    pub epoch: i64,
     pub template_type: String,
+    pub author_public_key: Vec<u8>,
     pub compiled_code: Option<Vec<u8>>,
     pub flow_json: Option<String>,
     pub status: String,
-    pub wasm_path: Option<String>,
     pub manifest: Option<String>,
     pub added_at: NaiveDateTime,
 }
@@ -45,16 +45,15 @@ pub struct TemplateModel {
 #[derive(Debug, Insertable)]
 #[diesel(table_name = templates)]
 pub struct NewTemplateModel {
+    pub author_public_key: Vec<u8>,
+    pub template_address: Vec<u8>,
     pub template_name: String,
     pub expected_hash: Vec<u8>,
-    pub template_address: Vec<u8>,
-    pub url: String,
-    pub height: i64,
     pub template_type: String,
     pub compiled_code: Option<Vec<u8>>,
+    pub epoch: i64,
     pub flow_json: Option<String>,
     pub status: String,
-    pub wasm_path: Option<String>,
     pub manifest: Option<String>,
 }
 

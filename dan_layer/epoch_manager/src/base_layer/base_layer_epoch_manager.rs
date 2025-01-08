@@ -28,6 +28,7 @@ use tari_common_types::types::{FixedHash, PublicKey};
 use tari_core::{blocks::BlockHeader, transactions::transaction_components::ValidatorNodeRegistration};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
+    layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef},
     optional::Optional,
     DerivableFromPublicKey,
     Epoch,
@@ -37,14 +38,20 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::global::{models::ValidatorNode, DbBaseLayerBlockInfo, DbEpoch, GlobalDb, MetadataKey};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_utilities::{byte_array::ByteArray, hex::Hex};
+use tari_sidechain::EvictionProof;
+use tari_utilities::byte_array::ByteArray;
 use tokio::sync::{broadcast, oneshot};
 
-use crate::{base_layer::config::EpochManagerConfig, error::EpochManagerError, EpochManagerEvent};
+use crate::{
+    base_layer::config::EpochManagerConfig,
+    error::EpochManagerError,
+    traits::LayerOneTransactionSubmitter,
+    EpochManagerEvent,
+};
 
 const LOG_TARGET: &str = "tari::dan::epoch_manager::base_layer";
 
-pub struct BaseLayerEpochManager<TGlobalStore, TBaseNodeClient> {
+pub struct BaseLayerEpochManager<TGlobalStore, TBaseNodeClient, TLayerOneSubmitter> {
     global_db: GlobalDb<TGlobalStore>,
     base_node_client: TBaseNodeClient,
     config: EpochManagerConfig,
@@ -56,16 +63,21 @@ pub struct BaseLayerEpochManager<TGlobalStore, TBaseNodeClient> {
     node_public_key: PublicKey,
     current_shard_key: Option<SubstateAddress>,
     base_layer_consensus_constants: Option<BaseLayerConsensusConstants>,
+    layer_one_submitter: TLayerOneSubmitter,
     is_initial_base_layer_sync_complete: bool,
 }
 
-impl<TAddr: NodeAddressable + DerivableFromPublicKey>
-    BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient>
+impl<TAddr, TLayerOneSubmitter>
+    BaseLayerEpochManager<SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient, TLayerOneSubmitter>
+where
+    TAddr: NodeAddressable + DerivableFromPublicKey,
+    TLayerOneSubmitter: LayerOneTransactionSubmitter,
 {
     pub fn new(
         config: EpochManagerConfig,
         global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
         base_node_client: GrpcBaseNodeClient,
+        layer_one_submitter: TLayerOneSubmitter,
         tx_events: broadcast::Sender<EpochManagerEvent>,
         node_public_key: PublicKey,
     ) -> Self {
@@ -81,6 +93,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
             node_public_key,
             current_shard_key: None,
             base_layer_consensus_constants: None,
+            layer_one_submitter,
             is_initial_base_layer_sync_complete: false,
         }
     }
@@ -136,14 +149,13 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_nodes = self.global_db.validator_nodes(&mut tx);
 
-        let vns = validator_nodes.get_all_within_epoch(epoch, self.config.validator_node_sidechain_id.as_ref())?;
+        let vns = validator_nodes.get_all_registered_within_start_epoch(epoch)?;
 
         let num_committees = calculate_num_committees(vns.len() as u64, self.config.committee_size);
         for vn in vns {
             validator_nodes.set_committee_shard(
                 vn.shard_key,
                 vn.shard_key.to_shard_group(self.config.num_preshards, num_committees),
-                self.config.validator_node_sidechain_id.as_ref(),
                 epoch,
             )?;
         }
@@ -186,66 +198,29 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         Ok(())
     }
 
-    fn validator_nodes_count(
-        &self,
-        next_epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
-    ) -> Result<u64, EpochManagerError> {
-        let mut tx = self.global_db.create_transaction()?;
-        let result = self
-            .global_db
-            .validator_nodes(&mut tx)
-            .count_by_epoch(next_epoch, sidechain_id)?;
-        tx.commit()?;
-        Ok(result)
-    }
-
     pub async fn add_validator_node_registration(
         &mut self,
-        block_height: u64,
+        activation_epoch: Epoch,
         registration: ValidatorNodeRegistration,
     ) -> Result<(), EpochManagerError> {
-        if registration.sidechain_id() != self.config.validator_node_sidechain_id.as_ref() {
-            return Err(EpochManagerError::ValidatorNodeRegistrationSidechainIdMismatch {
-                expected: self.config.validator_node_sidechain_id.as_ref().map(|v| v.to_hex()),
-                actual: registration.sidechain_id().map(|v| v.to_hex()),
-            });
-        }
-
-        let constants = self.base_layer_consensus_constants().await?;
-        let mut next_epoch = constants.height_to_epoch(block_height) + Epoch(1);
-        let validator_node_expiry = constants.validator_node_registration_expiry;
-
-        // find the next available epoch
-        let mut next_epoch_vn_count = self.validator_nodes_count(next_epoch, registration.sidechain_id())?;
-        while next_epoch_vn_count >= self.config.max_vns_per_epoch_activated {
-            next_epoch += Epoch(1);
-            next_epoch_vn_count = self.validator_nodes_count(next_epoch, registration.sidechain_id())?;
-        }
-
-        let next_epoch_height = constants.epoch_to_height(next_epoch);
-
         let shard_key = self
             .base_node_client
-            .get_shard_key(next_epoch_height, registration.public_key())
+            .get_shard_key(activation_epoch, registration.public_key())
             .await?
             .ok_or_else(|| EpochManagerError::ShardKeyNotFound {
                 public_key: registration.public_key().clone(),
-                block_height,
+                epoch: activation_epoch,
             })?;
 
-        info!(target: LOG_TARGET, "Registering validator node for epoch {}", next_epoch);
+        info!(target: LOG_TARGET, "Registering validator node for epoch {}", activation_epoch);
 
         let mut tx = self.global_db.create_transaction()?;
         self.global_db.validator_nodes(&mut tx).insert_validator_node(
             TAddr::derive_from_public_key(registration.public_key()),
             registration.public_key().clone(),
             shard_key,
-            block_height,
-            next_epoch,
-            next_epoch + Epoch(validator_node_expiry),
+            activation_epoch,
             registration.claim_public_key().clone(),
-            registration.sidechain_id().cloned(),
         )?;
 
         if *registration.public_key() == self.node_public_key {
@@ -254,16 +229,32 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
             let last_registration_epoch = metadata
                 .get_metadata::<Epoch>(MetadataKey::EpochManagerLastEpochRegistration)?
                 .unwrap_or(Epoch(0));
-            if last_registration_epoch < next_epoch {
-                metadata.set_metadata(MetadataKey::EpochManagerLastEpochRegistration, &next_epoch)?;
+            if last_registration_epoch < activation_epoch {
+                metadata.set_metadata(MetadataKey::EpochManagerLastEpochRegistration, &activation_epoch)?;
             }
             self.current_shard_key = Some(shard_key);
             info!(
                 target: LOG_TARGET,
-                "📋️ This validator node is registered for epoch {}, shard key: {} ", next_epoch, shard_key
+                "📋️ This validator node is registered for epoch {}, shard key: {} ", activation_epoch, shard_key
             );
         }
 
+        tx.commit()?;
+
+        Ok(())
+    }
+
+    pub async fn deactivate_validator_node(
+        &mut self,
+        public_key: PublicKey,
+        deactivation_epoch: Epoch,
+    ) -> Result<(), EpochManagerError> {
+        info!(target: LOG_TARGET, "Deactivating validator node({}) registration", public_key);
+
+        let mut tx = self.global_db.create_transaction()?;
+        self.global_db
+            .validator_nodes(&mut tx)
+            .deactivate(public_key, deactivation_epoch)?;
         tx.commit()?;
 
         Ok(())
@@ -308,7 +299,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
     ) -> Result<(), EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         self.global_db
-            .base_layer_hashes(&mut tx)
+            .base_layer(&mut tx)
             .insert_base_layer_block_info(DbBaseLayerBlockInfo {
                 hash: block_hash,
                 height: block_height,
@@ -369,7 +360,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         let vn = self
             .global_db
             .validator_nodes(&mut tx)
-            .get_by_public_key(epoch, public_key, self.config.validator_node_sidechain_id.as_ref())
+            .get_by_public_key(epoch, public_key)
             .optional()?;
 
         Ok(vn)
@@ -388,7 +379,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         let vn = self
             .global_db
             .validator_nodes(&mut tx)
-            .get_by_address(epoch, address, self.config.validator_node_sidechain_id.as_ref())
+            .get_by_address(epoch, address)
             .optional()?;
 
         Ok(vn)
@@ -406,7 +397,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
             let vn = self
                 .global_db
                 .validator_nodes(&mut tx)
-                .get_by_public_key(epoch, &public_key, self.config.validator_node_sidechain_id.as_ref())
+                .get_by_public_key(epoch, &public_key)
                 .optional()?
                 .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
                     address: public_key.to_string(),
@@ -444,7 +435,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
     pub fn get_committees(&self, epoch: Epoch) -> Result<HashMap<ShardGroup, Committee<TAddr>>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        Ok(validator_node_db.get_committees(epoch, self.config.validator_node_sidechain_id.as_ref())?)
+        Ok(validator_node_db.get_committees(epoch)?)
     }
 
     pub fn get_committee_info_by_validator_address(
@@ -484,22 +475,21 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
 
         // TODO(perf): fetch full validator node records for the shard group in single query (current O(n + 1) queries)
-        let committees = self.get_committees_for_shard_group(epoch, shard_group)?;
+        let committees = self.get_committee_for_shard_group(epoch, shard_group, false, None)?;
 
         let mut res = vec![];
-        for (_, committee) in committees {
-            for pub_key in committee.public_keys() {
-                let vn = self.get_validator_node_by_public_key(epoch, pub_key)?.ok_or_else(|| {
-                    EpochManagerError::ValidatorNodeNotRegistered {
-                        address: TAddr::try_from_public_key(pub_key)
-                            .map(|a| a.to_string())
-                            .unwrap_or_else(|| pub_key.to_string()),
-                        epoch,
-                    }
-                })?;
-                res.push(vn);
-            }
+        for (_, pub_key) in committees {
+            let vn = self.get_validator_node_by_public_key(epoch, &pub_key)?.ok_or_else(|| {
+                EpochManagerError::ValidatorNodeNotRegistered {
+                    address: TAddr::try_from_public_key(&pub_key)
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| pub_key.to_string()),
+                    epoch,
+                }
+            })?;
+            res.push(vn);
         }
+        res.sort_by(|a, b| a.shard_key.cmp(&b.shard_key));
         Ok(res)
     }
 
@@ -521,10 +511,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
 
     pub fn get_validator_nodes_per_epoch(&self, epoch: Epoch) -> Result<Vec<ValidatorNode<TAddr>>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
-        let db_vns = self
-            .global_db
-            .validator_nodes(&mut tx)
-            .get_all_within_epoch(epoch, self.config.validator_node_sidechain_id.as_ref())?;
+        let db_vns = self.global_db.validator_nodes(&mut tx).get_all_within_epoch(epoch)?;
         let vns = db_vns.into_iter().map(Into::into).collect();
         Ok(vns)
     }
@@ -565,22 +552,6 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         }
     }
 
-    pub async fn remaining_registration_epochs(&mut self) -> Result<Option<Epoch>, EpochManagerError> {
-        let last_registration_epoch = match self.last_registration_epoch()? {
-            Some(epoch) => epoch,
-            None => return Ok(None),
-        };
-
-        let constants = self.get_base_layer_consensus_constants().await?;
-        let expiry = constants.validator_node_registration_expiry();
-
-        // Note this can be negative in some cases
-        let num_blocks_since_last_reg = self.current_epoch.saturating_sub(last_registration_epoch);
-
-        // None indicates that we are not registered, or a previous registration has expired
-        Ok(expiry.checked_sub(num_blocks_since_last_reg))
-    }
-
     pub fn get_our_validator_node(&self, epoch: Epoch) -> Result<ValidatorNode<TAddr>, EpochManagerError> {
         let vn = self
             .get_validator_node_by_public_key(epoch, &self.node_public_key)?
@@ -595,11 +566,8 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
 
     pub fn get_total_validator_count(&self, epoch: Epoch) -> Result<u64, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
-        let db_vns = self
-            .global_db
-            .validator_nodes(&mut tx)
-            .count(epoch, self.config.validator_node_sidechain_id.as_ref())?;
-        Ok(db_vns)
+        let count = self.global_db.validator_nodes(&mut tx).count(epoch)?;
+        Ok(count)
     }
 
     pub fn get_num_committees(&self, epoch: Epoch) -> Result<u32, EpochManagerError> {
@@ -618,11 +586,7 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         let shard_group = substate_address.to_shard_group(self.config.num_preshards, num_committees);
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let num_validators = validator_node_db.count_in_shard_group(
-            epoch,
-            self.config.validator_node_sidechain_id.as_ref(),
-            shard_group,
-        )?;
+        let num_validators = validator_node_db.count_in_shard_group(epoch, shard_group)?;
         let num_validators = u32::try_from(num_validators).map_err(|_| EpochManagerError::IntegerOverflow {
             func: "get_committee_shard",
         })?;
@@ -644,14 +608,32 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         self.get_committee_info_for_substate(epoch, vn.shard_key)
     }
 
-    pub(crate) fn get_committees_for_shard_group(
+    pub(crate) fn get_committee_for_shard_group(
+        &self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+        shuffle: bool,
+        limit: Option<usize>,
+    ) -> Result<Committee<TAddr>, EpochManagerError> {
+        let mut tx = self.global_db.create_transaction()?;
+        let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
+        let committees = validator_node_db.get_committee_for_shard_group(
+            epoch,
+            shard_group,
+            shuffle,
+            limit.unwrap_or(usize::MAX),
+        )?;
+        Ok(committees)
+    }
+
+    pub(crate) fn get_committees_overlapping_shard_group(
         &self,
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<HashMap<ShardGroup, Committee<TAddr>>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
-        let committees = validator_node_db.get_committees_for_shard_group(epoch, shard_group)?;
+        let committees = validator_node_db.get_committees_overlapping_shard_group(epoch, shard_group)?;
         Ok(committees)
     }
 
@@ -674,13 +656,35 @@ impl<TAddr: NodeAddressable + DerivableFromPublicKey>
         let _ignore = self.tx_events.send(event);
     }
 
-    pub async fn get_base_layer_block_height(&self, hash: FixedHash) -> Result<Option<u64>, EpochManagerError> {
+    pub fn get_base_layer_block_height(&self, hash: FixedHash) -> Result<Option<u64>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
-        let mut base_layer_hashes = self.global_db.base_layer_hashes(&mut tx);
+        let mut base_layer_hashes = self.global_db.base_layer(&mut tx);
         let info = base_layer_hashes
             .get_base_layer_block_height(hash)?
             .map(|info| info.height);
         Ok(info)
+    }
+
+    pub async fn add_intent_to_evict_validator(&self, proof: EvictionProof) -> Result<(), EpochManagerError> {
+        {
+            let mut tx = self.global_db.create_transaction()?;
+            // Currently we store this for ease of debugging, there is no specific need to store this in the database
+            let mut bl = self.global_db.base_layer(&mut tx);
+            bl.insert_eviction_proof(&proof)?;
+            tx.commit()?;
+        }
+
+        let proof = LayerOneTransactionDef {
+            proof_type: LayerOnePayloadType::EvictionProof,
+            payload: proof,
+        };
+
+        self.layer_one_submitter
+            .submit_transaction(proof)
+            .await
+            .map_err(|e| EpochManagerError::FailedToSubmitLayerOneTransaction { details: e.to_string() })?;
+
+        Ok(())
     }
 }
 

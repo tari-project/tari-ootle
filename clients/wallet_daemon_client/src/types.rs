@@ -100,9 +100,20 @@ pub struct TransactionSubmitRequest {
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub signing_key_index: Option<u64>,
     pub autofill_inputs: Vec<SubstateRequirement>,
+    /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
+    /// contain the required inputs.
     pub detect_inputs: bool,
+    /// If true(default), detected inputs will omit versions allowing consensus to resolve input substates.
+    /// If false, the wallet will try determine versioned for the inputs. These may be outdated if the substate has
+    /// changed since detection.
+    #[serde(default = "return_true")]
+    pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub proof_ids: Vec<ConfidentialProofId>,
+}
+
+const fn return_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -144,6 +155,38 @@ pub struct TransactionSubmitDryRunResponse {
     pub result: ExecuteResult,
     #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
     pub json_result: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct PublishTemplateRequest {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::base64")]
+    pub binary: Vec<u8>,
+    #[serde(deserialize_with = "opt_string_or_struct")]
+    pub fee_account: Option<ComponentAddressOrName>,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub max_fee: u64,
+    /// Attempt to infer inputs and their dependencies from instructions. If false, the provided transaction must
+    /// contain the required inputs.
+    pub detect_inputs: bool,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct PublishTemplateResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub transaction_id: TransactionId,
+    pub dry_run_fee: Option<Amount>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -471,7 +514,6 @@ pub struct AccountsGetBalancesResponse {
 )]
 pub struct BalanceEntry {
     pub vault_address: SubstateId,
-    #[serde(with = "serde_with::string")]
     pub resource_address: ResourceAddress,
     pub balance: Amount,
     pub resource_type: ResourceType,

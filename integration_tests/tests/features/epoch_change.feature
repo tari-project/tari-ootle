@@ -24,8 +24,8 @@ Feature: Epoch change
     When base wallet WALLET registers the template "faucet"
 
     # Mine them into registered epoch
-    When miner MINER mines 16 new blocks
-    Then VAL has scanned to height 19
+    When miner MINER mines 26 new blocks
+    Then VAL has scanned to height 29
     Then the validator node VAL is listed as registered
     Then the template "faucet" is listed as registered by the validator node VAL
 
@@ -42,8 +42,8 @@ Feature: Epoch change
 
     When Block count on VN VAL is at least 6
     When miner MINER mines 5 new blocks
-    Then VAL has scanned to height 24
-    Then the validator node VAL switches to epoch 2
+    Then VAL has scanned to height 34
+    Then the validator node VAL has ended epoch 2
 
 #  @serial
 #  Scenario: Committee is split into two during epoch change

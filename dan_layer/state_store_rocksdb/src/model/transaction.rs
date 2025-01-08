@@ -36,75 +36,9 @@ use crate::error::RocksDbStorageError;
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct TransactionModel {
-    // Needed as a workaround to avoid serialization problems with the tari_transaction::Transaction struct
-    // as serde(flatten) is not supported in bincode: https://github.com/bincode-org/bincode/issues/245
-    transaction: TransactionInner,
-    execution_result: Option<ExecuteResult>,
-    resulting_outputs: Option<Vec<VersionedSubstateIdLockIntent>>,
-    resolved_inputs: Option<Vec<VersionedSubstateIdLockIntent>>,
-    final_decision: Option<Decision>,
-    finalized_time: Option<Duration>,
-    abort_reason: Option<RejectReason>,
-}
-
-impl From<TransactionRecord> for TransactionModel {
-    fn from(rec: TransactionRecord) -> Self {
-        TransactionModel {
-            transaction: rec.transaction.into(),
-            execution_result: rec.execution_result,
-            resulting_outputs: rec.resulting_outputs,
-            resolved_inputs: rec.resolved_inputs,
-            final_decision: rec.final_decision,
-            finalized_time: rec.finalized_time,
-            abort_reason: rec.abort_reason,
-        }
-    }
-}
-
-impl From<TransactionModel> for TransactionRecord {
-    fn from(model: TransactionModel) -> Self {
-        TransactionRecord {
-            transaction: model.transaction.into(),
-            execution_result: model.execution_result,
-            resulting_outputs: model.resulting_outputs,
-            resolved_inputs: model.resolved_inputs,
-            final_decision: model.final_decision,
-            finalized_time: model.finalized_time,
-            abort_reason: model.abort_reason,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct TransactionInner {
-    id: TransactionId,
-    transaction: UnsignedTransaction,
-    signatures: Vec<TransactionSignature>,
-    filled_inputs: IndexSet<VersionedSubstateId>,
-}
-
-impl From<tari_transaction::Transaction> for TransactionInner {
-    fn from(tx: tari_transaction::Transaction) -> Self {
-        TransactionInner {
-            id: *tx.id(),
-            transaction: tx.unsigned_transaction().clone(),
-            signatures: tx.signatures().to_vec(),
-            filled_inputs: tx.filled_inputs().clone(),
-        }
-    }
-}
-
-impl From<TransactionInner> for tari_transaction::Transaction {
-    fn from(tx: TransactionInner) -> Self {
-        tari_transaction::Transaction::new(
-            tx.transaction,
-            tx.signatures,
-        ).with_filled_inputs(tx.filled_inputs)
-    }
-}
-
+pub(crate) struct TransactionModel {}
 
 impl TransactionModel {
     pub const KEY_PREFIX: &str = "transactions";
@@ -114,14 +48,12 @@ impl TransactionModel {
     }
 
     fn encode(value: &TransactionRecord) -> Result<Vec<u8>, RocksDbStorageError> {
-        let value = Self::from(value.clone());
         let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
         Ok(bytes)
     }
 
     fn decode(bytes: Vec<u8>) -> Result<TransactionRecord, RocksDbStorageError> {
-        let (value, _): (TransactionModel, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
-        let value: TransactionRecord = value.into();
+        let (value, _): (TransactionRecord, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
         Ok(value)
     }
 

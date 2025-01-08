@@ -135,7 +135,7 @@ pub async fn create_component(
 
 pub(crate) fn add_substate_ids(world: &mut TariWorld, outputs_name: String, diff: &SubstateDiff) {
     let outputs = world.outputs.entry(outputs_name).or_default();
-    let mut counters = [0usize, 0, 0, 0, 0, 0, 0, 0, 0];
+    let mut counters = [0usize, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     for (addr, data) in diff.up_iter() {
         match addr {
             SubstateId::Component(_) => {
@@ -194,6 +194,13 @@ pub(crate) fn add_substate_ids(world: &mut TariWorld, outputs_name: String, diff
                     version: Some(data.version()),
                 });
                 counters[7] += 1;
+            },
+            SubstateId::Template(_) => {
+                outputs.insert(format!("published_template/{}", counters[8]), SubstateRequirement {
+                    substate_id: addr.clone(),
+                    version: Some(data.version()),
+                });
+                counters[8] += 1;
             },
         }
     }

@@ -6,6 +6,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHashSizeError;
 use tari_crypto::tari_utilities::hex::{from_hex, Hex};
@@ -13,7 +14,7 @@ use tari_dan_common_types::{SubstateAddress, ToSubstateAddress};
 use tari_engine_types::{serde_with, transaction_receipt::TransactionReceiptAddress};
 use tari_template_lib::Hash;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default, BorshSerialize)]
 #[serde(transparent)]
 pub struct TransactionId {
     #[serde(with = "serde_with::hex")]

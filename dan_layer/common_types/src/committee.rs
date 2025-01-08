@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_engine_types::substate::SubstateId;
 
-use crate::{shard::Shard, Epoch, NumPreshards, ShardGroup, SubstateAddress};
+use crate::{NumPreshards, ShardGroup, SubstateAddress};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default, Hash)]
 #[cfg_attr(
@@ -18,7 +18,7 @@ use crate::{shard::Shard, Epoch, NumPreshards, ShardGroup, SubstateAddress};
 )]
 pub struct Committee<TAddr> {
     // TODO: not pub
-    #[cfg_attr(feature = "ts", ts(type = "Array<[TAddr, string]>"))]
+    #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
     pub members: Vec<(TAddr, PublicKey)>,
 }
 
@@ -63,10 +63,8 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         self.members.shuffle(&mut OsRng);
     }
 
-    pub fn shuffled(&self) -> impl Iterator<Item = &TAddr> + '_ {
-        self.members
-            .choose_multiple(&mut OsRng, self.len())
-            .map(|(addr, _)| addr)
+    pub fn shuffled(&self) -> impl Iterator<Item = &(TAddr, PublicKey)> + '_ {
+        self.members.choose_multiple(&mut OsRng, self.len())
     }
 
     pub fn select_n_random(&self, n: usize) -> impl Iterator<Item = &TAddr> + '_ {
@@ -234,6 +232,9 @@ impl CommitteeInfo {
     }
 
     pub fn includes_substate_id(&self, substate_id: &SubstateId) -> bool {
+        if substate_id.is_global() {
+            return true;
+        }
         // version doesnt affect shard
         let addr = SubstateAddress::from_substate_id(substate_id, 0);
         let shard = addr.to_shard(self.num_shards);
@@ -258,7 +259,7 @@ impl CommitteeInfo {
             .any(|substate_address| self.includes_substate_address(substate_address.borrow()))
     }
 
-    pub fn filter<'a, I, B>(&'a self, items: I) -> impl Iterator<Item = B> + '_
+    pub fn filter<'a, I, B>(&'a self, items: I) -> impl Iterator<Item = B> + 'a
     where
         I: IntoIterator<Item = B> + 'a,
         B: Borrow<SubstateAddress>,
@@ -267,30 +268,10 @@ impl CommitteeInfo {
             .into_iter()
             .filter(|substate_address| self.includes_substate_address(substate_address.borrow()))
     }
-}
 
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub struct NetworkCommitteeInfo<TAddr> {
-    pub epoch: Epoch,
-    pub committees: Vec<CommitteeShardInfo<TAddr>>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/")
-)]
-pub struct CommitteeShardInfo<TAddr> {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub shard: Shard,
-    pub substate_address_range: RangeInclusive<SubstateAddress>,
-    pub validators: Committee<TAddr>,
+    pub fn all_shard_groups_iter(&self) -> impl Iterator<Item = ShardGroup> {
+        self.num_shards.all_shard_groups_iter(self.num_committees)
+    }
 }
 
 #[cfg(test)]

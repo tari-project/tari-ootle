@@ -47,9 +47,9 @@ where TConsensusSpec: ConsensusSpec
                 // self.pacemaker
                 //     .update_view(high_qc.epoch(), high_qc.block_height(), high_qc.block_height())
                 //     .await?;
-                // Reset the block time and leader timeouts
+                // Reset the leader timeout (not the block timer)
                 self.pacemaker.reset_leader_timeout(high_qc.block_height()).await?;
-                // If we reached quorum, trigger a check to see if we should propose
+                // We've reached quorum, trigger a check to see if we should propose immediately
                 self.pacemaker.beat();
             },
             Ok(None) => {},

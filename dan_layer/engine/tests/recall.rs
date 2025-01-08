@@ -25,8 +25,7 @@ fn it_recalls_all_resource_types() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(recall_template, "new", args![initial_supply])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -45,8 +44,7 @@ fn it_recalls_all_resource_types() {
             .call_method(account, "deposit", args![Workspace("buckets.0")])
             .call_method(account, "deposit", args![Workspace("buckets.1")])
             .call_method(account, "deposit", args![Workspace("buckets.2")])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -72,8 +70,7 @@ fn it_recalls_all_resource_types() {
             .call_method(account, "balance", args![fungible_resource])
             .call_method(account, "balance", args![non_fungible_resource])
             .call_method(account, "balance", args![confidential_resource])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 

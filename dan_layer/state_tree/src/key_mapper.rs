@@ -1,9 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::substate::SubstateId;
-
-use crate::{jellyfish::LeafKey, Hash};
+use tari_dan_common_types::VersionedSubstateId;
+use tari_jellyfish::{jmt_node_hash, LeafKey, TreeHash};
 
 pub trait DbKeyMapper<T> {
     fn map_to_leaf_key(id: &T) -> LeafKey;
@@ -11,17 +10,17 @@ pub trait DbKeyMapper<T> {
 
 pub struct SpreadPrefixKeyMapper;
 
-impl DbKeyMapper<SubstateId> for SpreadPrefixKeyMapper {
-    fn map_to_leaf_key(id: &SubstateId) -> LeafKey {
-        let hash = crate::jellyfish::jmt_node_hash(id);
+impl DbKeyMapper<VersionedSubstateId> for SpreadPrefixKeyMapper {
+    fn map_to_leaf_key(id: &VersionedSubstateId) -> LeafKey {
+        let hash = jmt_node_hash(id);
         LeafKey::new(hash)
     }
 }
 
 pub struct HashIdentityKeyMapper;
 
-impl DbKeyMapper<Hash> for HashIdentityKeyMapper {
-    fn map_to_leaf_key(hash: &Hash) -> LeafKey {
+impl DbKeyMapper<TreeHash> for HashIdentityKeyMapper {
+    fn map_to_leaf_key(hash: &TreeHash) -> LeafKey {
         LeafKey::new(*hash)
     }
 }

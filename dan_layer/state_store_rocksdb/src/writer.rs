@@ -41,7 +41,7 @@ use tari_dan_storage::{
         Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, StateTransition, StateTransitionId, SubstateChange, SubstateCreatedProof, SubstateData, SubstateLock, SubstatePledge, SubstatePledges, SubstateRecord, SubstateUpdate, TransactionPool, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
     }, Ordering, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeNode, Version};
 use tari_transaction::TransactionId;
 use tari_utilities::ByteArray;
@@ -913,11 +913,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         &mut self,
         tx_id: TransactionId,
         decision: Decision,
+        initial_evidence: &Evidence,
         is_ready: bool,
+        is_global: bool,
     ) -> Result<(), StorageError> {
         let value = TransactionPoolRecord::load(
             tx_id,
-            Evidence::default(),
+            initial_evidence.clone(),
+            is_global,
             0,
             None,
             TransactionPoolStage::New,
@@ -2111,38 +2114,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn burnt_utxos_set_proposed_block(
         &mut self,
-        substate_id: &SubstateId,
+        commitment: &UnclaimedConfidentialOutputAddress,
         proposed_in_block: &BlockId,
     ) -> Result<(), StorageError> {
         todo!()
-        /*
-        use crate::schema::{blocks, burnt_utxos};
-
-        let proposed_in_block_hex = serialize_hex(proposed_in_block);
-        let num_affected = diesel::update(burnt_utxos::table)
-            .filter(burnt_utxos::substate_id.eq(substate_id.to_string()))
-            .set((
-                burnt_utxos::proposed_in_block.eq(&proposed_in_block_hex),
-                burnt_utxos::proposed_in_block_height.eq(blocks::table
-                    .select(blocks::height)
-                    .filter(blocks::block_id.eq(&proposed_in_block_hex))
-                    .single_value()),
-            ))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "burnt_utxos_set_proposed_block",
-                source: e,
-            })?;
-
-        if num_affected == 0 {
-            return Err(StorageError::NotFound {
-                item: "burnt_utxo".to_string(),
-                key: substate_id.to_string(),
-            });
-        }
-
-        Ok(())
-        */
     }
 
     fn burnt_utxos_clear_proposed_block(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError> {
@@ -2167,28 +2142,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         */
     }
 
-    fn burnt_utxos_delete(&mut self, substate_id: &SubstateId) -> Result<(), StorageError> {
+    fn burnt_utxos_delete(&mut self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<(), StorageError> {
         todo!()
-        /*
-        use crate::schema::burnt_utxos;
-
-        let num_affected = diesel::delete(burnt_utxos::table)
-            .filter(burnt_utxos::substate_id.eq(substate_id.to_string()))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "burnt_utxos_delete",
-                source: e,
-            })?;
-
-        if num_affected == 0 {
-            return Err(StorageError::NotFound {
-                item: "burnt_utxo".to_string(),
-                key: substate_id.to_string(),
-            });
-        }
-
-        Ok(())
-        */
     }
 
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(
@@ -2383,85 +2338,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         */
     }
 
-    fn suspended_nodes_insert(
-        &mut self,
-        public_key: &PublicKey,
-        suspended_in_block: BlockId,
-    ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        let suspended_in_block = serialize_hex(suspended_in_block);
-        sql_query(
-            r#"
-            INSERT INTO
-                suspended_nodes (public_key, epoch, suspended_in_block, suspended_in_block_height)
-                SELECT ?, epoch, block_id, height FROM blocks where block_id = ?"#,
-        )
-        .bind::<Text, _>(public_key.to_hex())
-        .bind::<Text, _>(suspended_in_block)
-        .execute(self.connection())
-        .map_err(|e| SqliteStorageError::DieselError {
-            operation: "suspended_nodes_insert",
-            source: e,
-        })?;
-
-        Ok(())
-        */
-    }
-
-    fn suspended_nodes_mark_for_removal(
-        &mut self,
-        public_key: &PublicKey,
-        resumed_in_block: BlockId,
-    ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, suspended_nodes};
-        let resumed_in_block = serialize_hex(resumed_in_block);
-
-        diesel::update(suspended_nodes::table)
-            .set((
-                suspended_nodes::resumed_in_block.eq(&resumed_in_block),
-                suspended_nodes::resumed_in_block_height.eq(blocks::table
-                    .select(blocks::height)
-                    .filter(blocks::block_id.eq(&resumed_in_block))
-                    .single_value()),
-            ))
-            .filter(suspended_nodes::public_key.eq(public_key.to_hex()))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "suspended_nodes_mark_for_removal",
-                source: e,
-            })?;
-
-        Ok(())
-        */
-    }
-
-    fn suspended_nodes_delete(&mut self, public_key: &PublicKey) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::suspended_nodes;
-
-        let num_affected = diesel::delete(suspended_nodes::table)
-            .filter(suspended_nodes::public_key.eq(public_key.to_hex()))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "suspended_nodes_delete",
-                source: e,
-            })?;
-
-        if num_affected == 0 {
-            return Err(StorageError::NotFound {
-                item: "suspended_node",
-                key: public_key.to_string(),
-            });
-        }
-
-        Ok(())
-        */
-    }
-
     fn diagnostics_add_no_vote(&mut self, block_id: BlockId, reason: NoVoteReason) -> Result<(), StorageError> {
         todo!()
         /*
@@ -2489,6 +2365,29 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         Ok(())
         */
+    }
+    
+    fn lock_conflicts_remove_by_transaction_ids<'a, I: IntoIterator<Item = &'a TransactionId>>(
+        &mut self,
+        transaction_ids: I,
+    ) -> Result<(), StorageError> {
+        todo!()
+    }
+    
+    fn lock_conflicts_remove_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
+        todo!()
+    }
+    
+    fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError> {
+        todo!()
+    }
+    
+    fn evicted_nodes_mark_eviction_as_committed(
+        &mut self,
+        public_key: &PublicKey,
+        epoch: Epoch,
+    ) -> Result<(), StorageError> {
+        todo!()
     }
 }
 

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use tari_dan_common_types::option::DisplayContainer;
 use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 
 use crate::{
@@ -41,7 +42,7 @@ where TConsensusSpec: ConsensusSpec
         if !missing.is_empty() {
             warn!(
                 target: LOG_TARGET,
-                "Some requested transaction(s) not found: {}", missing.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ")
+                "Some requested transaction(s) not found: {}", missing.display()
             )
         }
 

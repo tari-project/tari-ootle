@@ -20,8 +20,7 @@ fn it_prevents_reentrant_withdraw() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(faucet_addr, "mint", args![Amount(1000)])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -34,8 +33,7 @@ fn it_prevents_reentrant_withdraw() {
             .call_method(faucet, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("bucket")
             .call_function(template_addr, "with_bucket", args![Workspace("bucket")])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -50,8 +48,7 @@ fn it_prevents_reentrant_withdraw() {
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(reentrancy, "get_balance", args![])
             .call_method(account, "deposit", args![Workspace("bucket")])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
     // Locked for read but attempted to lock the same component for write
@@ -69,8 +66,7 @@ fn it_allows_multiple_immutable_access_to_component() {
     test.execute_expect_success(
         Transaction::builder()
             .call_method(reentrancy, "reentrant_access_immutable", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 }
@@ -84,8 +80,7 @@ fn it_prevents_read_access_to_mutating_component() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(reentrancy, "reentrant_access", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -106,8 +101,7 @@ fn it_prevents_multiple_mutable_access_to_component() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(reentrancy, "reentrant_access_mut", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 

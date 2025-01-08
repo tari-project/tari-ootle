@@ -43,13 +43,18 @@ mod faucet_template {
             Component::new(Self {
                 vault: Vault::from_bucket(coins),
             })
-            .with_access_rules(AccessRules::allow_all())
-            .create()
+                .with_access_rules(AccessRules::allow_all())
+                .create()
         }
 
         pub fn take_free_coins(&mut self) -> Bucket {
             debug!("Withdrawing 1000 coins from faucet");
             self.vault.withdraw(Amount(1000))
+        }
+
+        pub fn take_free_coins_custom(&mut self, amount: Amount) -> Bucket {
+            debug!("Withdrawing {} coins from faucet", amount);
+            self.vault.withdraw(amount)
         }
 
         pub fn take_free_coins_confidential(&mut self, proof: ConfidentialWithdrawProof) -> Bucket {

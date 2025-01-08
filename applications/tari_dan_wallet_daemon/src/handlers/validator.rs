@@ -76,8 +76,7 @@ pub async fn handle_claim_validator_fees(
 
     let transaction = Transaction::builder()
         .with_fee_instructions(fee_instructions)
-        .sign(&account_secret_key.key)
-        .build();
+        .build_and_seal(&account_secret_key.key);
 
     // send the transaction
     let required_inputs = inputs.into_iter().map(Into::into).collect();

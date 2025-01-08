@@ -77,7 +77,7 @@ impl<'a, R: Read + Seek> IoReaderValueLookup<'a, R> {
     }
 }
 
-impl<'a, R: Read + Seek> ValueLookupTable for IoReaderValueLookup<'a, R> {
+impl<R: Read + Seek> ValueLookupTable for IoReaderValueLookup<'_, R> {
     type Error = io::Error;
 
     fn lookup(&mut self, value: u64) -> Result<Option<[u8; 32]>, Self::Error> {

@@ -40,9 +40,8 @@ impl Default for Config {
             relay_reservation_limits: RelayReservationLimits::default(),
             // This is the default for identify
             identify_interval: Duration::from_secs(5 * 60),
-            // 1MiB, 64 times the libp2p default
-            // TODO: change this to a lower limit when foreign proposal messages are smaller
-            gossip_sub_max_message_size: 1024 * 1024,
+            // 128KiB, 2 times the libp2p default
+            gossip_sub_max_message_size: 124 * 1024,
         }
     }
 }

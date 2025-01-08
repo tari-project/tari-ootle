@@ -1,6 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::fmt::Display;
+
 use tari_dan_common_types::{shard::Shard, SubstateAddress, ToSubstateAddress, VersionedSubstateId};
 use tari_engine_types::substate::Substate;
 use tari_state_tree::SubstateTreeChange;
@@ -115,16 +117,39 @@ impl From<SubstateRecord> for SubstateChange {
     }
 }
 
+impl Display for SubstateChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SubstateChange::Up {
+                id,
+                shard,
+                transaction_id,
+                substate,
+            } => write!(
+                f,
+                "Up: {}, {}, transaction_id: {}, substate hash: {}",
+                id,
+                shard,
+                transaction_id,
+                substate.to_value_hash()
+            ),
+            SubstateChange::Down {
+                id,
+                shard,
+                transaction_id,
+            } => write!(f, "Down: {}, {}, transaction_id: {}", id, shard, transaction_id),
+        }
+    }
+}
+
 impl From<&SubstateChange> for SubstateTreeChange {
     fn from(value: &SubstateChange) -> Self {
         match value {
             SubstateChange::Up { id, substate, .. } => SubstateTreeChange::Up {
-                id: id.substate_id().clone(),
+                id: id.clone(),
                 value_hash: substate.to_value_hash(),
             },
-            SubstateChange::Down { id, .. } => SubstateTreeChange::Down {
-                id: id.substate_id().clone(),
-            },
+            SubstateChange::Down { id, .. } => SubstateTreeChange::Down { id: id.clone() },
         }
     }
 }

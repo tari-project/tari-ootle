@@ -4,7 +4,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::Extension,
+    extract::{DefaultBodyLimit, Extension},
     http::{Request, StatusCode},
     middleware::Next,
     response::Response,
@@ -73,6 +73,8 @@ pub fn spawn_listener(
         .layer(Extension((preferred_address,signaling_server_address)))
         .layer(Extension(Arc::new(shutdown_signal.clone())))
         .layer(CorsLayer::permissive())
+        // Limit the body size to 5MB to allow for wasm uploads
+        .layer(DefaultBodyLimit::max(5*1024*1024))
         .layer(axum::middleware::from_fn(extract_token));
 
     let server = axum::Server::try_bind(&preferred_address)?;
@@ -124,6 +126,7 @@ async fn handler(
             "submit_instruction" => call_handler(context, value, token, transaction::handle_submit_instruction).await,
             "submit" => call_handler(context, value, token, transaction::handle_submit).await,
             "submit_dry_run" => call_handler(context, value, token, transaction::handle_submit_dry_run).await,
+            "publish_template" => call_handler(context, value, token, transaction::handle_publish_template).await,
             "get" => call_handler(context, value, token, transaction::handle_get).await,
             "get_result" => call_handler(context, value, token, transaction::handle_get_result).await,
             "wait_result" => call_handler(context, value, token, transaction::handle_wait_result).await,

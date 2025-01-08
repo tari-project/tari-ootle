@@ -15,6 +15,7 @@ use tari_utilities::epoch_time::EpochTime;
 
 mod confirm_all_transitions {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
+    use tari_dan_storage::consensus_models::Evidence;
 
     use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
@@ -65,9 +66,9 @@ mod confirm_all_transitions {
         .unwrap();
         block1.insert(&mut tx).unwrap();
         
-        tx.transaction_pool_insert_new(atom1.id, atom1.decision, true).unwrap();
-        tx.transaction_pool_insert_new(atom2.id, atom2.decision, true).unwrap();
-        tx.transaction_pool_insert_new(atom3.id, atom3.decision, true).unwrap();
+        tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false).unwrap();
+        tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false).unwrap();
+        tx.transaction_pool_insert_new(atom3.id, atom3.decision, &Evidence::empty(), true, false).unwrap();
         let block_id = *block1.id();
         let transactions = tx.transaction_pool_get_all().unwrap();
         let mut tx_1 = transactions
@@ -139,6 +140,7 @@ mod confirm_all_transitions {
 }
 
 mod transaction_operations {
+    use tari_common_types::types::PrivateKey;
     use tari_dan_common_types::SubstateRequirement;
     use tari_dan_storage::consensus_models::TransactionRecord;
     use tari_engine_types::commit_result::RejectReason;
@@ -168,21 +170,21 @@ mod transaction_operations {
             Transaction::builder()
             .add_instruction(Instruction::DropAllProofsInWorkspace)
             .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
-            .build()
+            .build_and_seal(&PrivateKey::default())
         );
         tx.transactions_insert(&tx1).unwrap();
         let tx2 = TransactionRecord::new(
             Transaction::builder()
             .add_instruction(Instruction::DropAllProofsInWorkspace)
             .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
-            .build()
+            .build_and_seal(&PrivateKey::default())
         );
         tx.transactions_insert(&tx2).unwrap();
         let unexisting_tx = TransactionRecord::new(
             Transaction::builder()
             .add_instruction(Instruction::DropAllProofsInWorkspace)
             .add_input(SubstateRequirement::new(create_random_substate_id(), Some(2)))
-            .build()
+            .build_and_seal(&PrivateKey::default())
         );
 
         // transactions_get
@@ -205,7 +207,7 @@ mod transaction_operations {
             Transaction::builder()
             .add_instruction(Instruction::DropAllProofsInWorkspace)
             .add_input(SubstateRequirement::new(create_random_substate_id(), Some(3)))
-            .build()
+            .build_and_seal(&PrivateKey::default())
         );
         tx.transactions_insert(&updated_tx).unwrap();
 
@@ -233,13 +235,13 @@ mod transaction_operations {
             Transaction::builder()
             .add_instruction(Instruction::DropAllProofsInWorkspace)
             .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
-            .build()
+            .build_and_seal(&PrivateKey::default())
         );
         let tx4 = TransactionRecord::new(
             Transaction::builder()
             .add_instruction(Instruction::DropAllProofsInWorkspace)
             .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
-            .build()
+            .build_and_seal(&PrivateKey::default())
         );
         tx.transactions_save_all(vec![&tx3, &tx4]).unwrap();    
         let res = tx.transactions_get_paginated(10, 0, None).unwrap();
@@ -252,8 +254,9 @@ mod transaction_operations {
 mod transaction_execution_operations {
     use std::{process::id, time::Duration};
 
+    use tari_common_types::types::PrivateKey;
     use tari_dan_common_types::{NumPreshards, SubstateRequirement};
-    use tari_dan_storage::consensus_models::{BlockTransactionExecution, TransactionRecord};
+    use tari_dan_storage::consensus_models::{BlockTransactionExecution, Evidence, TransactionRecord};
     use tari_engine_types::{commit_result::{ExecuteResult, FinalizeResult, TransactionResult}, fees::{FeeBreakdown, FeeReceipt}, substate::SubstateDiff};
     use tari_template_lib::{models::Amount, Hash};
     use tari_transaction::{Instruction, Transaction};
@@ -282,14 +285,14 @@ mod transaction_execution_operations {
             Transaction::builder()
             .add_instruction(Instruction::DropAllProofsInWorkspace)
             .add_input(SubstateRequirement::new(create_random_substate_id(), Some(0)))
-            .build()
+            .build_and_seal(&PrivateKey::default())
         );
         tx.transactions_insert(&tx1).unwrap();
         let tx2 = TransactionRecord::new(
             Transaction::builder()
             .add_instruction(Instruction::DropAllProofsInWorkspace)
             .add_input(SubstateRequirement::new(create_random_substate_id(), Some(1)))
-            .build()
+            .build_and_seal(&PrivateKey::default())
         );
         tx.transactions_insert(&tx2).unwrap();
 
@@ -331,7 +334,7 @@ mod transaction_execution_operations {
         assert_eq_debug(&res, &exec1);
 
         // transactions_finalize_all
-        tx.transaction_pool_insert_new(*tx1.id(), tx1.current_decision(), true).unwrap();
+        tx.transaction_pool_insert_new(*tx1.id(), tx1.current_decision(), &Evidence::empty(), true, false).unwrap();
         let transactions = tx.transaction_pool_get_all().unwrap();
         tx.transactions_finalize_all(*zero_block.id(), transactions.iter()).unwrap();     
 

@@ -119,6 +119,7 @@ impl TransactionPoolModel {
         Ok(TransactionPoolRecord::load(
             *value.transaction_id(),
             evidence,
+            value.is_global(),
             transaction_fee as u64,
             leader_fee,
             value.stage(),

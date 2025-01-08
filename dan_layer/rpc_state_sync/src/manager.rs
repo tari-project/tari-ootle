@@ -42,7 +42,7 @@ use tari_dan_storage::{
 use tari_engine_types::substate::hash_substate;
 use tari_epoch_manager::EpochManagerReader;
 use tari_rpc_framework::RpcError;
-use tari_state_tree::{Hash, SpreadPrefixStateTree, SubstateTreeChange, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service::ValidatorNodeRpcClient,
@@ -207,11 +207,11 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
                     let change = match &transition.update {
                         SubstateUpdate::Create(create) => SubstateTreeChange::Up {
-                            id: create.substate.substate_id.clone(),
+                            id: create.substate.to_versioned_substate_id(),
                             value_hash: hash_substate(&create.substate.substate_value, create.substate.version),
                         },
                         SubstateUpdate::Destroy(destroy) => SubstateTreeChange::Down {
-                            id: destroy.substate_id.clone(),
+                            id: destroy.to_versioned_substate_id()
                         },
                     };
 
@@ -249,7 +249,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         &self,
         shard: Shard,
         version: Option<Version>,
-    ) -> Result<Hash, CommsRpcConsensusSyncError> {
+    ) -> Result<TreeHash, CommsRpcConsensusSyncError> {
         let Some(version) = version else {
             return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
         };
@@ -316,14 +316,16 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let prev_epoch = current_epoch.saturating_sub(Epoch(1));
         info!(target: LOG_TARGET,"Previous epoch is {}", prev_epoch);
+        // We want to get any committees from the previous epoch that overlap with our shard group in this epoch
         let committees = self
             .epoch_manager
-            .get_committees_by_shard_group(prev_epoch, local_info.shard_group())
+            .get_committees_overlapping_shard_group(prev_epoch, local_info.shard_group())
             .await?;
 
         // TODO: not strictly necessary to sort by shard but easier on the eyes in logs
         let mut committees = committees.into_iter().collect::<Vec<_>>();
         committees.sort_by_key(|(k, _)| *k);
+        info!(target: LOG_TARGET, "🛜 Querying {} shard group(s) from epoch {}", committees.len(), prev_epoch);
         Ok(committees)
     }
 
@@ -361,16 +363,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     async fn check_sync(&self) -> Result<SyncStatus, Self::Error> {
         let current_epoch = self.epoch_manager.current_epoch().await?;
 
-        let leaf_epoch = self.state_store.with_read_tx(|tx| {
-            let epoch = LeafBlock::get(tx, current_epoch)
-                .optional()?
-                .map(|leaf| leaf.epoch())
-                .unwrap_or(Epoch(0));
-            Ok::<_, Self::Error>(epoch)
-        })?;
+        let leaf_block = self
+            .state_store
+            .with_read_tx(|tx| LeafBlock::get(tx, current_epoch).optional())?;
 
         // We only sync if we're behind by an epoch. The current epoch is replayed in consensus.
-        if current_epoch > leaf_epoch {
+        if current_epoch > leaf_block.map_or(Epoch::zero(), |b| b.epoch()) {
+            info!(target: LOG_TARGET, "🛜Our current leaf block is behind the current epoch. Syncing...");
+            return Ok(SyncStatus::Behind);
+        }
+
+        if leaf_block.is_some_and(|l| l.height.is_zero()) {
+            // We only have the genesis for the epoch, let's assume we're behind in this case
             info!(target: LOG_TARGET, "🛜Our current leaf block is behind the current epoch. Syncing...");
             return Ok(SyncStatus::Behind);
         }
@@ -414,8 +418,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                     let checkpoint = match self.fetch_epoch_checkpoint(&mut client, current_epoch).await {
                         Ok(Some(cp)) => cp,
                         Ok(None) => {
-                            // EDGE-CASE: This may occur because the previous epoch had not started at the consensus
-                            // level.
+                            // TODO: we should check with f + 1 validators in this case. If a single validator reports
+                            // this falsely, this will prevent us from continuing with consensus for a long time (state
+                            // root will mismatch).
+                            // TODO: we should instead ask the base layer if this is the first epoch in the network
                             warn!(
                                 target: LOG_TARGET,
                                 "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
@@ -451,7 +457,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                                     actual = state_root,
                                 );
                                 last_error = Some(CommsRpcConsensusSyncError::StateRootMismatch {
-                                    expected: *checkpoint.block().state_merkle_root(),
+                                    expected: TreeHash::from(checkpoint.block().state_merkle_root().into_array()),
                                     actual: state_root,
                                 });
                                 // TODO: rollback state
@@ -486,6 +492,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
             return Err(err);
         }
 
+        info!(target: LOG_TARGET, "🛜State sync complete");
         Ok(())
     }
 }

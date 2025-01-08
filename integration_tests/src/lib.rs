@@ -21,6 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
+    collections::HashMap,
     fmt::{Debug, Formatter},
     fs,
     time::{Duration, Instant},
@@ -47,6 +48,7 @@ use tari_crypto::{
     ristretto::{RistrettoComSig, RistrettoSecretKey},
 };
 use tari_dan_common_types::SubstateRequirement;
+use tari_sidechain::EvictionProof;
 use template::RegisteredTemplate;
 use validator_node::ValidatorNodeProcess;
 use wallet::WalletProcess;
@@ -96,6 +98,7 @@ pub struct TariWorld {
     /// A receiver wallet address that is used for default one-sided coinbase payments
     pub default_payment_address: TariAddress,
     pub consensus_manager: ConsensusManager,
+    pub eviction_proofs: HashMap<String, EvictionProof>,
 }
 
 impl TariWorld {
@@ -155,8 +158,18 @@ impl TariWorld {
             .unwrap_or_else(|| panic!("Validator node {} not found", name))
     }
 
-    pub fn all_validators_iter(&self) -> impl Iterator<Item = &ValidatorNodeProcess> {
-        self.validator_nodes.values().chain(self.vn_seeds.values())
+    pub fn get_validator_node_mut(&mut self, name: &str) -> &mut ValidatorNodeProcess {
+        self.validator_nodes
+            .get_mut(name)
+            .or_else(|| self.vn_seeds.get_mut(name))
+            .unwrap_or_else(|| panic!("Validator node {} not found", name))
+    }
+
+    pub fn all_running_validators_iter(&self) -> impl Iterator<Item = &ValidatorNodeProcess> + Clone {
+        self.validator_nodes
+            .values()
+            .chain(self.vn_seeds.values())
+            .filter(|vn| !vn.handle.is_finished())
     }
 
     pub fn get_indexer(&self, name: &str) -> &IndexerProcess {
@@ -177,6 +190,11 @@ impl TariWorld {
             .get(name)
             .unwrap_or_else(|| panic!("Account component address {} not found", name));
         all_components.get("components/Account").cloned()
+    }
+
+    pub fn add_eviction_proof<T: Into<String>>(&mut self, name: T, eviction_proof: EvictionProof) -> &mut Self {
+        self.eviction_proofs.insert(name.into(), eviction_proof);
+        self
     }
 
     pub fn after(&mut self, _scenario: &Scenario) {
@@ -287,6 +305,7 @@ impl Default for TariWorld {
             wallet_private_key,
             default_payment_address,
             consensus_manager: ConsensusManager::builder(Network::LocalNet).build().unwrap(),
+            eviction_proofs: HashMap::new(),
         }
     }
 }

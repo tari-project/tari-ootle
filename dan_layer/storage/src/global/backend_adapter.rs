@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::collections::HashMap;
 
 use serde::{de::DeserializeOwned, Serialize};
 use tari_common_types::types::{FixedHash, PublicKey};
@@ -33,10 +33,11 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 
-use super::{base_layer_hashes_db::DbBaseLayerBlockInfo, DbEpoch};
+use super::{DbBaseLayerBlockInfo, DbEpoch};
 use crate::{
     atomic::AtomicDb,
     global::{
+        base_layer_db::DbLayer1Transaction,
         metadata_db::MetadataKey,
         models::ValidatorNode,
         template_db::{DbTemplate, DbTemplateUpdate},
@@ -82,17 +83,27 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         address: Self::Addr,
         public_key: PublicKey,
         shard_key: SubstateAddress,
-        registered_at_base_height: u64,
         start_epoch: Epoch,
-        end_epoch: Epoch,
         fee_claim_public_key: PublicKey,
-        sidechain_id: Option<PublicKey>,
     ) -> Result<(), Self::Error>;
-    fn get_validator_nodes_within_epoch(
+
+    fn deactivate_validator_node(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        public_key: PublicKey,
+        deactivation_epoch: Epoch,
+    ) -> Result<(), Self::Error>;
+
+    fn get_validator_nodes_within_start_epoch(
         &self,
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
+    ) -> Result<Vec<ValidatorNode<Self::Addr>>, Self::Error>;
+
+    fn get_validator_nodes_within_committee_epoch(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
     ) -> Result<Vec<ValidatorNode<Self::Addr>>, Self::Error>;
 
     fn get_validator_node_by_address(
@@ -100,7 +111,6 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         address: &Self::Addr,
-        sidechain_id: Option<&PublicKey>,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error>;
 
     fn get_validator_node_by_public_key(
@@ -108,25 +118,12 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
         public_key: &PublicKey,
-        sidechain_id: Option<&PublicKey>,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error>;
-    fn validator_nodes_count(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
-    ) -> Result<u64, Self::Error>;
-    fn validator_nodes_count_by_start_epoch(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
-    ) -> Result<u64, Self::Error>;
+    fn validator_nodes_count(&self, tx: &mut Self::DbTransaction<'_>, epoch: Epoch) -> Result<u64, Self::Error>;
     fn validator_nodes_count_for_shard_group(
         &self,
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
         shard_group: ShardGroup,
     ) -> Result<u64, Self::Error>;
 
@@ -135,19 +132,19 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         shard_key: SubstateAddress,
         shard_group: ShardGroup,
-        sidechain_id: Option<&PublicKey>,
         epoch: Epoch,
     ) -> Result<(), Self::Error>;
 
-    fn validator_nodes_get_by_substate_range(
+    fn validator_nodes_get_for_shard_group(
         &self,
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
-        substate_range: RangeInclusive<SubstateAddress>,
-    ) -> Result<Vec<ValidatorNode<Self::Addr>>, Self::Error>;
+        shard_group: ShardGroup,
+        shuffle: bool,
+        limit: usize,
+    ) -> Result<Committee<Self::Addr>, Self::Error>;
 
-    fn validator_nodes_get_for_shard_group(
+    fn validator_nodes_get_overlapping_shard_group(
         &self,
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
@@ -158,7 +155,6 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         &self,
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
     ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, Self::Error>;
 
     fn insert_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: DbEpoch) -> Result<(), Self::Error>;
@@ -186,4 +182,10 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
     ) -> Result<Option<ValidatorNodeBalancedMerkleTree>, Self::Error>;
+
+    fn insert_layer_one_transaction<T: Serialize>(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        data: DbLayer1Transaction<T>,
+    ) -> Result<(), Self::Error>;
 }

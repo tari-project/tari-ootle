@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, ToSubstateAddress};
+use tari_dan_common_types::{committee::CommitteeInfo, option::DisplayContainer, SubstateAddress, ToSubstateAddress};
 use tari_dan_storage::{
     consensus_models::{
         BlockId,
@@ -62,11 +62,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     for cmd in block.commands() {
         match cmd {
             Command::LocalPrepare(atom) => {
-                if atom
-                    .evidence
-                    .shard_groups_iter()
-                    .all(|sg| *sg != local_committee_info.shard_group())
-                {
+                if !atom.evidence.has(&local_committee_info.shard_group()) {
                     debug!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL: Command: LocalPrepare({}, {}), block: {} not relevant to local committee",
@@ -96,8 +92,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                 command_count += 1;
 
                 if tx_rec.current_stage() > TransactionPoolStage::LocalPrepared {
-                    // CASE: This will happen if output-only nodes send a prepare to input-involved nodes. TODO:
-                    // output-only nodes can skip sending prepare
+                    // CASE: This will happen if output-only nodes send a prepare to input-involved nodes.
                     warn!(
                         target: LOG_TARGET,
                         "⚠️ Foreign LocalPrepare proposal ({}) received LOCAL_PREPARE for transaction {} but current transaction stage is {}. Ignoring.",
@@ -188,11 +183,13 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                             tx_rec.current_stage()
                         );
                     }
-                } else if tx_rec.current_stage().is_local_prepared() && tx_rec.evidence().all_inputs_prepared() {
+                } else if tx_rec.current_stage().is_local_prepared() &&
+                    tx_rec.evidence().all_input_shard_groups_prepared()
+                {
                     // If all shards are complete, and we've already received our LocalPrepared, we can set out
                     // LocalPrepared transaction as ready to propose ACCEPT. If we have not received
-                    // the local LocalPrepared, the transition will happen when we receive the local
-                    // block.
+                    // the local LocalPrepared, the transition to AllPrepared will occur after we receive the local
+                    // LocalPrepare proposal.
                     info!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL: Transaction is ready for propose AllPrepared({}, {}) Local Stage: {}",
@@ -206,22 +203,19 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, All Justified: {}. Waiting for local proposal.",
+                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, \
+                        All Justified: {}. Waiting for local proposal and/or additional foreign proposals for all other shard groups.",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
-                         tx_rec.evidence().all_inputs_prepared()
+                         tx_rec.evidence().all_input_shard_groups_prepared()
                     );
                     // Update the evidence
                     proposed_block_change_set.set_next_transaction_update(tx_rec)?;
                 }
             },
             Command::LocalAccept(atom) => {
-                if atom
-                    .evidence
-                    .shard_groups_iter()
-                    .all(|sg| *sg != local_committee_info.shard_group())
-                {
+                if !atom.evidence.has(&local_committee_info.shard_group()) {
                     continue;
                 }
 
@@ -317,6 +311,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                         );
 
                         tx_rec.set_ready(true);
+                        tx_rec.set_next_stage(TransactionPoolStage::New)?;
                         proposed_block_change_set.set_next_transaction_update(tx_rec)?;
                     } else {
                         info!(
@@ -364,7 +359,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
-                        tx_rec.evidence().all_addresses_accepted()
+                        tx_rec.evidence().all_objects_accepted()
                     );
                     // Still need to update the evidence
                     proposed_block_change_set.set_next_transaction_update(tx_rec)?;
@@ -387,8 +382,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
             Command::Prepare(_) |
             Command::LocalOnly(_) |
             Command::ForeignProposal(_) |
-            Command::SuspendNode(_) |
-            Command::ResumeNode(_) |
+            Command::EvictNode(_) |
             Command::MintConfidentialOutput(_) => {
                 // Disregard
                 continue;
@@ -413,6 +407,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_and_add_pledges(
     transaction: &TransactionPoolRecord,
     foreign_block_id: &BlockId,
@@ -436,10 +431,46 @@ fn validate_and_add_pledges(
             ),
         })?;
 
+    // Avoid iterating unless debug logs apply
+    if log_enabled!(Level::Debug) {
+        debug!(
+            target: LOG_TARGET,
+            "PLEDGES FOR TRANSACTION: {atom}",
+        );
+        if block_pledge.is_empty() {
+            debug!(
+                target: LOG_TARGET,
+                "No pledges for transaction {}",
+                atom.id
+            );
+        } else {
+            block_pledge.substate_pledges_iter().for_each(|pledge| {
+                for p in pledge {
+                    debug!(
+                        target: LOG_TARGET,
+                        "FOREIGN PLEDGE {p}",
+                    );
+                }
+            });
+        }
+    }
+
     #[allow(clippy::mutable_key_type)]
     match atom.decision {
         Decision::Commit => {
             let Some(pledges) = block_pledge.remove_transaction_pledges(&atom.id) else {
+                if transaction.is_global() {
+                    // If the transaction is global, some shard groups do not pledges to include
+                    // TODO: this is currently "assumed" to be correct and should be validated
+                    debug!(
+                        target: LOG_TARGET,
+                        "Foreign proposal COMMIT for transaction {} stage: {} but the transaction is global so no pledges are expected.",
+                        atom.id,
+                        transaction.current_stage()
+                    );
+                    return Ok(());
+                }
+
                 if is_prepare_phase && atom.evidence.is_committee_output_only(foreign_committee_info) {
                     // If the foreign shard group is only involved in the outputs, there will not be any pledges in the
                     // prepare phase
@@ -451,10 +482,11 @@ fn validate_and_add_pledges(
                     );
                     return Ok(());
                 }
-                return Err(HotStuffError::ForeignNodeOmittedTransactionPledges {
-                    foreign_block_id: *foreign_block_id,
-                    transaction_id: atom.id,
-                });
+                return Ok(());
+                // return Err(HotStuffError::ForeignNodeOmittedTransactionPledges {
+                //     foreign_block_id: *foreign_block_id,
+                //     transaction_id: atom.id,
+                // });
             };
 
             // Validate that provided evidence is correct
@@ -462,33 +494,36 @@ fn validate_and_add_pledges(
             // this is here as a sanity check and should change to not be a fatal error in consensus
             for pledge in &pledges {
                 let address = pledge.versioned_substate_id().to_substate_address();
-                let lock_type = evidence.substates().get(&address).ok_or_else(|| {
-                    ProposalValidationError::ForeignInvalidPledge {
-                        block_id: *foreign_block_id,
-                        transaction_id: atom.id,
-                        details: format!("Pledge {pledge} for address {address} not found in evidence"),
+                if pledge.is_input() {
+                    if !evidence.inputs().contains_key(pledge.substate_id()) {
+                        return Err(ProposalValidationError::ForeignInvalidPledge {
+                            block_id: *foreign_block_id,
+                            transaction_id: atom.id,
+                            details: format!("Pledge {pledge} for address {address} not found in input evidence"),
+                        }
+                        .into());
                     }
-                })?;
-                if lock_type.is_output() && pledge.is_input() {
+                } else if !evidence.outputs().contains_key(pledge.substate_id()) {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
                         block_id: *foreign_block_id,
                         transaction_id: atom.id,
-                        details: format!("Pledge {pledge} is an input but evidence is an output for address {address}"),
+                        details: format!("Pledge {pledge} for address {address} not found in output evidence"),
                     }
                     .into());
-                }
-                if !lock_type.is_output() && pledge.is_output() {
-                    return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block_id: *foreign_block_id,
-                        transaction_id: atom.id,
-                        details: format!("Pledge {pledge} is an output but evidence is an input for address {address}"),
-                    }
-                    .into());
+                } else {
+                    // Ok
                 }
             }
 
             // If the foreign shard has committed the transaction, we can add the pledges to the transaction
             // record
+            debug!(
+                target: LOG_TARGET,
+                "Adding foreign pledges to transaction {}. Foreign shard group: {}. Pledges: {}",
+                atom.id,
+                foreign_committee_info.shard_group(),
+                pledges.display()
+            );
             proposed_block_change_set.add_foreign_pledges(
                 transaction.transaction_id(),
                 foreign_committee_info.shard_group(),
@@ -521,26 +556,35 @@ fn has_all_foreign_input_pledges<TTx: StateStoreReadTransaction>(
         .evidence()
         .iter()
         .filter(|(sg, _)| local_committee_info.shard_group() != **sg)
-        .flat_map(|(_, ev)| ev.substates())
-        .filter(|(_, lock)| !lock.is_output())
-        .map(|(addr, _)| addr);
+        .flat_map(|(_, ev)| ev.inputs());
 
     let current_pledges = proposed_block_change_set.get_foreign_pledges(tx_rec.transaction_id());
 
-    for addr in foreign_inputs {
+    for (id, data) in foreign_inputs {
+        let Some(data) = data else {
+            // Case: Foreign shard group evidence is not yet fully populated therefore we do not consider the input
+            // pledged
+            return Ok(false);
+        };
         // Check the current block change set to see if the pledge is included
-        if current_pledges.clone().any(|pledge| pledge.satisfies_address(addr)) {
+        if current_pledges
+            .clone()
+            .any(|pledge| pledge.satisfies_substate_and_version(id, data.version))
+        {
             continue;
         }
 
-        if tx.foreign_substate_pledges_exists_for_address(tx_rec.transaction_id(), addr)? {
+        if tx.foreign_substate_pledges_exists_for_address(
+            tx_rec.transaction_id(),
+            SubstateAddress::from_substate_id(id, data.version),
+        )? {
             continue;
         }
         debug!(
             target: LOG_TARGET,
             "Transaction {} is missing a pledge for input {}",
             tx_rec.transaction_id(),
-            addr
+            id
         );
         return Ok(false);
     }

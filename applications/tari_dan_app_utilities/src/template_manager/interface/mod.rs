@@ -25,5 +25,5 @@ mod handle;
 mod types;
 
 pub use error::TemplateManagerError;
-pub use handle::{TemplateManagerHandle, TemplateRegistration};
+pub use handle::TemplateManagerHandle;
 pub use types::{Template, TemplateExecutable, TemplateManagerRequest, TemplateMetadata};

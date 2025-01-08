@@ -20,8 +20,8 @@ Feature: Wallet Daemon
 
         # VN registration
     When validator node VAL_1 sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
-    Then VAL_1 has scanned to height 17
+    When miner MINER mines 26 new blocks
+    Then VAL_1 has scanned to height 27
     Then the validator node VAL_1 is listed as registered
 
         # Initialize an indexer
@@ -35,8 +35,8 @@ Feature: Wallet Daemon
 
         # Mine some blocks until the UTXOs are scanned
     When miner MINER mines 5 new blocks
-    Then VAL_1 has scanned to height 22
-    Then indexer IDX has scanned to height 22
+    Then VAL_1 has scanned to height 32
+    Then indexer IDX has scanned to height 32
     Then the template "faucet" is listed as registered by the validator node VAL_1
 
         # Create two accounts to test sending the tokens
@@ -96,7 +96,7 @@ Feature: Wallet Daemon
     When miner MINER mines 4 new blocks
     When wallet WALLET has at least 5000 T
     When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
+    When miner MINER mines 26 new blocks
     Then the validator node VN is listed as registered
 
         # Initialize an indexer
@@ -114,7 +114,7 @@ Feature: Wallet Daemon
         # unfortunately have to wait for this to get into the mempool....
     Then there is 1 transaction in the mempool of BASE within 10 seconds
     When miner MINER mines 13 new blocks
-    Then VN has scanned to height 30
+    Then VN has scanned to height 40
 
     When I convert commitment COMMITMENT into COMM_ADDRESS address
     Then validator node VN has state at COMM_ADDRESS within 20 seconds
@@ -126,7 +126,7 @@ Feature: Wallet Daemon
     When I check the confidential balance of ACCOUNT_1 on wallet daemon WALLET_D the amount is at least 10000
         # When account ACCOUNT_1 reveals 100 burned tokens via wallet daemon WALLET_D
     Then I make a confidential transfer with amount 5 from ACCOUNT_1 to ACCOUNT_2 creating output OUTPUT_TX1 via the wallet_daemon WALLET_D
-    
+
   Scenario: Create and mint account NFT
     # Initialize a base node, wallet, miner and VN
     Given a network with registered validator VAL_1 and wallet daemon WALLET_D

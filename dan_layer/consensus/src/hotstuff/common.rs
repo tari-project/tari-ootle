@@ -36,7 +36,7 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_engine_types::substate::SubstateDiff;
-use tari_state_tree::{Hash, JellyfishMerkleTree, StateTreeError};
+use tari_state_tree::{JellyfishMerkleTree, StateTreeError};
 
 use crate::{
     hotstuff::{
@@ -89,7 +89,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     dummy
 }
 
-fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStrategy<TAddr>>(
+pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStrategy<TAddr>>(
     from_height: NodeHeight,
     new_height: NodeHeight,
     network: Network,
@@ -105,7 +105,7 @@ fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStrateg
     parent_base_layer_block_height: u64,
     parent_base_layer_block_hash: FixedHash,
 ) -> Vec<Block> {
-    let mut dummies = Vec::new();
+    let mut dummies = Vec::with_capacity(new_height.saturating_sub(from_height).as_u64() as usize);
     with_dummy_blocks(
         from_height,
         new_height,
@@ -147,7 +147,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         candidate_block.network(),
         candidate_block.epoch(),
         candidate_block.shard_group(),
-        *candidate_block.justify().block_id(),
+        *justify_block.id(),
         candidate_block.justify(),
         candidate_block.parent(),
         *justify_block.state_merkle_root(),
@@ -234,7 +234,7 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
     shard_group: ShardGroup,
     pending_tree_diffs: HashMap<Shard, Vec<PendingShardStateTreeDiff>>,
     changes: I,
-) -> Result<(Hash, IndexMap<Shard, VersionedStateHashTreeDiff>), StateTreeError> {
+) -> Result<(FixedHash, IndexMap<Shard, VersionedStateHashTreeDiff>), StateTreeError> {
     let mut change_map = IndexMap::new();
 
     changes.into_iter().for_each(|ch| {
@@ -244,7 +244,10 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
     let mut sharded_tree = ShardedStateTree::new(tx).with_pending_diffs(pending_tree_diffs);
     let root_hash = sharded_tree.put_substate_tree_changes(shard_group, change_map)?;
 
-    Ok((root_hash, sharded_tree.into_shard_tree_diffs()))
+    Ok((
+        FixedHash::new(root_hash.into_array()),
+        sharded_tree.into_shard_tree_diffs(),
+    ))
 }
 
 pub(crate) fn create_epoch_checkpoint<TTx>(
@@ -322,8 +325,8 @@ pub(crate) fn get_next_block_height_and_leader<
     let mut next_height = height;
     let (mut leader_addr, mut leader_pk) = leader_strategy.get_leader_for_next_height(committee, next_height);
 
-    while ValidatorConsensusStats::is_node_suspended(tx, block_id, leader_pk)? {
-        debug!(target: LOG_TARGET, "Validator {} suspended for next height {}. Checking next validator", leader_addr, next_height + NodeHeight(1));
+    while ValidatorConsensusStats::is_node_evicted(tx, block_id, leader_pk)? {
+        debug!(target: LOG_TARGET, "Validator {} evicted for next height {}. Checking next validator", leader_addr, next_height + NodeHeight(1));
         next_height += NodeHeight(1);
         num_skipped += 1;
         let (addr, pk) = leader_strategy.get_leader_for_next_height(committee, next_height);

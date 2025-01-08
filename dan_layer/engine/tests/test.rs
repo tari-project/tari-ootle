@@ -115,8 +115,8 @@ fn state_create_multiple_in_one_call() {
 fn test_composed() {
     let mut template_test = TemplateTest::new(vec!["tests/templates/state", "tests/templates/hello_world"]);
 
-    let functions = template_test
-        .get_module("HelloWorld")
+    let module = template_test.get_module("HelloWorld");
+    let functions = module
         .template_def()
         .functions()
         .iter()
@@ -124,8 +124,8 @@ fn test_composed() {
         .collect::<Vec<_>>();
     assert_eq!(functions, vec!["greet", "new", "custom_greeting"]);
 
-    let functions = template_test
-        .get_module("State")
+    let module = template_test.get_module("State");
+    let functions = module
         .template_def()
         .functions()
         .iter()
@@ -197,8 +197,8 @@ fn test_private_function() {
     let mut template_test = TemplateTest::new(vec!["tests/templates/private_function"]);
 
     // check that the private method and function are not exported
-    let functions = template_test
-        .get_module("PrivateCounter")
+    let module = template_test.get_module("PrivateCounter");
+    let functions = module
         .template_def()
         .functions()
         .iter()
@@ -223,8 +223,7 @@ fn test_engine_errors() {
         .try_execute(
             Transaction::builder()
                 .call_function(test.get_template_address("Errors"), "invalid_engine_call", args![])
-                .sign(&Default::default())
-                .build(),
+                .build_and_seal(&Default::default()),
             vec![],
         )
         .unwrap();
@@ -327,8 +326,7 @@ fn test_errors_on_infinite_loop() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(test.get_template_address("InfinityLoopTest"), "infinity_loop", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
     // Transaction failed: Execution failure: RuntimeError: unreachable\n    at tari_free (<module>[327]:0x2390c)
@@ -384,7 +382,8 @@ mod errors {
         match result.finalize.result.full_reject().unwrap() {
             RejectReason::ExecutionFailure(message) => {
                 assert!(message.starts_with(
-                    "Panic! failed to decode argument at position 0 for function 'please_pass_invalid_args':"
+                    "Panic! failed to decode argument at position 0 (tari_template_lib::models::amount::Amount) for \
+                     function 'please_pass_invalid_args':"
                 ),);
             },
             reason => panic!("Unexpected failure reason: {}", reason),
@@ -1125,8 +1124,7 @@ mod tickets {
         let result = template_test.execute_expect_success(
             Transaction::builder()
                 .call_function(faucet_template, "mint", args![initial_supply])
-                .sign(&secret)
-                .build(),
+                .build_and_seal(&secret),
             vec![],
         );
         let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
@@ -1151,8 +1149,7 @@ mod tickets {
                     price,
                     event_description
                 ])
-                .sign(&secret)
-                .build(),
+                .build_and_seal(&secret),
             vec![owner_proof.clone()],
         );
         let ticket_seller: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
@@ -1174,8 +1171,7 @@ mod tickets {
                 .call_method(faucet_component, "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("coins")
                 .call_method(account_address, "deposit", args![Workspace("coins")])
-                .sign(&secret)
-                .build(),
+                .build_and_seal(&secret),
             vec![],
         );
 
@@ -1187,8 +1183,7 @@ mod tickets {
                 .call_method(ticket_seller, "buy_ticket", args![Workspace("payment")])
                 .put_last_instruction_output_on_workspace("nft_bucket")
                 .call_method(account_address, "deposit", args![Workspace("nft_bucket")])
-                .sign(&secret)
-                .build(),
+                .build_and_seal(&secret),
             vec![owner_proof],
         );
 

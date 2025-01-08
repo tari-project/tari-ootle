@@ -38,6 +38,7 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     lock::LockFlag,
     logs::LogEntry,
+    published_template::{PublishedTemplate, PublishedTemplateAddress},
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
@@ -2341,6 +2342,22 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         };
 
         Ok(InvokeResult::encode(&address)?)
+    }
+
+    fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {
+        self.tracker.write_with(|state| {
+            let template_address =
+                PublishedTemplateAddress::from_author_and_code(&self.transaction_signer_public_key, &template);
+            state.new_substate(
+                template_address,
+                SubstateValue::Template(PublishedTemplate { binary: template }),
+            )?;
+            // Mark template substate as owned by current call stack
+            let scope_mut = state.current_call_scope_mut()?;
+            scope_mut.move_node_to_owned(&template_address.into())?;
+
+            Ok(())
+        })
     }
 }
 

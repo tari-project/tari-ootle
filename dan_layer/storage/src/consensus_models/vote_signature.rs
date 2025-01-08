@@ -1,17 +1,18 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use borsh::BorshSerialize;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{PrivateKey, PublicKey};
-use tari_core::transactions::transaction_components::ValidatorNodeHashDomain;
 use tari_crypto::{keys::PublicKey as _, signatures::SchnorrSignature};
+use tari_hashing::ValidatorNodeHashDomain;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
 pub type ValidatorSchnorrSignature = SchnorrSignature<PublicKey, PrivateKey, ValidatorNodeHashDomain>;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub struct ValidatorSignature {
     #[cfg_attr(feature = "ts", ts(type = "string"))]

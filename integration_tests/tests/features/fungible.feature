@@ -4,7 +4,7 @@
 @concurrent
 @fungible
 Feature: Fungible tokens
-  
+
   Scenario: Mint fungible tokens
 
     ##### Setup
@@ -20,7 +20,7 @@ Feature: Fungible tokens
     When miner MINER mines 10 new blocks
     When wallet WALLET has at least 2000 T
     When validator node VN sends a registration transaction to base wallet WALLET
-    When miner MINER mines 16 new blocks
+    When miner MINER mines 26 new blocks
     Then the validator node VN is listed as registered
 
     # Initialize indexer and connect wallet daemon
@@ -30,7 +30,7 @@ Feature: Fungible tokens
     # Register the "faucet" template
     When base wallet WALLET registers the template "faucet"
     When miner MINER mines 20 new blocks
-    Then VN has scanned to height 43
+    Then VN has scanned to height 53
     Then the template "faucet" is listed as registered by the validator node VN
 
     ##### Scenario

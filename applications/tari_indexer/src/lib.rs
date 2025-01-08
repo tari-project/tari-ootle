@@ -53,6 +53,7 @@ use tari_common::{
 };
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_dan_app_utilities::{keypair::setup_keypair_prompt, substate_file_cache::SubstateFileCache};
+use tari_dan_engine::transaction::TransactionProcessorConfig;
 use tari_dan_storage::global::DbFactory;
 use tari_dan_storage_sqlite::SqliteDbFactory;
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
@@ -86,13 +87,14 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         .get_or_create_global_db()
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
 
+    let consensus_constants = ConsensusConstants::from(config.network);
     let base_node_client = create_base_layer_clients(&config).await?;
     let services: Services = spawn_services(
         &config,
         shutdown_signal.clone(),
         keypair.clone(),
         global_db,
-        ConsensusConstants::devnet(), // TODO: change this eventually
+        consensus_constants.clone(),
     )
     .await?;
 
@@ -120,11 +122,14 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 
     // dry run
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
+        TransactionProcessorConfig::builder()
+            .with_network(config.network)
+            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes)
+            .build(),
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
         dan_layer_scanner.clone(),
         services.template_manager.clone(),
-        config.network,
     );
 
     // Run the JSON-RPC API

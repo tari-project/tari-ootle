@@ -25,11 +25,13 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use tari_bor::{decode_exact, encode};
 use tari_common_types::types::PublicKey;
 use tari_consensus::messages::{
     ForeignProposalMessage,
+    ForeignProposalNotificationMessage,
+    ForeignProposalRequestMessage,
     FullBlock,
     HotstuffMessage,
     MissingTransactionsRequest,
@@ -58,6 +60,7 @@ use tari_dan_storage::{
         BlockId,
         Command,
         Decision,
+        EvictNodeAtom,
         Evidence,
         ForeignProposal,
         ForeignProposalAtom,
@@ -67,12 +70,10 @@ use tari_dan_storage::{
         QcId,
         QuorumCertificate,
         QuorumDecision,
-        ResumeNodeAtom,
         SubstateDestroyed,
         SubstatePledge,
         SubstatePledges,
         SubstateRecord,
-        SuspendNodeAtom,
         TransactionAtom,
     },
 };
@@ -92,6 +93,12 @@ impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
             HotstuffMessage::Proposal(msg) => proto::consensus::hot_stuff_message::Message::Proposal(msg.into()),
             HotstuffMessage::ForeignProposal(msg) => {
                 proto::consensus::hot_stuff_message::Message::ForeignProposal(msg.into())
+            },
+            HotstuffMessage::ForeignProposalNotification(msg) => {
+                proto::consensus::hot_stuff_message::Message::ForeignProposalNotification(msg.into())
+            },
+            HotstuffMessage::ForeignProposalRequest(msg) => {
+                proto::consensus::hot_stuff_message::Message::ForeignProposalRequest(msg.into())
             },
             HotstuffMessage::Vote(msg) => proto::consensus::hot_stuff_message::Message::Vote(msg.into()),
             HotstuffMessage::MissingTransactionsRequest(msg) => {
@@ -121,6 +128,12 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
             proto::consensus::hot_stuff_message::Message::Proposal(msg) => HotstuffMessage::Proposal(msg.try_into()?),
             proto::consensus::hot_stuff_message::Message::ForeignProposal(msg) => {
                 HotstuffMessage::ForeignProposal(msg.try_into()?)
+            },
+            proto::consensus::hot_stuff_message::Message::ForeignProposalNotification(msg) => {
+                HotstuffMessage::ForeignProposalNotification(msg.try_into()?)
+            },
+            proto::consensus::hot_stuff_message::Message::ForeignProposalRequest(msg) => {
+                HotstuffMessage::ForeignProposalRequest(msg.try_into()?)
             },
             proto::consensus::hot_stuff_message::Message::Vote(msg) => HotstuffMessage::Vote(msg.try_into()?),
             proto::consensus::hot_stuff_message::Message::RequestMissingTransactions(msg) => {
@@ -258,6 +271,85 @@ impl TryFrom<proto::consensus::ForeignProposal> for ForeignProposal {
                 .ok_or_else(|| anyhow!("Justify QC is missing"))?
                 .try_into()?,
         ))
+    }
+}
+
+impl From<&ForeignProposalNotificationMessage> for proto::consensus::ForeignProposalNotification {
+    fn from(value: &ForeignProposalNotificationMessage) -> Self {
+        Self {
+            block_id: value.block_id.as_bytes().to_vec(),
+            epoch: value.epoch.as_u64(),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalNotificationMessage {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::ForeignProposalNotification) -> Result<Self, Self::Error> {
+        Ok(Self {
+            block_id: BlockId::try_from(value.block_id)?,
+            epoch: Epoch(value.epoch),
+        })
+    }
+}
+
+impl From<&ForeignProposalRequestMessage> for proto::consensus::ForeignProposalRequest {
+    fn from(value: &ForeignProposalRequestMessage) -> Self {
+        match value {
+            ForeignProposalRequestMessage::ByBlockId {
+                block_id,
+                for_shard_group,
+                epoch,
+            } => Self {
+                request: Some(proto::consensus::foreign_proposal_request::Request::ByBlockId(
+                    proto::consensus::ForeignProposalRequestByBlockId {
+                        block_id: block_id.as_bytes().to_vec(),
+                        for_shard_group: for_shard_group.encode_as_u32(),
+                        epoch: epoch.as_u64(),
+                    },
+                )),
+            },
+            ForeignProposalRequestMessage::ByTransactionId {
+                transaction_id,
+                for_shard_group,
+                epoch,
+            } => Self {
+                request: Some(proto::consensus::foreign_proposal_request::Request::ByTransactionId(
+                    proto::consensus::ForeignProposalRequestByTransactionId {
+                        transaction_id: transaction_id.as_bytes().to_vec(),
+                        for_shard_group: for_shard_group.encode_as_u32(),
+                        epoch: epoch.as_u64(),
+                    },
+                )),
+            },
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::ForeignProposalRequest> for ForeignProposalRequestMessage {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::ForeignProposalRequest) -> Result<Self, Self::Error> {
+        let request = value.request.ok_or_else(|| anyhow!("Request is missing"))?;
+        Ok(match request {
+            proto::consensus::foreign_proposal_request::Request::ByBlockId(by_block_id) => {
+                ForeignProposalRequestMessage::ByBlockId {
+                    block_id: BlockId::try_from(by_block_id.block_id)?,
+                    for_shard_group: ShardGroup::decode_from_u32(by_block_id.for_shard_group)
+                        .ok_or_else(|| anyhow!("Invalid ShardGroup"))?,
+                    epoch: Epoch(by_block_id.epoch),
+                }
+            },
+            proto::consensus::foreign_proposal_request::Request::ByTransactionId(by_transaction_id) => {
+                ForeignProposalRequestMessage::ByTransactionId {
+                    transaction_id: TransactionId::try_from(by_transaction_id.transaction_id)?,
+                    for_shard_group: ShardGroup::decode_from_u32(by_transaction_id.for_shard_group)
+                        .ok_or_else(|| anyhow!("Invalid ShardGroup"))?,
+                    epoch: Epoch(by_transaction_id.epoch),
+                }
+            },
+        })
     }
 }
 
@@ -606,8 +698,7 @@ impl From<&Command> for proto::consensus::Command {
             Command::MintConfidentialOutput(atom) => {
                 proto::consensus::command::Command::MintConfidentialOutput(atom.into())
             },
-            Command::SuspendNode(atom) => proto::consensus::command::Command::SuspendNode(atom.into()),
-            Command::ResumeNode(atom) => proto::consensus::command::Command::ResumeNode(atom.into()),
+            Command::EvictNode(atom) => proto::consensus::command::Command::EvictNode(atom.into()),
             Command::EndEpoch => proto::consensus::command::Command::EndEpoch(true),
         };
 
@@ -635,8 +726,7 @@ impl TryFrom<proto::consensus::Command> for Command {
             proto::consensus::command::Command::MintConfidentialOutput(atom) => {
                 Command::MintConfidentialOutput(atom.try_into()?)
             },
-            proto::consensus::command::Command::SuspendNode(atom) => Command::SuspendNode(atom.try_into()?),
-            proto::consensus::command::Command::ResumeNode(atom) => Command::ResumeNode(atom.try_into()?),
+            proto::consensus::command::Command::EvictNode(atom) => Command::EvictNode(atom.try_into()?),
             proto::consensus::command::Command::EndEpoch(_) => Command::EndEpoch,
         })
     }
@@ -674,46 +764,6 @@ impl TryFrom<proto::consensus::TransactionAtom> for TransactionAtom {
     }
 }
 
-// -------------------------------- SuspendNodeAtom -------------------------------- //
-
-impl From<&SuspendNodeAtom> for proto::consensus::SuspendNodeAtom {
-    fn from(value: &SuspendNodeAtom) -> Self {
-        Self {
-            public_key: value.public_key.as_bytes().to_vec(),
-        }
-    }
-}
-
-impl TryFrom<proto::consensus::SuspendNodeAtom> for SuspendNodeAtom {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::consensus::SuspendNodeAtom) -> Result<Self, Self::Error> {
-        Ok(Self {
-            public_key: PublicKey::from_canonical_bytes(&value.public_key)
-                .map_err(|e| anyhow!("SuspendNodeAtom failed to decode public key: {e}"))?,
-        })
-    }
-}
-// -------------------------------- ResumeNodeAtom -------------------------------- //
-
-impl From<&ResumeNodeAtom> for proto::consensus::ResumeNodeAtom {
-    fn from(value: &ResumeNodeAtom) -> Self {
-        Self {
-            public_key: value.public_key.as_bytes().to_vec(),
-        }
-    }
-}
-
-impl TryFrom<proto::consensus::ResumeNodeAtom> for ResumeNodeAtom {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::consensus::ResumeNodeAtom) -> Result<Self, Self::Error> {
-        Ok(Self {
-            public_key: PublicKey::from_canonical_bytes(&value.public_key)
-                .map_err(|e| anyhow!("ResumeNodeAtom failed to decode public key: {e}"))?,
-        })
-    }
-}
 // -------------------------------- BlockFee -------------------------------- //
 
 impl From<&LeaderFee> for proto::consensus::LeaderFee {
@@ -764,7 +814,7 @@ impl TryFrom<proto::consensus::ForeignProposalAtom> for ForeignProposalAtom {
 impl From<&MintConfidentialOutputAtom> for proto::consensus::MintConfidentialOutputAtom {
     fn from(value: &MintConfidentialOutputAtom) -> Self {
         Self {
-            substate_id: value.substate_id.to_bytes(),
+            commitment: value.commitment.as_bytes().to_vec(),
         }
     }
 }
@@ -773,8 +823,30 @@ impl TryFrom<proto::consensus::MintConfidentialOutputAtom> for MintConfidentialO
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::MintConfidentialOutputAtom) -> Result<Self, Self::Error> {
+        use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
         Ok(Self {
-            substate_id: SubstateId::from_bytes(&value.substate_id)?,
+            commitment: UnclaimedConfidentialOutputAddress::from_bytes(&value.commitment)?,
+        })
+    }
+}
+
+// -------------------------------- EvictNodeAtom -------------------------------- //
+
+impl From<&EvictNodeAtom> for proto::consensus::EvictNodeAtom {
+    fn from(value: &EvictNodeAtom) -> Self {
+        Self {
+            public_key: value.public_key.as_bytes().to_vec(),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::EvictNodeAtom> for EvictNodeAtom {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::EvictNodeAtom) -> Result<Self, Self::Error> {
+        Ok(Self {
+            public_key: PublicKey::from_canonical_bytes(&value.public_key)
+                .map_err(|e| anyhow!("EvictNodeAtom failed to decode public key: {e}"))?,
         })
     }
 }
@@ -878,7 +950,8 @@ impl TryFrom<proto::consensus::Evidence> for Evidence {
 impl From<&QuorumCertificate> for proto::consensus::QuorumCertificate {
     fn from(source: &QuorumCertificate) -> Self {
         Self {
-            block_id: source.block_id().as_bytes().to_vec(),
+            header_hash: source.header_hash().as_bytes().to_vec(),
+            parent_id: source.parent_id().as_bytes().to_vec(),
             block_height: source.block_height().as_u64(),
             epoch: source.epoch().as_u64(),
             shard_group: source.shard_group().encode_as_u32(),
@@ -896,7 +969,8 @@ impl TryFrom<proto::consensus::QuorumCertificate> for QuorumCertificate {
         let shard_group = ShardGroup::decode_from_u32(value.shard_group)
             .ok_or_else(|| anyhow!("QC shard_group ({}) is not a valid", value.shard_group))?;
         Ok(Self::new(
-            value.block_id.try_into()?,
+            value.header_hash.try_into().context("header_hash")?,
+            value.parent_id.try_into().context("parent_id")?,
             NodeHeight(value.block_height),
             Epoch(value.epoch),
             shard_group,

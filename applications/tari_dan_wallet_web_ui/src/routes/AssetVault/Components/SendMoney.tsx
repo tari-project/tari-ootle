@@ -41,6 +41,7 @@ import {
   ResourceType,
   ConfidentialTransferInputSelection,
   TransactionResult,
+  BalanceEntry,
 } from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
 
@@ -98,8 +99,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const { data } = useAccountsGetBalances(accountName);
   const badges = data?.balances
-    ?.filter((b) => b.resource_type === "NonFungible" && b.balance > 0)
-    .map((b) => b.resource_address) as string[];
+    ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && b.balance > 0)
+    .map((b: BalanceEntry) => b.resource_address) as string[];
 
   // TODO: we should have separate calls for confidential and non-confidential transfers
   const { mutateAsync: sendIt } = useAccountsTransfer(

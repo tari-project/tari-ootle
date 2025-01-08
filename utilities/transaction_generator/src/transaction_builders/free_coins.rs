@@ -35,6 +35,6 @@ pub fn builder(_: u64) -> Transaction {
             SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
             SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
         ])
-        .sign(&signer_secret_key)
-        .build()
+        .with_authorized_seal_signer()
+        .build_and_seal(&signer_secret_key)
 }

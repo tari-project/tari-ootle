@@ -64,7 +64,14 @@ pub trait NetworkingService<TMsg: MessageSpec> {
         message: Vec<u8>,
     ) -> Result<(), NetworkingError>;
 
-    async fn subscribe_topic<T: Into<String> + Send>(&mut self, topic: T) -> Result<(), NetworkingError>;
+    async fn subscribe_topic<T: Into<String> + Send>(&mut self, topic: T) -> Result<(), NetworkingError> {
+        self.subscribe_topic_with_explicit_peers(topic, Vec::new()).await
+    }
+    async fn subscribe_topic_with_explicit_peers<T: Into<String> + Send>(
+        &mut self,
+        topic: T,
+        explicit_topic_peers: Vec<PeerId>,
+    ) -> Result<(), NetworkingError>;
     async fn unsubscribe_topic<T: Into<String> + Send>(&mut self, topic: T) -> Result<(), NetworkingError>;
 
     async fn set_want_peers<I: IntoIterator<Item = PeerId> + Send>(&self, want_peers: I)

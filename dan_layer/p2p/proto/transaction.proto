@@ -17,18 +17,8 @@ message CommitmentSignature {
   bytes signature_v = 3;
 }
 
-message UnsignedTransaction {
-  repeated Instruction fee_instructions = 1;
-  repeated Instruction instructions = 2;
-  repeated SubstateRequirement inputs = 3;
-  tari.dan.common.Epoch min_epoch = 4;
-  tari.dan.common.Epoch max_epoch = 5;
-}
-
 message Transaction {
-  UnsignedTransaction transaction = 1;
-  repeated tari.dan.common.SignatureAndPublicKey signatures = 2;
-  repeated VersionedSubstateId filled_inputs = 3;
+  bytes bor_encoded = 1;
 }
 
 message Instruction {
@@ -42,6 +32,7 @@ message Instruction {
     DROP_ALL_PROOFS_IN_WORKSPACE = 6;
     CREATE_ACCOUNT = 7;
     ASSERT_BUCKET_CONTAINS = 8;
+    PUBLISH_TEMPLATE = 9;
   }
   InstructionType instruction_type = 1;
 
@@ -79,6 +70,9 @@ message Instruction {
   // AssertBucketContains
   bytes resource_address = 21;
   int64 min_amount = 22;
+
+  // PublishTemplate
+  bytes template_binary = 23;
 }
 
 

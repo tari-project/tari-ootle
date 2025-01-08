@@ -39,7 +39,7 @@ impl PaceMaker {
         let on_beat = OnBeat::new();
         let on_force_beat = OnForceBeat::new();
         let on_leader_timeout = OnLeaderTimeout::new();
-        let current_height = CurrentView::new();
+        let current_view = CurrentView::new();
 
         Self {
             handle_receiver: receiver,
@@ -48,9 +48,9 @@ impl PaceMaker {
                 on_beat,
                 on_force_beat,
                 on_leader_timeout,
-                current_height.clone(),
+                current_view.clone(),
             ),
-            current_view: current_height,
+            current_view,
             current_high_qc_height: NodeHeight(0),
             block_time: max_base_time,
         }
@@ -95,7 +95,7 @@ impl PaceMaker {
                 maybe_req = self.handle_receiver.recv() => {
                     if let Some(req) = maybe_req {
                         match req {
-                           PacemakerRequest::ResetLeaderTimeout { high_qc_height } => {
+                           PacemakerRequest::Reset { high_qc_height, reset_block_time } => {
                                 if !started {
                                     continue;
                                 }
@@ -103,11 +103,15 @@ impl PaceMaker {
                                 leader_failure_triggered_during_suspension = false;
 
                                 if let Some(height) = high_qc_height {
-                                    self.current_high_qc_height =  height;
+                                    self.current_high_qc_height = height;
                                 }
-                                info!(target: LOG_TARGET, "🧿 Pacemaker Reset! Current height: {}, Delta: {:.2?}", self.current_view, self.delta_time());
                                 leader_timeout.as_mut().reset(self.leader_timeout());
-                                block_timer.as_mut().reset(self.block_time());
+                                if reset_block_time {
+                                    block_timer.as_mut().reset(self.block_time());
+                                    info!(target: LOG_TARGET, "🧿 Pacemaker Reset! Current height: {}, Delta: {:.2?}", self.current_view, self.delta_time());
+                                } else {
+                                    info!(target: LOG_TARGET, "🧿 Pacemaker Leader timeout Reset! Current height: {}, Delta: {:.2?}", self.current_view, self.delta_time());
+                                }
                            },
                             PacemakerRequest::Start { high_qc_height } => {
                                 info!(target: LOG_TARGET, "🚀 Starting pacemaker at leaf height {} and high QC: {}", self.current_view, high_qc_height);

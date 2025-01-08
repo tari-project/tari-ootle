@@ -21,8 +21,7 @@ fn it_rejects_dangling_vaults_in_constructor() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "dangling_vault", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -41,8 +40,7 @@ fn it_rejects_dangling_vault_that_has_been_returned() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "return_vault", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -58,8 +56,7 @@ fn it_rejects_dangling_vaults_in_component() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(template_addr, "with_vault", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -72,8 +69,7 @@ fn it_rejects_dangling_vaults_in_component() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(component_address, "drop_vault", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![test.get_test_proof()],
     );
 
@@ -90,8 +86,7 @@ fn it_rejects_dangling_resources() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "dangling_resource", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -106,8 +101,7 @@ fn it_rejects_unknown_substate_addresses() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "non_existent_id", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -127,8 +121,7 @@ fn it_rejects_references_to_buckets_that_arent_in_scope() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(template_addr, "with_vault", args![])
-            .sign(&owner_key)
-            .build(),
+            .build_and_seal(&owner_key),
         vec![owner_token.clone()],
     );
 
@@ -141,8 +134,7 @@ fn it_rejects_references_to_buckets_that_arent_in_scope() {
             .call_method(account, "withdraw", args![XTR, Amount(1000)])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(shenanigans, "take_bucket_zero", args![])
-            .sign(&owner_key)
-            .build(),
+            .build_and_seal(&owner_key),
         vec![owner_token],
     );
 
@@ -158,8 +150,7 @@ fn it_rejects_double_ownership_of_vault() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "with_vault_copy", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![test.get_test_proof()],
     );
 
@@ -181,8 +172,7 @@ fn it_prevents_access_to_vault_id_in_component_context() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(template_addr, "with_vault", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![test.get_test_proof()],
     );
 
@@ -193,8 +183,7 @@ fn it_prevents_access_to_vault_id_in_component_context() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(shenanigans, "take_from_a_vault", args![vault_id, Amount(1000)])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![test.get_test_proof()],
     );
 
@@ -214,8 +203,7 @@ fn it_prevents_access_to_out_of_scope_component() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(template_addr, "new", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![test.get_test_proof()],
     );
 
@@ -226,8 +214,7 @@ fn it_prevents_access_to_out_of_scope_component() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(shenanigans, "empty_state_on_component", args![account])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![test.get_test_proof()],
     );
 
@@ -258,8 +245,7 @@ fn it_disallows_calls_on_vaults_that_are_not_owned_by_current_component() {
                 "attempt_to_steal_funds_using_cross_template_call",
                 args![vault_id, attacker, Some(Amount(1000))],
             )
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![test.get_test_proof()],
     );
 
@@ -285,8 +271,7 @@ fn it_disallows_vault_access_if_vault_is_not_owned() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "ref_stolen_vault", args![vault_id])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![test.get_test_proof()],
     );
 
@@ -306,8 +291,7 @@ fn it_disallows_minting_different_resource_type() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(template_addr, "new", args![])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
@@ -320,8 +304,7 @@ fn it_disallows_minting_different_resource_type() {
             .call_method(component, "mint_different_resource_type", args![])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
-            .sign(test.get_test_secret_key())
-            .build(),
+            .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 

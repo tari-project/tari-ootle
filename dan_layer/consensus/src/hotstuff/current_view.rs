@@ -60,7 +60,7 @@ impl CurrentView {
     pub(crate) fn reset(&self, epoch: Epoch, height: NodeHeight) {
         self.epoch.store(epoch.as_u64(), atomic::Ordering::SeqCst);
         self.height.store(height.as_u64(), atomic::Ordering::SeqCst);
-        info!(target: LOG_TARGET, "🧿 PACEMAKER RESET: View updated to {epoch}/{height}");
+        info!(target: LOG_TARGET, "🧿 PACEMAKER: reset View updated to {epoch}/{height}");
     }
 }
 

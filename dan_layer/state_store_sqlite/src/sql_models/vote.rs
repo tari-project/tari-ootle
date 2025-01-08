@@ -14,7 +14,7 @@ use crate::{
 #[derive(Debug, Clone, Queryable)]
 pub struct Vote {
     pub id: i32,
-    pub hash: String,
+    pub hash: i64,
     pub epoch: i64,
     pub block_id: String,
     pub decision: i32,

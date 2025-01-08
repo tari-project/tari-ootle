@@ -25,7 +25,7 @@ use std::{collections::HashMap, fs, io, ops::Deref, str::FromStr};
 use anyhow::{anyhow, Context};
 use futures::{future, FutureExt};
 use libp2p::identity;
-use log::info;
+use log::*;
 use minotari_app_utilities::identity_management;
 use serde::Serialize;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
@@ -34,7 +34,7 @@ use tari_common::{
     configuration::Network,
     exit_codes::{ExitCode, ExitError},
 };
-use tari_common_types::types::FixedHash;
+use tari_common_types::{epoch::VnEpoch, types::FixedHash};
 use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
@@ -59,7 +59,7 @@ use tari_dan_common_types::{
     ShardGroup,
     VersionedSubstateId,
 };
-use tari_dan_engine::fees::FeeTable;
+use tari_dan_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, SubstateRecord},
@@ -101,12 +101,19 @@ use tari_template_lib::{
 };
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, mpsc},
+    task::JoinHandle,
+};
 
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
-    config::DatabaseType, consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor}, dry_run_transaction_processor::DryRunTransactionProcessor, p2p::{
+    config::DatabaseType,
+    consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor},
+    dry_run_transaction_processor::DryRunTransactionProcessor,
+    file_l1_submitter::FileLayerOneSubmitter,
+    p2p::{
         create_tari_validator_node_rpc_service,
         services::{
             consensus_gossip::{self},
@@ -216,20 +223,30 @@ pub async fn spawn_services(
             .context("committee size must be non-zero")?,
         validator_node_sidechain_id: config.validator_node.validator_node_sidechain_id.clone(),
         num_preshards: consensus_constants.num_preshards,
-        max_vns_per_epoch_activated: consensus_constants.max_vns_per_epoch_activated,
     };
     // Epoch manager
-    let (epoch_manager, join_handle) = tari_epoch_manager::base_layer::spawn_service(
+    let (epoch_manager, epoch_manager_join_handle) = tari_epoch_manager::base_layer::spawn_service(
         epoch_manager_config,
         global_db.clone(),
         base_node_client.clone(),
         keypair.public_key().clone(),
+        FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path()),
         shutdown.clone(),
     );
-    handles.push(join_handle);
 
     // Create registration file
-    create_registration_file(config, &epoch_manager, &keypair).await?;
+    if let Err(err) = create_registration_file(config, &epoch_manager, sidechain_id.as_ref(), &keypair).await {
+        error!(target: LOG_TARGET, "Error creating registration file: {}", err);
+        if epoch_manager_join_handle.is_finished() {
+            return epoch_manager_join_handle
+                .await?
+                .and_then(|_| Err(anyhow!("Epoch manager exited in bootstrap")))
+                .map_err(|err| anyhow!("Epoch manager crashed: {err}"));
+        } else {
+            return Err(err);
+        }
+    }
+    handles.push(epoch_manager_join_handle);
 
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
@@ -247,9 +264,11 @@ pub async fn spawn_services(
         per_log_cost: 1,
     };
 
+    let (tx_hotstuff_events, _) = broadcast::channel(100);
     // Consensus gossip
     let (consensus_gossip_service, join_handle, rx_consensus_gossip_messages) = consensus_gossip::spawn(
         epoch_manager.subscribe(),
+        tx_hotstuff_events.subscribe(),
         networking.clone(),
         rx_consensus_gossip_messages,
     );
@@ -274,7 +293,14 @@ pub async fn spawn_services(
     );
 
     // Consensus
-    let payload_processor = TariDanTransactionProcessor::new(config.network, template_manager.clone(), fee_table);
+    let payload_processor = TariDanTransactionProcessor::new(
+        TransactionProcessorConfig::builder()
+            .with_network(config.network)
+            .with_template_binary_max_size_bytes(consensus_constants.template_binary_max_size_bytes)
+            .build(),
+        template_manager.clone(),
+        fee_table,
+    );
     let transaction_executor = TariDanBlockTransactionExecutor::new(
         payload_processor.clone(),
         consensus::create_transaction_validator(template_manager.clone()).boxed(),
@@ -300,13 +326,13 @@ pub async fn spawn_services(
         metrics,
         shutdown.clone(),
         transaction_executor,
+        tx_hotstuff_events,
         consensus_constants.clone(),
     )
     .await;
     handles.push(consensus_join_handle);
 
     let (mempool, join_handle) = mempool::spawn(
-        consensus_constants.num_preshards,
         epoch_manager.clone(),
         create_mempool_transaction_validator(template_manager.clone()),
         state_store.clone(),
@@ -323,15 +349,15 @@ pub async fn spawn_services(
         global_db.clone(),
         base_node_client.clone(),
         epoch_manager.clone(),
-        template_manager_service.clone(),
         shutdown.clone(),
         consensus_constants,
         state_store.clone(),
         config.validator_node.scan_base_layer,
         config.validator_node.base_layer_scanning_interval,
         config.validator_node.validator_node_sidechain_id.clone(),
-        config.validator_node.template_sidechain_id.clone(),
         config.validator_node.burnt_utxo_sidechain_id.clone(),
+        template_manager_service.clone(),
+        config.validator_node.template_sidechain_id.clone(),
     );
     handles.push(join_handle);
 
@@ -391,6 +417,7 @@ pub async fn spawn_services(
 async fn create_registration_file(
     config: &ApplicationConfig,
     epoch_manager: &EpochManagerHandle<PeerAddress>,
+    sidechain_pk: Option<&RistrettoPublicKey>,
     keypair: &RistrettoKeypair,
 ) -> Result<(), anyhow::Error> {
     let fee_claim_public_key = config.validator_node.fee_claim_public_key.clone();
@@ -399,7 +426,17 @@ async fn create_registration_file(
         .await
         .context("set_fee_claim_public_key failed when creating registration file")?;
 
-    let signature = ValidatorNodeSignature::sign(keypair.secret_key(), &fee_claim_public_key, b"");
+    // TODO: this signature can be replayed since it is not bound to any single use data (e.g. epoch). This
+    // could be used to re-register a validator node after that node has exited. However, this is costly and AFAICS
+    // could only potentially do reputational damage since an attacker would not be able to operate as the node
+    // (missed propsals etc). Suggest: perhaps a JSON-rpc call that triggers this file to be re-signed
+    // with the current epoch. File system access is still required to read the updated signature.
+    let signature = ValidatorNodeSignature::sign(
+        keypair.secret_key(),
+        sidechain_pk,
+        &fee_claim_public_key,
+        VnEpoch::zero(),
+    );
 
     let registration = ValidatorRegistrationFile {
         signature,
@@ -492,10 +529,7 @@ where
     TTx::Addr: NodeAddressable + Serialize,
 {
     // Assume that if the public identity resource exists, then the rest of the state has been bootstrapped
-    if SubstateRecord::exists(
-        &**tx,
-        &VersionedSubstateId::new(PUBLIC_IDENTITY_RESOURCE_ADDRESS.into(), 0),
-    )? {
+    if SubstateRecord::exists(&**tx, &VersionedSubstateId::new(PUBLIC_IDENTITY_RESOURCE_ADDRESS, 0))? {
         return Ok(());
     }
 

@@ -21,9 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_engine_types::indexed_value::IndexedValueError;
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::{models::TemplateAddress, HashParseError};
 
-use crate::{runtime::RuntimeError, wasm::WasmExecutionError};
+use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionError {
@@ -45,4 +45,12 @@ pub enum TransactionError {
     FunctionNotFound { name: String },
     #[error("Invariant error: {details}")]
     InvariantError { details: String },
+    #[error("Load template error: {0}")]
+    LoadTemplate(#[from] TemplateLoaderError),
+    #[error("WASM binary too big! {0} bytes are greater than allowed maximum {1} bytes.")]
+    WasmBinaryTooBig(usize, usize),
+    #[error("Template provider error: {0}")]
+    TemplateProvider(String),
+    #[error("Converting to hash error: {0}")]
+    HashConversion(#[from] HashParseError),
 }

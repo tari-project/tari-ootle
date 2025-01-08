@@ -19,6 +19,7 @@ minotari_console_wallet = { workspace = true, features = ["grpc"] }
 minotari_wallet = { workspace = true }
 tari_p2p = { workspace = true }
 tari_shutdown = { workspace = true }
+tari_sidechain = { workspace = true }
 
 tari_crypto = { workspace = true }
 tari_indexer = { workspace = true }
@@ -45,7 +46,7 @@ tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "featu
 tari_comms_dht = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 
 anyhow = { workspace = true }
-# if we set this version in the workspace it would break other crates
+# if we set this version in the workspace it would break other crates
 base64 = "0.21.0"
 config = { workspace = true }
 cucumber = { workspace = true, features = ["default", "libtest", "output-junit"] }
@@ -62,6 +63,7 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread", "signal"] }
 tonic = { workspace = true }
 regex = "1.11.0"
+notify = "7.0.0"
 
 [[test]]
 name = "cucumber" # this should be the same as the filename of your test target

@@ -41,6 +41,6 @@ async fn start_a_network(world: &mut TariWorld, vn_name: String, walletd_name: S
     miner::miner_mines_new_blocks(world, MINER_NAME.to_string(), 6).await;
     wallet::check_balance(world, WALLET_NAME.to_string(), 20, "T".to_string()).await;
     validator_node::send_vn_registration_with_claim_wallet(world, vn_name.clone(), WALLET_NAME.to_string()).await;
-    miner::miner_mines_new_blocks(world, MINER_NAME.to_string(), 16).await;
+    miner::miner_mines_new_blocks(world, MINER_NAME.to_string(), 26).await;
     validator_node::assert_vn_is_registered(world, vn_name).await;
 }

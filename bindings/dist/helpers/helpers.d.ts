@@ -3,7 +3,7 @@ import { RejectReason } from "../types/RejectReason";
 import { SubstateDiff } from "../types/SubstateDiff";
 import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
-export declare function substateIdToString(substateId: SubstateId | null): string;
+export declare function substateIdToString(substateId: SubstateId | string | null): string;
 export declare function stringToSubstateId(substateId: string): SubstateId;
 export declare function rejectReasonToString(reason: RejectReason | null): string;
 export declare function getSubstateDiffFromTransactionResult(result: TransactionResult): SubstateDiff | null;

@@ -30,6 +30,7 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{
     commit_result::RejectReason,
+    published_template::PublishedTemplateAddress,
     substate::Substate,
     transaction_receipt::TransactionReceiptAddress,
 };
@@ -84,7 +85,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 },
                 None => {
                     let version = store.get_latest_version(&input.substate_id)?;
-                    info!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input}");
+                    info!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input} to version {version}");
                     resolved_substates.insert(input, version);
                 },
             }
@@ -160,9 +161,17 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         let mut transaction = TransactionRecord::get(store.read_transaction(), &transaction_id)?;
         let mut outputs = HashSet::new();
         outputs.insert(VersionedSubstateId::new(
-            TransactionReceiptAddress::from(transaction_id).into(),
+            TransactionReceiptAddress::from(transaction_id),
             0,
         ));
+
+        for binary in transaction.transaction().publish_templates_iter() {
+            let author = transaction.transaction().seal_signature().public_key();
+            outputs.insert(VersionedSubstateId::new(
+                PublishedTemplateAddress::from_author_and_code(author, binary),
+                0,
+            ));
+        }
 
         let (local_versions, non_local_inputs) = match self.resolve_local_versions(
             store,
@@ -214,7 +223,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             )));
         }
 
-        if non_local_inputs.is_empty() {
+        if !transaction.transaction.is_global() && non_local_inputs.is_empty() {
             // CASE: All inputs are local and we can execute the transaction.
             //       Outputs may or may not be local
             let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.clone(), *v)))?;
@@ -296,6 +305,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
                 transaction.set_abort_reason(RejectReason::FailedToLockInputs(err.to_string()));
             }
+
             // CASE: Multishard transaction, not executed
             Ok(PreparedTransaction::new_multishard(
                 transaction.into_execution(),

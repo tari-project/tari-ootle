@@ -7,6 +7,7 @@ import type { TransactionPoolStage } from "./TransactionPoolStage";
 export interface TransactionPoolRecord {
   transaction_id: string;
   evidence: Evidence;
+  is_global: boolean;
   transaction_fee: number;
   leader_fee: LeaderFee | null;
   stage: TransactionPoolStage;

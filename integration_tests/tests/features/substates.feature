@@ -23,8 +23,8 @@ Feature: Substates
 
     # Register the "counter" template
     When base wallet WALLET registers the template "counter"
-    When miner MINER mines 13 new blocks
-    Then VAL_1 has scanned to height 16
+    When miner MINER mines 23 new blocks
+    Then VAL_1 has scanned to height 26
     Then the validator node VAL_1 is listed as registered
     Then the template "counter" is listed as registered by the validator node VAL_1
 

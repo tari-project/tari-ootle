@@ -20,13 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useQuery } from "@tanstack/react-query";
-import { transactionsGet, transactionsGetAll } from "../../utils/json_rpc";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { transactionsGet, transactionsGetAll, transactionsPublishTemplate } from "../../utils/json_rpc";
 import { apiError } from "../helpers/types";
+import queryClient from "../queryClient";
 
-import type { TransactionStatus } from "@tari-project/typescript-bindings";
+import type {
+  ComponentAddressOrName,
+  PublishTemplateRequest,
+  TransactionStatus,
+} from "@tari-project/typescript-bindings";
 
-const useTransactionDetails = (hash: string) => {
+export const useTransactionDetails = (hash: string) => {
   return useQuery({
     queryKey: ["transaction_details"],
     queryFn: () => {
@@ -38,7 +43,7 @@ const useTransactionDetails = (hash: string) => {
   });
 };
 
-const useGetAllTransactions = (status: TransactionStatus | null, component: string | null) => {
+export const useGetAllTransactions = (status: TransactionStatus | null, component: string | null) => {
   return useQuery({
     queryKey: ["transactions"],
     queryFn: () => transactionsGetAll({ status: status, component: component }),
@@ -50,4 +55,14 @@ const useGetAllTransactions = (status: TransactionStatus | null, component: stri
   });
 };
 
-export { useTransactionDetails, useGetAllTransactions };
+export const usePublishTemplate = () => {
+  return useMutation(transactionsPublishTemplate, {
+    onError: (error: apiError) => {
+      console.error(error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries(["transactions"]);
+      queryClient.invalidateQueries(["accounts_balances"]);
+    },
+  });
+};

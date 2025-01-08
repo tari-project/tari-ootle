@@ -3,24 +3,28 @@
 
 use std::fmt::{Display, Formatter};
 
+use borsh::BorshSerialize;
 use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
+    borsh::indexmap as indexmap_borsh,
     committee::CommitteeInfo,
+    option::DisplayContainer,
+    LockIntent,
     NumPreshards,
     ShardGroup,
-    SubstateAddress,
-    SubstateLockType,
+    SubstateRequirement,
     ToSubstateAddress,
+    VersionedSubstateId,
 };
-use tari_engine_types::serde_with;
+use tari_engine_types::{serde_with, substate::SubstateId};
 
-use crate::consensus_models::{QcId, VersionedSubstateIdLockIntent};
+use crate::consensus_models::QcId;
 
 const LOG_TARGET: &str = "tari::dan::consensus_models::evidence";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -30,6 +34,7 @@ pub struct Evidence {
     // Serialize JSON as an array of objects since ShardGroup is a non-string key
     #[serde(with = "serde_with::vec")]
     #[cfg_attr(feature = "ts", ts(type = "Array<[any, any]>"))]
+    #[borsh(serialize_with = "indexmap_borsh::serialize")]
     evidence: IndexMap<ShardGroup, ShardGroupEvidence>,
 }
 
@@ -40,54 +45,94 @@ impl Evidence {
         }
     }
 
-    pub fn from_inputs_and_outputs<
-        I: IntoIterator<Item = VersionedSubstateIdLockIntent>,
-        O: IntoIterator<Item = VersionedSubstateIdLockIntent>,
-    >(
+    pub fn from_initial_substates<I, O>(num_preshards: NumPreshards, num_committees: u32, inputs: I, outputs: O) -> Self
+    where
+        I: IntoIterator<Item = SubstateRequirement>,
+        O: IntoIterator<Item = VersionedSubstateId>,
+    {
+        let mut evidence = Self::empty();
+
+        for obj in inputs {
+            // Version does not affect the shard group
+            let substate_address = obj.to_substate_address_zero_version();
+            let sg = substate_address.to_shard_group(num_preshards, num_committees);
+            evidence.add_shard_group(sg).insert_empty_input(obj.into_substate_id());
+        }
+
+        for obj in outputs {
+            let substate_address = obj.to_substate_address();
+            let sg = substate_address.to_shard_group(num_preshards, num_committees);
+            evidence.add_shard_group(sg).insert_output(obj.substate_id, obj.version);
+        }
+
+        evidence
+    }
+
+    pub fn from_inputs_and_outputs<I, O, L1, L2>(
         num_preshards: NumPreshards,
         num_committees: u32,
         resolved_inputs: I,
         resulting_outputs: O,
-    ) -> Self {
-        let mut evidence = IndexMap::<ShardGroup, ShardGroupEvidence>::new();
+    ) -> Self
+    where
+        L1: LockIntent,
+        I: IntoIterator<Item = L1>,
+        L2: LockIntent,
+        O: IntoIterator<Item = L2>,
+    {
+        let mut evidence = Self::empty();
 
-        for obj in resolved_inputs.into_iter().chain(resulting_outputs) {
+        for obj in resolved_inputs {
             let substate_address = obj.to_substate_address();
             let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            let shard_evidence = evidence.entry(sg).or_default();
-            shard_evidence.substates.insert(substate_address, obj.lock_type());
-            shard_evidence.substates.sort_keys();
+            evidence.add_shard_group(sg).insert_from_lock_intent(obj);
         }
 
-        Evidence { evidence }
+        for obj in resulting_outputs {
+            let substate_address = obj.to_substate_address();
+            let sg = substate_address.to_shard_group(num_preshards, num_committees);
+            evidence.add_shard_group(sg).insert_from_lock_intent(obj);
+        }
+
+        evidence
     }
 
-    pub fn all_addresses_accepted(&self) -> bool {
+    pub fn all_objects_accepted(&self) -> bool {
         // CASE: all inputs and outputs are accept justified. If they have been accept justified, they have implicitly
         // been prepare justified. This may happen if the local node is only involved in outputs (and therefore
         // sequences using the LocalAccept foreign proposal)
         self.evidence.values().all(|e| e.is_accept_justified())
     }
 
-    pub fn all_inputs_prepared(&self) -> bool {
+    pub fn all_shard_groups_prepared(&self) -> bool {
         self.evidence
             .values()
             // CASE: we use prepare OR accept because inputs can only be accept justified if they were prepared. Prepared
             // may be implicit (null) if the local node is only involved in outputs (and therefore sequences using the LocalAccept
             // foreign proposal)
-            .all(|e| {
-                e.is_prepare_justified() || e.is_accept_justified()
+            .all(|e| e.is_prepare_justified() || e.is_accept_justified())
+    }
 
+    pub fn all_input_shard_groups_prepared(&self) -> bool {
+        self.evidence
+            .values()
+            .filter(|e| {
+                // CASE: we only require input shard groups to prepare
+                 !e.inputs().is_empty()
             })
+            // CASE: we use prepare OR accept because inputs can only be accept justified if they were prepared. Prepared
+            // may be implicit (null) if the local node is only involved in outputs (and therefore sequences using the LocalAccept
+            // foreign proposal). If there are no
+            .all(|e| e.is_prepare_justified() || e.is_accept_justified())
     }
 
     /// Returns true if all substates in the given shard group are output locks.
     /// This assumes the provided evidence is complete before this is called.
     /// If no evidence is present for the shard group, false is returned.
     pub fn is_committee_output_only(&self, committee_info: &CommitteeInfo) -> bool {
-        self.evidence.get(&committee_info.shard_group()).map_or(false, |e| {
-            !e.substates().is_empty() && e.substates().values().all(|lock| lock.is_output())
-        })
+        self.evidence
+            .get(&committee_info.shard_group())
+            .map_or(true, |e| e.inputs().is_empty())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -102,6 +147,16 @@ impl Evidence {
         self.evidence.get(shard_group)
     }
 
+    pub fn has(&self, shard_group: &ShardGroup) -> bool {
+        self.evidence.contains_key(shard_group)
+    }
+
+    pub fn has_and_not_empty(&self, shard_group: &ShardGroup) -> bool {
+        self.evidence
+            .get(shard_group)
+            .map_or(false, |e| !e.inputs.is_empty() || !e.outputs.is_empty())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&ShardGroup, &ShardGroupEvidence)> {
         self.evidence.iter()
     }
@@ -111,7 +166,7 @@ impl Evidence {
     }
 
     pub fn add_prepare_qc_evidence(&mut self, committee_info: &CommitteeInfo, qc_id: QcId) -> &mut Self {
-        for evidence_mut in self.evidence_in_committee_iter_mut(committee_info) {
+        if let Some(evidence_mut) = self.evidence.get_mut(&committee_info.shard_group()) {
             debug!(
                 target: LOG_TARGET,
                 "add_prepare_qc_evidence {} QC[{qc_id}]",
@@ -124,7 +179,7 @@ impl Evidence {
     }
 
     pub fn add_accept_qc_evidence(&mut self, committee_info: &CommitteeInfo, qc_id: QcId) -> &mut Self {
-        for evidence_mut in self.evidence_in_committee_iter_mut(committee_info) {
+        if let Some(evidence_mut) = self.evidence.get_mut(&committee_info.shard_group()) {
             debug!(
                 target: LOG_TARGET,
                 "add_accept_qc_evidence {} QC[{qc_id}]",
@@ -134,16 +189,6 @@ impl Evidence {
         }
 
         self
-    }
-
-    fn evidence_in_committee_iter_mut<'a>(
-        &'a mut self,
-        committee_info: &'a CommitteeInfo,
-    ) -> impl Iterator<Item = &'a mut ShardGroupEvidence> {
-        self.evidence
-            .iter_mut()
-            .filter(|(sg, _)| committee_info.shard_group() == **sg)
-            .map(|(_, e)| e)
     }
 
     pub fn qc_ids_iter(&self) -> impl Iterator<Item = &QcId> + '_ {
@@ -160,6 +205,16 @@ impl Evidence {
         self.evidence.keys()
     }
 
+    pub fn missing_evidence_iter(&self) -> impl Iterator<Item = &ShardGroup> {
+        self.evidence.iter().filter_map(|(sg, e)| {
+            if e.prepare_qc.is_none() || e.accept_qc.is_none() {
+                Some(sg)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn num_shard_groups(&self) -> usize {
         self.evidence.len()
     }
@@ -169,8 +224,11 @@ impl Evidence {
         for (sg, evidence) in other.iter() {
             let evidence_mut = self.evidence.entry(*sg).or_default();
             evidence_mut
-                .substates
-                .extend(evidence.substates.iter().map(|(addr, lock)| (*addr, *lock)));
+                .inputs
+                .extend(evidence.inputs.iter().map(|(id, lock)| (id.clone(), *lock)));
+            evidence_mut
+                .outputs
+                .extend(evidence.outputs.iter().map(|(id, version)| (id.clone(), *version)));
             evidence_mut.sort_substates();
         }
         self.evidence.sort_keys();
@@ -188,25 +246,47 @@ impl FromIterator<(ShardGroup, ShardGroupEvidence)> for Evidence {
 
 impl Display for Evidence {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{")?;
-        for (i, (substate_address, shard_evidence)) in self.evidence.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
+        if f.alternate() {
+            for (i, (shard_group, shard_evidence)) in self.evidence.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                match (
+                    shard_evidence.is_prepare_justified(),
+                    shard_evidence.is_accept_justified(),
+                ) {
+                    (_, true) => write!(f, "{}: ACCEPTED", shard_group)?,
+                    (true, false) => write!(f, "{}: PREPARED", shard_group)?,
+                    _ => write!(f, "{}: NO EVIDENCE", shard_group)?,
+                }
             }
-            write!(f, "{}: {}", substate_address, shard_evidence)?;
+        } else {
+            write!(f, "{{")?;
+            for (i, (substate_address, shard_evidence)) in self.evidence.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}: {}", substate_address, shard_evidence)?;
+            }
+            write!(f, "}}")?;
         }
-        write!(f, "}}")
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct ShardGroupEvidence {
-    substates: IndexMap<SubstateAddress, SubstateLockType>,
+    #[borsh(serialize_with = "indexmap_borsh::serialize")]
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, any>"))]
+    inputs: IndexMap<SubstateId, Option<EvidenceInputLockData>>,
+    #[borsh(serialize_with = "indexmap_borsh::serialize")]
+    #[cfg_attr(feature = "ts", ts(type = "Record<string, number>"))]
+    outputs: IndexMap<SubstateId, u32>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     prepare_qc: Option<QcId>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
@@ -214,42 +294,66 @@ pub struct ShardGroupEvidence {
 }
 
 impl ShardGroupEvidence {
-    pub fn insert(&mut self, address: SubstateAddress, lock: SubstateLockType) -> &mut Self {
-        self.substates.insert_sorted(address, lock);
+    pub fn insert_from_lock_intent<T: LockIntent>(&mut self, lock: T) -> &mut Self {
+        if lock.lock_type().is_input() {
+            self.inputs.insert_sorted(
+                lock.substate_id().clone(),
+                Some(EvidenceInputLockData {
+                    is_write: lock.lock_type().is_write(),
+                    version: lock.version_to_lock(),
+                }),
+            );
+        } else {
+            self.outputs
+                .insert_sorted(lock.substate_id().clone(), lock.version_to_lock());
+        }
+        self
+    }
+
+    pub fn insert_empty_input(&mut self, substate_id: SubstateId) -> &mut Self {
+        self.inputs.insert(substate_id, None);
+        self
+    }
+
+    pub fn insert_output(&mut self, substate_id: SubstateId, version: u32) -> &mut Self {
+        self.outputs.insert(substate_id, version);
         self
     }
 
     pub fn is_prepare_justified(&self) -> bool {
-        // No substates means that we have no pledges yet, so we cannot count this as justified
-        !self.substates.is_empty() && self.prepare_qc.is_some()
+        self.prepare_qc.is_some()
     }
 
     pub fn is_accept_justified(&self) -> bool {
-        // No substates means that we have no pledges yet, so we cannot count this as justified
-        !self.substates.is_empty() && self.accept_qc.is_some()
+        self.accept_qc.is_some()
     }
 
-    pub fn substates(&self) -> &IndexMap<SubstateAddress, SubstateLockType> {
-        &self.substates
+    pub fn inputs(&self) -> &IndexMap<SubstateId, Option<EvidenceInputLockData>> {
+        &self.inputs
     }
 
-    pub fn sort_substates(&mut self) {
-        self.substates.sort_keys();
+    pub fn outputs(&self) -> &IndexMap<SubstateId, u32> {
+        &self.outputs
     }
 
-    pub fn contains(&self, substate_address: &SubstateAddress) -> bool {
-        self.substates.contains_key(substate_address)
+    fn sort_substates(&mut self) {
+        self.inputs.sort_keys();
+        self.outputs.sort_keys();
+    }
+
+    pub fn contains(&self, substate_id: &SubstateId) -> bool {
+        self.inputs.contains_key(substate_id) || self.outputs.contains_key(substate_id)
     }
 }
 
 impl Display for ShardGroupEvidence {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{")?;
-        for (i, (substate_address, lock)) in self.substates.iter().enumerate() {
+        for (i, (substate_id, lock)) in self.inputs.iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
-            write!(f, "{}: {}", substate_address, lock)?;
+            write!(f, "{}: {}", substate_id, lock.display())?;
         }
         write!(f, "}}")?;
         if let Some(qc_id) = self.prepare_qc {
@@ -266,12 +370,38 @@ impl Display for ShardGroupEvidence {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct EvidenceInputLockData {
+    pub is_write: bool,
+    pub version: u32,
+}
+
+impl Display for EvidenceInputLockData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let rw = if self.is_write { "Write" } else { "Read" };
+        write!(f, "v{} {}", self.version, rw)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use tari_dan_common_types::SubstateLockType;
+    use tari_template_lib::models::{ComponentAddress, ObjectKey};
 
-    fn seed_substate_address(seed: u8) -> SubstateAddress {
-        SubstateAddress::from_bytes(&[seed; SubstateAddress::LENGTH]).unwrap()
+    use super::*;
+    use crate::consensus_models::SubstateRequirementLockIntent;
+
+    fn seed_substate_id(seed: u8) -> SubstateId {
+        SubstateId::Component(ComponentAddress::from_array([seed; ObjectKey::LENGTH]))
+    }
+
+    fn seed_lock_intent(seed: u8, ty: SubstateLockType) -> SubstateRequirementLockIntent {
+        SubstateRequirementLockIntent::new(seed_substate_id(seed), 0, ty)
     }
 
     #[test]
@@ -283,51 +413,55 @@ mod tests {
         let mut evidence1 = Evidence::empty();
         evidence1
             .add_shard_group(sg1)
-            .insert(seed_substate_address(1), SubstateLockType::Write);
+            .insert_from_lock_intent(seed_lock_intent(1, SubstateLockType::Write));
         evidence1
             .add_shard_group(sg1)
-            .insert(seed_substate_address(2), SubstateLockType::Read);
+            .insert_from_lock_intent(seed_lock_intent(2, SubstateLockType::Read));
 
         let mut evidence2 = Evidence::empty();
         evidence2
             .add_shard_group(sg1)
-            .insert(seed_substate_address(2), SubstateLockType::Output);
+            .insert_from_lock_intent(seed_lock_intent(2, SubstateLockType::Write));
+        evidence2
+            .add_shard_group(sg1)
+            .insert_from_lock_intent(seed_lock_intent(2, SubstateLockType::Output));
         evidence2
             .add_shard_group(sg2)
-            .insert(seed_substate_address(3), SubstateLockType::Output);
+            .insert_from_lock_intent(seed_lock_intent(3, SubstateLockType::Output));
         evidence2
             .add_shard_group(sg3)
-            .insert(seed_substate_address(4), SubstateLockType::Output);
+            .insert_from_lock_intent(seed_lock_intent(4, SubstateLockType::Output));
 
         evidence1.update(&evidence2);
 
         assert_eq!(evidence1.len(), 3);
-        assert_eq!(
-            *evidence1
+        assert!(
+            evidence1
                 .get(&sg1)
                 .unwrap()
-                .substates
-                .get(&seed_substate_address(1))
-                .unwrap(),
-            SubstateLockType::Write
+                .inputs
+                .get(&seed_substate_id(1))
+                .unwrap()
+                .unwrap()
+                .is_write,
+        );
+        assert!(
+            evidence1
+                .get(&sg1)
+                .unwrap()
+                .inputs
+                .get(&seed_substate_id(2))
+                .unwrap()
+                .unwrap()
+                .is_write,
         );
         assert_eq!(
-            *evidence1
-                .get(&sg1)
-                .unwrap()
-                .substates
-                .get(&seed_substate_address(2))
-                .unwrap(),
-            SubstateLockType::Output
+            evidence1.get(&sg1).unwrap().outputs.get(&seed_substate_id(2)),
+            Some(&0u32)
         );
         assert_eq!(
-            *evidence1
-                .get(&sg1)
-                .unwrap()
-                .substates
-                .get(&seed_substate_address(2))
-                .unwrap(),
-            SubstateLockType::Output
+            evidence1.get(&sg1).unwrap().outputs.get(&seed_substate_id(2)),
+            Some(&0u32)
         );
     }
 }

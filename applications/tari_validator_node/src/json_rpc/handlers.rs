@@ -31,7 +31,7 @@ use log::*;
 use serde_json::{self as json, json};
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
 use tari_dan_app_utilities::{keypair::RistrettoKeypair, template_manager::interface::TemplateManagerHandle};
-use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateAddress};
+use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateAddress};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
     consensus_models::{Block, ExecutedTransaction, LeafBlock, QuorumDecision, SubstateRecord, TransactionRecord},
@@ -50,6 +50,8 @@ use tari_validator_node_client::types::{
     DryRunTransactionFinalizeResult,
     GetAllVnsRequest,
     GetAllVnsResponse,
+    GetBaseLayerEpochChangesRequest,
+    GetBaseLayerEpochChangesResponse,
     GetBlockRequest,
     GetBlockResponse,
     GetBlocksCountResponse,
@@ -59,6 +61,7 @@ use tari_validator_node_client::types::{
     GetCommitteeResponse,
     GetCommsStatsResponse,
     GetConnectionsResponse,
+    GetConsensusStatusResponse,
     GetEpochManagerStatsResponse,
     GetFilteredBlocksCountRequest,
     GetIdentityResponse,
@@ -91,7 +94,7 @@ use tari_validator_node_client::types::{
 };
 
 use crate::{
-    dry_run_transaction_processor::DryRunTransactionProcessor, json_rpc::jrpc_errors::{internal_error, not_found}, p2p::services::mempool::MempoolHandle, state_store::ValidatorNodeStateStore, Services
+    bootstrap::Services, consensus::ConsensusHandle, dry_run_transaction_processor::DryRunTransactionProcessor, json_rpc::jrpc_errors::{internal_error, not_found}, p2p::services::mempool::MempoolHandle, state_store::ValidatorNodeStateStore
 };
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
@@ -101,6 +104,7 @@ pub struct JsonRpcHandlers {
     mempool: MempoolHandle,
     template_manager: TemplateManagerHandle,
     epoch_manager: EpochManagerHandle<PeerAddress>,
+    consensus: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
     base_node_client: GrpcBaseNodeClient,
     state_store: ValidatorNodeStateStore,
@@ -113,6 +117,7 @@ impl JsonRpcHandlers {
             keypair: services.keypair.clone(),
             mempool: services.mempool.clone(),
             epoch_manager: services.epoch_manager.clone(),
+            consensus: services.consensus_handle.clone(),
             template_manager: services.template_manager.clone(),
             networking: services.networking.clone(),
             base_node_client,
@@ -333,8 +338,9 @@ impl JsonRpcHandlers {
 
         let transaction = self
             .state_store
-            .with_read_tx(|tx| ExecutedTransaction::get(tx, &data.transaction_id))
-            .map_err(internal_error(answer_id))?;
+            .with_read_tx(|tx| ExecutedTransaction::get(tx, &data.transaction_id).optional())
+            .map_err(internal_error(answer_id))?
+            .ok_or_else(|| not_found(answer_id, format!("Transaction {} not found", data.transaction_id)))?;
 
         Ok(JsonRpcResponse::success(answer_id, GetTransactionResponse {
             transaction,
@@ -401,40 +407,25 @@ impl JsonRpcHandlers {
     pub async fn get_block(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let data: GetBlockRequest = value.parse_params()?;
-        let tx = self.state_store.create_read_tx().map_err(internal_error(answer_id))?;
-        match Block::get(&tx, &data.block_id) {
-            Ok(block) => {
-                let res = GetBlockResponse { block };
-                Ok(JsonRpcResponse::success(answer_id, res))
-            },
-            Err(e) => Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    format!("Something went wrong: {}", e),
-                    json::Value::Null,
-                ),
-            )),
-        }
+        let block = self
+            .state_store
+            .with_read_tx(|tx| Block::get(tx, &data.block_id).optional())
+            .map_err(internal_error(answer_id))?
+            .ok_or_else(|| not_found(answer_id, format!("Block {} not found", data.block_id)))?;
+
+        let res = GetBlockResponse { block };
+        Ok(JsonRpcResponse::success(answer_id, res))
     }
 
     pub async fn get_blocks_count(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let tx = self.state_store.create_read_tx().map_err(internal_error(answer_id))?;
-        match Block::get_count(&tx) {
-            Ok(count) => {
-                let res = GetBlocksCountResponse { count };
-                Ok(JsonRpcResponse::success(answer_id, res))
-            },
-            Err(e) => Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InternalError,
-                    format!("Something went wrong: {}", e),
-                    json::Value::Null,
-                ),
-            )),
-        }
+        let count = self
+            .state_store
+            .with_read_tx(|tx| Block::get_count(tx))
+            .map_err(internal_error(answer_id))?;
+
+        let res = GetBlocksCountResponse { count };
+        Ok(JsonRpcResponse::success(answer_id, res))
     }
 
     pub async fn get_filtered_blocks_count(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -484,9 +475,7 @@ impl JsonRpcHandlers {
                 .map(|t| TemplateMetadata {
                     name: t.name,
                     address: t.address,
-                    url: t.url,
                     binary_sha: t.binary_sha.to_vec(),
-                    height: t.height,
                 })
                 .collect(),
         }))
@@ -512,9 +501,7 @@ impl JsonRpcHandlers {
             registration_metadata: TemplateMetadata {
                 name: template.metadata.name,
                 address: template.metadata.address,
-                url: template.metadata.url,
                 binary_sha: template.metadata.binary_sha.to_vec(),
-                height: template.metadata.height,
             },
             abi,
         }))
@@ -593,6 +580,26 @@ impl JsonRpcHandlers {
                     ),
                 )
             })?;
+        let local_vn_start_epoch = self
+            .epoch_manager
+            .get_our_validator_node(current_epoch)
+            .await
+            .map(|vn| vn.start_epoch)
+            .map(Some)
+            .or_else(|err| {
+                if err.is_not_registered_error() {
+                    Ok(None)
+                } else {
+                    Err(JsonRpcResponse::error(
+                        answer_id,
+                        JsonRpcError::new(
+                            JsonRpcErrorReason::InternalError,
+                            format!("Could not get committee shard:{}", err),
+                            json::Value::Null,
+                        ),
+                    ))
+                }
+            })?;
         let committee_info = self
             .epoch_manager
             .get_local_committee_info(current_epoch)
@@ -617,6 +624,7 @@ impl JsonRpcHandlers {
             current_block_height,
             current_block_hash,
             is_valid: committee_info.is_some(),
+            start_epoch: local_vn_start_epoch,
             committee_info,
         };
         Ok(JsonRpcResponse::success(answer_id, response))
@@ -679,22 +687,16 @@ impl JsonRpcHandlers {
     pub async fn get_shard_key(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let request = value.parse_params::<GetShardKeyRequest>()?;
-        if let Ok(shard_key) = self
-            .base_node_client()
-            .get_shard_key(request.height, &request.public_key)
+        let maybe_vn = self
+            .epoch_manager
+            .get_our_validator_node(request.epoch)
             .await
-        {
-            Ok(JsonRpcResponse::success(answer_id, GetShardKeyResponse { shard_key }))
-        } else {
-            Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    "Something went wrong".to_string(),
-                    json::Value::Null,
-                ),
-            ))
-        }
+            .optional()
+            .map_err(internal_error(answer_id))?;
+
+        Ok(JsonRpcResponse::success(answer_id, GetShardKeyResponse {
+            shard_key: maybe_vn.map(|vn| vn.shard_key),
+        }))
     }
 
     pub async fn get_committee(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -733,6 +735,59 @@ impl JsonRpcHandlers {
                 ),
             ))
         }
+    }
+
+    pub async fn get_base_layer_validator_changes(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let GetBaseLayerEpochChangesRequest { start_epoch, end_epoch } =
+            value.parse_params::<GetBaseLayerEpochChangesRequest>()?;
+        let mut changes = Vec::new();
+        fn convert_change(
+            change: tari_core::base_node::comms_interface::ValidatorNodeChange,
+        ) -> types::ValidatorNodeChange {
+            match change {
+                tari_core::base_node::comms_interface::ValidatorNodeChange::Add {
+                    registration,
+                    activation_epoch,
+                    minimum_value_promise,
+                } => types::ValidatorNodeChange::Add {
+                    public_key: registration.public_key().clone(),
+                    activation_epoch: Epoch(activation_epoch.as_u64()),
+                    minimum_value_promise: minimum_value_promise.as_u64(),
+                },
+                tari_core::base_node::comms_interface::ValidatorNodeChange::Remove { public_key } => {
+                    types::ValidatorNodeChange::Remove {
+                        public_key: public_key.clone(),
+                    }
+                },
+            }
+        }
+        for epoch in start_epoch.as_u64()..=end_epoch.as_u64() {
+            let epoch = Epoch(epoch);
+            let vns = self
+                .base_node_client()
+                .get_validator_node_changes(epoch, None)
+                .await
+                .map_err(internal_error(answer_id))?;
+            changes.push((epoch, vns.into_iter().map(convert_change).collect()));
+        }
+
+        Ok(JsonRpcResponse::success(answer_id, GetBaseLayerEpochChangesResponse {
+            changes,
+        }))
+    }
+
+    pub async fn get_consensus_status(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let epoch = self.consensus.current_epoch();
+        let height = self.consensus.current_view().get_height();
+        let state = self.consensus.get_current_state();
+
+        Ok(JsonRpcResponse::success(answer_id, GetConsensusStatusResponse {
+            epoch,
+            height,
+            state: format!("{:?}", state),
+        }))
     }
 
     pub async fn get_validator_fees(&self, value: JsonRpcExtractor) -> JrpcResult {

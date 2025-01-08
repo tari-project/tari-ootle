@@ -20,7 +20,7 @@ impl<'a, TTx> ShardScopedTreeStoreReader<'a, TTx> {
     }
 }
 
-impl<'a, TTx: StateStoreReadTransaction> TreeStoreReader<Version> for ShardScopedTreeStoreReader<'a, TTx> {
+impl<TTx: StateStoreReadTransaction> TreeStoreReader<Version> for ShardScopedTreeStoreReader<'_, TTx> {
     fn get_node(&self, key: &NodeKey) -> Result<Node<Version>, tari_state_tree::JmtStorageError> {
         self.tx
             .state_tree_nodes_get(self.shard, key)
@@ -52,7 +52,7 @@ impl<'a, TTx: StateStoreWriteTransaction> ShardScopedTreeStoreWriter<'a, TTx> {
     }
 }
 
-impl<'a, TTx> TreeStoreReader<Version> for ShardScopedTreeStoreWriter<'a, TTx>
+impl<TTx> TreeStoreReader<Version> for ShardScopedTreeStoreWriter<'_, TTx>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
@@ -66,7 +66,7 @@ where
     }
 }
 
-impl<'a, TTx: StateStoreWriteTransaction> TreeStoreWriter<Version> for ShardScopedTreeStoreWriter<'a, TTx> {
+impl<TTx: StateStoreWriteTransaction> TreeStoreWriter<Version> for ShardScopedTreeStoreWriter<'_, TTx> {
     fn insert_node(&mut self, key: NodeKey, node: Node<Version>) -> Result<(), tari_state_tree::JmtStorageError> {
         self.tx
             .state_tree_nodes_insert(self.shard, key, node)

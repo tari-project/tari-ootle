@@ -8,9 +8,9 @@ use log::*;
 use minotari_app_grpc::tari_rpc::{self as grpc, GetActiveValidatorNodesResponse, RegisterValidatorNodeResponse};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use minotari_wallet_grpc_client::WalletGrpcClient;
-use tari_common::exit_codes::{ExitCode, ExitError};
-use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::ByteArray;
+use tari_dan_common_types::layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef};
+use tari_sidechain::EvictionProof;
 use tonic::transport::Channel;
 use url::Url;
 
@@ -18,26 +18,18 @@ use crate::helpers::read_registration_file;
 
 #[derive(Clone)]
 pub struct MinotariNodes {
-    bootstrapped: bool,
     node_grpc_address: Url,
     wallet_grpc_address: Url,
     node_registration_file: PathBuf,
     current_height: u64,
-    node: Option<BaseNodeGrpcClient<Channel>>,
-    wallet: Option<WalletGrpcClient<Channel>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TipStatus {
     block_height: u64,
-    block_hash: FixedHash,
 }
 
 impl TipStatus {
-    pub fn hash(&self) -> FixedHash {
-        self.block_hash
-    }
-
     pub fn height(&self) -> u64 {
         self.block_height
     }
@@ -46,55 +38,29 @@ impl TipStatus {
 impl MinotariNodes {
     pub fn new(node_grpc_address: Url, wallet_grpc_address: Url, node_registration_file: PathBuf) -> Self {
         Self {
-            bootstrapped: false,
             node_grpc_address,
             wallet_grpc_address,
             node_registration_file,
             current_height: 0,
-            node: None,
-            wallet: None,
         }
     }
 
-    pub async fn bootstrap(&mut self) -> anyhow::Result<()> {
-        if self.bootstrapped {
-            return Ok(());
-        }
-
-        self.connect_node().await?;
-        self.connect_wallet().await?;
-        self.bootstrapped = true;
-        Ok(())
-    }
-
-    async fn connect_wallet(&mut self) -> anyhow::Result<()> {
-        log::info!("Connecting to wallet on gRPC {}", self.wallet_grpc_address);
+    async fn connect_wallet(&self) -> anyhow::Result<WalletGrpcClient<Channel>> {
+        log::debug!("Connecting to wallet on gRPC {}", self.wallet_grpc_address);
         let client = WalletGrpcClient::connect(self.wallet_grpc_address.as_str()).await?;
-
-        self.wallet = Some(client);
-        Ok(())
+        Ok(client)
     }
 
-    async fn connect_node(&mut self) -> anyhow::Result<()> {
-        log::info!("Connecting to base node on gRPC {}", self.node_grpc_address);
-        let client = BaseNodeGrpcClient::connect(self.node_grpc_address.to_string())
-            .await
-            .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
-
-        self.node = Some(client);
-
-        Ok(())
+    async fn connect_node(&self) -> anyhow::Result<BaseNodeGrpcClient<Channel>> {
+        debug!("Connecting to base node on gRPC {}", self.node_grpc_address);
+        let client = BaseNodeGrpcClient::connect(self.node_grpc_address.to_string()).await?;
+        Ok(client)
     }
 
     pub async fn get_tip_status(&mut self) -> anyhow::Result<TipStatus> {
-        if !self.bootstrapped {
-            bail!("Node client not connected");
-        }
-
         let inner = self
-            .node
-            .clone()
-            .unwrap()
+            .connect_node()
+            .await?
             .get_tip_info(grpc::Empty {})
             .await?
             .into_inner();
@@ -107,20 +73,14 @@ impl MinotariNodes {
 
         Ok(TipStatus {
             block_height: metadata.best_block_height,
-            block_hash: metadata.best_block_hash.try_into().map_err(|_| anyhow!("error"))?,
         })
     }
 
     pub async fn get_active_validator_nodes(&self) -> anyhow::Result<Vec<GetActiveValidatorNodesResponse>> {
-        if !self.bootstrapped {
-            bail!("Node client not connected");
-        }
-
         let height = self.current_height;
         let mut stream = self
-            .node
-            .clone()
-            .unwrap()
+            .connect_node()
+            .await?
             .get_active_validator_nodes(grpc::GetActiveValidatorNodesRequest {
                 height,
                 sidechain_id: vec![],
@@ -150,11 +110,7 @@ impl MinotariNodes {
         Ok(vns)
     }
 
-    pub async fn register_validator_node(&self) -> anyhow::Result<RegisterValidatorNodeResponse> {
-        if !self.bootstrapped {
-            bail!("Node client not connected");
-        }
-
+    pub async fn register_validator_node(&mut self) -> anyhow::Result<RegisterValidatorNodeResponse> {
         info!("Preparing to send a VN registration request");
 
         let info = read_registration_file(self.node_registration_file.clone())
@@ -167,9 +123,8 @@ impl MinotariNodes {
             })?;
         let sig = info.signature.signature();
         let resp = self
-            .wallet
-            .clone()
-            .unwrap()
+            .connect_wallet()
+            .await?
             .register_validator_node(grpc::RegisterValidatorNodeRequest {
                 validator_node_public_key: info.public_key.to_vec(),
                 validator_node_signature: Some(grpc::Signature {
@@ -192,19 +147,36 @@ impl MinotariNodes {
         Ok(resp)
     }
 
-    pub async fn get_consensus_constants(&self, block_height: u64) -> anyhow::Result<grpc::ConsensusConstants> {
-        if !self.bootstrapped {
-            bail!("Node client not connected");
-        }
+    pub async fn submit_transaction(
+        &mut self,
+        transaction_def: LayerOneTransactionDef<serde_json::Value>,
+    ) -> anyhow::Result<()> {
+        let proof_type = transaction_def.proof_type;
+        let resp = match proof_type {
+            LayerOnePayloadType::EvictionProof => {
+                let proof = serde_json::from_value::<EvictionProof>(transaction_def.payload)?;
+                info!(
+                    "Preparing to send an eviction proof transaction to evict {}",
+                    proof.node_to_evict()
+                );
+                let proof_proto = (&proof).into();
 
-        let constants = self
-            .node
-            .clone()
-            .unwrap()
-            .get_constants(grpc::BlockHeight { block_height })
-            .await?
-            .into_inner();
+                let resp = self
+                    .connect_wallet()
+                    .await?
+                    .submit_validator_eviction_proof(grpc::SubmitValidatorEvictionProofRequest {
+                        proof: Some(proof_proto),
+                        fee_per_gram: 10,
+                        message: format!("Validator: Automatically submitted {proof_type} transaction"),
+                        sidechain_deployment_key: vec![],
+                    })
+                    .await?;
+                resp.into_inner()
+            },
+        };
 
-        Ok(constants)
+        info!("{} transaction sent successfully (tx_id={})", proof_type, resp.tx_id);
+
+        Ok(())
     }
 }

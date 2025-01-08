@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::bail;
 use log::*;
-use tari_shutdown::Shutdown;
+use tari_common::configuration::Network;
 use tokio::{
     fs::{self, OpenOptions},
     io::AsyncWriteExt,
@@ -62,6 +62,7 @@ async fn spawn_validator_node(
     binary_path: PathBuf,
     base_dir: PathBuf,
     minotari_node_grpc_url: &Url,
+    network: Network,
 ) -> anyhow::Result<Child> {
     debug!("Using VN binary at: {}", binary_path.display());
     debug!("Using VN base dir in directory: {}", base_dir.display());
@@ -69,6 +70,7 @@ async fn spawn_validator_node(
     fs::create_dir_all(&base_dir).await?;
 
     let child = TokioCommand::new(binary_path)
+        .arg(format!("--network={}", network.as_key_str()))
         .arg(format!("-b{}", base_dir.display()))
         .arg(format!("--node-grpc={minotari_node_grpc_url}"))
         .stdin(Stdio::null())
@@ -87,7 +89,7 @@ pub async fn spawn_validator_node_os(
     cfg_alert: Channels,
     auto_restart: bool,
     minotari_node_grpc_url: Url,
-    mut trigger_signal: Shutdown,
+    network: Network,
 ) -> anyhow::Result<ChildChannel> {
     let (tx_log, rx_log) = mpsc::channel(16);
     let (tx_alert, rx_alert) = mpsc::channel(16);
@@ -98,8 +100,13 @@ pub async fn spawn_validator_node_os(
     let tx_restart_clone_main = tx_restart.clone();
     tokio::spawn(async move {
         loop {
-            let child_res =
-                spawn_validator_node(binary_path.clone(), vn_base_dir.clone(), &minotari_node_grpc_url).await;
+            let child_res = spawn_validator_node(
+                binary_path.clone(),
+                vn_base_dir.clone(),
+                &minotari_node_grpc_url,
+                network,
+            )
+            .await;
 
             match child_res {
                 Ok(child) => {
@@ -135,7 +142,6 @@ pub async fn spawn_validator_node_os(
                 Some(_) => {
                     if !auto_restart {
                         info!("Received restart signal, but auto restart is disabled, exiting");
-                        trigger_signal.trigger();
                         break;
                     }
 
@@ -201,7 +207,7 @@ pub async fn start_validator(
     minotari_node_grpc_url: Url,
     alerting_config: Channels,
     auto_restart: bool,
-    trigger_signal: Shutdown,
+    network: Network,
 ) -> Option<ChildChannel> {
     let opt = check_existing_node_os(vn_base_dir.clone()).await;
     if let Some(pid) = opt {
@@ -218,7 +224,7 @@ pub async fn start_validator(
         alerting_config,
         auto_restart,
         minotari_node_grpc_url,
-        trigger_signal,
+        network,
     )
     .await
     .ok()?;

@@ -22,10 +22,11 @@ libp2p-identity = { workspace = true, features = [
     "peerid",
 ] }
 
-blake2 = { workspace = true }
+borsh = { workspace = true }
 ethnum = { workspace = true }
 newtype-ops = { workspace = true }
 rand = { workspace = true }
+indexmap = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 serde = { workspace = true, default-features = true }

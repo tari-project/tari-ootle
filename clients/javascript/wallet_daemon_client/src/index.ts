@@ -41,6 +41,8 @@ import {
   KeysSetActiveResponse,
   ListAccountNftRequest,
   ListAccountNftResponse,
+  PublishTemplateRequest,
+  PublishTemplateResponse,
   RevealFundsRequest,
   RevealFundsResponse,
   SettingsGetResponse,
@@ -122,6 +124,8 @@ export type {
   KeysSetActiveResponse,
   ListAccountNftRequest,
   ListAccountNftResponse,
+  PublishTemplateRequest,
+  PublishTemplateResponse,
   RevealFundsRequest,
   RevealFundsResponse,
   SettingsGetResponse,
@@ -252,6 +256,11 @@ export class WalletDaemonClient {
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {
     return this.__invokeRpc("transactions.submit", params);
   }
+
+  public publishTemplate(params: PublishTemplateRequest): Promise<PublishTemplateResponse> {
+    return this.__invokeRpc("transactions.publish_template", params);
+  }
+
 
   public substatesGet(params: SubstatesGetRequest): Promise<SubstatesGetResponse> {
     return this.__invokeRpc("substates.get", params);

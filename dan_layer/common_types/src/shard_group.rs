@@ -7,11 +7,12 @@ use std::{
     ops::RangeInclusive,
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 
 use crate::{shard::Shard, uint::U256, NumPreshards, SubstateAddress};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -91,6 +92,10 @@ impl ShardGroup {
         self.as_range().contains(shard)
     }
 
+    pub fn overlaps_shard_group(&self, other: &ShardGroup) -> bool {
+        self.start <= other.end_inclusive && self.end_inclusive >= other.start
+    }
+
     pub fn as_range(&self) -> RangeInclusive<Shard> {
         self.start..=self.end_inclusive
     }
@@ -118,7 +123,7 @@ impl ShardGroup {
 
 impl Display for ShardGroup {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ShardGroup[{}, {}]", self.start, self.end_inclusive)
+        write!(f, "ShardGroup({}-{})", self.start.as_u32(), self.end_inclusive.as_u32())
     }
 }
 

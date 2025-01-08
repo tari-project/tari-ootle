@@ -71,20 +71,24 @@ export function fromHexString(hexString: string) {
   return res;
 }
 
-export function substateIdToString(substateId: SubstateId | null | undefined) {
+export function substateIdToString(substateId: SubstateId | string | null | undefined) {
   if (substateId === null || substateId === undefined) {
     return "";
+  }
+  if (typeof substateId === "string") {
+    return substateId;
   }
   const key = Object.keys(substateId)[0] as keyof SubstateId;
   return substateId[key];
 }
 
-export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 8, end: number = 8) {
+export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 4, end: number = 4) {
   if (substateId === null || substateId === undefined) {
     return "";
   }
   const string = substateIdToString(substateId);
-  return shortenString(string, start, end);
+  const parts = string.split("_", 2);
+  return parts[0] + "_" + shortenString(parts[1], start, end);
 }
 
 export function shortenString(string: string, start: number = 8, end: number = 8) {

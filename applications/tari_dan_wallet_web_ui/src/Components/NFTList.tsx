@@ -23,12 +23,11 @@
 import React from "react";
 import FetchStatusCheck from "./FetchStatusCheck";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
-import type { ListAccountNftResponse } from "@tari-project/typescript-bindings/wallet-daemon-client";
 import type { apiError } from "../api/helpers/types";
 import { DataTableCell } from "./StyledComponents";
-import { renderJson, toHexString } from "../utils/helpers";
+import { toHexString } from "../utils/helpers";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
-import type { NonFungibleId, NonFungibleToken } from "@tari-project/typescript-bindings";
+import type { NonFungibleId, NonFungibleToken, ListAccountNftResponse } from "@tari-project/typescript-bindings";
 import { convertCborValue } from "../utils/cbor";
 
 function NftsList({ nft }: { nft: NonFungibleToken }) {
@@ -96,7 +95,7 @@ export default function NFTList(props: NftListProps) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {nftsListData?.nfts.map((nft: NonFungibleToken, index) => <NftsList key={index} nft={nft} />)}
+          {nftsListData?.nfts.map((nft: NonFungibleToken, index: number) => <NftsList key={index} nft={nft} />)}
         </TableBody>
       </Table>
     </TableContainer>

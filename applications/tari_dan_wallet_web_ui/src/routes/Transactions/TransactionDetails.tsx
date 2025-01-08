@@ -39,12 +39,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "../../Components/Loading";
 import Error from "../../Components/Error";
-import type {
-  FinalizeResult,
-  RejectReason,
-  TransactionResult,
-  TransactionSignature,
-} from "@tari-project/typescript-bindings";
+import type { FinalizeResult, TransactionResult, TransactionSignature } from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
 
 export default function TransactionDetails() {
@@ -108,7 +103,7 @@ export default function TransactionDetails() {
     const handleDownload = () => {
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: "application/json" });
-      const filename = `tx-${data?.transaction?.id}.json` || "tx-unknown_id.json";
+      const filename = `tx-${data?.transaction?.V1?.id}.json` || "tx-unknown_id.json";
       saveAs(blob, filename);
     };
 
@@ -129,6 +124,11 @@ export default function TransactionDetails() {
       }
     };
 
+    const transaction_id = data.transaction.V1?.id;
+    const seal_signature = data.transaction.V1?.seal_signature;
+    const transaction_body = data.transaction.V1?.body;
+    const transaction = transaction_body?.transaction;
+
     if (data.status === "Rejected" || data.status === "InvalidTransaction") {
       return (
         <>
@@ -137,7 +137,7 @@ export default function TransactionDetails() {
               <TableBody>
                 <TableRow>
                   <TableCell>Transaction Hash</TableCell>
-                  <DataTableCell>{data.transaction.id}</DataTableCell>
+                  <DataTableCell>{transaction_id}</DataTableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell>Timestamp</TableCell>
@@ -177,7 +177,7 @@ export default function TransactionDetails() {
                 <TableBody>
                   <TableRow>
                     <TableCell>Transaction Hash</TableCell>
-                    <DataTableCell>{data.transaction.id}</DataTableCell>
+                    <DataTableCell>{transaction_id}</DataTableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>Timestamp</TableCell>
@@ -258,8 +258,8 @@ export default function TransactionDetails() {
               <Typography>Fee Instructions</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {data.transaction?.fee_instructions?.length ? (
-                <FeeInstructions data={data.transaction.fee_instructions} />
+              {transaction?.fee_instructions?.length ? (
+                <FeeInstructions data={transaction?.fee_instructions} />
               ) : (
                 <span>Empty</span>
               )}
@@ -270,8 +270,8 @@ export default function TransactionDetails() {
               <Typography>Instructions</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {data.transaction?.instructions?.length ? (
-                <Instructions data={data.transaction.instructions} />
+              {transaction?.instructions?.length ? (
+                <Instructions data={transaction.instructions} />
               ) : (
                 <span>Empty</span>
               )}
@@ -312,11 +312,18 @@ export default function TransactionDetails() {
               <Typography>Signers</Typography>
             </AccordionSummary>
             <AccordionDetails>
-              {data.transaction?.signatures?.length ? (
+              {transaction_body?.signatures?.length ? (
                 <TableContainer>
                   <Table>
                     <TableBody>
-                      {data.transaction.signatures.map((item: TransactionSignature, i: number) => {
+                      {seal_signature ? (
+                        <TableRow key={-1}>
+                          <DataTableCell>{seal_signature.public_key}</DataTableCell>
+                        </TableRow>
+                      ) : (
+                        <></>
+                      )}
+                      {transaction_body.signatures.map((item: TransactionSignature, i: number) => {
                         return (
                           <TableRow key={i}>
                             <DataTableCell>{item.public_key}</DataTableCell>

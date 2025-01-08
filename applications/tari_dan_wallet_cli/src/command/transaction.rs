@@ -283,6 +283,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
             signing_key_index: None,
             autofill_inputs: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
+            detect_inputs_use_unversioned: true,
             proof_ids: vec![],
         };
         let resp = client.submit_transaction(&request).await?;
@@ -316,8 +317,7 @@ async fn handle_submit_manifest(
                     component_address: fee_account.address.as_component_address().unwrap(),
                     method: "pay_fee".to_string(),
                     args: args![Amount::try_from(common.max_fee.unwrap_or(1000))?],
-                }])
-                .collect(),
+                }]),
         )
         .with_instructions(instructions.instructions)
         .with_inputs(common.inputs)
@@ -347,6 +347,7 @@ async fn handle_submit_manifest(
             signing_key_index: None,
             autofill_inputs: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
+            detect_inputs_use_unversioned: true,
             proof_ids: vec![],
         };
 
@@ -470,12 +471,12 @@ fn summarize_transaction(transaction: &UnsignedTransaction) {
     }
     println!();
     println!("🌟 Submitting fee instructions:");
-    for instruction in &transaction.fee_instructions {
+    for instruction in transaction.fee_instructions() {
         println!("- {}", instruction);
     }
     println!();
     println!("🌟 Submitting instructions:");
-    for instruction in &transaction.instructions {
+    for instruction in transaction.instructions() {
         println!("- {}", instruction);
     }
     println!();
@@ -539,6 +540,9 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
                     "        ▶ validator: {}",
                     to_hex(fee_claim.validator_public_key.as_bytes())
                 );
+            },
+            SubstateValue::Template(_) => {
+                println!("      ▶ Template: {}", address);
             },
         }
         println!();
@@ -832,6 +836,7 @@ impl CliArg {
                 SubstateId::NonFungibleIndex(v) => arg!(v),
                 SubstateId::TransactionReceipt(v) => arg!(v),
                 SubstateId::FeeClaim(v) => arg!(v),
+                SubstateId::Template(v) => arg!(v),
             },
             CliArg::TemplateAddress(v) => arg!(v),
             CliArg::NonFungibleId(v) => arg!(v),

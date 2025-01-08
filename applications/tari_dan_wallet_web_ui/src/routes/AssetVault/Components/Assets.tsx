@@ -37,11 +37,10 @@ import { DataTableCell } from "../../../Components/StyledComponents";
 import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
 import { shortenString } from "../../../utils/helpers";
-import type { BalanceEntry } from "@tari-project/typescript-bindings/wallet-daemon-client";
 import NFTList from "../../../Components/NFTList";
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./SendMoney";
-import { ResourceAddress, ResourceType, VaultId } from "@tari-project/typescript-bindings";
+import { ResourceAddress, ResourceType, VaultId, BalanceEntry } from "@tari-project/typescript-bindings";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -193,7 +192,7 @@ function Assets({ accountName }: { accountName: string }) {
                       token_symbol,
                       vault_address,
                     }: BalanceEntry,
-                    i,
+                    i: number,
                   ) => (
                     <BalanceRow
                       key={i}
@@ -202,7 +201,7 @@ function Assets({ accountName }: { accountName: string }) {
                       resource_type={resource_type}
                       balance={balance}
                       confidential_balance={confidential_balance}
-                      vault_address={"Vault" in vault_address ? vault_address.Vault : ""}
+                      vault_address={vault_address as unknown as string}
                       onSendClicked={handleSendResourceClicked}
                     />
                   ),

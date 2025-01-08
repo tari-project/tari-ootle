@@ -134,6 +134,8 @@ create table block_diffs
     change         text      NOT NULL,
     -- NULL for Down
     state          text      NULL,
+    -- state_hash is to aid in debugging
+    state_hash     text      NULL,
     created_at     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 --    FOREIGN KEY (transaction_id) REFERENCES transactions (transaction_id),
     FOREIGN KEY (block_id) REFERENCES blocks (block_id)
@@ -270,24 +272,28 @@ CREATE INDEX locked_block_idx_epoch ON locked_block (epoch);
 
 create table transactions
 (
-    id                integer   not null primary key AUTOINCREMENT,
-    transaction_id    text      not null,
-    fee_instructions  text      not NULL,
-    instructions      text      not NULL,
-    signatures        text      not NULL,
-    inputs            text      not NULL,
-    filled_inputs     text      not NULL,
-    resolved_inputs   text      NULL,
-    resulting_outputs text      NULL,
-    result            text      NULL,
-    execution_time_ms bigint    NULL,
-    final_decision    text      NULL,
-    finalized_at      timestamp NULL,
-    outcome           TEXT      NULL,
-    abort_details     text      NULL,
-    min_epoch         BIGINT    NULL,
-    max_epoch         BIGINT    NULL,
-    created_at        timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                        integer   not null primary key AUTOINCREMENT,
+    network                   integer   not NULL,
+    transaction_id            text      not null,
+    fee_instructions          text      not NULL,
+    instructions              text      not NULL,
+    inputs                    text      not NULL,
+    filled_inputs             text      not NULL,
+    resolved_inputs           text      NULL,
+    resulting_outputs         text      NULL,
+    signatures                text      not NULL,
+    seal_signature            text      not NULL,
+    is_seal_signer_authorized boolean   not NULL,
+    result                    text      NULL,
+    execution_time_ms         bigint    NULL,
+    final_decision            text      NULL,
+    finalized_at              timestamp NULL,
+    outcome                   TEXT      NULL,
+    abort_details             text      NULL,
+    min_epoch                 BIGINT    NULL,
+    max_epoch                 BIGINT    NULL,
+    schema_version            BIGINT    NOT NULL,
+    created_at                timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 create unique index transactions_uniq_idx_id on transactions (transaction_id);
@@ -299,6 +305,7 @@ create table lock_conflicts
     transaction_id text      not null,
     depends_on_tx  text      not null,
     lock_type      text      not null CHECK (lock_type IN ('Write', 'Read', 'Output')),
+    is_local_only  boolean   not null,
     created_at     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Note: cannot use foreign key for block_id since it does not yet exist when proposing
     FOREIGN KEY (transaction_id) REFERENCES transaction_pool (transaction_id) ON DELETE CASCADE,
@@ -329,13 +336,14 @@ create table transaction_pool
     original_decision text      not null,
     local_decision    text      null,
     remote_decision   text      null,
-    evidence          text      null,
+    evidence          text      not null,
     transaction_fee   bigint    not null DEFAULT 0,
     leader_fee        text      null,
     stage             text      not null,
     pending_stage     text      null,
     is_ready          boolean   not null,
     confirm_stage     text      null,
+    is_global         boolean   not NULL,
     updated_at        timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at        timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (transaction_id) REFERENCES transactions (transaction_id)
@@ -368,7 +376,7 @@ create index transaction_pool_state_updates_idx_is_applied on transaction_pool_s
 create table votes
 (
     id               integer   not null primary key AUTOINCREMENT,
-    hash             text      not null,
+    siphash          bigint    not null,
     epoch            bigint    not null,
     block_id         text      not NULL,
     decision         integer   not null,
@@ -428,13 +436,13 @@ CREATE TABLE foreign_receive_counters
 CREATE TABLE burnt_utxos
 (
     id                       integer   not null primary key AUTOINCREMENT,
-    substate_id              text      not NULL,
-    substate                 text      not NULL,
+    commitment               text      not NULL,
+    output                   text      not NULL,
     base_layer_block_height  bigint    not NULL,
     proposed_in_block        text      NULL REFERENCES blocks (block_id),
     proposed_in_block_height bigint    NULL,
     created_at               timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (substate_id)
+    UNIQUE (commitment)
 );
 
 CREATE TABLE state_tree
@@ -520,21 +528,19 @@ CREATE TABLE validator_epoch_stats
 
 CREATE UNIQUE INDEX participation_shares_uniq_idx_epoch_public_key on validator_epoch_stats (epoch, public_key);
 
-CREATE TABLE suspended_nodes
+CREATE TABLE evicted_nodes
 (
-    id                        integer   not NULL primary key AUTOINCREMENT,
-    epoch                     bigint    not NULL,
-    public_key                text      not NULL,
-    suspended_in_block        text      not NULL,
-    suspended_in_block_height bigint    not NULL,
-    resumed_in_block          text      NULL,
-    resumed_in_block_height   bigint    NULL,
-    created_at                timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                          integer   not NULL primary key AUTOINCREMENT,
+    epoch                       bigint    not NULL,
+    public_key                  text      not NULL,
+    evicted_in_block            text      NULL REFERENCES blocks (block_id),
+    evicted_in_block_height     bigint    NULL,
+    eviction_committed_in_epoch bigint    NULL,
+    created_at                  timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX suspended_nodes_uniq_idx_epoch_public_key on suspended_nodes (epoch, public_key);
-CREATE INDEX suspended_nodes_idx_suspended_in_block on suspended_nodes (suspended_in_block);
-CREATE INDEX suspended_nodes_idx_unsuspended_in_block on suspended_nodes (resumed_in_block);
+CREATE UNIQUE INDEX evicted_nodes_uniq_idx_epoch_public_key on evicted_nodes (epoch, public_key);
+CREATE INDEX evicted_nodes_idx_evicted_in_block on evicted_nodes (evicted_in_block);
 
 CREATE TABLE diagnostics_no_votes
 (

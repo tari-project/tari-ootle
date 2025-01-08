@@ -43,6 +43,8 @@ pub enum TemplateManagerError {
     SqliteStorageError(#[from] SqliteStorageError),
     #[error("Template not found: {address}")]
     TemplateNotFound { address: TemplateAddress },
+    #[error("Template failed to delete: {address}")]
+    TemplateDeleteFailed { address: TemplateAddress },
     #[error("The template is unavailable for use")]
     TemplateUnavailable,
     #[error(transparent)]

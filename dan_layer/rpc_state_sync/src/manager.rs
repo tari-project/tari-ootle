@@ -11,16 +11,9 @@ use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
     traits::{ConsensusSpec, SyncManager, SyncStatus},
 };
-use tari_dan_common_types::{
-    committee::Committee,
-    optional::Optional,
-    shard::Shard,
-    Epoch,
-    NodeHeight,
-    PeerAddress,
-    ShardGroup,
-    VersionedSubstateId,
-};
+use tari_dan_app_utilities::template_manager::implementation::TemplateManager;
+use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
+use tari_dan_common_types::{committee::Committee, optional::Optional, shard::Shard, Epoch, NodeAddressable, NodeHeight, PeerAddress, ShardGroup, VersionedSubstateId};
 use tari_dan_p2p::proto::rpc::{GetCheckpointRequest, GetCheckpointResponse, SyncStateRequest};
 use tari_dan_storage::{
     consensus_models::{
@@ -39,7 +32,8 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::substate::hash_substate;
+use tari_engine_types::substate::{hash_substate, SubstateId, SubstateValue};
+use tari_engine_types::TemplateAddress;
 use tari_epoch_manager::EpochManagerReader;
 use tari_rpc_framework::RpcError;
 use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
@@ -53,24 +47,32 @@ use crate::error::CommsRpcConsensusSyncError;
 const BATCH_SIZE: usize = 100;
 const LOG_TARGET: &str = "tari::dan::comms_rpc_state_sync";
 
-pub struct RpcStateSyncManager<TConsensusSpec: ConsensusSpec> {
+pub struct RpcStateSyncManager<TConsensusSpec: ConsensusSpec, TAddr: NodeAddressable + 'static> {
     epoch_manager: TConsensusSpec::EpochManager,
     state_store: TConsensusSpec::StateStore,
     client_factory: TariValidatorNodeRpcClientFactory,
+    template_manager: TemplateManager<TAddr>,
+    template_manager_service: TemplateManagerHandle,
 }
 
-impl<TConsensusSpec> RpcStateSyncManager<TConsensusSpec>
-where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
+impl<TConsensusSpec, TAddr> RpcStateSyncManager<TConsensusSpec, TAddr>
+where
+    TConsensusSpec: ConsensusSpec<Addr=PeerAddress>,
+    TAddr: NodeAddressable + 'static,
 {
     pub fn new(
         epoch_manager: TConsensusSpec::EpochManager,
         state_store: TConsensusSpec::StateStore,
         client_factory: TariValidatorNodeRpcClientFactory,
+        template_manager: TemplateManager<TAddr>,
+        template_manager_service: TemplateManagerHandle,
     ) -> Self {
         Self {
             epoch_manager,
             state_store,
             client_factory,
+            template_manager,
+            template_manager_service,
         }
     }
 
@@ -95,8 +97,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             .await
         {
             Ok(GetCheckpointResponse {
-                checkpoint: Some(checkpoint),
-            }) => match EpochCheckpoint::try_from(checkpoint) {
+                   checkpoint: Some(checkpoint),
+               }) => match EpochCheckpoint::try_from(checkpoint) {
                 Ok(cp) => Ok(Some(cp)),
                 Err(err) => Err(CommsRpcConsensusSyncError::InvalidResponse(err)),
             },
@@ -150,15 +152,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
         let mut tree_changes = vec![];
 
+        let mut missing_templates = vec![];
+
+        // syncing states
         while let Some(result) = state_stream.next().await {
             let msg = match result {
                 Ok(msg) => msg,
                 Err(err) if err.is_not_found() => {
                     return Ok(current_version);
-                },
+                }
                 Err(err) => {
                     return Err(err.into());
-                },
+                }
             };
 
             if msg.transitions.is_empty() {
@@ -170,7 +175,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             tree_changes.reserve_exact(cmp::min(msg.transitions.len(), BATCH_SIZE));
 
             self.state_store.with_write_tx(|tx| {
-
                 info!(
                     target: LOG_TARGET,
                     "🛜 Next state updates batch of size {} from v{}",
@@ -224,6 +228,26 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     }
 
                     info!(target: LOG_TARGET, "🛜 Applying state update {transition} v{}", current_version.unwrap_or(0));
+
+                    // handle templates if there are any in substates
+                    match &change {
+                        SubstateTreeChange::Up { id, value_hash } => {
+                            if let SubstateId::Template(template_addr) = id.substate_id {
+                                if let Ok(false) = self.template_manager.template_exists(&template_addr.as_hash()) {
+                                    missing_templates.push(template_addr.as_hash());
+                                    // TODO: consider if it makes any problem if we commit substate change, but later failed to sync template(s)
+                                }
+                            }
+                        }
+                        SubstateTreeChange::Down { id } => {
+                            if let SubstateId::Template(template_addr) = &id.substate_id {
+                                if let Err(error) = self.template_manager.delete_template(&template_addr.as_hash()) {
+                                    error!(target: LOG_TARGET, "Failed to delete template from template manager: {error:?}");
+                                }
+                            }
+                        }
+                    }
+
                     tree_changes.push(change);
 
                     self.commit_update(store.transaction(), checkpoint, transition)?;
@@ -242,7 +266,14 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             })?;
         }
 
+        self.sync_templates(missing_templates).await?;
+
         Ok(current_version)
+    }
+
+    async fn sync_templates(&self, templates: Vec<TemplateAddress>) -> Result<(), CommsRpcConsensusSyncError> {
+        // TODO: implement by using self.template_manager_service
+        Ok(())
     }
 
     fn get_state_root_for_shard(
@@ -283,13 +314,13 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     QcId::zero(),
                     // *created_qc.id(),
                 )
-                .create(tx)?;
-            },
+                    .create(tx)?;
+            }
             SubstateUpdate::Destroy(SubstateDestroyedProof {
-                substate_id,
-                version,
-                destroyed_by_transaction,
-            }) => {
+                                        substate_id,
+                                        version,
+                                        destroyed_by_transaction,
+                                    }) => {
                 SubstateRecord::destroy(
                     tx,
                     VersionedSubstateId::new(substate_id, version),
@@ -300,7 +331,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     &QcId::zero(),
                     &destroyed_by_transaction,
                 )?;
-            },
+            }
         }
 
         Ok(())
@@ -355,8 +386,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 }
 
 #[async_trait]
-impl<TConsensusSpec> SyncManager for RpcStateSyncManager<TConsensusSpec>
-where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
+impl<TConsensusSpec, TAddr> SyncManager for RpcStateSyncManager<TConsensusSpec, TAddr>
+where
+    TConsensusSpec: ConsensusSpec<Addr=PeerAddress> + Send + Sync + 'static,
+    TAddr: NodeAddressable + 'static,
 {
     type Error = CommsRpcConsensusSyncError;
 
@@ -412,7 +445,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                             }
                             last_error = Some(err);
                             continue;
-                        },
+                        }
                     };
 
                     let checkpoint = match self.fetch_epoch_checkpoint(&mut client, current_epoch).await {
@@ -427,7 +460,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                                 "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
                             );
                             return Ok(());
-                        },
+                        }
                         Err(err) => {
                             warn!(
                                 target: LOG_TARGET,
@@ -438,7 +471,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                             }
                             last_error = Some(err);
                             continue;
-                        },
+                        }
                     };
                     info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
 
@@ -469,7 +502,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                             }
 
                             info!(target: LOG_TARGET, "🛜Synced state for {shard} to v{} with root {state_root}", current_version.unwrap_or(0));
-                        },
+                        }
                         Err(err) => {
                             warn!(
                                 target: LOG_TARGET,
@@ -481,7 +514,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
                             }
                             last_error = Some(err);
                             continue;
-                        },
+                        }
                     }
                     break;
                 }

@@ -28,6 +28,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use diesel::dsl::delete;
 use diesel::{
     sql_query,
     sql_types::{BigInt, Bigint},
@@ -369,6 +370,20 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(result > 0)
     }
 
+    fn delete_template(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8]) -> Result<(), Self::Error> {
+        use crate::global::schema::templates::dsl;
+        delete(
+            dsl::templates
+                .filter(templates::template_address.eq(key))
+        )
+            .execute(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "delete::template".to_string(),
+            })?;
+        Ok(())
+    }
+
     fn insert_validator_node(
         &self,
         tx: &mut Self::DbTransaction<'_>,
@@ -471,13 +486,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             "SELECT COUNT(distinct public_key) as cnt FROM validator_nodes WHERE start_epoch <= ? AND (end_epoch IS \
              NULL OR end_epoch > ?)",
         )
-        .bind::<BigInt, _>(epoch.as_u64() as i64)
-        .bind::<BigInt, _>(epoch.as_u64() as i64)
-        .get_result::<Count>(tx.connection())
-        .map_err(|source| SqliteStorageError::DieselError {
-            source,
-            operation: "count_validator_nodes".to_string(),
-        })?;
+            .bind::<BigInt, _>(epoch.as_u64() as i64)
+            .bind::<BigInt, _>(epoch.as_u64() as i64)
+            .get_result::<Count>(tx.connection())
+            .map_err(|source| SqliteStorageError::DieselError {
+                source,
+                operation: "count_validator_nodes".to_string(),
+            })?;
 
         Ok(count.cnt as u64)
     }

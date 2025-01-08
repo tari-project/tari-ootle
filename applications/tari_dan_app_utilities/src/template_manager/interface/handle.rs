@@ -87,4 +87,19 @@ impl TemplateManagerHandle {
             .map_err(|_| TemplateManagerError::ChannelClosed)?;
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
     }
+
+    pub async fn template_exists(
+        &self,
+        template_address: TemplateAddress,
+    ) -> Result<bool, TemplateManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(TemplateManagerRequest::TemplateExists {
+                address: template_address,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| TemplateManagerError::ChannelClosed)?;
+        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
 }

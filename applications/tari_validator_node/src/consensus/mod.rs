@@ -11,7 +11,7 @@ use tari_dan_app_utilities::{
     template_manager::implementation::TemplateManager,
     transaction_executor::TariDanTransactionProcessor,
 };
-use tari_dan_common_types::PeerAddress;
+use tari_dan_common_types::{NodeAddressable, PeerAddress};
 use tari_dan_storage::consensus_models::TransactionPool;
 use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncManager;
@@ -48,16 +48,15 @@ pub mod metrics;
 mod signature_service;
 mod spec;
 
+use crate::{p2p::NopLogger, transaction_validators::WithContext};
 pub use block_transaction_executor::*;
 pub use handle::*;
 pub use signature_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
 
-use crate::{p2p::NopLogger, transaction_validators::WithContext};
-
 pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Transaction, TransactionValidationError>;
 
-pub async fn spawn(
+pub async fn spawn<TAddr: NodeAddressable + 'static>(
     network: Network,
     sidechain_id: Option<RistrettoPublicKey>,
     store: SqliteStateStore<PeerAddress>,
@@ -75,6 +74,7 @@ pub async fn spawn(
     >,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
+    template_manager: TemplateManager<TAddr>,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
@@ -109,7 +109,7 @@ pub async fn spawn(
     let context = ConsensusWorkerContext {
         epoch_manager: epoch_manager.clone(),
         hotstuff: hotstuff_worker,
-        state_sync: RpcStateSyncManager::new(epoch_manager, store, client_factory),
+        state_sync: RpcStateSyncManager::new(epoch_manager, store, client_factory, template_manager),
         tx_current_state,
     };
 
@@ -127,7 +127,7 @@ pub async fn spawn(
 
 pub fn create_transaction_validator(
     template_manager: TemplateManager<PeerAddress>,
-) -> impl Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError> {
+) -> impl Validator<Transaction, Context=ValidationContext, Error=TransactionValidationError> {
     WithContext::<ValidationContext, _, _>::new()
         .map_context(
             |_| (),

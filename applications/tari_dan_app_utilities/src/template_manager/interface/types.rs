@@ -107,4 +107,8 @@ pub enum TemplateManagerRequest {
         address: TemplateAddress,
         reply: oneshot::Sender<Result<TemplateAbi, TemplateManagerError>>,
     },
+    TemplateExists {
+        address: TemplateAddress,
+        reply: oneshot::Sender<Result<bool, TemplateManagerError>>,
+    },
 }

@@ -67,8 +67,8 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                 download_queue,
                 completed_downloads,
             }
-            .run(shutdown)
-            .await?;
+                .run(shutdown)
+                .await?;
             Ok(())
         })
     }
@@ -132,12 +132,16 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                     self.handle_add_template(author_public_key, template_address, template, template_name, epoch)
                         .await,
                 );
-            },
+            }
             GetTemplate { address, reply } => {
                 handle(reply, self.manager.fetch_template(&address));
-            },
+            }
             GetTemplates { limit, reply } => handle(reply, self.manager.fetch_template_metadata(limit)),
             LoadTemplateAbi { address, reply } => handle(reply, self.handle_load_template_abi(address)),
+            TemplateExists { address, reply } => handle(
+                reply,
+                self.handle_template_exists(&address),
+            )
         }
     }
 
@@ -213,7 +217,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                                     target: LOG_TARGET,
                                     "⚠️ Template {} is not valid json: {}", download.template_address, e
                                 );
-                            },
+                            }
                         };
 
                         DbTemplateUpdate {
@@ -221,11 +225,11 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                             status: Some(status),
                             ..Default::default()
                         }
-                    },
+                    }
                     DbTemplateType::Manifest => todo!(),
                 };
                 self.manager.update_template(download.template_address, update)?;
-            },
+            }
             Err(err) => {
                 warn!(target: LOG_TARGET, "🚨 Failed to download template: {}", err);
                 self.manager
@@ -233,9 +237,17 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                         status: Some(TemplateStatus::DownloadFailed),
                         ..Default::default()
                     })?;
-            },
+            }
         }
         Ok(())
+    }
+
+    /// Handling template exists request.
+    fn handle_template_exists(
+        &mut self,
+        template_address: &TemplateAddress,
+    ) -> Result<bool, TemplateManagerError> {
+        self.manager.template_exists(template_address)
     }
 
     async fn handle_add_template(

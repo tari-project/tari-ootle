@@ -331,8 +331,9 @@ pub async fn spawn_services(
         transaction_executor,
         tx_hotstuff_events,
         consensus_constants.clone(),
+        template_manager.clone(),
     )
-    .await;
+        .await;
     handles.push(consensus_join_handle);
 
     let (mempool, join_handle) = mempool::spawn(
@@ -392,7 +393,7 @@ pub async fn spawn_services(
         virtual_substate_manager,
         consensus_handle.clone(),
     )
-    .await?;
+        .await?;
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
     save_identities(config, &keypair)?;
@@ -449,7 +450,7 @@ async fn create_registration_file(
         config.common.base_path.join("registration.json"),
         serde_json::to_string(&registration)?,
     )
-    .context("failed to write registration file")?;
+        .context("failed to write registration file")?;
     Ok(())
 }
 
@@ -653,13 +654,13 @@ where
         created_at_epoch: Epoch(0),
         destroyed: None,
     }
-    .create(tx)?;
+        .create(tx)?;
     Ok(())
 }
 
 fn create_mempool_transaction_validator(
     template_manager: TemplateManager<PeerAddress>,
-) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
+) -> impl Validator<Transaction, Context=(), Error=TransactionValidationError> {
     HasInputs::new()
         .and_then(TemplateExistsValidator::new(template_manager))
         .and_then(FeeTransactionValidator)

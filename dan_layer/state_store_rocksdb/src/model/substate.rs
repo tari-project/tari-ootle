@@ -26,7 +26,7 @@ use indexmap::IndexSet;
 use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, SubstateAddress, VersionedSubstateId};
+use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, SubstateAddress, SubstateRequirement, VersionedSubstateId};
 use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, QcId, SubstateDestroyed, SubstateRecord, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
 use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof, substate::{SubstateId, SubstateValue}};
 use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
@@ -103,18 +103,35 @@ impl TryFrom<SubstateModel> for SubstateRecord {
 
 impl SubstateModel {
     pub const KEY_PREFIX: &str = "substates";
+    pub const CF_VERSION: &str = "substates_version";
 
     pub fn cfs() -> Vec<&'static str> {
-        vec![]
+        vec![Self::CF_VERSION]
     }
 
-    fn key(substate: &SubstateRecord) -> String {
+    pub fn key(substate: &SubstateRecord) -> String {
         let address = SubstateAddress::from_substate_id(substate.substate_id(), substate.version());
         Self::key_from_address(&address)
     }
 
-    fn key_from_address(address: &SubstateAddress) -> String {
+    pub fn key_from_address(address: &SubstateAddress) -> String {
         format!("{}_{}", Self::KEY_PREFIX, address.to_string())
+    }
+
+    pub fn key_cf_version_from_requirement(req: &SubstateRequirement) -> String {
+        let version = req.version()
+            .map(|version|
+                // hexadecimal endcoding with full 0 padding, so the key preserves ordering
+                format!{"{version:#018x}"}
+            )
+            .unwrap_or_default();
+
+        format!("{}_{}_{}", Self::KEY_PREFIX, req.substate_id, version)
+    }
+
+    pub fn key_cf_version_from_substate(rec: SubstateRecord) -> String {
+        let req = SubstateRequirement::new(rec.substate_id, Some(rec.version));
+        Self::key_cf_version_from_requirement(&req)
     }
 
     fn encode(value: &SubstateRecord) -> Result<Vec<u8>, RocksDbStorageError> {
@@ -147,13 +164,65 @@ impl SubstateModel {
         let value = Self::encode(substate)?;
 
         // put the value in the default column family
-        tx.put(key, value)
+        tx.put(&key, value)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+        })?;
+
+        // version column family
+        let cf = db.cf_handle(Self::CF_VERSION).unwrap();
+        let key_cf = Self::key_cf_version_from_substate(substate.clone());
+        tx.put_cf(cf, key_cf, key.as_bytes())
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
                 source: e,
         })?;   
 
         Ok(())
+    }
+
+    pub fn count(tx: &Transaction<'_, TransactionDB>) -> Result<u64, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        let key_prefix = format!("{}_", Self::KEY_PREFIX);
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+        let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
+        let count = iterator.count() as u64;
+        Ok(count)
+    }
+
+    pub fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf: &str, operation: &'static str, key_prefix: &str, ordering: Ordering) -> Result<Option<SubstateRecord>, RocksDbStorageError> {
+        let cf = db.cf_handle(cf).unwrap();
+
+        let mut options = rocksdb::ReadOptions::default();
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+       
+        let iterator_mode = match ordering {
+            Ordering::Ascending => rocksdb::IteratorMode::Start,
+            Ordering::Descending => rocksdb::IteratorMode::End,
+        };
+
+        // get the main key from the CF
+        let mut iterator = tx.iterator_cf_opt(cf, options, iterator_mode);
+        let Some(value) = iterator.next() else {
+            return Ok(None);
+        };
+        let (_, key_bytes) = value.map_err(|e| RocksDbStorageError::RocksDbError {
+            operation,
+            source: e,
+        })?;
+        let key = String::from_utf8(key_bytes.to_vec()).unwrap();
+
+        // get the value
+        let value = tx.get(&key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+            })?;
+        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
+ 
+        let value = Self::decode(bytes)?;
+        Ok(Some(value))
     }
 
 }

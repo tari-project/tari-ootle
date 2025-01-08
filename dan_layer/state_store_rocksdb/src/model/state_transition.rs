@@ -44,8 +44,8 @@ pub struct StateTransitionModel {
 }
 
 impl StateTransitionModel {
-    pub const KEY_PREFIX: &str = "substates";
-    pub const CF_SHARD_SEQ: &str = "substates_shard_seq";
+    pub const KEY_PREFIX: &str = "statetransitions";
+    pub const CF_SHARD_SEQ: &str = "statetransitions_shard_seq";
 
     pub fn cfs() -> Vec<&'static str> {
         vec![Self::CF_SHARD_SEQ]

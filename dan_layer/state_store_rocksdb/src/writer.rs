@@ -1656,77 +1656,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         StateTransitionModel::put(self.db.clone(), tx, operation, &state_transition)?;
 
         Ok(())
-        
-
-        /*
-        use crate::schema::{state_transitions, substates};
-
-        if substate.is_destroyed() {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "calling substates_create with a destroyed SubstateRecord is not valid. substate_id = {}",
-                    substate.substate_id
-                ),
-            });
-        }
-
-        let values = (
-            substates::address.eq(serialize_hex(substate.to_substate_address())),
-            substates::substate_id.eq(substate.substate_id.to_string()),
-            substates::version.eq(substate.version as i32),
-            substates::data.eq(serialize_json(&substate.substate_value)?),
-            substates::state_hash.eq(serialize_hex(substate.state_hash)),
-            substates::created_by_transaction.eq(serialize_hex(substate.created_by_transaction)),
-            substates::created_justify.eq(serialize_hex(substate.created_justify)),
-            substates::created_block.eq(serialize_hex(substate.created_block)),
-            substates::created_height.eq(substate.created_height.as_u64() as i64),
-            substates::created_at_epoch.eq(substate.created_at_epoch.as_u64() as i64),
-            substates::created_by_shard.eq(substate.created_by_shard.as_u32() as i32),
-        );
-
-        diesel::insert_into(substates::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_create",
-                source: e,
-            })?;
-
-        let seq = state_transitions::table
-            .select(dsl::max(state_transitions::seq))
-            .filter(state_transitions::shard.eq(substate.created_by_shard.as_u32() as i32))
-            .first::<Option<i64>>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_create",
-                source: e,
-            })?;
-        let next_seq = seq.map(|s| s + 1).unwrap_or(1);
-
-        // This means that we MUST do the state tree updates before inserting substates
-        let version = self.state_tree_versions_get_latest(substate.created_by_shard)?;
-        let values = (
-            state_transitions::seq.eq(next_seq),
-            state_transitions::epoch.eq(substate.created_at_epoch.as_u64() as i64),
-            state_transitions::shard.eq(substate.created_by_shard.as_u32() as i32),
-            state_transitions::substate_address.eq(serialize_hex(substate.to_substate_address())),
-            state_transitions::substate_id.eq(substate.substate_id.to_string()),
-            state_transitions::version.eq(substate.version as i32),
-            state_transitions::transition.eq("UP"),
-            state_transitions::state_hash.eq(serialize_hex(substate.state_hash)),
-            state_transitions::state_version.eq(version.unwrap_or(0) as i64),
-        );
-
-        diesel::insert_into(state_transitions::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_create",
-                source: e,
-            })?;
-
-        Ok(())
-        */
-        
     }
 
     fn substates_down(
@@ -2040,29 +1969,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             version
         };
         Ok(StateTreeShardVersionModel::put(self.db.clone(), tx, "state_tree_shard_versions_set", &shard, &value)?)
-
-
-        /*
-        use crate::schema::state_tree_shard_versions;
-
-        let values = (
-            state_tree_shard_versions::shard.eq(shard.as_u32() as i32),
-            state_tree_shard_versions::version.eq(version as i64),
-        );
-
-        diesel::insert_into(state_tree_shard_versions::table)
-            .values(&values)
-            .on_conflict(state_tree_shard_versions::shard)
-            .do_update()
-            .set(state_tree_shard_versions::version.eq(version as i64))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "state_tree_shard_versions_increment",
-                source: e,
-            })?;
-
-        Ok(())
-        */
     }
 
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {

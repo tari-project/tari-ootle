@@ -3,52 +3,39 @@
 
 use rand::{rngs::OsRng, RngCore};
 use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{Epoch, NodeHeight};
+use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
 use tari_dan_storage::{
-    consensus_models::{Block, Command, Decision, TransactionAtom, TransactionPoolStage, TransactionPoolStatusUpdate},
+    consensus_models::{Block, BlockId, Command, Decision, QcId, SubstateRecord, TransactionAtom, TransactionPoolStage, TransactionPoolStatusUpdate},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
+use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}};
+use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress}, prelude::AccessRules};
+use tari_transaction::TransactionId;
 use tari_utilities::epoch_time::EpochTime;
+use tari_template_lib::prelude::ComponentAccessRules;
 
+fn random_substate_id() -> SubstateId {
+    let rng = &mut OsRng;
 
-mod substates {
-    use tari_dan_common_types::{shard::Shard, ExtraData, NumPreshards, ShardGroup};
-    use tari_dan_storage::consensus_models::{BlockId, QcId, SubstateDestroyed, SubstateRecord};
-    use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}, TemplateAddress};
-    use tari_state_tree::Node;
-    use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, EntityId}, prelude::AccessRules};
-    use tari_template_lib::prelude::ComponentAccessRules;
-    use tari_transaction::TransactionId;
+    let mut bytes = [0u8; EntityId::LENGTH];
+    rng.fill_bytes(&mut bytes);
+    let entity_id = EntityId::from_array(bytes);
 
-    use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite, create_tx_atom};
-    use tari_engine_types::serde_with::hex::option;
-    
+    let mut bytes = [0u8; ComponentKey::LENGTH];
+    rng.fill_bytes(&mut bytes);
+    let component_key = ComponentKey::new(bytes); 
 
-    use super::*;
+    let address = ComponentAddress::new(ObjectKey::new(entity_id, component_key));
+    SubstateId::Component(address)
+}
 
-    #[test]
-    fn basic_substate_operations_sqlite() {
-        let db = create_sqlite();
-        db.foreign_keys_off().unwrap();
-        basic_substate_operations(db);
-    }
-
-    #[test]
-    fn basic_substate_operations_rocksdb() {
-        let db = create_rocksdb();
-        basic_substate_operations(db);
-    }
-
-    fn basic_substate_operations(db: impl StateStore) {
-        let mut tx = db.create_write_tx().unwrap();
-
-        let substate_id = SubstateId::Component(ComponentAddress::from_hex("0000000000000000000000000000000000000000000000000000000000000000").unwrap());
-        let entity_id = substate_id.to_object_key().as_entity_id();
-        let substate = SubstateRecord {
-            substate_id, 
-            version: 0,
+fn build_substate(substate_id: &SubstateId, version: u32) -> SubstateRecord {
+    let entity_id = substate_id.to_object_key().as_entity_id();
+    SubstateRecord {
+            substate_id: substate_id.clone(), 
+            version,
             substate_value: SubstateValue::Component(ComponentHeader {
                 template_address: TemplateAddress::default(),
                 module_name: "foo".to_string(),
@@ -68,14 +55,81 @@ mod substates {
             created_by_shard: Shard::zero(),
             created_at_epoch: Epoch::zero(),
             destroyed: None,
-        };
+    }
+}
 
-        let substate_address = substate.to_substate_address();
-        tx.substates_create(&substate).unwrap();
+mod substates {
+    use std::collections::HashSet;
 
-       
-        let res = tx.substates_get(&substate_address).unwrap();
-        assert_eq_debug(&res, &substate);
+    use tari_dan_common_types::{shard::Shard, ExtraData, NumPreshards, ShardGroup, SubstateRequirement};
+    use tari_dan_storage::consensus_models::{BlockId, QcId, SubstateDestroyed, SubstateRecord};
+    use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}, TemplateAddress};
+    use tari_state_tree::Node;
+    use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, EntityId}, prelude::AccessRules};
+    use tari_template_lib::prelude::ComponentAccessRules;
+    use tari_transaction::TransactionId;
+
+    use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite, create_tx_atom};
+    use tari_engine_types::serde_with::hex::option;
+    
+    use super::*;
+
+    #[test]
+    fn basic_substate_operations_sqlite() {
+        let db = create_sqlite();
+        db.foreign_keys_off().unwrap();
+        basic_substate_operations(db);
+    }
+
+    #[test]
+    fn basic_substate_operations_rocksdb() {
+        let db = create_rocksdb();
+        basic_substate_operations(db);
+    }
+
+    fn basic_substate_operations(db: impl StateStore) {
+        let mut tx = db.create_write_tx().unwrap();
+
+        // substate 1
+        let substate1_id = random_substate_id();
+        let substate1 = build_substate(&substate1_id, 0);
+        let substate1_address = substate1.to_substate_address();
+        tx.substates_create(&substate1).unwrap();
+
+        // substate 1 (version 1)
+        let substate1b = build_substate(&substate1_id, 1);
+        let substate1b_address = substate1b.to_substate_address();
+        tx.substates_create(&substate1b).unwrap();
+
+        // substate 2
+        let substate2_id = random_substate_id();
+        let substate2 = build_substate(&substate2_id, 0);
+        let substate2_address = substate2.to_substate_address();
+        tx.substates_create(&substate2).unwrap();
+
+        // check that we can get all the newly inserted substates
+        let res = tx.substates_get(&substate1_address).unwrap();
+        assert_eq_debug(&res, &substate1);
+
+        let res = tx.substates_get(&substate1b_address).unwrap();
+        assert_eq_debug(&res, &substate1b);
+
+        let res = tx.substates_get(&substate2_address).unwrap();
+        assert_eq_debug(&res, &substate2);
+
+        // substates_get_any fetches all substates
+        let mut req = HashSet::new();
+        req.insert(SubstateRequirement::new(substate1_id.clone(), Some(0)) );
+        req.insert(SubstateRequirement::new(substate2_id, Some(0)) );
+        let res = tx.substates_get_any(&req).unwrap();
+        assert_eq!(res.len(), 2);
+
+        // substates_get_any fetches the last version of a substate
+        let mut req = HashSet::new();
+        req.insert(SubstateRequirement::new(substate1_id.clone(), None) );
+        let res = tx.substates_get_any(&req).unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq_debug(&res[0], &substate1b);
      
         tx.rollback().unwrap();
     }

@@ -288,20 +288,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     pub fn substates_count(&self) -> Result<u64, RocksDbStorageError> {
-        todo!()
-        /*
-        use crate::schema::substates;
-
-        let count = substates::table
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_count",
-                source: e,
-            })?;
-
-        Ok(count as u64)
-        */
+        Ok(SubstateModel::count(&self.tx)?)
     }
 
     pub fn blocks_get_tip(&self, epoch: Epoch, shard_group: ShardGroup) -> Result<Block, StorageError> {
@@ -1671,56 +1658,27 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError> {
         Ok(SubstateModel::get(&self.tx, "substates_get", address)?)
-
-        /*
-        use crate::schema::substates;
-
-        let substate = substates::table
-            .filter(substates::address.eq(serialize_hex(address)))
-            .first::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get",
-                source: e,
-            })?;
-
-        substate.try_into()
-        */
     }
 
     fn substates_get_any(
         &self,
         substate_ids: &HashSet<SubstateRequirement>,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::substates;
+        let operation = "substates_get_any";
+        let cf = SubstateModel::CF_VERSION;
+        // we want descending key order to get the highest version of each substate, because rocksdb orders incrementally by key
+        let ordering = Ordering::Descending;
 
-        let mut query = substates::table.into_boxed();
+        let mut substates = vec![];
 
-        for id in substate_ids {
-            let id_str = id.substate_id.to_string();
-            match id.version() {
-                Some(v) => {
-                    query = query.or_filter(substates::substate_id.eq(id_str).and(substates::version.eq(v as i32)));
-                },
-                None => {
-                    // Select the max known version
-                    query = query.or_filter(substates::substate_id.eq(id_str.clone()).and(substates::version.eq(
-                        dsl::sql("SELECT MAX(version) FROM substates WHERE substate_id = ?").bind::<Text, _>(id_str),
-                    )));
-                },
+        for req in substate_ids {
+            let key_prefix = SubstateModel::key_cf_version_from_requirement(req);
+            if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)? {
+                substates.push(substate);
             }
         }
 
-        let results = query
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_any",
-                source: e,
-            })?;
-
-        results.into_iter().map(TryInto::try_into).collect()
-        */
+        return Ok(substates)
     }
 
     fn substates_get_any_max_version<'a, I: IntoIterator<Item = &'a SubstateId>>(

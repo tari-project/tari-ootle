@@ -61,7 +61,7 @@ fn build_substate(substate_id: &SubstateId, version: u32) -> SubstateRecord {
 mod substates {
     use std::collections::HashSet;
 
-    use tari_dan_common_types::{shard::Shard, ExtraData, NumPreshards, ShardGroup, SubstateRequirement};
+    use tari_dan_common_types::{shard::Shard, ExtraData, NumPreshards, ShardGroup, SubstateRequirement, VersionedSubstateId};
     use tari_dan_storage::consensus_models::{BlockId, QcId, SubstateDestroyed, SubstateRecord};
     use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}, TemplateAddress};
     use tari_state_tree::Node;
@@ -120,7 +120,7 @@ mod substates {
         // substates_get_any fetches all substates
         let mut req = HashSet::new();
         req.insert(SubstateRequirement::new(substate1_id.clone(), Some(0)) );
-        req.insert(SubstateRequirement::new(substate2_id, Some(0)) );
+        req.insert(SubstateRequirement::new(substate2_id.clone(), Some(0)) );
         let res = tx.substates_get_any(&req).unwrap();
         assert_eq!(res.len(), 2);
 
@@ -130,7 +130,44 @@ mod substates {
         let res = tx.substates_get_any(&req).unwrap();
         assert_eq!(res.len(), 1);
         assert_eq_debug(&res[0], &substate1b);
-     
+
+        // substates_get_any_max_version
+        let substate_ids = vec![substate1_id.clone(), substate2_id.clone()];
+        let res = tx.substates_get_any_max_version(&substate_ids).unwrap();
+        assert_eq!(res.len(), 2);
+        assert!(res.iter().any(|s| s.substate_id == substate1_id && s.version == 1));
+        assert!(res.iter().any(|s| s.substate_id == substate2_id && s.version == 0));
+
+        // substates_get_max_version_for_substate
+        let res = tx.substates_get_max_version_for_substate(&substate1_id).unwrap();
+        assert_eq!(res, (1, false));
+        let res = tx.substates_get_max_version_for_substate(&substate2_id).unwrap();
+        assert_eq!(res, (0, false));
+
+        // substates_any_exist (all exist)
+        let substate_ids = vec![
+            VersionedSubstateId::new(substate1_id.clone(), 0),
+            VersionedSubstateId::new(substate2_id.clone(), 0)
+        ];
+        let res = tx.substates_any_exist(substate_ids).unwrap();
+        assert_eq!(res, true);
+
+        // substates_any_exist (some do not exist)
+        let substate_ids = vec![
+            VersionedSubstateId::new(substate1_id.clone(), 100), // version should not exist
+            VersionedSubstateId::new(substate2_id.clone(), 0)
+        ];
+        let res = tx.substates_any_exist(substate_ids).unwrap();
+        assert_eq!(res, true);
+
+        // substates_any_exist (none exist)
+        let substate_ids = vec![
+            VersionedSubstateId::new(substate1_id, 100), // version should not exist
+            VersionedSubstateId::new(substate2_id, 100) // version should not exist
+        ];
+        let res = tx.substates_any_exist(substate_ids).unwrap();
+        assert_eq!(res, false);
+
         tx.rollback().unwrap();
     }
 

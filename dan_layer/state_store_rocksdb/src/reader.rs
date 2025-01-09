@@ -1685,128 +1685,64 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::substates;
-        #[derive(Debug, QueryableByName)]
-        struct MaxVersionAndId {
-            #[allow(dead_code)]
-            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
-            max_version: Option<i32>,
-            #[diesel(sql_type = diesel::sql_types::Integer)]
-            id: i32,
+        let operation = "substates_get_any_max_version";
+        let cf = SubstateModel::CF_VERSION;
+        // we want descending key order to get the highest version of each substate, because rocksdb orders incrementally by key
+        let ordering = Ordering::Descending;
+
+        let mut substates = vec![];
+
+        for substate_id in substate_ids {
+            let req = SubstateRequirement::new(substate_id.clone(), None);
+            let key_prefix = SubstateModel::key_cf_version_from_requirement(&req);
+            if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)? {
+                substates.push(substate);
+            }
         }
 
-        let substate_ids = substate_ids.into_iter().map(ToString::to_string).collect::<Vec<_>>();
-        if substate_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let frag = self.sql_frag_for_in_statement(substate_ids.iter().map(|s| s.as_str()), 32);
-        let max_versions_and_ids = sql_query(format!(
-            r#"
-                SELECT MAX(version) as max_version, id
-                FROM substates
-                WHERE substate_id in ({})
-                GROUP BY substate_id"#,
-            frag
-        ))
-        .get_results::<MaxVersionAndId>(self.connection())
-        .map_err(|e| SqliteStorageError::DieselError {
-            operation: "substates_get_any_max_version",
-            source: e,
-        })?;
-
-        let results = substates::table
-            .filter(substates::id.eq_any(max_versions_and_ids.iter().map(|m| m.id)))
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_any_max_version",
-                source: e,
-            })?;
-
-        // let results = substates::table
-        //     .group_by(substates::substate_id)
-        //     .select((substates::all_columns, dsl::max(substates::version))
-        //     .filter(substates::substate_id.eq_any(substate_ids.into_iter().map(ToString::to_string)))
-        //     .get_results::<(sql_models::SubstateRecord, Option<i32>)>(self.connection())
-        //     .map_err(|e| SqliteStorageError::DieselError {
-        //         operation: "substates_get_any_max_version",
-        //         source: e,
-        //     })?;
-
-        results.into_iter().map(TryInto::try_into).collect()
-        */
+        return Ok(substates)
     }
 
     fn substates_get_max_version_for_substate(&self, substate_id: &SubstateId) -> Result<(u32, bool), StorageError> {
-        todo!()
-        /*
-        #[derive(Debug, QueryableByName)]
-        struct MaxVersionAndDestroyed {
-            #[allow(dead_code)]
-            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
-            max_version: Option<i32>,
-            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
-            destroyed_by_shard: Option<i32>,
-        }
+        let operation = "substates_get_max_version_for_substate";
+        let cf = SubstateModel::CF_VERSION;
+        // we want descending key order to get the highest version of the substate, because rocksdb orders incrementally by key
+        let ordering = Ordering::Descending;
 
-        let substate_id = substate_id.to_string();
-        // Diesel GROUP BY support is limited
-        let max_version_and_destroyed = sql_query(
-            r#"
-                SELECT MAX(version) as max_version, destroyed_by_shard
-                FROM substates
-                WHERE substate_id = ?
-                GROUP BY substate_id"#,
-        )
-        .bind::<Text, _>(&substate_id)
-        .get_result::<MaxVersionAndDestroyed>(self.connection())
-        .map_err(|e| SqliteStorageError::DieselError {
-            operation: "substates_get_max_version_for_substate",
-            source: e,
-        })?;
+        let req = SubstateRequirement::new(substate_id.clone(), None);
+        let key_prefix = SubstateModel::key_cf_version_from_requirement(&req);
 
-        let Some(max_version) = max_version_and_destroyed.max_version else {
-            return Err(StorageError::NotFound {
-                item: "Substate (substates_get_max_version_for_substate)".to_string(),
+        let res = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)?;
+
+        match res {
+            Some(substate) =>
+                Ok((substate.version, substate.destroyed.is_some()))
+            ,
+            None => Err(StorageError::NotFound {
+                item: "Substate (substates_get_max_version_for_substate)",
                 key: substate_id.to_string(),
-            });
-        };
-
-        Ok((
-            max_version as u32,
-            max_version_and_destroyed.destroyed_by_shard.is_some(),
-        ))
-        */
+            })
+        }
     }
 
     fn substates_any_exist<I: IntoIterator<Item = S>, S: Borrow<VersionedSubstateId>>(
         &self,
         addresses: I,
     ) -> Result<bool, StorageError> {
-        todo!()
-        /*
-        use crate::schema::substates;
+        let operation = "substates_any_exist";
 
-        let count = substates::table
-            .count()
-            .filter(
-                substates::address.eq_any(
-                    addresses
-                        .into_iter()
-                        .map(|v| v.borrow().to_substate_address())
-                        .map(serialize_hex),
-                ),
-            )
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_any",
-                source: e,
-            })?;
+        for address in addresses {
+            let res = SubstateModel::get(&self.tx, operation, &address.borrow().to_substate_address());
+            match res {
+                Ok(_) => return Ok(true),
+                Err(e) => match e {
+                    RocksDbStorageError::NotFound { .. } => continue,
+                    _ => return Err(e.into()),
+                }
+            }
+        }
 
-        Ok(count > 0)
-        */
+        return Ok(false)
     }
 
     fn substates_exists_for_transaction(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {

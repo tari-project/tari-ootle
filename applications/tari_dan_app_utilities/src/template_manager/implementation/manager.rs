@@ -130,20 +130,20 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         }
     }
 
-    pub fn template_exists(&self, address: &TemplateAddress) -> Result<bool, TemplateManagerError> {
+    pub fn template_exists(&self, address: &TemplateAddress, status: Option<TemplateStatus>) -> Result<bool, TemplateManagerError> {
         if self.builtin_templates.contains_key(address) {
             return Ok(true);
         }
         let mut tx = self.global_db.create_transaction()?;
         self.global_db
             .templates(&mut tx)
-            .template_exists(address)
+            .template_exists(address, status)
             .map_err(|_| TemplateManagerError::TemplateNotFound { address: *address })
     }
 
     /// Deletes a template if exists.
     pub fn delete_template(&self, address: &TemplateAddress) -> Result<(), TemplateManagerError> {
-        if !self.template_exists(address)? {
+        if !self.template_exists(address, None)? {
             return Ok(());
         }
 
@@ -201,6 +201,28 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         templates.append(&mut builtin_metadata);
 
         Ok(templates)
+    }
+
+    pub fn add_pending_template(
+        &self,
+        template_address: tari_engine_types::TemplateAddress,
+        epoch: Epoch,
+    ) -> Result<(), TemplateManagerError> {
+        let template = DbTemplate::empty_pending(template_address, epoch);
+
+        let mut tx = self.global_db.create_transaction()?;
+        let mut templates_db = self.global_db.templates(&mut tx);
+        match templates_db.get_template(&template.template_address)? {
+            Some(_) => templates_db.update_template(
+                &template.template_address,
+                DbTemplateUpdate::status(TemplateStatus::Pending),
+            )?,
+            None => templates_db.insert_template(template)?,
+        }
+
+        tx.commit()?;
+
+        Ok(())
     }
 
     pub(super) fn add_template(

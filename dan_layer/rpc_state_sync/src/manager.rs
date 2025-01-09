@@ -233,9 +233,9 @@ where
                     match &change {
                         SubstateTreeChange::Up { id, value_hash } => {
                             if let SubstateId::Template(template_addr) = id.substate_id {
-                                if let Ok(false) = self.template_manager.template_exists(&template_addr.as_hash()) {
+                                if let Ok(false) = self.template_manager.template_exists(&template_addr.as_hash(), None) {
+                                    self.template_manager.add_pending_template(template_addr.as_hash(), current_epoch)?;
                                     missing_templates.push(template_addr.as_hash());
-                                    // TODO: consider if it makes any problem if we commit substate change, but later failed to sync template(s)
                                 }
                             }
                         }

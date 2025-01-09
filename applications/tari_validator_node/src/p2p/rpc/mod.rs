@@ -23,8 +23,10 @@
 mod block_sync_task;
 mod service_impl;
 mod state_sync_task;
+mod template_sync_task;
 
 pub use service_impl::ValidatorNodeRpcServiceImpl;
+use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 use tari_dan_common_types::PeerAddress;
 use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_state_store_sqlite::SqliteStateStore;
@@ -38,6 +40,7 @@ use crate::{
 
 pub fn create_tari_validator_node_rpc_service(
     epoch_manager: EpochManagerHandle<PeerAddress>,
+    template_manager: TemplateManagerHandle,
     shard_store_store: SqliteStateStore<PeerAddress>,
     mempool: MempoolHandle,
     virtual_substate_manager: VirtualSubstateManager<SqliteStateStore<PeerAddress>, EpochManagerHandle<PeerAddress>>,
@@ -45,6 +48,7 @@ pub fn create_tari_validator_node_rpc_service(
 ) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl> {
     ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(
         epoch_manager,
+        template_manager,
         shard_store_store,
         mempool,
         virtual_substate_manager,

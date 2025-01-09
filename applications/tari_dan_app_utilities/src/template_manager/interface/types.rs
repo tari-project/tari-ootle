@@ -23,7 +23,7 @@
 use reqwest::Url;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::global::{DbTemplate, DbTemplateType};
+use tari_dan_storage::global::{DbTemplate, DbTemplateType, TemplateStatus};
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::oneshot;
@@ -36,6 +36,7 @@ pub struct TemplateMetadata {
     pub address: TemplateAddress,
     /// SHA hash of binary
     pub binary_sha: FixedHash,
+    pub author_public_key: FixedHash,
 }
 
 // TODO: Allow fetching of just the template metadata without the compiled code
@@ -45,6 +46,7 @@ impl From<DbTemplate> for TemplateMetadata {
             name: record.template_name,
             address: record.template_address,
             binary_sha: FixedHash::zero(),
+            author_public_key: record.author_public_key,
         }
     }
 }
@@ -109,6 +111,7 @@ pub enum TemplateManagerRequest {
     },
     TemplateExists {
         address: TemplateAddress,
+        status: Option<TemplateStatus>,
         reply: oneshot::Sender<Result<bool, TemplateManagerError>>,
     },
 }

@@ -356,10 +356,15 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(())
     }
 
-    fn template_exists(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8]) -> Result<bool, Self::Error> {
+    fn template_exists(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8], status: Option<TemplateStatus>) -> Result<bool, Self::Error> {
         use crate::global::schema::templates::dsl;
-        let result = dsl::templates
-            .filter(templates::template_address.eq(key))
+
+        let mut query = dsl::templates.into_boxed().filter(templates::template_address.eq(key));
+        if let Some(status) = status {
+            query = query.filter(templates::status.eq(status.as_str()));
+        }
+
+        let result = query
             .count()
             .limit(1)
             .get_result::<i64>(tx.connection())

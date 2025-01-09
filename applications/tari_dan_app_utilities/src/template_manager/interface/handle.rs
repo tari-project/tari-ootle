@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use super::{types::TemplateManagerRequest, Template, TemplateExecutable, TemplateManagerError, TemplateMetadata};
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::Epoch;
+use tari_dan_storage::global::TemplateStatus;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
-
-use super::{types::TemplateManagerRequest, Template, TemplateExecutable, TemplateManagerError, TemplateMetadata};
 
 #[derive(Debug, Clone)]
 pub struct TemplateManagerHandle {
@@ -91,11 +91,13 @@ impl TemplateManagerHandle {
     pub async fn template_exists(
         &self,
         template_address: TemplateAddress,
+        status: Option<TemplateStatus>,
     ) -> Result<bool, TemplateManagerError> {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(TemplateManagerRequest::TemplateExists {
                 address: template_address,
+                status,
                 reply: tx,
             })
             .await

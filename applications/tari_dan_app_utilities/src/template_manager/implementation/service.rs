@@ -138,9 +138,9 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
             }
             GetTemplates { limit, reply } => handle(reply, self.manager.fetch_template_metadata(limit)),
             LoadTemplateAbi { address, reply } => handle(reply, self.handle_load_template_abi(address)),
-            TemplateExists { address, reply } => handle(
+            TemplateExists { address, status, reply } => handle(
                 reply,
-                self.handle_template_exists(&address),
+                self.handle_template_exists(&address, status),
             )
         }
     }
@@ -246,8 +246,9 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
     fn handle_template_exists(
         &mut self,
         template_address: &TemplateAddress,
+        status: Option<TemplateStatus>,
     ) -> Result<bool, TemplateManagerError> {
-        self.manager.template_exists(template_address)
+        self.manager.template_exists(template_address, status)
     }
 
     async fn handle_add_template(

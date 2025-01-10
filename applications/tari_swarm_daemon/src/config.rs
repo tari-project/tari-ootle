@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     fmt,
     fmt::Display,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
 };
 
@@ -19,10 +19,12 @@ use tokio::{
 use crate::cli::{Cli, Commands};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub base_dir: PathBuf,
     pub start_port: u16,
     pub network: Network,
+    pub settings: Option<HashMap<String, String>>,
     pub webserver: WebserverConfig,
     #[serde(flatten)]
     pub processes: ProcessesConfig,
@@ -30,6 +32,7 @@ pub struct Config {
     pub skip_registration: bool,
     #[serde(default = "default_as_true")]
     pub auto_register_previous_templates: bool,
+    pub public_ip: Option<IpAddr>,
 }
 
 fn default_as_true() -> bool {
@@ -59,6 +62,10 @@ impl Config {
         let toml = toml::to_string_pretty(self)?;
         writer.write_all(toml.as_bytes()).await?;
         Ok(())
+    }
+
+    pub fn get_public_ip(&self) -> IpAddr {
+        self.public_ip.unwrap_or_else(|| [127, 0, 0, 1].into())
     }
 
     fn overrides_from_cli(&mut self, cli: &Cli) {

@@ -3,6 +3,7 @@
 
 use std::{str::FromStr, sync::Arc};
 
+use anyhow::Context;
 use axum::{
     handler::HandlerWithoutStateExt,
     http::{HeaderValue, Response, Uri},
@@ -23,6 +24,7 @@ use log::*;
 use reqwest::{header, StatusCode};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
+use tokio::fs;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
 use crate::webserver::{context::HandlerContext, error::HandlerError, handler::JrpcHandler, rpc, templates};
@@ -36,10 +38,20 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         (StatusCode::NOT_FOUND, "Resource not found")
     }
 
-    let serve_templates =
-        ServeDir::new(context.config().base_dir.join("templates")).not_found_service(not_found.into_service());
+    let templates_dir = context.config().base_dir.join("templates");
+    if !templates_dir.exists() {
+        fs::create_dir_all(&templates_dir)
+            .await
+            .context("create template dir")?;
+    }
 
-    let serve_misc = ServeDir::new(context.config().base_dir.join("misc")).not_found_service(not_found.into_service());
+    let serve_templates = ServeDir::new(templates_dir).not_found_service(not_found.into_service());
+
+    let misc_dir = context.config().base_dir.join("misc");
+    if !misc_dir.exists() {
+        fs::create_dir_all(&misc_dir).await.context("create misc dir")?;
+    }
+    let serve_misc = ServeDir::new(misc_dir).not_found_service(not_found.into_service());
 
     let router = Router::new()
         .route("/upload_template", post(templates::upload))

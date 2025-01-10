@@ -36,16 +36,19 @@ impl ProcessDefinition for MinotariNode {
             base_node_addresses.push(identity);
         }
 
+        let network = context.network();
+
         command
             .envs(context.environment())
             .arg("-b")
             .arg(context.base_path())
             .arg("--network")
-            .arg(context.network().to_string())
+            .arg(network.to_string())
             .arg("-pbase_node.p2p.transport.type=tcp")
             .arg(format!(
                 "-pbase_node.p2p.transport.tcp.listener_address={public_address}"
             ))
+            .arg(format!("-p{network}.base_node.identity_file=config/base_node_id.json"))
             .arg(format!("-pbase_node.p2p.public_addresses={public_address}"))
             .arg(format!("-pbase_node.grpc_address=/ip4/{listen_ip}/tcp/{grpc_port}"))
             .args([

@@ -36,9 +36,10 @@ impl MinoTariNodeProcess {
     pub async fn get_identity(&self) -> anyhow::Result<String> {
         // We cannot call identify because we'd need to override the allowed methods via cli, and this is not
         // supported. So we read from the base node identity file
-        let mut config = File::open(self.instance.base_path().join("config").join("base_node_id.json"))
+        let id_file = self.instance.base_path().join("config").join("base_node_id.json");
+        let mut config = File::open(&id_file)
             .await
-            .context("Loading base node ID failed")?;
+            .with_context(|| format!("Loading base node ID failed {}", id_file.display()))?;
         let mut s = String::new();
         config.read_to_string(&mut s).await?;
         let identity = json5::from_str::<serde_json::Value>(&s)?;

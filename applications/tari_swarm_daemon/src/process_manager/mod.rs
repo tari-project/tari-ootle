@@ -23,8 +23,6 @@ pub fn spawn(
     shutdown: tari_shutdown::ShutdownSignal,
 ) -> (task::JoinHandle<anyhow::Result<()>>, ProcessManagerHandle) {
     let (manager, handle) = manager::ProcessManager::new(config, shutdown);
-
     let task_handle = tokio::spawn(manager.start());
-
     (task_handle, handle)
 }

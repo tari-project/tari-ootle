@@ -62,6 +62,10 @@ impl SubstateLock {
         self.lock_type.is_read()
     }
 
+    pub fn is_input(&self) -> bool {
+        self.lock_type.is_input()
+    }
+
     pub fn is_output(&self) -> bool {
         self.lock_type.is_output()
     }

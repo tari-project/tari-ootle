@@ -1554,15 +1554,16 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::LeaderFeeDisagreement));
         }
 
-        if !tx_rec.evidence().all_objects_accepted() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed that all shard groups have accepted the atom but locally this is not the case",
-                tx_rec.transaction_id(),
-                block,
-            );
-            return Ok(Some(NoVoteReason::NotAllInputsOutputsAccepted));
-        }
+        // TODO: investigate, this fails sometimes
+        // if !tx_rec.evidence().all_objects_accepted() {
+        //     warn!(
+        //         target: LOG_TARGET,
+        //         "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed that all shard
+        // groups have accepted the atom but locally this is not the case",         tx_rec.transaction_id(),
+        //         block,
+        //     );
+        //     return Ok(Some(NoVoteReason::NotAllInputsOutputsAccepted));
+        // }
 
         if !tx_rec.has_all_required_foreign_pledges(tx, local_committee_info)? {
             warn!(

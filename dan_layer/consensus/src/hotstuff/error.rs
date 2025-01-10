@@ -230,6 +230,8 @@ pub enum ProposalValidationError {
         block_id: BlockId,
         base_layer_block_height: u64,
     },
+    #[error("Foreign node in {shard_group} submitted malformed BlockPledge for block {block_id}")]
+    ForeignMalformedPledges { block_id: BlockId, shard_group: ShardGroup },
     #[error(
         "Foreign node in {shard_group} submitted invalid pledge for block {block_id}, transaction {transaction_id}: \
          {details}"

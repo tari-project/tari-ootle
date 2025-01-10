@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, option::DisplayContainer, SubstateAddress, ToSubstateAddress};
+use tari_dan_common_types::{committee::CommitteeInfo, option::DisplayContainer, SubstateAddress};
 use tari_dan_storage::{
     consensus_models::{
         BlockId,
@@ -533,7 +533,7 @@ fn validate_and_add_pledges(
             for pledge in &pledges {
                 if pledge.is_input() {
                     if !evidence.inputs().contains_key(pledge.substate_id()) {
-                        let address = pledge.versioned_substate_id().to_substate_address();
+                        let address = pledge.to_substate_address();
                         return Err(ProposalValidationError::ForeignInvalidPledge {
                             block_id: *foreign_block_id,
                             transaction_id: atom.id,
@@ -543,7 +543,7 @@ fn validate_and_add_pledges(
                         .into());
                     }
                 } else if !evidence.outputs().contains_key(pledge.substate_id()) {
-                    let address = pledge.versioned_substate_id().to_substate_address();
+                    let address = pledge.to_substate_address();
                     return Err(ProposalValidationError::ForeignInvalidPledge {
                         block_id: *foreign_block_id,
                         transaction_id: atom.id,

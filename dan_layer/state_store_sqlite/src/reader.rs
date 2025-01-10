@@ -2419,7 +2419,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     details: format!("Invalid input substate pledge for {lock_intent}"),
                 }
             })?;
-            pledges.insert(pledge);
+            pledges.push(pledge);
         }
 
         Ok(pledges)

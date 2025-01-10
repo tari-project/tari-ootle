@@ -163,13 +163,11 @@ function Assets({ accountName }: { accountName: string }) {
         </Tabs>
       </Box>
       <TabPanel value={value} index={0}>
-        {balancesIsError || balancesIsFetching ? (
-          <FetchStatusCheck
-            isError={balancesIsError}
-            errorMessage={balancesError?.message || "Error fetching data"}
-            isLoading={balancesIsFetching}
-          />
-        ) : (
+        <FetchStatusCheck
+          isError={balancesIsError}
+          errorMessage={balancesError?.message || "Error fetching data"}
+          isLoading={balancesIsFetching}
+        >
           <TableContainer>
             <Table>
               <TableHead>
@@ -209,7 +207,7 @@ function Assets({ accountName }: { accountName: string }) {
               </TableBody>
             </Table>
           </TableContainer>
-        )}
+        </FetchStatusCheck>
       </TabPanel>
       <TabPanel value={value} index={1}>
         <NFTList

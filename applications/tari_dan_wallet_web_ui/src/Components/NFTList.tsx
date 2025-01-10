@@ -25,18 +25,20 @@ import FetchStatusCheck from "./FetchStatusCheck";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import type { apiError } from "../api/helpers/types";
 import { DataTableCell } from "./StyledComponents";
-import { toHexString } from "../utils/helpers";
+import { renderJson, shortenString, shortenSubstateId, toHexString } from "../utils/helpers";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
 import type { NonFungibleId, NonFungibleToken, ListAccountNftResponse } from "@tari-project/typescript-bindings";
 import { convertCborValue } from "../utils/cbor";
 
-function NftsList({ nft }: { nft: NonFungibleToken }) {
+function NftListItem({ nft }: { nft: NonFungibleToken }) {
   return (
     <TableRow>
       <DataTableCell>{displayNftId(nft.nft_id)}</DataTableCell>
-      <DataTableCell>{nft.vault_id}</DataTableCell>
-      <DataTableCell>{JSON.stringify(convertCborValue(nft.data))}</DataTableCell>
-      <DataTableCell>{JSON.stringify(convertCborValue(nft.mutable_data))}</DataTableCell>
+      <DataTableCell>{shortenSubstateId(nft.vault_id)}</DataTableCell>
+      <DataTableCell>
+        <DataTableCell>{renderJson(convertCborValue(nft.data))}</DataTableCell>
+      </DataTableCell>
+      <DataTableCell>{renderJson(convertCborValue(nft.mutable_data))}</DataTableCell>
       <DataTableCell>
         {nft.is_burned ? (
           <IoCheckmarkOutline style={{ height: 22, width: 22 }} color="#DB7E7E" />
@@ -50,7 +52,7 @@ function NftsList({ nft }: { nft: NonFungibleToken }) {
 
 function displayNftId(nftId: NonFungibleId) {
   if ("U256" in nftId) {
-    return `U256:${toHexString(nftId.U256)}`;
+    return `U256:${shortenString(toHexString(nftId.U256))}`;
   }
   if ("Uint64" in nftId) {
     return `Uint64:${nftId.Uint64}`;
@@ -58,7 +60,6 @@ function displayNftId(nftId: NonFungibleId) {
   if ("Uint32" in nftId) {
     return `Uint32:${nftId.Uint32}`;
   }
-
   if ("String" in nftId) {
     return `String:${nftId.String}`;
   }
@@ -75,13 +76,7 @@ export interface NftListProps {
 
 export default function NFTList(props: NftListProps) {
   const { nftsListIsError, nftsListIsFetching, nftsListError, nftsListData } = props;
-  if (nftsListIsError || nftsListIsFetching) {
-    <FetchStatusCheck
-      isError={nftsListIsError}
-      errorMessage={nftsListError?.message || "Error fetching data"}
-      isLoading={nftsListIsFetching}
-    />;
-  }
+
   return (
     <TableContainer>
       <Table>
@@ -95,7 +90,13 @@ export default function NFTList(props: NftListProps) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {nftsListData?.nfts.map((nft: NonFungibleToken, index: number) => <NftsList key={index} nft={nft} />)}
+          <FetchStatusCheck
+            isError={nftsListIsError}
+            errorMessage={nftsListError?.message || "Error fetching data"}
+            isLoading={nftsListIsFetching}
+          >
+            {nftsListData?.nfts.map((nft: NonFungibleToken, index: number) => <NftListItem key={index} nft={nft} />)}
+          </FetchStatusCheck>
         </TableBody>
       </Table>
     </TableContainer>

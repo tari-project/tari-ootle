@@ -411,7 +411,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             .map_err(|error| {
                 RpcStatus::bad_request(format!("Failed to parse address: {:?}", error))
             })?;
-        // TODO: set workers based on how many addresses we got in request with a maximum of 10
+        
         task::spawn(
             TemplateSyncTask::new(
                 5,

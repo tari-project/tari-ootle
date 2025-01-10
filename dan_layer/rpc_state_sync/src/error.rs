@@ -38,6 +38,8 @@ pub enum CommsRpcConsensusSyncError {
     StateRootMismatch { expected: TreeHash, actual: TreeHash },
     #[error("Template manager error: {0}")]
     TemplateManager(#[from] TemplateManagerError),
+    #[error("Task join error: {0}")]
+    TaskJoin(String),
 }
 
 impl CommsRpcConsensusSyncError {

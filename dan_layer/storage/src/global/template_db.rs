@@ -47,6 +47,10 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
         self.backend.get_templates(self.tx, limit)
     }
 
+    pub fn get_templates_by_addresses(&mut self, addresses: &[&[u8]]) -> Result<Vec<DbTemplate>, TGlobalDbAdapter::Error> {
+        self.backend.get_templates_by_addresses(self.tx, addresses)
+    }
+
     pub fn get_pending_templates(&mut self, limit: usize) -> Result<Vec<DbTemplate>, TGlobalDbAdapter::Error> {
         self.backend.get_pending_templates(self.tx, limit)
     }

@@ -59,6 +59,6 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
     #[rpc(method = 9)]
     async fn sync_templates(
         &self,
-        request: Request<proto::SyncTemplateRequest>,
-    ) -> Result<Streaming<proto::SyncTemplateResponse>, RpcStatus>;
+        request: Request<proto::SyncTemplatesRequest>,
+    ) -> Result<Streaming<proto::SyncTemplatesResponse>, RpcStatus>;
 }

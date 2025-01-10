@@ -154,6 +154,36 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             .map_err(|_| TemplateManagerError::TemplateDeleteFailed { address: *address })
     }
 
+    pub fn fetch_templates_by_addresses(&self, mut addresses: Vec<TemplateAddress>) -> Result<Vec<Template>, TemplateManagerError> {
+        let mut result = Vec::with_capacity(addresses.len());
+
+        // check in built-in templates first
+        let mut found_template_indexes = vec![];
+        for (i, address) in addresses.iter().enumerate() {
+            if let Some(template) = self.builtin_templates.get(address) {
+                result.push(template.clone());
+                found_template_indexes.push(i);
+            }
+        }
+        found_template_indexes.iter().for_each(|i| {
+            addresses.remove(*i);
+        });
+
+        // check the rest in DB
+        let mut tx = self.global_db.create_transaction()?;
+        self.global_db
+            .templates(&mut tx)
+            .get_templates_by_addresses(
+                addresses.iter()
+                    .map(|address| address.iter().as_slice())
+                    .collect::<Vec<&[u8]>>()
+                    .as_slice()
+            )
+            .map_err(|_| TemplateManagerError::TemplatesNotFound { addresses })?;
+
+        Ok(result)
+    }
+
     pub fn fetch_template(&self, address: &TemplateAddress) -> Result<Template, TemplateManagerError> {
         // first of all, check if the address is for a bulitin template
         if let Some(template) = self.builtin_templates.get(address) {

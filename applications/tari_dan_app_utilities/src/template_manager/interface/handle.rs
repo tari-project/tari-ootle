@@ -27,6 +27,7 @@ use tari_dan_storage::global::TemplateStatus;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone)]
 pub struct TemplateManagerHandle {
@@ -60,6 +61,27 @@ impl TemplateManagerHandle {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(TemplateManagerRequest::GetTemplates { limit, reply: tx })
+            .await
+            .map_err(|_| TemplateManagerError::ChannelClosed)?;
+        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
+
+    pub async fn get_templates_by_addresses(&self, addresses: Vec<TemplateAddress>) -> Result<Vec<Template>, TemplateManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(TemplateManagerRequest::GetTemplatesByAddresses { addresses, reply: tx })
+            .await
+            .map_err(|_| TemplateManagerError::ChannelClosed)?;
+        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
+
+    pub async fn sync_templates(&self, addresses: Vec<TemplateAddress>) -> Result<
+        JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>,
+        TemplateManagerError
+    > {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(TemplateManagerRequest::SyncTemplates { addresses, reply: tx })
             .await
             .map_err(|_| TemplateManagerError::ChannelClosed)?;
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?

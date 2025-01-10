@@ -271,8 +271,14 @@ where
         Ok(current_version)
     }
 
+    /// Triggers syncing of the passed templates (by address) and wait for the result.
     async fn sync_templates(&self, templates: Vec<TemplateAddress>) -> Result<(), CommsRpcConsensusSyncError> {
-        // TODO: implement by using self.template_manager_service
+        let handle = self.template_manager_service.sync_templates(templates).await?;
+        if let Some(missing_templates) = handle.await
+            .map_err(|error| CommsRpcConsensusSyncError::TaskJoin(error.to_string()))?? {
+            warn!(target: LOG_TARGET, "⚠️ Some templates were not synchronized!");
+            // TODO: continue
+        }
         Ok(())
     }
 

@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use super::TemplateManagerError;
 use reqwest::Url;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::Epoch;
@@ -27,8 +28,7 @@ use tari_dan_storage::global::{DbTemplate, DbTemplateType, TemplateStatus};
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::oneshot;
-
-use super::TemplateManagerError;
+use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone)]
 pub struct TemplateMetadata {
@@ -77,6 +77,7 @@ impl From<DbTemplate> for Template {
                 address: record.template_address,
                 // TODO: add field to db
                 binary_sha: FixedHash::zero(),
+                author_public_key: record.author_public_key,
             },
             executable: match record.template_type {
                 DbTemplateType::Wasm => TemplateExecutable::CompiledWasm(record.compiled_code.unwrap()),
@@ -105,6 +106,10 @@ pub enum TemplateManagerRequest {
         limit: usize,
         reply: oneshot::Sender<Result<Vec<TemplateMetadata>, TemplateManagerError>>,
     },
+    GetTemplatesByAddresses {
+        addresses: Vec<TemplateAddress>,
+        reply: oneshot::Sender<Result<Vec<Template>, TemplateManagerError>>,
+    },
     LoadTemplateAbi {
         address: TemplateAddress,
         reply: oneshot::Sender<Result<TemplateAbi, TemplateManagerError>>,
@@ -113,5 +118,14 @@ pub enum TemplateManagerRequest {
         address: TemplateAddress,
         status: Option<TemplateStatus>,
         reply: oneshot::Sender<Result<bool, TemplateManagerError>>,
+    },
+    SyncTemplates {
+        addresses: Vec<TemplateAddress>,
+        reply: oneshot::Sender<
+            Result<
+                JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>,
+                TemplateManagerError
+            >
+        >,
     },
 }

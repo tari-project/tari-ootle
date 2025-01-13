@@ -168,6 +168,16 @@ mod substates {
         let res = tx.substates_any_exist(substate_ids).unwrap();
         assert_eq!(res, false);
 
+        // substates_get_many_by_created_transaction
+        let tx_id = TransactionId::default();
+        let res = tx.substates_get_many_by_created_transaction(&tx_id).unwrap();
+        assert_eq!(res.len(), 3);
+
+        // substates_get_all_for_transaction
+        let tx_id = TransactionId::default();
+        let res = tx.substates_get_all_for_transaction(&tx_id).unwrap();
+        assert_eq!(res.len(), 3);
+
         tx.rollback().unwrap();
     }
 

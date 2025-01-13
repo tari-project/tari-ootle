@@ -104,9 +104,11 @@ impl TryFrom<SubstateModel> for SubstateRecord {
 impl SubstateModel {
     pub const KEY_PREFIX: &str = "substates";
     pub const CF_VERSION: &str = "substates_version";
+    pub const CF_CREATED_BY_TX: &str = "substates_created_by_tx";
+    pub const CF_DESTROYED_BY_TX: &str = "substates_destroyed_by_tx";
 
     pub fn cfs() -> Vec<&'static str> {
-        vec![Self::CF_VERSION]
+        vec![Self::CF_VERSION, Self::CF_CREATED_BY_TX, Self::CF_DESTROYED_BY_TX]
     }
 
     pub fn key(substate: &SubstateRecord) -> String {
@@ -132,6 +134,11 @@ impl SubstateModel {
     pub fn key_cf_version_from_substate(rec: SubstateRecord) -> String {
         let req = SubstateRequirement::new(rec.substate_id, Some(rec.version));
         Self::key_cf_version_from_requirement(&req)
+    }
+
+    pub fn key_cf_by_tx(tx_id: &TransactionId, address_opt: Option<&SubstateAddress>) -> String {
+        let address = address_opt.map(|s| s.to_string()).unwrap_or_default();
+        format!("{}_{}_{}", Self::KEY_PREFIX, tx_id, address)        
     }
 
     fn encode(value: &SubstateRecord) -> Result<Vec<u8>, RocksDbStorageError> {
@@ -177,7 +184,25 @@ impl SubstateModel {
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
                 source: e,
+        })?;
+
+        // created_by_tx column family
+        let address = substate.to_substate_address();
+        let key_cf = Self::key_cf_by_tx(&substate.created_by_transaction, Some(&address));
+        let cf = db.cf_handle(Self::CF_CREATED_BY_TX).unwrap();
+        tx.put_cf(cf, key_cf.clone(), key.as_bytes())
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
         })?;   
+
+        // destroyed_by_tx column family
+        let cf = db.cf_handle(Self::CF_DESTROYED_BY_TX).unwrap();
+        tx.put_cf(cf, key_cf, key.as_bytes())
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+        })?;
 
         Ok(())
     }
@@ -223,6 +248,43 @@ impl SubstateModel {
  
         let value = Self::decode(bytes)?;
         Ok(Some(value))
+    }
+
+    pub fn multi_get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, cf: &str, key_prefix: &str, ordering: Ordering) -> Result<Vec<SubstateRecord>, RocksDbStorageError> {
+        let cf = db.cf_handle(cf).unwrap();
+        
+        let mut options = rocksdb::ReadOptions::default();
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+
+        let iterator_mode = match ordering {
+            Ordering::Ascending => rocksdb::IteratorMode::Start,
+            Ordering::Descending => rocksdb::IteratorMode::End,
+        };
+
+        // get all the keys
+        let iterator = tx.iterator_cf_opt(cf,options, iterator_mode);
+        let keys: Vec<String> = iterator.map(|item| {
+            // TODO: properly handle errors and avoid unwraps
+            let (_, value) = item.unwrap();
+            // the value is the key in the default CF
+            String::from_utf8(value.to_vec()).unwrap()
+        })
+        .collect();
+
+        // get all the substates
+        let mut values = vec![];
+        for key in keys {
+            let value = tx.get(&key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+            })?;
+            let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
+            let value = Self::decode(bytes)?;
+            values.push(value);
+        }
+
+        Ok(values)
     }
 
 }

@@ -1746,53 +1746,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn substates_exists_for_transaction(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
+        // This function is not used anywhere, so we skip implementation
         todo!()
-        /*
-        use crate::schema::substates;
-
-        let transaction_id = serialize_hex(transaction_id);
-
-        let count = substates::table
-            .count()
-            .filter(substates::created_by_transaction.eq(&transaction_id))
-            .or_filter(substates::destroyed_by_transaction.eq(&transaction_id))
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_exists_for_transaction",
-                source: e,
-            })?;
-
-        Ok(count > 0)
-        */
     }
 
     fn substates_get_n_after(&self, n: usize, after: &SubstateAddress) -> Result<Vec<SubstateRecord>, StorageError> {
+        // This function is not used anywhere, so we skip implementation
         todo!()
-        /*
-        use crate::schema::substates;
-
-        let start_id = substates::table
-            .select(substates::id)
-            .filter(substates::address.eq(after.to_string()))
-            .get_result::<i32>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_n_after",
-                source: e,
-            })?;
-
-        let substates = substates::table
-            .filter(substates::id.gt(start_id))
-            .limit(n as i64)
-            .order_by(substates::id.asc())
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_n_after",
-                source: e,
-            })?;
-
-        substates.into_iter().map(TryInto::try_into).collect()
-        */
     }
 
     fn substates_get_many_within_range(
@@ -1801,93 +1761,62 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         end: &SubstateAddress,
         exclude: &[SubstateAddress],
     ) -> Result<Vec<SubstateRecord>, StorageError> {
+        // This function is not used anywhere, so we skip implementation
         todo!()
-        /*
-        use crate::schema::substates;
-
-        let substates = substates::table
-            .filter(substates::address.between(serialize_hex(start), serialize_hex(end)))
-            .filter(substates::address.ne_all(exclude.iter().map(serialize_hex)))
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_many_within_range",
-                source: e,
-            })?;
-
-        substates.into_iter().map(TryInto::try_into).collect()
-        */
     }
 
     fn substates_get_many_by_created_transaction(
         &self,
         tx_id: &TransactionId,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::substates;
+        let operation = "substates_get_many_by_created_transaction";
+        let cf = SubstateModel::CF_CREATED_BY_TX;
+        let ordering = Ordering::Ascending; // order does not matter here
+        let key_prefix = SubstateModel::key_cf_by_tx(tx_id, None);
 
-        let substates = substates::table
-            .filter(substates::created_by_transaction.eq(serialize_hex(tx_id)))
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_many_by_created_transaction",
-                source: e,
-            })?;
+        let substates = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
 
-        substates.into_iter().map(TryInto::try_into).collect()
-        */
+        Ok(substates)
     }
 
     fn substates_get_many_by_destroyed_transaction(
         &self,
         tx_id: &TransactionId,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::substates;
+        let operation = "substates_get_many_by_destroyed_transaction";
+        let cf = SubstateModel::CF_DESTROYED_BY_TX;
+        let ordering = Ordering::Ascending; // order does not matter here
+        let key_prefix = SubstateModel::key_cf_by_tx(tx_id, None);
 
-        let substates = substates::table
-            .filter(substates::destroyed_by_transaction.eq(serialize_hex(tx_id)))
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_many_by_destroyed_transaction",
-                source: e,
-            })?;
+        let substates = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
 
-        substates.into_iter().map(TryInto::try_into).collect()
-        */
+        Ok(substates)
     }
 
     fn substates_get_all_for_transaction(
         &self,
-        transaction_id: &TransactionId,
+        tx_id: &TransactionId,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::substates;
+        let operation = "substates_get_all_for_transaction";
+        let ordering = Ordering::Ascending;
+        let key_prefix = SubstateModel::key_cf_by_tx(tx_id, None);
 
-        let transaction_id_hex = serialize_hex(transaction_id);
-
-        let substates = substates::table
-            .filter(
-                substates::created_by_transaction
-                    .eq(&transaction_id_hex)
-                    .or(substates::destroyed_by_transaction.eq(Some(&transaction_id_hex))),
-            )
-            .order_by(substates::id.asc())
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_all_for_transaction",
-                source: e,
-            })?;
-
-        let substates = substates
+        // get all created by transaction
+        let cf = SubstateModel::CF_DESTROYED_BY_TX;
+        let created_by = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
+        let mut substates = created_by
             .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|s| (s.to_substate_address(), s))
+            .collect::<HashMap<_,_>>();       
+        
+        // get all destroyed by transaction
+        let cf = SubstateModel::CF_DESTROYED_BY_TX;
+        let destroyed_by = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
+        for substate in destroyed_by {
+            substates.insert(substate.to_substate_address(), substate);
+        }    
 
-        Ok(substates)
-        */
+        Ok(substates.into_values().collect())
     }
 
     fn substate_locks_get_locked_substates_for_transaction(

@@ -2,7 +2,6 @@
 #
 # //  Copyright 2025 The Tari Project
 # //  SPDX-License-Identifier: BSD-3-Clause
-#
 
 
 # This script is used to build and bundle Tari binaries into a single tarball for distribution.
@@ -29,5 +28,7 @@ done
 # Create the tarball
 rm -f tari-binaries.tar.gz
 tar -czf tari-binaries.tar.gz -C $TMP_DIR .
+
+rm -fr $TMP_DIR
 
 echo "Binaries bundled into tari-binaries.tar.gz"

@@ -185,7 +185,7 @@ impl Evidence {
     pub fn has_and_not_empty(&self, shard_group: &ShardGroup) -> bool {
         self.evidence
             .get(shard_group)
-            .map_or(false, |e| !e.inputs.is_empty() || !e.outputs.is_empty())
+            .is_some_and(|e| !e.inputs.is_empty() || !e.outputs.is_empty())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&ShardGroup, &ShardGroupEvidence)> {
@@ -422,10 +422,10 @@ impl ShardGroupEvidence {
             return self
                 .inputs
                 .get(substate_id)
-                .map_or(false, |e| e.as_ref().map_or(false, |e| e.version == version));
+                .is_some_and(|e| e.as_ref().is_some_and(|e| e.version == version));
         }
 
-        self.outputs.get(substate_id).map_or(false, |v| *v == version)
+        self.outputs.get(substate_id).is_some_and(|v| *v == version)
     }
 
     pub fn update(&mut self, other: &ShardGroupEvidence) -> &mut Self {

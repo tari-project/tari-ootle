@@ -102,8 +102,12 @@ impl Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "event: substate_id {:?}, template_address {}, tx_hash {}, topic {} and payload {:?}",
-            self.substate_id, self.template_address, self.tx_hash, self.topic, self.payload
+            "event: substate_id {:?}, template_address {}, tx_hash {}, topic {} and payload {}",
+            self.substate_id.as_ref().map(|e| e.to_string()),
+            self.template_address,
+            self.tx_hash,
+            self.topic,
+            self.payload
         )
     }
 }

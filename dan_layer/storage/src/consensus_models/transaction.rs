@@ -9,7 +9,13 @@ use std::{
 
 use log::*;
 use serde::Deserialize;
-use tari_dan_common_types::{committee::CommitteeInfo, NumPreshards, SubstateLockType, VersionedSubstateId};
+use tari_dan_common_types::{
+    committee::CommitteeInfo,
+    option::DisplayContainer,
+    NumPreshards,
+    SubstateLockType,
+    VersionedSubstateId,
+};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason},
     transaction_receipt::TransactionReceiptAddress,
@@ -404,6 +410,11 @@ impl TransactionRecord {
                 if locks.iter().all(|i| !i.satisfies_requirements(&input)) {
                     debug!(
                         target: LOG_TARGET,
+                        "Locks: {}",
+                        locks.display(),
+                    );
+                    debug!(
+                        target: LOG_TARGET,
                         "{} Transaction {} is missing a local lock for input {} ({} lock(s) found)",
                         local_committee_info.shard_group(),
                         self.id(),
@@ -416,6 +427,11 @@ impl TransactionRecord {
                 let remote_shard_group = input.to_substate_address_zero_version().to_shard_group(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),
+                );
+                debug!(
+                    target: LOG_TARGET,
+                    "Pledges: {}",
+                    pledges.display(),
                 );
                 debug!(
                     target: LOG_TARGET,

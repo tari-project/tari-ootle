@@ -12,7 +12,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
 };
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_transaction::Transaction;
+use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,
@@ -88,15 +88,8 @@ impl Validator {
             })
     }
 
-    pub fn has_committed_substates(&self) -> bool {
+    pub fn has_committed_substates(&self, tx_id: &TransactionId) -> bool {
         let tx = self.state_store().create_read_tx().unwrap();
-        // assert_eq!(
-        //     tx.transaction_pool_count(None, None, None).unwrap(),
-        //     0,
-        //     "Transaction pool is not empty in {}",
-        //     self.address
-        // );
-
-        tx.substates_count().unwrap() > 0
+        tx.substates_exists_for_transaction(tx_id).unwrap()
     }
 }

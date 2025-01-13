@@ -26,7 +26,7 @@ import { DataTableCell, AccordionIconButton } from "../../Components/StyledCompo
 import { renderJson } from "../../utils/helpers";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "../../Components/CodeBlock";
+import CodeBlockDialog from "../../Components/CodeBlock";
 import type { Instruction } from "@tari-project/typescript-bindings";
 
 function RowData({ title, data }: { title: string; data: Instruction }, index: number) {
@@ -51,7 +51,7 @@ function RowData({ title, data }: { title: string; data: Instruction }, index: n
       <TableRow key={`${index}-2`}>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={2}>
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <CodeBlockExpand title={title}>{renderJson(data)}</CodeBlockExpand>
+            <CodeBlockDialog title={title}>{renderJson(data)}</CodeBlockDialog>
           </Collapse>
         </DataTableCell>
       </TableRow>

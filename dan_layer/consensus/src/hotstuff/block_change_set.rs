@@ -409,6 +409,9 @@ impl ProposedBlockChangeSet {
     }
 
     pub fn log_everything(&self) {
+        if !log_enabled!(log::Level::Debug) {
+            return;
+        }
         const LOG_TARGET: &str = "tari::dan::consensus::block_change_set::debug";
         debug!(target: LOG_TARGET, "❌ No vote: {}", self.no_vote_reason.display());
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save_for_debug");

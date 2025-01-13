@@ -575,7 +575,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let foreign_proposals = foreign_proposals::table
             .filter(foreign_proposals::epoch.le(epoch.as_u64() as i64))
-            .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
+            .filter(
+                foreign_proposals::status
+                    .eq(ForeignProposalStatus::New.to_string())
+                    .or(foreign_proposals::status.eq(ForeignProposalStatus::Proposed.to_string())),
+            )
             .count()
             .limit(1)
             .get_result::<i64>(self.connection())
@@ -1727,11 +1731,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
-    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError> {
+    fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, StorageError> {
         use crate::schema::transaction_pool_state_updates;
+
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("transaction_pool_has_pending_state_updates: block {block_id} does not exist"),
+            });
+        }
+
+        let commit_block = self.get_commit_block()?;
+        let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
 
         let count = transaction_pool_state_updates::table
             .filter(transaction_pool_state_updates::is_applied.eq(false))
+            .filter(transaction_pool_state_updates::block_id.eq_any(block_ids))
             .count()
             .limit(1)
             .get_result::<i64>(self.connection())

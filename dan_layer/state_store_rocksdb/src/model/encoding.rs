@@ -1,4 +1,4 @@
-//  Copyright 2024. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,14 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod encoding;
-pub mod model;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-pub mod block_transaction_execution;
-pub mod block;
-pub mod state_transition;
-pub mod state_tree_shard_versions;
-pub mod substate;
-pub mod transaction_pool_state_update;
-pub mod transaction_pool;
-pub mod transaction;
+use crate::error::RocksDbStorageError;
+
+const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+
+pub fn binary_encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RocksDbStorageError> {
+    let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
+    Ok(bytes)
+}
+
+pub fn binary_decode<T: DeserializeOwned>(bytes: Vec<u8>) -> Result<T, RocksDbStorageError> {
+    let (value, _): (T, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
+    Ok(value)
+}

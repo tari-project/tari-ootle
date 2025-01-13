@@ -178,6 +178,21 @@ mod substates {
         let res = tx.substates_get_all_for_transaction(&tx_id).unwrap();
         assert_eq!(res.len(), 3);
 
+        // substates_down
+        let res = tx.substates_get(&substate2_address).unwrap();
+        assert!(res.destroyed.is_none());
+
+        let versioned_substate_id = VersionedSubstateId::new(substate2.substate_id, substate2.version);
+        let shard = Shard::zero();
+        let epoch = Epoch::zero();
+        let destroyed_block_height = NodeHeight::zero();
+        let destroyed_transaction_id = TransactionId::default();
+        let destroyed_qc_id = QcId::zero();
+        
+        tx.substates_down(versioned_substate_id, shard, epoch, destroyed_block_height, &destroyed_transaction_id, &destroyed_qc_id).unwrap();
+        let res = tx.substates_get(&substate2_address).unwrap();
+        assert!(res.destroyed.is_some());
+
         tx.rollback().unwrap();
     }
 

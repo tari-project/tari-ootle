@@ -38,7 +38,7 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::{
     consensus_models::{
-        Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, StateTransition, StateTransitionId, SubstateChange, SubstateCreatedProof, SubstateData, SubstateLock, SubstatePledge, SubstatePledges, SubstateRecord, SubstateUpdate, TransactionPool, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
+        Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, StateTransition, StateTransitionId, SubstateChange, SubstateCreatedProof, SubstateData, SubstateDestroyed, SubstateDestroyedProof, SubstateLock, SubstatePledge, SubstatePledges, SubstateRecord, SubstateUpdate, TransactionPool, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
     }, Ordering, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError
 };
 use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
@@ -1667,62 +1667,52 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         destroyed_transaction_id: &TransactionId,
         destroyed_qc_id: &QcId,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::{state_transitions, substates};
-
-        let changes = (
-            substates::destroyed_at.eq(diesel::dsl::now),
-            substates::destroyed_by_transaction.eq(Some(serialize_hex(destroyed_transaction_id))),
-            substates::destroyed_by_block.eq(Some(destroyed_block_height.as_u64() as i64)),
-            substates::destroyed_at_epoch.eq(Some(epoch.as_u64() as i64)),
-            substates::destroyed_by_shard.eq(Some(shard.as_u32() as i32)),
-            substates::destroyed_justify.eq(Some(serialize_hex(destroyed_qc_id))),
-        );
-
+        let operation = "substates_down";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        
+        // update the substate
         let address = versioned_substate_id.to_substate_address();
+        let mut substate = SubstateModel::get(tx, operation, &address)?;
+        substate.destroyed = Some(SubstateDestroyed {
+            by_transaction: *destroyed_transaction_id,
+            justify: *destroyed_qc_id,
+            by_block: destroyed_block_height,
+            at_epoch: epoch,
+            by_shard: shard,
+        });
+        SubstateModel::put(self.db.clone(), tx, operation, &substate)?;
 
-        diesel::update(substates::table)
-            .filter(substates::address.eq(serialize_hex(address)))
-            .set(changes)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_down (update substates)",
-                source: e,
-            })?;
+        // Calculate the index ("seq" field) of the state transition
+        let shard_seq_cf = StateTransitionModel::CF_SHARD_SEQ;
+        let key_prefix = StateTransitionModel::key_prefix_shard_seq(&shard);
+        // TODO: this could be optimized by a new model function that allows to specify the we only want one key
+        let shard_transition_keys = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, shard_seq_cf, &key_prefix, Ordering::Descending)?;
+        let next_seq = match shard_transition_keys.first() {
+            Some(key) => {
+                let value = StateTransitionModel::get(tx, operation, key)?;
+                value.seq
+            },
+            None => 1,
+        };
 
-        let seq = state_transitions::table
-            .select(dsl::max(state_transitions::seq))
-            .filter(state_transitions::shard.eq(shard.as_u32() as i32))
-            .first::<Option<i64>>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_down (get max seq)",
-                source: e,
-            })?;
-        let next_seq = seq.map(|s| s + 1).unwrap_or(1);
-
-        let version = self.state_tree_versions_get_latest(shard)?;
-        let values = (
-            state_transitions::seq.eq(next_seq),
-            state_transitions::epoch.eq(epoch.as_u64() as i64),
-            state_transitions::shard.eq(shard.as_u32() as i32),
-            state_transitions::substate_address.eq(serialize_hex(address)),
-            state_transitions::substate_id.eq(versioned_substate_id.substate_id.to_string()),
-            state_transitions::version.eq(versioned_substate_id.version as i32),
-            state_transitions::transition.eq("DOWN"),
-            state_transitions::state_version.eq(version.unwrap_or(0) as i64),
-        );
-
-        diesel::insert_into(state_transitions::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_down(insert into state_transitions)",
-                source: e,
-            })?;
+        // insert new state transition down
+        let state_transition = StateTransitionModel {
+            data: StateTransition {
+                id: StateTransitionId::new(epoch, shard, next_seq),
+                update: SubstateUpdate::Destroy(
+                    SubstateDestroyedProof {
+                        substate_id: versioned_substate_id.substate_id,
+                        version: versioned_substate_id.version,
+                        destroyed_by_transaction: *destroyed_transaction_id,
+                    }
+                ),
+            },
+            shard,
+            seq: next_seq,
+        };
+        StateTransitionModel::put(self.db.clone(), tx, operation, &state_transition)?;
 
         Ok(())
-        */
     }
 
     fn foreign_substate_pledges_save(

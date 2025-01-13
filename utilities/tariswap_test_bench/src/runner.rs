@@ -44,13 +44,6 @@ impl Runner {
     }
 
     pub async fn submit_transaction(&mut self, transaction: Transaction) -> anyhow::Result<TransactionId> {
-        // TODO: remove the filled inputs here and allow consensus to figure out input versions
-        // let inputs = transaction
-        //     .to_referenced_substates()?
-        //     .into_iter()
-        //     .map(|s| SubstateRequirement::new(s, None))
-        //     .collect();
-
         let tx_id = self
             .sdk
             .transaction_api()

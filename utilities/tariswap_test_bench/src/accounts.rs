@@ -135,26 +135,27 @@ impl Runner {
             .sdk
             .accounts_api()
             .get_vault_by_resource(&fee_account.address, &XTR)?;
-        let mut builder = Transaction::builder().fee_transaction_pay_from_component(
-            fee_account.address.as_component_address().unwrap(),
-            Amount(1000 * accounts.len() as i64),
-        );
-        for account in accounts {
-            builder = builder
-                .call_method(faucet.component_address, "take_free_coins", args![])
-                .put_last_instruction_output_on_workspace("faucet")
-                .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-                    Workspace("faucet")
-                ])
-                .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000)])
-                .put_last_instruction_output_on_workspace("xtr")
-                .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-                    Workspace("xtr")
-                ])
-                .add_input(SubstateRequirement::unversioned(account.address.clone()));
-        }
-
-        let transaction = builder
+        let transaction = Transaction::builder()
+            .fee_transaction_pay_from_component(
+                fee_account.address.as_component_address().unwrap(),
+                Amount(1000 * accounts.len() as i64),
+            )
+            .then(|builder| {
+                accounts.iter().fold(builder, |builder, account| {
+                    builder
+                        .call_method(faucet.component_address, "take_free_coins", args![])
+                        .put_last_instruction_output_on_workspace("faucet")
+                        .call_method(account.address.as_component_address().unwrap(), "deposit", args![
+                            Workspace("faucet")
+                        ])
+                        .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000)])
+                        .put_last_instruction_output_on_workspace("xtr")
+                        .call_method(account.address.as_component_address().unwrap(), "deposit", args![
+                            Workspace("xtr")
+                        ])
+                        .add_input(SubstateRequirement::unversioned(account.address.clone()))
+                })
+            })
             .with_inputs([
                 SubstateRequirement::unversioned(XTR),
                 SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),

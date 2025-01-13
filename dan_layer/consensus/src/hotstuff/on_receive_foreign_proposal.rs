@@ -348,7 +348,7 @@ where TConsensusSpec: ConsensusSpec
             // the justify QC is valid)
             warn!(
                 target: LOG_TARGET,
-                "⚠️ FOREIGN PROPOSAL: Invalid proposal: {}. Ignoring {}.",
+                "⚠️❌ FOREIGN PROPOSAL: Invalid proposal: {}. Ignoring {}.",
                 err,
                 proposal.block(),
             );
@@ -440,7 +440,7 @@ fn validate_evidence_and_pledges_match(
         cmd.local_prepare()
             // The foreign committee may have sent us this block for other transactions that are applicable to us
             // not for this output-only LocalPrepare
-            .filter(|atom| atom.evidence.is_committee_output_only(foreign_shard))
+            .filter(|atom| !atom.evidence.is_committee_output_only(foreign_shard))
             .or_else(|| cmd.local_accept())
     }) {
         if atom.decision.is_abort() || !atom.evidence.has(&local_shard) {

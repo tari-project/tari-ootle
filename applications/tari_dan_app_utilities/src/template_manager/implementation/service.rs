@@ -28,7 +28,7 @@ use super::{
     TemplateManager,
 };
 use crate::template_manager::interface::{Template, TemplateExecutable, TemplateManagerError, TemplateManagerRequest};
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use log::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::committee::Committee;
 use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch, NodeAddressable, PeerAddress, SubstateAddress};
 use tari_dan_engine::function_definitions::FlowFunctionDefinition;
-use tari_dan_p2p::proto::rpc::{SyncTemplatesRequest, TemplateType};
+use tari_dan_p2p::proto::rpc::{SyncTemplatesRequest, SyncTemplatesResponse, TemplateType};
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_engine_types::calculate_template_binary_hash;
 use tari_engine_types::hashing::template_hasher32;
@@ -382,87 +382,89 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                     }
 
                     // do syncing
-                    for (committee, mut addresses) in committees.iter() {
+                    for (committee, addresses) in committees.iter_mut() {
+                        warn!(target: LOG_TARGET, "Current committee({:?}): {:?}", committee.members.len(), committee.members); // TODO: remove, only for testing
+
                         for (addr, _) in &committee.members {
                             // syncing current part of batch
                             match Self::vn_client(client_factory.clone(), addr).await {
                                 Ok(mut client) => {
+                                    warn!(target: LOG_TARGET, "Connected to VN at {addr:?}"); // TODO: remove, only for testing
+
                                     match client.sync_templates(SyncTemplatesRequest {
                                         addresses: addresses.iter()
                                             .map(|address| address.to_vec()).collect()
                                     }).await {
-                                        Ok(stream) => {
-                                            stream.for_each_concurrent(
-                                                None,
-                                                |result| async move {
-                                                    match result {
-                                                        Ok(resp) => {
-                                                            // code
-                                                            let mut compiled_code = None;
-                                                            let mut flow_json = None;
-                                                            let mut manifest = None;
-                                                            let template_type: DbTemplateType;
-                                                            let bin_hash = FixedHash::from(
-                                                                template_hasher32().chain(resp.binary.as_slice()).result().into_array(),
-                                                            );
-                                                            match resp.template_type() {
-                                                                TemplateType::Wasm => {
-                                                                    compiled_code = Some(resp.binary);
-                                                                    template_type = DbTemplateType::Wasm;
-                                                                }
-                                                                TemplateType::Manifest => {
-                                                                    manifest = Some(String::from_utf8(resp.binary)?); // TODO: handle
-                                                                    template_type = DbTemplateType::Manifest;
-                                                                }
-                                                                TemplateType::Flow => {
-                                                                    flow_json = Some(String::from_utf8(resp.binary)?); // TODO: handle
-                                                                    template_type = DbTemplateType::Flow;
-                                                                }
-                                                            }
+                                        Ok(mut stream) => {
+                                            warn!(target: LOG_TARGET, "Got a stream: {stream:?}"); // TODO: remove, only for testing
 
-                                                            // get template address
-                                                            let template_address_result = TemplateAddress::try_from_vec(resp.address);
-                                                            if let Err(error) = template_address_result {
-                                                                error!(target: LOG_TARGET, "Invalid template address: {error:?}");
-                                                                return;
+                                            while let Some(result) = stream.next().await {
+                                                warn!(target: LOG_TARGET, "Got new response: {result:?}"); // TODO: remove, only for testing
+                                                match result {
+                                                    Ok(resp) => {
+                                                        // code
+                                                        let mut compiled_code = None;
+                                                        let mut flow_json = None;
+                                                        let mut manifest = None;
+                                                        let template_type: DbTemplateType;
+                                                        let bin_hash = FixedHash::from(
+                                                            template_hasher32().chain(resp.binary.as_slice()).result().into_array(),
+                                                        );
+                                                        match resp.template_type() {
+                                                            TemplateType::Wasm => {
+                                                                compiled_code = Some(resp.binary);
+                                                                template_type = DbTemplateType::Wasm;
                                                             }
-                                                            let template_address = template_address_result.unwrap();
+                                                            TemplateType::Manifest => {
+                                                                manifest = Some(String::from_utf8(resp.binary)?);
+                                                                template_type = DbTemplateType::Manifest;
+                                                            }
+                                                            TemplateType::Flow => {
+                                                                flow_json = Some(String::from_utf8(resp.binary)?);
+                                                                template_type = DbTemplateType::Flow;
+                                                            }
+                                                        }
 
-                                                            if let Err(error) = template_manager.update_template(
-                                                                template_address,
-                                                                DbTemplateUpdate::template(
-                                                                    FixedHash::try_from(resp.author_public_key.to_vec())?,
-                                                                    Some(bin_hash),
-                                                                    resp.template_name,
-                                                                    template_type,
-                                                                    compiled_code,
-                                                                    flow_json,
-                                                                    manifest,
-                                                                ),
-                                                            ) {
-                                                                error!(target: LOG_TARGET, "Failed to add new template: {error:?}");
-                                                            }
+                                                        // get template address
+                                                        let template_address_result = TemplateAddress::try_from_vec(resp.address);
+                                                        if let Err(error) = template_address_result {
+                                                            error!(target: LOG_TARGET, "Invalid template address: {error:?}");
+                                                            continue;
+                                                        }
+                                                        let template_address = template_address_result.unwrap();
 
-                                                            // remove from addresses to be able to send back a list of not synced templates (if any)
-                                                            let mut addr_to_remove_idx = None;
-                                                            for (i, addr) in addresses.iter().enumerate() {
-                                                                if *addr == template_address {
-                                                                    addr_to_remove_idx = Some(i);
-                                                                    break;
-                                                                }
-                                                            }
-                                                            if let Some(i) = addr_to_remove_idx {
+                                                        if let Err(error) = template_manager.update_template(
+                                                            template_address,
+                                                            DbTemplateUpdate::template(
+                                                                FixedHash::try_from(resp.author_public_key.to_vec())?,
+                                                                Some(bin_hash),
+                                                                resp.template_name,
+                                                                template_type,
+                                                                compiled_code,
+                                                                flow_json,
+                                                                manifest,
+                                                            ),
+                                                        ) {
+                                                            error!(target: LOG_TARGET, "Failed to add new template: {error:?}");
+                                                            continue;
+                                                        }
+
+                                                        // remove from addresses to be able to send back a list of not synced templates (if any)
+                                                        for (i, addr) in addresses.iter().enumerate() {
+                                                            if *addr == template_address {
                                                                 addresses.remove(i);
+                                                                break;
                                                             }
+                                                        }
 
-                                                            info!(target: LOG_TARGET, "✅ Template synced successfully: {}", template_address);
-                                                            // TODO: set a variable or anything to break out of iterating over committee members
-                                                        }
-                                                        Err(error) => {
-                                                            warn!(target: LOG_TARGET, "Failed to get one of the templates: {error:?}");
-                                                        }
+                                                        info!(target: LOG_TARGET, "✅ Template synced successfully: {}", template_address);
+                                                        break;
                                                     }
-                                                }).await;
+                                                    Err(error) => {
+                                                        warn!(target: LOG_TARGET, "Can't get stream of templates from VN({addr}): {error:?}");
+                                                    }
+                                                }
+                                            }
                                         }
                                         Err(error) => {
                                             warn!(target: LOG_TARGET, "Can't get stream of templates from VN({addr}): {error:?}");

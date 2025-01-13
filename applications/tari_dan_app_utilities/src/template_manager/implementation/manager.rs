@@ -125,6 +125,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 name: name.to_string(),
                 address,
                 binary_sha,
+                author_public_key: Default::default(),
             },
             executable: TemplateExecutable::CompiledWasm(compiled_code),
         }

@@ -35,7 +35,7 @@ use log::*;
 use tari_bor::{decode_exact, encode};
 use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateAddress};
-use tari_dan_p2p::proto::rpc::{SyncTemplateRequest, SyncTemplateResponse};
+use tari_dan_p2p::proto::rpc::{SyncTemplatesRequest, SyncTemplatesResponse};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{
@@ -401,7 +401,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         Ok(Streaming::new(receiver))
     }
 
-    async fn sync_templates(&self, request: Request<SyncTemplateRequest>) -> Result<Streaming<SyncTemplateResponse>, RpcStatus> {
+    async fn sync_templates(&self, request: Request<SyncTemplatesRequest>) -> Result<Streaming<SyncTemplatesResponse>, RpcStatus> {
         let req = request.into_message();
 
         let (tx, rx) = mpsc::channel(10);
@@ -411,7 +411,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             .map_err(|error| {
                 RpcStatus::bad_request(format!("Failed to parse address: {:?}", error))
             })?;
-        
+
         task::spawn(
             TemplateSyncTask::new(
                 5,

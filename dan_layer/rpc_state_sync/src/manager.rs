@@ -272,12 +272,18 @@ where
     }
 
     /// Triggers syncing of the passed templates (by address) and wait for the result.
+    /// If any of the templates were not synced, keep retries to sync those again until everything is synced.
     async fn sync_templates(&self, templates: Vec<TemplateAddress>) -> Result<(), CommsRpcConsensusSyncError> {
+        // TODO: consider having a max failures count, so we can return an error if there are still unsynced templates after X tries
         let handle = self.template_manager_service.sync_templates(templates).await?;
-        if let Some(missing_templates) = handle.await
+        if let Some(mut missing_templates) = handle.await
             .map_err(|error| CommsRpcConsensusSyncError::TaskJoin(error.to_string()))?? {
-            warn!(target: LOG_TARGET, "⚠️ Some templates were not synchronized!");
-            // TODO: continue
+            warn!(target: LOG_TARGET, "⚠️ Some templates were not synchronized ({} of them), retry the rest!", missing_templates.len());
+            while let Some(current_missing_templates) = self.template_manager_service.sync_templates(missing_templates.clone()).await?
+                .await.map_err(|error| CommsRpcConsensusSyncError::TaskJoin(error.to_string()))?? {
+                missing_templates = current_missing_templates;
+                warn!(target: LOG_TARGET, "⚠️ Some templates were not synchronized ({} of them), retry the rest!", missing_templates.len());
+            }
         }
         Ok(())
     }

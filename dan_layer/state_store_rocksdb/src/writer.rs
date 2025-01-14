@@ -210,43 +210,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn blocks_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         let operation = "blocks_delete";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-    
-        BlockModel::delete(self.db.clone(), tx, operation, block_id)?;
+        let key = BlockModel::key_from_block_id(block_id);
+        BlockModel::delete(self.db.clone(), tx, operation, &key)?;
 
         // NOTE: we not implementing the equivalent of the sqlite "diagnostic_deleted_blocks" table as it does not seem to be used
 
         Ok(())
-
-        /*
-        use crate::schema::{blocks, diagnostic_deleted_blocks};
-
-        let block_id = serialize_hex(block_id);
-
-        diesel::insert_into(diagnostic_deleted_blocks::table)
-            .values(blocks::table.filter(blocks::block_id.eq(&block_id)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_delete (insert into diagnostic_deleted_blocks)",
-                source: e,
-            })?;
-
-        let num_deleted = diesel::delete(blocks::table)
-            .filter(blocks::block_id.eq(&block_id))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_delete",
-                source: e,
-            })?;
-
-        if num_deleted == 0 {
-            return Err(StorageError::NotFound {
-                item: "blocks".to_string(),
-                key: block_id,
-            });
-        }
-
-        Ok(())
-        */
     }
 
     fn blocks_set_flags(
@@ -259,7 +228,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
         // fetch the related block
-        let mut block = BlockModel::get(tx, operation, block_id)?;
+        let key: String = BlockModel::key_from_block_id(block_id);
+        let mut block = BlockModel::get(tx, operation, &key)?;
 
         // set the flags
         is_committed.map(|value| block.set_is_committed(value));
@@ -945,7 +915,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
         // fetch the related block
-        let block = BlockModel::get(tx, operation, block_id)?;
+        let key: String = BlockModel::key_from_block_id(block_id);
+        let block = BlockModel::get(tx, operation, &key)?;
 
         // insert the update
         let value = TransactionPoolStateUpdateModel {

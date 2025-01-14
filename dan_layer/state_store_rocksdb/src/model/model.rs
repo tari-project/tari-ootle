@@ -47,7 +47,19 @@ pub trait ModelColumnFamily {
         })?;
 
         Ok(()) 
-    } 
+    }
+
+    fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+        let key = Self::build_key(&item);
+        let cf = db.cf_handle(&Self::name()).unwrap();
+        tx.delete_cf(cf, key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+        })?;
+
+        Ok(())
+    }
 }
 
 pub trait RocksdbModel {
@@ -55,9 +67,9 @@ pub trait RocksdbModel {
 
     fn key_prefix() -> &'static str;
 
-    fn column_families() -> Vec<&'static str>;
-
     fn key(item: &Self::Item) -> String;
+
+    fn column_families() -> Vec<&'static str>;
 
     fn encode(value: &Self::Item) -> Result<Vec<u8>, RocksDbStorageError> {
         let bytes = bincode_encode(value)?;
@@ -187,5 +199,27 @@ pub trait RocksdbModel {
         let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
         let count = iterator.count() as u64;
         Ok(count)
+    }
+
+    fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<(), RocksDbStorageError> {
+        // we need to have the main value to delete CF values later
+        let value = Self::get(tx, operation, key)?;
+
+        tx.delete(key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+            operation,
+            source: e,
+        })?;
+
+        // we also need to delete related CF keys
+        Self::delete_from_cfs(db.clone(), tx, operation, &value)?;
+
+        Ok(())
+    }
+
+    fn delete_from_cfs(_db: Arc<TransactionDB>, _tx: &Transaction<'_, TransactionDB>, _operation: &'static str, _value: &Self::Item) -> Result<(), RocksDbStorageError> {
+        // It's up to concrete models to override this method
+        // We provide a default implementation to simplify all the models that do not have column families
+        Ok(())
     }
 }

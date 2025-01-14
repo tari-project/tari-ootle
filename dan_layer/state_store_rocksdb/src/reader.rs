@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -216,7 +216,8 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
 
         let mut block_id = *end_block;
         while block_id != *start_block || block_id != BlockId::genesis() {
-            let block = BlockModel::get(&self.tx, "blocks_parent_id", &block_id)?;
+            let key: String = BlockModel::key_from_block_id(&block_id);
+            let block = BlockModel::get(&self.tx, "blocks_parent_id", &key)?;
             block_ids.push(block.id().to_string());
             block_id = *block.parent();
         }
@@ -283,8 +284,13 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     pub(crate) fn get_commit_block_id(&self) -> Result<BlockId, StorageError> {
-        let block = BlockModel::get_cf(self.db.clone(), &self.tx, BlockModel::CF_IS_COMMITED, "get_commit_block_id", "", Ordering::Descending)?;
-        Ok(*block.id())
+        let block_opt = BlockModel::get_cf(self.db.clone(), &self.tx, model::block::IsCommittedColumnFamily::NAME, "get_commit_block_id", "", Ordering::Descending)?;
+        match block_opt {
+            Some(block) => Ok(*block.id()),
+            None => Err(StorageError::General {
+                details: "get_commit_block_id: no commited block found".to_string() 
+            })
+        }
     }
 
     pub fn substates_count(&self) -> Result<u64, RocksDbStorageError> {
@@ -750,7 +756,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction(tx_id);
         let executions = BlockTransactionExecutionModel::list(&self.tx, &key_prefix, Ordering::Descending)?;
         for execution in executions {
-            let block = BlockModel::get(&self.tx, operation, execution.transaction_execution.block_id())?;
+            let key = BlockModel::key_from_block_id(execution.transaction_execution.block_id());
+            let block = BlockModel::get(&self.tx, operation, &key)?;
             if block.is_committed() {
                 return Ok(execution.transaction_execution)
             }
@@ -763,92 +770,39 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 tx_id
             ),
         })
-
-
-
-        // get transaction_executions: block_id, is_committed, transaction_id
-            // last (order by id desc), get first
-
-
-        /*
-        use crate::schema::{blocks, transaction_executions};
-
-        if !self.blocks_exists(from_block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "transaction_executions_get_pending_for_block: Block {} does not exist",
-                    from_block_id
-                ),
-            });
-        }
-
-        let commit_block = self.get_commit_block_id()?;
-        let block_ids = self.get_block_ids_between(&commit_block, from_block_id)?;
-        let tx_id = serialize_hex(tx_id);
-
-        let execution = transaction_executions::table
-            .filter(transaction_executions::transaction_id.eq(&tx_id))
-            .filter(transaction_executions::block_id.eq_any(block_ids))
-            // Get last execution
-            .order_by(transaction_executions::id.desc())
-            .first::<sql_models::TransactionExecution>(self.connection())
-            .optional()
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_executions_get_pending_for_block",
-                source: e,
-            })?;
-
-        if let Some(execution) = execution {
-            return execution.try_into();
-        }
-
-        // Otherwise look for executions after the commit block
-        let execution = transaction_executions::table
-            .select(transaction_executions::all_columns)
-            .inner_join(
-                blocks::table.on(transaction_executions::block_id
-                    .eq(blocks::block_id)
-                    .and(blocks::is_committed.eq(true))),
-            )
-            .filter(transaction_executions::transaction_id.eq(&tx_id))
-            .order_by(transaction_executions::id.desc())
-            .first::<sql_models::TransactionExecution>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_executions_get_pending_for_block",
-                source: e,
-            })?;
-
-        execution.try_into()
-        */
     }
 
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError> {
-        Ok(BlockModel::get(&self.tx, "blocks_get", block_id)?)
+        let key = BlockModel::key_from_block_id(block_id);
+        Ok(BlockModel::get(&self.tx, "blocks_get", &key)?)
     }
 
     fn blocks_get_all_ids_by_height(&self, epoch: Epoch, height: NodeHeight) -> Result<Vec<BlockId>, StorageError> {
-        let cf = BlockModel::CF_EPOCH_HEIGHT;
-        let key_prefix = format!("{}_{}_", epoch, height);
-        
+        type Cf = crate::model::block::EpochHeightColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::build_key_prefix(epoch, Some(height));
+
         let block_ids =
-            BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_all_ids_by_height",  cf, &key_prefix)?
-            .into_iter()
-            .collect();
+            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_all_ids_by_height",  cf, &key_prefix)?
+                .into_iter()
+                .collect();
 
         Ok(block_ids)
     }
 
     fn blocks_get_genesis_for_epoch(&self, epoch: Epoch) -> Result<Block, StorageError> {
-        let cf = BlockModel::CF_EPOCH_HEIGHT;
-        let key_prefix = format!("{}_{}_", epoch, NodeHeight(0));
+        type Cf = crate::model::block::EpochHeightColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::build_key_prefix(epoch, Some(NodeHeight(0)));
 
         let block_id =
-            BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_genesis_for_epoch",  cf, &key_prefix)?
+            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_genesis_for_epoch",  cf, &key_prefix)?
             .into_iter()
             .next();
 
         if let Some(block_id) = block_id {
-            let block= BlockModel::get(&self.tx, "blocks_get_genesis_for_epoch", &block_id)?;
+            let key = BlockModel::key_from_block_id(&block_id);
+            let block= BlockModel::get(&self.tx, "blocks_get_genesis_for_epoch", &key)?;
             Ok(block)
         } else {
             Err(RocksDbStorageError::GeneralError { message: "Genesis block not found".to_owned() }.into())
@@ -859,17 +813,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // TODO: this could be optimized by a new column familiy with the height reversed
         //       so we could avoid fetching the ids for all the blocks in the epoch
 
-        let cf = BlockModel::CF_EPOCH_HEIGHT;
-        let key_prefix = format!("{}_", epoch);
+        type Cf = crate::model::block::EpochHeightColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::build_key_prefix(epoch, None);
 
         let block_ids: Vec<BlockId> =
-            BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_last_n_in_epoch",  cf, &key_prefix)?
+            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_last_n_in_epoch",  cf, &key_prefix)?
             .into_iter()
             .collect();
 
         let mut blocks = vec![];
         for block_id in block_ids {
-            let block= BlockModel::get(&self.tx, "blocks_get_last_n_in_epoch", &block_id)?;
+            let key = BlockModel::key_from_block_id(&block_id);
+            let block= BlockModel::get(&self.tx, "blocks_get_last_n_in_epoch", &key)?;
             if block.is_committed() {
                 blocks.push(block);
             }
@@ -892,6 +848,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         limit: u64,
     ) -> Result<Vec<Block>, StorageError> {
         // TODO: this operation could be optimized by creating a new column family that includes shard_group as part of the key
+
+        let operation = "blocks_get_all_between";
         
         if start_block_height > end_block_height {
             return Err(StorageError::QueryError {
@@ -901,19 +859,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        let cf = BlockModel::CF_EPOCH_HEIGHT;
-        let lower_prefix = format!("{}_{}_", epoch, start_block_height);
+        type Cf = crate::model::block::EpochHeightColumnFamily;
+        let cf = Cf::name();
+        let lower_prefix = Cf::build_key_prefix(epoch, Some(start_block_height));
         // in rocksdb, the upper bound of a range is not included, and we want the blocks with the end height
-        let upper_prefix = format!("{}_{}_", epoch, end_block_height + NodeHeight(1));
+        let upper_prefix = Cf::build_key_prefix(epoch, Some(end_block_height + NodeHeight(1)));
 
         let block_ids: Vec<BlockId> =
-            BlockModel::multi_get_cf_range(self.db.clone(), &self.tx, "blocks_get_all_between",  cf, &lower_prefix, &upper_prefix)?
+            BlockModel::multi_get_ids_by_cf_range(self.db.clone(), &self.tx, operation, cf, &lower_prefix, &upper_prefix)?
             .into_iter()
             .collect();
 
         let mut blocks = vec![];
         for block_id in block_ids {
-            let block= BlockModel::get(&self.tx, "blocks_get_all_between", &block_id)?;
+            let key = BlockModel::key_from_block_id(&block_id);
+            let block= BlockModel::get(&self.tx, operation, &key)?;
 
             if !include_dummy_blocks && block.is_dummy() {
                 continue;
@@ -932,7 +892,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
-        Ok(BlockModel::key_exists(&self.tx, "blocks_exists", block_id)?)
+        let key = BlockModel::key_from_block_id(block_id);
+        Ok(BlockModel::key_exists(&self.tx, "blocks_exists", &key)?)
     }
 
     fn blocks_is_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError> {
@@ -951,7 +912,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // TODO: could this be optimized in RocksDB?
         let mut block_id = *descendant;
         while block_id != BlockId::genesis() {
-            let block = BlockModel::get(&self.tx, "blocks_is_ancestor", &block_id)?;
+            let key = BlockModel::key_from_block_id(&block_id);
+            let block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;
             
             if block.parent() == ancestor {
                 return Ok(true);
@@ -964,11 +926,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_get_ids_by_parent(&self, parent_id: &BlockId) -> Result<Vec<BlockId>, StorageError> {
-        let cf = BlockModel::CF_PARENT_ID;
-        let key_prefix = format!("{}_", parent_id);
+        type Cf = crate::model::block::ParentIdColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::build_key_prefix(parent_id);
         
         let block_ids =
-            BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_ids_by_parent",  cf, &key_prefix)?
+            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_ids_by_parent",  cf, &key_prefix)?
             .into_iter()
             // Exclude the genesis block
             .filter(|block_id| block_id != parent_id)
@@ -984,7 +947,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // fetch each child by id
         let mut blocks = vec![];
         for block_id in block_ids {
-            let block = BlockModel::get(&self.tx, "blocks_get_all_by_parent", &block_id)?;
+            let key = BlockModel::key_from_block_id(&block_id);
+            let block = BlockModel::get(&self.tx, "blocks_get_all_by_parent", &key)?;
             blocks.push(block);
         }
         
@@ -1000,10 +964,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let mut blocks = vec![];
         let mut i = 0;
-        let initial_block = BlockModel::get(&self.tx, "blocks_is_ancestor", &block_id)?;  
+        let key = BlockModel::key_from_block_id(block_id);
+        let initial_block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;  
         let mut current_block_id = *initial_block.parent();
         while i < limit && current_block_id != BlockId::genesis() {
-            let block = BlockModel::get(&self.tx, "blocks_is_ancestor", &current_block_id)?;
+            let key = BlockModel::key_from_block_id(&current_block_id);
+            let block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;
             current_block_id = *block.parent();
             blocks.push(block);
             i += 1;
@@ -1036,13 +1002,18 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<u64, StorageError> {
         // TODO: to optimize this query we could create a new column familiy with epoch and proposed_by fields in the key
 
-        let cf = BlockModel::CF_EPOCH_HEIGHT;
-        let key_prefix = format!("{}_", epoch);
-        let block_ids = BlockModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_total_leader_fee_for_epoch", cf, &key_prefix)?;
+        let operation = "blocks_get_total_leader_fee_for_epoch";
+
+        type Cf = crate::model::block::EpochHeightColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::build_key_prefix(epoch, None);
+
+        let block_ids = BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix)?;
 
         let mut sum = 0;
         for block_id in block_ids {
-            let block= BlockModel::get(&self.tx, "blocks_get_total_leader_fee_for_epoch", &block_id)?;
+            let key = BlockModel::key_from_block_id(&block_id);
+            let block= BlockModel::get(&self.tx, operation, &key)?;
 
             if block.proposed_by() == validator_public_key {
                 sum += block.total_leader_fee();
@@ -1059,19 +1030,23 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<Block>, StorageError> {
         // TODO: this could be optimized by creating a new rocksdb column family for vn keys
 
-        let cf = BlockModel::CF_EPOCH_HEIGHT;
-        let lower_prefix = format!("{}_", epoch_range.start());
+        let operation = "blocks_get_any_with_epoch_range";
+
+        type Cf = crate::model::block::EpochHeightColumnFamily;
+        let cf = Cf::name();
+        let lower_prefix = Cf::build_key_prefix(*epoch_range.start(), None);
         // in rocksdb, the upper bound of a range is not included, and we want the blocks with the end epoch
-        let upper_prefix = format!("{}_", epoch_range.end() + &Epoch(1));
+        let upper_prefix = Cf::build_key_prefix(epoch_range.end() + &Epoch(1), None);
 
         let block_ids: Vec<BlockId> =
-            BlockModel::multi_get_cf_range(self.db.clone(), &self.tx, "blocks_get_any_with_epoch_range",  cf, &lower_prefix, &upper_prefix)?
+            BlockModel::multi_get_ids_by_cf_range(self.db.clone(), &self.tx, operation,  cf, &lower_prefix, &upper_prefix)?
             .into_iter()
             .collect();
 
         let mut blocks = vec![];
         for block_id in block_ids {
-            let block= BlockModel::get(&self.tx, "blocks_get_any_with_epoch_range", &block_id)?;
+            let key = BlockModel::key_from_block_id(&block_id);
+            let block= BlockModel::get(&self.tx, "blocks_get_any_with_epoch_range", &key)?;
 
             if let Some(vn) = validator_public_key {
                 if block.proposed_by() != vn {
@@ -1164,7 +1139,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_get_count(&self) -> Result<i64, StorageError> {
-        Ok(BlockModel::count(&self.tx)?)
+        let count = BlockModel::count(&self.tx, None)? as i64;
+        Ok(count)
     }
 
     fn filtered_blocks_get_count(

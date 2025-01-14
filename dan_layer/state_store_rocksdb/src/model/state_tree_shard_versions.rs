@@ -20,18 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::sync::Arc;
 
-use indexmap::IndexSet;
-use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
+use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{shard::Shard, NodeHeight, SubstateAddress, VersionedSubstateId};
-use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, SubstateRecord, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
-use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof};
+use tari_dan_common_types::shard::Shard;
 use tari_state_tree::Version;
-use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
-use tari_utilities::ByteArray;
-
 
 use crate::error::RocksDbStorageError;
 

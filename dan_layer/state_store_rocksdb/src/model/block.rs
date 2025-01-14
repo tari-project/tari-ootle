@@ -20,108 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::sync::Arc;
 
-use indexmap::IndexSet;
-use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
-use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{NodeHeight, VersionedSubstateId};
-use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
-use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof};
-use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
-use tari_utilities::ByteArray;
-
+use rocksdb::{Transaction, TransactionDB};
+use tari_dan_common_types::{Epoch, NodeHeight};
+use tari_dan_storage::{consensus_models::{Block, BlockId}, Ordering};
 
 use crate::error::RocksDbStorageError;
 
-const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+use super::model::{ModelColumnFamily, RocksdbModel};
 
-pub(crate) struct BlockModel {}
+pub struct BlockModel {}
 
 impl BlockModel {
-    pub const KEY_PREFIX: &str = "blocks";
-    pub const CF_PARENT_ID: &str = "blocks_parent_id";
-    pub const CF_EPOCH_HEIGHT: &str = "blocks_epoch_height";
-    pub const CF_IS_COMMITED: &str = "blocks_is_committed";
-
-    pub fn cfs() -> Vec<&'static str> {
-        vec![Self::CF_PARENT_ID, Self::CF_EPOCH_HEIGHT, Self::CF_IS_COMMITED]
+    pub fn key_from_block_id(block_id: &BlockId) -> String {
+        format!("{}_{}", Self::key_prefix(), block_id)
     }
 
-    fn key(block_id: &BlockId) -> String {
-        format!("{}_{}", Self::KEY_PREFIX, block_id.to_string())
-    }
-
-    fn encode(block: &Block) -> Result<Vec<u8>, RocksDbStorageError> {
-        let bytes = bincode::serde::encode_to_vec(block, BINCODE_CONFIG)?;
-        Ok(bytes)
-    }
-
-    fn decode(bytes: Vec<u8>) -> Result<Block, RocksDbStorageError> {
-        let (block, _): (Block, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
-        Ok(block)
-    }
-
-    pub fn key_exists(tx: &Transaction<'_, TransactionDB>, operation: &'static str, block_id: &BlockId) -> Result<bool, RocksDbStorageError> {
-        let key = Self::key(block_id);
-        let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        Ok(value.is_some())
-    }
-
-    pub fn get(tx: &Transaction<'_, TransactionDB>, operation: &'static str, block_id: &BlockId) -> Result<Block, RocksDbStorageError> {
-        let key = Self::key(block_id);
-        let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
-        let block = Self::decode(bytes)?;
-        Ok(block)
-    }
-
-    pub fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf: &str, operation: &'static str, key_prefix: &str, ordering: Ordering) -> Result<Block, RocksDbStorageError> {
-        let cf = db.cf_handle(cf).unwrap();
-        let key_prefix = format!("{}_{}", Self::KEY_PREFIX, key_prefix);
-
+    pub fn multi_get_ids_by_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, _operation: &'static str, cf: &str, prefix: &str) -> Result<Vec<BlockId>, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
-        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
-       
-        let iterator_mode = match ordering {
-            Ordering::Ascending => rocksdb::IteratorMode::Start,
-            Ordering::Descending => rocksdb::IteratorMode::End,
-        };
-
-        // get the block id from the CF
-        let mut iterator = tx.iterator_cf_opt(cf, options, iterator_mode);
-        let value = iterator.next()
-            .ok_or_else(|| RocksDbStorageError::NotFound { key: key_prefix, operation })?;
-        let (_, bytes) = value.map_err(|e| RocksDbStorageError::RocksDbError {
-            operation,
-            source: e,
-        })?;
-        let block_id = BlockId::try_from(bytes.to_vec()).unwrap();
-
-        // get the block
-        let key = Self::key(&block_id);
-        let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
- 
-        let block = Self::decode(bytes)?;
-        Ok(block)
-    }
-
-    pub fn multi_get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, _operation: &'static str, cf: &str, prefix: &str) -> Result<Vec<BlockId>, RocksDbStorageError> {
-        let mut options = rocksdb::ReadOptions::default();
-        let prefix = format!("{}_{}", Self::KEY_PREFIX, prefix);
         options.set_iterate_range(rocksdb::PrefixRange(prefix.as_bytes()));
 
         let cf = db.cf_handle(cf).unwrap();
@@ -138,12 +55,10 @@ impl BlockModel {
         Ok(values)
     }
 
-    pub fn multi_get_cf_range(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, _operation: &'static str, cf: &str, lower_prefix: &str, upper_prefix: &str) -> Result<Vec<BlockId>, RocksDbStorageError> {
+    pub fn multi_get_ids_by_cf_range(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, _operation: &'static str, cf: &str, lower_prefix: &str, upper_prefix: &str) -> Result<Vec<BlockId>, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
-        let lower = format!("{}_{}", Self::KEY_PREFIX, lower_prefix);
-        options.set_iterate_lower_bound(lower.as_bytes());
-        let upper = format!("{}_{}", Self::KEY_PREFIX, upper_prefix);
-        options.set_iterate_upper_bound(upper.as_bytes());
+        options.set_iterate_lower_bound(lower_prefix.as_bytes());
+        options.set_iterate_upper_bound(upper_prefix.as_bytes());
 
         let cf = db.cf_handle(cf).unwrap();
 
@@ -159,82 +74,10 @@ impl BlockModel {
         Ok(values)
     }
 
-    pub fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, block: &Block) -> Result<(), RocksDbStorageError> {
-        let key = Self::key(block.id());
-        let value = Self::encode(block)?;
-
-        // put the whole block in the default column family
-        tx.put(key, value)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
-
-        // blocks_parent_id column family
-        let cf = db.cf_handle(Self::CF_PARENT_ID).unwrap();
-        let key = format!("{}_{}_{}", Self::KEY_PREFIX, block.parent(), block.id());
-        tx.put_cf(cf, key, block.id().as_bytes())
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
-
-        // blocks_epoch_height column family
-        let cf = db.cf_handle(Self::CF_EPOCH_HEIGHT).unwrap();
-        let key = format!("{}_{}_{}_{}", Self::KEY_PREFIX, block.epoch(), block.height(), block.id());
-        tx.put_cf(cf, key, block.id().as_bytes())
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
-
-        // blocks_is_committed column family
-        let cf = db.cf_handle(Self::CF_IS_COMMITED).unwrap();
-        let key = format!("{}_{}", Self::KEY_PREFIX, block.id());
-        if block.is_committed() {
-            tx.put_cf(cf, key, block.id().as_bytes())
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        } else {
-            tx.delete_cf(cf, key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        }      
-
-        Ok(())
-    }
-
-    pub fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, block_id: &BlockId) -> Result<(), RocksDbStorageError> {
-        let key = Self::key(block_id);
-
-        // we need to fetch the parent id for CF related keys
-        let block = BlockModel::get(tx, operation, block_id)?;
-
-        tx.delete(key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-            operation,
-            source: e,
-        })?;
-
-        // we also need to delete related CF keys
-        let cf = db.cf_handle(Self::CF_PARENT_ID).unwrap();
-        let key = format!("{}_{}_{}", Self::KEY_PREFIX, block.parent(), block.id());
-        tx.delete_cf(cf, key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
-
-        Ok(())
-    }
-
     pub fn list(tx: &Transaction<'_, TransactionDB>) -> Result<Vec<Block>, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
-        options.set_iterate_range(rocksdb::PrefixRange("blocks_".as_bytes()));
+        let key_prefix = format!("{}_", Self::key_prefix());
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
 
         let iterator = tx.iterator_opt( rocksdb::IteratorMode::Start, options);
         let blocks = iterator.map(|item| {
@@ -245,12 +88,161 @@ impl BlockModel {
 
         Ok(blocks)
     }
+}
 
-    pub fn count(tx: &Transaction<'_, TransactionDB>) -> Result<i64, RocksDbStorageError> {
+impl RocksdbModel for BlockModel {
+    type Item = Block;
+
+    fn key_prefix() -> &'static str {
+        "blocks"
+    }
+
+    fn key(item: &Self::Item) -> String {
+        Self::key_from_block_id(item.id())
+    }
+
+    fn column_families() -> Vec<&'static str> {
+        vec![ParentIdColumnFamily::name(), EpochHeightColumnFamily::name(), IsCommittedColumnFamily::name()]
+    }
+
+    fn put_cf(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, cf_name: &str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+        // In each CF value We store the BlockId of the block, so we can reference it back
+        let cf_value = value.id().as_bytes();
+        match cf_name {
+            ParentIdColumnFamily::NAME => ParentIdColumnFamily::put(db, tx, operation,  value, cf_value)?,
+            EpochHeightColumnFamily::NAME => EpochHeightColumnFamily::put(db, tx, operation, value, cf_value)?,
+            IsCommittedColumnFamily::NAME => IsCommittedColumnFamily::put(db, tx, operation, value, cf_value)?,
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf_name: &str, operation: &'static str, key_prefix: &str, ordering: Ordering) -> Result<Option<Self::Item>, RocksDbStorageError> {
+        let cf = db.cf_handle(cf_name).unwrap();
+
         let mut options = rocksdb::ReadOptions::default();
-        options.set_iterate_range(rocksdb::PrefixRange("blocks_".as_bytes()));
-        let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
-        let count = iterator.count() as i64;
-        Ok(count)
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+       
+        let iterator_mode = match ordering {
+            Ordering::Ascending => rocksdb::IteratorMode::Start,
+            Ordering::Descending => rocksdb::IteratorMode::End,
+        };
+
+        // get the block id from the CF
+        let mut iterator = tx.iterator_cf_opt(cf, options, iterator_mode);
+        let value = iterator.next()
+            .ok_or_else(|| RocksDbStorageError::NotFound { key: key_prefix.to_string(), operation })?;
+        let (_, bytes) = value.map_err(|e| RocksDbStorageError::RocksDbError {
+            operation,
+            source: e,
+        })?;
+        let block_id = BlockId::try_from(bytes.to_vec()).unwrap();
+
+        // get the block
+        let key = Self::key_from_block_id(&block_id);
+        let value = tx.get(&key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+            })?;
+        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
+        let value = Self::decode(bytes)?;
+        Ok(Some(value))
+    }
+
+    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+        ParentIdColumnFamily::delete(db.clone(), tx, operation, item)?;
+        EpochHeightColumnFamily::delete(db.clone(), tx, operation, item)?;
+        IsCommittedColumnFamily::delete(db.clone(), tx, operation, item)?;
+        Ok(())
+    }
+}
+
+// Column family for Parent id
+pub struct ParentIdColumnFamily {}
+
+impl ParentIdColumnFamily {
+    pub const NAME: &str = "blocks_parent_id";
+
+    pub fn build_key_prefix(parent_id: &BlockId) -> String {
+        format!("{}_{}_", BlockModel::key_prefix(), parent_id)
+    }
+}
+
+impl ModelColumnFamily for ParentIdColumnFamily {
+    type Item = Block;
+
+    fn name() -> &'static str {
+        Self::NAME
+    }
+
+    fn build_key(value: &Self::Item) -> String {
+        format!("{}_{}_{}", BlockModel::key_prefix(), value.parent(), value.id())
+    }
+}
+
+// Column family for epoch-height
+pub struct EpochHeightColumnFamily {}
+
+impl EpochHeightColumnFamily {
+    pub const NAME: &str = "blocks_epoch_height";
+
+    pub fn build_key_prefix(epoch: Epoch, height: Option<NodeHeight>) -> String {
+        match height {
+            Some(height) => format!("{}_{}_{}_", BlockModel::key_prefix(), epoch, height),
+            None => format!("{}_{}_", BlockModel::key_prefix(), epoch),
+        }
+    }
+}
+
+impl ModelColumnFamily for EpochHeightColumnFamily {
+    type Item = Block;
+
+    fn name() -> &'static str {
+        Self::NAME
+    }
+
+    fn build_key(value: &Self::Item) -> String {
+        format!("{}_{}_{}_{}", BlockModel::key_prefix(), value.epoch(), value.height(), value.id())
+    }
+}
+
+// Column family for "is_commited"
+pub struct IsCommittedColumnFamily {}
+
+impl IsCommittedColumnFamily {
+    pub const NAME: &str = "blocks_is_committed";
+}
+
+impl ModelColumnFamily for IsCommittedColumnFamily {
+    type Item = Block;
+
+    fn name() -> &'static str {
+        Self::NAME
+    }
+
+    fn build_key(value: &Self::Item) -> String {
+        format!("{}_{}", BlockModel::key_prefix(), value.id())
+    }
+
+    fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item, _value: &[u8]) -> Result<(), RocksDbStorageError> {
+        let key = Self::build_key(&item);
+        let cf = db.cf_handle(&Self::name()).unwrap();
+        if item.is_committed() {
+            tx.put_cf(cf, key, item.id().as_bytes())
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+            })?;
+        } else {
+            tx.delete_cf(cf, key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+            })?;
+        }
+        
+        Ok(())
     }
 }

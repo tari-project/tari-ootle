@@ -47,7 +47,7 @@ impl<TAddr> RocksDbStateStore<TAddr> {
         options.create_missing_column_families(true);
 
         let cf_names = [
-            BlockModel::cfs(),
+            BlockModel::column_families(),
             BlockTransactionExecutionModel::cfs(),
             StateTransitionModel::column_families(),
             SubstateModel::column_families(),

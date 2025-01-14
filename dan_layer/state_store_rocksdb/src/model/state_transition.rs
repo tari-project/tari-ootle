@@ -72,15 +72,19 @@ impl RocksdbModel for StateTransitionModel {
         vec![ShardColumnFamily::name()]
     }
 
-    fn put_cf(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, cf_name: &str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
-        match cf_name {
-            ShardColumnFamily::NAME => ShardColumnFamily::put(db, tx, operation,  value, main_key_bytes)?,
-            _ => (),
-        }
 
+        ShardColumnFamily::put(db, tx, operation,  value, main_key_bytes)?;
+
+        Ok(())
+    }
+    
+    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+        ShardColumnFamily::delete(db.clone(), tx, operation, item)?;
+        
         Ok(())
     }
 }

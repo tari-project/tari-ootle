@@ -20,14 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
-
-use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
 use tari_state_tree::Version;
-
-use crate::error::RocksDbStorageError;
 
 use super::model::RocksdbModel;
 
@@ -58,10 +53,5 @@ impl RocksdbModel for StateTreeShardVersionModel {
 
     fn column_families() -> Vec<&'static str> {
         vec![]
-    }
-
-    fn put_cf(_db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, _operation: &'static str, _cf_name: &str, _value: &Self::Item) -> Result<(), RocksDbStorageError> {
-        // No column families for this model
-        Ok(())
     }
 }

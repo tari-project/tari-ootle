@@ -101,23 +101,6 @@ impl RocksdbModel for BlockModel {
         Self::key_from_block_id(item.id())
     }
 
-    fn column_families() -> Vec<&'static str> {
-        vec![ParentIdColumnFamily::name(), EpochHeightColumnFamily::name(), IsCommittedColumnFamily::name()]
-    }
-
-    fn put_cf(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, cf_name: &str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
-        // In each CF value We store the BlockId of the block, so we can reference it back
-        let cf_value = value.id().as_bytes();
-        match cf_name {
-            ParentIdColumnFamily::NAME => ParentIdColumnFamily::put(db, tx, operation,  value, cf_value)?,
-            EpochHeightColumnFamily::NAME => EpochHeightColumnFamily::put(db, tx, operation, value, cf_value)?,
-            IsCommittedColumnFamily::NAME => IsCommittedColumnFamily::put(db, tx, operation, value, cf_value)?,
-            _ => (),
-        }
-
-        Ok(())
-    }
-
     fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf_name: &str, operation: &'static str, key_prefix: &str, ordering: Ordering) -> Result<Option<Self::Item>, RocksDbStorageError> {
         let cf = db.cf_handle(cf_name).unwrap();
 
@@ -151,10 +134,25 @@ impl RocksdbModel for BlockModel {
         Ok(Some(value))
     }
 
+    fn column_families() -> Vec<&'static str> {
+        vec![ParentIdColumnFamily::name(), EpochHeightColumnFamily::name(), IsCommittedColumnFamily::name()]
+    }
+
+    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+        // In each CF value We store the BlockId of the block, so we can reference it back
+        let cf_value = value.id().as_bytes();
+
+        ParentIdColumnFamily::put(db.clone(), tx, operation,  value, cf_value)?;
+        EpochHeightColumnFamily::put(db.clone(), tx, operation, value, cf_value)?;
+        IsCommittedColumnFamily::put(db, tx, operation, value, cf_value)?;
+
+        Ok(())
+    }
+    
     fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
         ParentIdColumnFamily::delete(db.clone(), tx, operation, item)?;
         EpochHeightColumnFamily::delete(db.clone(), tx, operation, item)?;
-        IsCommittedColumnFamily::delete(db.clone(), tx, operation, item)?;
+        IsCommittedColumnFamily::delete(db, tx, operation, item)?;
         Ok(())
     }
 }

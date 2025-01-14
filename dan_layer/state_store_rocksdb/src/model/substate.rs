@@ -133,17 +133,23 @@ impl RocksdbModel for SubstateModel {
         vec![VersionColumnFamily::name(), CreatedByTxColumnFamily::name(), DestroyedByTxColumnFamily::name()]
     }
 
-    fn put_cf(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, cf_name: &str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
-        match cf_name {
-            VersionColumnFamily::NAME => VersionColumnFamily::put(db, tx, operation,  value, main_key_bytes)?,
-            CreatedByTxColumnFamily::NAME => CreatedByTxColumnFamily::put(db, tx, operation, value, main_key_bytes)?,
-            DestroyedByTxColumnFamily::NAME => DestroyedByTxColumnFamily::put(db, tx, operation, value, main_key_bytes)?,
-            _ => (),
-        }
 
+        VersionColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        CreatedByTxColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
+        DestroyedByTxColumnFamily::put(db, tx, operation, value, main_key_bytes)?;
+
+        Ok(())
+    }
+
+    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+        VersionColumnFamily::delete(db.clone(), tx, operation, item)?;
+        CreatedByTxColumnFamily::delete(db.clone(), tx, operation, item)?;
+        DestroyedByTxColumnFamily::delete(db, tx, operation, item)?;
+        
         Ok(())
     }
 }

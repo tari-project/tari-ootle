@@ -93,14 +93,16 @@ pub trait RocksdbModel {
         })?;
 
         // insert the main key in each of the column families
-        for cf_name in Self::column_families() {
-            Self::put_cf(db.clone(), tx, operation, &cf_name, &value)?;
-        }
+        Self::put_in_cfs(db.clone(), tx, operation, &value)?;
 
         Ok(())
     }
 
-    fn put_cf(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, cf_name: &str, value: &Self::Item) -> Result<(), RocksDbStorageError>;
+    fn put_in_cfs(_db: Arc<TransactionDB>, _tx: &mut Transaction<'_, TransactionDB>, _operation: &'static str, _value: &Self::Item) -> Result<(), RocksDbStorageError> {
+        // It's up to concrete models to override this method
+        // We provide a default implementation to simplify all the models that do not have column families
+        Ok(())
+    }
 
     fn key_exists(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<bool, RocksDbStorageError> {
         let value = tx.get(&key)

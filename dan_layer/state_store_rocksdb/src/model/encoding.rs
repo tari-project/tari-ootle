@@ -26,12 +26,22 @@ use crate::error::RocksDbStorageError;
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
-pub fn binary_encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RocksDbStorageError> {
+pub fn bincode_encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RocksDbStorageError> {
     let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
     Ok(bytes)
 }
 
-pub fn binary_decode<T: DeserializeOwned>(bytes: Vec<u8>) -> Result<T, RocksDbStorageError> {
+pub fn bincode_decode<T: DeserializeOwned>(bytes: Vec<u8>) -> Result<T, RocksDbStorageError> {
     let (value, _): (T, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
     Ok(value)
+}
+
+pub fn bor_encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RocksDbStorageError> {
+    tari_bor::encode(value)
+        .map_err(|e| RocksDbStorageError::GeneralError { message: e.into_string() })
+}
+
+pub fn bor_decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RocksDbStorageError> {
+    tari_bor::decode_exact(bytes)
+        .map_err(|e| RocksDbStorageError::GeneralError { message: e.into_string() })
 }

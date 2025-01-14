@@ -10550,6 +10550,7 @@ dependencies = [
  "rocksdb",
  "serde",
  "serde_json",
+ "tari_bor",
  "tari_common_types",
  "tari_dan_common_types",
  "tari_dan_storage",

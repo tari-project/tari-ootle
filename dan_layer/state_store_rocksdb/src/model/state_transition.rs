@@ -20,123 +20,92 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::sync::Arc;
 
-use indexmap::IndexSet;
-use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
+use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{shard::Shard, NodeHeight, SubstateAddress, VersionedSubstateId};
-use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, StateTransition, StateTransitionId, SubstateRecord, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
-use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof};
-use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
-use tari_utilities::ByteArray;
-
+use tari_dan_common_types::shard::Shard;
+use tari_dan_storage::consensus_models::{StateTransition, StateTransitionId};
 
 use crate::error::RocksDbStorageError;
 
-const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+use super::{encoding::bor_encode, model::{ModelColumnFamily, RocksdbModel}};
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateTransitionModel {
-    pub data: StateTransition,
+pub struct StateTransitionModelData {
+    pub data: Vec<u8>,
+    pub id: StateTransitionId,
     pub shard: Shard,
     pub seq: u64
 }
 
-impl StateTransitionModel {
-    pub const KEY_PREFIX: &str = "statetransitions";
-    pub const CF_SHARD_SEQ: &str = "statetransitions_shard_seq";
+impl StateTransitionModelData {
+    pub fn new(data: StateTransition, shard: Shard, seq: u64) -> Result<Self, RocksDbStorageError> {
+        let id = data.id;
+        // we need to encode this field to bor due to incompatiblities between a inner SubstateValue field and bincode
+        let data = bor_encode(&data)?;
 
-    pub fn cfs() -> Vec<&'static str> {
-        vec![Self::CF_SHARD_SEQ]
-    }
-
-    pub fn key(id: &StateTransitionId) -> String {
-        format!("{}_{}", Self::KEY_PREFIX, id)
-    }
-
-    pub fn key_shard_seq(state: &StateTransitionModel) -> String {
-        let seq = state.seq;
-        // hexadecimal endcoding with full 0 padding, so the key preserves ordering
-        let seq_hex = format!{"{seq:#018x}"};
-        format!("{}_{}_{}", Self::KEY_PREFIX, state.shard, seq_hex)
-    }
-
-    pub fn key_prefix_shard_seq(shard: &Shard) -> String {
-        format!("{}_{}_", Self::KEY_PREFIX, shard)
-    }
-
-    fn encode(value: &StateTransitionModel) -> Result<Vec<u8>, RocksDbStorageError> {
-        let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
-        Ok(bytes)
-    }
-
-    fn decode(bytes: Vec<u8>) -> Result<StateTransitionModel, RocksDbStorageError> {
-        let (value, _): (StateTransitionModel, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
-        Ok(value)
-    }
-
-    pub fn get_by_id(tx: &Transaction<'_, TransactionDB>, operation: &'static str, id: &StateTransitionId) -> Result<StateTransitionModel, RocksDbStorageError> {
-        let key = Self::key(id);
-        Self::get(tx, operation, &key)
-    }
-
-    pub fn get(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<StateTransitionModel, RocksDbStorageError> {
-        let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key: key.to_string(), operation })?;
-        let state = Self::decode(bytes)?;
-        Ok(state)
-    }
-
-    pub fn multi_get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, _operation: &'static str, cf: &str, prefix: &str, ordering: Ordering) -> Result<Vec<String>, RocksDbStorageError> {
-        let mut options = rocksdb::ReadOptions::default();
-        let prefix = format!("{}_{}", Self::KEY_PREFIX, prefix);
-        options.set_iterate_range(rocksdb::PrefixRange(prefix.as_bytes()));
-
-        let iterator_mode = match ordering {
-            Ordering::Ascending => rocksdb::IteratorMode::Start,
-            Ordering::Descending => rocksdb::IteratorMode::End,
-        };
-
-        let cf = db.cf_handle(cf).unwrap();
-
-        let iterator = tx.iterator_cf_opt(cf,options, iterator_mode);
-        let values = iterator.map(|item| {
-            // TODO: properly handle errors and avoid unwraps
-            let (_, value) = item.unwrap();
-            // the value is the key in the default CF
-            String::from_utf8(value.to_vec()).unwrap()
+        Ok(Self {
+            data,
+            id,
+            shard,
+            seq
         })
-        .collect();
+    }
+}
 
-        Ok(values)
+pub struct StateTransitionModel {}
+
+impl RocksdbModel for StateTransitionModel {
+    type Item = StateTransitionModelData;
+
+    fn key_prefix() -> &'static str {
+        "statetransitions"
     }
 
-    pub fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, state: &StateTransitionModel) -> Result<(), RocksDbStorageError> {
-        let key = Self::key(&state.data.id);
-        let value = Self::encode(state)?;
+    fn key(item: &Self::Item) -> String {
+        format!("{}_{}", Self::key_prefix(), item.id)
+    }
 
-        // put the value in the default column family
-        tx.put(&key, value)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
+    fn column_families() -> Vec<&'static str> {
+        vec![ShardColumnFamily::name()]
+    }
 
-        // key_shard_seq column family
-        let cf = db.cf_handle(Self::CF_SHARD_SEQ).unwrap();
-        let key_cf = Self::key_shard_seq(state);
-        tx.put_cf(cf, key_cf, key.as_bytes())
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;   
+    fn put_cf(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, cf_name: &str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+        // In each CF value We store the key to the main collection, so we can retrieve the actual value
+        let main_key = Self::key(value);
+        let main_key_bytes = main_key.as_bytes();
+        match cf_name {
+            ShardColumnFamily::NAME => ShardColumnFamily::put(db, tx, operation,  value, main_key_bytes)?,
+            _ => (),
+        }
 
         Ok(())
     }
+}
 
+pub struct ShardColumnFamily {}
+
+impl ShardColumnFamily {
+    pub const NAME: &str = "statetransitions_shard_seq";
+
+    pub fn build_key_prefix_by_shard(shard: &Shard) -> String {
+        format!("{}_{}_", StateTransitionModel::key_prefix(), shard)
+    }
+}
+
+impl ModelColumnFamily for ShardColumnFamily {
+    type Item = StateTransitionModelData;
+
+    fn name() -> &'static str {
+        Self::NAME
+    }
+
+    fn build_key(value: &Self::Item) -> String {
+        let seq = value.seq;
+        // hexadecimal endcoding with full 0 padding, so the key preserves ordering
+        let seq_hex = format!{"{seq:#018x}"};
+        format!("{}_{}_{}", StateTransitionModel::key_prefix(), value.shard, seq_hex)
+    }
 }

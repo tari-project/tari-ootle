@@ -20,31 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::sync::Arc;
 
-use indexmap::IndexSet;
-use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
+use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, SubstateAddress, SubstateRequirement, VersionedSubstateId};
-use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, QcId, SubstateDestroyed, SubstateRecord, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
-use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof, substate::{SubstateId, SubstateValue}};
-use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
-use tari_utilities::ByteArray;
-
+use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, SubstateAddress, SubstateRequirement};
+use tari_dan_storage::consensus_models::{BlockId, QcId, SubstateDestroyed, SubstateRecord};
+use tari_engine_types::substate::{SubstateId, SubstateValue};
+use tari_transaction::TransactionId;
 
 use crate::error::RocksDbStorageError;
 
-use super::{encoding::{binary_decode, binary_encode}, model::{ModelColumnFamily, RocksdbModel}};
-
-const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+use super::{encoding::{bincode_decode, bincode_encode}, model::{ModelColumnFamily, RocksdbModel}};
 
 // We need to reimplement the "SubstateRecord" struct because of a incompatiblity between bincode and ciborium Value,
 // which we use for the substate state.
 // The error is simply an obscure "Serde(AnyNotSupported)", probably due to some serde tag
 // Ref: https://github.com/bincode-org/bincode/blob/trunk/src/features/serde/mod.rs
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SubstateModelData {
+struct SubstateModelData {
     pub substate_id: SubstateId,
     pub version: u32,
     pub substate_value: Vec<u8>,
@@ -122,13 +117,13 @@ impl RocksdbModel for SubstateModel {
     // We need to override the default trait implementation to encode as SubstateModelData
     fn encode(value: &Self::Item) -> Result<Vec<u8>, RocksDbStorageError> {
         let value = SubstateModelData::from(value.clone());
-        let bytes = binary_encode(&value)?;
+        let bytes = bincode_encode(&value)?;
         Ok(bytes)
     }
 
     // We need to override the default trait implementation to decode as SubstateModelData
     fn decode(bytes: Vec<u8>) -> Result<Self::Item, RocksDbStorageError> {
-        let value: SubstateModelData = binary_decode(bytes)?;
+        let value: SubstateModelData = bincode_decode(bytes)?;
         let value: SubstateRecord = value.try_into()
             .map_err(|e| RocksDbStorageError::GeneralError { message: e })?;
         Ok(value)

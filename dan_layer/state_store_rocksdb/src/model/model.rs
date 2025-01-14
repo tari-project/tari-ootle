@@ -1,4 +1,4 @@
-//  Copyright 2024. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,22 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::sync::Arc;
 
-use indexmap::IndexSet;
-use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, SubstateAddress, SubstateRequirement, VersionedSubstateId};
-use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, QcId, SubstateDestroyed, SubstateRecord, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
-use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof, substate::{SubstateId, SubstateValue}};
-use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
-use tari_utilities::ByteArray;
-
+use rocksdb::{Transaction, TransactionDB};
+use serde::{de::DeserializeOwned, Serialize};
+use tari_dan_storage::Ordering;
 
 use crate::error::RocksDbStorageError;
 
-use super::encoding::{binary_decode, binary_encode};
+use super::encoding::{bincode_decode, bincode_encode};
 
 pub trait ModelColumnFamily {
     type Item: Serialize;
@@ -67,12 +60,12 @@ pub trait RocksdbModel {
     fn key(item: &Self::Item) -> String;
 
     fn encode(value: &Self::Item) -> Result<Vec<u8>, RocksDbStorageError> {
-        let bytes = binary_encode(value)?;
+        let bytes = bincode_encode(value)?;
         Ok(bytes)
     }
 
     fn decode(bytes: Vec<u8>) -> Result<Self::Item, RocksDbStorageError> {
-        let value = binary_decode(bytes)?;
+        let value = bincode_decode(bytes)?;
         Ok(value)
     }
 

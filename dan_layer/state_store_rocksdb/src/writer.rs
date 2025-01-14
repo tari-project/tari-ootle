@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::RocksdbModel, state_transition::StateTransitionModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -1625,21 +1625,20 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         SubstateModel::put(self.db.clone(), tx, operation, &substate)?;
 
         // Calculate the index ("seq" field) of the state transition for the shard
-        let shard_seq_cf = StateTransitionModel::CF_SHARD_SEQ;
-        let key_prefix = StateTransitionModel::key_prefix_shard_seq(&substate.created_by_shard);
+        type ShardCf = crate::model::state_transition::ShardColumnFamily;
+        let key_prefix = ShardCf::build_key_prefix_by_shard(&substate.created_by_shard);
         // TODO: this could be optimized by a new model function that allows to specify the we only want one key
-        let shard_transition_keys = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, shard_seq_cf, &key_prefix, Ordering::Descending)?;
-        let next_seq = match shard_transition_keys.first() {
-            Some(key) => {
-                let value = StateTransitionModel::get(tx, operation, key)?;
+        let shard_transitions = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, ShardCf::name(), &key_prefix, Ordering::Descending)?;
+        let next_seq = match shard_transitions.first() {
+            Some(value) => {
                 value.seq
             },
             None => 1,
         };
 
         // Insert the next state transition
-        let state_transition = StateTransitionModel {
-            data: StateTransition {
+        let state_transition = StateTransitionModelData::new(
+            StateTransition {
                 id: StateTransitionId::new(substate.created_at_epoch, substate.created_by_shard, next_seq),
                 update: SubstateUpdate::Create(SubstateCreatedProof {
                     substate: SubstateData {
@@ -1650,9 +1649,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                     },
                 }),
             },
-            shard: substate.created_by_shard,
-            seq: next_seq,
-        };
+            substate.created_by_shard,
+            next_seq,
+        )?;
         StateTransitionModel::put(self.db.clone(), tx, operation, &state_transition)?;
 
         Ok(())
@@ -1684,21 +1683,20 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         SubstateModel::put(self.db.clone(), tx, operation, &substate)?;
 
         // Calculate the index ("seq" field) of the state transition
-        let shard_seq_cf = StateTransitionModel::CF_SHARD_SEQ;
-        let key_prefix = StateTransitionModel::key_prefix_shard_seq(&shard);
+        type ShardCf = crate::model::state_transition::ShardColumnFamily;
+        let key_prefix = ShardCf::build_key_prefix_by_shard(&substate.created_by_shard);
         // TODO: this could be optimized by a new model function that allows to specify the we only want one key
-        let shard_transition_keys = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, shard_seq_cf, &key_prefix, Ordering::Descending)?;
-        let next_seq = match shard_transition_keys.first() {
-            Some(key) => {
-                let value = StateTransitionModel::get(tx, operation, key)?;
+        let shard_transitions = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, ShardCf::name(), &key_prefix, Ordering::Descending)?;
+        let next_seq = match shard_transitions.first() {
+            Some(value) => {
                 value.seq
             },
             None => 1,
         };
 
         // insert new state transition down
-        let state_transition = StateTransitionModel {
-            data: StateTransition {
+        let state_transition = StateTransitionModelData::new(
+            StateTransition {
                 id: StateTransitionId::new(epoch, shard, next_seq),
                 update: SubstateUpdate::Destroy(
                     SubstateDestroyedProof {
@@ -1709,8 +1707,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 ),
             },
             shard,
-            seq: next_seq,
-        };
+            next_seq,
+        )?;
         StateTransitionModel::put(self.db.clone(), tx, operation, &state_transition)?;
 
         Ok(())

@@ -90,6 +90,15 @@ pub trait RocksdbModel {
 
     fn put_cf(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, cf_name: &str, value: &Self::Item) -> Result<(), RocksDbStorageError>;
 
+    fn key_exists(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<bool, RocksDbStorageError> {
+        let value = tx.get(&key)
+            .map_err(|e| RocksDbStorageError::RocksDbError {
+                operation,
+                source: e,
+            })?;
+        Ok(value.is_some())
+    }
+
     fn get(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<Self::Item, RocksDbStorageError> {
         let value = tx.get(&key)
             .map_err(|e| RocksDbStorageError::RocksDbError {

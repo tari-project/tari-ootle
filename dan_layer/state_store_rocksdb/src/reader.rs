@@ -2018,29 +2018,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError> {
         let operation = "state_tree_versions_get_latest";
-        if !StateTreeShardVersionModel::key_exists(&self.tx, operation, &shard)? {
+        let key = StateTreeShardVersionModel::key_from_shard(&shard);
+
+        if !StateTreeShardVersionModel::key_exists(&self.tx, operation, &key)? {
             return Ok(None)
         }
 
-        let value = StateTreeShardVersionModel::get(&self.tx, operation, &shard)?;
+        let value = StateTreeShardVersionModel::get(&self.tx, operation, &key)?;
         Ok(Some(value.version))
-
-        /*
-        use crate::schema::state_tree_shard_versions;
-
-        let version = state_tree_shard_versions::table
-            .select(state_tree_shard_versions::version)
-            .filter(state_tree_shard_versions::shard.eq(shard.as_u32() as i32))
-            .order_by(state_tree_shard_versions::version.desc())
-            .first::<i64>(self.connection())
-            .optional()
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "state_tree_versions_get_latest",
-                source: e,
-            })?;
-
-        Ok(version.map(|v| v as Version))
-        */
     }
 
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError> {

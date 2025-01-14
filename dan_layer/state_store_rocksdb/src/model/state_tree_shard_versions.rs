@@ -35,68 +35,39 @@ use tari_utilities::ByteArray;
 
 use crate::error::RocksDbStorageError;
 
-const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+use super::model::RocksdbModel;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct StateTreeShardVersionModel {
-    pub version: Version
+pub struct StateTreeShardVersionModelData {
+    pub shard: Shard,
+    pub version: Version,
 }
 
-impl StateTreeShardVersionModel {
-    pub const KEY_PREFIX: &str = "statetreeshardversions";
+pub struct StateTreeShardVersionModel {}
 
-    pub fn cfs() -> Vec<&'static str> {
+impl StateTreeShardVersionModel {
+    pub fn key_from_shard(shard: &Shard) -> String {
+        format!("{}_{}", Self::key_prefix(), shard)
+    } 
+}
+
+impl RocksdbModel for StateTreeShardVersionModel {
+    type Item = StateTreeShardVersionModelData;
+
+    fn key_prefix() -> &'static str {
+        "statetreeshardversions"
+    }
+
+    fn key(item: &Self::Item) -> String {
+        Self::key_from_shard(&item.shard)
+    }
+
+    fn column_families() -> Vec<&'static str> {
         vec![]
     }
 
-    fn key(shard: &Shard) -> String {
-        format!("{}_{}", Self::KEY_PREFIX, shard)
-    }
-
-    fn encode(data: &Self) -> Result<Vec<u8>, RocksDbStorageError> {
-        let bytes = bincode::serde::encode_to_vec(data, BINCODE_CONFIG)?;
-        Ok(bytes)
-    }
-
-    fn decode(bytes: Vec<u8>) -> Result<Self, RocksDbStorageError> {
-        let (value, _): (Self, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
-        Ok(value)
-    }
-
-    pub fn key_exists(tx: &Transaction<'_, TransactionDB>, operation: &'static str, shard: &Shard) -> Result<bool, RocksDbStorageError> {
-        let key = Self::key(shard);
-        let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        Ok(value.is_some())
-    }
-
-    pub fn get(tx: &Transaction<'_, TransactionDB>, operation: &'static str, shard: &Shard) -> Result<Self, RocksDbStorageError> {
-        let key = Self::key(shard);
-        let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
-        let substate = Self::decode(bytes)?;
-        Ok(substate)
-    }
-
-    pub fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, shard: &Shard, value: &Self) -> Result<(), RocksDbStorageError> {
-        let key = Self::key(shard);
-        let value = Self::encode(value)?;
-
-        // put the value in the default column family
-        tx.put(key, value)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;   
-
+    fn put_cf(_db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, _operation: &'static str, _cf_name: &str, _value: &Self::Item) -> Result<(), RocksDbStorageError> {
+        // No column families for this model
         Ok(())
     }
-
 }

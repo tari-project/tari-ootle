@@ -1,14 +1,23 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_app_utilities::template_manager::interface::{Template, TemplateExecutable, TemplateManagerError, TemplateManagerHandle};
+use tari_dan_app_utilities::template_manager::interface::{
+    Template,
+    TemplateExecutable,
+    TemplateManagerError,
+    TemplateManagerHandle,
+};
 use tari_dan_p2p::proto::rpc::{SyncTemplatesResponse, TemplateType};
 use tari_engine_types::TemplateAddress;
 use tari_rpc_framework::RpcStatus;
-use tokio::sync::broadcast::error::{RecvError, SendError};
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
-use tokio::task::JoinError;
+use tokio::{
+    sync::{
+        broadcast::error::{RecvError, SendError},
+        mpsc,
+        mpsc::Sender,
+    },
+    task::JoinError,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TemplateSyncTaskError {
@@ -49,25 +58,16 @@ impl TemplateSyncTask {
     }
 
     pub async fn run(self) -> Result<(), TemplateSyncTaskError> {
-        println!("Starting template sync task for: {:?}", self.template_addresses); // TODO: remove, only for testing
         for batch in self.template_addresses.chunks(self.batch_size) {
-            self.convert_and_send(
-                self.template_manager
-                    .get_templates_by_addresses(batch.to_vec())
-                    .await?
-            ).await?;
+            let templates = self.template_manager.get_templates_by_addresses(batch.to_vec()).await?;
+            self.convert_and_send(templates).await?;
         }
 
         Ok(())
     }
 
-    async fn convert_and_send(
-        &self,
-        templates: Vec<Template>,
-    ) -> Result<(), TemplateSyncTaskError> {
+    async fn convert_and_send(&self, templates: Vec<Template>) -> Result<(), TemplateSyncTaskError> {
         for template in templates {
-            println!("Processing template: {:?}", &template); // TODO: remove, only for testing
-            
             let result = match template.executable {
                 TemplateExecutable::CompiledWasm(binary) => Ok(SyncTemplatesResponse {
                     address: template.metadata.address.to_vec(),
@@ -94,14 +94,9 @@ impl TemplateSyncTask {
                 TemplateExecutable::DownloadableWasm(_, _) => Err(RpcStatus::not_implemented("Unsupported type!")),
             };
 
-            println!("Sending template response: {:?}", result.clone()); // TODO: remove, only for testing
-
             self.tx_responses.send(result).await?;
         }
 
         Ok(())
     }
 }
-
-
-

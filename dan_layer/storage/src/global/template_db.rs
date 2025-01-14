@@ -47,7 +47,10 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
         self.backend.get_templates(self.tx, limit)
     }
 
-    pub fn get_templates_by_addresses(&mut self, addresses: &[&[u8]]) -> Result<Vec<DbTemplate>, TGlobalDbAdapter::Error> {
+    pub fn get_templates_by_addresses(
+        &mut self,
+        addresses: Vec<&[u8]>,
+    ) -> Result<Vec<DbTemplate>, TGlobalDbAdapter::Error> {
         self.backend.get_templates_by_addresses(self.tx, addresses)
     }
 
@@ -63,7 +66,11 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
         self.backend.update_template(self.tx, key, update)
     }
 
-    pub fn template_exists(&mut self, key: &[u8], status: Option<TemplateStatus>) -> Result<bool, TGlobalDbAdapter::Error> {
+    pub fn template_exists(
+        &mut self,
+        key: &[u8],
+        status: Option<TemplateStatus>,
+    ) -> Result<bool, TGlobalDbAdapter::Error> {
         self.backend.template_exists(self.tx, key, status)
     }
 

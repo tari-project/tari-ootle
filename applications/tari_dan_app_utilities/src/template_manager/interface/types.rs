@@ -20,15 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use super::TemplateManagerError;
 use reqwest::Url;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::global::{DbTemplate, DbTemplateType, TemplateStatus};
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
+use tokio::{sync::oneshot, task::JoinHandle};
+
+use super::TemplateManagerError;
 
 #[derive(Debug, Clone)]
 pub struct TemplateMetadata {
@@ -122,10 +122,7 @@ pub enum TemplateManagerRequest {
     SyncTemplates {
         addresses: Vec<TemplateAddress>,
         reply: oneshot::Sender<
-            Result<
-                JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>,
-                TemplateManagerError
-            >
+            Result<JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>, TemplateManagerError>,
         >,
     },
 }

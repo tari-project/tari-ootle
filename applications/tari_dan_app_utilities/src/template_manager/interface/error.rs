@@ -67,7 +67,6 @@ pub enum TemplateManagerError {
     EpochManager(#[from] EpochManagerError),
     #[error("Validator Node RPC client error: {0}")]
     ValidatorNodeRpcClient(#[from] ValidatorNodeRpcClientError),
-
 }
 
 impl IsNotFoundError for TemplateManagerError {

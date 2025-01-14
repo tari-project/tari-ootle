@@ -22,20 +22,10 @@
 // DAMAGE.
 use std::convert::{TryFrom, TryInto};
 
-use crate::p2p::rpc::template_sync_task::TemplateSyncTask;
-use crate::{
-    consensus::ConsensusHandle,
-    p2p::{
-        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
-        services::mempool::MempoolHandle,
-    },
-    virtual_substate::VirtualSubstateManager,
-};
 use log::*;
 use tari_bor::{decode_exact, encode};
 use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateAddress};
-use tari_dan_p2p::proto::rpc::{SyncTemplatesRequest, SyncTemplatesResponse};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{
@@ -53,14 +43,15 @@ use tari_dan_p2p::{
         SyncBlocksResponse,
         SyncStateRequest,
         SyncStateResponse,
+        SyncTemplatesRequest,
+        SyncTemplatesResponse,
     },
 };
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
-use tari_engine_types::virtual_substate::VirtualSubstateId;
-use tari_engine_types::TemplateAddress;
+use tari_engine_types::{virtual_substate::VirtualSubstateId, TemplateAddress};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_state_store_sqlite::SqliteStateStore;
@@ -68,6 +59,15 @@ use tari_template_lib::HashParseError;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
+
+use crate::{
+    consensus::ConsensusHandle,
+    p2p::{
+        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
+        services::mempool::MempoolHandle,
+    },
+    virtual_substate::VirtualSubstateManager,
+};
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";
 
@@ -291,10 +291,10 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             match start_block_id {
                 Some(id) => {
                     if !Block::record_exists(&tx, &id).map_err(RpcStatus::log_internal_error(LOG_TARGET))? {
-                        return Err(RpcStatus::not_found(format!("start_block_id {id} not found", )));
+                        return Err(RpcStatus::not_found(format!("start_block_id {id} not found",)));
                     }
                     id
-                }
+                },
                 None => {
                     let epoch = req
                         .epoch
@@ -318,7 +318,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                     }
 
                     block_id
-                }
+                },
             }
         };
 
@@ -395,32 +395,27 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 last_state_transition_for_chain,
                 end_epoch,
             )
-                .run(),
+            .run(),
         );
 
         Ok(Streaming::new(receiver))
     }
 
-    async fn sync_templates(&self, request: Request<SyncTemplatesRequest>) -> Result<Streaming<SyncTemplatesResponse>, RpcStatus> {
+    async fn sync_templates(
+        &self,
+        request: Request<SyncTemplatesRequest>,
+    ) -> Result<Streaming<SyncTemplatesResponse>, RpcStatus> {
         let req = request.into_message();
 
         let (tx, rx) = mpsc::channel(10);
-        let addresses = req.addresses.iter()
+        let addresses = req
+            .addresses
+            .iter()
             .map(|raw| TemplateAddress::try_from_vec(raw.clone()))
             .collect::<Result<Vec<TemplateAddress>, HashParseError>>()
-            .map_err(|error| {
-                RpcStatus::bad_request(format!("Failed to parse address: {:?}", error))
-            })?;
+            .map_err(|error| RpcStatus::bad_request(format!("Failed to parse address: {:?}", error)))?;
 
-        task::spawn(
-            TemplateSyncTask::new(
-                5,
-                addresses,
-                tx,
-                self.template_manager.clone(),
-            )
-                .run()
-        );
+        task::spawn(TemplateSyncTask::new(5, addresses, tx, self.template_manager.clone()).run());
 
         Ok(Streaming::new(rx))
     }

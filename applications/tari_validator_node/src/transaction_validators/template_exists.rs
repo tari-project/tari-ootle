@@ -32,7 +32,9 @@ impl<TAddr: NodeAddressable> Validator<Transaction> for TemplateExistsValidator<
         for instruction in instructions {
             match instruction {
                 Instruction::CallFunction { template_address, .. } => {
-                    let template_exists = self.template_manager.template_exists(template_address, Some(TemplateStatus::Active));
+                    let template_exists = self
+                        .template_manager
+                        .template_exists(template_address, Some(TemplateStatus::Active));
                     match template_exists {
                         Err(e) => return Err(TransactionValidationError::InvalidTemplateAddress(e)),
                         Ok(false) => {
@@ -42,10 +44,10 @@ impl<TAddr: NodeAddressable> Validator<Transaction> for TemplateExistsValidator<
                                     address: *template_address,
                                 },
                             ));
-                        }
+                        },
                         _ => continue,
                     }
-                }
+                },
                 _ => continue,
             }
         }

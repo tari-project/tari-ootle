@@ -21,6 +21,12 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use chrono::NaiveDateTime;
+use tari_common_types::types::{FixedHash, FixedHashSizeError};
+use tari_dan_common_types::Epoch;
+use tari_dan_storage::global::DbTemplate;
+use tari_engine_types::TemplateAddress;
+use tari_template_lib::HashParseError;
+use thiserror::Error;
 
 use crate::global::schema::*;
 
@@ -40,6 +46,35 @@ pub struct TemplateModel {
     pub status: String,
     pub manifest: Option<String>,
     pub added_at: NaiveDateTime,
+}
+
+#[derive(Debug, Error)]
+pub enum TemplateConversionError {
+    #[error("Fixed hash size error: {0}")]
+    FixedHashSize(#[from] FixedHashSizeError),
+    #[error("Hash parse error: {0}")]
+    HashParse(#[from] HashParseError),
+}
+
+impl TryInto<DbTemplate> for TemplateModel {
+    type Error = TemplateConversionError;
+
+    fn try_into(self) -> Result<DbTemplate, Self::Error> {
+        Ok(DbTemplate {
+            author_public_key: FixedHash::try_from(self.author_public_key.as_slice())?,
+            template_name: self.template_name,
+            expected_hash: self.expected_hash.try_into()?,
+            template_address: TemplateAddress::try_from_vec(self.template_address)?,
+            template_type: self.template_type.parse().expect("DB template type corrupted"),
+            compiled_code: self.compiled_code,
+            flow_json: self.flow_json,
+            manifest: self.manifest,
+            url: self.url,
+            status: self.status.parse().expect("DB status corrupted"),
+            added_at: self.added_at,
+            epoch: Epoch(self.epoch as u64),
+        })
+    }
 }
 
 #[derive(Debug, Insertable)]

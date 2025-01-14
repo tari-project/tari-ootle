@@ -40,6 +40,8 @@ pub enum CommsRpcConsensusSyncError {
     TemplateManager(#[from] TemplateManagerError),
     #[error("Task join error: {0}")]
     TaskJoin(String),
+    #[error("Failed to sync templates!")]
+    TemplateSyncFailure,
 }
 
 impl CommsRpcConsensusSyncError {

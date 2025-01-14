@@ -48,12 +48,13 @@ pub mod metrics;
 mod signature_service;
 mod spec;
 
-use crate::{p2p::NopLogger, transaction_validators::WithContext};
 pub use block_transaction_executor::*;
 pub use handle::*;
 pub use signature_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
 use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
+
+use crate::{p2p::NopLogger, transaction_validators::WithContext};
 
 pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Transaction, TransactionValidationError>;
 
@@ -111,7 +112,13 @@ pub async fn spawn(
     let context = ConsensusWorkerContext {
         epoch_manager: epoch_manager.clone(),
         hotstuff: hotstuff_worker,
-        state_sync: RpcStateSyncManager::new(epoch_manager, store, client_factory, template_manager, template_manager_handle),
+        state_sync: RpcStateSyncManager::new(
+            epoch_manager,
+            store,
+            client_factory,
+            template_manager,
+            template_manager_handle,
+        ),
         tx_current_state,
     };
 
@@ -129,7 +136,7 @@ pub async fn spawn(
 
 pub fn create_transaction_validator(
     template_manager: TemplateManager<PeerAddress>,
-) -> impl Validator<Transaction, Context=ValidationContext, Error=TransactionValidationError> {
+) -> impl Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError> {
     WithContext::<ValidationContext, _, _>::new()
         .map_context(
             |_| (),

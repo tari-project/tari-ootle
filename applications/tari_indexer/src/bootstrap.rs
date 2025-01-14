@@ -143,8 +143,12 @@ pub async fn spawn_services(
 
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
-    let (template_manager_service, _) =
-        template_manager::implementation::spawn(template_manager.clone(), epoch_manager.clone(), validator_node_client_factory.clone(), shutdown.clone());
+    let (template_manager_service, _) = template_manager::implementation::spawn(
+        template_manager.clone(),
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        shutdown.clone(),
+    );
 
     // Base Node scanner
     base_layer_scanner::spawn(

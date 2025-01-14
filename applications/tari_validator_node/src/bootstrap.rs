@@ -256,8 +256,12 @@ pub async fn spawn_services(
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.validator_node.templates.clone())?;
-    let (template_manager_service, join_handle) =
-        template_manager::implementation::spawn(template_manager.clone(), epoch_manager.clone(), validator_node_client_factory.clone(), shutdown.clone());
+    let (template_manager_service, join_handle) = template_manager::implementation::spawn(
+        template_manager.clone(),
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        shutdown.clone(),
+    );
     handles.push(join_handle);
 
     info!(target: LOG_TARGET, "Payload processor initializing");
@@ -335,7 +339,7 @@ pub async fn spawn_services(
         template_manager.clone(),
         template_manager_service.clone(),
     )
-        .await;
+    .await;
     handles.push(consensus_join_handle);
 
     let (mempool, join_handle) = mempool::spawn(
@@ -396,7 +400,7 @@ pub async fn spawn_services(
         consensus_handle.clone(),
         template_manager_service.clone(),
     )
-        .await?;
+    .await?;
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
     save_identities(config, &keypair)?;
@@ -453,7 +457,7 @@ async fn create_registration_file(
         config.common.base_path.join("registration.json"),
         serde_json::to_string(&registration)?,
     )
-        .context("failed to write registration file")?;
+    .context("failed to write registration file")?;
     Ok(())
 }
 
@@ -659,13 +663,13 @@ where
         created_at_epoch: Epoch(0),
         destroyed: None,
     }
-        .create(tx)?;
+    .create(tx)?;
     Ok(())
 }
 
 fn create_mempool_transaction_validator(
     template_manager: TemplateManager<PeerAddress>,
-) -> impl Validator<Transaction, Context=(), Error=TransactionValidationError> {
+) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
     HasInputs::new()
         .and_then(TemplateExistsValidator::new(template_manager))
         .and_then(FeeTransactionValidator)

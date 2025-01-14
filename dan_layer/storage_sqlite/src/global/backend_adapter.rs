@@ -28,8 +28,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use diesel::dsl::delete;
 use diesel::{
+    dsl::delete,
     sql_query,
     sql_types::{BigInt, Bigint},
     BoolExpressionMethods,
@@ -67,6 +67,7 @@ use tari_dan_storage::{
     AtomicDb,
 };
 use tari_engine_types::TemplateAddress;
+use tari_template_lib::Hash;
 use tari_utilities::ByteArray;
 
 use super::{models, models::DbValidatorNode};
@@ -253,26 +254,15 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
         templates
             .into_iter()
-            .map(|t| {
-                Ok(DbTemplate {
-                    author_public_key: FixedHash::try_from(t.author_public_key.as_slice())?,
-                    template_name: t.template_name,
-                    expected_hash: t.expected_hash.try_into()?,
-                    template_address: TemplateAddress::try_from_vec(t.template_address)?,
-                    template_type: t.template_type.parse().expect("DB template type corrupted"),
-                    compiled_code: t.compiled_code,
-                    flow_json: t.flow_json,
-                    manifest: t.manifest,
-                    url: t.url,
-                    status: t.status.parse().expect("DB status corrupted"),
-                    added_at: t.added_at,
-                    epoch: Epoch(t.epoch as u64),
-                })
-            })
+            .map(|t| t.try_into().map_err(SqliteStorageError::TemplateConversion))
             .collect()
     }
 
-    fn get_templates_by_addresses(&self, tx: &mut Self::DbTransaction<'_>, addresses: &[&[u8]]) -> Result<Vec<DbTemplate>, Self::Error> {
+    fn get_templates_by_addresses(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        addresses: Vec<&[u8]>,
+    ) -> Result<Vec<DbTemplate>, Self::Error> {
         use crate::global::schema::templates::dsl;
 
         dsl::templates
@@ -281,25 +271,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .get_results::<TemplateModel>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
-                operation: "get_templates_by_address".to_string(),
+                operation: "get_templates_by_addresses".to_string(),
             })?
             .into_iter()
-            .map(|t| {
-                Ok(DbTemplate {
-                    author_public_key: FixedHash::try_from(t.author_public_key.as_slice())?,
-                    template_name: t.template_name,
-                    expected_hash: t.expected_hash.try_into()?,
-                    template_address: TemplateAddress::try_from_vec(t.template_address)?,
-                    template_type: t.template_type.parse().expect("DB template type corrupted"),
-                    compiled_code: t.compiled_code,
-                    flow_json: t.flow_json,
-                    manifest: t.manifest,
-                    url: t.url,
-                    status: t.status.parse().expect("DB status corrupted"),
-                    added_at: t.added_at,
-                    epoch: Epoch(t.epoch as u64),
-                })
-            })
+            .map(|t| t.try_into().map_err(SqliteStorageError::TemplateConversion))
             .collect()
     }
 
@@ -391,7 +366,12 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         Ok(())
     }
 
-    fn template_exists(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8], status: Option<TemplateStatus>) -> Result<bool, Self::Error> {
+    fn template_exists(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        key: &[u8],
+        status: Option<TemplateStatus>,
+    ) -> Result<bool, Self::Error> {
         use crate::global::schema::templates::dsl;
 
         let mut query = dsl::templates.into_boxed().filter(templates::template_address.eq(key));
@@ -412,10 +392,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
     fn delete_template(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8]) -> Result<(), Self::Error> {
         use crate::global::schema::templates::dsl;
-        delete(
-            dsl::templates
-                .filter(templates::template_address.eq(key))
-        )
+        delete(dsl::templates.filter(templates::template_address.eq(key)))
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -526,13 +503,13 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             "SELECT COUNT(distinct public_key) as cnt FROM validator_nodes WHERE start_epoch <= ? AND (end_epoch IS \
              NULL OR end_epoch > ?)",
         )
-            .bind::<BigInt, _>(epoch.as_u64() as i64)
-            .bind::<BigInt, _>(epoch.as_u64() as i64)
-            .get_result::<Count>(tx.connection())
-            .map_err(|source| SqliteStorageError::DieselError {
-                source,
-                operation: "count_validator_nodes".to_string(),
-            })?;
+        .bind::<BigInt, _>(epoch.as_u64() as i64)
+        .bind::<BigInt, _>(epoch.as_u64() as i64)
+        .get_result::<Count>(tx.connection())
+        .map_err(|source| SqliteStorageError::DieselError {
+            source,
+            operation: "count_validator_nodes".to_string(),
+        })?;
 
         Ok(count.cnt as u64)
     }

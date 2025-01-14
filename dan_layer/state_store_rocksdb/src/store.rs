@@ -30,7 +30,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
 use tari_dan_storage::{consensus_models::StateTransition, StateStore, StorageError};
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, state_transition::StateTransitionModel, substate::SubstateModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::RocksdbModel, state_transition::StateTransitionModel, substate::SubstateModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 
@@ -50,7 +50,7 @@ impl<TAddr> RocksDbStateStore<TAddr> {
             BlockModel::cfs(),
             BlockTransactionExecutionModel::cfs(),
             StateTransitionModel::cfs(),
-            SubstateModel::cfs(),
+            SubstateModel::column_families(),
         ].concat();
 
         let db = TransactionDB::<SingleThreaded>::open_cf(&options, &TransactionDBOptions::default(), path, cf_names.clone())

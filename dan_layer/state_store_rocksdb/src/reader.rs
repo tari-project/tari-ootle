@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -288,7 +288,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     pub fn substates_count(&self) -> Result<u64, RocksDbStorageError> {
-        Ok(SubstateModel::count(&self.tx)?)
+        Ok(SubstateModel::count(&self.tx, None)?)
     }
 
     pub fn blocks_get_tip(&self, epoch: Epoch, shard_group: ShardGroup) -> Result<Block, StorageError> {
@@ -1657,22 +1657,25 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError> {
-        Ok(SubstateModel::get(&self.tx, "substates_get", address)?)
+        let key = SubstateModel::key_from_address(address);
+        Ok(SubstateModel::get(&self.tx, "substates_get", &key)?)
     }
 
     fn substates_get_any(
         &self,
         substate_ids: &HashSet<SubstateRequirement>,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
+        type Cf = crate::model::substate::VersionColumnFamily;
+
         let operation = "substates_get_any";
-        let cf = SubstateModel::CF_VERSION;
         // we want descending key order to get the highest version of each substate, because rocksdb orders incrementally by key
         let ordering = Ordering::Descending;
 
+        let cf = Cf::name();
         let mut substates = vec![];
 
         for req in substate_ids {
-            let key_prefix = SubstateModel::key_cf_version_from_requirement(req);
+            let key_prefix = Cf::build_key_from_requirement(req);
             if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)? {
                 substates.push(substate);
             }
@@ -1685,8 +1688,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
+        type Cf = crate::model::substate::VersionColumnFamily;
+
         let operation = "substates_get_any_max_version";
-        let cf = SubstateModel::CF_VERSION;
+        let cf = Cf::name();
         // we want descending key order to get the highest version of each substate, because rocksdb orders incrementally by key
         let ordering = Ordering::Descending;
 
@@ -1694,7 +1699,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         for substate_id in substate_ids {
             let req = SubstateRequirement::new(substate_id.clone(), None);
-            let key_prefix = SubstateModel::key_cf_version_from_requirement(&req);
+            let key_prefix = Cf::build_key_from_requirement(&req);
             if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)? {
                 substates.push(substate);
             }
@@ -1704,13 +1709,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn substates_get_max_version_for_substate(&self, substate_id: &SubstateId) -> Result<(u32, bool), StorageError> {
+        type Cf = crate::model::substate::VersionColumnFamily;
+
         let operation = "substates_get_max_version_for_substate";
-        let cf = SubstateModel::CF_VERSION;
+        let cf = Cf::name();
         // we want descending key order to get the highest version of the substate, because rocksdb orders incrementally by key
         let ordering = Ordering::Descending;
 
         let req = SubstateRequirement::new(substate_id.clone(), None);
-        let key_prefix = SubstateModel::key_cf_version_from_requirement(&req);
+        let key_prefix = Cf::build_key_from_requirement(&req);
 
         let res = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)?;
 
@@ -1732,7 +1739,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let operation = "substates_any_exist";
 
         for address in addresses {
-            let res = SubstateModel::get(&self.tx, operation, &address.borrow().to_substate_address());
+            let key = SubstateModel::key_from_address(&address.borrow().to_substate_address());
+            let res = SubstateModel::get(&self.tx, operation, &key);
             match res {
                 Ok(_) => return Ok(true),
                 Err(e) => match e {
@@ -1769,10 +1777,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         tx_id: &TransactionId,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
+        type Cf = crate::model::substate::CreatedByTxColumnFamily;
+
         let operation = "substates_get_many_by_created_transaction";
-        let cf = SubstateModel::CF_CREATED_BY_TX;
+        let cf = Cf::name();
         let ordering = Ordering::Ascending; // order does not matter here
-        let key_prefix = SubstateModel::key_cf_by_tx(tx_id, None);
+        let key_prefix = Cf::build_key_by_transaction(tx_id, None);
 
         let substates = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
 
@@ -1783,10 +1793,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         tx_id: &TransactionId,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
+        type Cf = crate::model::substate::DestroyedByTxColumnFamily;
+
         let operation = "substates_get_many_by_destroyed_transaction";
-        let cf = SubstateModel::CF_DESTROYED_BY_TX;
+        let cf = Cf::name();
         let ordering = Ordering::Ascending; // order does not matter here
-        let key_prefix = SubstateModel::key_cf_by_tx(tx_id, None);
+        let key_prefix = Cf::build_key_by_transaction(tx_id, None);
 
         let substates = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
 
@@ -1799,10 +1811,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<SubstateRecord>, StorageError> {
         let operation = "substates_get_all_for_transaction";
         let ordering = Ordering::Ascending;
-        let key_prefix = SubstateModel::key_cf_by_tx(tx_id, None);
 
         // get all created by transaction
-        let cf = SubstateModel::CF_DESTROYED_BY_TX;
+        type CreatedCf = crate::model::substate::CreatedByTxColumnFamily;
+        let cf = CreatedCf::name();
+        let key_prefix = CreatedCf::build_key_by_transaction(tx_id, None);
         let created_by = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
         let mut substates = created_by
             .into_iter()
@@ -1810,7 +1823,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect::<HashMap<_,_>>();       
         
         // get all destroyed by transaction
-        let cf = SubstateModel::CF_DESTROYED_BY_TX;
+        type DestroyedCf = crate::model::substate::DestroyedByTxColumnFamily;
+        let cf = DestroyedCf::name();
+        let key_prefix = DestroyedCf::build_key_by_transaction(tx_id, None);
         let destroyed_by = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
         for substate in destroyed_by {
             substates.insert(substate.to_substate_address(), substate);

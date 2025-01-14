@@ -23,7 +23,6 @@
 use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 
 use indexmap::IndexSet;
-use log::kv::Key;
 use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
@@ -41,14 +40,14 @@ use super::encoding::{binary_decode, binary_encode};
 pub trait ModelColumnFamily {
     type Item: Serialize;
 
-    fn name() -> String;
+    fn name() -> &'static str;
 
     fn build_key(value: &Self::Item) -> String;
 
-    fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
-        let key = Self::build_key(&value);
+    fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item, value: &[u8]) -> Result<(), RocksDbStorageError> {
+        let key = Self::build_key(&item);
         let cf = db.cf_handle(&Self::name()).unwrap();
-        tx.put_cf(cf, key.clone(), key.as_bytes())
+        tx.put_cf(cf, key, value)
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
                 source: e,
@@ -58,12 +57,12 @@ pub trait ModelColumnFamily {
     } 
 }
 
-pub trait Model {
+pub trait RocksdbModel {
     type Item: Serialize + DeserializeOwned;
 
-    fn key_prefix() -> String;
+    fn key_prefix() -> &'static str;
 
-    fn column_families() -> Vec<String>;
+    fn column_families() -> Vec<&'static str>;
 
     fn key(item: &Self::Item) -> String;
 
@@ -88,7 +87,7 @@ pub trait Model {
                 source: e,
         })?;
 
-        // insert a key-value in each of the column families
+        // insert the main key in each of the column families
         for cf_name in Self::column_families() {
             Self::put_cf(db.clone(), tx, operation, &cf_name, &value)?;
         }
@@ -179,8 +178,9 @@ pub trait Model {
         Ok(values)
     }
 
-    fn count(tx: &Transaction<'_, TransactionDB>, key_prefix: &str) -> Result<u64, RocksDbStorageError> {
+    fn count(tx: &Transaction<'_, TransactionDB>, key_prefix: Option<&str>) -> Result<u64, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
+        let key_prefix = key_prefix.unwrap_or_default();
         options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
         let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
         let count = iterator.count() as u64;

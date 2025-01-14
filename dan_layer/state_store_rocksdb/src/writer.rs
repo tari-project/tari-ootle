@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, state_transition::StateTransitionModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::RocksdbModel, state_transition::StateTransitionModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -1672,7 +1672,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         
         // update the substate
         let address = versioned_substate_id.to_substate_address();
-        let mut substate = SubstateModel::get(tx, operation, &address)?;
+        let key = SubstateModel::key_from_address(&address);
+        let mut substate = SubstateModel::get(tx, operation, &key)?;
         substate.destroyed = Some(SubstateDestroyed {
             by_transaction: *destroyed_transaction_id,
             justify: *destroyed_qc_id,

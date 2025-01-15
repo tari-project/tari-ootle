@@ -42,7 +42,7 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_engine_types::{
-    substate::{hash_substate, SubstateId, SubstateValue},
+    substate::{hash_substate, SubstateId},
     TemplateAddress,
 };
 use tari_epoch_manager::EpochManagerReader;

@@ -57,6 +57,7 @@ use crate::{substate_storage_sqlite::sqlite_substate_store_factory::SqliteSubsta
 
 const _LOG_TARGET: &str = "tari_indexer::bootstrap";
 
+#[allow(clippy::too_many_lines)]
 pub async fn spawn_services(
     config: &ApplicationConfig,
     shutdown: ShutdownSignal,

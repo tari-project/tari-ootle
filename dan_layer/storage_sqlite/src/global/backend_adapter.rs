@@ -67,7 +67,6 @@ use tari_dan_storage::{
     AtomicDb,
 };
 use tari_engine_types::TemplateAddress;
-use tari_template_lib::Hash;
 use tari_utilities::ByteArray;
 
 use super::{models, models::DbValidatorNode};

@@ -22,7 +22,7 @@
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use log::*;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
@@ -34,7 +34,7 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_engine::function_definitions::FlowFunctionDefinition;
-use tari_dan_p2p::proto::rpc::{SyncTemplatesRequest, SyncTemplatesResponse, TemplateType};
+use tari_dan_p2p::proto::rpc::{SyncTemplatesRequest, TemplateType};
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_engine_types::{
     calculate_template_binary_hash,
@@ -59,7 +59,13 @@ use super::{
     downloader::{DownloadRequest, DownloadResult},
     TemplateManager,
 };
-use crate::template_manager::interface::{Template, TemplateExecutable, TemplateManagerError, TemplateManagerRequest};
+use crate::template_manager::interface::{
+    SyncTemplatesResult,
+    Template,
+    TemplateExecutable,
+    TemplateManagerError,
+    TemplateManagerRequest,
+};
 
 const LOG_TARGET: &str = "tari::template_manager";
 
@@ -357,10 +363,8 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
     /// This method returns a [`JoinHandle`] which can be .await-ed to get the results, or it can be ignored,
     /// the process will be running anyway async.
     #[allow(clippy::mutable_key_type)]
-    async fn handle_templates_sync_request(
-        &self,
-        mut addresses: Vec<TemplateAddress>,
-    ) -> Result<JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>, TemplateManagerError> {
+    #[allow(clippy::too_many_lines)]
+    async fn handle_templates_sync_request(&self, mut addresses: Vec<TemplateAddress>) -> SyncTemplatesResult {
         info!(target: LOG_TARGET, "New templates sync request for {} templates.", addresses.len());
 
         // check for existing templates
@@ -405,7 +409,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                 }
 
                 // do syncing
-                for (committee, addresses) in committees.iter_mut() {
+                for (committee, addresses) in &mut committees {
                     for (addr, _) in &committee.members {
                         // syncing current part of batch
                         match Self::vn_client(client_factory.clone(), addr).await {

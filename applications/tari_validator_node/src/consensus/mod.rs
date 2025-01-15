@@ -11,7 +11,7 @@ use tari_dan_app_utilities::{
     template_manager::implementation::TemplateManager,
     transaction_executor::TariDanTransactionProcessor,
 };
-use tari_dan_common_types::{NodeAddressable, PeerAddress};
+use tari_dan_common_types::PeerAddress;
 use tari_dan_storage::consensus_models::TransactionPool;
 use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncManager;

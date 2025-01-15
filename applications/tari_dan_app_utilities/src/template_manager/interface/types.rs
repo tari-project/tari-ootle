@@ -88,6 +88,9 @@ impl From<DbTemplate> for Template {
     }
 }
 
+pub type SyncTemplatesResult =
+    Result<JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>, TemplateManagerError>;
+
 #[derive(Debug)]
 pub enum TemplateManagerRequest {
     AddTemplate {
@@ -121,8 +124,6 @@ pub enum TemplateManagerRequest {
     },
     SyncTemplates {
         addresses: Vec<TemplateAddress>,
-        reply: oneshot::Sender<
-            Result<JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>, TemplateManagerError>,
-        >,
+        reply: oneshot::Sender<SyncTemplatesResult>,
     },
 }

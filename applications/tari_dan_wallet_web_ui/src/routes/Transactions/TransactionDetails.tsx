@@ -39,7 +39,15 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "../../Components/Loading";
 import Error from "../../Components/Error";
-import type { FinalizeResult, TransactionResult, TransactionSignature } from "@tari-project/typescript-bindings";
+import {
+  FinalizeResult,
+  Substate,
+  SubstateId,
+  substateIdToString,
+  SubstateRequirement,
+  TransactionResult,
+  TransactionSignature,
+} from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
 
 export default function TransactionDetails() {
@@ -58,7 +66,7 @@ export default function TransactionDetails() {
   };
 
   const expandAll = () => {
-    setExpandedPanels(["panel1", "panel2", "panel3", "panel4", "panel5", "panel6"]);
+    setExpandedPanels(["panel1", "panel2", "panel3", "panel4", "panel5", "panel6", "panel7"]);
   };
 
   const collapseAll = () => {
@@ -308,7 +316,31 @@ export default function TransactionDetails() {
             </Accordion>
           )}
           <Accordion expanded={expandedPanels.includes("panel6")} onChange={handleChange("panel6")}>
-            <AccordionSummary aria-controls="panel6bh-content" id="panel6bh-header">
+            <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
+              <Typography>Inputs</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              {transaction?.inputs?.length ? (
+                <TableContainer>
+                  <Table>
+                    <TableBody>
+                      {transaction.inputs.map((item: SubstateRequirement, index: number) => {
+                        return (
+                          <div key={index}>
+                            {substateIdToString(item.substate_id)}:{item.version || "x"}
+                          </div>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <span>Empty</span>
+              )}
+            </AccordionDetails>
+          </Accordion>
+          <Accordion expanded={expandedPanels.includes("panel7")} onChange={handleChange("panel7")}>
+            <AccordionSummary aria-controls="panel7bh-content" id="panel7bh-header">
               <Typography>Signers</Typography>
             </AccordionSummary>
             <AccordionDetails>

@@ -424,7 +424,7 @@ pub async fn handle_reveal_funds(
         let account_substate = sdk.substate_api().get_substate(&account.address)?;
         // Add all versioned account child addresses as inputs
         let child_addresses = sdk.substate_api().load_dependent_substates(&[&account.address])?;
-        let mut inputs = vec![account_substate.address];
+        let mut inputs = vec![account_substate.substate_id];
         inputs.extend(child_addresses);
 
         let inputs = inputs
@@ -817,7 +817,7 @@ fn get_or_create_account<T: WalletStore>(
                 .key_manager_api()
                 .derive_key(key_manager::TRANSACTION_BRANCH, key_index)?;
             let account_substate = sdk.substate_api().get_substate(&account.address)?;
-            inputs.push(account_substate.address.into());
+            inputs.push(account_substate.substate_id.into());
 
             (account.address, account_secret_key, None)
         },
@@ -863,7 +863,7 @@ pub async fn handle_transfer(
         .accounts_api()
         .get_vault_by_resource(&account.address, &req.resource_address)?;
     let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
-    inputs.push(src_vault_substate.address);
+    inputs.push(src_vault_substate.substate_id);
 
     // add the input for the resource address to be transfered
     let resource_substate = sdk

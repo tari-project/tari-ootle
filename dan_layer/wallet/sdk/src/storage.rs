@@ -7,7 +7,12 @@ use std::{
 };
 
 use tari_common_types::types::Commitment;
-use tari_dan_common_types::{optional::IsNotFoundError, substate_type::SubstateType, SubstateRequirement};
+use tari_dan_common_types::{
+    optional::IsNotFoundError,
+    substate_type::SubstateType,
+    SubstateRequirement,
+    VersionedSubstateId,
+};
 use tari_dan_storage::consensus_models::QuorumCertificate;
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId, TemplateAddress};
 use tari_template_lib::{
@@ -27,7 +32,6 @@ use crate::models::{
     SubstateModel,
     TransactionStatus,
     VaultModel,
-    VersionedSubstateId,
     WalletTransaction,
 };
 

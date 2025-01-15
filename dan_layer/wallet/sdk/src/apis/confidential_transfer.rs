@@ -8,7 +8,10 @@ use log::*;
 use tari_bor::{Deserialize, Serialize};
 use tari_common_types::types::{PrivateKey, PublicKey};
 use tari_crypto::keys::PublicKey as _;
-use tari_dan_common_types::optional::{IsNotFoundError, Optional};
+use tari_dan_common_types::{
+    optional::{IsNotFoundError, Optional},
+    VersionedSubstateId,
+};
 use tari_dan_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProofStatement};
 use tari_engine_types::{component::new_component_address_from_public_key, substate::SubstateId};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -28,7 +31,7 @@ use crate::{
         key_manager::{KeyManagerApi, KeyManagerApiError},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
     },
-    models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus, VersionedSubstateId},
+    models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
@@ -217,13 +220,7 @@ where
             .optional()?
         {
             Some(ValidatorScanResult { address, .. }) => Ok((address, true)),
-            None => Ok((
-                VersionedSubstateId {
-                    substate_id: account_component.into(),
-                    version: 0,
-                },
-                false,
-            )),
+            None => Ok((VersionedSubstateId::new(account_component, 0), false)),
         }
     }
 
@@ -243,7 +240,7 @@ where
 
         let account = self.accounts_api.get_account_by_address(&params.from_account.into())?;
         let account_substate = self.substate_api.get_substate(&params.from_account.into())?;
-        inputs.push(account_substate.address);
+        inputs.push(account_substate.substate_id);
 
         // Add all versioned account child addresses as inputs
         let child_addresses = self.substate_api.load_dependent_substates(&[&account.address])?;
@@ -253,7 +250,7 @@ where
             .accounts_api
             .get_vault_by_resource(&account.address, &params.resource_address)?;
         let src_vault_substate = self.substate_api.get_substate(&src_vault.address)?;
-        inputs.push(src_vault_substate.address);
+        inputs.push(src_vault_substate.substate_id);
 
         // add the input for the resource address to be transferred
         let maybe_known_resource = self
@@ -264,7 +261,7 @@ where
             .substate_api
             .scan_for_substate(
                 &SubstateId::Resource(params.resource_address),
-                maybe_known_resource.map(|r| r.address.version),
+                maybe_known_resource.map(|r| r.substate_id.version),
             )
             .await?;
         inputs.push(resource_substate.address.clone());
@@ -275,7 +272,7 @@ where
                 .substate_api
                 .scan_for_substate(
                     &SubstateId::Resource(*resource_address),
-                    maybe_known_resource.map(|r| r.address.version),
+                    maybe_known_resource.map(|r| r.substate_id.version),
                 )
                 .await?;
             inputs.push(resource_substate.address.clone());

@@ -24,15 +24,15 @@ pub async fn handle_get(
 
     let substate = sdk
         .get_network_interface()
-        .query_substate(&record.address.substate_id, Some(record.address.version), false)
+        .query_substate(&record.substate_id.substate_id, Some(record.substate_id.version), false)
         .await?;
 
     Ok(SubstatesGetResponse {
         record: WalletSubstateRecord {
-            substate_id: record.address.substate_id,
+            substate_id: record.substate_id.substate_id,
             parent_id: record.parent_address,
             module_name: record.module_name,
-            version: record.address.version,
+            version: record.substate_id.version,
             template_address: record.template_address,
         },
         value: substate.substate,

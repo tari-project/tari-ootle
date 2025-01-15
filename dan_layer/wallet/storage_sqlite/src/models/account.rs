@@ -14,9 +14,9 @@ pub struct Account {
     pub name: Option<String>,
     pub address: String,
     pub owner_key_index: i64,
+    pub is_default: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
-    pub is_default: bool,
 }
 
 impl TryFrom<Account> for tari_dan_wallet_sdk::models::Account {

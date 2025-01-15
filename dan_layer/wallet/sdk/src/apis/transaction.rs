@@ -7,6 +7,7 @@ use log::*;
 use tari_dan_common_types::{
     optional::{IsNotFoundError, Optional},
     SubstateRequirement,
+    VersionedSubstateId,
 };
 use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
@@ -16,7 +17,7 @@ use tari_template_lib::prelude::ComponentAddress;
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
-    models::{NewAccountInfo, TransactionStatus, VersionedSubstateId, WalletTransaction},
+    models::{NewAccountInfo, TransactionStatus, WalletTransaction},
     network::{TransactionFinalizedResult, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
@@ -298,7 +299,7 @@ where
             };
 
             if let Some(parent) = downed.parent_address {
-                downed_substates_with_parents.insert(downed.address.substate_id, parent);
+                downed_substates_with_parents.insert(downed.substate_id.substate_id, parent);
             }
         }
 
@@ -310,10 +311,7 @@ where
             debug!(target: LOG_TARGET, "Substate {} up", component_addr);
             tx.substates_upsert_root(
                 transaction_id,
-                VersionedSubstateId {
-                    substate_id: component_addr.clone(),
-                    version: substate.version(),
-                },
+                VersionedSubstateId::new(component_addr.clone(), substate.version()),
                 Some(header.module_name.clone()),
                 Some(header.template_address),
             )?;

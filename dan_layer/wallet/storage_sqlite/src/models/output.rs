@@ -23,9 +23,9 @@ pub struct ConfidentialOutput {
     pub status: String,
     pub locked_at: Option<NaiveDateTime>,
     pub locked_by_proof: Option<i32>,
+    pub encrypted_data: Vec<u8>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
-    pub encrypted_data: Vec<u8>,
 }
 
 impl ConfidentialOutput {

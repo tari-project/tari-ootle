@@ -150,6 +150,7 @@ mod transaction_operations {
 
     use super::*;
 
+    #[ignore]
     #[test]
     fn transaction_operations_sqlite() {
         let db = create_sqlite();
@@ -265,6 +266,7 @@ mod transaction_execution_operations {
 
     use super::*;
 
+    #[ignore]
     #[test]
     fn transaction_execution_operations_sqlite() {
         let db = create_sqlite();

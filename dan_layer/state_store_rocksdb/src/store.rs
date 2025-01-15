@@ -48,7 +48,7 @@ impl<TAddr> RocksDbStateStore<TAddr> {
 
         let cf_names = [
             BlockModel::column_families(),
-            BlockTransactionExecutionModel::cfs(),
+            BlockTransactionExecutionModel::column_families(),
             StateTransitionModel::column_families(),
             SubstateModel::column_families(),
         ].concat();

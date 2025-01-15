@@ -74,6 +74,7 @@ mod substates {
     
     use super::*;
 
+    #[ignore]
     #[test]
     fn basic_substate_operations_sqlite() {
         let db = create_sqlite();

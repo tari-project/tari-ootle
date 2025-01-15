@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -706,8 +706,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         tx_id: &TransactionId,
         block: &BlockId,
     ) -> Result<BlockTransactionExecution, StorageError> {
-        let key_prefix = BlockTransactionExecutionModel::key_prefix(block, tx_id);
-        let executions = BlockTransactionExecutionModel::list(&self.tx, &key_prefix, Ordering::Descending)?;
+        let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, Some(block));
+        let executions = BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
         
         match executions.first() {
             Some(execution) => Ok(execution.transaction_execution.clone()),
@@ -735,11 +735,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let block_ids = self.get_block_ids_between(&commit_block, from_block_id)?;
 
         // get the most recent escution of the transaction for every block in the range
-        let mut executions: Vec<BlockTransactionExecutionModel> = vec![];
+        let mut executions: Vec<BlockTransactionExecutionModelData> = vec![];
         for block_id in block_ids {
             let block_id = BlockId::new(FixedHash::from_hex(&block_id).unwrap());
-            let key_prefix = BlockTransactionExecutionModel::key_prefix(&block_id, tx_id);
-            let block_executions = BlockTransactionExecutionModel::list(&self.tx, &key_prefix, Ordering::Descending)?;
+            let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, Some(&block_id));
+            let block_executions = BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
             if let Some(exec) = block_executions.first() {
                 executions.push(exec.clone());
             }
@@ -753,8 +753,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         // Otherwise look for executions after the commit block
-        let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction(tx_id);
-        let executions = BlockTransactionExecutionModel::list(&self.tx, &key_prefix, Ordering::Descending)?;
+        let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, None);
+        let executions = BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
         for execution in executions {
             let key = BlockModel::key_from_block_id(execution.transaction_execution.block_id());
             let block = BlockModel::get(&self.tx, operation, &key)?;

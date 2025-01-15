@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -852,28 +852,25 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let operation = "transaction_executions_insert_or_ignore";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let tx_id = transaction_execution.transaction_id();
-        let block_id = transaction_execution.block_id();
-        
-        if BlockTransactionExecutionModel::key_exists(tx, tx_id, block_id)? {
-            // ignore if it already exists
-            return Ok(false)
-        } else {
-            BlockTransactionExecutionModel::put(self.db.clone(), tx, operation, &transaction_execution)?;
-            return Ok(true)
-        }
+        let value = BlockTransactionExecutionModelData::from(transaction_execution);
+        BlockTransactionExecutionModel::put(self.db.clone(), tx, operation, &value)?;
+
+        return Ok(true)
     }
 
     fn transaction_executions_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         let operation = "transaction_executions_remove_any_by_block_id";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let cf = BlockTransactionExecutionModel::CF_BLOCK_ID;
-        let key_prefix = BlockTransactionExecutionModel::key_prefix_by_block(block_id);
-        let execs = BlockTransactionExecutionModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix)?;
+        type Cf = crate::model::block_transaction_execution::BlockColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::key_prefix_by_block(block_id);
+        let ordering = Ordering::Ascending;
+        let execs = BlockTransactionExecutionModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, ordering)?;
 
         for exec in execs {
-            BlockTransactionExecutionModel::delete(self.db.clone(), tx, operation, &exec)?;
+            let key = BlockTransactionExecutionModel::key(&exec);
+            BlockTransactionExecutionModel::delete(self.db.clone(), tx, operation, &key)?;
         }
 
         Ok(())

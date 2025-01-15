@@ -203,6 +203,27 @@ pub trait RocksdbModel {
         Ok(count)
     }
 
+    fn multi_get(tx: &Transaction<'_, TransactionDB>, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Vec<Self::Item>, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        if let Some(key_prefix) = key_prefix_opt {
+            options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+        }
+
+        let iterator_mode = match ordering {
+            Ordering::Ascending => rocksdb::IteratorMode::Start,
+            Ordering::Descending => rocksdb::IteratorMode::End,
+        };
+
+        let iterator = tx.iterator_opt( iterator_mode, options);
+        let values = iterator.map(|item| {
+            let (_, bytes) = item.unwrap();
+            Self::decode(bytes.to_vec()).unwrap()
+        })
+        .collect();
+
+        Ok(values)
+    }
+
     fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<(), RocksDbStorageError> {
         // we need to have the main value to delete CF values later
         let value = Self::get(tx, operation, key)?;

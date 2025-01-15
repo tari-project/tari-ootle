@@ -73,21 +73,6 @@ impl BlockModel {
 
         Ok(values)
     }
-
-    pub fn list(tx: &Transaction<'_, TransactionDB>) -> Result<Vec<Block>, RocksDbStorageError> {
-        let mut options = rocksdb::ReadOptions::default();
-        let key_prefix = format!("{}_", Self::key_prefix());
-        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
-
-        let iterator = tx.iterator_opt( rocksdb::IteratorMode::Start, options);
-        let blocks = iterator.map(|item| {
-            let (_, bytes) = item.unwrap();
-            Self::decode(bytes.to_vec()).unwrap()
-        })
-        .collect();
-
-        Ok(blocks)
-    }
 }
 
 impl RocksdbModel for BlockModel {

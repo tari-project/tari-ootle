@@ -1104,8 +1104,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             res
         };
 
+        // list all the blocks
         let mut blocks: Vec<Block> =
-            BlockModel::list(&self.tx)?
+            BlockModel::multi_get(&self.tx, None, Ordering::Ascending)?
             .into_iter()
             .filter(block_filter)
             .collect();
@@ -1182,7 +1183,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             res
         };
 
-        let count = BlockModel::list(&self.tx)?
+        let count = BlockModel::multi_get(&self.tx, None, Ordering::Ascending)?
             .into_iter()
             .filter(block_filter)
             .count() as i64;

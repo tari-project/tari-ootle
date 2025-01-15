@@ -1,12 +1,9 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-};
+use std::{collections::HashMap, marker::PhantomData};
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use log::*;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
@@ -30,7 +27,6 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{
     commit_result::RejectReason,
-    published_template::PublishedTemplateAddress,
     substate::Substate,
     transaction_receipt::TransactionReceiptAddress,
 };
@@ -66,10 +62,11 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         store: &PendingSubstateStore<TStateStore>,
         local_committee_info: &CommitteeInfo,
         transaction: &Transaction,
-    ) -> Result<(IndexMap<SubstateRequirement, u32>, HashSet<SubstateRequirement>), BlockTransactionExecutorError> {
+    ) -> Result<(IndexMap<SubstateRequirement, u32>, IndexSet<SubstateRequirement>), BlockTransactionExecutorError>
+    {
         let mut resolved_substates = IndexMap::with_capacity(transaction.num_unique_inputs());
 
-        let mut non_local_inputs = HashSet::new();
+        let mut non_local_inputs = IndexSet::new();
         for input in transaction.all_inputs_iter() {
             if !local_committee_info.includes_substate_id(&input.substate_id) {
                 non_local_inputs.insert(input);
@@ -159,19 +156,11 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let _timer = TraceTimer::info(LOG_TARGET, "prepare");
         let mut transaction = TransactionRecord::get(store.read_transaction(), &transaction_id)?;
-        let mut outputs = HashSet::new();
+        let mut outputs = IndexSet::new();
         outputs.insert(VersionedSubstateId::new(
             TransactionReceiptAddress::from(transaction_id),
             0,
         ));
-
-        for binary in transaction.transaction().publish_templates_iter() {
-            let author = transaction.transaction().seal_signature().public_key();
-            outputs.insert(VersionedSubstateId::new(
-                PublishedTemplateAddress::from_author_and_code(author, binary),
-                0,
-            ));
-        }
 
         let (local_versions, non_local_inputs) = match self.resolve_local_versions(
             store,
@@ -207,7 +196,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     return Ok(PreparedTransaction::new_multishard(
                         transaction.into_execution(),
                         IndexMap::new(),
-                        HashSet::new(),
+                        IndexSet::new(),
                         outputs,
                         LockStatus::default(),
                     ));
@@ -223,7 +212,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             )));
         }
 
-        if !transaction.transaction.is_global() && non_local_inputs.is_empty() {
+        if non_local_inputs.is_empty() &&
+            (local_committee_info.num_committees() == 1 || !transaction.transaction.is_global())
+        {
             // CASE: All inputs are local and we can execute the transaction.
             //       Outputs may or may not be local
             let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.clone(), *v)))?;
@@ -275,7 +266,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         Ok(PreparedTransaction::new_multishard(
                             Some(execution),
                             local_versions,
-                            HashSet::new(),
+                            IndexSet::new(),
                             all_outputs,
                             lock_status,
                         ))
@@ -294,7 +285,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             //       specify this or we can correct the locks after execution. Currently, this limitation
             //       prevents concurrent multi-shard read locks.
             let requested_locks = local_versions.iter().map(|(substate_id, version)| {
-                if substate_id.substate_id().is_read_only() {
+                // Assume resources are read-only, if the transaction mutates the resource, it will be upgraded to a
+                // write lock
+                if substate_id.substate_id().is_resource() || substate_id.substate_id().is_read_only() {
                     SubstateRequirementLockIntent::read(substate_id.clone(), *version)
                 } else {
                     SubstateRequirementLockIntent::write(substate_id.clone(), *version)

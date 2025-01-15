@@ -240,9 +240,7 @@ fn check_requirement(
 
             Ok(false)
         },
-        RuleRequirement::ScopedToComponent(address) => {
-            Ok(state.current_component()?.map_or(false, |current| current == *address))
-        },
+        RuleRequirement::ScopedToComponent(address) => Ok(state.current_component()? == Some(*address)),
         RuleRequirement::ScopedToTemplate(address) => {
             let (current, _) = state.current_template()?;
             Ok(current == address)

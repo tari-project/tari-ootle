@@ -4,7 +4,7 @@
 use std::{iter, time::Duration};
 
 use tari_common_types::types::PrivateKey;
-use tari_dan_common_types::SubstateRequirement;
+use tari_dan_common_types::{LockIntent, SubstateRequirement};
 use tari_dan_storage::consensus_models::{Decision, TransactionRecord, VersionedSubstateIdLockIntent};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},

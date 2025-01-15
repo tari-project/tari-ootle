@@ -172,9 +172,6 @@ fn msg_epoch_and_height(msg: &HotstuffMessage) -> Option<EpochAndHeight> {
         HotstuffMessage::Proposal(msg) => Some((msg.block.epoch(), msg.block.height())),
         // Votes for block v occur in view v + 1
         HotstuffMessage::Vote(msg) => Some((msg.epoch, msg.unverified_block_height.saturating_add(NodeHeight(1)))),
-        // We will buffer NEWVIEW messages until the appropriate height is set. This essentially prevents us from being
-        // forced to the next height without locally deciding to do so.
-        // HotstuffMessage::NewView(msg) => Some((msg.high_qc.epoch(), msg.new_height.saturating_add(NodeHeight(1)))),
         _ => None,
     }
 }

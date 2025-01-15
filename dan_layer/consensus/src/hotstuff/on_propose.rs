@@ -39,9 +39,9 @@ use tari_dan_storage::{
         LeafBlock,
         LockedBlock,
         PendingShardStateTreeDiff,
+        QcId,
         QuorumCertificate,
         SubstateChange,
-        SubstateRequirementLockIntent,
         TransactionAtom,
         TransactionExecution,
         TransactionPool,
@@ -294,7 +294,7 @@ where TConsensusSpec: ConsensusSpec
                 lock_conflicts,
             ),
             // Leader thinks all local nodes have prepared
-            TransactionPoolStage::Prepared => Ok(Some(Command::LocalPrepare(tx_rec.get_local_transaction_atom()))),
+            TransactionPoolStage::Prepared => Ok(Some(Command::LocalPrepare(tx_rec.get_local_transaction_atom(None)))),
             // Leader thinks all foreign PREPARE pledges have been received (condition for LocalPrepared stage to be
             // ready)
             TransactionPoolStage::LocalPrepared => self.all_or_some_prepare_transaction(
@@ -336,7 +336,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         new_leaf_block: &Block,
-        high_qc: HighQc,
+        high_qc_id: QcId,
         local_committee_info: &CommitteeInfo,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
@@ -364,9 +364,15 @@ where TConsensusSpec: ConsensusSpec
             };
 
             if cmd.is_local_prepare() {
-                pool_tx.add_prepare_qc_evidence(local_committee_info, high_qc.qc_id);
+                pool_tx
+                    .evidence_mut()
+                    .add_shard_group(local_committee_info.shard_group())
+                    .set_prepare_qc(high_qc_id);
             } else if cmd.is_local_accept() {
-                pool_tx.add_accept_qc_evidence(local_committee_info, high_qc.qc_id);
+                pool_tx
+                    .evidence_mut()
+                    .add_shard_group(local_committee_info.shard_group())
+                    .set_accept_qc(high_qc_id);
             } else {
                 // Nothing
             }
@@ -382,7 +388,7 @@ where TConsensusSpec: ConsensusSpec
                 pool_tx.transaction_id(),
                 pool_tx.current_stage(),
                 local_committee_info.shard_group(),
-                high_qc.qc_id
+                high_qc_id
             );
 
             change_set.set_next_transaction_update(pool_tx)?;
@@ -462,7 +468,8 @@ where TConsensusSpec: ConsensusSpec
             // evidence. And that should determine if they are ready. However this is difficult because we
             // get the batch from the database which isnt aware of which foreign proposals we're going to
             // propose. This is why the system currently never proposes foreign proposals affecting a
-            // transaction in the same block as LocalPrepare/LocalAccept
+            // transaction in the same block for LocalPrepare/LocalAccept and can result in evidence in the
+            // atom having missing Prepare/Accept QCs (which are added on subsequent proposals).
             //
             // for fp in foreign_proposals {
             //     process_foreign_block(
@@ -482,7 +489,7 @@ where TConsensusSpec: ConsensusSpec
                 self.process_newly_justified_block(
                     tx,
                     &justified_block,
-                    high_qc_certificate.as_high_qc(),
+                    *high_qc_certificate.id(),
                     local_committee_info,
                     &mut change_set,
                 )?;
@@ -842,7 +849,7 @@ where TConsensusSpec: ConsensusSpec
                     tx_rec.current_decision(),
                 );
 
-                let atom = tx_rec.get_local_transaction_atom();
+                let atom = tx_rec.get_local_transaction_atom(Some(local_committee_info.shard_group()));
                 Command::Prepare(atom)
             },
         };
@@ -884,7 +891,7 @@ where TConsensusSpec: ConsensusSpec
             .filter(|o| {
                 o.substate_id().is_transaction_receipt() || local_committee_info.includes_substate_id(o.substate_id())
             })
-            .map(|output| SubstateRequirementLockIntent::from(output.clone()));
+            .cloned();
         let lock_status = substate_store.try_lock_all(*tx_rec.transaction_id(), local_outputs, false)?;
         if let Some(err) = lock_status.failures().first() {
             warn!(

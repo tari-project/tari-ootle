@@ -93,7 +93,8 @@ export function rejectReasonToString(reason: RejectReason | null): string {
     return `FeesNotPaid(${reason.FeesNotPaid})`;
   }
   if ("ForeignShardGroupDecidedToAbort" in reason) {
-    return `ForeignShardGroupDecidedToAbort(shard group ${reason.ForeignShardGroupDecidedToAbort.start_shard}-${reason.ForeignShardGroupDecidedToAbort.end_shard})`;
+    const r = reason.ForeignShardGroupDecidedToAbort;
+    return `ForeignShardGroupDecidedToAbort(${r.start_shard}-${r.end_shard}, ${r.abort_reason})`;
   }
   if ("InvalidTransaction" in reason) {
     return `InvalidTransaction(${reason.InvalidTransaction})`;
@@ -111,7 +112,7 @@ export function rejectReasonToString(reason: RejectReason | null): string {
     return `FailedToLockOutputs(${reason.FailedToLockOutputs})`;
   }
   console.error("Unknown reason", reason);
-  return "Unknown";
+  return JSON.stringify(reason);
 }
 
 export function getSubstateDiffFromTransactionResult(result: TransactionResult): SubstateDiff | null {

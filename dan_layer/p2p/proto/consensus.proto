@@ -65,38 +65,7 @@ message ForeignProposalRequestByTransactionId {
 message ForeignProposal {
   Block block = 1;
   QuorumCertificate justify_qc = 2;
-  repeated TransactionPledge block_pledge = 3;
-}
-
-message TransactionPledge {
-  bytes transaction_id = 1;
-  repeated SubstatePledge pledges = 2;
-}
-
-message SubstatePledge {
-  oneof pledge {
-    SubstatePledgeInput input = 1;
-    SubstatePledgeOutput output = 2;
-  }
-}
-
-message SubstatePledgeInput {
-  bytes substate_id = 1;
-  uint32 version = 2;
-  bytes substate_value = 3;
-  bool is_write = 4;
-}
-
-message SubstatePledgeOutput {
-  bytes substate_id = 1;
-  uint32 version = 2;
-}
-
-enum SubstateLockType {
-  None = 0;
-  Read = 1;
-  Write = 2;
-  Output = 3;
+  bytes encoded_block_pledge = 3;
 }
 
 message VoteMessage {

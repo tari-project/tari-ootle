@@ -275,7 +275,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
 
             // If we received the message from our local shard group, we don't need to gossip it again on the topic
             // (prevents Duplicate errors)
-            if sender_shard_group != Some(local_committee_shard.shard_group()) {
+            if sender_shard_group.map_or(true, |sg| sg != local_committee_shard.shard_group()) {
                 // This validator is involved, we to send the transaction to local replicas
                 if let Err(e) = self
                     .gossip

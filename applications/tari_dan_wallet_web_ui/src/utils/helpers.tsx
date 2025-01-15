@@ -39,7 +39,9 @@ export const renderJson = (json: any) => {
         ],
       </>
     );
-  } else if (typeof json === "object") {
+  }
+
+  if (json && typeof json === "object") {
     return (
       <>
         {"{"}
@@ -53,10 +55,11 @@ export const renderJson = (json: any) => {
         {"}"}
       </>
     );
-  } else {
-    if (typeof json === "string") return <span className="string">"{json}"</span>;
-    return <span className="other">{json}</span>;
   }
+
+  if (typeof json === "string") return <span className="string">"{json}"</span>;
+  if (typeof json === "number") return <span className="number">{json}</span>;
+  return <span className="other">{json || "null"}</span>;
 };
 
 export function toHexString(byteArray: any): string {

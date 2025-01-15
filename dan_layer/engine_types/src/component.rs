@@ -115,6 +115,12 @@ pub struct ComponentBody {
 }
 
 impl ComponentBody {
+    pub const fn empty() -> Self {
+        Self {
+            state: tari_bor::Value::Null,
+        }
+    }
+
     pub fn set(&mut self, state: tari_bor::Value) -> &mut Self {
         self.state = state;
         self

@@ -1,6 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_dan_common_types::ShardGroup;
+
 use crate::consensus_models::{Decision, TransactionPoolStage};
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -60,6 +62,20 @@ pub enum NoVoteReason {
     NodeAlreadyEvicted,
     #[error("Leader proposed to evict a node but it is not permitted to suspend more than f nodes")]
     CannotEvictNodeBelowQuorumThreshold,
+    #[error("Not all inputs and outputs are accepted")]
+    NotAllInputsOutputsAccepted,
+    #[error("Invalid evidence")]
+    InvalidEvidence { reason: InvalidEvidenceReason },
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum InvalidEvidenceReason {
+    #[error("Expected evidence to contain {shard_group} but it was missing")]
+    MissingInvolvedShardGroup { shard_group: ShardGroup },
+    #[error("Evidence mismatched")]
+    MismatchedEvidence,
+    #[error("Not all shard groups prepared in evidence")]
+    NotAllShardGroupsPrepared,
 }
 
 impl NoVoteReason {
@@ -91,6 +107,8 @@ impl NoVoteReason {
             Self::NodeAlreadyEvicted => "NodeAlreadyEvicted",
             Self::ShouldNotEvictNode => "ShouldNotEvictNode",
             Self::CannotEvictNodeBelowQuorumThreshold => "CannotSuspendNodeBelowQuorumThreshold",
+            Self::NotAllInputsOutputsAccepted => "NotAllInputsOutputsAccepted",
+            Self::InvalidEvidence { .. } => "InvalidEvidence",
         }
     }
 }

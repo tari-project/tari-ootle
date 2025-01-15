@@ -687,7 +687,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             // Propose quickly if there are UTXOs to mint or transactions to propose
             let propose_now = ForeignProposal::has_unconfirmed(tx, epoch)? ||
                 BurntUtxo::has_unproposed(tx)? ||
-                self.transaction_pool.has_uncommitted_transactions(tx)?;
+                self.transaction_pool.has_ready_or_pending_transaction_updates(tx)?;
 
             Ok::<_, HotStuffError>(propose_now)
         })?;
@@ -822,8 +822,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
-        // TODO: check the message comes from a local committee member (except foreign proposals which must come from a
-        //       registered node)
         match msg {
             HotstuffMessage::NewView(message) => log_err(
                 "on_receive_new_view",

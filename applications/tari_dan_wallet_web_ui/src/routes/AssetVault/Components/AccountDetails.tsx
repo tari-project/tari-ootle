@@ -52,34 +52,28 @@ function AccountDetails({ accountName }: { accountName: string }) {
   } = useAccountsGet(accountName);
 
   return (
-    <>
-      {accountsIsError || accountsIsFetching ? (
-        <FetchStatusCheck
-          isError={accountsIsError}
-          errorMessage={accountsError?.message || "Error fetching data"}
-          isLoading={accountsIsFetching}
-        />
-      ) : (
-        <>
-          {accountsData && (
-            <GridContainer>
-              <GridHeadCell className="head1">Name</GridHeadCell>
-              <GridHeadCell className="head2">Address</GridHeadCell>
-              <GridHeadCell className="head3">Public Key</GridHeadCell>
-              <GridDataCell className="content1">{accountsData.account.name}</GridDataCell>
-              <GridDataCell className="content2">
-                {shortenSubstateId(accountsData.account.address)}
-                <CopyToClipboard copy={substateIdToString(accountsData.account.address)} />
-              </GridDataCell>
-              <GridDataCell className="content3">
-                {shortenString(accountsData.public_key)}
-                <CopyToClipboard copy={accountsData.public_key} />
-              </GridDataCell>
-            </GridContainer>
-          )}
-        </>
+    <FetchStatusCheck
+      isError={accountsIsError}
+      errorMessage={accountsError?.message || "Error fetching data"}
+      isLoading={accountsIsFetching}
+    >
+      {accountsData && (
+        <GridContainer>
+          <GridHeadCell className="head1">Name</GridHeadCell>
+          <GridHeadCell className="head2">Address</GridHeadCell>
+          <GridHeadCell className="head3">Public Key</GridHeadCell>
+          <GridDataCell className="content1">{accountsData.account.name}</GridDataCell>
+          <GridDataCell className="content2">
+            {shortenSubstateId(accountsData.account.address)}
+            <CopyToClipboard copy={substateIdToString(accountsData.account.address)} />
+          </GridDataCell>
+          <GridDataCell className="content3">
+            {shortenString(accountsData.public_key)}
+            <CopyToClipboard copy={accountsData.public_key} />
+          </GridDataCell>
+        </GridContainer>
       )}
-    </>
+    </FetchStatusCheck>
   );
 }
 

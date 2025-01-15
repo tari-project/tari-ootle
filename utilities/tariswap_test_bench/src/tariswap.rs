@@ -15,7 +15,7 @@ use tari_template_lib::{
 };
 use tari_transaction::Transaction;
 
-use crate::{faucet::Faucet, runner::Runner};
+use crate::{faucet::Faucet, runner::Runner, timer::TraceTimer};
 
 pub struct TariSwap {
     pub component_address: ComponentAddress,
@@ -101,6 +101,9 @@ impl Runner {
         let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key);
 
         for i in 0..5 {
+            let _timer = TraceTimer::info("tariswap", "add_liquidity")
+                .with_iterations(200usize.min(tariswaps.len().saturating_sub(i * 200)));
+
             for (i, tariswap) in tariswaps.iter().enumerate().skip(i * 200).take(200) {
                 let account = &accounts[i % accounts.len()];
                 let key = self
@@ -164,32 +167,34 @@ impl Runner {
                 ));
             }
 
-            for (account, lp_resource, tx_id) in tx_ids.drain(..) {
-                let result = self.wait_for_transaction(tx_id).await?;
-                if let Some(reject) = result.result.full_reject() {
-                    return Err(anyhow::anyhow!("Transaction failed: {}", reject));
-                }
-                let diff = result.result.accept().unwrap();
-                let lp_vault = diff
-                    .up_iter()
-                    .find_map(|(addr, s)| {
-                        let addr = addr.as_vault_id()?;
-                        if *s.substate_value().vault().unwrap().resource_address() == lp_resource {
-                            Some(addr)
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or_else(|| anyhow::anyhow!("LP Vault not found in {tx_id} result"))?;
-                self.sdk.accounts_api().add_vault(
-                    account,
-                    lp_vault.into(),
-                    tariswaps[0].lp_resource_address,
-                    ResourceType::NonFungible,
-                    Some("LP".to_string()),
-                )?;
-            }
             info!("⏳️ Added liquidity to pools {}-{}", i * 200, (i + 1) * 200);
+        }
+
+        info!("⏳️ Waiting for {} transactions to finalize", tariswaps.len());
+        for (account, lp_resource, tx_id) in tx_ids.drain(..) {
+            let result = self.wait_for_transaction(tx_id).await?;
+            if let Some(reject) = result.result.full_reject() {
+                return Err(anyhow::anyhow!("Transaction failed: {}", reject));
+            }
+            let diff = result.result.accept().unwrap();
+            let lp_vault = diff
+                .up_iter()
+                .find_map(|(addr, s)| {
+                    let addr = addr.as_vault_id()?;
+                    if *s.substate_value().vault().unwrap().resource_address() == lp_resource {
+                        Some(addr)
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| anyhow::anyhow!("LP Vault not found in {tx_id} result"))?;
+            self.sdk.accounts_api().add_vault(
+                account,
+                lp_vault.into(),
+                tariswaps[0].lp_resource_address,
+                ResourceType::NonFungible,
+                Some("LP".to_string()),
+            )?;
         }
 
         Ok(())

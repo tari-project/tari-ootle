@@ -288,7 +288,7 @@ impl SubstateId {
     }
 
     pub fn is_read_only(&self) -> bool {
-        matches!(self, Self::TransactionReceipt(_) | Self::Resource(_))
+        matches!(self, Self::TransactionReceipt(_) | Self::Template(_))
     }
 }
 

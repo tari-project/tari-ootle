@@ -8,6 +8,7 @@ mod runner;
 mod stats;
 mod tariswap;
 mod templates;
+mod timer;
 
 use std::{fs, time::Instant};
 

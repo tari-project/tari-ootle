@@ -26,6 +26,7 @@ pub struct ValidatorNodeInfo {
 
 pub async fn list(context: &HandlerContext, _req: ListIndexersRequest) -> Result<ListIndexersResponse, anyhow::Error> {
     let instances = context.process_manager().list_indexers().await?;
+    let public_ip = context.config().get_public_ip();
 
     let nodes = instances
         .into_iter()
@@ -35,8 +36,8 @@ pub async fn list(context: &HandlerContext, _req: ListIndexersRequest) -> Result
                 .ports
                 .get("jrpc")
                 .ok_or_else(|| anyhow!("jrpc port not found"))?;
-            let web = format!("http://localhost:{web_port}");
-            let jrpc = format!("http://localhost:{json_rpc_port}");
+            let web = format!("http://{public_ip}:{web_port}");
+            let jrpc = format!("http://{public_ip}:{json_rpc_port}");
 
             Ok(ValidatorNodeInfo {
                 name: instance.name,

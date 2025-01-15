@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{future::Future, pin::Pin};
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 use anyhow::{anyhow, Context};
 use tari_common::configuration::Network;
@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             if let Some(parent) = config_path.parent() {
-                fs::create_dir_all(parent).await?;
+                fs::create_dir_all(parent).await.context("create_dir_all failed")?;
             }
             let config = get_initial_config(&cli, args)?;
             let file = fs::File::create(&config_path)
@@ -175,6 +175,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
     Ok(Config {
         skip_registration: false,
         network: cli.common.network.unwrap_or(Network::LocalNet),
+        settings: Some(HashMap::new()),
         start_port: 12000,
         base_dir: base_dir
             .canonicalize()
@@ -186,13 +187,14 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
             executables,
         },
         auto_register_previous_templates: true,
+        public_ip: None,
     })
 }
 
 async fn start(cli: &Cli) -> anyhow::Result<()> {
-    let mut config = Config::load_with_cli(cli).await?;
+    let mut config = Config::load_with_cli(cli).await.context("load with cli")?;
     if let Commands::Start(ref overrides) = cli.command {
-        overrides.apply(&mut config)?;
+        overrides.apply(&mut config).context("cli overrides")?;
     }
     let lock_file = config.base_dir.join("tari_swarm.pid");
     let _pid = lockfile::Lockfile::create(&lock_file).with_context(|| {
@@ -206,7 +208,7 @@ async fn start(cli: &Cli) -> anyhow::Result<()> {
     create_paths(&config).await?;
 
     let mut shutdown = Shutdown::new();
-    let signal = shutdown.to_signal().select(exit_signal()?);
+    let signal = shutdown.to_signal().select(exit_signal().context("exit_signal")?);
     let (task_handle, pm_handle) = process_manager::spawn(&config, shutdown.to_signal());
     let webserver = webserver::spawn(config, shutdown.to_signal(), pm_handle.clone());
 
@@ -221,11 +223,11 @@ async fn start(cli: &Cli) -> anyhow::Result<()> {
             log::info!("Terminating all instances...");
             let num_instances = pm_handle.stop_all().await?;
             log::info!("Terminated {num_instances} instances");
-            result??;
+            result?.context("web server crashed")?;
             log::info!("Webserver exited");
         },
         result = task_handle => {
-            result??;
+            result?.context("process manager crashed")?;
             log::info!("Process manager exited");
         }
     }

@@ -54,6 +54,7 @@ impl ProcessManager {
             instance_manager: InstanceManager::new(
                 config.base_dir.clone(),
                 config.network,
+                config.settings.clone().unwrap_or_default(),
                 config.processes.instances.clone(),
                 config.start_port,
             ),

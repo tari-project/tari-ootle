@@ -73,6 +73,14 @@ impl ForeignProposal {
         tx.foreign_proposals_upsert(self, proposed_in_block)
     }
 
+    pub fn set_status<TTx: StateStoreWriteTransaction>(
+        &self,
+        tx: &mut TTx,
+        status: ForeignProposalStatus,
+    ) -> Result<(), StorageError> {
+        tx.foreign_proposals_set_status(self.block.id(), status)
+    }
+
     pub fn delete<TTx: StateStoreWriteTransaction>(tx: &mut TTx, block_id: &BlockId) -> Result<(), StorageError> {
         tx.foreign_proposals_delete(block_id)
     }
@@ -166,6 +174,8 @@ pub enum ForeignProposalStatus {
     Proposed,
     /// Foreign proposal has been confirmed i.e. the block containing it has been locked.
     Confirmed,
+    /// Foreign proposal has been rejected.
+    Invalid,
 }
 
 impl Display for ForeignProposalStatus {
@@ -174,6 +184,7 @@ impl Display for ForeignProposalStatus {
             ForeignProposalStatus::New => write!(f, "New"),
             ForeignProposalStatus::Proposed => write!(f, "Proposed"),
             ForeignProposalStatus::Confirmed => write!(f, "Confirmed"),
+            ForeignProposalStatus::Invalid => write!(f, "Invalid"),
         }
     }
 }
@@ -186,6 +197,7 @@ impl FromStr for ForeignProposalStatus {
             "New" => Ok(ForeignProposalStatus::New),
             "Proposed" => Ok(ForeignProposalStatus::Proposed),
             "Confirmed" => Ok(ForeignProposalStatus::Confirmed),
+            "Invalid" => Ok(ForeignProposalStatus::Invalid),
             _ => Err(StorageError::DecodingError {
                 operation: "ForeignProposalStatus::from_str",
                 item: "foreign proposal",

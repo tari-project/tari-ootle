@@ -23,20 +23,21 @@
 import Loading from "./Loading";
 import Error from "./Error";
 
-interface IFetchStatusCheck {
+interface FetchStatusCheckProps {
   errorMessage: string;
   isError: boolean;
   isLoading: boolean;
+  children: React.ReactNode;
 }
 
-function FetchStatusCheck({ isLoading, isError, errorMessage }: IFetchStatusCheck) {
+function FetchStatusCheck({ isLoading, isError, errorMessage, children }: FetchStatusCheckProps) {
   if (isLoading) {
     return <Loading />;
   }
   if (isError) {
     return <Error message={errorMessage} />;
   }
-  return null;
+  return <>{children}</>;
 }
 
 export default FetchStatusCheck;

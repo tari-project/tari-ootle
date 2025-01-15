@@ -182,6 +182,7 @@ async fn single_transaction_abort() {
 async fn propose_blocks_with_queued_up_transactions_until_all_committed() {
     setup_logger();
     let mut test = Test::builder()
+        .debug_sql("/tmp/test{}.db")
         .add_committee(0, vec!["1", "2", "3", "4", "5"])
         .start()
         .await;
@@ -302,13 +303,12 @@ async fn node_requests_missing_transaction_from_local_leader() {
 async fn multi_shard_single_transaction() {
     setup_logger();
     let mut test = Test::builder()
-        .debug_sql("/tmp/test{}.db")
         .add_committee(0, vec!["1"])
         .add_committee(1, vec!["2"])
         .start()
         .await;
 
-    test.send_transaction_to_all(Decision::Commit, 100, 2, 2).await;
+    let (tx, _, _) = test.send_transaction_to_all(Decision::Commit, 100, 2, 2).await;
 
     test.start_epoch(Epoch(1)).await;
 
@@ -330,6 +330,8 @@ async fn multi_shard_single_transaction() {
     }
 
     test.assert_all_validators_at_same_height().await;
+    test.assert_all_validators_have_decision(tx.id(), Decision::Commit)
+        .await;
     test.assert_all_validators_committed();
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
@@ -1185,7 +1187,7 @@ async fn multi_shard_unversioned_input_conflict() {
 
         let leaf1 = test.get_validator(&TestAddress::new("1")).get_leaf_block();
         let leaf2 = test.get_validator(&TestAddress::new("3")).get_leaf_block();
-        if leaf1.height > NodeHeight(30) && leaf2.height > NodeHeight(30) {
+        if leaf1.height > NodeHeight(60) && leaf2.height > NodeHeight(60) {
             panic!(
                 "Not all transaction committed after {}/{} blocks",
                 leaf1.height, leaf2.height

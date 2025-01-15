@@ -8,13 +8,7 @@ use std::{
 };
 
 use cucumber::{given, then, when};
-use integration_tests::{
-    base_node::get_base_node_client,
-    template::{send_template_registration, RegisteredTemplate},
-    validator_node::spawn_validator_node,
-    validator_node_cli::create_key,
-    TariWorld,
-};
+use integration_tests::{base_node::get_base_node_client, template, template::{send_template_registration, RegisteredTemplate}, validator_node::spawn_validator_node, validator_node_cli::create_key, TariWorld};
 use libp2p::Multiaddr;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
@@ -35,11 +29,13 @@ async fn start_validator_node(world: &mut TariWorld, vn_name: String, bn_name: S
         wallet_daemon_name,
         format!("{}_claim_fee", vn_name),
     )
-    .await;
+        .await;
     world.validator_nodes.insert(vn_name, vn);
 }
 
-#[given(expr = "a seed validator node {word} connected to base node {word} and wallet daemon {word}")]
+#[given(
+    expr = "a seed validator node {word} connected to base node {word} and wallet daemon {word}"
+)]
 async fn start_seed_vn_without_claim_fee(
     world: &mut TariWorld,
     seed_vn_name: String,
@@ -53,7 +49,7 @@ async fn start_seed_vn_without_claim_fee(
         wallet_daemon_name,
         format!("{}_claim_fee", &seed_vn_name),
     )
-    .await;
+        .await;
 }
 
 #[given(
@@ -74,7 +70,7 @@ async fn start_seed_validator_node(
         wallet_daemon_name,
         claim_fee_key_name,
     )
-    .await;
+        .await;
     // Ensure any existing nodes know about the new seed node
     let mut client = validator.get_client();
     let ident = client.get_identity().await.unwrap();
@@ -115,7 +111,7 @@ async fn start_multiple_validator_nodes(world: &mut TariWorld, num_nodes: u64, b
             wallet_name.clone(),
             format!("{}_claim_fee", vn_name),
         )
-        .await;
+            .await;
         world.validator_nodes.insert(vn_name, vn);
     }
 }
@@ -182,6 +178,33 @@ pub async fn send_vn_registration_with_claim_wallet(world: &mut TariWorld, vn_na
     world.mark_point_in_logs("after register_validator_node");
 }
 
+#[when(expr = "wallet daemon {word} publishes the template \"{word}\" using account {word}")]
+async fn publish_template(
+    world: &mut TariWorld,
+    wallet_daemon_name: String,
+    template_name: String,
+    account_name: String,
+) {
+    world.mark_point_in_logs("Start publishing template");
+    let template_address = match template::publish_template(world, wallet_daemon_name, account_name, template_name.clone()).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            println!("publish_template error = {}", e);
+            panic!("publish_template error = {}", e);
+        }
+    };
+    assert!(!template_address.is_empty());
+
+    // store the template address for future reference
+    let registered_template = RegisteredTemplate {
+        name: template_name.clone(),
+        address: template_address,
+    };
+    world.templates.insert(template_name, registered_template);
+
+    world.mark_point_in_logs("End publishing template");
+}
+
 #[when(expr = "base wallet {word} registers the template \"{word}\"")]
 async fn register_template(world: &mut TariWorld, wallet_name: String, template_name: String) {
     world.mark_point_in_logs("Start register template");
@@ -190,7 +213,7 @@ async fn register_template(world: &mut TariWorld, wallet_name: String, template_
         Err(e) => {
             println!("register_template error = {}", e);
             panic!("register_template error = {}", e);
-        },
+        }
     };
     assert!(!template_address.is_empty());
 
@@ -354,7 +377,7 @@ async fn then_validator_node_has_state_at(
                     println!("Failed to get state: {}", e);
                     panic!("Failed to get state: {}", e);
                 }
-            },
+            }
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -557,7 +580,7 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
         },
         notify::Config::default(),
     )
-    .unwrap();
+        .unwrap();
 
     watcher.watch(&l1_tx_path, notify::RecursiveMode::NonRecursive).unwrap();
 
@@ -585,7 +608,7 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
                     Err(err) => {
                         eprintln!("Error deserializing eviction proof: {}", err);
                         continue;
-                    },
+                    }
                 };
                 if *transaction_def.payload.node_to_evict() != evict_vn.public_key {
                     panic!(

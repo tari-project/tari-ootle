@@ -1,8 +1,9 @@
 //  Copyright 2022 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-use std::path::PathBuf;
-
+use crate::wallet_daemon_cli::get_auth_wallet_daemon_client;
+use crate::TariWorld;
+use anyhow::anyhow;
 use minotari_app_grpc::tari_rpc::{
     template_type,
     BuildInfo,
@@ -10,16 +11,81 @@ use minotari_app_grpc::tari_rpc::{
     TemplateType,
     WasmInfo,
 };
+use std::path::PathBuf;
 use tari_dan_engine::wasm::compile::compile_template;
+use tari_engine_types::commit_result::TransactionResult;
+use tari_engine_types::substate::SubstateId;
 use tari_engine_types::{hashing::template_hasher32, TemplateAddress};
 use tari_template_lib::Hash;
-
-use crate::TariWorld;
+use tari_wallet_daemon_client::types::{PublishTemplateRequest, TransactionWaitResultRequest};
+use tari_wallet_daemon_client::ComponentAddressOrName;
 
 #[derive(Debug)]
 pub struct RegisteredTemplate {
     pub name: String,
     pub address: TemplateAddress,
+}
+
+pub async fn publish_template(
+    world: &mut TariWorld,
+    wallet_daemon_name: String,
+    account_name: String,
+    template_name: String,
+) -> anyhow::Result<TemplateAddress> {
+    // compile and load wasm
+    compile_wasm_template(template_name.clone())?;
+    let wasm_file_path = get_template_wasm_path(template_name.clone());
+    let wasm_binary = tokio::fs::read(&wasm_file_path).await?;
+
+    // send publish template request
+    let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
+    let response = client.publish_template(PublishTemplateRequest {
+        binary: wasm_binary,
+        fee_account: Some(ComponentAddressOrName::Name(account_name)),
+        max_fee: 1_000_000,
+        detect_inputs: true,
+        dry_run: false,
+    }).await?;
+
+    let tx_resp = client
+        .wait_transaction_result(TransactionWaitResultRequest {
+            transaction_id: response.transaction_id,
+            timeout_secs: Some(60 * 5),
+        })
+        .await?;
+
+    if tx_resp.timed_out {
+        return Err(anyhow!(format!("Transaction timed out: {}", response.transaction_id)));
+    }
+
+    let finalize_result = tx_resp.result.ok_or(
+        anyhow!(format!("Missing transaction result: {}", response.transaction_id))
+    )?;
+    if !matches!(finalize_result.result, TransactionResult::Accept(_)) {
+        let error_status = match finalize_result.result {
+            TransactionResult::AcceptFeeRejectRest(_, reason)
+            | TransactionResult::Reject(reason) => {
+                format!("Status: {}, Reason: {}", tx_resp.status, reason)
+            }
+            TransactionResult::Accept(_) => String::new(), // does not happen here
+        };
+        return Err(anyhow!(format!("Invalid transaction {}: {error_status:?}", response.transaction_id)));
+    }
+
+    // look for the new UP template substate
+    let mut result = None;
+    if let TransactionResult::Accept(diff) = finalize_result.result {
+        for (substate_id, _) in diff.up_iter() {
+            if let SubstateId::Template(addr) = substate_id {
+                result = Some(addr.as_hash());
+                break;
+            }
+        }
+    }
+
+    let template_id = result.ok_or(anyhow!("Missing published template in substates!"))?;
+
+    Ok(TemplateAddress::try_from_vec(template_id.to_vec())?)
 }
 
 pub async fn send_template_registration(

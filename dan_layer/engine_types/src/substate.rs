@@ -21,6 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
+    any,
     fmt::{Display, Formatter},
     str::FromStr,
 };
@@ -31,13 +32,8 @@ use tari_bor::{decode, decode_exact, encode, BorError};
 use tari_common_types::types::FixedHash;
 use tari_template_lib::{
     models::{
-        ComponentAddress,
-        NonFungibleAddress,
-        NonFungibleIndexAddress,
-        ObjectKey,
-        ResourceAddress,
-        UnclaimedConfidentialOutputAddress,
-        VaultId,
+        ComponentAddress, NonFungibleAddress, NonFungibleIndexAddress, ObjectKey, ResourceAddress,
+        UnclaimedConfidentialOutputAddress, VaultId,
     },
     prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
     Hash,
@@ -167,15 +163,15 @@ impl SubstateId {
     /// Returns true for any substate that has is "versionable" i.e. can have a version > 0, otherwise false.
     pub fn is_versioned(&self) -> bool {
         match self {
-            SubstateId::Component(_) |
-            SubstateId::Resource(_) |
-            SubstateId::Vault(_) |
-            SubstateId::NonFungibleIndex(_) |
-            SubstateId::Template(_) |
-            SubstateId::NonFungible(_) => true,
-            SubstateId::UnclaimedConfidentialOutput(_) |
-            SubstateId::TransactionReceipt(_) |
-            SubstateId::FeeClaim(_) => false,
+            SubstateId::Component(_)
+            | SubstateId::Resource(_)
+            | SubstateId::Vault(_)
+            | SubstateId::NonFungibleIndex(_)
+            | SubstateId::Template(_)
+            | SubstateId::NonFungible(_) => true,
+            SubstateId::UnclaimedConfidentialOutput(_)
+            | SubstateId::TransactionReceipt(_)
+            | SubstateId::FeeClaim(_) => false,
         }
     }
 
@@ -346,13 +342,135 @@ impl From<PublishedTemplateAddress> for SubstateId {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Could not convert substate ID variant '{substate_id}' to {expected}")]
+pub struct InvalidSubstateIdVariant {
+    pub substate_id: SubstateId,
+    pub expected: &'static str,
+}
+
 impl TryFrom<SubstateId> for ComponentAddress {
-    type Error = SubstateId;
+    type Error = InvalidSubstateIdVariant;
 
     fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
         match value {
             SubstateId::Component(addr) => Ok(addr),
-            _ => Err(value),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<SubstateId> for ResourceAddress {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
+        match value {
+            SubstateId::Resource(addr) => Ok(addr),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<SubstateId> for VaultId {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
+        match value {
+            SubstateId::Vault(addr) => Ok(addr),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<SubstateId> for NonFungibleAddress {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
+        match value {
+            SubstateId::NonFungible(addr) => Ok(addr),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<SubstateId> for NonFungibleIndexAddress {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
+        match value {
+            SubstateId::NonFungibleIndex(addr) => Ok(addr),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<SubstateId> for UnclaimedConfidentialOutputAddress {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
+        match value {
+            SubstateId::UnclaimedConfidentialOutput(addr) => Ok(addr),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<SubstateId> for FeeClaimAddress {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
+        match value {
+            SubstateId::FeeClaim(addr) => Ok(addr),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<SubstateId> for TransactionReceiptAddress {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
+        match value {
+            SubstateId::TransactionReceipt(addr) => Ok(addr),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<SubstateId> for PublishedTemplateAddress {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
+        match value {
+            SubstateId::Template(addr) => Ok(addr),
+            _ => Err(InvalidSubstateIdVariant {
+                substate_id: value,
+                expected: any::type_name::<Self>(),
+            }),
         }
     }
 }

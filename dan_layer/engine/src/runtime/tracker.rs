@@ -37,7 +37,7 @@ use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     lock::LockFlag,
     logs::LogEntry,
-    substate::{SubstateId, SubstateValue},
+    substate::{InvalidSubstateIdVariant, SubstateId, SubstateValue},
     virtual_substate::VirtualSubstates,
     TemplateAddress,
 };
@@ -163,8 +163,11 @@ impl StateTracker {
             let component_address = match address_allocation {
                 Some(address_allocation) => {
                     let addr = state.take_allocated_address(address_allocation.id())?;
-                    addr.try_into()
-                        .map_err(|address| RuntimeError::AddressAllocationTypeMismatch { address })?
+                    addr.try_into().map_err(|error: InvalidSubstateIdVariant| {
+                        RuntimeError::AddressAllocationTypeMismatch {
+                            address: error.substate_id,
+                        }
+                    })?
                 },
                 None => state.id_provider()?.new_component_address(template_address, None)?,
             };

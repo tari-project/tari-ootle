@@ -205,9 +205,10 @@ pub trait RocksdbModel {
 
     fn multi_get(tx: &Transaction<'_, TransactionDB>, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Vec<Self::Item>, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
-        if let Some(key_prefix) = key_prefix_opt {
-            options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
-        }
+
+        let default_key_prefix = format!("{}_", Self::key_prefix());
+        let key_prefix = key_prefix_opt.unwrap_or(&default_key_prefix);
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
 
         let iterator_mode = match ordering {
             Ordering::Ascending => rocksdb::IteratorMode::Start,

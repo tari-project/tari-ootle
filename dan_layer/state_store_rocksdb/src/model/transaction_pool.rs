@@ -20,78 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
-
-use indexmap::IndexSet;
-use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
-use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{NodeHeight, VersionedSubstateId};
-use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
-use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof};
-use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
-use tari_utilities::ByteArray;
-
+use tari_dan_storage::consensus_models::TransactionPoolRecord;
+use tari_transaction::TransactionId;
 
 use crate::error::RocksDbStorageError;
 
-use super::transaction_pool_state_update::TransactionPoolStateUpdateModel;
+use super::{model::RocksdbModel, transaction_pool_state_update::TransactionPoolStateUpdateModel};
 
-const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
-
-
-pub(crate) struct TransactionPoolModel {}
+pub struct TransactionPoolModel {}
 
 impl TransactionPoolModel {
-    fn key(tx_id: &TransactionId) -> String {
-        format!("transactionpool_{}", tx_id.to_string())
-    }
-
-    fn encode(value: &TransactionPoolRecord) -> Result<Vec<u8>, RocksDbStorageError> {
-        let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
-        Ok(bytes)
-    }
-
-    fn decode(bytes: Vec<u8>) -> Result<TransactionPoolRecord, RocksDbStorageError> {
-        let (value, _): (TransactionPoolRecord, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
-        Ok(value)
-    }
-
-    pub fn put(tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &TransactionPoolRecord) -> Result<(), RocksDbStorageError> {
-        let key = Self::key(value.transaction_id());
-        let value = Self::encode(value)?;
-        tx.put(key, value)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
-
-        Ok(())
-    }
-
-    pub fn get(tx: &Transaction<'_, TransactionDB>, operation: &'static str, tx_id: &TransactionId) -> Result<TransactionPoolRecord, RocksDbStorageError> {
-        let key = Self::key(tx_id);
-        let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
-        let block = Self::decode(bytes)?;
-        Ok(block)
-    }
-
-    pub fn get_all(tx: &Transaction<'_, TransactionDB>, operation: &'static str) -> Result<Vec<TransactionPoolRecord>, RocksDbStorageError> {
-        let mut options = rocksdb::ReadOptions::default();
-        options.set_iterate_range(rocksdb::PrefixRange("transactionpool_".as_bytes()));
-        let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
-        let values = iterator.map(|item| {
-            // TODO: properly handle errors and avoid unwraps
-            let (key, value) = item.unwrap();
-            let value = Self::decode(value.to_vec()).unwrap();
-            value
-        })
-        .collect();
-        Ok(values)
+    pub fn key_from_transaction_id(tx_id: &TransactionId) -> String {
+        format!("{}_{}", Self::key_prefix(), tx_id)
     }
 
     pub fn try_convert(
@@ -129,5 +69,21 @@ impl TransactionPoolModel {
             remote_decision,
             is_ready,
         ))
+    }
+}
+
+impl RocksdbModel for TransactionPoolModel {
+    type Item = TransactionPoolRecord;
+
+    fn key_prefix() -> &'static str {
+        "transactionpool"
+    }
+
+    fn key(item: &Self::Item) -> String {
+        Self::key_from_transaction_id(item.transaction_id())
+    }
+
+    fn column_families() -> Vec<&'static str> {
+        vec![]
     }
 }

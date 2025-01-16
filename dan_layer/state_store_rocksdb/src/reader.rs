@@ -1350,7 +1350,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             updates.values().map(|v| v.block_id.clone()).collect::<Vec<_>>(),
         );
 
-        let rec = TransactionPoolModel::get(&self.tx, "transaction_pool_get_for_blocks", transaction_id)?;
+        let key = TransactionPoolModel::key_from_transaction_id(&transaction_id);
+        let rec = TransactionPoolModel::get(&self.tx, "transaction_pool_get_for_blocks", &key)?;
         let rec = TransactionPoolModel::try_convert(&rec, updates.swap_remove(&transaction_id.to_string()))?;
 
         Ok(rec)
@@ -1375,19 +1376,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError> {
-        let txs = TransactionPoolModel::get_all(&self.tx, "transaction_pool_get_all")?;
+        let txs = TransactionPoolModel::multi_get(&self.tx, None, Ordering::Ascending)?;
         Ok(txs)
-        /*
-        use crate::schema::transaction_pool;
-        let txs = transaction_pool::table
-            .get_results::<sql_models::TransactionPoolRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_get_all",
-                source: e,
-            })?;
-        // TODO: need to get the updates - this is just used in JRPC so it doesnt matter too much
-        txs.into_iter().map(|tx| tx.try_convert(None)).collect()
-        */
     }
 
     fn transaction_pool_get_many_ready(

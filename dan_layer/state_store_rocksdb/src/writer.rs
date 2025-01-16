@@ -901,7 +901,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        Ok(TransactionPoolModel::put(tx, "transaction_pool_insert_new", &value)?)
+        Ok(TransactionPoolModel::put(self.db.clone(), tx, "transaction_pool_insert_new", &value)?)
     }
 
     fn transaction_pool_add_pending_update(
@@ -936,65 +936,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // accurate value without querying records in the updates table.
         // TODO: is it better to use a RocksDB merge operator?
         let transaction_id = update.transaction().transaction_id();
-        let mut transaction_pool_value = TransactionPoolModel::get(tx, operation, transaction_id)?;
+        let key = TransactionPoolModel::key_from_transaction_id(&transaction_id);
+        let mut transaction_pool_value = TransactionPoolModel::get(tx, operation, &key)?;
         transaction_pool_value.set_is_ready(update.is_ready_now());
         transaction_pool_value.set_pending_stage(Some(update.stage()));
-        TransactionPoolModel::put(tx, operation, &transaction_pool_value)?;
+        TransactionPoolModel::put(self.db.clone(), tx, operation, &transaction_pool_value)?;
 
         Ok(())
-
-        
-
-
-
-
-        /*
-        use crate::schema::{blocks, transaction_pool, transaction_pool_state_updates};
-
-        let transaction_id = serialize_hex(update.transaction_id());
-        let block_id = serialize_hex(block_id);
-
-        let values = (
-            transaction_pool_state_updates::block_id.eq(&block_id),
-            transaction_pool_state_updates::block_height.eq(blocks::table
-                .select(blocks::height)
-                .filter(blocks::block_id.eq(&block_id))
-                .single_value()
-                .assume_not_null()),
-            transaction_pool_state_updates::transaction_id.eq(&transaction_id),
-            transaction_pool_state_updates::evidence.eq(serialize_json(update.evidence())?),
-            transaction_pool_state_updates::stage.eq(update.stage().to_string()),
-            transaction_pool_state_updates::local_decision.eq(update.decision().to_string()),
-            transaction_pool_state_updates::remote_decision.eq(update.remote_decision().map(|d| d.to_string())),
-            transaction_pool_state_updates::transaction_fee.eq(update.transaction_fee() as i64),
-            transaction_pool_state_updates::leader_fee.eq(update.leader_fee().map(serialize_json).transpose()?),
-            transaction_pool_state_updates::is_ready.eq(update.is_ready()),
-        );
-
-        diesel::insert_into(transaction_pool_state_updates::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_add_pending_update",
-                source: e,
-            })?;
-
-        // Set is_ready and pending_stage to the updated values. This allows has_uncommitted_transactions to return an
-        // accurate value without querying records in the updates table.
-        diesel::update(transaction_pool::table)
-            .filter(transaction_pool::transaction_id.eq(&transaction_id))
-            .set((
-                transaction_pool::is_ready.eq(update.is_ready_now()),
-                transaction_pool::pending_stage.eq(update.stage().to_string()),
-            ))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_add_pending_update",
-                source: e,
-            })?;
-
-        Ok(())
-        */
     }
 
     fn transaction_pool_remove(&mut self, transaction_id: &TransactionId) -> Result<(), StorageError> {
@@ -1108,7 +1056,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             };
 
             // TODO: use instead the rocksdb "merge" operator for better performance?
-            let mut tx_pool_value = TransactionPoolModel::get(tx, operation, &update.transaction_id)?;
+            let key = TransactionPoolModel::key_from_transaction_id(&update.transaction_id);
+            let mut tx_pool_value = TransactionPoolModel::get(tx, operation, &key)?;
             tx_pool_value.set_stage(update.stage);
             tx_pool_value.set_local_decision(update.local_decision);
             tx_pool_value.set_transaction_fee(update.transaction_fee);
@@ -1122,84 +1071,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             }
             // TODO: tx_pool_value.set_confirm_stage?
 
-            TransactionPoolModel::put(tx, operation, &tx_pool_value)?;
+            TransactionPoolModel::put(self.db.clone(), tx, operation, &tx_pool_value)?;
         }
 
         Ok(())
-
-        /*
-        use crate::schema::{transaction_pool, transaction_pool_state_updates};
-
-        let updates = transaction_pool_state_updates::table
-            .filter(transaction_pool_state_updates::block_id.eq(serialize_hex(new_locked_block.block_id())))
-            .filter(transaction_pool_state_updates::is_applied.eq(false))
-            .get_results::<sql_models::TransactionPoolStateUpdate>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_confirm_all_transitions",
-                source: e,
-            })?;
-
-        debug!(
-            target: LOG_TARGET,
-            "transaction_pool_confirm_all_transitions: new_locked_block={}, {} updates",  new_locked_block, updates.len()
-        );
-
-        diesel::update(transaction_pool_state_updates::table)
-            .filter(transaction_pool_state_updates::id.eq_any(updates.iter().map(|u| u.id)))
-            .filter(transaction_pool_state_updates::block_height.le(new_locked_block.height().as_u64() as i64))
-            .set(transaction_pool_state_updates::is_applied.eq(true))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_confirm_all_transitions",
-                source: e,
-            })?;
-
-        #[derive(AsChangeset, Default)]
-        #[diesel(table_name = transaction_pool)]
-        struct TransactionPoolChangeSet {
-            stage: Option<String>,
-            local_decision: Option<String>,
-            transaction_fee: Option<i64>,
-            leader_fee: Option<Option<String>>,
-            evidence: Option<Option<String>>,
-            is_ready: Option<bool>,
-            confirm_stage: Option<Option<String>>,
-            remote_decision: Option<Option<String>>,
-            updated_at: Option<PrimitiveDateTime>,
-        }
-
-        for update in updates {
-            let confirm_stage = match update.stage.as_str() {
-                "LocalPrepared" => Some(Some(TransactionPoolConfirmedStage::ConfirmedPrepared.to_string())),
-                "LocalAccepted" => Some(Some(TransactionPoolConfirmedStage::ConfirmedAccepted.to_string())),
-                _ => None,
-            };
-            let changeset = TransactionPoolChangeSet {
-                stage: Some(update.stage),
-                local_decision: Some(update.local_decision),
-                transaction_fee: Some(update.transaction_fee),
-                // Only update if Some. This isn't technically necessary since leader fee should be in every update, but
-                // it does shorten the update query FWIW.
-                leader_fee: update.leader_fee.map(Some),
-                evidence: Some(Some(update.evidence)),
-                is_ready: Some(update.is_ready),
-                confirm_stage,
-                remote_decision: Some(update.remote_decision),
-                updated_at: Some(now()),
-            };
-
-            diesel::update(transaction_pool::table)
-                .filter(transaction_pool::transaction_id.eq(&update.transaction_id))
-                .set(changeset)
-                .execute(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "transaction_pool_confirm_all_transitions",
-                    source: e,
-                })?;
-        }
-
-        Ok(())
-        */
     }
 
     fn transaction_pool_state_updates_remove_any_by_block_id(

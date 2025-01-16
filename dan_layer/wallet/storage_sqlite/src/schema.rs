@@ -6,9 +6,9 @@ diesel::table! {
         name -> Nullable<Text>,
         address -> Text,
         owner_key_index -> BigInt,
+        is_default -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
-        is_default -> Bool,
     }
 }
 
@@ -49,6 +49,7 @@ diesel::table! {
         id -> Integer,
         vault_id -> Integer,
         nft_id -> Text,
+        resource_id -> Text,
         data -> Text,
         mutable_data -> Text,
         is_burned -> Bool,
@@ -70,9 +71,9 @@ diesel::table! {
         status -> Text,
         locked_at -> Nullable<Timestamp>,
         locked_by_proof -> Nullable<Integer>,
+        encrypted_data -> Binary,
         created_at -> Timestamp,
         updated_at -> Timestamp,
-        encrypted_data -> Binary,
     }
 }
 
@@ -118,12 +119,12 @@ diesel::table! {
         dry_run -> Bool,
         min_epoch -> Nullable<BigInt>,
         max_epoch -> Nullable<BigInt>,
-        created_at -> Timestamp,
-        updated_at -> Timestamp,
         executed_time_ms -> Nullable<BigInt>,
         finalized_time_ms -> Nullable<BigInt>,
         required_substates -> Text,
         new_account_info -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 

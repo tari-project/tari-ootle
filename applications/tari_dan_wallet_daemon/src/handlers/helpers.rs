@@ -3,10 +3,10 @@
 
 use std::fmt::Display;
 
-use tari_dan_common_types::optional::Optional;
+use tari_dan_common_types::{optional::Optional, VersionedSubstateId};
 use tari_dan_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
-    models::{Account, VersionedSubstateId},
+    models::Account,
     DanWalletSdk,
 };
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
@@ -95,7 +95,7 @@ pub fn get_account_with_inputs(
 
     // add the input for the source account component substate
     let account_substate = sdk.substate_api().get_substate(&account.address)?;
-    inputs.push(account_substate.address);
+    inputs.push(account_substate.substate_id);
 
     // Add all versioned account child addresses as inputs
     let child_addresses = sdk.substate_api().load_dependent_substates(&[&account.address])?;

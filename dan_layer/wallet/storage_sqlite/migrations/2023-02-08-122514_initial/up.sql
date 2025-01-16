@@ -46,6 +46,10 @@ CREATE TABLE transactions
     dry_run                   BOOLEAN  NOT NULL,
     min_epoch                 BIGINT   NULL,
     max_epoch                 BIGINT   NULL,
+    executed_time_ms          bigint   NULL,
+    finalized_time_ms         bigint   NULL,
+    required_substates        text     NOT NULL default '[]',
+    new_account_info          text     NULL,
     created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -76,6 +80,7 @@ CREATE TABLE accounts
     name            TEXT     NULL,
     address         TEXT     NOT NULL,
     owner_key_index BIGINT   NOT NULL,
+    is_default      BOOLEAN  NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -116,6 +121,7 @@ CREATE TABLE outputs
     status                      TEXT     NOT NULL,
     locked_at                   DATETIME NULL,
     locked_by_proof             INTEGER  NULL,
+    encrypted_data              blob     NOT NULL DEFAULT '',
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -134,3 +140,28 @@ CREATE TABLE proofs
     created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Auth token, we don't store the auth token, the token in this table is the jwt token that is granted when user accepts the auth login request.
+CREATE TABLE auth_status
+(
+    id           INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    user_decided BOOLEAN                           NOT NULL,
+    granted      BOOLEAN                           NOT NULL,
+    token        TEXT                              NULL,
+    revoked      BOOLEAN                           NOT NULL DEFAULT FALSE
+);
+
+-- NFTs
+CREATE TABLE non_fungible_tokens
+(
+    id           INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    vault_id     INTEGER  NOT NULL REFERENCES vaults (id),
+    nft_id       TEXT     NOT NULL,
+    resource_id  text     NOT NULL,
+    data         TEXT     NOT NULL,
+    mutable_data TEXT     NOT NULL,
+    is_burned    BOOLEAN  NOT NULL,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX nfts_uniq_address ON non_fungible_tokens (nft_id);

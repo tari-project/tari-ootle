@@ -32,12 +32,12 @@ pub struct Transaction {
     pub is_dry_run: bool,
     pub min_epoch: Option<i64>,
     pub max_epoch: Option<i64>,
-    pub updated_at: NaiveDateTime,
-    pub created_at: NaiveDateTime,
     pub executed_time_ms: Option<i64>,
     pub finalized_time_ms: Option<i64>,
     pub required_substates: String,
     pub new_account_info: Option<String>,
+    pub updated_at: NaiveDateTime,
+    pub created_at: NaiveDateTime,
 }
 
 impl Transaction {

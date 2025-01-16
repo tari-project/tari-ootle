@@ -8,6 +8,7 @@ use tari_dan_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
     SubstateRequirement,
+    VersionedSubstateId,
 };
 use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
@@ -18,7 +19,7 @@ use tari_engine_types::{
 use tari_transaction::TransactionId;
 
 use crate::{
-    models::{SubstateModel, VersionedSubstateId},
+    models::SubstateModel,
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
@@ -71,8 +72,8 @@ where
         for parent_addr in parents {
             let parent = tx.substates_get(parent_addr)?;
             let children = tx.substates_get_children(parent_addr)?;
-            substate_addresses.push(parent.address);
-            substate_addresses.extend(children.into_iter().map(|s| s.address));
+            substate_addresses.push(parent.substate_id);
+            substate_addresses.extend(children.into_iter().map(|s| s.substate_id));
         }
         Ok(substate_addresses)
     }
@@ -81,35 +82,46 @@ where
         &self,
         parents: &[SubstateId],
     ) -> Result<Vec<SubstateRequirement>, SubstateApiError> {
-        let mut substate_addresses = HashMap::with_capacity(parents.len());
+        let mut substate_ids = HashMap::with_capacity(parents.len());
 
         for parent_addr in parents {
             match self.store.with_read_tx(|tx| tx.substates_get(parent_addr)).optional()? {
                 Some(parent) => {
-                    substate_addresses.insert(parent.address.substate_id, parent.address.version);
-                    let children = self.store.with_read_tx(|tx| tx.substates_get_children(parent_addr))?;
-                    substate_addresses.extend(children.into_iter().map(|s| (s.address.substate_id, s.address.version)));
+                    substate_ids.insert(parent.substate_id.substate_id, Some(parent.substate_id.version));
+                    self.store.with_read_tx(|tx| {
+                        for child in tx.substates_get_children(parent_addr)? {
+                            if child.substate_id.substate_id.is_vault() {
+                                // Ensure that the associated resource is also included
+                                if let Some(vault) = tx.vaults_get(&child.substate_id.substate_id).optional()? {
+                                    substate_ids.insert(vault.resource_address.into(), None);
+                                }
+                            }
+
+                            if let Some(addr) = child.substate_id.substate_id.as_non_fungible_address() {
+                                // Ensure that the associated resource is also included
+                                substate_ids.insert((*addr.resource_address()).into(), None);
+                            }
+                            substate_ids.insert(child.substate_id.substate_id, Some(child.substate_id.version));
+                        }
+                        Ok::<_, WalletStorageError>(())
+                    })?;
                 },
                 None => {
                     let ValidatorScanResult { address, substate, .. } =
                         self.scan_for_substate(parent_addr, None).await?;
-                    substate_addresses.insert(address.substate_id.clone(), address.version);
-
-                    if substate_addresses.contains_key(&address.substate_id) {
-                        continue;
-                    }
+                    substate_ids.insert(address.substate_id.clone(), Some(address.version));
 
                     match substate {
                         SubstateValue::Component(data) => {
                             let value = IndexedWellKnownTypes::from_value(&data.body.state)?;
                             for addr in value.referenced_substates() {
-                                if substate_addresses.contains_key(&addr) {
+                                if substate_ids.contains_key(&addr) {
                                     continue;
                                 }
 
                                 let ValidatorScanResult { address: addr, .. } =
                                     self.scan_for_substate(&addr, None).await?;
-                                substate_addresses.insert(addr.substate_id, addr.version);
+                                substate_ids.insert(addr.substate_id, Some(addr.version));
                             }
                         },
                         SubstateValue::Resource(_) => {},
@@ -117,31 +129,46 @@ where
                             let tx_receipt_addr = SubstateId::TransactionReceipt(TransactionReceiptAddress::from_hash(
                                 tx_receipt.transaction_hash,
                             ));
-                            if substate_addresses.contains_key(&tx_receipt_addr) {
+                            if substate_ids.contains_key(&tx_receipt_addr) {
                                 continue;
                             }
                             let ValidatorScanResult { address: addr, .. } =
                                 self.scan_for_substate(&tx_receipt_addr, None).await?;
-                            substate_addresses.insert(addr.substate_id, addr.version);
+                            substate_ids.insert(addr.substate_id, Some(addr.version));
                         },
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
-                            if substate_addresses.contains_key(&resx_addr) {
+                            if substate_ids.contains_key(&resx_addr) {
                                 continue;
                             }
                             let ValidatorScanResult { address: addr, .. } =
                                 self.scan_for_substate(&resx_addr, None).await?;
-                            substate_addresses.insert(addr.substate_id, addr.version);
+                            substate_ids.insert(addr.substate_id, Some(addr.version));
                         },
-                        SubstateValue::NonFungible(_) => {},
+                        SubstateValue::NonFungible(_) => {
+                            let nft_addr = address.substate_id.as_non_fungible_address().ok_or_else(|| {
+                                SubstateApiError::InvalidValidatorNodeResponse(format!(
+                                    "NonFungible substate does not have a valid address {}",
+                                    address
+                                ))
+                            })?;
+
+                            let resx_addr = SubstateId::Resource(*nft_addr.resource_address());
+                            if substate_ids.contains_key(&resx_addr) {
+                                continue;
+                            }
+                            let ValidatorScanResult { address: addr, .. } =
+                                self.scan_for_substate(&resx_addr, None).await?;
+                            substate_ids.insert(addr.substate_id, Some(addr.version));
+                        },
                         SubstateValue::NonFungibleIndex(addr) => {
                             let resx_addr = SubstateId::Resource(*addr.referenced_address().resource_address());
-                            if substate_addresses.contains_key(&resx_addr) {
+                            if substate_ids.contains_key(&resx_addr) {
                                 continue;
                             }
                             let ValidatorScanResult { address: addr, .. } =
                                 self.scan_for_substate(&resx_addr, None).await?;
-                            substate_addresses.insert(addr.substate_id, addr.version);
+                            substate_ids.insert(addr.substate_id, Some(addr.version));
                         },
                         SubstateValue::UnclaimedConfidentialOutput(_) => {},
                         SubstateValue::FeeClaim(_) => {},
@@ -151,9 +178,9 @@ where
             }
         }
 
-        Ok(substate_addresses
+        Ok(substate_ids
             .into_iter()
-            .map(|(address, version)| SubstateRequirement::with_version(address, version))
+            .map(|(substate_id, version)| SubstateRequirement::new(substate_id, version))
             .collect())
     }
 

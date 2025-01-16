@@ -82,8 +82,4 @@ impl RocksdbModel for TransactionPoolModel {
     fn key(item: &Self::Item) -> String {
         Self::key_from_transaction_id(item.transaction_id())
     }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![]
-    }
 }

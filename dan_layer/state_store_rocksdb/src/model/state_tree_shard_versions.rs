@@ -50,8 +50,4 @@ impl RocksdbModel for StateTreeShardVersionModel {
     fn key(item: &Self::Item) -> String {
         Self::key_from_shard(&item.shard)
     }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![]
-    }
 }

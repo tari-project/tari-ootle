@@ -69,7 +69,11 @@ pub trait RocksdbModel {
 
     fn key(item: &Self::Item) -> String;
 
-    fn column_families() -> Vec<&'static str>;
+    fn column_families() -> Vec<&'static str> {
+        // It's up to concrete models to override this method
+        // We provide a default implementation to simplify all the models that do not have column families
+        vec![]
+    }
 
     fn encode(value: &Self::Item) -> Result<Vec<u8>, RocksDbStorageError> {
         let bytes = bincode_encode(value)?;

@@ -68,8 +68,4 @@ impl RocksdbModel for TransactionPoolStateUpdateModel {
         let tx_id = value.transaction_id.to_string();
         format!("{}_{}_{}_{}", Self::key_prefix(), block_id, block_height_desc, tx_id)
     }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![]
-    }
 }

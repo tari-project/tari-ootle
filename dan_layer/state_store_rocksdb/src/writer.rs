@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}, reader::RocksDbStateStoreReadTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction};
 
 use bincode;
 
@@ -917,7 +917,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let block = BlockModel::get(tx, operation, &key)?;
 
         // insert the update
-        let value = TransactionPoolStateUpdateModel {
+        let value = TransactionPoolStateUpdateModelData {
             block_id: *block_id,
             block_height: block.height(),
             is_applied: false,
@@ -1026,8 +1026,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
         // fetch all the transaction updates that are not applied yet for the new block 
-        let key_prefix = new_locked_block.block_id().to_string();
-        let mut updates: Vec<TransactionPoolStateUpdateModel> = TransactionPoolStateUpdateModel::multi_get(tx, operation, &key_prefix)?
+        let key_prefix = TransactionPoolStateUpdateModel::key_prefix_by_block_id(new_locked_block.block_id());
+        let mut updates: Vec<TransactionPoolStateUpdateModelData> = TransactionPoolStateUpdateModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?
             // TODO: do the filtering at the rocksdb query (use a dedicated column family?)
             .into_iter()
             .filter(|u| {

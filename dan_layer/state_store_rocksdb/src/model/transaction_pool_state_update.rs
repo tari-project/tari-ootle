@@ -20,24 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
-
-use indexmap::IndexSet;
-use rocksdb::{AsColumnFamilyRef, ColumnFamily, ColumnFamilyDescriptor, ColumnFamilyRef, Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{NodeHeight, VersionedSubstateId};
-use tari_dan_storage::{consensus_models::{Block, BlockId, BlockTransactionExecution, Decision, Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedSubstateIdLockIntent}, Ordering};
-use tari_engine_types::{commit_result::{ExecuteResult, RejectReason}, confidential::validate_elgamal_verifiable_balance_proof};
-use tari_transaction::{TransactionId, TransactionSignature, UnsignedTransaction};
-use tari_utilities::ByteArray;
+use tari_dan_common_types::NodeHeight;
+use tari_dan_storage::consensus_models::{BlockId, Decision, Evidence, LeaderFee, TransactionPoolStage};
+use tari_transaction::TransactionId;
 
-
-use crate::error::RocksDbStorageError;
-
-const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
-
+use super::model::RocksdbModel;
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct TransactionPoolStateUpdateModel {
+pub struct TransactionPoolStateUpdateModelData {
     pub block_id: BlockId,
     pub block_height: NodeHeight,
     pub transaction_id: TransactionId,
@@ -51,53 +41,35 @@ pub(crate) struct TransactionPoolStateUpdateModel {
     pub is_applied: bool,
 }
 
-impl TransactionPoolStateUpdateModel {
-    pub const KEY_PREFIX: &str = "transactionpoolpendingupdate_";
+pub struct TransactionPoolStateUpdateModel {}
 
-    fn key(value: &TransactionPoolStateUpdateModel) -> String {
+impl TransactionPoolStateUpdateModel {
+    pub fn key_prefix_by_block_id(block_id: &BlockId) -> String {
+        format!("{}_{}_", Self::key_prefix(), block_id)
+    }
+
+    pub fn key_prefix_by_block_id_str(block_id: &str) -> String {
+        format!("{}_{}_", Self::key_prefix(), block_id)
+    }
+}
+
+impl RocksdbModel for TransactionPoolStateUpdateModel {
+    type Item = TransactionPoolStateUpdateModelData;
+
+    fn key_prefix() -> &'static str {
+        "transactionpoolpendingupdate"
+    }
+
+    fn key(value: &Self::Item) -> String {
         // the key format allows us to query all updates by block prefix, ordered by height DESC
         let block_id =  value.block_id.to_string();
         // TODO: is there a cleaner way to implement desc key ordering in RocksDb?
         let block_height_desc = NodeHeight(u64::MAX) - value.block_height;
         let tx_id = value.transaction_id.to_string();
-        format!("{}_{}_{}_{}", Self::KEY_PREFIX, block_id, block_height_desc, tx_id)
+        format!("{}_{}_{}_{}", Self::key_prefix(), block_id, block_height_desc, tx_id)
     }
 
-    fn encode(value: &TransactionPoolStateUpdateModel) -> Result<Vec<u8>, RocksDbStorageError> {
-        let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
-        Ok(bytes)
-    }
-
-    fn decode(bytes: Vec<u8>) -> Result<TransactionPoolStateUpdateModel, RocksDbStorageError> {
-        let (value, _): (TransactionPoolStateUpdateModel, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
-        Ok(value)
-    }
-
-    pub fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &TransactionPoolStateUpdateModel) -> Result<(), RocksDbStorageError> {
-        let key = Self::key(value);
-        let value_bytes = Self::encode(value)?;
-        tx.put(key, value_bytes)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
-
-        Ok(())
-    }
-
-    pub fn multi_get(tx: &Transaction<'_, TransactionDB>, _operation: &'static str, prefix: &str) -> Result<Vec<TransactionPoolStateUpdateModel>, RocksDbStorageError> {
-        let mut options = rocksdb::ReadOptions::default();
-        let prefix = format!("{}_{}", Self::KEY_PREFIX, prefix);
-        options.set_iterate_range(rocksdb::PrefixRange(prefix.as_bytes()));
-
-        let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
-        let values = iterator.map(|item| {
-            // TODO: properly handle errors and avoid unwraps
-            let (_, value) = item.unwrap();
-            let value = Self::decode(value.to_vec()).unwrap();
-            value
-        })
-        .collect();
-        Ok(values)
+    fn column_families() -> Vec<&'static str> {
+        vec![]
     }
 }

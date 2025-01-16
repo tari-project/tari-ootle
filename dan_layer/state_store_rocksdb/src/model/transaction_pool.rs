@@ -25,7 +25,7 @@ use tari_transaction::TransactionId;
 
 use crate::error::RocksDbStorageError;
 
-use super::{model::RocksdbModel, transaction_pool_state_update::TransactionPoolStateUpdateModel};
+use super::{model::RocksdbModel, transaction_pool_state_update::TransactionPoolStateUpdateModelData};
 
 pub struct TransactionPoolModel {}
 
@@ -36,7 +36,7 @@ impl TransactionPoolModel {
 
     pub fn try_convert(
         value: &TransactionPoolRecord,
-        update: Option<TransactionPoolStateUpdateModel>,
+        update: Option<TransactionPoolStateUpdateModelData>,
     ) -> Result<TransactionPoolRecord, RocksDbStorageError> {
         let mut evidence = value.evidence().clone();
         let mut pending_stage = None;

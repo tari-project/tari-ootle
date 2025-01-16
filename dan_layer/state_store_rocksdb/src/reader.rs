@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::TransactionPoolStateUpdateModel}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -142,7 +142,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         from_block_id: &BlockId,
         to_block_id: &BlockId,
         transaction_ids: ITx,
-    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModel>, RocksDbStorageError>
+    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModelData>, RocksDbStorageError>
     where
         ITx: Iterator<Item = &'i str> + ExactSizeIterator,
     {
@@ -180,14 +180,14 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         &self,
         transaction_ids: ITx,
         block_ids: IBlk,
-    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModel>, RocksDbStorageError>
+    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModelData>, RocksDbStorageError>
     {
         // TODO: optimize this query in RocksDB
         let transaction_ids: Vec<String> = transaction_ids.map(|id| id.to_string()).collect();
         let mut res = IndexMap::new();
         for block_id in block_ids {
-            let key_value = block_id.to_string();
-            let updates = TransactionPoolStateUpdateModel::multi_get( &self.tx, "get_ranked_transaction_atom_updates", &key_value)?;
+            let key_value = TransactionPoolStateUpdateModel::key_prefix_by_block_id_str(block_id);
+            let updates = TransactionPoolStateUpdateModel::multi_get( &self.tx, Some(&key_value), Ordering::Ascending)?;
             updates
                 .iter()
                 .filter(|u| {

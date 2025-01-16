@@ -770,7 +770,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let operation = "transactions_update";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        if !TransactionModel::key_exists(tx, operation, transaction_rec.id())? {
+        let key = TransactionModel::key_from_transaction_id(transaction_rec.id());
+        if !TransactionModel::key_exists(tx, operation, &key)? {
             return Err(StorageError::NotFound {
                 item: "transaction",
                 key: transaction_rec.id().to_string(),

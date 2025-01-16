@@ -662,11 +662,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError> {
-        Ok(TransactionModel::get(&self.tx, "transactions_get", tx_id)?)
+        let key = TransactionModel::key_from_transaction_id(tx_id);
+        Ok(TransactionModel::get(&self.tx, "transactions_get", &key)?)
     }
 
     fn transactions_exists(&self, tx_id: &TransactionId) -> Result<bool, StorageError> {
-        Ok(TransactionModel::key_exists(&self.tx, "transactions_exists", tx_id)?)
+        let key = TransactionModel::key_from_transaction_id(tx_id);
+        Ok(TransactionModel::key_exists(&self.tx, "transactions_exists", &key)?)
     }
 
     fn transactions_get_any<'a, I: IntoIterator<Item = &'a TransactionId>>(
@@ -674,7 +676,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         tx_ids: I,
     ) -> Result<Vec<TransactionRecord>, StorageError> {
         let tx_ids = tx_ids.into_iter().collect();
-        Ok(TransactionModel::multi_get(&self.tx, "transactions_get_any", tx_ids)?)
+        Ok(TransactionModel::get_any(&self.tx, "transactions_get_any", tx_ids)?)
     }
 
     fn transactions_get_paginated(
@@ -687,7 +689,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // As this method is only used for testing, further RocksDb database optimizations are probably not worth it
 
         let mut transactions: Vec<TransactionRecord> =
-            TransactionModel::list(&self.tx)?
+            TransactionModel::multi_get(&self.tx, None, Ordering::Ascending)?
             .into_iter()
             .collect();
 

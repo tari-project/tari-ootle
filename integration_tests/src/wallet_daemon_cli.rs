@@ -836,7 +836,7 @@ pub async fn concurrent_call_component(
                             .result
                             .expect("no transaction result"),
                     );
-                },
+                }
                 Err(error) => bail!("Failed to submit transaction: {error:?}"),
             },
             Err(e) => bail!("Failed to get response from handler: {}", e),

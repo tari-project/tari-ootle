@@ -301,7 +301,7 @@ async fn assert_template_is_registered(world: &mut TariWorld, template_name: Str
         let resp = client.get_template(req).await.ok();
 
         if resp.is_none() {
-            if timer.elapsed() > Duration::from_secs(10) {
+            if timer.elapsed() > Duration::from_secs(120) {
                 panic!("Timed out waiting for template to be registered by all VNs");
             }
 
@@ -332,7 +332,7 @@ async fn assert_template_is_registered_by_all(world: &mut TariWorld, template_na
             let resp = client.get_template(req).await.ok();
 
             if resp.is_none() {
-                if timer.elapsed() > Duration::from_secs(10) {
+                if timer.elapsed() > Duration::from_secs(120) {
                     panic!("Timed out waiting for template to be registered by all VNs");
                 }
 

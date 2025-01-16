@@ -118,7 +118,7 @@ impl TariWorld {
                         log_file, point_name
                     ),
                 )
-                .unwrap();
+                    .unwrap();
             }
         }
 
@@ -165,7 +165,7 @@ impl TariWorld {
             .unwrap_or_else(|| panic!("Validator node {} not found", name))
     }
 
-    pub fn all_running_validators_iter(&self) -> impl Iterator<Item = &ValidatorNodeProcess> + Clone {
+    pub fn all_running_validators_iter(&self) -> impl Iterator<Item=&ValidatorNodeProcess> + Clone {
         self.validator_nodes
             .values()
             .chain(self.vn_seeds.values())

@@ -86,7 +86,7 @@ impl WalletProcess {
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     attempts += 1;
-                },
+                }
             }
         };
         WalletClient::with_interceptor(

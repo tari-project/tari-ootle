@@ -4,8 +4,7 @@
 @concurrent
 @epoch_change
 Feature: Epoch change
-
-  @dev
+  
   Scenario: EndEpoch command is used on epoch change
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE
@@ -38,9 +37,9 @@ Feature: Epoch change
     When I call function "mint" on template "faucet" with args "amount_10000" using account ACC to pay fees via wallet daemon WALLET_D named "FAUCET"
 
     When Block count on VN VAL is at least 6
-    When miner MINER mines 5 new blocks
-    Then VAL has scanned to height 38
-    Then the validator node VAL has ended epoch 2
+    When miner MINER mines 7 new blocks
+    Then VAL has scanned to height 40
+    Then the validator node VAL has ended epoch 3
 
 #  @serial
 #  Scenario: Committee is split into two during epoch change

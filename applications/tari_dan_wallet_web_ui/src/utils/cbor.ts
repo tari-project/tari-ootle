@@ -42,7 +42,7 @@ export function convertCborValue(value: any): any {
     return result;
   }
   if ("Tag" in value) {
-    return convertTaggedValueToString(value.Tag[0], value.Tag[1].Bytes);
+    return convertTaggedValue(value.Tag[0], value.Tag[1]);
   }
   if ("Text" in value) {
     return value.Text;
@@ -71,14 +71,16 @@ function bytesToAddressString(type: String, tag: ArrayLike<number>): string {
   return `${type}_${hex}`;
 }
 
-export function convertTaggedValueToString(tag: number, value: any): string | any {
+export function convertTaggedValue(tag: number, value: any): string | any {
   switch (tag) {
     case BinaryTag.VaultId:
-      return bytesToAddressString("vault", value);
+      return bytesToAddressString("vault", value.Bytes!);
     case BinaryTag.ComponentAddress:
-      return bytesToAddressString("component", value);
+      return bytesToAddressString("component", value.Bytes!);
     case BinaryTag.ResourceAddress:
-      return bytesToAddressString("resource", value);
+      return bytesToAddressString("resource", value.Bytes!);
+    case BinaryTag.Metadata:
+      return convertCborValue(value);
     default:
       return value;
   }

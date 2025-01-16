@@ -82,11 +82,6 @@ function AccountDetailsLayout() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <FetchStatusCheck
-            isError={accountsIsError}
-            errorMessage={accountsError?.message || "Error fetching data"}
-            isLoading={accountsIsLoading}
-          />
           <TableContainer>
             <Table>
               <TableHead>
@@ -97,19 +92,25 @@ function AccountDetailsLayout() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {accountsData && (
-                  <TableRow>
-                    <DataTableCell>{accountsData.account.name}</DataTableCell>
-                    <DataTableCell>
-                      {shortenString(substateIdToString(accountsData.account.address))}
-                      <CopyToClipboard copy={substateIdToString(accountsData.account.address)} />
-                    </DataTableCell>
-                    <DataTableCell>
-                      {shortenString(accountsData.public_key)}
-                      <CopyToClipboard copy={accountsData.public_key} />
-                    </DataTableCell>
-                  </TableRow>
-                )}
+                <FetchStatusCheck
+                  isError={accountsIsError}
+                  errorMessage={accountsError?.message || "Error fetching data"}
+                  isLoading={accountsIsLoading}
+                >
+                  {accountsData && (
+                    <TableRow>
+                      <DataTableCell>{accountsData.account.name}</DataTableCell>
+                      <DataTableCell>
+                        {shortenString(substateIdToString(accountsData.account.address))}
+                        <CopyToClipboard copy={substateIdToString(accountsData.account.address)} />
+                      </DataTableCell>
+                      <DataTableCell>
+                        {shortenString(accountsData.public_key)}
+                        <CopyToClipboard copy={accountsData.public_key} />
+                      </DataTableCell>
+                    </TableRow>
+                  )}
+                </FetchStatusCheck>
               </TableBody>
             </Table>
           </TableContainer>
@@ -122,20 +123,21 @@ function AccountDetailsLayout() {
             isError={balancesIsError}
             errorMessage={balancesError?.message || "Error fetching data"}
             isLoading={balancesIsLoading}
-          />
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Resource</TableCell>
-                  <TableCell>Resource Type</TableCell>
-                  <TableCell>Revealed Balance</TableCell>
-                  <TableCell>Confidential Balance</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>{balancesData?.balances.map((balance: BalanceEntry) => BalanceRow(balance))}</TableBody>
-            </Table>
-          </TableContainer>
+          >
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Resource</TableCell>
+                    <TableCell>Resource Type</TableCell>
+                    <TableCell>Revealed Balance</TableCell>
+                    <TableCell>Confidential Balance</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>{balancesData?.balances.map((balance: BalanceEntry) => BalanceRow(balance))}</TableBody>
+              </Table>
+            </TableContainer>
+          </FetchStatusCheck>
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>

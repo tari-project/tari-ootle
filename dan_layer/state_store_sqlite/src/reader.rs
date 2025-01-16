@@ -608,6 +608,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
             .filter(foreign_proposals::epoch.le(locked.epoch.as_u64() as i64))
             .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
+            .filter(foreign_proposals::status.ne(ForeignProposalStatus::Invalid.to_string()))
             .filter(
                 foreign_proposals::proposed_in_block
                     .is_null()
@@ -1726,6 +1727,22 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
+    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError> {
+        use crate::schema::transaction_pool_state_updates;
+
+        let count = transaction_pool_state_updates::table
+            .filter(transaction_pool_state_updates::is_applied.eq(false))
+            .count()
+            .limit(1)
+            .get_result::<i64>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "transaction_pool_has_pending_state_updates",
+                source: e,
+            })?;
+
+        Ok(count > 0)
+    }
+
     fn transaction_pool_count(
         &self,
         stage: Option<TransactionPoolStage>,
@@ -2402,7 +2419,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     details: format!("Invalid input substate pledge for {lock_intent}"),
                 }
             })?;
-            pledges.insert(pledge);
+            pledges.push(pledge);
         }
 
         Ok(pledges)

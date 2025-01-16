@@ -36,11 +36,16 @@ impl ExecutableManager {
         let mut tasks = FuturesUnordered::new();
 
         for exec in &self.config {
-            let Some(exec_path) = exec.get_executable_path() else {
+            let Some(mut exec_path) = exec.get_executable_path() else {
                 continue;
             };
 
             if !self.always_compile && exec_path.exists() {
+                if exec_path.is_relative() {
+                    exec_path = env::current_dir()
+                        .context("Failed to get current directory")?
+                        .join(&exec_path);
+                }
                 self.prepared.push(Executable {
                     instance_type: exec.instance_type,
                     path: exec_path,

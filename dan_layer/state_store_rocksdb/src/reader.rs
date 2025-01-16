@@ -2209,6 +2209,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError> {
         todo!()
     }
+    
+    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError> {
+        todo!()
+    }
 }
 
 /*

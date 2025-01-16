@@ -14,7 +14,7 @@ use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
 use tari_common_types::types::{Commitment, PublicKey};
-use tari_dan_common_types::SubstateRequirement;
+use tari_dan_common_types::{SubstateRequirement, VersionedSubstateId};
 use tari_dan_storage::consensus_models::QuorumCertificate;
 use tari_dan_wallet_sdk::{
     models::{
@@ -26,7 +26,6 @@ use tari_dan_wallet_sdk::{
         SubstateModel,
         TransactionStatus,
         VaultModel,
-        VersionedSubstateId,
     },
     storage::{WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
@@ -405,7 +404,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             return Err(WalletStorageError::NotFound {
                 operation: "substates_remove",
                 entity: "substate".to_string(),
-                key: substate.address.to_string(),
+                key: substate.substate_id.to_string(),
             });
         }
 

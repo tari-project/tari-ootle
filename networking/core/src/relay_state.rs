@@ -41,7 +41,7 @@ impl RelayState {
     }
 
     pub fn set_relay_peer(&mut self, peer_id: PeerId, dialled_address: Option<Multiaddr>) -> bool {
-        if self.selected_relay.as_ref().map_or(false, |p| p.peer_id == peer_id) {
+        if self.selected_relay.as_ref().is_some_and(|p| p.peer_id == peer_id) {
             return true;
         }
 

@@ -47,6 +47,11 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         (len - 1) / 3
     }
 
+    /// Returns $n - f$ (i.e $2f + 1$) where n is the number of committee members and f is the tolerated failure nodes.
+    pub fn quorum_threshold(&self) -> usize {
+        self.members.len() - self.max_failures()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()
     }

@@ -66,10 +66,6 @@ impl VersionedSubstateIdLockIntent {
         self.versioned_substate_id.version()
     }
 
-    pub fn lock_type(&self) -> SubstateLockType {
-        self.lock_type
-    }
-
     pub fn to_substate_requirement(&self) -> SubstateRequirement {
         let version = if self.require_version {
             Some(self.version())

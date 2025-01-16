@@ -627,39 +627,84 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::foreign_proposals;
         let block = foreign_proposal.block();
 
-        let values = (
-            foreign_proposals::block_id.eq(serialize_hex(block.id())),
-            foreign_proposals::parent_block_id.eq(serialize_hex(block.parent())),
-            foreign_proposals::state_merkle_root.eq(block.state_merkle_root().to_string()),
-            foreign_proposals::command_merkle_root.eq(block.command_merkle_root().to_string()),
-            foreign_proposals::network.eq(block.network().to_string()),
-            foreign_proposals::height.eq(block.height().as_u64() as i64),
-            foreign_proposals::epoch.eq(block.epoch().as_u64() as i64),
-            foreign_proposals::shard_group.eq(block.shard_group().encode_as_u32() as i32),
-            foreign_proposals::proposed_by.eq(serialize_hex(block.proposed_by().as_bytes())),
-            foreign_proposals::command_count.eq(block.commands().len() as i64),
-            foreign_proposals::commands.eq(serialize_json(block.commands())?),
-            foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
-            foreign_proposals::qc.eq(serialize_json(block.justify())?),
-            foreign_proposals::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
-            foreign_proposals::timestamp.eq(block.timestamp() as i64),
-            foreign_proposals::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-            foreign_proposals::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
-            // Extra
-            foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
-            foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
-            foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
-            foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
-        );
+        let block_id_hex = serialize_hex(block.id());
 
-        diesel::insert_into(foreign_proposals::table)
-            .values(&values)
-            .on_conflict_do_nothing()
-            .execute(self.connection())
+        let count = foreign_proposals::table
+            .count()
+            .filter(foreign_proposals::block_id.eq(&block_id_hex))
+            .first::<i64>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "foreign_proposals_upsert",
                 source: e,
             })?;
+
+        if count == 0 {
+            let values = (
+                foreign_proposals::block_id.eq(block_id_hex),
+                foreign_proposals::parent_block_id.eq(serialize_hex(block.parent())),
+                foreign_proposals::state_merkle_root.eq(block.state_merkle_root().to_string()),
+                foreign_proposals::command_merkle_root.eq(block.command_merkle_root().to_string()),
+                foreign_proposals::network.eq(block.network().to_string()),
+                foreign_proposals::height.eq(block.height().as_u64() as i64),
+                foreign_proposals::epoch.eq(block.epoch().as_u64() as i64),
+                foreign_proposals::shard_group.eq(block.shard_group().encode_as_u32() as i32),
+                foreign_proposals::proposed_by.eq(serialize_hex(block.proposed_by().as_bytes())),
+                foreign_proposals::command_count.eq(block.commands().len() as i64),
+                foreign_proposals::commands.eq(serialize_json(block.commands())?),
+                foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
+                foreign_proposals::qc.eq(serialize_json(block.justify())?),
+                foreign_proposals::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
+                foreign_proposals::timestamp.eq(block.timestamp() as i64),
+                foreign_proposals::base_layer_block_height.eq(block.base_layer_block_height() as i64),
+                foreign_proposals::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+                foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
+                // Extra
+                foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
+                foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
+                foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
+            );
+
+            diesel::insert_into(foreign_proposals::table)
+                .values(values)
+                .execute(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "foreign_proposals_upsert",
+                    source: e,
+                })?;
+        } else {
+            let values = (
+                foreign_proposals::parent_block_id.eq(serialize_hex(block.parent())),
+                foreign_proposals::state_merkle_root.eq(block.state_merkle_root().to_string()),
+                foreign_proposals::command_merkle_root.eq(block.command_merkle_root().to_string()),
+                foreign_proposals::network.eq(block.network().to_string()),
+                foreign_proposals::height.eq(block.height().as_u64() as i64),
+                foreign_proposals::epoch.eq(block.epoch().as_u64() as i64),
+                foreign_proposals::shard_group.eq(block.shard_group().encode_as_u32() as i32),
+                foreign_proposals::proposed_by.eq(serialize_hex(block.proposed_by().as_bytes())),
+                foreign_proposals::command_count.eq(block.commands().len() as i64),
+                foreign_proposals::commands.eq(serialize_json(block.commands())?),
+                foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
+                foreign_proposals::qc.eq(serialize_json(block.justify())?),
+                foreign_proposals::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
+                foreign_proposals::timestamp.eq(block.timestamp() as i64),
+                foreign_proposals::base_layer_block_height.eq(block.base_layer_block_height() as i64),
+                foreign_proposals::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+                foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
+                // Extra
+                foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
+                foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
+                foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
+            );
+
+            diesel::update(foreign_proposals::table)
+                .filter(foreign_proposals::block_id.eq(block_id_hex))
+                .set(values)
+                .execute(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "foreign_proposals_upsert",
+                    source: e,
+                })?;
+        }
 
         if let Some(proposed_in_block) = proposed_in_block {
             self.foreign_proposals_set_proposed_in(block.id(), &proposed_in_block)?;
@@ -1548,7 +1593,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                             substate_locks::substate_id.eq(id.to_string()),
                             substate_locks::version.eq(lock.version() as i32),
                             substate_locks::transaction_id.eq(serialize_hex(lock.transaction_id())),
-                            substate_locks::lock.eq(lock.substate_lock().to_string()),
+                            substate_locks::lock.eq(lock.lock_type().to_string()),
                             substate_locks::is_local_only.eq(lock.is_local_only()),
                         )
                     })

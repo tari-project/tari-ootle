@@ -23,6 +23,7 @@ use crate::{
         Decision,
         Evidence,
         ExecutedTransaction,
+        LockedSubstateValue,
         SubstatePledge,
         SubstatePledges,
         TransactionExecution,
@@ -358,7 +359,7 @@ impl TransactionRecord {
     }
 
     pub fn get_local_pledges<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<SubstatePledges, StorageError> {
-        let locked_values = tx.substate_locks_get_locked_substates_for_transaction(self.id())?;
+        let locked_values = LockedSubstateValue::get_all_for_transaction(tx, self.id())?;
         locked_values
             .into_iter()
             .filter(|lock| !lock.lock.is_output())
@@ -396,7 +397,7 @@ impl TransactionRecord {
             .transaction()
             .all_inputs_iter()
             .map(|req| (local_committee_info.includes_substate_id(req.substate_id()), req));
-        let locks = tx.substate_locks_get_locked_substates_for_transaction(self.id())?;
+        let locks = LockedSubstateValue::get_all_for_transaction(tx, self.id())?;
         let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
         for (is_local, input) in inputs {
             if is_local {

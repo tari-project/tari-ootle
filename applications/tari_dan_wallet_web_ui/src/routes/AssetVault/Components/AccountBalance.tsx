@@ -52,12 +52,11 @@ function AccountBalance({ accountName }: { accountName: string }) {
   });
 
   return (
-    <>
-      <FetchStatusCheck
-        isError={balancesIsError}
-        errorMessage={balancesError?.message || "Error fetching data"}
-        isLoading={false}
-      />
+    <FetchStatusCheck
+      isError={balancesIsError}
+      errorMessage={balancesError?.message || "Error fetching data"}
+      isLoading={false}
+    >
       <Fade in={!balancesIsFetching && !balancesIsError} timeout={100}>
         <Box>
           <Box>
@@ -97,7 +96,7 @@ function AccountBalance({ accountName }: { accountName: string }) {
           </Box>
         </Box>
       </Fade>
-    </>
+    </FetchStatusCheck>
   );
 }
 

@@ -51,6 +51,12 @@ pub enum AbortReason {
     EarlyAbort,
 }
 
+impl Display for AbortReason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_ref())
+    }
+}
+
 impl From<&RejectReason> for AbortReason {
     fn from(reject_reason: &RejectReason) -> Self {
         match reject_reason {
@@ -82,17 +88,20 @@ impl Decision {
         }
     }
 
-    pub fn as_string(&self) -> String {
+    pub fn abort_reason(&self) -> Option<AbortReason> {
         match self {
-            Decision::Commit => String::from("Commit"),
-            Decision::Abort(reason) => format!("Abort({})", reason.as_ref()),
+            Decision::Commit => None,
+            Decision::Abort(reason) => Some(*reason),
         }
     }
 }
 
 impl Display for Decision {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_string().as_str())
+        match self {
+            Decision::Commit => write!(f, "Commit"),
+            Decision::Abort(reason) => write!(f, "Abort({})", reason.as_ref()),
+        }
     }
 }
 
@@ -107,13 +116,17 @@ impl FromStr for Decision {
                 Ok(Decision::Abort(AbortReason::None))
             },
             _ => {
+                const ABORT_PREFIX: &str = "Abort(";
                 // abort with reason
-                if s.starts_with("Abort(") {
-                    let mut reason = s.replace("Abort(", "");
-                    reason.pop(); // remove last char ')'
-                    return Ok(Decision::Abort(AbortReason::from_str(reason.as_str()).map_err(
-                        |error| FromStrConversionError::InvalidAbortReason(s.to_string(), error),
-                    )?));
+                if s.starts_with(ABORT_PREFIX) {
+                    let start = ABORT_PREFIX.len();
+                    let end = s
+                        .rfind(')')
+                        .ok_or_else(|| FromStrConversionError::InvalidDecision(s.to_string()))?;
+                    let reason = &s[start..end];
+                    return Ok(Decision::Abort(AbortReason::from_str(reason).map_err(|error| {
+                        FromStrConversionError::InvalidAbortReason(s.to_string(), error)
+                    })?));
                 }
 
                 Err(FromStrConversionError::InvalidDecision(s.to_string()))
@@ -131,5 +144,28 @@ impl From<&TransactionResult> for Decision {
         } else {
             Decision::Abort(AbortReason::None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_parses_decision_correctly() {
+        let decision = Decision::Commit.to_string().parse::<Decision>().unwrap();
+        assert_eq!(decision, Decision::Commit);
+
+        let decision = Decision::Abort(AbortReason::None)
+            .to_string()
+            .parse::<Decision>()
+            .unwrap();
+        assert_eq!(decision, Decision::Abort(AbortReason::None));
+
+        let decision = Decision::Abort(AbortReason::InvalidTransaction)
+            .to_string()
+            .parse::<Decision>()
+            .unwrap();
+        assert_eq!(decision, Decision::Abort(AbortReason::InvalidTransaction));
     }
 }

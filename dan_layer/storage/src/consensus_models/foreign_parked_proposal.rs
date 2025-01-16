@@ -79,15 +79,12 @@ impl ForeignParkedProposal {
 
 impl Display for ForeignParkedProposal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ForeignParkedBlock: block={}, qcs=", self.block())?;
-        for (_tx_id, pledges) in self.block_pledge().iter() {
-            write!(f, "{_tx_id}:[")?;
-            for pledge in pledges {
-                write!(f, "{pledge}, ")?;
-            }
-            write!(f, "],")?;
-        }
-        write!(f, "justify_qc={}", self.justify_qc())?;
-        Ok(())
+        write!(
+            f,
+            "ForeignParkedBlock: block={}, block_pledge=[{}], justify_qc={}",
+            self.block(),
+            self.block_pledge(),
+            self.justify_qc()
+        )
     }
 }

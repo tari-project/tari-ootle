@@ -102,7 +102,7 @@ pub async fn handle_create_transfer_proof(
         .substate_api()
         .scan_for_substate(
             &req.resource_address.into(),
-            known_resource_substate_address.map(|s| s.address.version),
+            known_resource_substate_address.map(|s| s.substate_id.version),
         )
         .await?;
     let resource_view_key = resource

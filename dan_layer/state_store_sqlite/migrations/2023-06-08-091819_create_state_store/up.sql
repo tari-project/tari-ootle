@@ -190,7 +190,7 @@ create table foreign_substate_pledges
 );
 
 create index foreign_substate_pledges_transaction_id_idx on foreign_substate_pledges (transaction_id);
-create unique index foreign_substate_pledges_transaction_id_substate_id_uniq_idx on foreign_substate_pledges (transaction_id, substate_id);
+create unique index foreign_substate_pledges_transaction_id_substate_id_lock_type_uniq_idx on foreign_substate_pledges (transaction_id, substate_id, lock_type);
 
 create table substate_locks
 (

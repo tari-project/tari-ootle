@@ -244,6 +244,8 @@ pub trait StateStoreReadTransaction: Sized {
         max_txs: usize,
         block_id: &BlockId,
     ) -> Result<Vec<TransactionPoolRecord>, StorageError>;
+    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError>;
+
     fn transaction_pool_count(
         &self,
         stage: Option<TransactionPoolStage>,

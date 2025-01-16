@@ -40,6 +40,7 @@ use crate::{
 pub struct InstanceManager {
     base_path: PathBuf,
     config: Vec<InstanceConfig>,
+    global_settings: HashMap<String, String>,
     network: Network,
     minotari_nodes: HashMap<InstanceId, MinoTariNodeProcess>,
     minotari_wallets: HashMap<InstanceId, MinoTariWalletProcess>,
@@ -53,11 +54,18 @@ pub struct InstanceManager {
 }
 
 impl InstanceManager {
-    pub fn new(base_path: PathBuf, network: Network, config: Vec<InstanceConfig>, start_port: u16) -> Self {
+    pub fn new(
+        base_path: PathBuf,
+        network: Network,
+        global_settings: HashMap<String, String>,
+        config: Vec<InstanceConfig>,
+        start_port: u16,
+    ) -> Self {
         Self {
             base_path,
             config,
             network,
+            global_settings,
             minotari_nodes: HashMap::new(),
             minotari_wallets: HashMap::new(),
             minotari_miners: HashMap::new(),
@@ -81,11 +89,13 @@ impl InstanceManager {
             })?;
 
             for i in 0..instance.num_instances {
+                let mut settings = self.global_settings.clone();
+                settings.extend(instance.settings.iter().map(|(k, v)| (k.clone(), v.clone())));
                 self.fork_new(
                     executable,
                     instance.instance_type,
                     format!("{}-#{:02}", instance.name, i),
-                    instance.settings.clone(),
+                    settings,
                 )
                 .await?;
             }
@@ -112,10 +122,10 @@ impl InstanceManager {
         executable: &Executable,
         instance_type: InstanceType,
         instance_name: String,
-        settings: HashMap<String, String>,
+        instance_settings: HashMap<String, String>,
         ports: Option<AllocatedPorts>,
     ) -> anyhow::Result<InstanceId> {
-        let listen_ip = settings
+        let listen_ip = instance_settings
             .get("listen_ip")
             .map(|s| s.parse())
             .transpose()
@@ -124,16 +134,17 @@ impl InstanceManager {
         let definition = get_definition(instance_type);
 
         log::info!(
-            "🚀 Starting {} (id: {}, exec path: {})",
+            "🚀 Starting {} (id: {}, exec path: {}, listen_ip: {})",
             instance_type,
             instance_id,
-            executable.path.display()
+            executable.path.display(),
+            listen_ip
         );
 
         let mut allocated_ports = ports.unwrap_or_else(|| self.port_allocator.create());
 
         let base_path = self.base_path.join("processes").join(slugify(&instance_name));
-        fs::create_dir_all(&base_path).await?;
+        fs::create_dir_all(&base_path).await.context("create_dir_all in fork")?;
 
         let context = ProcessContext::new(
             instance_id,
@@ -144,10 +155,17 @@ impl InstanceManager {
             listen_ip,
             &mut allocated_ports,
             self,
-            &settings,
+            &instance_settings,
         );
+        if !context.bin().exists() {
+            return Err(anyhow::anyhow!(
+                "{} binary not found at {}",
+                instance_type,
+                context.bin().display()
+            ));
+        }
 
-        let mut command = definition.get_command(context).await?;
+        let mut command = definition.get_command(context).await.context("get_command")?;
         let stdout_log_path = base_path.join("stdout.log");
         let stderr_log_path = base_path.join("stderr.log");
         command
@@ -156,7 +174,8 @@ impl InstanceManager {
             .stderr(Stdio::piped())
             // Any attempt to use stdin will fail immediately
             .stdin(Stdio::null());
-        let mut child = command.spawn()?;
+        info!("Command: {:?}", command);
+        let mut child = command.spawn().with_context(|| format!("spawn {instance_type}"))?;
 
         self.port_allocator.register(instance_id, allocated_ports.clone());
 
@@ -176,7 +195,7 @@ impl InstanceManager {
             // This saves us from having to join the network string to the path all over the place, since everything we
             // want is under {base_dir}/{network}
             base_path.join(self.network.to_string()),
-            settings,
+            instance_settings,
         );
 
         // Wait for base layer nodes to start

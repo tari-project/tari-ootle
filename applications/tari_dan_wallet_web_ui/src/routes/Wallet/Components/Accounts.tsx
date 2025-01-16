@@ -297,26 +297,27 @@ function Accounts() {
         isLoading={isLoadingAccountsList}
         isError={isErrorAccountsList}
         errorMessage={errorAccountsList?.message || "Error fetching data"}
-      />
-      <Fade in={!isLoadingAccountsList && !isErrorAccountsList}>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Address</TableCell>
-                <TableCell>Key index</TableCell>
-                <TableCell>Public key</TableCell>
-                <TableCell>Details</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {dataAccountsList &&
-                dataAccountsList.accounts.map((account: AccountInfo, index: number) => Account(account, index))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Fade>
+      >
+        <Fade in={!isLoadingAccountsList && !isErrorAccountsList}>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Address</TableCell>
+                  <TableCell>Key index</TableCell>
+                  <TableCell>Public key</TableCell>
+                  <TableCell>Details</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {dataAccountsList &&
+                  dataAccountsList.accounts.map((account: AccountInfo, index: number) => Account(account, index))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Fade>
+      </FetchStatusCheck>
     </>
   );
 }

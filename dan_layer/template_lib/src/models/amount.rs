@@ -182,7 +182,7 @@ impl PartialEq<u64> for Amount {
 
 impl PartialEq<i32> for Amount {
     fn eq(&self, other: &i32) -> bool {
-        i32::try_from(self.0).map_or(false, |v| v == *other)
+        i32::try_from(self.0) == Ok(*other)
     }
 }
 
@@ -191,7 +191,7 @@ impl PartialEq<u32> for Amount {
         if self.is_negative() {
             return false;
         }
-        u32::try_from(self.0).map_or(false, |v| v == *other)
+        u32::try_from(self.0) == Ok(*other)
     }
 }
 

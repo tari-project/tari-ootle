@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_engine_types::serde_with;
-use tari_template_lib::{models::VaultId, prelude::NonFungibleId};
+use tari_template_lib::models::{NonFungibleId, ResourceAddress, VaultId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(
@@ -13,6 +13,7 @@ use tari_template_lib::{models::VaultId, prelude::NonFungibleId};
 pub struct NonFungibleToken {
     pub vault_id: VaultId,
     pub nft_id: NonFungibleId,
+    pub resource_address: ResourceAddress,
     #[cfg_attr(feature = "ts", ts(type = "any"))]
     #[serde(with = "serde_with::cbor_value")]
     pub data: tari_bor::Value,

@@ -57,12 +57,7 @@ export default function Transactions({ accountName }: { accountName: string }) {
   const theme = useTheme();
 
   return (
-    <>
-      <FetchStatusCheck
-        isLoading={isLoading}
-        isError={isError}
-        errorMessage={error?.message || "Error fetching data"}
-      />
+    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error fetching data"}>
       <Fade in={!isLoading && !isError}>
         <TableContainer>
           <Table>
@@ -100,7 +95,7 @@ export default function Transactions({ accountName }: { accountName: string }) {
                       <DataTableCell>
                         <StatusChip status={status} showTitle />
                       </DataTableCell>
-                      <DataTableCell>{result?.fee_receipt.total_fees_paid || 0}</DataTableCell>
+                      <DataTableCell>{result?.fee_receipt.total_fees_paid || "--"}</DataTableCell>
                       <DataTableCell>
                         <IconButton
                           component={Link}
@@ -139,6 +134,6 @@ export default function Transactions({ accountName }: { accountName: string }) {
           )}
         </TableContainer>
       </Fade>
-    </>
+    </FetchStatusCheck>
   );
 }

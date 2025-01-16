@@ -15,7 +15,7 @@ use libp2p::{
     dcutr,
     futures::StreamExt,
     gossipsub,
-    gossipsub::{IdentTopic, MessageId, TopicHash},
+    gossipsub::{IdentTopic, MessageId, PublishError, TopicHash},
     identify,
     identity,
     mdns,
@@ -266,13 +266,17 @@ where
                 topic,
                 message,
                 reply_tx,
-            } => match self.swarm.behaviour_mut().gossipsub.publish(topic, message) {
+            } => match self.swarm.behaviour_mut().gossipsub.publish(topic.hash(), message) {
                 Ok(msg_id) => {
-                    debug!(target: LOG_TARGET, "📢 Published gossipsub message: {}", msg_id);
+                    debug!(target: LOG_TARGET, "📢 Published gossipsub message on {topic}: {}", msg_id);
                     let _ignore = reply_tx.send(Ok(()));
                 },
+                Err(err @ PublishError::Duplicate) => {
+                    debug!(target: LOG_TARGET, "Not publishing duplicate message on {topic}");
+                    let _ignore = reply_tx.send(Err(err.into()));
+                },
                 Err(err) => {
-                    debug!(target: LOG_TARGET, "🚨 Failed to publish gossipsub message: {}", err);
+                    debug!(target: LOG_TARGET, "🚨 Failed to publish gossipsub message on {topic}: {}", err);
                     let _ignore = reply_tx.send(Err(err.into()));
                 },
             },

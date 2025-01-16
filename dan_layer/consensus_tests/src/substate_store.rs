@@ -188,7 +188,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
         LockFailedError::LockConflict { .. }
     ));
 
-    // The same transaction is able to lock
+    // The same transaction is able to lock as an output
     store
         .try_lock(
             tx_id(1),
@@ -198,7 +198,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
         .unwrap();
 
     let n = store.new_locks().get(id.substate_id()).unwrap().len();
-    assert_eq!(n, 1);
+    assert_eq!(n, 2);
 }
 
 fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateId {

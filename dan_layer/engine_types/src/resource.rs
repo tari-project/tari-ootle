@@ -110,7 +110,7 @@ impl Resource {
             amount.is_positive(),
             "Invariant violation in increase_total_supply: amount must be positive"
         );
-        self.total_supply.checked_add(amount).map_or(false, |new_total| {
+        self.total_supply.checked_add(amount).is_some_and(|new_total| {
             self.total_supply = new_total;
             true
         })

@@ -66,12 +66,7 @@ function Keys() {
   };
 
   return (
-    <>
-      <FetchStatusCheck
-        isLoading={isLoading}
-        isError={isError}
-        errorMessage={error?.message || "Error fetching data"}
-      />
+    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error fetching data"}>
       <Fade in={!isLoading && !isError}>
         <div>
           <BoxHeading2>
@@ -111,7 +106,7 @@ function Keys() {
           </TableContainer>
         </div>
       </Fade>
-    </>
+    </FetchStatusCheck>
   );
 }
 

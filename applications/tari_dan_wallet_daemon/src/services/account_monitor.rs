@@ -164,8 +164,8 @@ where
             created_by_tx,
         } = substate_api
             .scan_for_substate(
-                &account_substate.address.substate_id,
-                Some(account_substate.address.version),
+                &account_substate.substate_id.substate_id,
+                Some(account_substate.substate_id.version),
             )
             .await?;
 
@@ -173,7 +173,7 @@ where
 
         let vaults_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
         let known_child_vaults = substate_api
-            .load_dependent_substates(&[&account_substate.address.substate_id])?
+            .load_dependent_substates(&[&account_substate.substate_id.substate_id])?
             .into_iter()
             .filter(|s| s.substate_id.is_vault())
             .map(|s| (s.substate_id, s.version))
@@ -330,6 +330,7 @@ where
 
             let non_fungible = NonFungibleToken {
                 is_burned: maybe_nft_contents.is_none(),
+                resource_address: *vault.resource_address(),
                 vault_id,
                 nft_id: id.clone(),
                 data: maybe_nft_contents
@@ -480,7 +481,7 @@ where
         let version = substate_api
             .get_substate(&resx_addr)
             .optional()?
-            .map(|s| s.address.version)
+            .map(|s| s.substate_id.version)
             .unwrap_or(0);
         let ValidatorScanResult { substate: resource, .. } =
             substate_api.scan_for_substate(&resx_addr, Some(version)).await?;

@@ -11,7 +11,7 @@ use log::*;
 use serde::Deserialize;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    option::DisplayContainer,
+    option::Displayable,
     NumPreshards,
     SubstateLockType,
     VersionedSubstateId,

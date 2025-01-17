@@ -214,15 +214,6 @@ impl Test {
         &self.validators
     }
 
-    pub fn get_transaction_record(&self, address: &TestAddress, transaction_id: &TransactionId) -> TransactionRecord {
-        self.validators
-            .get(address)
-            .unwrap()
-            .state_store
-            .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
-            .unwrap()
-    }
-
     pub async fn on_hotstuff_event(&mut self) -> (TestAddress, HotstuffEvent) {
         if self.network.task_handle().is_finished() {
             panic!("Network task exited while waiting for Hotstuff event");

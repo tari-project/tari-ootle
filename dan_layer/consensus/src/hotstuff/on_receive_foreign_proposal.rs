@@ -4,13 +4,7 @@
 use std::collections::HashSet;
 
 use log::*;
-use tari_dan_common_types::{
-    committee::CommitteeInfo,
-    option::DisplayContainer,
-    optional::Optional,
-    Epoch,
-    ShardGroup,
-};
+use tari_dan_common_types::{committee::CommitteeInfo, option::Displayable, optional::Optional, Epoch, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,

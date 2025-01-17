@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, option::DisplayContainer, ShardGroup, SubstateAddress};
+use tari_dan_common_types::{committee::CommitteeInfo, option::Displayable, ShardGroup, SubstateAddress};
 use tari_dan_storage::{
     consensus_models::{
         BlockPledge,

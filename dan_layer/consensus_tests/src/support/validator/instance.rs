@@ -7,7 +7,7 @@ use tari_consensus::{
 };
 use tari_dan_common_types::{optional::Optional, NodeHeight, ShardGroup, SubstateAddress};
 use tari_dan_storage::{
-    consensus_models::{BlockId, LeafBlock},
+    consensus_models::{BlockId, LeafBlock, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
 };
@@ -91,5 +91,11 @@ impl Validator {
     pub fn has_committed_substates(&self, tx_id: &TransactionId) -> bool {
         let tx = self.state_store().create_read_tx().unwrap();
         tx.substates_exists_for_transaction(tx_id).unwrap()
+    }
+
+    pub fn get_transaction(&self, transaction_id: &TransactionId) -> TransactionRecord {
+        self.state_store
+            .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
+            .unwrap()
     }
 }

@@ -748,11 +748,11 @@ async fn multishard_output_conflict_abort() {
     test.assert_all_validators_at_same_height().await;
     // Currently not deterministic (test harness) which transaction will arrive first so we check that one transaction
     // is committed and the other is aborted. TODO: It is also possible that both are aborted.
-    let tx1_vn1 = test.get_transaction_record(&TestAddress::new("1"), tx_ids[0]);
-    let tx2_vn1 = test.get_transaction_record(&TestAddress::new("1"), tx_ids[1]);
+    let tx1_vn1 = test.get_validator(&TestAddress::new("1")).get_transaction(tx_ids[0]);
+    let tx2_vn1 = test.get_validator(&TestAddress::new("1")).get_transaction(tx_ids[1]);
 
-    let tx1_vn3 = test.get_transaction_record(&TestAddress::new("3"), tx_ids[0]);
-    let tx2_vn3 = test.get_transaction_record(&TestAddress::new("3"), tx_ids[1]);
+    let tx1_vn3 = test.get_validator(&TestAddress::new("3")).get_transaction(tx_ids[0]);
+    let tx2_vn3 = test.get_validator(&TestAddress::new("3")).get_transaction(tx_ids[1]);
 
     assert_eq!(tx1_vn1.final_decision().unwrap(), tx1_vn3.final_decision().unwrap());
     assert_eq!(tx2_vn1.final_decision().unwrap(), tx2_vn3.final_decision().unwrap());
@@ -813,22 +813,19 @@ async fn single_shard_inputs_from_previous_outputs() {
     }
 
     test.assert_all_validators_at_same_height().await;
-    // We do not work out input dependencies when we sequence transactions in blocks. Currently ordering within a block
-    // is lexicographical by transaction id, therefore both will only be committed if tx1 happens to be sequenced
-    // first.
-    // if tx1.id() < tx2.id() {
+    // Assert that the decision matches for all validators. If tx2 is sequenced first, then it will be aborted due to
+    // the input not existing
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
-    test.assert_all_validators_have_decision(tx2.id(), Decision::Commit)
-        .await;
-    // TODO: this is no longer true - it always commits both. Need to confirm correctness because it may be that the
-    //       implementation is more intelligent (correct sequencing or downgrading to a read lock) but not certain.
-    // } else {
-    //     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
-    //         .await;
-    //     test.assert_all_validators_have_decision(tx2.id(), Decision::Abort(AbortReason::OneOrMoreInputsNotFound))
-    //         .await;
-    // }
+    let decision_tx2 = test
+        .get_validator(&TestAddress::new("1"))
+        .get_transaction(tx2.id())
+        .final_decision()
+        .expect("tx2 final decision not reached");
+    test.assert_all_validators_have_decision(tx2.id(), decision_tx2).await;
+    if let Some(reason) = decision_tx2.abort_reason() {
+        assert_eq!(reason, AbortReason::OneOrMoreInputsNotFound);
+    }
 
     test.assert_clean_shutdown().await;
     log::info!("total messages sent: {}", test.network().total_messages_sent());

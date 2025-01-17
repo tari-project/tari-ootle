@@ -1170,7 +1170,7 @@ async fn single_shard_unversioned_inputs() {
     // Remove versions from inputs to test substate version resolution
     let unversioned_inputs = inputs
         .iter()
-        .map(|i| SubstateRequirement::new(i.substate_id.clone(), None));
+        .map(|i| SubstateRequirement::new(i.substate_id().clone(), None));
     let tx = Transaction::builder()
         .with_inputs(unversioned_inputs)
         .build_and_seal(&PrivateKey::default());

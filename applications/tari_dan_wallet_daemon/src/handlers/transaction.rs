@@ -180,7 +180,7 @@ pub async fn handle_submit_dry_run(
         let substates = substates.into_iter().collect::<Vec<_>>();
         sdk.substate_api().locate_dependent_substates(&substates).await?
     } else {
-        vec![]
+        Default::default()
     };
 
     let transaction = Transaction::builder()

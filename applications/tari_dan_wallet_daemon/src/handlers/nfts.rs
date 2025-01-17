@@ -210,12 +210,13 @@ async fn mint_account_nft(
     let transaction = Transaction::builder()
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .with_instructions(instructions)
+        .with_inputs(inputs)
         .build_and_seal(owner_sk);
 
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
-        .submit_transaction(transaction, inputs)
+        .submit_transaction(transaction, vec![])
         .await?;
 
     let event = wait_for_result(&mut events, tx_id).await?;

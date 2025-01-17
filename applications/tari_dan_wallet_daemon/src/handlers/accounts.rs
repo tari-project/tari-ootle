@@ -219,7 +219,7 @@ pub async fn handle_invoke(
 
     let inputs = inputs
         .into_iter()
-        .map(|s| SubstateRequirement::new(s.substate_id.clone(), Some(s.version)));
+        .map(|s| SubstateRequirement::new(s.substate_id().clone(), Some(s.version())));
 
     let account_address = account.address.as_component_address().unwrap();
     let transaction = Transaction::builder()
@@ -429,7 +429,7 @@ pub async fn handle_reveal_funds(
 
         let inputs = inputs
             .into_iter()
-            .map(|addr| SubstateRequirement::new(addr.substate_id.clone(), Some(addr.version)));
+            .map(|addr| SubstateRequirement::new(addr.substate_id().clone(), Some(addr.version())));
 
         let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
 
@@ -812,10 +812,9 @@ fn get_or_create_account<T: WalletStore>(
     };
     let (account_address, account_secret_key, new_account_name) = match maybe_account {
         Some(account) => {
-            let key_index = key_id.unwrap_or(account.key_index);
             let account_secret_key = sdk
                 .key_manager_api()
-                .derive_key(key_manager::TRANSACTION_BRANCH, key_index)?;
+                .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
             let account_substate = sdk.substate_api().get_substate(&account.address)?;
             inputs.push(account_substate.substate_id.into());
 
@@ -871,8 +870,8 @@ pub async fn handle_transfer(
         .scan_for_substate(&SubstateId::Resource(req.resource_address), None)
         .await?;
     let resource_substate_address = SubstateRequirement::new(
-        resource_substate.address.substate_id.clone(),
-        Some(resource_substate.address.version),
+        resource_substate.address.substate_id().clone(),
+        Some(resource_substate.address.version()),
     );
     inputs.push(resource_substate.address);
 

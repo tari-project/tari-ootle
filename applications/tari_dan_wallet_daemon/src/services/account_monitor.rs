@@ -164,21 +164,27 @@ where
             created_by_tx,
         } = substate_api
             .scan_for_substate(
-                &account_substate.substate_id.substate_id,
-                Some(account_substate.substate_id.version),
+                account_substate.substate_id.substate_id(),
+                Some(account_substate.substate_id.version()),
             )
             .await?;
 
-        substate_api.save_root(created_by_tx, versioned_account_address.clone())?;
-
-        let vaults_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
+        let indexed_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
+        substate_api.save_root(
+            created_by_tx,
+            versioned_account_address.clone(),
+            indexed_value.referenced_substates(),
+        )?;
         let known_child_vaults = substate_api
-            .load_dependent_substates(&[&account_substate.substate_id.substate_id])?
+            .load_dependent_substates(&[account_substate.substate_id.substate_id()])?
             .into_iter()
-            .filter(|s| s.substate_id.is_vault())
-            .map(|s| (s.substate_id, s.version))
+            .filter(|s| s.substate_id().is_vault())
+            .map(|s| {
+                let version = s.version();
+                (s.into_substate_id(), version)
+            })
             .collect::<HashMap<_, _>>();
-        for vault_id in vaults_value.vault_ids() {
+        for vault_id in indexed_value.vault_ids() {
             let vault_substate_id = SubstateId::Vault(*vault_id);
             let maybe_vault_version = known_child_vaults.get(&vault_substate_id).copied();
             let scan_result = substate_api
@@ -188,7 +194,7 @@ where
             let Some(ValidatorScanResult {
                 address: versioned_addr,
                 substate,
-                created_by_tx,
+                ..
             }) = scan_result
             else {
                 warn!(target: LOG_TARGET, "Vault {} for account {} does not exist according to validator node", vault_substate_id, versioned_account_address);
@@ -198,8 +204,8 @@ where
             if let Some(vault_version) = maybe_vault_version {
                 // The first time a vault is found, know about the vault substate from the tx result but never added
                 // it to the database.
-                if versioned_addr.version == vault_version && accounts_api.has_vault(&vault_substate_id)? {
-                    info!(target: LOG_TARGET, "Vault {} is up to date", versioned_addr.substate_id);
+                if versioned_addr.version() == vault_version && accounts_api.has_vault(&vault_substate_id)? {
+                    info!(target: LOG_TARGET, "Vault {} is up to date", versioned_addr.substate_id());
                     continue;
                 }
             }
@@ -221,21 +227,24 @@ where
                 let nft_container = substate.into_non_fungible().ok_or_else(|| {
                     AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a non-fungible token.", nft))
                 })?;
-                substate_api.save_child(created_by_tx, versioned_addr.substate_id.clone(), address)?;
+                substate_api.save_child(created_by_tx, versioned_addr.substate_id().clone(), address, [(*vault
+                    .resource_address())
+                .into()])?;
                 nfts.insert(nft.clone(), nft_container);
             }
 
             is_updated = true;
 
-            substate_api.save_child(
-                created_by_tx,
-                versioned_account_address.substate_id.clone(),
-                versioned_addr,
-            )?;
+            // substate_api.save_child(
+            //     created_by_tx,
+            //     versioned_account_address.substate_id().clone(),
+            //     versioned_addr,
+            //     substate
+            // )?;
 
-            self.add_vault_to_account_if_not_exist(&versioned_account_address.substate_id, *vault_id, &vault)
+            self.add_vault_to_account_if_not_exist(versioned_account_address.substate_id(), *vault_id, &vault)
                 .await?;
-            self.refresh_vault(&versioned_account_address.substate_id, *vault_id, &vault, &nfts)
+            self.refresh_vault(versioned_account_address.substate_id(), *vault_id, &vault, &nfts)
                 .await?;
         }
 
@@ -481,7 +490,7 @@ where
         let version = substate_api
             .get_substate(&resx_addr)
             .optional()?
-            .map(|s| s.substate_id.version)
+            .map(|s| s.substate_id.version())
             .unwrap_or(0);
         let ValidatorScanResult { substate: resource, .. } =
             substate_api.scan_for_substate(&resx_addr, Some(version)).await?;

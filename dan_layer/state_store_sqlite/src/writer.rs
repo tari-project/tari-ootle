@@ -1774,8 +1774,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             state_transitions::epoch.eq(epoch.as_u64() as i64),
             state_transitions::shard.eq(shard.as_u32() as i32),
             state_transitions::substate_address.eq(serialize_hex(address)),
-            state_transitions::substate_id.eq(versioned_substate_id.substate_id.to_string()),
-            state_transitions::version.eq(versioned_substate_id.version as i32),
+            state_transitions::substate_id.eq(versioned_substate_id.substate_id().to_string()),
+            state_transitions::version.eq(versioned_substate_id.version() as i32),
             state_transitions::transition.eq("DOWN"),
             state_transitions::state_version.eq(version.unwrap_or(0) as i64),
         );

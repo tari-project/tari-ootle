@@ -261,7 +261,7 @@ where
             .substate_api
             .scan_for_substate(
                 &SubstateId::Resource(params.resource_address),
-                maybe_known_resource.map(|r| r.substate_id.version),
+                maybe_known_resource.map(|r| r.substate_id.version()),
             )
             .await?;
         inputs.push(resource_substate.address.clone());
@@ -272,7 +272,7 @@ where
                 .substate_api
                 .scan_for_substate(
                     &SubstateId::Resource(*resource_address),
-                    maybe_known_resource.map(|r| r.substate_id.version),
+                    maybe_known_resource.map(|r| r.substate_id.version()),
                 )
                 .await?;
             inputs.push(resource_substate.address.clone());
@@ -453,7 +453,7 @@ where
             ])
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(
-                to_account.substate_id.as_component_address().unwrap(),
+                to_account.substate_id().as_component_address().unwrap(),
                 "deposit",
                 args![Workspace("bucket")],
             );

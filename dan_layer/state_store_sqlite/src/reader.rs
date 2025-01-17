@@ -39,6 +39,7 @@ use tari_dan_common_types::{
     SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
     consensus_models::{
@@ -1470,6 +1471,39 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .first::<sql_models::BlockDiff>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "block_diffs_get_last_change_for_substate",
+                source: e,
+            })?;
+
+        sql_models::BlockDiff::try_convert_change(diff)
+    }
+
+    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        use crate::schema::block_diffs;
+        if !Block::record_exists(self, block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "block_diffs_get_change_for_versioned_substate: Block {} does not exist",
+                    block_id
+                ),
+            });
+        }
+
+        let commit_block = self.get_commit_block()?;
+        let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
+        let substate_ref = substate_id.into();
+
+        let diff = block_diffs::table
+            .filter(block_diffs::block_id.eq_any(block_ids))
+            .filter(block_diffs::substate_id.eq(substate_ref.substate_id.to_string()))
+            .filter(block_diffs::version.eq(substate_ref.version as i32))
+            .order_by(block_diffs::id.desc())
+            .first::<sql_models::BlockDiff>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "block_diffs_get_change_for_versioned_substate",
                 source: e,
             })?;
 

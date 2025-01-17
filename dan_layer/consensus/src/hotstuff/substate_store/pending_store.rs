@@ -78,7 +78,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
         }
 
         if let Some(change) =
-            BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, id.substate_id).optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
         {
             return change
                 .into_up()
@@ -587,7 +587,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
         );
 
         if let Some(change) =
-            BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, id.substate_id()).optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
         {
             if change.is_up() {
                 return Ok(());

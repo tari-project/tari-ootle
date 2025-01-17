@@ -455,10 +455,17 @@ impl TransactionRecord {
         tx: &TTx,
         local_committee_info: &CommitteeInfo,
     ) -> Result<bool, StorageError> {
-        let foreign_inputs = self
+        let mut foreign_inputs = self
             .transaction()
             .all_inputs_iter()
-            .filter(|i| !local_committee_info.includes_substate_id(i.substate_id()));
+            .filter(|i| !local_committee_info.includes_substate_id(i.substate_id()))
+            .peekable();
+
+        if foreign_inputs.peek().is_none() {
+            // Avoid query for pledges for no reason
+            return Ok(true);
+        }
+
         // TODO(perf): this could be a bespoke DB query
         let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
         for input in foreign_inputs {

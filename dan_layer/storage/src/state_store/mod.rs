@@ -21,6 +21,7 @@ use tari_dan_common_types::{
     SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_engine_types::substate::SubstateId;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
@@ -220,6 +221,11 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         block_id: &BlockId,
         substate_id: &SubstateId,
+    ) -> Result<SubstateChange, StorageError>;
+    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
     ) -> Result<SubstateChange, StorageError>;
 
     // -------------------------------- QuorumCertificate -------------------------------- //

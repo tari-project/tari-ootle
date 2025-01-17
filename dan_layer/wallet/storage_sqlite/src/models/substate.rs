@@ -1,13 +1,14 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::str::FromStr;
+
 use chrono::NaiveDateTime;
 use diesel::{Identifiable, Queryable};
 use tari_common_types::types::FixedHash;
-use tari_dan_wallet_sdk::{
-    models::{SubstateModel, VersionedSubstateId},
-    storage::WalletStorageError,
-};
+use tari_dan_common_types::VersionedSubstateId;
+use tari_dan_wallet_sdk::{models::SubstateModel, storage::WalletStorageError};
+use tari_engine_types::substate::SubstateId;
 use tari_template_lib::Hash;
 use tari_utilities::hex::Hex;
 
@@ -30,10 +31,7 @@ impl Substate {
     pub fn try_to_record(&self) -> Result<SubstateModel, WalletStorageError> {
         Ok(SubstateModel {
             module_name: self.module_name.clone(),
-            address: VersionedSubstateId {
-                substate_id: self.address.parse().unwrap(),
-                version: self.version as u32,
-            },
+            substate_id: VersionedSubstateId::new(SubstateId::from_str(&self.address).unwrap(), self.version as u32),
             parent_address: self.parent_address.as_ref().map(|s| s.parse().unwrap()),
             transaction_hash: FixedHash::from_hex(&self.transaction_hash).map_err(|e| {
                 WalletStorageError::DecodingError {

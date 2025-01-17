@@ -13,10 +13,7 @@ tari_template_macros = { workspace = true, optional = true }
 tari_bor = { workspace = true, default-features = false }
 
 newtype-ops = { workspace = true }
-serde = { workspace = true, default-features = false, features = [
-    "derive",
-    "alloc",
-] }
+serde = { workspace = true, default-features = false, features = ["derive", "alloc"] }
 serde_with = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 borsh = { workspace = true, optional = true }

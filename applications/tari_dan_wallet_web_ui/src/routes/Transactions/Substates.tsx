@@ -31,11 +31,22 @@ import CodeBlockExpand from "../../Components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
 import type { Substate, SubstateId, TransactionResult } from "@tari-project/typescript-bindings";
 
-function RowData({ info, state }: { info: [SubstateId, Substate | number]; state: string }, index: number) {
+function SubstateRowData(
+  {
+    id,
+    substate,
+    state,
+  }: {
+    id: SubstateId;
+    substate?: Substate | number;
+    state: string;
+  },
+  index: number,
+) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
-  const itemKey = Object.keys(info[0])[0];
-  const itemValue = Object.values(info[0])[0];
+  const itemKey = Object.keys(id)[0];
+  const itemValue = Object.values(id)[0];
   return (
     <>
       <TableRow key={`${index}-1`}>
@@ -64,7 +75,13 @@ function RowData({ info, state }: { info: [SubstateId, Substate | number]; state
             ) : (
               <IoArrowDownCircle style={{ width: 22, height: 22, color: "#ECA86A" }} />
             )}
-            {state}({typeof info[1] === "number" ? info?.[1] : info[1].version})
+            {state}(
+            {substate !== null && substate !== undefined
+              ? typeof substate === "number"
+                ? substate
+                : substate.version
+              : ""}
+            )
           </div>
         </DataTableCell>
         <DataTableCell>{itemKey}</DataTableCell>
@@ -82,7 +99,7 @@ function RowData({ info, state }: { info: [SubstateId, Substate | number]; state
           colSpan={4}
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <CodeBlockExpand title="Substate" content={info} />
+            <CodeBlockExpand title="Substate" content={{ substate, id }} />
           </Collapse>
         </DataTableCell>
       </TableRow>
@@ -107,11 +124,11 @@ export default function Substates({ data }: { data: TransactionResult }) {
     <TableContainer>
       <Table>
         <TableBody>
-          {up.map((item: [SubstateId, Substate], index: number) => {
-            return <RowData info={item} state="Up" key={index} />;
+          {up.map(([id, substate]: [SubstateId, Substate | number], index: number) => {
+            return <SubstateRowData id={id} substate={substate} state="Up" key={index} />;
           })}
-          {down.map((item: [SubstateId, number], index: number) => {
-            return <RowData info={item} state="Down" key={index} />;
+          {down.map(([id, substate]: [SubstateId, Substate | number], index: number) => {
+            return <SubstateRowData id={id} substate={substate} state="Down" key={index} />;
           })}
         </TableBody>
       </Table>

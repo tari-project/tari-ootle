@@ -71,7 +71,7 @@ pub async fn mine_blocks(world: &mut TariWorld, miner_name: String, num_blocks: 
             .into_inner()
             .one_sided_address,
     )
-        .unwrap();
+    .unwrap();
 
     for _ in 0..num_blocks {
         mine_block(world, &payment_address, &mut base_client).await;
@@ -99,7 +99,7 @@ async fn mine_block(world: &TariWorld, payment_address: &TariAddress, base_clien
         false,
         &world.consensus_manager,
     )
-        .await;
+    .await;
 
     mine_block_without_wallet_with_template(base_client, block_template).await;
 }
@@ -162,8 +162,8 @@ async fn create_block_template_with_coinbase(
         RangeProofType::BulletProofPlus,
         PaymentId::Empty,
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
     let body = block_template.body.as_mut().unwrap();
 
     let grpc_output = tari_rpc::TransactionOutput::try_from(coinbase_output).unwrap();

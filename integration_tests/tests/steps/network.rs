@@ -35,7 +35,7 @@ async fn start_a_network(world: &mut TariWorld, vn_name: String, walletd_name: S
         walletd_name,
         format!("{}_claim_fee", vn_name),
     )
-        .await;
+    .await;
     world.validator_nodes.insert(vn_name.clone(), vn);
 
     miner::miner_mines_new_blocks(world, MINER_NAME.to_string(), 6).await;

@@ -99,7 +99,7 @@ pub async fn spawn_validator_node(
             }
             spawn_wallet_daemon(world, wallet_daemon_name.clone(), indexer_name).await;
             world.wallet_daemons.get(&wallet_daemon_name).unwrap()
-        }
+        },
     };
     let mut wallet_client = walletd.get_authed_client().await;
 

@@ -50,8 +50,8 @@ async fn when_i_claim_burn_via_wallet_daemon(
         wallet_daemon_name,
         1000,
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
     if let Some(ref reason) = claim_burn_resp.result.result.reject() {
         panic!("Transaction failed: {}", reason);
     }
@@ -99,13 +99,11 @@ async fn when_i_claim_burn_via_wallet_daemon_it_fails(
         wallet_daemon_name,
         1000,
     )
-        .await
-        .unwrap_err();
+    .await
+    .unwrap_err();
 }
 
-#[when(
-    expr = "I claim fees for validator {word} and epoch {int} into account {word} using the wallet daemon {word}"
-)]
+#[when(expr = "I claim fees for validator {word} and epoch {int} into account {word} using the wallet daemon {word}")]
 async fn when_i_claim_fees_for_validator_and_epoch(
     world: &mut TariWorld,
     validator_node: String,
@@ -164,7 +162,7 @@ async fn when_i_create_transfer_proof_via_wallet_daemon(
         None,
         None,
     )
-        .await;
+    .await;
 }
 
 #[then(expr = "I create an account {word} via the wallet daemon {word}")]
@@ -196,12 +194,8 @@ async fn when_i_create_a_wallet_key(world: &mut TariWorld, key_name: String, wal
     world.wallet_keys.insert(key_name, key.id);
 }
 
-#[then(
-    expr = "I create an account {word} via the wallet daemon {word} with {int} free coins using key {word}"
-)]
-#[when(
-    expr = "I create an account {word} via the wallet daemon {word} with {int} free coins using key {word}"
-)]
+#[then(expr = "I create an account {word} via the wallet daemon {word} with {int} free coins using key {word}")]
+#[when(expr = "I create an account {word} via the wallet daemon {word} with {int} free coins using key {word}")]
 async fn when_i_create_account_via_wallet_daemon_with_free_coins_using_key(
     world: &mut TariWorld,
     account_name: String,
@@ -216,7 +210,7 @@ async fn when_i_create_account_via_wallet_daemon_with_free_coins_using_key(
         amount.into(),
         Some(key_name),
     )
-        .await;
+    .await;
 }
 
 #[when(
@@ -277,9 +271,7 @@ async fn when_i_burn_funds_with_wallet_daemon(
     );
 }
 
-#[when(
-    expr = "I check the balance of {word} on wallet daemon {word} the amount is at {word} {int}"
-)]
+#[when(expr = "I check the balance of {word} on wallet daemon {word} the amount is at {word} {int}")]
 async fn check_account_balance_via_daemon(
     world: &mut TariWorld,
     account_name: String,
@@ -295,13 +287,13 @@ async fn check_account_balance_via_daemon(
                 println!("Expected balance to be at least {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at least {} but was {}", amount, current_balance);
             }
-        }
+        },
         "most" => {
             if current_balance > amount {
                 println!("Expected balance to be at most {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at most {} but was {}", amount, current_balance);
             }
-        }
+        },
         _ => panic!("Expected least or most, got {}", least_or_most),
     }
 }
@@ -354,9 +346,7 @@ async fn check_account_balance_is_exactly_via_daemon(
     }
 }
 
-#[when(
-    expr = "I check the confidential balance of {word} on wallet daemon {word} the amount is at {word} {int}"
-)]
+#[when(expr = "I check the confidential balance of {word} on wallet daemon {word} the amount is at {word} {int}")]
 async fn check_account_confidential_balance_is_via_daemon(
     world: &mut TariWorld,
     account_name: String,
@@ -372,13 +362,13 @@ async fn check_account_confidential_balance_is_via_daemon(
                 println!("Expected balance to be at least {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at least {} but was {}", amount, current_balance);
             }
-        }
+        },
         "most" => {
             if current_balance.value() > amount {
                 println!("Expected balance to be at most {} but was {}", amount, current_balance);
                 panic!("Expected balance to be at most {} but was {}", amount, current_balance);
             }
-        }
+        },
         _ => panic!("Expected least or most, got {}", least_or_most),
     }
 }
@@ -426,7 +416,7 @@ async fn when_transfer_via_wallet_daemon(
         wallet_daemon_name,
         outputs_name,
     )
-        .await;
+    .await;
 }
 
 #[when(
@@ -451,7 +441,7 @@ async fn when_confidential_transfer_via_wallet_daemon(
         wallet_daemon_name,
         outputs_name,
     )
-        .await;
+    .await;
 }
 
 #[when(expr = "I set the default account for {word} to {word}")]

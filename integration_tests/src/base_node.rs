@@ -134,7 +134,7 @@ pub async fn spawn_base_node(world: &mut TariWorld, bn_name: String) {
                 GrpcMethod::GetSideChainUtxos,
                 GrpcMethod::GetValidatorNodeChanges,
             ]
-                .into();
+            .into();
 
             let result = run_base_node(shutdown, Arc::new(base_node_identity), Arc::new(base_node_config)).await;
             if let Err(e) = result {

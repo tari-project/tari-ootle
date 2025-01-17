@@ -66,7 +66,7 @@ pub async fn wait_listener_on_local_port<T, E: Debug>(
             Ok(mut sock) => {
                 sock.shutdown().await.unwrap();
                 break;
-            }
+            },
             Err(e) => {
                 if handle.is_finished() {
                     match handle.await {
@@ -82,7 +82,7 @@ pub async fn wait_listener_on_local_port<T, E: Debug>(
                                     .or_else(|| panic.downcast_ref::<String>().map(|s| s.as_str()))
                                     .unwrap()
                             );
-                        }
+                        },
                     }
                 }
                 // println!("Waiting for base node to start listening on port {}. {}", port, e);
@@ -95,7 +95,7 @@ pub async fn wait_listener_on_local_port<T, E: Debug>(
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 i += 1;
-            }
+            },
         }
     }
     handle
@@ -112,13 +112,13 @@ pub async fn check_join_handle<E: Display>(
     match handle.await {
         Ok(Ok(_)) => {
             panic!("Node {} exited unexpectedly", name);
-        }
+        },
         Ok(Err(e)) => {
             panic!("Node {} exited unexpectedly with error: {}", name, e);
-        }
+        },
         Err(e) => {
             panic!("Node {} panicked: {:?}", name, e.try_into_panic());
-        }
+        },
     }
 }
 

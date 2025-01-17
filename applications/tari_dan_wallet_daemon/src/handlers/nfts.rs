@@ -32,7 +32,7 @@ use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::get_account,
+    handlers::helpers::{get_account, transaction_builder},
     services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
 };
@@ -207,7 +207,7 @@ async fn mint_account_nft(
         },
     ];
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .with_instructions(instructions)
         .build_and_seal(owner_sk);
@@ -249,7 +249,7 @@ async fn create_account_nft(
         .locate_dependent_substates(&[account.address.clone()])
         .await?;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .call_function(ACCOUNT_NFT_TEMPLATE_ADDRESS, "create", args![owner_token,])
         .with_inputs(inputs)

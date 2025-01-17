@@ -34,7 +34,10 @@ use tokio::time;
 
 use super::{accounts, context::HandlerContext};
 use crate::{
-    handlers::{helpers::get_account_or_default, HandlerError},
+    handlers::{
+        helpers::{get_account_or_default, transaction_builder},
+        HandlerError,
+    },
     services::WalletEvent,
 };
 
@@ -45,7 +48,7 @@ pub async fn handle_submit_instruction(
     token: Option<String>,
     req: CallInstructionRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
-    let mut builder = Transaction::builder().with_instructions(req.instructions);
+    let mut builder = transaction_builder(context).with_instructions(req.instructions);
 
     if let Some(dump_account) = req.dump_outputs_into {
         let AccountGetResponse {
@@ -130,7 +133,7 @@ pub async fn handle_submit(
         req.detect_inputs_use_unversioned,
     );
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .build_and_seal(&key.key);
@@ -183,7 +186,7 @@ pub async fn handle_submit_dry_run(
         vec![]
     };
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .build_and_seal(&key.key);
@@ -381,7 +384,7 @@ pub async fn handle_publish_template(
 
     let fee_account = get_account_or_default(req.fee_account, &sdk.accounts_api())?;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(
             fee_account.address.as_component_address().unwrap(),
             req.max_fee.try_into()?,

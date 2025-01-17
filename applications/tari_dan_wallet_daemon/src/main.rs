@@ -43,7 +43,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let config_path = cli.common.config_path();
     let cfg = load_configuration(config_path, true, &cli, cli.common.network)?;
-    let config = ApplicationConfig::load_from(&cfg)?;
+    let mut config = ApplicationConfig::load_from(&cfg)?;
 
     if let Some(index) = cli.derive_secret {
         let sdk = initialize_wallet_sdk(&config)?;
@@ -53,6 +53,10 @@ async fn main() -> Result<(), anyhow::Error> {
         println!("Secret: {}", secret.key.reveal());
         println!("Public key: {}", RistrettoPublicKey::from_secret_key(&secret.key));
         return Ok(());
+    }
+
+    if let Some(network) = cli.common.network {
+        config.dan_wallet_daemon.network = network;
     }
 
     // Remove the file if it was left behind by a previous run

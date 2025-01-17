@@ -16,7 +16,7 @@ use tari_wallet_daemon_client::types::{
 
 use crate::{
     handlers::{
-        helpers::{get_account_with_inputs, wait_for_result},
+        helpers::{get_account_with_inputs, transaction_builder, wait_for_result},
         HandlerContext,
     },
     DEFAULT_FEE,
@@ -74,7 +74,7 @@ pub async fn handle_claim_validator_fees(
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_fee_instructions(fee_instructions)
         .build_and_seal(&account_secret_key.key);
 

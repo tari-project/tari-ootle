@@ -11,11 +11,12 @@ use tari_dan_wallet_sdk::{
 };
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_engine_types::substate::SubstateId;
-use tari_transaction::TransactionId;
+use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
 use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
 use crate::{
+    handlers::HandlerContext,
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     services::{TransactionFinalizedEvent, WalletEvent},
 };
@@ -149,4 +150,9 @@ pub(super) fn invalid_params<T: Display>(field: &str, details: Option<T>) -> any
         serde_json::Value::Null,
     )
     .into()
+}
+
+/// Returns a TransactionBuilder with the current network configured.
+pub fn transaction_builder(context: &HandlerContext) -> TransactionBuilder {
+    Transaction::builder().for_network(context.config().network.as_byte())
 }

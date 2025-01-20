@@ -21,7 +21,7 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_dan_app_utilities::transaction_executor::TransactionProcessorError;
-use tari_dan_common_types::{Epoch, SubstateAddress};
+use tari_dan_common_types::{Epoch, SubstateRequirement};
 use tari_dan_engine::state_store::StateStoreError;
 use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerError;
@@ -42,14 +42,15 @@ pub enum DryRunTransactionProcessorError {
     #[error("TransactionProcessor error: {0}")]
     PayloadProcessor(#[from] TransactionProcessorError),
     #[error(
-        "All validators for epoch {epoch} substate address {address} failed to return substate. does_not_exist: \
-         {nexist_count}/{committee_size}, substate_down: {err_count}/{committee_size}"
+        "All validators for epoch {epoch} substate {substate_requirement} failed to return substate. does_not_exist: \
+         {nexist_count}/{max_failures}, substate_down: {err_count}/{max_failures} (committee_size: {committee_size})"
     )]
     AllValidatorsFailedToReturnSubstate {
-        address: SubstateAddress,
+        substate_requirement: SubstateRequirement,
         epoch: Epoch,
         nexist_count: usize,
         err_count: usize,
+        max_failures: usize,
         committee_size: usize,
     },
     #[error("Indexer error : {0}")]

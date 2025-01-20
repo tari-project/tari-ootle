@@ -110,11 +110,12 @@ pub async fn handle_submit(
         let loaded_substates = sdk.substate_api().locate_dependent_substates(&substates).await?;
         loaded_substates
             .into_iter()
-            .map(|mut input| {
+            .map(|input| {
                 if req.detect_inputs_use_unversioned {
-                    input.version = None;
+                    input.into_unversioned()
+                } else {
+                    input
                 }
-                input
             })
             .collect()
     } else {
@@ -177,9 +178,19 @@ pub async fn handle_submit_dry_run(
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
         let substates = substates.into_iter().collect::<Vec<_>>();
-        sdk.substate_api().locate_dependent_substates(&substates).await?
+        let dependencies = sdk.substate_api().locate_dependent_substates(&substates).await?;
+        dependencies
+            .into_iter()
+            .map(|input| {
+                if req.detect_inputs_use_unversioned {
+                    input.into_unversioned()
+                } else {
+                    input
+                }
+            })
+            .collect()
     } else {
-        Default::default()
+        vec![]
     };
 
     let transaction = Transaction::builder()
@@ -394,6 +405,7 @@ pub async fn handle_publish_template(
             signing_key_index: Some(fee_account.key_index),
             autofill_inputs: vec![],
             detect_inputs: req.detect_inputs,
+            detect_inputs_use_unversioned: true,
             proof_ids: vec![],
         };
         let resp = handle_submit_dry_run(context, token, request).await?;

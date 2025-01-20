@@ -102,37 +102,53 @@ where
             .with_write_tx(|tx| tx.transactions_insert(&transaction, &required_substates, None, true))?;
 
         let tx_id = *transaction.id();
-        let query = self
+        let result = self
             .network_interface
             .submit_dry_run_transaction(transaction, required_substates)
             .await
-            .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()))?;
+            .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()));
 
-        match &query.result {
-            TransactionFinalizedResult::Pending => {
-                return Err(TransactionApiError::NetworkInterfaceError(
-                    "Pending execution result returned from dry run".to_string(),
-                ));
+        match result {
+            Ok(query) => match &query.result {
+                TransactionFinalizedResult::Pending => {
+                    return Err(TransactionApiError::NetworkInterfaceError(
+                        "Pending execution result returned from dry run".to_string(),
+                    ));
+                },
+                TransactionFinalizedResult::Finalized {
+                    execution_result,
+                    finalized_time,
+                    execution_time,
+                    ..
+                } => {
+                    self.store.with_write_tx(|tx| {
+                        tx.transactions_set_result_and_status(
+                            query.transaction_id,
+                            execution_result.as_ref().map(|e| &e.finalize),
+                            execution_result
+                                .as_ref()
+                                .map(|e| e.finalize.fee_receipt.total_fees_charged()),
+                            None,
+                            TransactionStatus::DryRun,
+                            Some(*execution_time),
+                            Some(*finalized_time),
+                        )
+                    })?;
+                },
             },
-            TransactionFinalizedResult::Finalized {
-                execution_result,
-                finalized_time,
-                execution_time,
-                ..
-            } => {
+            Err(err) => {
                 self.store.with_write_tx(|tx| {
                     tx.transactions_set_result_and_status(
-                        query.transaction_id,
-                        execution_result.as_ref().map(|e| &e.finalize),
-                        execution_result
-                            .as_ref()
-                            .map(|e| e.finalize.fee_receipt.total_fees_charged()),
+                        tx_id,
                         None,
-                        TransactionStatus::DryRun,
-                        Some(*execution_time),
-                        Some(*finalized_time),
+                        None,
+                        None,
+                        TransactionStatus::DryRunFailed,
+                        None,
+                        None,
                     )
                 })?;
+                return Err(err);
             },
         }
 

@@ -37,6 +37,7 @@ pub enum TransactionStatus {
     #[default]
     New,
     DryRun,
+    DryRunFailed,
     Pending,
     Accepted,
     Rejected,
@@ -49,6 +50,7 @@ impl TransactionStatus {
         match self {
             TransactionStatus::New => "New",
             TransactionStatus::DryRun => "DryRun",
+            TransactionStatus::DryRunFailed => "DryRunFailed",
             TransactionStatus::Pending => "Pending",
             TransactionStatus::Accepted => "Accepted",
             TransactionStatus::Rejected => "Rejected",
@@ -65,6 +67,7 @@ impl FromStr for TransactionStatus {
         match s {
             "New" => Ok(TransactionStatus::New),
             "DryRun" => Ok(TransactionStatus::DryRun),
+            "DryRunFailed" => Ok(TransactionStatus::DryRunFailed),
             "Pending" => Ok(TransactionStatus::Pending),
             "Accepted" => Ok(TransactionStatus::Accepted),
             "Rejected" => Ok(TransactionStatus::Rejected),

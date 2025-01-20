@@ -22,12 +22,12 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use log::info;
+use log::{debug, info};
 use tari_dan_app_utilities::{
     template_manager::implementation::TemplateManager,
     transaction_executor::{TariDanTransactionProcessor, TransactionExecutor as _},
 };
-use tari_dan_common_types::{Epoch, PeerAddress, SubstateAddress, SubstateRequirement};
+use tari_dan_common_types::{Epoch, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
     commit_result::ExecuteResult,
@@ -154,17 +154,13 @@ where TSubstateCache: SubstateCache + 'static
 
         // Fetch explicit inputs that may not have been resolved by the autofiller
         for requirement in transaction.inputs() {
-            let Some(address) = requirement.to_substate_address() else {
-                // No version, we cant fetch it
-                continue;
-            };
             // If the input has been filled, we've already fetched the substate
             // Note: this works because VersionedSubstateId hashes the same as SubstateId internally.
             if transaction.filled_inputs().contains(&requirement.substate_id) {
                 continue;
             }
 
-            let (id, substate) = self.fetch_substate(address, epoch).await?;
+            let (id, substate) = self.fetch_substate(requirement, epoch).await?;
             substates.insert(id, substate);
         }
 
@@ -173,11 +169,14 @@ where TSubstateCache: SubstateCache + 'static
 
     pub async fn fetch_substate(
         &self,
-        address: SubstateAddress,
+        substate_requirement: &SubstateRequirement,
         epoch: Epoch,
     ) -> Result<(SubstateId, Substate), DryRunTransactionProcessorError> {
+        let address = substate_requirement.to_substate_address_zero_version();
         let mut committee = self.epoch_manager.get_committee_for_substate(epoch, address).await?;
         committee.shuffle();
+
+        let max_failures = committee.max_failures() + 1;
 
         let mut nexist_count = 0;
         let mut err_count = 0;
@@ -186,7 +185,7 @@ where TSubstateCache: SubstateCache + 'static
             // build a client with the VN
             let mut client = self.client_provider.create_client(vn_addr);
 
-            match client.get_substate(address).await {
+            match client.get_substate(substate_requirement).await {
                 Ok(SubstateResult::Up { substate, id, .. }) => {
                     return Ok((id, substate));
                 },
@@ -195,12 +194,21 @@ where TSubstateCache: SubstateCache + 'static
                     return Err(DryRunTransactionProcessorError::SubstateDowned { id, version });
                 },
                 Ok(SubstateResult::DoesNotExist) => {
-                    // we do not stop when an individual claims DoesNotExist, we try all Vns
+                    debug!(
+                        target: LOG_TARGET,
+                        "Substate {} does not exist on validator node {}",
+                        substate_requirement,
+                        vn_addr
+                    );
+                    // we do not stop when an individual claims DoesNotExist, we try $f + 1$ Vns
                     nexist_count += 1;
+                    if nexist_count >= max_failures {
+                        break;
+                    }
                     continue;
                 },
                 Err(e) => {
-                    info!(target: LOG_TARGET, "Unable to get pledge from peer: {} ", e.to_string());
+                    info!(target: LOG_TARGET, "Unable to get substate from peer: {} ", e.to_string());
                     // we do not stop when an individual request errors, we try all Vns
                     err_count += 1;
                     continue;
@@ -210,10 +218,11 @@ where TSubstateCache: SubstateCache + 'static
 
         // The substate does not exist on any VN or all validator nodes are offline, we return an error
         Err(DryRunTransactionProcessorError::AllValidatorsFailedToReturnSubstate {
-            address,
+            substate_requirement: substate_requirement.clone(),
             epoch,
             nexist_count,
             err_count,
+            max_failures,
             committee_size: committee.members().count(),
         })
     }

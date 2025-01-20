@@ -1003,6 +1003,8 @@ pub async fn handle_confidential_transfer(
     }
     let transaction_service = context.transaction_service().clone();
 
+    // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
+    // cause funds to remain locked indefinitely.
     task::spawn(async move {
         let account = get_account_or_default(req.account, &sdk.accounts_api())?;
 
@@ -1024,7 +1026,7 @@ pub async fn handle_confidential_transfer(
         if req.dry_run {
             let transaction_id = *transfer.transaction.id();
             let exec_result = transaction_service
-                .submit_dry_run_transaction(transfer.transaction, transfer.inputs)
+                .submit_dry_run_transaction(transfer.transaction, transfer.autofill_inputs)
                 .await?;
             let finalize = exec_result.finalize;
             return Ok(ConfidentialTransferResponse {
@@ -1036,7 +1038,7 @@ pub async fn handle_confidential_transfer(
 
         let mut events = notifier.subscribe();
         let tx_id = transaction_service
-            .submit_transaction(transfer.transaction, transfer.inputs)
+            .submit_transaction(transfer.transaction, transfer.autofill_inputs)
             .await?;
 
         notifier.notify(TransactionSubmittedEvent {

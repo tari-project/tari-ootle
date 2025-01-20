@@ -39,7 +39,7 @@ use tari_dan_app_utilities::{
     substate_file_cache::SubstateFileCache,
     template_manager::{implementation::TemplateManager, interface::TemplateExecutable},
 };
-use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress};
+use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::consensus_models::Decision;
@@ -320,7 +320,7 @@ impl JsonRpcHandlers {
                     // Ask network
                     let substate = self
                         .transaction_manager
-                        .get_substate(request.address.clone(), request.version.unwrap_or_default())
+                        .get_substate(&SubstateRequirement::new(request.address.clone(), request.version))
                         .await
                         .map_err(|e| {
                             warn!(target: LOG_TARGET, "Error asking network for substate: {}", e);
@@ -672,7 +672,7 @@ impl JsonRpcHandlers {
         loop {
             let res = self
                 .substate_manager
-                .get_specific_substate(&request.address, version)
+                .get_specific_substate(request.address.clone(), version)
                 .await;
 
             if let Ok(substate_result) = res {

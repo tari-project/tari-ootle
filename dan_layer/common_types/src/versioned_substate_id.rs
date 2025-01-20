@@ -222,6 +222,10 @@ impl VersionedSubstateId {
             version: self.version,
         }
     }
+
+    pub fn into_unversioned_requirement(self) -> SubstateRequirement {
+        SubstateRequirement::unversioned(self.substate_id)
+    }
 }
 
 impl ToSubstateAddress for VersionedSubstateId {

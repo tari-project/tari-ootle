@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use log::*;
 use tari_dan_common_types::{
+    option::Displayable,
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
     SubstateRequirement,
@@ -85,10 +86,20 @@ where
         for parent_id in parents {
             match self.store.with_read_tx(|tx| tx.substates_get(parent_id)).optional()? {
                 Some(parent) => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Parent substate {} found in store, loading dependent substates",
+                        parent.substate_id
+                    );
                     self.store
                         .with_read_tx(|tx| get_dependent_substates(tx, parent, &mut substate_ids))?;
                 },
                 None => {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Parent substate {} not found in store, requesting dependent substates",
+                        parent_id
+                    );
                     let ValidatorScanResult {
                         address: substate_id,
                         substate,
@@ -159,6 +170,11 @@ where
                         SubstateValue::Template(_) => {},
                     }
 
+                    debug!(
+                        target: LOG_TARGET,
+                        "Adding substate {} to dependent substates from remote source",
+                        substate_id
+                    );
                     substate_ids.insert(substate_id.into());
                 },
             }
@@ -176,13 +192,12 @@ where
             target: LOG_TARGET,
             "Scanning for substate {} at version {}",
             address,
-            version_hint.unwrap_or(0)
+            version_hint.display()
         );
 
-        // TODO: make configuration option to not do network requests
         let resp = self
             .network_interface
-            .query_substate(address, version_hint, true)
+            .query_substate(address, version_hint, false)
             .await
             .optional()
             .map_err(|e| SubstateApiError::NetworkIndexerError(e.into()))?

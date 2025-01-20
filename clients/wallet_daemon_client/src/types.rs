@@ -139,6 +139,7 @@ pub struct TransactionSubmitDryRunRequest {
     pub signing_key_index: Option<u64>,
     pub autofill_inputs: Vec<SubstateRequirement>,
     pub detect_inputs: bool,
+    pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub proof_ids: Vec<ConfidentialProofId>,
 }

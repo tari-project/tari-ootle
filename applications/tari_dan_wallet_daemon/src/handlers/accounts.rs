@@ -36,7 +36,6 @@ use tari_template_lib::{
     models::{Amount, UnclaimedConfidentialOutputAddress},
     prelude::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
 };
-use tari_transaction::Transaction;
 use tari_wallet_daemon_client::{
     types::{
         AccountGetDefaultRequest,

@@ -6,7 +6,6 @@ use log::*;
 use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
 use tari_engine_types::instruction::Instruction;
 use tari_template_lib::args;
-use tari_transaction::Transaction;
 use tari_wallet_daemon_client::types::{
     ClaimValidatorFeesRequest,
     ClaimValidatorFeesResponse,

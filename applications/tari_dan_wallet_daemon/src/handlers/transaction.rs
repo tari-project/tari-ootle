@@ -10,7 +10,6 @@ use tari_dan_app_utilities::json_encoding;
 use tari_dan_common_types::{optional::Optional, Epoch, SubstateRequirement};
 use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
 use tari_template_lib::{args, models::Amount};
-use tari_transaction::Transaction;
 use tari_wallet_daemon_client::types::{
     AccountGetRequest,
     AccountGetResponse,

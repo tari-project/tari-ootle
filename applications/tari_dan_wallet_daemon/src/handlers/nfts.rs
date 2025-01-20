@@ -19,7 +19,7 @@ use tari_template_lib::{
     crypto::RistrettoPublicKeyBytes,
     prelude::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
 };
-use tari_transaction::{Transaction, TransactionId};
+use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::types::{
     GetAccountNftRequest,
     GetAccountNftResponse,

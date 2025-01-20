@@ -186,7 +186,7 @@ where
             .collect::<HashMap<_, _>>();
         for vault_id in indexed_value.vault_ids() {
             let vault_substate_id = SubstateId::Vault(*vault_id);
-            let maybe_vault_version = known_child_vaults.get(&vault_substate_id).copied();
+            let maybe_vault_version = known_child_vaults.get(&vault_substate_id).copied().flatten();
             let scan_result = substate_api
                 .scan_for_substate(&vault_substate_id, maybe_vault_version)
                 .await

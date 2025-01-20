@@ -50,6 +50,10 @@ impl SubstateRequirement {
         self.substate_id
     }
 
+    pub fn into_unversioned(self) -> Self {
+        Self::unversioned(self.substate_id)
+    }
+
     pub fn version(&self) -> Option<u32> {
         self.version
     }

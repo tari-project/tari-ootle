@@ -540,7 +540,7 @@ pub async fn submit_manifest(
         .collect::<Vec<_>>();
 
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new())
-        .unwrap_or_else(|_| panic!("Attempted to parse manifest but failed"));
+        .unwrap_or_else(|err| panic!("Attempted to parse manifest but failed: {err}"));
 
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 

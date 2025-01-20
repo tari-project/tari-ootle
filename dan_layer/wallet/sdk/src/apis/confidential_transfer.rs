@@ -10,6 +10,7 @@ use tari_common_types::types::{PrivateKey, PublicKey};
 use tari_crypto::keys::PublicKey as _;
 use tari_dan_common_types::{
     optional::{IsNotFoundError, Optional},
+    SubstateRequirement,
     VersionedSubstateId,
 };
 use tari_dan_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProofStatement};
@@ -232,15 +233,15 @@ where
         let from_account_address = from_account.address.as_component_address().unwrap();
 
         // Determine Transaction Inputs
-        let mut inputs = Vec::new();
+        let mut inputs = Vec::<SubstateRequirement>::new();
 
         if dest_account_exists {
-            inputs.push(to_account.clone());
+            inputs.push(to_account.clone().into());
         }
 
         let account = self.accounts_api.get_account_by_address(&params.from_account.into())?;
         let account_substate = self.substate_api.get_substate(&params.from_account.into())?;
-        inputs.push(account_substate.substate_id);
+        inputs.push(account_substate.substate_id.into());
 
         // Add all versioned account child addresses as inputs
         let child_addresses = self.substate_api.load_dependent_substates(&[&account.address])?;
@@ -250,7 +251,7 @@ where
             .accounts_api
             .get_vault_by_resource(&account.address, &params.resource_address)?;
         let src_vault_substate = self.substate_api.get_substate(&src_vault.address)?;
-        inputs.push(src_vault_substate.substate_id);
+        inputs.push(src_vault_substate.substate_id.into());
 
         // add the input for the resource address to be transferred
         let maybe_known_resource = self
@@ -264,7 +265,7 @@ where
                 maybe_known_resource.map(|r| r.substate_id.version()),
             )
             .await?;
-        inputs.push(resource_substate.address.clone());
+        inputs.push(resource_substate.address.clone().into());
 
         if let Some(ref resource_address) = params.proof_from_resource {
             let maybe_known_resource = self.substate_api.get_substate(&(*resource_address).into()).optional()?;
@@ -275,7 +276,7 @@ where
                     maybe_known_resource.map(|r| r.substate_id.version()),
                 )
                 .await?;
-            inputs.push(resource_substate.address.clone());
+            inputs.push(resource_substate.address.into());
         }
 
         // Reserve and lock input funds for fees
@@ -512,7 +513,7 @@ where
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    pub inputs: Vec<VersionedSubstateId>,
+    pub inputs: Vec<SubstateRequirement>,
     pub fee_transaction_proof_id: Option<ConfidentialProofId>,
     pub transaction_proof_id: Option<ConfidentialProofId>,
 }

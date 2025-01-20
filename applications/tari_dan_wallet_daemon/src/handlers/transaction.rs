@@ -7,7 +7,7 @@ use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
 use tari_dan_app_utilities::json_encoding;
-use tari_dan_common_types::{optional::Optional, Epoch, SubstateRequirement};
+use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
 use tari_template_lib::{args, models::Amount};
 use tari_transaction::Transaction;
@@ -110,7 +110,6 @@ pub async fn handle_submit(
         let loaded_substates = sdk.substate_api().locate_dependent_substates(&substates).await?;
         loaded_substates
             .into_iter()
-            .chain(substates.into_iter().map(SubstateRequirement::unversioned))
             .map(|mut input| {
                 if req.detect_inputs_use_unversioned {
                     input.version = None;

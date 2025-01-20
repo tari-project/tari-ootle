@@ -217,10 +217,6 @@ pub async fn handle_invoke(
 
     let inputs = sdk.substate_api().load_dependent_substates(&[&account.address])?;
 
-    let inputs = inputs
-        .into_iter()
-        .map(|s| SubstateRequirement::new(s.substate_id().clone(), Some(s.version())));
-
     let account_address = account.address.as_component_address().unwrap();
     let transaction = Transaction::builder()
         .fee_transaction_pay_from_component(account_address, req.max_fee.unwrap_or(DEFAULT_FEE))
@@ -424,12 +420,9 @@ pub async fn handle_reveal_funds(
         let account_substate = sdk.substate_api().get_substate(&account.address)?;
         // Add all versioned account child addresses as inputs
         let child_addresses = sdk.substate_api().load_dependent_substates(&[&account.address])?;
-        let mut inputs = vec![account_substate.substate_id];
+        let mut inputs = Vec::with_capacity(child_addresses.len() + 1);
+        inputs.push(SubstateRequirement::from(account_substate.substate_id));
         inputs.extend(child_addresses);
-
-        let inputs = inputs
-            .into_iter()
-            .map(|addr| SubstateRequirement::new(addr.substate_id().clone(), Some(addr.version())));
 
         let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
 
@@ -862,7 +855,7 @@ pub async fn handle_transfer(
         .accounts_api()
         .get_vault_by_resource(&account.address, &req.resource_address)?;
     let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
-    inputs.push(src_vault_substate.substate_id);
+    inputs.insert(src_vault_substate.substate_id.into());
 
     // add the input for the resource address to be transfered
     let resource_substate = sdk
@@ -873,7 +866,7 @@ pub async fn handle_transfer(
         resource_substate.address.substate_id().clone(),
         Some(resource_substate.address.version()),
     );
-    inputs.push(resource_substate.address);
+    inputs.insert(resource_substate.address.into());
 
     let mut instructions = vec![];
     let mut fee_instructions = vec![];
@@ -887,7 +880,7 @@ pub async fn handle_transfer(
         .optional()?;
 
     if let Some(ValidatorScanResult { address, .. }) = existing_account {
-        inputs.push(address);
+        inputs.insert(address.into());
     } else {
         instructions.push(Instruction::CreateAccount {
             public_key_address: req.destination_public_key,
@@ -943,16 +936,16 @@ pub async fn handle_transfer(
     let transaction = Transaction::builder()
         .with_fee_instructions(fee_instructions)
         .with_instructions(instructions)
-        .with_inputs(vec![resource_substate_address])
+        .add_input(resource_substate_address)
+        .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
 
-    let required_inputs = inputs.into_iter().map(Into::into).collect();
     // If dry run we can return the result immediately
     if req.dry_run {
         let transaction_id = *transaction.id();
         let execute_result = context
             .transaction_service()
-            .submit_dry_run_transaction(transaction, required_inputs)
+            .submit_dry_run_transaction(transaction, vec![])
             .await?;
         let finalize = execute_result.finalize;
         return Ok(AccountsTransferResponse {
@@ -967,7 +960,7 @@ pub async fn handle_transfer(
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
-        .submit_transaction(transaction, required_inputs)
+        .submit_transaction(transaction, vec![])
         .await?;
 
     let finalized = wait_for_result(&mut events, tx_id).await?;
@@ -975,7 +968,7 @@ pub async fn handle_transfer(
     if let Some(reject) = finalized.finalize.result.reject() {
         return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
     }
-    if let Some(reason) = finalized.finalize.reject() {
+    if let Some(reason) = finalized.finalize.full_reject() {
         return Err(anyhow::anyhow!(
             "Fee transaction succeeded (fees charged) however the transaction failed: {}",
             reason
@@ -1031,10 +1024,7 @@ pub async fn handle_confidential_transfer(
         if req.dry_run {
             let transaction_id = *transfer.transaction.id();
             let exec_result = transaction_service
-                .submit_dry_run_transaction(
-                    transfer.transaction,
-                    transfer.inputs.into_iter().map(Into::into).collect(),
-                )
+                .submit_dry_run_transaction(transfer.transaction, transfer.inputs)
                 .await?;
             let finalize = exec_result.finalize;
             return Ok(ConfidentialTransferResponse {
@@ -1046,10 +1036,7 @@ pub async fn handle_confidential_transfer(
 
         let mut events = notifier.subscribe();
         let tx_id = transaction_service
-            .submit_transaction(
-                transfer.transaction,
-                transfer.inputs.into_iter().map(Into::into).collect(),
-            )
+            .submit_transaction(transfer.transaction, transfer.inputs)
             .await?;
 
         notifier.notify(TransactionSubmittedEvent {

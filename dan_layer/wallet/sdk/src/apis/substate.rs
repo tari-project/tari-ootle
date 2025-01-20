@@ -65,17 +65,14 @@ where
     pub fn load_dependent_substates(
         &self,
         parents: &[&SubstateId],
-    ) -> Result<Vec<VersionedSubstateId>, SubstateApiError> {
-        let mut substate_addresses = Vec::with_capacity(parents.len());
+    ) -> Result<HashSet<SubstateRequirement>, SubstateApiError> {
+        let mut substate_ids = HashSet::with_capacity(parents.len());
         let mut tx = self.store.create_read_tx()?;
-        // TODO: Could be optimised, also perhaps we need to traverse all ancestors recursively
         for parent_addr in parents {
             let parent = tx.substates_get(parent_addr)?;
-            let children = tx.substates_get_children(parent_addr)?;
-            substate_addresses.push(parent.substate_id);
-            substate_addresses.extend(children.into_iter().map(|s| s.substate_id));
+            get_dependent_substates(&mut tx, parent, &mut substate_ids)?;
         }
-        Ok(substate_addresses)
+        Ok(substate_ids)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -330,6 +327,11 @@ fn get_dependent_substates_inner<TTx: WalletStoreReader>(
             // Ensure that the associated resource is also included
             substate_ids.insert(SubstateRequirement::unversioned(*addr.resource_address()));
         }
+
+        if substate_ids.contains(&child) {
+            continue;
+        }
+
         get_dependent_substates_inner(tx, &child, substate_ids)?;
         debug!(
             target: LOG_TARGET,

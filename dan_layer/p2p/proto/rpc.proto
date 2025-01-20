@@ -260,3 +260,21 @@ message StateTransitionId {
   uint32 shard = 2;
   uint64 seq = 3;
 }
+
+enum TemplateType {
+  Wasm = 0;
+  Manifest = 1;
+  Flow = 2;
+}
+
+message SyncTemplatesRequest {
+  repeated bytes addresses = 1;
+}
+
+message SyncTemplatesResponse {
+  bytes address = 1;
+  bytes author_public_key = 2;
+  TemplateType template_type = 3;
+  string template_name = 4;
+  bytes binary = 5;
+}

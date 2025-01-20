@@ -52,6 +52,7 @@ pub use block_transaction_executor::*;
 pub use handle::*;
 pub use signature_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
+use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 
 use crate::{p2p::NopLogger, transaction_validators::WithContext};
 
@@ -75,6 +76,8 @@ pub async fn spawn(
     >,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
+    template_manager: TemplateManager<PeerAddress>,
+    template_manager_handle: TemplateManagerHandle,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
@@ -109,7 +112,13 @@ pub async fn spawn(
     let context = ConsensusWorkerContext {
         epoch_manager: epoch_manager.clone(),
         hotstuff: hotstuff_worker,
-        state_sync: RpcStateSyncManager::new(epoch_manager, store, client_factory),
+        state_sync: RpcStateSyncManager::new(
+            epoch_manager,
+            store,
+            client_factory,
+            template_manager,
+            template_manager_handle,
+        ),
         tx_current_state,
     };
 

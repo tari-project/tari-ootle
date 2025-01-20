@@ -22,9 +22,13 @@
 
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::Epoch;
+use tari_dan_storage::global::TemplateStatus;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 
 use super::{types::TemplateManagerRequest, Template, TemplateExecutable, TemplateManagerError, TemplateMetadata};
 
@@ -65,6 +69,30 @@ impl TemplateManagerHandle {
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
     }
 
+    pub async fn get_templates_by_addresses(
+        &self,
+        addresses: Vec<TemplateAddress>,
+    ) -> Result<Vec<Template>, TemplateManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(TemplateManagerRequest::GetTemplatesByAddresses { addresses, reply: tx })
+            .await
+            .map_err(|_| TemplateManagerError::ChannelClosed)?;
+        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
+
+    pub async fn sync_templates(
+        &self,
+        addresses: Vec<TemplateAddress>,
+    ) -> Result<JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>, TemplateManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(TemplateManagerRequest::SyncTemplates { addresses, reply: tx })
+            .await
+            .map_err(|_| TemplateManagerError::ChannelClosed)?;
+        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
+
     pub async fn add_template(
         &self,
         author_public_key: PublicKey,
@@ -81,6 +109,23 @@ impl TemplateManagerHandle {
                 template,
                 template_name,
                 epoch,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| TemplateManagerError::ChannelClosed)?;
+        rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
+
+    pub async fn template_exists(
+        &self,
+        template_address: TemplateAddress,
+        status: Option<TemplateStatus>,
+    ) -> Result<bool, TemplateManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(TemplateManagerRequest::TemplateExists {
+                address: template_address,
+                status,
                 reply: tx,
             })
             .await

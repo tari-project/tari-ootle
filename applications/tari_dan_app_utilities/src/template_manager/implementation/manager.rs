@@ -125,20 +125,71 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 name: name.to_string(),
                 address,
                 binary_sha,
+                author_public_key: Default::default(),
             },
             executable: TemplateExecutable::CompiledWasm(compiled_code),
         }
     }
 
-    pub fn template_exists(&self, address: &TemplateAddress) -> Result<bool, TemplateManagerError> {
+    pub fn template_exists(
+        &self,
+        address: &TemplateAddress,
+        status: Option<TemplateStatus>,
+    ) -> Result<bool, TemplateManagerError> {
         if self.builtin_templates.contains_key(address) {
             return Ok(true);
         }
         let mut tx = self.global_db.create_transaction()?;
         self.global_db
             .templates(&mut tx)
-            .template_exists(address)
+            .template_exists(address, status)
             .map_err(|_| TemplateManagerError::TemplateNotFound { address: *address })
+    }
+
+    /// Deletes a template if exists.
+    pub fn delete_template(&self, address: &TemplateAddress) -> Result<(), TemplateManagerError> {
+        if !self.template_exists(address, None)? {
+            return Ok(());
+        }
+
+        let mut tx = self.global_db.create_transaction()?;
+        self.global_db
+            .templates(&mut tx)
+            .delete_template(address)
+            .map_err(|_| TemplateManagerError::TemplateDeleteFailed { address: *address })
+    }
+
+    /// Fetching all templates by addresses.
+    pub fn fetch_templates_by_addresses(
+        &self,
+        mut addresses: Vec<TemplateAddress>,
+    ) -> Result<Vec<Template>, TemplateManagerError> {
+        let mut result = Vec::with_capacity(addresses.len());
+
+        // check in built-in templates first
+        let mut found_template_indexes = vec![];
+        for (i, address) in addresses.iter().enumerate() {
+            if let Some(template) = self.builtin_templates.get(address) {
+                result.push(template.clone());
+                found_template_indexes.push(i);
+            }
+        }
+        found_template_indexes.iter().for_each(|i| {
+            addresses.remove(*i);
+        });
+
+        // check the rest in DB
+        let mut tx = self.global_db.create_transaction()?;
+        self.global_db
+            .templates(&mut tx)
+            .get_templates_by_addresses(addresses.iter().map(|addr| addr.as_ref()).collect())
+            .map_err(|_| TemplateManagerError::TemplatesNotFound { addresses })?
+            .iter()
+            .for_each(|template| {
+                result.push(Template::from(template.clone()));
+            });
+
+        Ok(result)
     }
 
     pub fn fetch_template(&self, address: &TemplateAddress) -> Result<Template, TemplateManagerError> {
@@ -188,6 +239,28 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         templates.append(&mut builtin_metadata);
 
         Ok(templates)
+    }
+
+    pub fn add_pending_template(
+        &self,
+        template_address: tari_engine_types::TemplateAddress,
+        epoch: Epoch,
+    ) -> Result<(), TemplateManagerError> {
+        let template = DbTemplate::empty_pending(template_address, epoch);
+
+        let mut tx = self.global_db.create_transaction()?;
+        let mut templates_db = self.global_db.templates(&mut tx);
+        match templates_db.get_template(&template.template_address)? {
+            Some(_) => templates_db.update_template(
+                &template.template_address,
+                DbTemplateUpdate::status(TemplateStatus::Pending),
+            )?,
+            None => templates_db.insert_template(template)?,
+        }
+
+        tx.commit()?;
+
+        Ok(())
     }
 
     pub(super) fn add_template(

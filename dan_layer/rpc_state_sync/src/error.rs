@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus::hotstuff::{HotStuffError, ProposalValidationError};
+use tari_dan_app_utilities::template_manager::interface::TemplateManagerError;
 use tari_dan_storage::{
     consensus_models::{BlockId, TransactionPoolError},
     StorageError,
@@ -35,6 +36,12 @@ pub enum CommsRpcConsensusSyncError {
     StateTreeError(#[from] tari_state_tree::StateTreeError),
     #[error("State root mismatch. Expected: {expected}, actual: {actual}")]
     StateRootMismatch { expected: TreeHash, actual: TreeHash },
+    #[error("Template manager error: {0}")]
+    TemplateManager(#[from] TemplateManagerError),
+    #[error("Task join error: {0}")]
+    TaskJoin(String),
+    #[error("Failed to sync templates!")]
+    TemplateSyncFailure,
 }
 
 impl CommsRpcConsensusSyncError {

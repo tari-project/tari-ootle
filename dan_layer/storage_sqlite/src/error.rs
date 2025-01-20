@@ -29,6 +29,8 @@ use tari_dan_storage::StorageError;
 use tari_template_lib::HashParseError;
 use thiserror::Error;
 
+use crate::global::models::TemplateConversionError;
+
 #[derive(Debug, Error)]
 pub enum SqliteStorageError {
     #[error("Could not connect to database: {source}")]
@@ -72,6 +74,8 @@ pub enum SqliteStorageError {
     },
     #[error("Hash parsing error: {0}")]
     HashParse(#[from] HashParseError),
+    #[error("Template conversion error: {0}")]
+    TemplateConversion(#[from] TemplateConversionError),
 }
 
 impl From<SqliteStorageError> for StorageError {

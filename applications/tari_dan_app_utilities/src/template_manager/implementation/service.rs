@@ -20,18 +20,36 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// TODO: rewrite downloader to get template from other peer(s) OR completely drop this concept and implement somewhere
-// else
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use futures::StreamExt;
 use log::*;
-use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch, NodeAddressable};
+use tari_common_types::types::{FixedHash, PublicKey};
+use tari_dan_common_types::{
+    committee::Committee,
+    services::template_provider::TemplateProvider,
+    Epoch,
+    NodeAddressable,
+    PeerAddress,
+    SubstateAddress,
+};
 use tari_dan_engine::function_definitions::FlowFunctionDefinition;
+use tari_dan_p2p::proto::rpc::{SyncTemplatesRequest, TemplateType};
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
-use tari_engine_types::calculate_template_binary_hash;
+use tari_engine_types::{
+    calculate_template_binary_hash,
+    hashing::template_hasher32,
+    published_template::PublishedTemplateAddress,
+    substate::SubstateId,
+};
+use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::{models::TemplateAddress, Hash};
 use tari_validator_node_client::types::{ArgDef, FunctionDef, TemplateAbi};
+use tari_validator_node_rpc::{
+    client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
+    rpc_service::ValidatorNodeRpcClient,
+};
 use tokio::{
     sync::{mpsc, mpsc::Receiver, oneshot},
     task::JoinHandle,
@@ -41,31 +59,46 @@ use super::{
     downloader::{DownloadRequest, DownloadResult},
     TemplateManager,
 };
-use crate::template_manager::interface::{TemplateExecutable, TemplateManagerError, TemplateManagerRequest};
+use crate::template_manager::interface::{
+    SyncTemplatesResult,
+    Template,
+    TemplateExecutable,
+    TemplateManagerError,
+    TemplateManagerRequest,
+};
 
-const LOG_TARGET: &str = "tari::template_manager";
+const LOG_TARGET: &str = "tari::dan::template_manager";
 
 pub struct TemplateManagerService<TAddr> {
     rx_request: Receiver<TemplateManagerRequest>,
     manager: TemplateManager<TAddr>,
+    epoch_manager: EpochManagerHandle<PeerAddress>,
     completed_downloads: mpsc::Receiver<DownloadResult>,
     download_queue: mpsc::Sender<DownloadRequest>,
+    client_factory: Arc<TariValidatorNodeRpcClientFactory>,
+    periodic_template_sync_interval: Duration,
 }
 
 impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
     pub fn spawn(
         rx_request: Receiver<TemplateManagerRequest>,
         manager: TemplateManager<TAddr>,
+        epoch_manager: EpochManagerHandle<PeerAddress>,
         download_queue: mpsc::Sender<DownloadRequest>,
         completed_downloads: mpsc::Receiver<DownloadResult>,
+        client_factory: TariValidatorNodeRpcClientFactory,
+        periodic_template_sync_interval: Duration,
         shutdown: ShutdownSignal,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {
             Self {
                 rx_request,
                 manager,
+                epoch_manager,
                 download_queue,
                 completed_downloads,
+                client_factory: Arc::new(client_factory),
+                periodic_template_sync_interval,
             }
             .run(shutdown)
             .await?;
@@ -75,6 +108,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
 
     pub async fn run(mut self, mut shutdown: ShutdownSignal) -> Result<(), TemplateManagerError> {
         self.on_startup().await?;
+        let mut auto_template_sync_interval = tokio::time::interval(self.periodic_template_sync_interval);
         loop {
             tokio::select! {
                 Some(req) = self.rx_request.recv() => self.handle_request(req).await,
@@ -83,7 +117,11 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                         error!(target: LOG_TARGET, "Error handling completed download: {}", err);
                     }
                 },
-
+                _ = auto_template_sync_interval.tick() => {
+                    if let Err(error) = self.sync_pending_templates().await {
+                        error!(target: LOG_TARGET, "Error syncing pending templates: {}", error);
+                    }
+                }
                 _ = shutdown.wait() => {
                     dbg!("Shutting down epoch manager");
                     break;
@@ -93,8 +131,24 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         Ok(())
     }
 
+    /// Triggers syncing of pending templates.
+    /// Please note that this is a non-blocking call, after trigger it returns immediately.
+    async fn sync_pending_templates(&mut self) -> Result<(), TemplateManagerError> {
+        let templates = self.manager.fetch_pending_templates()?;
+        let template_addresses: Vec<TemplateAddress> =
+            templates.iter().map(|template| template.template_address).collect();
+        if !template_addresses.is_empty() {
+            self.handle_templates_sync_request(template_addresses).await?;
+            info!(target: LOG_TARGET, "⏳️️ {} templates are triggered to sync from network", templates.len());
+        }
+
+        Ok(())
+    }
+
     async fn on_startup(&mut self) -> Result<(), TemplateManagerError> {
         let templates = self.manager.fetch_pending_templates()?;
+
+        // trigger syncing templates the old way too
         for template in templates {
             if template.status == TemplateStatus::Pending {
                 let _ignore = self
@@ -138,6 +192,11 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
             },
             GetTemplates { limit, reply } => handle(reply, self.manager.fetch_template_metadata(limit)),
             LoadTemplateAbi { address, reply } => handle(reply, self.handle_load_template_abi(address)),
+            TemplateExists { address, status, reply } => handle(reply, self.handle_template_exists(&address, status)),
+            GetTemplatesByAddresses { addresses, reply } => {
+                handle(reply, self.handle_get_templates_by_addresses(addresses))
+            },
+            SyncTemplates { addresses, reply } => handle(reply, self.handle_templates_sync_request(addresses).await),
         }
     }
 
@@ -238,6 +297,23 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         Ok(())
     }
 
+    /// Handling template exists request.
+    fn handle_template_exists(
+        &mut self,
+        template_address: &TemplateAddress,
+        status: Option<TemplateStatus>,
+    ) -> Result<bool, TemplateManagerError> {
+        self.manager.template_exists(template_address, status)
+    }
+
+    /// Handling fetching templates by addresses.
+    fn handle_get_templates_by_addresses(
+        &mut self,
+        addresses: Vec<TemplateAddress>,
+    ) -> Result<Vec<Template>, TemplateManagerError> {
+        self.manager.fetch_templates_by_addresses(addresses)
+    }
+
     async fn handle_add_template(
         &mut self,
         author_public_key: PublicKey,
@@ -281,6 +357,171 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
         }
 
         Ok(())
+    }
+
+    /// Starts an async task to synchronize templates from the right committees.
+    /// This method returns a [`JoinHandle`] which can be .await-ed to get the results, or it can be ignored,
+    /// the process will be running anyway async.
+    #[allow(clippy::mutable_key_type)]
+    #[allow(clippy::too_many_lines)]
+    async fn handle_templates_sync_request(&self, mut addresses: Vec<TemplateAddress>) -> SyncTemplatesResult {
+        info!(target: LOG_TARGET, "New templates sync request for {} templates.", addresses.len());
+
+        // check for existing templates
+        let mut existing_templates = vec![];
+        for (i, address) in addresses.iter().enumerate() {
+            if self.manager.template_exists(address, Some(TemplateStatus::Active))? {
+                existing_templates.push(i);
+            }
+        }
+        existing_templates.iter().for_each(|i| {
+            addresses.remove(*i);
+        });
+
+        // sync
+        let client_factory = self.client_factory.clone();
+        let template_manager = Arc::new(self.manager.clone());
+        let epoch_manager = self.epoch_manager.clone();
+        let current_epoch = self.epoch_manager.current_epoch().await?;
+
+        // start a task to not block other calls in service
+        Ok(tokio::spawn(async move {
+            let address_batches = addresses.chunks(100);
+            for addresses in address_batches {
+                // collect and map all template addresses to committees in the current batch
+                let mut committees = HashMap::<Committee<PeerAddress>, Vec<TemplateAddress>>::new();
+                for address in addresses {
+                    let substate_id = SubstateId::from(PublishedTemplateAddress::from_hash(*address));
+                    let owner_committee = epoch_manager
+                        .get_committee_for_substate(
+                            current_epoch,
+                            SubstateAddress::from_substate_id(&substate_id, 0), /* at the moment we do not support a
+                                                                                 * template update directly on the
+                                                                                 * same substate */
+                        )
+                        .await?;
+
+                    if let Some(committee_template_addresses) = committees.get_mut(&owner_committee) {
+                        committee_template_addresses.push(*address);
+                    } else {
+                        committees.insert(owner_committee, vec![*address]);
+                    }
+                }
+
+                // do syncing
+                for (committee, addresses) in &mut committees {
+                    for (addr, _) in &committee.members {
+                        // syncing current part of batch
+                        match Self::vn_client(client_factory.clone(), addr).await {
+                            Ok(mut client) => {
+                                match client
+                                    .sync_templates(SyncTemplatesRequest {
+                                        addresses: addresses.iter().map(|address| address.to_vec()).collect(),
+                                    })
+                                    .await
+                                {
+                                    Ok(mut stream) => {
+                                        while let Some(result) = stream.next().await {
+                                            match result {
+                                                Ok(resp) => {
+                                                    // code
+                                                    let mut compiled_code = None;
+                                                    let mut flow_json = None;
+                                                    let mut manifest = None;
+                                                    let template_type: DbTemplateType;
+                                                    let bin_hash = FixedHash::from(
+                                                        template_hasher32()
+                                                            .chain(resp.binary.as_slice())
+                                                            .result()
+                                                            .into_array(),
+                                                    );
+                                                    match resp.template_type() {
+                                                        TemplateType::Wasm => {
+                                                            compiled_code = Some(resp.binary);
+                                                            template_type = DbTemplateType::Wasm;
+                                                        },
+                                                        TemplateType::Manifest => {
+                                                            manifest = Some(String::from_utf8(resp.binary)?);
+                                                            template_type = DbTemplateType::Manifest;
+                                                        },
+                                                        TemplateType::Flow => {
+                                                            flow_json = Some(String::from_utf8(resp.binary)?);
+                                                            template_type = DbTemplateType::Flow;
+                                                        },
+                                                    }
+
+                                                    // get template address
+                                                    let template_address_result =
+                                                        TemplateAddress::try_from_vec(resp.address);
+                                                    if let Err(error) = template_address_result {
+                                                        error!(target: LOG_TARGET, "Invalid template address: {error:?}");
+                                                        continue;
+                                                    }
+                                                    let template_address = template_address_result.unwrap();
+
+                                                    if let Err(error) = template_manager.update_template(
+                                                        template_address,
+                                                        DbTemplateUpdate::template(
+                                                            FixedHash::try_from(resp.author_public_key.to_vec())?,
+                                                            Some(bin_hash),
+                                                            resp.template_name,
+                                                            template_type,
+                                                            compiled_code,
+                                                            flow_json,
+                                                            manifest,
+                                                        ),
+                                                    ) {
+                                                        error!(target: LOG_TARGET, "Failed to add new template: {error:?}");
+                                                        continue;
+                                                    }
+
+                                                    // remove from addresses to be able to send back a list of not
+                                                    // synced templates (if any)
+                                                    for (i, addr) in addresses.iter().enumerate() {
+                                                        if *addr == template_address {
+                                                            addresses.remove(i);
+                                                            break;
+                                                        }
+                                                    }
+
+                                                    info!(target: LOG_TARGET, "✅ Template synced successfully: {}", template_address);
+                                                    break;
+                                                },
+                                                Err(error) => {
+                                                    warn!(target: LOG_TARGET, "Can't get stream of templates from VN({addr}): {error:?}");
+                                                },
+                                            }
+                                        }
+                                    },
+                                    Err(error) => {
+                                        warn!(target: LOG_TARGET, "Can't get stream of templates from VN({addr}): {error:?}");
+                                    },
+                                }
+                            },
+                            Err(error) => {
+                                warn!(target: LOG_TARGET, "Failed to connect to VN at {addr}: {error:?}");
+                            },
+                        }
+                    }
+                }
+            }
+
+            if addresses.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(addresses))
+            }
+        }))
+    }
+
+    /// Creates a new validator node client.
+    async fn vn_client(
+        client_factory: Arc<TariValidatorNodeRpcClientFactory>,
+        addr: &PeerAddress,
+    ) -> Result<ValidatorNodeRpcClient, TemplateManagerError> {
+        let mut rpc_client = client_factory.create_client(addr);
+        let client = rpc_client.client_connection().await?;
+        Ok(client)
     }
 }
 

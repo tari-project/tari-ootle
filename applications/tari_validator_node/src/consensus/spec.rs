@@ -43,7 +43,7 @@ impl ConsensusSpec for TariConsensusSpec {
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
     type SignatureService = TariSignatureService;
     type StateStore = SqliteStateStore<Self::Addr>;
-    type SyncManager = RpcStateSyncManager<Self>;
+    type SyncManager = RpcStateSyncManager<Self, Self::Addr>;
     type TransactionExecutor = TariDanBlockTransactionExecutor<
         TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
         ConsensusTransactionValidator,

@@ -24,6 +24,7 @@ use std::convert::{TryFrom, TryInto};
 
 use log::*;
 use tari_bor::{decode_exact, encode};
+use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateAddress};
 use tari_dan_p2p::{
     proto,
@@ -42,16 +43,19 @@ use tari_dan_p2p::{
         SyncBlocksResponse,
         SyncStateRequest,
         SyncStateResponse,
+        SyncTemplatesRequest,
+        SyncTemplatesResponse,
     },
 };
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
-use tari_engine_types::virtual_substate::VirtualSubstateId;
+use tari_engine_types::{virtual_substate::VirtualSubstateId, TemplateAddress};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_lib::HashParseError;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
@@ -59,7 +63,7 @@ use tokio::{sync::mpsc, task};
 use crate::{
     consensus::ConsensusHandle,
     p2p::{
-        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
+        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
         services::mempool::MempoolHandle,
     },
     virtual_substate::VirtualSubstateManager,
@@ -69,6 +73,7 @@ const LOG_TARGET: &str = "tari::dan::p2p::rpc";
 
 pub struct ValidatorNodeRpcServiceImpl {
     epoch_manager: EpochManagerHandle<PeerAddress>,
+    template_manager: TemplateManagerHandle,
     shard_state_store: SqliteStateStore<PeerAddress>,
     mempool: MempoolHandle,
     virtual_substate_manager: VirtualSubstateManager<SqliteStateStore<PeerAddress>, EpochManagerHandle<PeerAddress>>,
@@ -78,6 +83,7 @@ pub struct ValidatorNodeRpcServiceImpl {
 impl ValidatorNodeRpcServiceImpl {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
+        template_manager: TemplateManagerHandle,
         shard_state_store: SqliteStateStore<PeerAddress>,
         mempool: MempoolHandle,
         virtual_substate_manager: VirtualSubstateManager<
@@ -88,6 +94,7 @@ impl ValidatorNodeRpcServiceImpl {
     ) -> Self {
         Self {
             epoch_manager,
+            template_manager,
             shard_state_store,
             mempool,
             virtual_substate_manager,
@@ -392,5 +399,24 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         );
 
         Ok(Streaming::new(receiver))
+    }
+
+    async fn sync_templates(
+        &self,
+        request: Request<SyncTemplatesRequest>,
+    ) -> Result<Streaming<SyncTemplatesResponse>, RpcStatus> {
+        let req = request.into_message();
+
+        let (tx, rx) = mpsc::channel(10);
+        let addresses = req
+            .addresses
+            .iter()
+            .map(|raw| TemplateAddress::try_from_vec(raw.clone()))
+            .collect::<Result<Vec<TemplateAddress>, HashParseError>>()
+            .map_err(|error| RpcStatus::bad_request(format!("Failed to parse address: {:?}", error)))?;
+
+        task::spawn(TemplateSyncTask::new(5, addresses, tx, self.template_manager.clone()).run());
+
+        Ok(Streaming::new(rx))
     }
 }

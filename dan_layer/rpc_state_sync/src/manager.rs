@@ -11,11 +11,13 @@ use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
     traits::{ConsensusSpec, SyncManager, SyncStatus},
 };
+use tari_dan_app_utilities::template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_dan_common_types::{
     committee::Committee,
     optional::Optional,
     shard::Shard,
     Epoch,
+    NodeAddressable,
     NodeHeight,
     PeerAddress,
     ShardGroup,
@@ -39,7 +41,10 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::substate::hash_substate;
+use tari_engine_types::{
+    substate::{hash_substate, SubstateId},
+    TemplateAddress,
+};
 use tari_epoch_manager::EpochManagerReader;
 use tari_rpc_framework::RpcError;
 use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
@@ -53,24 +58,32 @@ use crate::error::CommsRpcConsensusSyncError;
 const BATCH_SIZE: usize = 100;
 const LOG_TARGET: &str = "tari::dan::comms_rpc_state_sync";
 
-pub struct RpcStateSyncManager<TConsensusSpec: ConsensusSpec> {
+pub struct RpcStateSyncManager<TConsensusSpec: ConsensusSpec, TAddr: NodeAddressable + 'static> {
     epoch_manager: TConsensusSpec::EpochManager,
     state_store: TConsensusSpec::StateStore,
     client_factory: TariValidatorNodeRpcClientFactory,
+    template_manager: TemplateManager<TAddr>,
+    template_manager_service: TemplateManagerHandle,
 }
 
-impl<TConsensusSpec> RpcStateSyncManager<TConsensusSpec>
-where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
+impl<TConsensusSpec, TAddr> RpcStateSyncManager<TConsensusSpec, TAddr>
+where
+    TConsensusSpec: ConsensusSpec<Addr = PeerAddress>,
+    TAddr: NodeAddressable + 'static,
 {
     pub fn new(
         epoch_manager: TConsensusSpec::EpochManager,
         state_store: TConsensusSpec::StateStore,
         client_factory: TariValidatorNodeRpcClientFactory,
+        template_manager: TemplateManager<TAddr>,
+        template_manager_service: TemplateManagerHandle,
     ) -> Self {
         Self {
             epoch_manager,
             state_store,
             client_factory,
+            template_manager,
+            template_manager_service,
         }
     }
 
@@ -150,6 +163,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
         let mut tree_changes = vec![];
 
+        let mut missing_templates = vec![];
+
+        // syncing states
         while let Some(result) = state_stream.next().await {
             let msg = match result {
                 Ok(msg) => msg,
@@ -170,7 +186,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             tree_changes.reserve_exact(cmp::min(msg.transitions.len(), BATCH_SIZE));
 
             self.state_store.with_write_tx(|tx| {
-
                 info!(
                     target: LOG_TARGET,
                     "🛜 Next state updates batch of size {} from v{}",
@@ -224,6 +239,26 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     }
 
                     info!(target: LOG_TARGET, "🛜 Applying state update {transition} v{}", current_version.unwrap_or(0));
+
+                    // handle templates if there are any in substates
+                    match &change {
+                        SubstateTreeChange::Up { id, value_hash: _value_hash } => {
+                            if let SubstateId::Template(template_addr) = id.substate_id {
+                                if let Ok(false) = self.template_manager.template_exists(&template_addr.as_hash(), None) {
+                                    self.template_manager.add_pending_template(template_addr.as_hash(), current_epoch)?;
+                                    missing_templates.push(template_addr.as_hash());
+                                }
+                            }
+                        }
+                        SubstateTreeChange::Down { id } => {
+                            if let SubstateId::Template(template_addr) = &id.substate_id {
+                                if let Err(error) = self.template_manager.delete_template(&template_addr.as_hash()) {
+                                    error!(target: LOG_TARGET, "Failed to delete template from template manager: {error:?}");
+                                }
+                            }
+                        }
+                    }
+
                     tree_changes.push(change);
 
                     self.commit_update(store.transaction(), checkpoint, transition)?;
@@ -242,7 +277,44 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             })?;
         }
 
+        self.sync_templates(missing_templates, Some(20)).await?;
+
         Ok(current_version)
+    }
+
+    /// Triggers syncing of the passed templates (by address) and wait for the result.
+    /// If any of the templates were not synced, keep retries to sync those again until everything is synced.
+    async fn sync_templates(
+        &self,
+        templates: Vec<TemplateAddress>,
+        max_sync_tries: Option<u64>,
+    ) -> Result<(), CommsRpcConsensusSyncError> {
+        let mut sync_tries = 0;
+        let handle = self.template_manager_service.sync_templates(templates).await?;
+        if let Some(mut missing_templates) = handle
+            .await
+            .map_err(|error| CommsRpcConsensusSyncError::TaskJoin(error.to_string()))??
+        {
+            sync_tries += 1;
+            warn!(target: LOG_TARGET, "⚠️ Some templates were not synchronized ({} of them), retry the rest (tried to sync {} times already)!", missing_templates.len(), sync_tries);
+            while let Some(current_missing_templates) = self
+                .template_manager_service
+                .sync_templates(missing_templates.clone())
+                .await?
+                .await
+                .map_err(|error| CommsRpcConsensusSyncError::TaskJoin(error.to_string()))??
+            {
+                if let Some(max_sync_tries) = max_sync_tries {
+                    if sync_tries >= max_sync_tries {
+                        return Err(CommsRpcConsensusSyncError::TemplateSyncFailure);
+                    }
+                }
+                missing_templates = current_missing_templates;
+                sync_tries += 1;
+                warn!(target: LOG_TARGET, "⚠️ Some templates were not synchronized ({} of them), retry the rest (tried to sync {} times already)!", missing_templates.len(), sync_tries);
+            }
+        }
+        Ok(())
     }
 
     fn get_state_root_for_shard(
@@ -355,8 +427,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 }
 
 #[async_trait]
-impl<TConsensusSpec> SyncManager for RpcStateSyncManager<TConsensusSpec>
-where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
+impl<TConsensusSpec, TAddr> SyncManager for RpcStateSyncManager<TConsensusSpec, TAddr>
+where
+    TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static,
+    TAddr: NodeAddressable + 'static,
 {
     type Error = CommsRpcConsensusSyncError;
 

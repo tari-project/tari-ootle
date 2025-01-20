@@ -257,11 +257,17 @@ pub async fn spawn_services(
     }
     handles.push(epoch_manager_join_handle);
 
+    let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
+
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.validator_node.templates.clone())?;
-    let (template_manager_service, join_handle) =
-        template_manager::implementation::spawn(template_manager.clone(), shutdown.clone());
+    let (template_manager_service, join_handle) = template_manager::implementation::spawn(
+        template_manager.clone(),
+        epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        shutdown.clone(),
+    );
     handles.push(join_handle);
 
     info!(target: LOG_TARGET, "Payload processor initializing");
@@ -320,7 +326,6 @@ pub async fn spawn_services(
     #[cfg(not(feature = "metrics"))]
     let metrics = NoopHooks;
 
-    let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
     let signing_service = consensus::TariSignatureService::new(keypair.clone());
     let (consensus_join_handle, consensus_handle) = consensus::spawn(
         config.network,
@@ -337,6 +342,8 @@ pub async fn spawn_services(
         transaction_executor,
         tx_hotstuff_events,
         consensus_constants.clone(),
+        template_manager.clone(),
+        template_manager_service.clone(),
     )
     .await;
     handles.push(consensus_join_handle);
@@ -397,6 +404,7 @@ pub async fn spawn_services(
         mempool.clone(),
         virtual_substate_manager,
         consensus_handle.clone(),
+        template_manager_service.clone(),
     )
     .await?;
     // Save final node identity after comms has initialized. This is required because the public_address can be
@@ -504,6 +512,7 @@ async fn spawn_p2p_rpc(
     mempool: MempoolHandle,
     virtual_substate_manager: VirtualSubstateManager<SqliteStateStore<PeerAddress>, EpochManagerHandle<PeerAddress>>,
     consensus: ConsensusHandle,
+    template_manager: TemplateManagerHandle,
 ) -> anyhow::Result<()> {
     let rpc_server = RpcServer::builder()
         .with_maximum_simultaneous_sessions(config.validator_node.rpc.max_simultaneous_sessions)
@@ -511,6 +520,7 @@ async fn spawn_p2p_rpc(
         .finish()
         .add_service(create_tari_validator_node_rpc_service(
             epoch_manager,
+            template_manager,
             shard_store_store,
             mempool,
             virtual_substate_manager,

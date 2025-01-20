@@ -28,7 +28,9 @@ use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_engine::template::TemplateLoaderError;
 use tari_dan_storage::StorageError;
 use tari_dan_storage_sqlite::error::SqliteStorageError;
+use tari_epoch_manager::EpochManagerError;
 use tari_template_lib::models::TemplateAddress;
+use tari_validator_node_rpc::ValidatorNodeRpcClientError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -43,6 +45,10 @@ pub enum TemplateManagerError {
     SqliteStorageError(#[from] SqliteStorageError),
     #[error("Template not found: {address}")]
     TemplateNotFound { address: TemplateAddress },
+    #[error("Templates not found: {addresses:?}")]
+    TemplatesNotFound { addresses: Vec<TemplateAddress> },
+    #[error("Template failed to delete: {address}")]
+    TemplateDeleteFailed { address: TemplateAddress },
     #[error("The template is unavailable for use")]
     TemplateUnavailable,
     #[error(transparent)]
@@ -57,6 +63,10 @@ pub enum TemplateManagerError {
     FlowEngineError(#[from] tari_dan_engine::flow::FlowEngineError),
     #[error("FixedHashSizeError: {0}")]
     FixedHashSizeError(#[from] FixedHashSizeError),
+    #[error("Epoch manager error: {0}")]
+    EpochManager(#[from] EpochManagerError),
+    #[error("Validator Node RPC client error: {0}")]
+    ValidatorNodeRpcClient(#[from] ValidatorNodeRpcClientError),
 }
 
 impl IsNotFoundError for TemplateManagerError {

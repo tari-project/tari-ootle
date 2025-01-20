@@ -5,7 +5,6 @@
 @committee
 Feature: Committee scenarios
 
-  @dev
   @fixed
   Scenario: Template registration and invocation in a 2-VN committee
     # Initialize a base node, wallet and miner

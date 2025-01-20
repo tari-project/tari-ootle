@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional};
+use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, VersionedSubstateIdRef};
 use tari_engine_types::substate::SubstateId;
 
 use crate::{
@@ -104,5 +104,13 @@ impl BlockDiff {
         substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError> {
         tx.block_diffs_get_last_change_for_substate(block_id, substate_id)
+    }
+
+    pub fn get_for_versioned_substate<'a, TTx: StateStoreReadTransaction, T: Into<VersionedSubstateIdRef<'a>>>(
+        tx: &TTx,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        tx.block_diffs_get_change_for_versioned_substate(block_id, substate_id)
     }
 }

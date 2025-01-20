@@ -3,6 +3,7 @@
 
 use std::ops::RangeInclusive;
 
+use log::info;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::SubstateRequirement;
 use tari_dan_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
@@ -128,83 +129,94 @@ impl Runner {
         &mut self,
         faucet: &Faucet,
         fee_account: &Account,
-        accounts: &[Account],
+        all_accounts: &[Account],
     ) -> anyhow::Result<()> {
         let key = self.sdk.key_manager_api().derive_key(TRANSACTION_BRANCH, 0)?;
         let fee_vault = self
             .sdk
             .accounts_api()
             .get_vault_by_resource(&fee_account.address, &XTR)?;
-        let transaction = Transaction::builder()
-            .fee_transaction_pay_from_component(
-                fee_account.address.as_component_address().unwrap(),
-                Amount(1000 * accounts.len() as i64),
-            )
-            .then(|builder| {
-                accounts.iter().fold(builder, |builder, account| {
-                    builder
-                        .call_method(faucet.component_address, "take_free_coins", args![])
-                        .put_last_instruction_output_on_workspace("faucet")
-                        .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-                            Workspace("faucet")
-                        ])
-                        .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000)])
-                        .put_last_instruction_output_on_workspace("xtr")
-                        .call_method(account.address.as_component_address().unwrap(), "deposit", args![
-                            Workspace("xtr")
-                        ])
-                        .add_input(SubstateRequirement::unversioned(account.address.clone()))
+        let mut tx_ids = Vec::with_capacity(all_accounts.len());
+
+        for accounts in all_accounts.chunks(100) {
+            let transaction = Transaction::builder()
+                .fee_transaction_pay_from_component(
+                    fee_account.address.as_component_address().unwrap(),
+                    Amount(1000 * accounts.len() as i64),
+                )
+                .then(|builder| {
+                    accounts.iter().fold(builder, |builder, account| {
+                        builder
+                            .call_method(faucet.component_address, "take_free_coins", args![])
+                            .put_last_instruction_output_on_workspace("faucet")
+                            .call_method(account.address.as_component_address().unwrap(), "deposit", args![
+                                Workspace("faucet")
+                            ])
+                            .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000)])
+                            .put_last_instruction_output_on_workspace("xtr")
+                            .call_method(account.address.as_component_address().unwrap(), "deposit", args![
+                                Workspace("xtr")
+                            ])
+                            .add_input(SubstateRequirement::unversioned(account.address.clone()))
+                    })
                 })
-            })
-            .with_inputs([
-                SubstateRequirement::unversioned(XTR),
-                SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
-                SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
-                SubstateRequirement::unversioned(faucet.component_address),
-                SubstateRequirement::unversioned(faucet.resource_address),
-                SubstateRequirement::unversioned(faucet.vault_address),
-                SubstateRequirement::unversioned(fee_vault.account_address),
-                SubstateRequirement::unversioned(fee_vault.address),
-            ])
-            .build_and_seal(&key.key);
+                .with_inputs([
+                    SubstateRequirement::unversioned(XTR),
+                    SubstateRequirement::unversioned(XTR_FAUCET_COMPONENT_ADDRESS),
+                    SubstateRequirement::unversioned(XTR_FAUCET_VAULT_ADDRESS),
+                    SubstateRequirement::unversioned(faucet.component_address),
+                    SubstateRequirement::unversioned(faucet.resource_address),
+                    SubstateRequirement::unversioned(faucet.vault_address),
+                    SubstateRequirement::unversioned(fee_vault.account_address.clone()),
+                    SubstateRequirement::unversioned(fee_vault.address.clone()),
+                ])
+                .build_and_seal(&key.key);
 
-        let result = self.submit_transaction_and_wait(transaction).await?;
+            let tx_id = self.submit_transaction(transaction).await?;
+            tx_ids.push(tx_id);
+            log::debug!("Submitted transaction {} to fund {} accounts", tx_id, accounts.len());
+        }
 
-        let accounts_and_state = result
-            .result
-            .accept()
-            .unwrap()
-            .up_iter()
-            .filter(|(addr, _)| {
-                *addr != XTR_FAUCET_COMPONENT_ADDRESS &&
-                    *addr != faucet.component_address &&
-                    *addr != fee_account.address
-            })
-            .filter_map(|(addr, substate)| Some((addr, substate.substate_value().component()?)))
-            .map(|(addr, component)| (addr, IndexedWellKnownTypes::from_value(&component.body.state).unwrap()));
+        for tx_id in tx_ids {
+            let result = self.wait_for_transaction(tx_id).await?;
+            let accounts_and_state = result
+                .result
+                .accept()
+                .unwrap()
+                .up_iter()
+                .filter(|(addr, _)| {
+                    *addr != XTR_FAUCET_COMPONENT_ADDRESS &&
+                        *addr != faucet.component_address &&
+                        *addr != fee_account.address
+                })
+                .filter_map(|(addr, substate)| Some((addr, substate.substate_value().component()?)))
+                .map(|(addr, component)| (addr, IndexedWellKnownTypes::from_value(&component.body.state).unwrap()));
 
-        for (account, indexed) in accounts_and_state {
-            log::info!("Funded account {account} with vaults:");
-            for vault_id in indexed.vault_ids() {
-                let vault = result
-                    .result
-                    .accept()
-                    .unwrap()
-                    .up_iter()
-                    .find(|(addr, _)| addr == vault_id)
-                    .map(|(_, substate)| substate.substate_value().vault().unwrap())
-                    .unwrap_or_else(|| {
-                        panic!("Vault {vault_id} not found in diff");
-                    });
-                log::info!("- {} {} {}", vault_id, vault.resource_address(), vault.resource_type());
-                self.sdk.accounts_api().add_vault(
-                    account.clone(),
-                    (*vault_id).into(),
-                    *vault.resource_address(),
-                    vault.resource_type(),
-                    None,
-                )?;
+            for (account, indexed) in accounts_and_state {
+                log::debug!("Funded account {account} with vaults:");
+                for vault_id in indexed.vault_ids() {
+                    let vault = result
+                        .result
+                        .accept()
+                        .unwrap()
+                        .up_iter()
+                        .find(|(addr, _)| addr == vault_id)
+                        .map(|(_, substate)| substate.substate_value().vault().unwrap())
+                        .unwrap_or_else(|| {
+                            panic!("Vault {vault_id} not found in diff");
+                        });
+                    log::debug!("- {} {} {}", vault_id, vault.resource_address(), vault.resource_type());
+                    self.sdk.accounts_api().add_vault(
+                        account.clone(),
+                        (*vault_id).into(),
+                        *vault.resource_address(),
+                        vault.resource_type(),
+                        None,
+                    )?;
+                }
             }
+
+            info!("✅ Funded 100 accounts");
         }
 
         Ok(())

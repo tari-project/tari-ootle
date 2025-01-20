@@ -32,6 +32,15 @@ pub enum Decision {
     Abort(AbortReason),
 }
 
+impl Decision {
+    pub fn is_same_outcome(&self, other: Decision) -> bool {
+        matches!(
+            (self, other),
+            (Decision::Commit, Decision::Commit) | (Decision::Abort(_), Decision::Abort(_))
+        )
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, AsRefStr, EnumString, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub enum AbortReason {
@@ -42,7 +51,6 @@ pub enum AbortReason {
     LockInputsFailed,
     LockOutputsFailed,
     LockInputsOutputsFailed,
-    LeaderProposalVsLocalDecisionMismatch,
     InvalidTransaction,
     ExecutionFailure,
     OneOrMoreInputsNotFound,

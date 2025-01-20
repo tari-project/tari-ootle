@@ -9,17 +9,18 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
     borsh::indexmap as indexmap_borsh,
-    option::DisplayContainer,
+    option::Displayable,
     LockIntent,
     NumPreshards,
     ShardGroup,
+    SubstateLockType,
     SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
 };
 use tari_engine_types::{serde_with, substate::SubstateId};
 
-use crate::consensus_models::QcId;
+use crate::consensus_models::{QcId, SubstatePledge};
 
 const LOG_TARGET: &str = "tari::dan::consensus_models::evidence";
 
@@ -100,14 +101,6 @@ impl Evidence {
         evidence
     }
 
-    pub fn to_includes_only_shard_group(&self, shard_group: ShardGroup) -> Self {
-        let mut evidence = Self::empty();
-        if let Some(ev) = self.get(&shard_group) {
-            *evidence.add_shard_group(shard_group) = ev.clone();
-        }
-        evidence
-    }
-
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = (&ShardGroup, &SubstateId, &Option<EvidenceInputLockData>)> {
         self.evidence.iter().flat_map(|(sg, evidence)| {
             evidence
@@ -126,7 +119,7 @@ impl Evidence {
         })
     }
 
-    pub fn all_objects_accepted(&self) -> bool {
+    pub fn all_shard_groups_accepted(&self) -> bool {
         // CASE: all inputs and outputs are accept justified. If they have been accept justified, they have implicitly
         // been prepare justified. This may happen if the local node is only involved in outputs (and therefore
         // sequences using the LocalAccept foreign proposal)
@@ -160,6 +153,10 @@ impl Evidence {
     /// If no evidence is present for the shard group, false is returned.
     pub fn is_committee_output_only(&self, shard_group: ShardGroup) -> bool {
         self.evidence.get(&shard_group).map_or(true, |e| e.inputs().is_empty())
+    }
+
+    pub fn is_committee_input_only(&self, shard_group: ShardGroup) -> bool {
+        self.evidence.get(&shard_group).map_or(true, |e| e.outputs().is_empty())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -210,14 +207,10 @@ impl Evidence {
         self.evidence.keys()
     }
 
-    pub fn missing_evidence_iter(&self) -> impl Iterator<Item = &ShardGroup> {
-        self.evidence.iter().filter_map(|(sg, e)| {
-            if e.prepare_qc.is_none() || e.accept_qc.is_none() {
-                Some(sg)
-            } else {
-                None
-            }
-        })
+    pub fn input_shard_groups_iter(&self) -> impl Iterator<Item = &ShardGroup> {
+        self.evidence
+            .iter()
+            .filter_map(|(sg, e)| if e.inputs.is_empty() { None } else { Some(sg) })
     }
 
     pub fn num_shard_groups(&self) -> usize {
@@ -412,6 +405,14 @@ impl ShardGroupEvidence {
         &self.outputs
     }
 
+    pub fn to_output_pledge_iter(&self) -> impl Iterator<Item = SubstatePledge> + '_ {
+        self.outputs
+            .iter()
+            .map(|(substate_id, version)| SubstatePledge::Output {
+                substate_id: VersionedSubstateId::new(substate_id.clone(), *version),
+            })
+    }
+
     fn sort_substates(&mut self) {
         self.inputs.sort_keys();
         self.outputs.sort_keys();
@@ -512,6 +513,16 @@ impl Display for ShardGroupEvidence {
 pub struct EvidenceInputLockData {
     pub is_write: bool,
     pub version: u32,
+}
+
+impl EvidenceInputLockData {
+    pub fn as_lock_type(&self) -> SubstateLockType {
+        if self.is_write {
+            SubstateLockType::Write
+        } else {
+            SubstateLockType::Read
+        }
+    }
 }
 
 impl Display for EvidenceInputLockData {

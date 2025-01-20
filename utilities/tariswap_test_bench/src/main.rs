@@ -59,10 +59,7 @@ async fn run(cli: cli::CommonArgs, _args: cli::RunArgs) -> anyhow::Result<()> {
     info!("✅ Created faucet {}", faucet.component_address);
 
     info!("⏳️ Funding accounts ...");
-    for batch in accounts.chunks(100) {
-        runner.fund_accounts(&faucet, &primary_account, batch).await?;
-        info!("✅ Funded 100 accounts");
-    }
+    runner.fund_accounts(&faucet, &primary_account, &accounts).await?;
 
     info!("⏳️ Creating 1000 tariswap components...");
     let mut tariswaps = vec![];

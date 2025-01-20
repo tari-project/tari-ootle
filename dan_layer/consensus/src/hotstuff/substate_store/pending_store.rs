@@ -6,6 +6,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Display};
 use indexmap::IndexMap;
 use log::*;
 use tari_dan_common_types::{
+    option::Displayable,
     optional::Optional,
     LockIntent,
     NumPreshards,
@@ -77,7 +78,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
         }
 
         if let Some(change) =
-            BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, id.substate_id).optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
         {
             return change
                 .into_up()
@@ -531,7 +532,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
     fn get_pending(&self, addr: &SubstateAddress) -> Option<&SubstateChange> {
         self.pending
             .get(addr)
-            .map(|&pos| self.diff.get(pos).expect("Index map and diff are out of sync"))
+            .map(|&pos| self.diff.get(pos).expect("pending map and diff are out of sync"))
     }
 
     fn insert(&mut self, change: SubstateChange) {
@@ -565,6 +566,13 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
     }
 
     fn assert_is_up(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
+        debug!(
+            target: LOG_TARGET,
+            "assert_is_up: id: {}, pending: {}, head: {}",
+            id,
+            self.pending.display(),
+            self.head.display()
+        );
         if let Some(change) = self.get_pending(&id.to_substate_address()) {
             if change.is_down() {
                 return Err(SubstateStoreError::SubstateIsDown { id: id.clone() });
@@ -572,14 +580,26 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
             return Ok(());
         }
 
+        debug!(
+            target: LOG_TARGET,
+            "assert_is_up id: {} not found in pending",
+            id,
+        );
+
         if let Some(change) =
-            BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, &id.substate_id).optional()?
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
         {
             if change.is_up() {
                 return Ok(());
             }
             return Err(SubstateStoreError::SubstateIsDown { id: id.clone() });
         }
+
+        debug!(
+            target: LOG_TARGET,
+            "assert_is_up: id: {} not found in block diff",
+            id,
+        );
 
         match SubstateRecord::substate_is_up(self.read_transaction(), &id.to_substate_address()).optional()? {
             Some(true) => Ok(()),

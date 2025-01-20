@@ -39,6 +39,7 @@ use tari_dan_common_types::{
     SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
     consensus_models::{
@@ -575,7 +576,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let foreign_proposals = foreign_proposals::table
             .filter(foreign_proposals::epoch.le(epoch.as_u64() as i64))
-            .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
+            .filter(
+                foreign_proposals::status
+                    .eq(ForeignProposalStatus::New.to_string())
+                    .or(foreign_proposals::status.eq(ForeignProposalStatus::Proposed.to_string())),
+            )
             .count()
             .limit(1)
             .get_result::<i64>(self.connection())
@@ -1472,6 +1477,39 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         sql_models::BlockDiff::try_convert_change(diff)
     }
 
+    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        use crate::schema::block_diffs;
+        if !Block::record_exists(self, block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "block_diffs_get_change_for_versioned_substate: Block {} does not exist",
+                    block_id
+                ),
+            });
+        }
+
+        let commit_block = self.get_commit_block()?;
+        let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
+        let substate_ref = substate_id.into();
+
+        let diff = block_diffs::table
+            .filter(block_diffs::block_id.eq_any(block_ids))
+            .filter(block_diffs::substate_id.eq(substate_ref.substate_id.to_string()))
+            .filter(block_diffs::version.eq(substate_ref.version as i32))
+            .order_by(block_diffs::id.desc())
+            .first::<sql_models::BlockDiff>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "block_diffs_get_change_for_versioned_substate",
+                source: e,
+            })?;
+
+        sql_models::BlockDiff::try_convert_change(diff)
+    }
+
     fn quorum_certificates_get(&self, qc_id: &QcId) -> Result<QuorumCertificate, StorageError> {
         use crate::schema::quorum_certificates;
 
@@ -1727,11 +1765,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
-    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError> {
+    fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, StorageError> {
         use crate::schema::transaction_pool_state_updates;
+
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("transaction_pool_has_pending_state_updates: block {block_id} does not exist"),
+            });
+        }
+
+        let commit_block = self.get_commit_block()?;
+        let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
 
         let count = transaction_pool_state_updates::table
             .filter(transaction_pool_state_updates::is_applied.eq(false))
+            .filter(transaction_pool_state_updates::block_id.eq_any(block_ids))
             .count()
             .limit(1)
             .get_result::<i64>(self.connection())

@@ -10,7 +10,7 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{option::DisplayContainer, optional::Optional, shard::Shard, Epoch, ShardGroup};
+use tari_dan_common_types::{option::Displayable, optional::Optional, shard::Shard, Epoch, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,
@@ -409,6 +409,9 @@ impl ProposedBlockChangeSet {
     }
 
     pub fn log_everything(&self) {
+        if !log_enabled!(log::Level::Debug) {
+            return;
+        }
         const LOG_TARGET: &str = "tari::dan::consensus::block_change_set::debug";
         debug!(target: LOG_TARGET, "❌ No vote: {}", self.no_vote_reason.display());
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save_for_debug");

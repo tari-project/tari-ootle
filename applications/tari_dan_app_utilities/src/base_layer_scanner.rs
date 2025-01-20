@@ -48,13 +48,7 @@ use tari_crypto::{
     ristretto::RistrettoPublicKey,
     tari_utilities::{ByteArray, ByteArrayError},
 };
-use tari_dan_common_types::{
-    option::DisplayContainer,
-    optional::Optional,
-    Epoch,
-    NodeAddressable,
-    VersionedSubstateId,
-};
+use tari_dan_common_types::{option::Displayable, optional::Optional, Epoch, NodeAddressable, VersionedSubstateId};
 use tari_dan_storage::{
     consensus_models::{BurntUtxo, SubstateRecord},
     global::{GlobalDb, MetadataKey},

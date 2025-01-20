@@ -185,7 +185,7 @@ export default function BlockDetails() {
                           </TableRow>
                           <TableRow>
                             <TableCell>Epoch</TableCell>
-                            <DataTableCell>{block!.header.epoch}</DataTableCell>
+                            <DataTableCell>{block!.header.epoch} (ShardGroup {block!.header.shard_group.start}-{block!.header.shard_group.end_inclusive})</DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Height</TableCell>

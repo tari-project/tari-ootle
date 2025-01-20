@@ -74,10 +74,11 @@ impl ForeignProposal {
     }
 
     pub fn set_status<TTx: StateStoreWriteTransaction>(
-        &self,
+        &mut self,
         tx: &mut TTx,
         status: ForeignProposalStatus,
     ) -> Result<(), StorageError> {
+        self.status = status;
         tx.foreign_proposals_set_status(self.block.id(), status)
     }
 

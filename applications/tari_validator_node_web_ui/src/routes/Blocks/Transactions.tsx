@@ -25,6 +25,8 @@ import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from
 import StatusChip from "../../Components/StatusChip";
 import type { TransactionAtom } from "@tari-project/typescript-bindings";
 import { Link } from "react-router-dom";
+import { renderJson } from "../../utils/helpers";
+import CodeBlockDialog from "../../Components/CodeBlock";
 
 function Transaction({ transaction }: { transaction: TransactionAtom }) {
   const decision = typeof transaction.decision === "object" ? "Abort" : "Commit";
@@ -35,6 +37,11 @@ function Transaction({ transaction }: { transaction: TransactionAtom }) {
       </TableCell>
       <TableCell>
         <StatusChip status={decision} />
+      </TableCell>
+      <TableCell>
+        <CodeBlockDialog title="Evidence" contentsWhenUnexpanded={<></>}>
+          {renderJson(transaction.evidence)}
+        </CodeBlockDialog>
       </TableCell>
       <TableCell>{transaction.leader_fee?.fee}</TableCell>
       <TableCell>{transaction.transaction_fee}</TableCell>
@@ -50,6 +57,7 @@ export default function Transactions({ transactions }: { transactions: Transacti
           <TableRow>
             <TableCell>Transaction ID</TableCell>
             <TableCell>Decision</TableCell>
+            <TableCell>Evidence</TableCell>
             <TableCell>Leader fee</TableCell>
             <TableCell>Transaction fee</TableCell>
           </TableRow>

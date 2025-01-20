@@ -280,15 +280,16 @@ impl EventScanner {
             let event_already_exists = tx.event_exists(event_row.clone())?;
             if event_already_exists {
                 // the event was already stored previously
-                warn!(
+                // TODO: Making this debug because it happens a lot and tends to spam the swarm output
+                debug!(
                     target: LOG_TARGET,
-                    "Duplicated event {:}",
+                    "Duplicate {}",
                     data.event
                 );
                 continue;
             }
 
-            info!(
+            debug!(
                 target: LOG_TARGET,
                 "Saving event: {:?}",
                 event_row

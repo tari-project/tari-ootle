@@ -167,7 +167,7 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
                 <div onClick={() => copyToClipboard(tx)}>{copied == tx ? "Copied" : shorten(tx)}</div>
                 <div style={{ color: known ? "green" : "red" }}><b>{known && "Yes" || "No"}</b></div>
                 <div>{abort_details || <i>unknown</i>}</div>
-                <div>{final_decision || <i>unknown</i>}</div>
+                <div>{("Abort" in final_decision) ? <>Abort ({final_decision.Abort})</> : <>Commit</>}</div>
               </>
             );
           })}

@@ -2,10 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, option::DisplayContainer, SubstateAddress};
+use tari_dan_common_types::{committee::CommitteeInfo, option::Displayable, ShardGroup, SubstateAddress};
 use tari_dan_storage::{
     consensus_models::{
-        BlockId,
         BlockPledge,
         Command,
         Decision,
@@ -33,15 +32,16 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     local_leaf: &LeafBlock,
     locked_block: &LockedBlock,
-    proposal: ForeignProposal,
-    foreign_committee_info: &CommitteeInfo,
+    proposal: &ForeignProposal,
     local_committee_info: &CommitteeInfo,
     proposed_block_change_set: &mut ProposedBlockChangeSet,
 ) -> Result<(), HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "process_foreign_block");
+
+    let foreign_shard_group = proposal.block.shard_group();
     assert_eq!(
         proposal.block.shard_group(),
-        foreign_committee_info.shard_group(),
+        foreign_shard_group,
         "Foreign proposal shard group does not match the foreign committee shard group"
     );
     info!(
@@ -52,9 +52,9 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     );
 
     let ForeignProposal {
-        block,
-        justify_qc,
-        mut block_pledge,
+        ref block,
+        ref justify_qc,
+        ref block_pledge,
         ..
     } = proposal;
     let mut command_count = 0usize;
@@ -62,7 +62,11 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     for cmd in block.commands() {
         match cmd {
             Command::LocalPrepare(atom) => {
-                if !atom.evidence.has(&local_committee_info.shard_group()) {
+                if !atom.evidence.has(&local_committee_info.shard_group()) ||
+                    // Foreign output-only nodes should not do a local prepare, if they do we ignore it
+                    atom.evidence
+                        .is_committee_output_only(foreign_shard_group)
+                {
                     debug!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL: Command: LocalPrepare({}, {}), block: {} not relevant to local committee",
@@ -127,8 +131,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                         // Add an abort execution since we previously decided to commit
                         let mut transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
                         transaction.set_abort_reason(RejectReason::ForeignShardGroupDecidedToAbort {
-                            start_shard: foreign_committee_info.shard_group().start().as_u32(),
-                            end_shard: foreign_committee_info.shard_group().end().as_u32(),
+                            start_shard: foreign_shard_group.start().as_u32(),
+                            end_shard: foreign_shard_group.end().as_u32(),
                             abort_reason: abort_reason.to_string(),
                         });
                         let exec = transaction.into_execution().expect("ABORT set above");
@@ -137,28 +141,29 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                 }
 
                 // Update the transaction record with any new information provided by this foreign block
-                let Some(foreign_evidence) = atom.evidence.get(&foreign_committee_info.shard_group()) else {
+                let Some(foreign_evidence) = atom.evidence.get(&foreign_shard_group) else {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block_id: *block.id(),
+                        block: block.as_leaf_block(),
                         transaction_id: atom.id,
-                        shard_group: foreign_committee_info.shard_group(),
-                        details: "Foreign proposal did not contain evidence for shard group".to_string(),
+                        shard_group: foreign_shard_group,
+                        details: "Foreign proposal did not contain evidence for it's own shard group".to_string(),
                     }
                     .into());
                 };
                 tx_rec
                     .evidence_mut()
-                    .add_shard_group(foreign_committee_info.shard_group())
+                    .add_shard_group(foreign_shard_group)
                     .update(foreign_evidence)
                     .set_prepare_qc(*justify_qc.id());
                 tx_rec.set_remote_decision(remote_decision);
 
-                validate_and_add_pledges(
+                add_pledges(
                     &tx_rec,
-                    block.id(),
+                    block.as_leaf_block(),
                     atom,
-                    &mut block_pledge,
-                    foreign_committee_info,
+                    block_pledge,
+                    foreign_shard_group,
+                    local_committee_info.shard_group(),
                     proposed_block_change_set,
                     true,
                 )?;
@@ -184,8 +189,9 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
 
                     // CASE: One foreign SG is involved in all inputs and executed the transaction, local SG is
                     // involved in the outputs
-                    let is_ready = local_committee_info.includes_substate_id(&tx_rec.to_receipt_id().into()) ||
-                        tx_rec.involves_committee(local_committee_info) ||
+                    let is_ready =
+                        // local_committee_info.includes_substate_id(&tx_rec.to_receipt_id().into()) ||
+                        tx_rec.committee_involves_inputs(local_committee_info) ||
                         has_all_foreign_input_pledges(tx, &tx_rec, local_committee_info, proposed_block_change_set)?;
 
                     if is_ready {
@@ -211,8 +217,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                 } else if tx_rec.current_stage().is_local_prepared() &&
                     tx_rec.evidence().all_input_shard_groups_prepared()
                 {
-                    // If all shards are complete, and we've already received our LocalPrepared, we can set out
-                    // LocalPrepared transaction as ready to propose ACCEPT. If we have not received
+                    // If all shards are complete, and we've already received our LocalPrepared, we can set the
+                    // LocalPrepared transaction as ready to propose AllPrepared. If we have not received
                     // the local LocalPrepared, the transition to AllPrepared will occur after we receive the local
                     // LocalPrepare proposal.
                     info!(
@@ -287,8 +293,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                         // Add an abort execution since we previously decided to commit
                         let mut transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
                         transaction.set_abort_reason(RejectReason::ForeignShardGroupDecidedToAbort {
-                            start_shard: foreign_committee_info.shard_group().start().as_u32(),
-                            end_shard: foreign_committee_info.shard_group().end().as_u32(),
+                            start_shard: foreign_shard_group.start().as_u32(),
+                            end_shard: foreign_shard_group.end().as_u32(),
                             abort_reason: abort_reason.to_string(),
                         });
                         let exec = transaction.into_execution().expect("ABORT set above");
@@ -297,28 +303,29 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                 }
 
                 // Update the transaction record with any new information provided by this foreign block
-                let Some(foreign_evidence) = atom.evidence.get(&foreign_committee_info.shard_group()) else {
+                let Some(foreign_evidence) = atom.evidence.get(&foreign_shard_group) else {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block_id: *block.id(),
+                        block: block.as_leaf_block(),
                         transaction_id: atom.id,
-                        shard_group: foreign_committee_info.shard_group(),
-                        details: "Foreign proposal did not contain evidence for shard group".to_string(),
+                        shard_group: foreign_shard_group,
+                        details: "Foreign proposal did not contain evidence for it's own shard group".to_string(),
                     }
                     .into());
                 };
                 tx_rec
                     .evidence_mut()
-                    .add_shard_group(foreign_committee_info.shard_group())
+                    .add_shard_group(foreign_shard_group)
                     .update(foreign_evidence)
                     .set_accept_qc(*justify_qc.id());
                 tx_rec.set_remote_decision(remote_decision);
 
-                validate_and_add_pledges(
+                add_pledges(
                     &tx_rec,
-                    block.id(),
+                    block.as_leaf_block(),
                     atom,
-                    &mut block_pledge,
-                    foreign_committee_info,
+                    block_pledge,
+                    foreign_shard_group,
+                    local_committee_info.shard_group(),
                     proposed_block_change_set,
                     false,
                 )?;
@@ -337,8 +344,8 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                     // have them.
                     // CASE: Foreign SGs have pledged all inputs and executed the transaction, local SG is involved
                     // in the outputs
-                    let is_ready = local_committee_info.includes_substate_id(&tx_rec.to_receipt_id().into()) ||
-                        tx_rec.involves_committee(local_committee_info) ||
+                    let is_ready = //local_committee_info.includes_substate_id(&tx_rec.to_receipt_id().into()) ||
+                        tx_rec.committee_involves_inputs(local_committee_info) ||
                         has_all_foreign_input_pledges(tx, &tx_rec, local_committee_info, proposed_block_change_set)?;
                     if is_ready {
                         info!(
@@ -398,7 +405,7 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
-                        tx_rec.evidence().all_objects_accepted()
+                        tx_rec.evidence().all_shard_groups_accepted()
                     );
                     // Still need to update the evidence
                     proposed_block_change_set.set_next_transaction_update(tx_rec)?;
@@ -446,31 +453,17 @@ pub fn process_foreign_block<TTx: StateStoreReadTransaction>(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
-fn validate_and_add_pledges(
+fn add_pledges(
     transaction: &TransactionPoolRecord,
-    foreign_block_id: &BlockId,
+    foreign_block: LeafBlock,
     atom: &TransactionAtom,
-    block_pledge: &mut BlockPledge,
-    foreign_committee_info: &CommitteeInfo,
+    block_pledge: &BlockPledge,
+    foreign_shard_group: ShardGroup,
+    local_shard_group: ShardGroup,
     proposed_block_change_set: &mut ProposedBlockChangeSet,
     is_prepare_phase: bool,
 ) -> Result<(), HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "validate_and_add_pledges");
-    // We need to add the justify QC to the evidence because the prepare block should not include it
-    // yet
-    let evidence = atom
-        .evidence
-        .get(&foreign_committee_info.shard_group())
-        .ok_or_else(|| ProposalValidationError::ForeignInvalidPledge {
-            block_id: *foreign_block_id,
-            transaction_id: atom.id,
-            shard_group: foreign_committee_info.shard_group(),
-            details: format!(
-                "Foreign proposal did not contain evidence for {}",
-                foreign_committee_info.shard_group()
-            ),
-        })?;
 
     // Avoid iterating unless debug logs apply
     if log_enabled!(Level::Debug) {
@@ -494,96 +487,85 @@ fn validate_and_add_pledges(
 
     match atom.decision {
         Decision::Commit => {
-            let Some(pledges) = block_pledge.remove_transaction_pledges(&atom.id) else {
-                if transaction.is_global() {
-                    // If the transaction is global, some shard groups do not pledges to include
-                    // TODO: this is currently "assumed" to be correct and should be validated
-                    debug!(
-                        target: LOG_TARGET,
-                        "Foreign proposal COMMIT for transaction {} stage: {} but the transaction is global so no pledges are expected.",
-                        atom.id,
-                        transaction.current_stage()
-                    );
-                    return Ok(());
-                }
+            // Output pledges come straight from evidence
+            let output_pledges = transaction
+                .evidence()
+                .get(&foreign_shard_group)
+                .ok_or_else(|| {
+                    // NEVER HAPPEN: we should already have checked this
+                    ProposalValidationError::ForeignInvalidPledge {
+                        block: foreign_block,
+                        transaction_id: atom.id,
+                        shard_group: foreign_shard_group,
+                        details: "Foreign proposal did not contain evidence for it's own shard group".to_string(),
+                    }
+                })?
+                .to_output_pledge_iter()
+                .collect();
 
-                if is_prepare_phase &&
-                    atom.evidence
-                        .is_committee_output_only(foreign_committee_info.shard_group())
-                {
-                    // If the foreign shard group is only involved in the outputs, there will not be any pledges in the
-                    // prepare phase
+            proposed_block_change_set.add_foreign_pledges(
+                transaction.transaction_id(),
+                foreign_shard_group,
+                output_pledges,
+            );
+
+            let Some(pledges) = block_pledge.get_transaction_substate_pledges(&atom.id) else {
+                if transaction.evidence().is_committee_output_only(foreign_shard_group) {
                     debug!(
                         target: LOG_TARGET,
-                        "Foreign proposal COMMIT for transaction {} stage: {} but the foreign shard group is only involved in outputs so no output pledge is expected.",
+                        "Foreign proposal for transaction {} stage: {} but the foreign shard group is only involved in outputs so no output pledge is expected.",
                         atom.id,
                         transaction.current_stage()
                     );
                     return Ok(());
                 }
+                // Accept phase: We only require pledges for inputs in the accept phase if the local shard group is
+                // output-only. Otherwise, the pledging has already happened in the prepare
+                // phase.
+                if !is_prepare_phase && !transaction.evidence().is_committee_output_only(local_shard_group) {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Foreign proposal for transaction {} stage: {}. The local shard group is involved in inputs so pledges should already have been pledged in the prepare phase.",
+                        atom.id,
+                        transaction.current_stage()
+                    );
+                    return Ok(());
+                }
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️❌ Foreign proposal for transaction {} stage: {} but no pledges found in the block pledge. Evidence: {}",
+                    atom.id,
+                    transaction.current_stage(),
+                    transaction.evidence()
+                );
+
                 return Err(HotStuffError::ForeignNodeOmittedTransactionPledges {
-                    foreign_block_id: *foreign_block_id,
+                    foreign_block,
                     transaction_id: atom.id,
+                    is_prepare_phase,
                 });
             };
-
-            // Validate that provided evidence is correct
-            // TODO: there are a lot of validations to be done on evidence and the foreign block in general,
-            // this is here as a sanity check
-            for pledge in &pledges {
-                if pledge.is_input() {
-                    if !evidence.inputs().contains_key(pledge.substate_id()) {
-                        let address = pledge.to_substate_address();
-                        return Err(ProposalValidationError::ForeignInvalidPledge {
-                            block_id: *foreign_block_id,
-                            transaction_id: atom.id,
-                            shard_group: foreign_committee_info.shard_group(),
-                            details: format!("Pledge {pledge} for address {address} not found in input evidence"),
-                        }
-                        .into());
-                    }
-                } else if !evidence.outputs().contains_key(pledge.substate_id()) {
-                    let address = pledge.to_substate_address();
-                    return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block_id: *foreign_block_id,
-                        transaction_id: atom.id,
-                        shard_group: foreign_committee_info.shard_group(),
-                        details: format!("Pledge {pledge} for address {address} not found in output evidence"),
-                    }
-                    .into());
-                } else {
-                    debug!(
-                        target: LOG_TARGET,
-                        "Foreign pledge {} for transaction {} found in evidence",
-                        pledge,
-                        atom.id
-                    );
-                    // Ok
-                }
-            }
 
             // If the foreign shard has committed the transaction, we can add the pledges to the transaction
             // record
             debug!(
                 target: LOG_TARGET,
-                "Adding foreign pledges to transaction {}. Foreign shard group: {}. Pledges: {}",
+                "Adding {} foreign pledge(s) to transaction {}. Foreign shard group: {}. Pledges: {}",
                 atom.id,
-                foreign_committee_info.shard_group(),
+                pledges.len(),
+                foreign_shard_group,
                 pledges.display()
             );
-            proposed_block_change_set.add_foreign_pledges(
-                transaction.transaction_id(),
-                foreign_committee_info.shard_group(),
-                pledges,
-            );
+
+            proposed_block_change_set.add_foreign_pledges(transaction.transaction_id(), foreign_shard_group, pledges);
         },
         Decision::Abort(reason) => {
             warn!(target: LOG_TARGET, "⚠️ Remote decided ABORT({reason:?}) but provided pledges.");
             if block_pledge.contains(&atom.id) {
                 return Err(ProposalValidationError::ForeignInvalidPledge {
-                    block_id: *foreign_block_id,
+                    block: foreign_block,
                     transaction_id: atom.id,
-                    shard_group: foreign_committee_info.shard_group(),
+                    shard_group: foreign_shard_group,
                     details: "Remote decided ABORT but provided pledges".to_string(),
                 }
                 .into());

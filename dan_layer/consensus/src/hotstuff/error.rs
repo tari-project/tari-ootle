@@ -97,12 +97,13 @@ pub enum HotStuffError {
     #[error("Substate store error: {0}")]
     SubstateStoreError(#[from] SubstateStoreError),
     #[error(
-        "Validator node omitted transaction pledges: remote_block_id={foreign_block_id}, \
-         transaction_id={transaction_id}"
+        "Validator node omitted transaction pledges: remote_block={foreign_block}, transaction_id={transaction_id}, \
+         is_prepare_phase={is_prepare_phase}"
     )]
     ForeignNodeOmittedTransactionPledges {
-        foreign_block_id: BlockId,
+        foreign_block: LeafBlock,
         transaction_id: TransactionId,
+        is_prepare_phase: bool,
     },
     #[error("Block building error: {0}")]
     BlockBuildingError(#[from] BlockError),
@@ -233,14 +234,24 @@ pub enum ProposalValidationError {
     #[error("Foreign node in {shard_group} submitted malformed BlockPledge for block {block_id}")]
     ForeignMalformedPledges { block_id: BlockId, shard_group: ShardGroup },
     #[error(
-        "Foreign node in {shard_group} submitted invalid pledge for block {block_id}, transaction {transaction_id}: \
+        "Foreign node in {shard_group} submitted invalid pledge for block {block}, transaction {transaction_id}: \
          {details}"
     )]
     ForeignInvalidPledge {
-        block_id: BlockId,
+        block: LeafBlock,
         transaction_id: TransactionId,
         shard_group: ShardGroup,
         details: String,
+    },
+    #[error(
+        "Foreign node in {shard_group} submitted invalid epoch for block {block_id}. Current epoch: {current_epoch}, \
+         block epoch: {block_epoch}"
+    )]
+    ForeignInvalidEpoch {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        current_epoch: Epoch,
+        block_epoch: Epoch,
     },
     #[error(
         "Foreign node in {shard_group} submitted proposal {block_id} but justify QC justifies {justify_qc_block_id}"

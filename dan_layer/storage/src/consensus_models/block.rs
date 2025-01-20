@@ -989,6 +989,12 @@ impl Block {
     }
 
     pub fn get_block_pledge<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<BlockPledge, StorageError> {
+        if self.is_committed() {
+            warn!(
+                target: LOG_TARGET,
+                "get_block_pledge: Block {} is already committed. Locks likely would already be released and therefore no pledges will be provided", self.as_leaf_block()
+            );
+        }
         let mut pledges = BlockPledge::new();
         for atom in self.commands().iter().filter_map(|cmd| {
             cmd.local_prepare()
@@ -1000,17 +1006,15 @@ impl Block {
                 continue;
             }
 
-            let Some(evidence) = atom.evidence.get(&self.shard_group()) else {
-                // CASE: The output-only shard group has sequenced this transaction
-                debug!(
-                    "get_block_pledge: Local evidence for atom {} is missing in block {}",
-                    atom.id, self
-                );
-                continue;
-            };
+            let evidence = atom
+                .evidence
+                .get(&self.shard_group())
+                .ok_or_else(|| StorageError::DataInconsistency {
+                    details: format!("Local evidence for atom {} is missing in block {}", atom.id, self),
+                })?;
 
             // TODO(perf): O(n) queries
-            let locked_values = LockedSubstateValue::get_all_for_transaction(tx, &atom.id)?;
+            let locked_values = LockedSubstateValue::get_all_input_locks_for_transaction(tx, &atom.id)?;
 
             let num_locked = locked_values.len();
             // CASE: We're retrieving pledges for the LocalPrepared and LocalAccept commands. If all other pledges were
@@ -1021,19 +1025,32 @@ impl Block {
                 // It is possible that evidence has "downgraded" a write lock to a read lock. However, we do not
                 // downgrade the actual lock so we only discern between inputs and outputs, not read/write locks.
                 // TODO: this is because we Write lock inputs initially (before execution) due to lack of information
-                evidence.contains_pledge(
+                if evidence.contains_pledge(
                     lock.substate_id(),
                     lock.lock.version(),
                     lock.lock.lock_type().is_input(),
-                )
+                ) {
+                    true
+                } else {
+                    debug!(
+                        target: LOG_TARGET,
+                        "get_block_pledge: Skipping locked value {} for atom {} in block {} because it was not originally pledged",
+                        lock.lock,
+                        atom.id,
+                        self
+                    );
+                    false
+                }
             });
 
             let count = locks.clone().count();
             debug!(
+                target: LOG_TARGET,
                 "get_block_pledge: {} out of {} locked for atom {} in block {}",
                 count, num_locked, atom.id, self
             );
 
+            let self_as_leaf = self.as_leaf_block();
             for locked_value in locks {
                 let lock_intent = locked_value.to_substate_lock_intent();
                 let LockedSubstateValue {
@@ -1045,14 +1062,12 @@ impl Block {
 
                 let pledge =
                     SubstatePledge::try_create(lock_intent, value).ok_or_else(|| StorageError::DataInconsistency {
-                        details: format!(
-                            "{} {} has no value however an input lock requires a value",
-                            substate_id, lock
-                        ),
+                        details: format!("{substate_id} has no value however {lock} requires a value",),
                     })?;
                 debug!(
+                    target: LOG_TARGET,
                     "get_block_pledge: Adding pledge {} for atom {} in block {}",
-                    pledge, atom.id, self
+                    pledge, atom.id, self_as_leaf
                 );
                 pledges.add_substate_pledge(*locked_value.lock.transaction_id(), pledge);
             }

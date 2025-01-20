@@ -121,6 +121,15 @@ impl LockedSubstateValue {
     ) -> Result<Vec<LockedSubstateValue>, StorageError> {
         tx.substate_locks_get_locked_substates_for_transaction(transaction_id)
     }
+
+    pub fn get_all_input_locks_for_transaction<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<Vec<LockedSubstateValue>, StorageError> {
+        // TODO(perf): custom query
+        let locks = tx.substate_locks_get_locked_substates_for_transaction(transaction_id)?;
+        Ok(locks.into_iter().filter(|l| l.lock.is_input()).collect())
+    }
 }
 
 impl ToSubstateAddress for LockedSubstateValue {

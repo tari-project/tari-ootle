@@ -30,7 +30,7 @@ use std::{
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
 use tari_dan_common_types::{
-    option::{DisplayCont, DisplayContainer},
+    option::{DisplayContainer, Displayable},
     optional::Optional,
     SubstateAddress,
     SubstateRequirement,
@@ -498,7 +498,7 @@ fn summarize_finalize_result(finalize: &FinalizeResult) {
 }
 
 fn display_vec<W: fmt::Write>(writer: &mut W, ty: &Type, result: &InstructionResult) -> fmt::Result {
-    fn display_slice<T: fmt::Display>(slice: &[T]) -> DisplayCont<&[T]> {
+    fn display_slice<T: fmt::Display>(slice: &[T]) -> DisplayContainer<&[T]> {
         slice.display()
     }
 

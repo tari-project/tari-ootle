@@ -106,6 +106,10 @@ impl MultiShardPreparedTransaction {
         &self.outputs
     }
 
+    pub fn involve_any_inputs(&self) -> bool {
+        !self.local_inputs.is_empty()
+    }
+
     pub fn into_execution(self) -> Option<TransactionExecution> {
         self.execution
     }

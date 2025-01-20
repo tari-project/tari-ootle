@@ -12,7 +12,7 @@ use tari_common_types::types::{FixedHash, PublicKey};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
-    option::DisplayContainer,
+    option::Displayable,
     optional::Optional,
     shard::Shard,
     Epoch,
@@ -294,7 +294,34 @@ where TConsensusSpec: ConsensusSpec
                 lock_conflicts,
             ),
             // Leader thinks all local nodes have prepared
-            TransactionPoolStage::Prepared => Ok(Some(Command::LocalPrepare(tx_rec.get_local_transaction_atom(None)))),
+            TransactionPoolStage::Prepared => {
+                if tx_rec
+                    .evidence()
+                    .is_committee_output_only(local_committee_info.shard_group())
+                {
+                    if !tx_rec.has_all_required_foreign_input_pledges(tx, local_committee_info)? {
+                        error!(
+                            target: LOG_TARGET,
+                            "BUG: attempted to propose transaction {} as Prepared but not all foreign input pledges were found. \
+                             This transaction should not have been marked as ready. {}",
+                            tx_rec.transaction_id(),
+                            tx_rec.evidence()
+                        );
+                        return Ok(None);
+                    }
+                    let atom = tx_rec.get_local_transaction_atom();
+                    debug!(
+                        target: LOG_TARGET,
+                        "ℹ️ Transaction {} is output-only for {}, proposing LocalAccept",
+                        tx_rec.transaction_id(),
+                        local_committee_info.shard_group()
+                    );
+                    Ok(Some(Command::LocalAccept(atom)))
+                } else {
+                    let atom = tx_rec.get_local_transaction_atom();
+                    Ok(Some(Command::LocalPrepare(atom)))
+                }
+            },
             // Leader thinks all foreign PREPARE pledges have been received (condition for LocalPrepared stage to be
             // ready)
             TransactionPoolStage::LocalPrepared => self.all_or_some_prepare_transaction(
@@ -470,17 +497,27 @@ where TConsensusSpec: ConsensusSpec
             // propose. This is why the system currently never proposes foreign proposals affecting a
             // transaction in the same block for LocalPrepare/LocalAccept and can result in evidence in the
             // atom having missing Prepare/Accept QCs (which are added on subsequent proposals).
-            //
+            // let locked_block = LockedBlock::get(tx, epoch)?;
+            // let num_proposals = batch.foreign_proposals.len();
+            // let foreign_proposals = mem::replace(&mut batch.foreign_proposals, Vec::with_capacity(num_proposals));
             // for fp in foreign_proposals {
-            //     process_foreign_block(
+            //     if let Err(err) = process_foreign_block(
             //         tx,
             //         &high_qc_certificate.as_leaf_block(),
-            //         locked_block,
-            //         fp,
-            //         foreign_committee_info,
+            //         &locked_block,
+            //         &fp,
             //         local_committee_info,
             //         &mut change_set,
-            //     )?;
+            //     ) {
+            //         warn!(
+            //             target: LOG_TARGET,
+            //             "Failed to process foreign proposal: {}. Skipping this proposal...",
+            //             err
+            //         );
+            //         // TODO: mark as invalid
+            //         continue;
+            //     }
+            //     batch.foreign_proposals.push(fp);
             // }
 
             let justified_block = high_qc_certificate.get_block(tx)?;
@@ -811,13 +848,28 @@ where TConsensusSpec: ConsensusSpec
                 match multishard.current_decision() {
                     Decision::Commit => {
                         if multishard.is_executed() {
+                            let involves_inputs = multishard.involve_any_inputs();
+
                             // CASE: All inputs are local and outputs are foreign (i.e. the transaction is executed), or
+                            // all inputs are foreign and this shard group is output only.
                             let execution = multishard.into_execution().expect("Abort should have execution");
                             tx_rec.update_from_execution(
                                 local_committee_info.num_preshards(),
                                 local_committee_info.num_committees(),
                                 &execution,
                             );
+                            if !involves_inputs {
+                                let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
+                                let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
+                                    HotStuffError::InvariantError("Number of involved shard groups is 0".to_string())
+                                })?;
+                                let leader_fee = tx_rec.calculate_leader_fee(
+                                    involved,
+                                    self.config.consensus_constants.fee_exhaust_divisor,
+                                );
+                                tx_rec.set_leader_fee(leader_fee);
+                            }
+
                             executed_transactions.insert(*tx_rec.transaction_id(), execution);
                         } else {
                             // CASE: All local inputs were resolved. We need to continue with consensus to get the
@@ -831,6 +883,7 @@ where TConsensusSpec: ConsensusSpec
                     },
                     Decision::Abort(reason) => {
                         warn!(target: LOG_TARGET, "Prepare transaction abort: {reason:?}");
+                        let initial_evidence = multishard.to_initial_evidence(local_committee_info);
                         // CASE: The transaction was ABORTed due to a lock conflict
                         let execution = multishard.into_execution().expect("Abort must have execution");
                         tx_rec.update_from_execution(
@@ -838,6 +891,7 @@ where TConsensusSpec: ConsensusSpec
                             local_committee_info.num_committees(),
                             &execution,
                         );
+                        tx_rec.evidence_mut().update(&initial_evidence);
                         executed_transactions.insert(*tx_rec.transaction_id(), execution);
                     },
                 }
@@ -849,7 +903,7 @@ where TConsensusSpec: ConsensusSpec
                     tx_rec.current_decision(),
                 );
 
-                let atom = tx_rec.get_local_transaction_atom(Some(local_committee_info.shard_group()));
+                let atom = tx_rec.get_local_transaction_atom();
                 Command::Prepare(atom)
             },
         };

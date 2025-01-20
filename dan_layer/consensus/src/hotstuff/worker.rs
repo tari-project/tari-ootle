@@ -676,18 +676,19 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         info!(
             target: LOG_TARGET,
-            "🔥 [on_beat] {} Local node is leader for height ({}), local_committee: {}",
+            "🔥 [on_beat] {} Local node is leader for height ({}), num local members: {}, {}",
             self.local_validator_addr,
             next_height,
-            local_committee
-                .len(),
+            local_committee.len(),
+            local_committee_info.shard_group()
         );
 
         let propose_now = self.state_store.with_read_tx(|tx| {
             // Propose quickly if there are UTXOs to mint or transactions to propose
             let propose_now = ForeignProposal::has_unconfirmed(tx, epoch)? ||
                 BurntUtxo::has_unproposed(tx)? ||
-                self.transaction_pool.has_ready_or_pending_transaction_updates(tx)?;
+                self.transaction_pool
+                    .has_ready_or_pending_transaction_updates(tx, leaf_block.block_id())?;
 
             Ok::<_, HotStuffError>(propose_now)
         })?;

@@ -362,22 +362,6 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             .get_committee_by_validator_public_key(msg.block.epoch(), msg.block.proposed_by().clone())
             .await?;
 
-        if !msg.block_pledge.validate_integrity() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ Foreign proposal block {} has invalid pledge", msg.block
-            );
-            let block_id = *msg.block.id();
-            return Ok(MessageValidationResult::Invalid {
-                from,
-                err: HotStuffError::ProposalValidationError(ProposalValidationError::ForeignMalformedPledges {
-                    block_id,
-                    shard_group: msg.block.shard_group(),
-                }),
-                message: HotstuffMessage::ForeignProposal(msg),
-            });
-        }
-
         if let Err(err) = self.check_foreign_proposal(&msg.block, &committee) {
             return Ok(MessageValidationResult::Invalid {
                 from,

@@ -13,14 +13,14 @@ use log::*;
 use serde::Serialize;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    option::DisplayContainer,
+    option::Displayable,
     optional::{IsNotFoundError, Optional},
     NumPreshards,
-    ShardGroup,
     SubstateAddress,
+    SubstateLockType,
     ToSubstateAddress,
 };
-use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
+use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -131,22 +131,50 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
     pub fn has_ready_or_pending_transaction_updates(
         &self,
         tx: &TStateStore::ReadTransaction<'_>,
+        block_id: &BlockId,
     ) -> Result<bool, TransactionPoolError> {
         // Check if any pending transactions have state updates that need to be applied
-        if tx.transaction_pool_has_pending_state_updates()? {
+        if tx.transaction_pool_has_pending_state_updates(block_id)? {
+            debug!(
+                target: LOG_TARGET,
+                "has_ready_or_pending_transaction_updates: Pending state updates found",
+            );
             return Ok(true);
         }
+        debug!(
+            target: LOG_TARGET,
+            "has_ready_or_pending_transaction_updates: No pending state updates",
+        );
 
         // Check if any transactions are marked as ready to propose
         let count = tx.transaction_pool_count(None, Some(true), None)?;
         if count > 0 {
+            debug!(
+                target: LOG_TARGET,
+                "has_ready_or_pending_transaction_updates: {} transactions marked as ready",
+                count,
+            );
             return Ok(true);
         }
+        debug!(
+            target: LOG_TARGET,
+            "has_ready_or_pending_transaction_updates: No transactions marked as ready",
+        );
 
         // Check if we have transactions that have not yet been confirmed (locked). In this case we should propose
         // until this stage is locked.
-        let count = tx.transaction_pool_count(None, None, Some(None))?;
+        // let count = tx.transaction_pool_count(None, None, Some(None))?;
+        // if count > 0 {
+        //     return Ok(true);
+        // }
+
+        let count = tx.transaction_pool_count(Some(TransactionPoolStage::LocalOnly), None, None)?;
         if count > 0 {
+            debug!(
+                target: LOG_TARGET,
+                "has_ready_or_pending_transaction_updates: {} transactions that need to be finalized (LocalOnly)",
+                count,
+            );
             return Ok(true);
         }
 
@@ -154,63 +182,30 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         // have been locked but not committed.
         let count = tx.transaction_pool_count(Some(TransactionPoolStage::AllAccepted), None, None)?;
         if count > 0 {
+            debug!(
+                target: LOG_TARGET,
+                "has_ready_or_pending_transaction_updates: {} transactions that need to be finalized (AllAccepted)",
+                count,
+            );
             return Ok(true);
         }
 
         let count = tx.transaction_pool_count(Some(TransactionPoolStage::SomeAccepted), None, None)?;
         if count > 0 {
+            debug!(
+                target: LOG_TARGET,
+                "has_ready_or_pending_transaction_updates: {} transactions that need to be finalized (SomeAccepted)",
+                count,
+            );
             return Ok(true);
         }
 
-        Ok(false)
+        debug!(
+            target: LOG_TARGET,
+            "has_ready_or_pending_transaction_updates: No transactions that need to be finalized",
+        );
 
-        // let count = tx.transaction_pool_count(None, Some(true), None)?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        //
-        // let count = tx.transaction_pool_count(Some(TransactionPoolStage::LocalOnly), None, None)?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        // let count = tx.transaction_pool_count(Some(TransactionPoolStage::Prepared), None, None)?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        // // Check if we have local prepared that has not yet been confirmed (locked). In this case we should propose
-        // // until this stage is locked.
-        // let count = tx.transaction_pool_count(Some(TransactionPoolStage::LocalPrepared), None, Some(None))?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        // let count = tx.transaction_pool_count(Some(TransactionPoolStage::AllPrepared), None, None)?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        // let count = tx.transaction_pool_count(Some(TransactionPoolStage::SomePrepared), None, None)?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        // // Check if we have local accepted that is still confirmed(locked) to be prepared. In this case we should
-        // // propose until this stage is locked.
-        // let count = tx.transaction_pool_count(
-        //     Some(TransactionPoolStage::LocalAccepted),
-        //     None,
-        //     Some(Some(TransactionPoolConfirmedStage::ConfirmedPrepared)),
-        // )?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        // let count = tx.transaction_pool_count(Some(TransactionPoolStage::AllAccepted), None, None)?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        // let count = tx.transaction_pool_count(Some(TransactionPoolStage::SomeAccepted), None, None)?;
-        // if count > 0 {
-        //     return Ok(true);
-        // }
-        //
-        // Ok(count > 0)
+        Ok(false)
     }
 
     pub fn count(&self, tx: &TStateStore::ReadTransaction<'_>) -> Result<usize, TransactionPoolError> {
@@ -430,9 +425,11 @@ impl TransactionPoolRecord {
             TransactionPoolStage::New => self.is_ready,
             TransactionPoolStage::Prepared => true,
             TransactionPoolStage::LocalPrepared => self.evidence.all_input_shard_groups_prepared(),
-            TransactionPoolStage::AllPrepared | TransactionPoolStage::SomePrepared => true,
+            TransactionPoolStage::AllPrepared | TransactionPoolStage::SomePrepared => {
+                self.evidence.all_input_shard_groups_prepared()
+            },
             TransactionPoolStage::LocalAccepted => match self.current_decision() {
-                Decision::Commit => self.evidence.all_objects_accepted(),
+                Decision::Commit => self.evidence.all_shard_groups_accepted(),
                 // If we have decided to abort, we can continue if all inputs are justified
                 Decision::Abort(_) => self.evidence.all_shard_groups_prepared(),
             },
@@ -515,16 +512,13 @@ impl TransactionPoolRecord {
         }
     }
 
-    pub fn get_local_transaction_atom(&self, filter_by_shard_group: Option<ShardGroup>) -> TransactionAtom {
-        let evidence = filter_by_shard_group
-            .map(|sg| self.evidence.to_includes_only_shard_group(sg))
-            .unwrap_or_else(|| self.evidence.clone());
+    pub fn get_local_transaction_atom(&self) -> TransactionAtom {
         TransactionAtom {
             id: self.transaction_id,
             decision: self.current_local_decision(),
-            evidence,
+            evidence: self.evidence.clone(),
             transaction_fee: self.transaction_fee,
-            leader_fee: None,
+            leader_fee: self.leader_fee.clone(),
         }
     }
 
@@ -671,6 +665,8 @@ impl TransactionPoolRecord {
             // Prepared
             ((TransactionPoolStage::Prepared, TransactionPoolStage::Prepared), _) |
             ((TransactionPoolStage::Prepared, TransactionPoolStage::LocalPrepared), _) |
+            // Output-only case - we can skip straight to LocalAccepted
+            ((TransactionPoolStage::Prepared, TransactionPoolStage::LocalAccepted), _) |
             // LocalPrepared
             ((TransactionPoolStage::LocalPrepared, TransactionPoolStage::LocalPrepared), _) |
             ((TransactionPoolStage::LocalPrepared, TransactionPoolStage::AllPrepared), _) |
@@ -766,6 +762,12 @@ impl TransactionPoolRecord {
         self.evidence.contains(&committee_info.shard_group())
     }
 
+    pub fn committee_involves_inputs(&self, committee_info: &CommitteeInfo) -> bool {
+        self.evidence
+            .get(&committee_info.shard_group())
+            .is_some_and(|e| !e.inputs().is_empty())
+    }
+
     pub fn has_all_required_foreign_pledges<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
@@ -774,26 +776,61 @@ impl TransactionPoolRecord {
         let involved_objects = self
             .evidence()
             .all_inputs_iter()
-            .map(|(_, substate_id, evidence)| (substate_id, evidence.map(|e| e.version)))
+            .map(|(_, substate_id, evidence)| (substate_id, evidence.map(|e| (e.version, e.as_lock_type()))))
             .chain(
                 self.evidence()
                     .all_outputs_iter()
-                    .map(|(_, substate_id, version)| (substate_id, Some(*version))),
+                    .map(|(_, substate_id, version)| (substate_id, Some((*version, SubstateLockType::Output)))),
             )
             .filter(|(substate_id, _)| !local_committee_info.includes_substate_id(substate_id));
 
-        let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.transaction_id())?;
-        for (substate_id, version) in involved_objects {
-            let Some(version) = version else {
-                return Err(StorageError::DataInconsistency {
-                    details: format!("Missing evidence for input {}", substate_id),
-                });
+        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects)
+    }
+
+    pub fn has_all_required_foreign_input_pledges<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        local_committee_info: &CommitteeInfo,
+    ) -> Result<bool, StorageError> {
+        let involved_objects = self
+            .evidence()
+            .all_inputs_iter()
+            .map(|(_, substate_id, evidence)| (substate_id, evidence.map(|e| (e.version, e.as_lock_type()))))
+            .filter(|(substate_id, _)| !local_committee_info.includes_substate_id(substate_id));
+
+        self.has_foreign_pledges_for_objects(tx, local_committee_info, involved_objects)
+    }
+
+    fn has_foreign_pledges_for_objects<'a, TTx, TObj>(
+        &self,
+        tx: &TTx,
+        local_committee_info: &CommitteeInfo,
+        involved_objects: TObj,
+    ) -> Result<bool, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        TObj: IntoIterator<Item = (&'a SubstateId, Option<(u32, SubstateLockType)>)>,
+    {
+        for (substate_id, data) in involved_objects {
+            let Some((version, lock_type)) = data else {
+                debug!(
+                    target: LOG_TARGET,
+                    "Transaction {} is missing a version for substate_id {}",
+                    self.transaction_id(),
+                    substate_id,
+                );
+                return Ok(false);
             };
-            if pledges
-                .iter()
-                .all(|p| p.versioned_substate_id().version() != version || p.substate_id() != substate_id)
-            {
-                let remote_shard_group = SubstateAddress::from_substate_id(substate_id, version).to_shard_group(
+            let address = SubstateAddress::from_substate_id(substate_id, version);
+            // TODO(perf): O(n) queries
+            if tx.foreign_substate_pledges_exists_for_address(self.transaction_id(), address)? {
+                continue;
+            }
+
+            if log_enabled!(Level::Debug) {
+                // Load them for debugging purposes
+                let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.transaction_id())?;
+                let remote_shard_group = address.to_shard_group(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),
                 );
@@ -804,19 +841,18 @@ impl TransactionPoolRecord {
                 );
                 debug!(
                     target: LOG_TARGET,
-                    "{} Transaction {} is missing a foreign pledge for {}:{} from {} ({} pledge(s) found)",
+                    "{} Transaction {} is missing a foreign {} pledge for {}:{} from {} ({} pledge(s) found)",
                     local_committee_info.shard_group(),
                     self.transaction_id(),
+                    lock_type,
                     substate_id,
                     version,
                     remote_shard_group,
                     pledges.len(),
                 );
-
-                return Ok(false);
-            } else {
-                // We have a lock/pledge for the input, continue
             }
+
+            return Ok(false);
         }
         Ok(true)
     }

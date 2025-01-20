@@ -1,13 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, num::NonZeroU64};
+use std::num::NonZeroU64;
 
 use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    option::DisplayContainer,
+    option::Displayable,
     optional::Optional,
     Epoch,
     ShardGroup,
@@ -111,7 +111,6 @@ where TConsensusSpec: ConsensusSpec
         valid_block: &ValidBlock,
         local_committee_info: &CommitteeInfo,
         can_propose_epoch_end: bool,
-        foreign_committee_infos: HashMap<ShardGroup, CommitteeInfo>,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
         let _timer =
@@ -141,7 +140,6 @@ where TConsensusSpec: ConsensusSpec
                 valid_block.block(),
                 local_committee_info,
                 can_propose_epoch_end,
-                &foreign_committee_infos,
                 change_set,
             )?;
         } else {
@@ -317,7 +315,6 @@ where TConsensusSpec: ConsensusSpec
         block: &Block,
         local_committee_info: &CommitteeInfo,
         can_propose_epoch_end: bool,
-        foreign_committee_infos: &HashMap<ShardGroup, CommitteeInfo>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
         // Store used for transactions that have inputs without specific versions.
@@ -395,9 +392,14 @@ where TConsensusSpec: ConsensusSpec
                     }
                 },
                 Command::LocalAccept(atom) => {
-                    if let Some(reason) =
-                        self.evaluate_local_accept_command(tx, block, &locked_block, atom, proposed_block_change_set)?
-                    {
+                    if let Some(reason) = self.evaluate_local_accept_command(
+                        tx,
+                        block,
+                        &locked_block,
+                        atom,
+                        local_committee_info,
+                        proposed_block_change_set,
+                    )? {
                         proposed_block_change_set.no_vote(reason);
                         return Ok(());
                     }
@@ -426,24 +428,13 @@ where TConsensusSpec: ConsensusSpec
                     }
                 },
                 Command::ForeignProposal(fp_atom) => {
-                    let Some(foreign_committee_info) = foreign_committee_infos.get(&fp_atom.shard_group) else {
-                        warn!(
-                            target: LOG_TARGET,
-                            "❌ NO VOTE: ForeignProposal command in block {} {} but no foreign proposal found",
-                            fp_atom.block_id,
-                            fp_atom.shard_group,
-                        );
-                        proposed_block_change_set.no_vote(NoVoteReason::ForeignProposalCommandInBlockMissing);
-                        return Ok(());
-                    };
-
                     if let Some(reason) = self.evaluate_foreign_proposal_command(
                         tx,
                         block,
                         &locked_block,
                         fp_atom,
                         local_committee_info,
-                        foreign_committee_info,
+                        fp_atom.shard_group,
                         proposed_block_change_set,
                     )? {
                         proposed_block_change_set.no_vote(reason);
@@ -826,14 +817,18 @@ where TConsensusSpec: ConsensusSpec
                 return Ok(Some(NoVoteReason::MultiShardProposedForLocalOnly));
             },
             PreparedTransaction::MultiShard(multishard) => {
-                if multishard.current_decision() != atom.decision {
+                // TODO: Because on_propose does not process foreign proposals before proposing, the decision abort
+                // reason may mismatch (e.g. ExecutionFailure != ForeignShardGroupDecidedToAbort)
+                // This is why we use is_same_outcome here. We should try to process foreign proposals in
+                // on_propose
+                if !multishard.current_decision().is_same_outcome(atom.decision) {
                     warn!(
                         target: LOG_TARGET,
-                        "❌ Leader proposed {} for transaction {} in block {} but we decided to {}",
-                        tx_rec.transaction_id(),
-                        block,
+                        "❌ Leader proposed {} for transaction {} but we decided {} in block {}",
                         atom.decision,
+                        atom.id,
                         multishard.current_decision(),
+                        block,
                     );
                     return Ok(Some(NoVoteReason::DecisionDisagreement {
                         local: multishard.current_decision(),
@@ -866,6 +861,7 @@ where TConsensusSpec: ConsensusSpec
                                 tx_rec.transaction_id(),
                                 block,
                             );
+                            let involves_inputs = multishard.involve_any_inputs();
                             // CASE: All inputs are local and outputs are foreign (i.e. the transaction is executed), or
                             let execution = multishard.into_execution().expect("Abort should have execution");
                             tx_rec.update_from_execution(
@@ -873,6 +869,18 @@ where TConsensusSpec: ConsensusSpec
                                 local_committee_info.num_committees(),
                                 &execution,
                             );
+                            if !involves_inputs {
+                                // Output only
+                                let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
+                                let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
+                                    HotStuffError::InvariantError("Number of involved shard groups is 0".to_string())
+                                })?;
+                                let leader_fee = tx_rec.calculate_leader_fee(
+                                    involved,
+                                    self.config.consensus_constants.fee_exhaust_divisor,
+                                );
+                                tx_rec.set_leader_fee(leader_fee);
+                            }
                             proposed_block_change_set.add_transaction_execution(execution)?;
                         } else {
                             debug!(
@@ -921,6 +929,7 @@ where TConsensusSpec: ConsensusSpec
                         };
                     },
                     Decision::Abort(reason) => {
+                        let initial_evidence = multishard.to_initial_evidence(local_committee_info);
                         // CASE: The transaction was ABORTed due to a lock conflict
                         warn!(target: LOG_TARGET, "⚠️ Multi-shard prepared transaction aborted: {reason:?}");
                         let execution = multishard.into_execution().expect("Abort should have execution");
@@ -929,6 +938,7 @@ where TConsensusSpec: ConsensusSpec
                             local_committee_info.num_committees(),
                             &execution,
                         );
+                        tx_rec.evidence_mut().update(&initial_evidence);
                         proposed_block_change_set.add_transaction_execution(execution)?;
                     },
                 }
@@ -1094,18 +1104,19 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::NotAllShardGroupsPrepared));
         }
 
-        if !atom.evidence.all_input_shard_groups_prepared() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE: AllPrepare disagreement for transaction {} in block {}. {}",
-                tx_rec.transaction_id(),
-                block,
-                InvalidEvidenceReason::NotAllShardGroupsPrepared,
-            );
-            return Ok(Some(NoVoteReason::InvalidEvidence {
-                reason: InvalidEvidenceReason::NotAllShardGroupsPrepared,
-            }));
-        }
+        // TODO: on_propose does not process foreign proposals so we cannot rely on this check
+        // if !atom.evidence.all_input_shard_groups_prepared() {
+        //     warn!(
+        //         target: LOG_TARGET,
+        //         "❌ NO VOTE: AllPrepare disagreement for transaction {} in block {}. {}",
+        //         tx_rec.transaction_id(),
+        //         block,
+        //         InvalidEvidenceReason::NotAllShardGroupsPrepared,
+        //     );
+        //     return Ok(Some(NoVoteReason::InvalidEvidence {
+        //         reason: InvalidEvidenceReason::NotAllShardGroupsPrepared,
+        //     }));
+        // }
 
         let maybe_execution = if tx_rec.current_decision().is_commit() {
             // TODO: provide the current input locks to the executor, the executor must fail if a write lock is
@@ -1151,7 +1162,7 @@ where TConsensusSpec: ConsensusSpec
                             block,
                         );
                         return Ok(Some(NoVoteReason::DecisionDisagreement {
-                            local: Decision::Abort(AbortReason::LeaderProposalVsLocalDecisionMismatch),
+                            local: Decision::Abort(AbortReason::LockOutputsFailed),
                             remote: Decision::Commit,
                         }));
                     }
@@ -1292,7 +1303,7 @@ where TConsensusSpec: ConsensusSpec
             );
             return Ok(Some(NoVoteReason::DecisionDisagreement {
                 local: Decision::Commit,
-                remote: Decision::Abort(AbortReason::LeaderProposalVsLocalDecisionMismatch),
+                remote: atom.decision,
             }));
         }
 
@@ -1335,6 +1346,7 @@ where TConsensusSpec: ConsensusSpec
         block: &Block,
         locked_block: &LockedBlock,
         atom: &TransactionAtom,
+        local_committee_info: &CommitteeInfo,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let Some(mut tx_rec) =
@@ -1349,7 +1361,15 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::TransactionNotInPool));
         };
 
-        if !tx_rec.current_stage().is_all_prepared() && !tx_rec.current_stage().is_some_prepared() {
+        #[allow(clippy::nonminimal_bool)]
+        if !tx_rec.current_stage().is_all_prepared() &&
+            !tx_rec.current_stage().is_some_prepared() &&
+            // We allow the transition from LocalPrepared to LocalAccepted if we are output-only
+            !(tx_rec.current_stage().is_prepared() &&
+                tx_rec
+                    .evidence()
+                    .is_committee_output_only(local_committee_info.shard_group()))
+        {
             warn!(
                 target: LOG_TARGET,
                 "{} ❌ Stage disagreement in block {} for transaction {}. Leader proposed LocalAccept, but current stage is {}",
@@ -1507,7 +1527,7 @@ where TConsensusSpec: ConsensusSpec
                 block,
             );
             return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: Decision::Abort(AbortReason::LeaderProposalVsLocalDecisionMismatch),
+                local: atom.decision,
                 remote: Decision::Commit,
             }));
         }
@@ -1575,15 +1595,16 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::NotAllForeignInputPledges));
         }
 
-        if !atom.evidence.all_objects_accepted() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed an atom which did not indicate that all shard groups have accepted the transaction",
-                tx_rec.transaction_id(),
-                block,
-            );
-            return Ok(Some(NoVoteReason::NotAllInputsOutputsAccepted));
-        }
+        // TODO: on_propose does not process foreign proposals so we cannot rely on this check
+        // if !atom.evidence.all_shard_groups_accepted() {
+        //     warn!(
+        //         target: LOG_TARGET,
+        //         "❌ NO VOTE: AllAccept disagreement for transaction {} in block {}. Leader proposed an atom which did
+        // not indicate that all shard groups have accepted the transaction",         tx_rec.transaction_id(),
+        //         block,
+        //     );
+        //     return Ok(Some(NoVoteReason::NotAllInputsOutputsAccepted));
+        // }
 
         if *tx_rec.evidence() != atom.evidence {
             warn!(
@@ -1686,7 +1707,7 @@ where TConsensusSpec: ConsensusSpec
             );
             return Ok(Some(NoVoteReason::DecisionDisagreement {
                 local: Decision::Commit,
-                remote: Decision::Abort(AbortReason::LeaderProposalVsLocalDecisionMismatch),
+                remote: atom.decision,
             }));
         }
 
@@ -1715,7 +1736,7 @@ where TConsensusSpec: ConsensusSpec
         locked_block: &LockedBlock,
         fp_atom: &ForeignProposalAtom,
         local_committee_info: &CommitteeInfo,
-        foreign_committee_info: &CommitteeInfo,
+        foreign_shard_group: ShardGroup,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         if proposed_block_change_set
@@ -1756,9 +1777,7 @@ where TConsensusSpec: ConsensusSpec
             tx,
             &local_block.as_leaf_block(),
             locked_block,
-            fp,
-            // NB: dont put these args in the wrong order
-            foreign_committee_info,
+            &fp,
             local_committee_info,
             proposed_block_change_set,
         ) {
@@ -1769,7 +1788,7 @@ where TConsensusSpec: ConsensusSpec
                 block = local_block,
                 foreign_block_id = fp_atom.block_id,
                 error = err,
-                shard_group = foreign_committee_info.shard_group(),
+                shard_group = foreign_shard_group,
             );
             return Ok(Some(NoVoteReason::ForeignProposalProcessingFailed));
         }

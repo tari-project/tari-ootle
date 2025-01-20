@@ -28,7 +28,7 @@ import CopyToClipboard from "../../Components/CopyToClipboard";
 import { renderJson } from "../../utils/helpers";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
-import CodeBlockExpand from "../../Components/CodeBlock";
+import CodeBlockDialog from "../../Components/CodeBlock";
 import type { Event } from "@tari-project/typescript-bindings";
 
 function RowData({ substate_id, template_address, topic, tx_hash, payload }: Event, index: number) {
@@ -67,7 +67,7 @@ function RowData({ substate_id, template_address, topic, tx_hash, payload }: Eve
       <TableRow>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={5}>
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <CodeBlockExpand title="Payload">{renderJson(payload)}</CodeBlockExpand>
+            <CodeBlockDialog title="Payload">{renderJson(payload)}</CodeBlockDialog>
           </Collapse>
         </DataTableCell>
       </TableRow>

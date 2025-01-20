@@ -23,7 +23,7 @@ use tari_transaction::TransactionId;
 use crate::consensus_models::VersionedSubstateIdLockIntent;
 pub type SubstatePledges = Vec<SubstatePledge>;
 
-const LOG_TARGET: &str = "dan_layer::storage::consensus_models::block_pledges";
+const LOG_TARGET: &str = "tari::dan::storage::consensus_models::block_pledges";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BlockPledge {
@@ -51,8 +51,8 @@ impl BlockPledge {
         self.pledges.contains_key(transaction_id)
     }
 
-    pub fn validate_integrity(&self) -> bool {
-        self.pledges.iter().all(|(_tx_id, pledges)| {
+    pub fn has_all_input_substate_values_for(&self, transaction_id: &TransactionId) -> bool {
+        self.pledges.get(transaction_id).is_some_and(|pledges| {
             pledges.iter().all(|pledge| {
                 if pledge.lock_type().is_output() {
                     return true;
@@ -62,13 +62,31 @@ impl BlockPledge {
                 if !self.substates.contains_key(&address) {
                     warn!(
                         target: LOG_TARGET,
-                        "Substate not found for pledge: {}",
+                        "Substate not found for {} pledge: {}",
+                        pledge.lock_type(),
                         pledge.versioned_substate_id()
                     );
                     return false;
                 }
 
                 true
+            })
+        })
+    }
+
+    pub fn has_some_write_input_pledge_values_for(&self, tx_id: &TransactionId) -> bool {
+        self.pledges.get(tx_id).is_some_and(|pledges| {
+            pledges.iter().any(|pledge| {
+                if pledge.lock_type().is_output() {
+                    return false;
+                }
+
+                if pledge.lock_type().is_read() {
+                    return false;
+                }
+
+                let address = pledge.to_substate_address();
+                self.substates.contains_key(&address)
             })
         })
     }
@@ -106,21 +124,23 @@ impl BlockPledge {
         self
     }
 
-    pub fn remove_transaction_pledges(&mut self, transaction_id: &TransactionId) -> Option<SubstatePledges> {
-        let pledges = self.pledges.remove(transaction_id)?;
-        pledges
-            .into_iter()
-            .map(|intent| match intent.lock_type() {
+    pub fn get_transaction_substate_pledges(&self, transaction_id: &TransactionId) -> Option<SubstatePledges> {
+        let pledges = self.pledges.get(transaction_id)?;
+        let pledges = pledges
+            .iter()
+            .filter_map(|intent| match intent.lock_type() {
                 SubstateLockType::Read | SubstateLockType::Write => {
                     let is_write = intent.lock_type().is_write();
-                    let substate_id = intent.into_versioned_substate_id();
+                    let substate_id = intent.versioned_substate_id().clone();
                     let address = substate_id.to_substate_address();
-                    let substate = match self.substates.get_mut(&address) {
+                    let substate = match self.substates.get(&address) {
                         Some(substate) => substate,
                         None => {
-                            warn!(
+                            // CASE: the remote VN could have omitted the substate value for various reasons including
+                            // it was already pledged previously, so this is not necessarily an error.
+                            debug!(
                                 target: LOG_TARGET,
-                                "⚠️ Substate not found for INPUT pledge: {}",
+                                "Substate value not found for INPUT pledge: {}",
                                 substate_id
                             );
                             return None;
@@ -133,11 +153,12 @@ impl BlockPledge {
                     })
                 },
                 SubstateLockType::Output => {
-                    let substate_id = intent.into_versioned_substate_id();
+                    let substate_id = intent.versioned_substate_id().clone();
                     Some(SubstatePledge::Output { substate_id })
                 },
             })
-            .collect()
+            .collect();
+        Some(pledges)
     }
 
     pub fn get_transaction_pledges(&self, transaction_id: &TransactionId) -> Option<&[VersionedSubstateIdLockIntent]> {
@@ -148,8 +169,56 @@ impl BlockPledge {
         self.pledges.values().map(|s| s.len()).sum()
     }
 
+    pub fn num_substate_values(&self) -> usize {
+        self.substates.len()
+    }
+
     pub fn retain_transactions(&mut self, transaction_ids: &HashSet<TransactionId>) -> &mut Self {
         self.pledges.retain(|tx, _| transaction_ids.contains(tx));
+        self
+    }
+
+    pub fn trim_input_values_for(&mut self, transaction_id: &TransactionId) -> &mut Self {
+        if let Some(pledges) = self.pledges.get(transaction_id) {
+            for pledge in pledges {
+                if pledge.lock_type().is_output() {
+                    continue;
+                }
+                if pledge.lock_type().is_write() {
+                    // Write should only be pledged to a single transaction, so we can remove the substate value
+                    let address = pledge.to_substate_address();
+                    debug!(
+                        target: LOG_TARGET,
+                        "trim_input_values_for: Removing substate value for {} pledge: {}",
+                        pledge.lock_type(),
+                        pledge.versioned_substate_id()
+                    );
+                    self.substates.remove(&address);
+                } else {
+                    // Read - check if it's pledged to any other transaction (This is worst case O(n*m))
+                    if self
+                        .pledges
+                        .iter()
+                        .filter(|(tx_id, _)| *tx_id != transaction_id)
+                        .any(|(_, v)| {
+                            v.iter()
+                                .any(|p| p.version() == pledge.version() && p.substate_id() == pledge.substate_id())
+                        })
+                    {
+                        continue;
+                    }
+                    debug!(
+                        target: LOG_TARGET,
+                        "trim_input_values_for: Removing substate value for {} pledge: {}",
+                        pledge.lock_type(),
+                        pledge.versioned_substate_id()
+                    );
+                    // No further pledges to this substate, so we can remove the substate value
+                    let address = pledge.to_substate_address();
+                    self.substates.remove(&address);
+                }
+            }
+        }
         self
     }
 
@@ -179,7 +248,7 @@ impl Display for BlockPledge {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum SubstatePledge {
     Input {
         substate_id: VersionedSubstateId,

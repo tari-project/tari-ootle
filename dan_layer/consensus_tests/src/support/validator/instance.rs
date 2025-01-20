@@ -7,12 +7,12 @@ use tari_consensus::{
 };
 use tari_dan_common_types::{optional::Optional, NodeHeight, ShardGroup, SubstateAddress};
 use tari_dan_storage::{
-    consensus_models::{BlockId, LeafBlock},
+    consensus_models::{BlockId, LeafBlock, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
 };
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_transaction::Transaction;
+use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,
@@ -88,15 +88,14 @@ impl Validator {
             })
     }
 
-    pub fn has_committed_substates(&self) -> bool {
+    pub fn has_committed_substates(&self, tx_id: &TransactionId) -> bool {
         let tx = self.state_store().create_read_tx().unwrap();
-        // assert_eq!(
-        //     tx.transaction_pool_count(None, None, None).unwrap(),
-        //     0,
-        //     "Transaction pool is not empty in {}",
-        //     self.address
-        // );
+        tx.substates_exists_for_transaction(tx_id).unwrap()
+    }
 
-        tx.substates_count().unwrap() > 0
+    pub fn get_transaction(&self, transaction_id: &TransactionId) -> TransactionRecord {
+        self.state_store
+            .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
+            .unwrap()
     }
 }

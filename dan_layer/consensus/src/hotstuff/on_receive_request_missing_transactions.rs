@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::option::DisplayContainer;
+use tari_dan_common_types::option::Displayable;
 use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 
 use crate::{

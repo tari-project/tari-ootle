@@ -281,19 +281,72 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 }
             }
         } else {
+            let execution = if local_versions.is_empty() {
+                // We're output-only
+                // let local_pledges = transaction.get_local_pledges(store.read_transaction())?;
+                let foreign_pledges = transaction.get_foreign_pledges(store.read_transaction())?;
+
+                let resolved_inputs = foreign_pledges
+                    .into_iter()
+                    // Exclude any output pledges
+                    .filter_map(|pledge| pledge.into_input())
+                    .map(|(id, substate)|
+                        {
+                            let version = id.version();
+                            (
+                                id.into(),
+                                Substate::new(version, substate),
+                            )
+                        })
+                    .collect();
+                let execution = self.execute_or_fetch(
+                    store,
+                    transaction.transaction().clone(),
+                    current_epoch,
+                    &resolved_inputs,
+                    block_id,
+                )?;
+                info!(
+                    target: LOG_TARGET,
+                    "👨‍🔧 PREPARE: Output-Only Executed transaction {} with {} decision",
+                    transaction_id,
+                    execution.decision()
+                );
+
+                Some(execution)
+            } else {
+                None
+            };
+
             // TODO: We do not know if the inputs locks required are Read/Write. Either we allow the user to
             //       specify this or we can correct the locks after execution. Currently, this limitation
             //       prevents concurrent multi-shard read locks.
-            let requested_locks = local_versions.iter().map(|(substate_id, version)| {
-                // Assume resources are read-only, if the transaction mutates the resource, it will be upgraded to a
-                // write lock
-                if substate_id.substate_id().is_resource() || substate_id.substate_id().is_read_only() {
-                    SubstateRequirementLockIntent::read(substate_id.clone(), *version)
-                } else {
-                    SubstateRequirementLockIntent::write(substate_id.clone(), *version)
-                }
-            });
-            let lock_status = store.try_lock_all(transaction_id, requested_locks, false)?;
+            let lock_status = match execution.as_ref() {
+                Some(execution) => {
+                    let requested_locks = execution
+                        .resolved_inputs()
+                        .iter()
+                        .chain(execution.resulting_outputs())
+                        .filter(|o| {
+                            o.substate_id().is_transaction_receipt() ||
+                                local_committee_info.includes_substate_id(o.substate_id())
+                        });
+                    store.try_lock_all(transaction_id, requested_locks, false)?
+                },
+                None => {
+                    let requested_locks = local_versions.iter().map(|(substate_id, version)| {
+                        // Assume resources are read-only, if the transaction mutates the resource, it will be upgraded
+                        // to a write lock
+                        if substate_id.substate_id().is_resource() || substate_id.substate_id().is_read_only() {
+                            SubstateRequirementLockIntent::read(substate_id.clone(), *version)
+                        } else {
+                            SubstateRequirementLockIntent::write(substate_id.clone(), *version)
+                        }
+                    });
+                    store.try_lock_all(transaction_id, requested_locks, false)?
+                },
+            };
+
             if let Some(err) = lock_status.hard_conflict() {
                 warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
                 transaction.set_abort_reason(RejectReason::FailedToLockInputs(err.to_string()));
@@ -301,7 +354,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
             // CASE: Multishard transaction, not executed
             Ok(PreparedTransaction::new_multishard(
-                transaction.into_execution(),
+                execution,
                 local_versions,
                 non_local_inputs,
                 outputs,

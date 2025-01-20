@@ -181,6 +181,7 @@ impl EpochManagerReader for TestEpochManager {
             num_shard_group_members as u32,
             num_committees,
             sg,
+            epoch,
         ))
     }
 
@@ -217,7 +218,7 @@ impl EpochManagerReader for TestEpochManager {
 
     async fn get_committee_info_by_validator_address(
         &self,
-        _epoch: Epoch,
+        epoch: Epoch,
         address: &Self::Addr,
     ) -> Result<CommitteeInfo, EpochManagerError> {
         let state = self.state_lock().await;
@@ -233,6 +234,7 @@ impl EpochManagerReader for TestEpochManager {
             num_members as u32,
             num_committees,
             *sg,
+            epoch,
         ))
     }
 
@@ -290,6 +292,7 @@ impl EpochManagerReader for TestEpochManager {
             num_members as u32,
             num_committees,
             sg,
+            epoch,
         ))
     }
 

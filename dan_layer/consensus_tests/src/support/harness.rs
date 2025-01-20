@@ -123,7 +123,7 @@ impl Test {
         self.add_execution_at_destination(dest, ExecuteSpec {
             transaction: transaction.transaction().clone(),
             decision: transaction.current_decision(),
-            fee: transaction.transaction_fee().unwrap_or(0),
+            fee: transaction.transaction_fee().unwrap_or(1),
             inputs,
             new_outputs,
         });
@@ -481,9 +481,25 @@ impl Test {
         }
     }
 
-    pub fn assert_all_validators_committed(&self) {
+    pub fn assert_all_validators_committed(&self, tx_id: &TransactionId) {
         self.validators.values().for_each(|v| {
-            assert!(v.has_committed_substates(), "Validator {} did not commit", v.address);
+            assert!(
+                v.has_committed_substates(tx_id),
+                "Validator {} did not commit transaction {}",
+                v.address,
+                tx_id
+            );
+        });
+    }
+
+    pub fn assert_all_validators_did_not_commit(&self, tx_id: &TransactionId) {
+        self.validators.values().for_each(|v| {
+            assert!(
+                !v.has_committed_substates(tx_id),
+                "Validator {} committed {} but expected it to reject",
+                v.address,
+                tx_id
+            );
         });
     }
 

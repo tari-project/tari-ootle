@@ -62,11 +62,9 @@ pub async fn upload(
 ) -> Result<Json<UploadResponse>, UploadError> {
     let Some(field) = value.next_field().await? else {
         error!("🌐 Upload template: no field found");
-        return Ok(
-            Json(
-                UploadResponse::failure("No multipart file field found".to_string())
-            )
-        );
+        return Ok(Json(UploadResponse::failure(
+            "No multipart file field found".to_string(),
+        )));
     };
 
     let name = field.file_name().unwrap_or("unnamed-template").to_string();

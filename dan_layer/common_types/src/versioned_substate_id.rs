@@ -260,7 +260,7 @@ impl Borrow<SubstateId> for VersionedSubstateId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct VersionedSubstateIdRef<'a> {
     pub substate_id: &'a SubstateId,
     pub version: u32,
@@ -279,6 +279,15 @@ impl<'a> VersionedSubstateIdRef<'a> {
 impl ToSubstateAddress for VersionedSubstateIdRef<'_> {
     fn to_substate_address(&self) -> SubstateAddress {
         SubstateAddress::from_substate_id(self.substate_id, self.version)
+    }
+}
+
+impl<'a> From<&'a VersionedSubstateId> for VersionedSubstateIdRef<'a> {
+    fn from(value: &'a VersionedSubstateId) -> Self {
+        Self {
+            substate_id: &value.substate_id,
+            version: value.version,
+        }
     }
 }
 

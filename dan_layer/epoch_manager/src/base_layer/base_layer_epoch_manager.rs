@@ -595,6 +595,7 @@ where
             num_validators,
             num_committees,
             shard_group,
+            epoch,
         ))
     }
 

@@ -112,6 +112,8 @@ use crate::{
         PublishTemplateResponse,
         RevealFundsRequest,
         RevealFundsResponse,
+        TransactionGetAllRequest,
+        TransactionGetAllResponse,
         TransactionGetRequest,
         TransactionGetResponse,
         TransactionGetResultRequest,
@@ -254,6 +256,13 @@ impl WalletDaemonClient {
         request: T,
     ) -> Result<TransactionGetResponse, WalletDaemonClientError> {
         self.send_request("transactions.get", request.borrow()).await
+    }
+
+    pub async fn get_transactions_all<T: Borrow<TransactionGetAllRequest>>(
+        &mut self,
+        request: T,
+    ) -> Result<TransactionGetAllResponse, WalletDaemonClientError> {
+        self.send_request("transactions.get_all", request.borrow()).await
     }
 
     pub async fn get_transaction_result<T: Borrow<TransactionGetResultRequest>>(

@@ -245,6 +245,7 @@ where
                         SubstateTreeChange::Up { id, value_hash: _value_hash } => {
                             if let SubstateId::Template(template_addr) = id.substate_id {
                                 if let Ok(false) = self.template_manager.template_exists(&template_addr.as_hash(), None) {
+                                    info!(target: LOG_TARGET, "🛜 New template found in substates: {}", template_addr.as_hash());
                                     self.template_manager.add_pending_template(template_addr.as_hash(), current_epoch)?;
                                     missing_templates.push(template_addr.as_hash());
                                 }
@@ -252,6 +253,7 @@ where
                         }
                         SubstateTreeChange::Down { id } => {
                             if let SubstateId::Template(template_addr) = &id.substate_id {
+                                info!(target: LOG_TARGET, "🛜 Deleting DOWN-ed substate: {}", template_addr.as_hash());
                                 if let Err(error) = self.template_manager.delete_template(&template_addr.as_hash()) {
                                     error!(target: LOG_TARGET, "Failed to delete template from template manager: {error:?}");
                                 }

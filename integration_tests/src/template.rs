@@ -12,12 +12,7 @@ use minotari_app_grpc::tari_rpc::{
     WasmInfo,
 };
 use tari_dan_engine::wasm::compile::compile_template;
-use tari_engine_types::{
-    commit_result::TransactionResult,
-    hashing::template_hasher32,
-    substate::SubstateId,
-    TemplateAddress,
-};
+use tari_engine_types::{hashing::template_hasher32, TemplateAddress};
 use tari_template_lib::Hash;
 use tari_wallet_daemon_client::{
     types::{PublishTemplateRequest, TransactionWaitResultRequest},
@@ -70,31 +65,21 @@ pub async fn publish_template(
         "Missing transaction result: {}",
         response.transaction_id
     )))?;
-    if !matches!(finalize_result.result, TransactionResult::Accept(_)) {
-        let error_status = match finalize_result.result {
-            TransactionResult::AcceptFeeRejectRest(_, reason) | TransactionResult::Reject(reason) => {
-                format!("Status: {}, Reason: {}", tx_resp.status, reason)
-            },
-            TransactionResult::Accept(_) => String::new(), // does not happen here
-        };
+
+    if let Some(reason) = finalize_result.result.full_reject() {
         return Err(anyhow!(format!(
-            "Invalid transaction {}: {error_status:?}",
-            response.transaction_id
+            "Invalid transaction {}: Status: {}, Reason: {}",
+            response.transaction_id, tx_resp.status, reason
         )));
     }
 
     // look for the new UP template substate
-    let mut result = None;
-    if let TransactionResult::Accept(diff) = finalize_result.result {
-        for (substate_id, _) in diff.up_iter() {
-            if let SubstateId::Template(addr) = substate_id {
-                result = Some(addr.as_hash());
-                break;
-            }
-        }
-    }
-
-    let template_id = result.ok_or(anyhow!("Missing published template in substates!"))?;
+    let template_id = finalize_result
+        .result
+        .accept()
+        .and_then(|result| result.up_iter().find_map(|(substate_id, _)| substate_id.as_template()))
+        .map(|id| id.as_hash())
+        .ok_or_else(|| anyhow!("Transaction result did not contain a published template!"))?;
 
     Ok(TemplateAddress::try_from_vec(template_id.to_vec())?)
 }

@@ -67,7 +67,7 @@ use crate::template_manager::interface::{
     TemplateManagerRequest,
 };
 
-const LOG_TARGET: &str = "tari::template_manager";
+const LOG_TARGET: &str = "tari::dan::template_manager";
 
 pub struct TemplateManagerService<TAddr> {
     rx_request: Receiver<TemplateManagerRequest>,

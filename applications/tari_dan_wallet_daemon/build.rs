@@ -31,6 +31,11 @@ fn exit_on_ci() {
 const BUILD: &[(&str, &[&str])] = &[
     ("../../bindings", &["install"]),
     ("../../bindings", &["run", "ts-build"]),
+    // Always use the latest bindings
+    ("../../clients/javascript/wallet_daemon_client", &[
+        "link",
+        "../../../bindings",
+    ]),
     ("../../clients/javascript/wallet_daemon_client", &["install"]),
     ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
     ("../tari_dan_wallet_web_ui", &["run", "build"]),

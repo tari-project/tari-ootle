@@ -48,8 +48,8 @@ mod sparkle_nft_template {
                 resource_address,
                 vault,
             })
-            .with_access_rules(AccessRules::allow_all())
-            .create()
+                .with_access_rules(AccessRules::allow_all())
+                .create()
         }
 
         pub fn new_with_initial_nft(nft: NonFungibleId) -> Component<Self> {
@@ -65,8 +65,8 @@ mod sparkle_nft_template {
                 resource_address: bucket.resource_address(),
                 vault: Vault::from_bucket(bucket),
             })
-            .with_access_rules(AccessRules::allow_all())
-            .create()
+                .with_access_rules(AccessRules::allow_all())
+                .create()
         }
 
         pub fn take_initial_nft(&mut self) -> Bucket {

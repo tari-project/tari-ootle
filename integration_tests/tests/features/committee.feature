@@ -27,12 +27,18 @@ Feature: Committee scenarios
     When validator node VAL_2 sends a registration transaction to base wallet WALLET
 
     # Register the "counter" template
-    When base wallet WALLET registers the template "counter"
+#    When base wallet WALLET registers the template "counter"
     When miner MINER mines 25 new blocks
     Then VAL_1 has scanned to height 28
     Then VAL_2 has scanned to height 28
     Then the validator node VAL_1 is listed as registered
     Then the validator node VAL_2 is listed as registered
+
+    # Initialize indexer and connect wallet daemon
+    Given an indexer IDX connected to base node BASE
+    Given a wallet daemon WALLET_D connected to indexer IDX
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "counter" using account ACC
     Then the template "counter" is listed as registered by the validator node VAL_1
     Then the template "counter" is listed as registered by the validator node VAL_2
 

@@ -27,16 +27,12 @@ Feature: Indexer node
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register some templates
-    When base wallet WALLET registers the template "counter"
-    When base wallet WALLET registers the template "basic_nft"
-    When miner MINER mines 20 new blocks
-    Then VN has scanned to height 53
-    Then the template "counter" is listed as registered by the validator node VN
-    Then the template "basic_nft" is listed as registered by the validator node VN
-
     # Create the sender account
-    When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+
+    # Publish some templates
+    When wallet daemon WALLET_D publishes the template "counter" using account ACC
+    When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 
     ##### Scenario
     # Create a new Counter component and increase it to have version 1
@@ -86,7 +82,7 @@ Feature: Indexer node
 #    Then the indexer IDX returns 6 non fungibles for resource NFT/resources/0
 
     # Scan the network for the event emitted on ACC creation
-    When indexer IDX scans the network events for account ACC with topics component-created,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,deposit,component-created,pay_fee,pay_fee,deposit,deposit,deposit,deposit,deposit,deposit
+    When indexer IDX scans the network events for account ACC with topics component-created,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,deposit,component-created,pay_fee,pay_fee,deposit,deposit,deposit,deposit,deposit,deposit
 
   Scenario: Indexer GraphQL requests work
     # Initialize a base node, wallet, miner and VN
@@ -152,11 +148,9 @@ Feature: Indexer node
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register template
-    When base wallet WALLET registers the template "faucet"
-    When miner MINER mines 20 new blocks
-    Then VN has scanned to height 53
-    Then the template "faucet" is listed as registered by the validator node VN
+    # publish template
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
     When I create an account ACC_1 via the wallet daemon WALLET_D with 10000 free coins
     When I create an account ACC_2 via the wallet daemon WALLET_D with 10000 free coins

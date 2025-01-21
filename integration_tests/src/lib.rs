@@ -210,6 +210,11 @@ impl TariWorld {
             p.shutdown.trigger();
         }
 
+        for (name, mut p) in self.vn_seeds.drain(..) {
+            println!("Shutting down validator node seed {}", name);
+            p.shutdown.trigger();
+        }
+
         for (name, mut p) in self.wallets.drain(..) {
             println!("Shutting down wallet {}", name);
             p.shutdown.trigger();

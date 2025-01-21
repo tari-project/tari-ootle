@@ -68,8 +68,8 @@ impl<'a> ProcessContext<'a> {
         self.network
     }
 
-    pub fn get_setting(&self, key: &str) -> Option<&String> {
-        self.settings.get(key)
+    pub fn get_setting(&self, key: &str) -> Option<&str> {
+        self.settings.get(key).map(|s| s.as_str())
     }
 
     pub async fn get_free_port(&mut self, name: &'static str) -> anyhow::Result<u16> {

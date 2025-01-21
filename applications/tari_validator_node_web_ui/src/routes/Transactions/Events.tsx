@@ -23,13 +23,12 @@
 import { useState } from "react";
 import { TableContainer, Table, TableHead, TableRow, TableCell, TableBody, Collapse } from "@mui/material";
 import { DataTableCell, AccordionIconButton } from "../../Components/StyledComponents";
-import { shortenString, shortenSubstateId, substateIdToString } from "../../utils/helpers";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import { renderJson } from "../../utils/helpers";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockDialog from "../../Components/CodeBlock";
-import type { Event } from "@tari-project/typescript-bindings";
+import { Event, shortenString, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
 
 function RowData({ substate_id, template_address, topic, tx_hash, payload }: Event, index: number) {
   const [open, setOpen] = useState(false);

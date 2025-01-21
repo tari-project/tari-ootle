@@ -59,6 +59,17 @@ export function stringToSubstateId(substateId) {
             throw new Error(`Unknown substate id: ${substateId}`);
     }
 }
+export function shortenSubstateId(substateId, start = 4, end = 4) {
+    if (substateId === null || substateId === undefined) {
+        return "";
+    }
+    const string = substateIdToString(substateId);
+    const parts = string.split("_", 2);
+    return parts[0] + "_" + shortenString(parts[1], start, end);
+}
+export function shortenString(string, start = 8, end = 8) {
+    return string.substring(0, start) + "..." + string.slice(-end);
+}
 export function rejectReasonToString(reason) {
     if (reason === null) {
         return "";

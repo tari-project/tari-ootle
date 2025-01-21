@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { toHexString } from "../routes/VN/Components/helpers";
-import type { ShardGroup, SubstateId } from "@tari-project/typescript-bindings";
+import { ShardGroup, SubstateId, substateIdToString } from "@tari-project/typescript-bindings";
 
 export const renderJson = (json: any) => {
 
@@ -74,17 +74,6 @@ export function fromHexString(hexString: string) {
     res.push(Number("0x" + hexString.substring(i, i + 2)));
   }
   return res;
-}
-
-export function substateIdToString(substateId: SubstateId | string | null | undefined) {
-  if (substateId === null || substateId === undefined) {
-    return "";
-  }
-  if (typeof substateId === "string") {
-    return substateId;
-  }
-  const key = Object.keys(substateId)[0] as keyof SubstateId;
-  return substateId[key];
 }
 
 export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 4, end: number = 4) {

@@ -23,20 +23,31 @@
 import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../Components/StyledComponents";
-import { Box, Button, IconButton, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography, Select, MenuItem, InputLabel } from "@mui/material";
+import {
+  Box,
+  Button,
+  IconButton,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+  Select,
+  MenuItem,
+  InputLabel,
+} from "@mui/material";
 import React, { useEffect, useState } from "react";
 import { toHexString } from "../VN/Components/helpers";
 import { truncateText } from "../../utils/helpers";
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
-import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
+import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
-import type {
-  ListSubstatesRequest,
-  ListSubstatesResponse,
-  SubstateType
-} from "@tari-project/typescript-bindings";
+import { shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
 import { listSubstates, getSubstate } from "../../utils/json_rpc";
 
 const PAGE_SIZE = 10;
@@ -49,7 +60,7 @@ function SubstatesLayout() {
   const [selectedContent, setSelectedContent] = useState({});
   const [filter, setFilter] = useState({
     filter_by_template: null,
-    filter_by_type: null
+    filter_by_type: null,
   });
 
   useEffect(() => {
@@ -74,17 +85,16 @@ function SubstatesLayout() {
     // @ts-ignore
     let resp = await listSubstates(params);
 
-    console.log({resp});
+    console.log({ resp });
 
     let substates = resp.substates.map((s) => {
       return {
         ...s,
-        address: Object.values(s.substate_id)[0],
         timestamp: (new Date(Number(s.timestamp) * 1000)).toDateString(),
       };
     });
 
-    console.log({substates});
+    console.log({ substates });
     setSubstates(substates);
   }
 
@@ -94,7 +104,7 @@ function SubstatesLayout() {
     }
   };
 
-  async function handleChangePage(newPage: number) { 
+  async function handleChangePage(newPage: number) {
     const offset = newPage * PAGE_SIZE;
     await get_substates(offset, PAGE_SIZE, filter);
     setPage(newPage);
@@ -102,9 +112,9 @@ function SubstatesLayout() {
 
   const handleContentDownload = async (substate: any) => {
     const data = await getSubstate({
-      address: substate.address,
+      address: substate.substate_id,
       version: null,
-      local_search_only: false
+      local_search_only: false,
     });
 
     const json = JSON.stringify(data, null, 2);
@@ -115,13 +125,13 @@ function SubstatesLayout() {
 
   const handleContentView = async (substate: any) => {
     const data = await getSubstate({
-      address: substate.address,
+      address: substate.substate_id,
       version: null,
-      local_search_only: false
+      local_search_only: false,
     });
     setSelectedContent(data);
     setJsonDialogOpen(true);
-  };  
+  };
 
   const handleJsonDialogClose = () => {
     setJsonDialogOpen(false);
@@ -164,18 +174,18 @@ function SubstatesLayout() {
               if (!value) {
                 return <>All Types</>;
               }
-  
+
               return value;
-            }}     
+            }}
             style={{ flexGrow: 1, minWidth: "200px" }}>
-              <MenuItem key={"All Types"} value={undefined}>
-                {"All types"}
+            <MenuItem key={"All Types"} value={undefined}>
+              {"All types"}
+            </MenuItem>
+            {SUBSTATE_TYPES.map((type) => (
+              <MenuItem key={type} value={type}>
+                {type}
               </MenuItem>
-              {SUBSTATE_TYPES.map((type) => (
-                <MenuItem key={type} value={type}>
-                  {type}
-                </MenuItem>
-              ))}
+            ))}
           </Select>
         </Box>
       </Grid>
@@ -194,11 +204,11 @@ function SubstatesLayout() {
             <TableBody>
               {substates.map((row: any) => (
                 <TableRow
-                  sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                  sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
                 >
                   <TableCell>
-                    {truncateText(row.address, 20)}
-                    <IconButton aria-label="copy" onClick={() => handleCopyClick(row.address)}>
+                    {shortenSubstateId(row.substate_id)}
+                    <IconButton aria-label="copy" onClick={() => handleCopyClick(substateIdToString(row.substate_id))}>
                       <ContentCopyIcon />
                     </IconButton>
                   </TableCell>
@@ -206,12 +216,12 @@ function SubstatesLayout() {
                   <TableCell>{row.version}</TableCell>
 
                   <TableCell>
-                    { row.template_address != null &&
+                    {row.template_address != null &&
                       <>
-                      {truncateText(row.template_address, 20)}
-                      <IconButton aria-label="copy" onClick={() => handleCopyClick(row.template_address)}>
-                        <ContentCopyIcon />
-                      </IconButton>
+                        {truncateText(row.template_address, 20)}
+                        <IconButton aria-label="copy" onClick={() => handleCopyClick(row.template_address)}>
+                          <ContentCopyIcon />
+                        </IconButton>
                       </>
                     }
                   </TableCell>
@@ -220,14 +230,14 @@ function SubstatesLayout() {
 
                   <TableCell>
                     <Stack direction="row" spacing={2} alignItems="left">
-                    <Button variant="outlined" onClick={async () => handleContentView(row)}>
+                      <Button variant="outlined" onClick={async () => handleContentView(row)}>
                         View
-                    </Button>
-                    <Button variant="outlined" onClick={async () => handleContentDownload(row)}>
+                      </Button>
+                      <Button variant="outlined" onClick={async () => handleContentDownload(row)}>
                         Download
-                    </Button>
+                      </Button>
                     </Stack>
-                    
+
                   </TableCell>
                 </TableRow>
               ))}
@@ -247,7 +257,7 @@ function SubstatesLayout() {
       <JsonDialog
         open={jsonDialogOpen}
         onClose={handleJsonDialogClose}
-        data={selectedContent}/>
+        data={selectedContent} />
     </>
   );
 }

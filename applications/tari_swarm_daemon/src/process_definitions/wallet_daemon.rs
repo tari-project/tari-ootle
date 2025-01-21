@@ -25,8 +25,9 @@ impl ProcessDefinition for WalletDaemon {
         let jrpc_port = context.get_free_port("jrpc").await?;
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
+        let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
 
-        let json_rpc_public_address = format!("{listen_ip}:{jrpc_port}");
+        let json_rpc_public_address = format!("{public_ip}:{jrpc_port}");
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
         let web_ui_address = format!("{listen_ip}:{web_ui_port}");
 
@@ -35,7 +36,7 @@ impl ProcessDefinition for WalletDaemon {
             .next()
             .ok_or_else(|| anyhow!("Indexer should be started before wallet daemon"))?;
         let indexer_url = format!(
-            "http://{listen_ip}:{}",
+            "http://127.0.0.1:{}",
             indexer
                 .instance()
                 .allocated_ports()

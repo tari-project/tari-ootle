@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
 use tari_dan_storage::consensus_models::{StateTransition, StateTransitionId};
 
-use crate::error::RocksDbStorageError;
+use crate::{error::RocksDbStorageError, utils::RocksdbSeq};
 
 use super::{super::utils::bor_encode, model::{ModelColumnFamily, RocksdbModel}};
 
@@ -37,7 +37,7 @@ pub struct StateTransitionModelData {
     pub data: Vec<u8>,
     pub id: StateTransitionId,
     pub shard: Shard,
-    pub seq: u64
+    pub seq: RocksdbSeq
 }
 
 impl StateTransitionModelData {
@@ -50,7 +50,7 @@ impl StateTransitionModelData {
             data,
             id,
             shard,
-            seq
+            seq: RocksdbSeq(seq)
         })
     }
 }
@@ -107,9 +107,6 @@ impl ModelColumnFamily for ShardColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        let seq = value.seq;
-        // hexadecimal endcoding with full 0 padding, so the key preserves ordering
-        let seq_hex = format!{"{seq:#018x}"};
-        format!("{}_{}_{}", StateTransitionModel::key_prefix(), value.shard, seq_hex)
+        format!("{}_{}_{}", StateTransitionModel::key_prefix(), value.shard, value.seq)
     }
 }

@@ -1483,5 +1483,9 @@ impl<'tx> StateStoreReadTransaction
             ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.evicted_nodes_count(epoch),
         }
     }
+    
+    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, tari_dan_storage::StorageError> {
+        todo!()
+    }
 
 }

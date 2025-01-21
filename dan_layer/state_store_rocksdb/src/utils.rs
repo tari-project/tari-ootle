@@ -64,3 +64,13 @@ impl Display for RocksdbTimestamp {
         write!(f, "{:b}", self.0)
     }
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord)]
+pub struct RocksdbSeq(pub u64);
+
+impl Display for RocksdbSeq {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // hexadecimal endcoding with full 0 padding, so the key preserves ordering
+        write!(f, "{:#018x}", self.0)
+    }
+}

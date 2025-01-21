@@ -56,7 +56,7 @@ const DEFAULT_WALLET_ADDRESS = new URL(
 
 export async function getClientAddress(): Promise<URL> {
   try {
-    let resp = await fetch("/json_rpc_address");
+    const resp = await fetch("/json_rpc_address");
     if (resp.status === 200) {
       const url = await resp.text();
       try {

@@ -20,13 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::sync::Arc;
 
 use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{BlockId, BlockTransactionExecution};
 use tari_transaction::TransactionId;
-use crate::model::model::RocksdbModel;
+use crate::{model::model::RocksdbModel, utils::RocksdbTimestamp};
 
 use crate::error::RocksDbStorageError;
 
@@ -37,14 +37,14 @@ pub struct BlockTransactionExecutionModelData {
     pub transaction_execution: BlockTransactionExecution,
     // we need this field to keep track of insertion order
     // for the "transaction_executions_get_pending_for_block" method
-    pub created_at: u128,
+    pub created_at: RocksdbTimestamp,
 }
 
 impl From<&BlockTransactionExecution> for BlockTransactionExecutionModelData {
     fn from(exec: &BlockTransactionExecution) -> Self {
         Self {
             transaction_execution: exec.clone(),
-            created_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis(),
+            created_at: RocksdbTimestamp::now(),
         }
     }
 }
@@ -71,8 +71,8 @@ impl RocksdbModel for BlockTransactionExecutionModel {
         let transaction_id = value.transaction_execution.transaction_id();
         let block_id = value.transaction_execution.block_id();
         let created_at = value.created_at;
-        // the key segment for "created_at" is binary to order keys by creation time
-        format!("{}_{}_{}_{:b}", Self::key_prefix(), transaction_id, block_id, created_at)
+        // the key segment for "created_at" allows us to order by creation time
+        format!("{}_{}_{}_{}", Self::key_prefix(), transaction_id, block_id, created_at)
     }
 
     fn column_families() -> Vec<&'static str> {

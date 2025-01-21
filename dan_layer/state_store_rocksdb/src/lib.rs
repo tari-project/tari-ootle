@@ -24,6 +24,7 @@ mod error;
 mod model;
 mod reader;
 mod store;
+mod utils;
 mod writer;
 
 pub use store::RocksDbStateStore;

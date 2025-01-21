@@ -29,7 +29,7 @@ use tari_dan_storage::consensus_models::{StateTransition, StateTransitionId};
 
 use crate::error::RocksDbStorageError;
 
-use super::{encoding::bor_encode, model::{ModelColumnFamily, RocksdbModel}};
+use super::{super::utils::bor_encode, model::{ModelColumnFamily, RocksdbModel}};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -28,7 +28,7 @@ use tari_dan_storage::Ordering;
 
 use crate::error::RocksDbStorageError;
 
-use super::encoding::{bincode_decode, bincode_encode};
+use super::super::utils::{bincode_decode, bincode_encode};
 
 pub trait ModelColumnFamily {
     type Item: Serialize;

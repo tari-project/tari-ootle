@@ -20,9 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{de::DeserializeOwned, Serialize};
+use std::{fmt::{self, Display}, time::SystemTime};
+
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::error::RocksDbStorageError;
+use std::time::UNIX_EPOCH;
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
@@ -44,4 +47,20 @@ pub fn bor_encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RocksDbStorageErro
 pub fn bor_decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RocksDbStorageError> {
     tari_bor::decode_exact(bytes)
         .map_err(|e| RocksDbStorageError::GeneralError { message: e.into_string() })
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord)]
+pub struct RocksdbTimestamp(u128);
+
+impl RocksdbTimestamp {
+    pub fn now() -> Self {
+        Self(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis())
+    }
+}
+
+impl Display for RocksdbTimestamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // displayed as binary to order if the value is used in a RocksDB key
+        write!(f, "{:b}", self.0)
+    }
 }

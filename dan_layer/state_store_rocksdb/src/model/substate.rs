@@ -32,7 +32,7 @@ use tari_transaction::TransactionId;
 
 use crate::error::RocksDbStorageError;
 
-use super::{encoding::{bincode_decode, bincode_encode}, model::{ModelColumnFamily, RocksdbModel}};
+use super::{super::utils::{bincode_decode, bincode_encode}, model::{ModelColumnFamily, RocksdbModel}};
 
 // We need to reimplement the "SubstateRecord" struct because of a incompatiblity between bincode and ciborium Value,
 // which we use for the substate state.

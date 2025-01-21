@@ -35,7 +35,7 @@ impl ProcessDefinition for WalletDaemon {
             .next()
             .ok_or_else(|| anyhow!("Indexer should be started before wallet daemon"))?;
         let indexer_url = format!(
-            "http://{listen_ip}:{}",
+            "http://127.0.0.1:{}",
             indexer
                 .instance()
                 .allocated_ports()

@@ -40,7 +40,7 @@ impl ProcessDefinition for ValidatorNode {
             .instance()
             .allocated_ports()
             .get("grpc")
-            .map(|port| format!("http://{listen_ip}:{port}"))
+            .map(|port| format!("http://127.0.0.1:{port}"))
             .ok_or_else(|| anyhow!("grpc port not found for base node"))?;
 
         debug!(

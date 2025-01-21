@@ -163,10 +163,7 @@ where
             substate: account_value,
             created_by_tx,
         } = substate_api
-            .scan_for_substate(
-                account_substate.substate_id.substate_id(),
-                Some(account_substate.substate_id.version()),
-            )
+            .scan_for_substate(account_substate.substate_id.substate_id(), None)
             .await?;
 
         let indexed_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
@@ -186,9 +183,8 @@ where
             .collect::<HashMap<_, _>>();
         for vault_id in indexed_value.vault_ids() {
             let vault_substate_id = SubstateId::Vault(*vault_id);
-            let maybe_vault_version = known_child_vaults.get(&vault_substate_id).copied().flatten();
             let scan_result = substate_api
-                .scan_for_substate(&vault_substate_id, maybe_vault_version)
+                .scan_for_substate(&vault_substate_id, None)
                 .await
                 .optional()?;
             let Some(ValidatorScanResult {
@@ -197,10 +193,11 @@ where
                 ..
             }) = scan_result
             else {
-                warn!(target: LOG_TARGET, "Vault {} for account {} does not exist according to validator node", vault_substate_id, versioned_account_address);
+                warn!(target: LOG_TARGET, "Vault {} for account {} does not exist according to indexer", vault_substate_id, versioned_account_address);
                 continue;
             };
 
+            let maybe_vault_version = known_child_vaults.get(&vault_substate_id).copied().flatten();
             if let Some(vault_version) = maybe_vault_version {
                 // The first time a vault is found, know about the vault substate from the tx result but never added
                 // it to the database.
@@ -487,13 +484,7 @@ where
     async fn fetch_resource(&self, resx_addr: ResourceAddress) -> Result<Resource, AccountMonitorError> {
         let substate_api = self.wallet_sdk.substate_api();
         let resx_addr = SubstateId::Resource(resx_addr);
-        let version = substate_api
-            .get_substate(&resx_addr)
-            .optional()?
-            .map(|s| s.substate_id.version())
-            .unwrap_or(0);
-        let ValidatorScanResult { substate: resource, .. } =
-            substate_api.scan_for_substate(&resx_addr, Some(version)).await?;
+        let ValidatorScanResult { substate: resource, .. } = substate_api.scan_for_substate(&resx_addr, None).await?;
         let resx = resource.into_resource().ok_or_else(|| {
             AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a resource.", resx_addr))
         })?;

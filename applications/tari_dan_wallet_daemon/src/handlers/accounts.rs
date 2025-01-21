@@ -125,7 +125,7 @@ pub async fn handle_create(
     let transaction = Transaction::builder()
         .fee_transaction_pay_from_component(default_account.address.as_component_address().unwrap(), max_fee)
         .create_account(owner_pk.clone())
-        .with_inputs(inputs)
+        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&signing_key.key);
 
     let mut events = context.notifier().subscribe();

@@ -141,6 +141,26 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             .map_err(|e| RpcStatus::bad_request(format!("Invalid substate requirement: {e}")))?
             .ok_or_else(|| RpcStatus::bad_request("Missing substate requirement"))?;
 
+        if !substate_requirement.substate_id().is_global() {
+            let current_epoch = self
+                .epoch_manager
+                .current_epoch()
+                .await
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+            let local_committee_info = self
+                .epoch_manager
+                .get_local_committee_info(current_epoch)
+                .await
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+            if !local_committee_info.includes_substate_id(substate_requirement.substate_id()) {
+                return Err(RpcStatus::bad_request(format!(
+                    "This node in {} does not store {}",
+                    local_committee_info.shard_group(),
+                    substate_requirement
+                )));
+            }
+        }
+
         debug!(
             target: LOG_TARGET,
             "Querying substate {substate_requirement} from the state store"

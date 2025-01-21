@@ -17,6 +17,7 @@ use tokio::sync::broadcast;
 
 use crate::{
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
+    jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
 };
 
@@ -139,6 +140,15 @@ pub(super) fn invalid_params<T: Display>(field: &str, details: Option<T>) -> any
             field,
             details.map(|d| format!(": {}", d)).unwrap_or_default()
         ),
+        serde_json::Value::Null,
+    )
+    .into()
+}
+
+pub(super) fn application<T: Display>(code: ApplicationErrorCode, details: T) -> anyhow::Error {
+    axum_jrpc::error::JsonRpcError::new(
+        axum_jrpc::error::JsonRpcErrorReason::ApplicationError(code as i32),
+        format!("Application error: '{details}",),
         serde_json::Value::Null,
     )
     .into()

@@ -147,8 +147,8 @@ Feature: Account transfers
   acc2.balance(faucet_resource);
   ```
     When I print the cucumber world
-    
-  Scenario: Confidential transfer to unexisting account
+
+  Scenario: Confidential transfer to account that does not previously exist
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE
     Given a wallet WALLET connected to base node BASE

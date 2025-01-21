@@ -30,14 +30,9 @@ Feature: Wallet Daemon
         # Initialize the wallet daemon
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-        # Register the "faucet" template
-    When base wallet WALLET registers the template "faucet"
-
-        # Mine some blocks until the UTXOs are scanned
-    When miner MINER mines 5 new blocks
-    Then VAL_1 has scanned to height 32
-    Then indexer IDX has scanned to height 32
-    Then the template "faucet" is listed as registered by the validator node VAL_1
+    # Publish the "fauset" template
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
         # Create two accounts to test sending the tokens
     When I create an account ACC_1 via the wallet daemon WALLET_D with 10000 free coins
@@ -84,7 +79,7 @@ Feature: Wallet Daemon
     When I check the balance of ACC_1 on wallet daemon WALLET_D the amount is at least 8000
     # TODO: Figure out why this is taking more than 10 seconds to update
     #        When I wait for ACC_2 on wallet daemon WALLET_D to have balance eq 50
-
+  
   Scenario: Claim and transfer confidential assets via wallet daemon
         # Initialize a base node, wallet, miner and VN
     Given a base node BASE

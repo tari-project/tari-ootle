@@ -39,8 +39,8 @@ mod faucet_template {
             Component::new(Self {
                 vault: Vault::from_bucket(coins),
             })
-            .with_access_rules(AccessRules::allow_all())
-            .create()
+                .with_access_rules(AccessRules::allow_all())
+                .create()
         }
 
         pub fn take_free_coins(&mut self) -> Bucket {

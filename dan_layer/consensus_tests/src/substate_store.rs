@@ -42,7 +42,7 @@ fn it_allows_substate_up_for_v0() {
     store
         .put(SubstateChange::Up {
             id: VersionedSubstateId::new(id.clone(), 1),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             transaction_id: tx_id(0),
             substate: Substate::new(1, value.clone()),
         })
@@ -52,7 +52,7 @@ fn it_allows_substate_up_for_v0() {
         .put(SubstateChange::Up {
             id: VersionedSubstateId::new(id.clone(), 0),
             transaction_id: tx_id(0),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             substate: Substate::new(0, value),
         })
         .unwrap();
@@ -77,7 +77,7 @@ fn it_allows_down_then_up() {
     store
         .put(SubstateChange::Down {
             id: id.clone(),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             transaction_id: Default::default(),
         })
         .unwrap();
@@ -85,7 +85,7 @@ fn it_allows_down_then_up() {
     store
         .put(SubstateChange::Up {
             id: id.to_next_version(),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             transaction_id: Default::default(),
             substate: new_substate(1, 1),
         })
@@ -108,7 +108,7 @@ fn it_fails_if_previous_version_is_not_down() {
     let err = store
         .put(SubstateChange::Up {
             id: id.to_next_version(),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             transaction_id: Default::default(),
             substate: new_substate(1, 1),
         })
@@ -216,11 +216,11 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
                 created_justify: QcId::zero(),
                 created_block: BlockId::zero(),
                 created_height: 0.into(),
-                created_by_shard: Shard::zero(),
+                created_by_shard: Shard::first(),
                 created_at_epoch: 0.into(),
                 destroyed: None,
             }
-            .create(tx)
+                .create(tx)
         })
         .unwrap();
 
@@ -265,7 +265,7 @@ fn new_substate_value(seed: u8) -> SubstateValue {
             state: tari_bor::Value::Null,
         },
     }
-    .into()
+        .into()
 }
 
 fn tx_id(seed: u8) -> tari_transaction::TransactionId {

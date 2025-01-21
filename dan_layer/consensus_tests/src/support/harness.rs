@@ -161,7 +161,7 @@ impl Test {
                     .take(num)
                     .map(|id| VersionedSubstateId::new(id, 0))
                     .collect::<Vec<_>>()
-            },
+            }
         };
 
         let substates = substate_ids
@@ -172,7 +172,7 @@ impl Test {
                     id.substate_id.clone(),
                     id.version,
                     value,
-                    Shard::zero(),
+                    Shard::first(),
                     Epoch(0),
                     NodeHeight(0),
                     BlockId::zero(),
@@ -238,7 +238,7 @@ impl Test {
                     Err(_) => {
                         self.dump_pool_info();
                         panic!("Timeout waiting for Hotstuff event");
-                    },
+                    }
                 }
             } else {
                 self.on_hotstuff_event().await
@@ -258,7 +258,7 @@ impl Test {
                 other => {
                     log::info!("[{}] Ignoring event: {:?}", address, other);
                     continue;
-                },
+                }
             }
         }
     }
@@ -352,7 +352,7 @@ impl Test {
             log::info!("{} has {} transactions in pool", vn.address, transactions.len());
             transactions.iter().filter(|tx| tx.is_finalized()).count() >= n
         })
-        .await
+            .await
     }
 
     pub async fn wait_for_pool_count(&self, dest: TestVnDestination, count: usize) {
@@ -364,7 +364,7 @@ impl Test {
             log::info!("{} has {} transactions in pool", vn.address, c);
             c >= count
         })
-        .await
+            .await
     }
 
     pub fn with_all_validators(&self, f: impl FnMut(&Validator)) {
@@ -683,7 +683,7 @@ impl TestBuilder {
             &self.failure_nodes,
             shutdown.to_signal(),
         )
-        .await;
+            .await;
         let network = spawn_network(channels, shutdown.to_signal(), self.message_filter);
 
         Test {
@@ -704,7 +704,7 @@ pub fn committee_number_to_shard_group(num_shards: NumPreshards, target_group: u
     // number of committees can never exceed number of shards
     assert!(num_committees <= num_shards.as_u32());
     if num_committees <= 1 {
-        return ShardGroup::new(Shard::zero(), Shard::from(num_shards.as_u32() - 1));
+        return ShardGroup::new(Shard::first(), Shard::from(num_shards.as_u32() - 1));
     }
 
     let shards_per_committee = num_shards.as_u32() / num_committees;

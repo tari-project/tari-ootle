@@ -8,7 +8,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::{uint::U256, NumPreshards, SubstateAddress};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    BorshSerialize
+)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -18,9 +30,15 @@ use crate::{uint::U256, NumPreshards, SubstateAddress};
 pub struct Shard(#[cfg_attr(feature = "ts", ts(type = "number"))] u32);
 
 impl Shard {
-    pub const fn zero() -> Shard {
-        Shard(0)
+    /// Returns the first available shard in the whole range.
+    /// Note: it starts from `1` as `0` is reserved for global substates.
+    pub const fn first() -> Shard {
+        Shard(1)
     }
+
+    /// Returns global shard number.
+    /// It is a reserved shard for globally handled substates.
+    pub const fn global() -> Shard { Shard(0) }
 
     pub const fn is_zero(&self) -> bool {
         self.0 == 0
@@ -142,7 +160,7 @@ mod test {
                 let shard = Shard::from(shard_index);
                 let range = shard.to_substate_address_range(num_of_shards);
                 if shard_index == 0 {
-                    assert_eq!(range.start().to_u256(), U256::ZERO, "First shard should start at 0");
+                    assert_eq!(range.start().to_u256(), U256::ONE, "First shard should start at 0");
                 } else {
                     assert_eq!(
                         range.start().to_u256(),

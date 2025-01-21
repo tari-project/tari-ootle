@@ -11,6 +11,7 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
+use tari_bor::BorError;
 use tari_common_types::types::{FixedHash, FixedHashSizeError};
 use tari_crypto::tari_utilities::{
     hex::{from_hex, Hex},
@@ -56,6 +57,10 @@ impl SubstateAddress {
         buf[ObjectKey::LENGTH..].copy_from_slice(&version.to_be_bytes());
 
         Self(buf)
+    }
+
+    pub fn to_substate_id(&self) -> Result<SubstateId, BorError> {
+        SubstateId::from_bytes(&self.0.as_ref()[..ObjectKey::LENGTH])
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -138,18 +143,30 @@ impl SubstateAddress {
     /// Calculates and returns the shard number that this SubstateAddress belongs.
     /// A shard is a division of the 256-bit shard space where the boundary of the division if always a power of two.
     pub fn to_shard(&self, num_shards: NumPreshards) -> Shard {
+        // if the corresponding substate ID is a global one, just return global shard
+        if let Ok(substate_id) = self.to_substate_id() {
+            if substate_id.is_global() {
+                return Shard::global();
+            }
+        }
+        
         if num_shards.as_u32() == 1 || self.is_zero() {
-            return Shard::from(0u32);
+            return Shard::first();
         }
         let addr_u256 = self.to_u256();
 
         let num_shards = num_shards.as_u32();
         let shard_size = U256::MAX >> num_shards.trailing_zeros();
-        Shard::from(
-            u32::try_from(addr_u256 / shard_size)
-                .expect("to_shard: num_shards is a u32, so this cannot fail")
-                .min(num_shards - 1),
-        )
+        let mut shard_number = u32::try_from(addr_u256 / shard_size)
+            .expect("to_shard: num_shards is a u32, so this cannot fail")
+            .min(num_shards - 1);
+
+        // check for global shard
+        if shard_number == Shard::global().as_u32() {
+            shard_number += 1;
+        }
+
+        Shard::from(shard_number)
 
         // // 2^15-1 shards with 40 vns per shard = 1,310,680 validators. This limit exists to prevent next_power_of_two
         // // from panicking.
@@ -191,7 +208,7 @@ impl SubstateAddress {
         // number of committees can never exceed number of shards
         let num_committees = num_committees.min(num_shards.as_u32());
         if num_committees <= 1 {
-            return ShardGroup::new(Shard::zero(), Shard::from(num_shards.as_u32() - 1));
+            return ShardGroup::new(Shard::first(), Shard::from(num_shards.as_u32() - 1));
         }
 
         let shards_per_committee = num_shards.as_u32() / num_committees;
@@ -398,7 +415,7 @@ mod tests {
     #[test]
     fn to_shard() {
         let shard = SubstateAddress::zero().to_shard(NumPreshards::P2);
-        assert_eq!(shard, 0);
+        assert_eq!(shard, 1);
         let shard = address_at(1, 2).to_shard(NumPreshards::P2);
         assert_eq!(shard, 1);
         let shard = plus_one(address_at(1, 2)).to_shard(NumPreshards::P2);
@@ -408,13 +425,13 @@ mod tests {
 
         for i in 0..=32 {
             let shard = divide_shard_space(i, 32).to_shard(NumPreshards::P1);
-            assert_eq!(shard, 0);
+            assert_eq!(shard, 1);
         }
 
         // 2 shards, exactly half of the physical shard space
         for i in 0..=8 {
             let shard = divide_shard_space(i, 16).to_shard(NumPreshards::P2);
-            assert_eq!(shard, 0, "{shard} is not 0 for i: {i}");
+            assert_eq!(shard, 1, "{shard} is not 1 for i: {i}");
         }
 
         for i in 9..16 {
@@ -433,7 +450,7 @@ mod tests {
         }
         // +1 boundary
         for power_of_two in iter::successors(Some(1), |&x| Some(x * 2)).take(8) {
-            for i in 0..power_of_two {
+            for i in 1..power_of_two {
                 let shard = plus_one(address_at(i, power_of_two)).to_shard(power_of_two.try_into().unwrap());
                 assert_eq!(shard, i, "Got: {shard}, Expected: {i} for power_of_two: {power_of_two}");
             }
@@ -581,7 +598,7 @@ mod tests {
             // Note: this test does not calculate the correct assertions if you change this constant.
             const NUM_COMMITTEES: u32 = 2;
             for num_shards in all_num_shards_except_1 {
-                for at in 0..num_shards.as_u32() {
+                for at in 1..num_shards.as_u32() {
                     let group = address_at(at, num_shards.as_u32()).to_shard_group(num_shards, NUM_COMMITTEES);
                     if at < num_shards.as_u32() / NUM_COMMITTEES {
                         assert_eq!(

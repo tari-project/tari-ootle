@@ -86,6 +86,10 @@ mod confirm_all_transitions {
             .find(|tx| *tx.transaction_id() == atom3.id)
             .unwrap()
             .clone();
+
+        assert!(tx.transaction_pool_exists(&atom1.id).unwrap());
+        assert!(tx.transaction_pool_exists(&atom2.id).unwrap());
+        assert!(tx.transaction_pool_exists(&atom3.id).unwrap());
        
         tx_1.set_next_stage(TransactionPoolStage::Prepared).unwrap();
         tx_1.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();

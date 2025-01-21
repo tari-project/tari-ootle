@@ -1358,21 +1358,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
-        todo!()
-        /*
-        use crate::schema::transaction_pool;
-
-        let count = transaction_pool::table
-            .count()
-            .filter(transaction_pool::transaction_id.eq(serialize_hex(transaction_id)))
-            .first::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_exists",
-                source: e,
-            })?;
-
-        Ok(count > 0)
-        */
+        let key = TransactionPoolModel::key_from_transaction_id(transaction_id);
+        let key_exists = TransactionPoolModel::key_exists(&self.tx, "transaction_pool_exists", &key)?;
+        Ok(key_exists)
     }
 
     fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError> {

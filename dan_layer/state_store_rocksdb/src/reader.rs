@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -391,21 +391,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
-        todo!()
-        /*
-        use crate::schema::leaf_blocks;
-
-        let leaf_block = leaf_blocks::table
-            .filter(leaf_blocks::epoch.eq(epoch.as_u64() as i64))
-            .order_by(leaf_blocks::id.desc())
-            .first::<sql_models::LeafBlock>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "leaf_block_get",
-                source: e,
-            })?;
-
-        leaf_block.try_into()
-        */
+        let key_prefix = LeafBlockModel::key_prefix_by_epoch(epoch);
+        let value = LeafBlockModel::get_first(&self.tx, "leaf_block_get", Some(&key_prefix), Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No leaf block stored in database".to_string() })?;
+        Ok(value.leaf_block)
     }
 
     fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError> {

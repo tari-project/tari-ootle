@@ -1,4 +1,4 @@
-//  Copyright 2024. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,19 +20,43 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod model;
+use serde::{Deserialize, Serialize};
+use tari_dan_common_types::Epoch;
+use tari_dan_storage::consensus_models::LeafBlock;
+use crate::{model::model::RocksdbModel, utils::RocksdbTimestamp};
 
-pub mod block_transaction_execution;
-pub mod block;
-pub mod last_executed;
-pub mod last_proposed;
-pub mod last_sent_vote;
-pub mod last_voted;
-pub mod leaf_block;
-pub mod locked_block;
-pub mod state_transition;
-pub mod state_tree_shard_versions;
-pub mod substate;
-pub mod transaction_pool_state_update;
-pub mod transaction_pool;
-pub mod transaction;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeafBlockData {
+    pub leaf_block: LeafBlock,
+    // we need this field to keep track of insertion order
+    pub created_at: RocksdbTimestamp,
+}
+
+impl From<&LeafBlock> for LeafBlockData {
+    fn from(value: &LeafBlock) -> Self {
+        Self {
+            leaf_block: value.clone(),
+            created_at: RocksdbTimestamp::now(),
+        }
+    }
+}
+
+pub struct LeafBlockModel {}
+
+impl LeafBlockModel {
+    pub fn key_prefix_by_epoch(epoch: Epoch) -> String {
+        format!("{}_{}", Self::key_prefix(), epoch)
+    }
+}
+
+impl RocksdbModel for LeafBlockModel {
+    type Item = LeafBlockData;
+
+    fn key_prefix() -> &'static str {
+        "leafblock"
+    }
+
+    fn key(value: &Self::Item) -> String {
+        format!("{}_{}_{}", Self::key_prefix(), value.leaf_block.epoch, value.created_at)
+    }
+}

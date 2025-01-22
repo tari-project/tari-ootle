@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -367,20 +367,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn last_executed_get(&self) -> Result<LastExecuted, StorageError> {
-        todo!()
-        /*
-        use crate::schema::last_executed;
-
-        let last_executed = last_executed::table
-            .order_by(last_executed::id.desc())
-            .first::<sql_models::LastExecuted>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_executed_get",
-                source: e,
-            })?;
-
-        last_executed.try_into()
-        */
+        let value = LastExecutedModel::get_first(&self.tx, "last_executed_get", None, Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No last executed stored in database".to_string() })?;
+        Ok(value)
     }
 
     fn last_proposed_get(&self) -> Result<LastProposed, StorageError> {

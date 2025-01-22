@@ -10,7 +10,7 @@ use tari_dan_storage::{
 
 mod last_inserted {
     use tari_common_types::types::PublicKey;
-    use tari_dan_storage::consensus_models::{BlockId, LastSentVote, LastVoted, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+    use tari_dan_storage::consensus_models::{BlockId, LastExecuted, LastSentVote, LastVoted, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
 
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
     
@@ -66,7 +66,21 @@ mod last_inserted {
         let res = tx.last_sent_vote_get().unwrap();
         assert_eq_debug(&res, &last_sent_vote);
 
-        
+        // last executed
+        let mut last_exec = LastExecuted {
+            block_id: BlockId::genesis(),
+            height: NodeHeight(123),
+            epoch: Epoch::zero(),
+        };
+        tx.last_executed_set(&last_exec).unwrap();
+        let res = tx.last_executed_get().unwrap();
+        assert_eq_debug(&res, &last_exec);
+
+        last_exec.epoch = last_exec.epoch + Epoch(1);
+
+        tx.last_executed_set(&last_exec).unwrap();
+        let res = tx.last_executed_get().unwrap();
+        assert_eq_debug(&res, &last_exec);
 
         tx.rollback().unwrap();
     }

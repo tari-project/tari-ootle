@@ -30,7 +30,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
 use tari_dan_storage::{consensus_models::{LastVoted, StateTransition}, StateStore, StorageError};
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, last_voted::LastVotedModel, model::RocksdbModel, state_transition::StateTransitionModel, substate::SubstateModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, last_voted::LastVotedModel, model::RocksdbModel, quorum_certificate::QuorumCertificateModel, state_transition::StateTransitionModel, substate::SubstateModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 
@@ -50,6 +50,7 @@ impl<TAddr> RocksDbStateStore<TAddr> {
             BlockModel::column_families(),
             BlockTransactionExecutionModel::column_families(),
             LastVotedModel::column_families(),
+            QuorumCertificateModel::column_families(),
             StateTransitionModel::column_families(),
             SubstateModel::column_families(),
         ].concat();

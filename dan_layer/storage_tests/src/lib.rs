@@ -10,3 +10,5 @@ mod helper;
 mod substates;
 #[cfg(test)]
 mod last_inserted;
+#[cfg(test)]
+mod quorum_certificates;

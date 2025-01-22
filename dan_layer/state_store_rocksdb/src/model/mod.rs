@@ -31,6 +31,7 @@ pub mod last_sent_vote;
 pub mod last_voted;
 pub mod leaf_block;
 pub mod locked_block;
+pub mod quorum_certificate;
 pub mod state_transition;
 pub mod state_tree_shard_versions;
 pub mod substate;

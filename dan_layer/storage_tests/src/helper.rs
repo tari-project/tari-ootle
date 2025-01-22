@@ -1,4 +1,5 @@
-use tari_dan_storage::consensus_models::{Decision, TransactionAtom};
+use tari_common_types::types::FixedHash;
+use tari_dan_storage::consensus_models::{BlockId, Decision, TransactionAtom};
 use tari_engine_types::substate::SubstateId;
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
@@ -58,4 +59,9 @@ pub fn assert_eq_debug<T>(a: &T, b: &T)
         format!("{:?}", a),
         format!("{:?}", b),
     );
+}
+
+pub fn create_random_block_id() -> BlockId {
+    let rand_bytes = OsRng.gen::<[u8; FixedHash::byte_size()]>();
+    BlockId::new(FixedHash::new(rand_bytes))
 }

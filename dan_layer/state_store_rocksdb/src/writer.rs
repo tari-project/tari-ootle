@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
+use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
 
 use bincode;
 
@@ -297,61 +297,25 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn quorum_certificates_insert(&mut self, qc: &QuorumCertificate) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::quorum_certificates;
-
-        let insert = (
-            quorum_certificates::qc_id.eq(serialize_hex(qc.id())),
-            quorum_certificates::shard_group.eq(qc.shard_group().encode_as_u32() as i32),
-            quorum_certificates::block_id.eq(serialize_hex(qc.block_id())),
-            quorum_certificates::json.eq(serialize_json(qc)?),
-        );
-
-        diesel::insert_into(quorum_certificates::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "quorum_certificates_insert",
-                source: e,
-            })?;
-
-        Ok(())
-        */
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        Ok(QuorumCertificateModel::put(self.db.clone(), tx, "quorum_certificates_insert", &qc)?)
     }
 
     fn quorum_certificates_set_shares_processed(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::quorum_certificates;
+        let operation = "quorum_certificates_set_shares_processed";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let qc_id = serialize_hex(qc_id);
-        let qc_json = quorum_certificates::table
-            .select(quorum_certificates::json)
-            .filter(quorum_certificates::qc_id.eq(&qc_id))
-            .get_result::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "quorum_certificates_set_shares_processed",
-                source: e,
-            })?;
+        // fetch the qc
+        let key: String = QuorumCertificateModel::key_from_qc_id(qc_id);
+        let mut qc = QuorumCertificateModel::get(tx, operation, &key)?;
 
-        let mut json = deserialize_json::<serde_json::Value>(&qc_json)?;
-        json["is_shares_processed"] = serde_json::Value::Bool(true);
-
-        diesel::update(quorum_certificates::table)
-            .filter(quorum_certificates::qc_id.eq(qc_id))
-            .set((
-                quorum_certificates::is_shares_processed.eq(true),
-                quorum_certificates::json.eq(serialize_json(&json)?),
-            ))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "quorum_certificates_set_shares_processed",
-                source: e,
-            })?;
+        // set the value
+        qc.set_is_shares_processed(true);
+        
+        // update the block in rocksDb
+        QuorumCertificateModel::put(self.db.clone(), tx, operation, &qc)?;
 
         Ok(())
-        */
     }
 
     fn last_sent_vote_set(&mut self, last_sent_vote: &LastSentVote) -> Result<(), StorageError> {

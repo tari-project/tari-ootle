@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1175,75 +1175,41 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn quorum_certificates_get(&self, qc_id: &QcId) -> Result<QuorumCertificate, StorageError> {
-        todo!()
-        /*
-        use crate::schema::quorum_certificates;
-
-        let qc_json = quorum_certificates::table
-            .select(quorum_certificates::json)
-            .filter(quorum_certificates::qc_id.eq(serialize_hex(qc_id)))
-            .first::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "quorum_certificates_get",
-                source: e,
-            })?;
-
-        deserialize_json(&qc_json)
-        */
+        let key = QuorumCertificateModel::key_from_qc_id(qc_id);
+        let qc = QuorumCertificateModel::get(&self.tx, "quorum_certificates_get", &key)?;
+        Ok(qc)
     }
 
     fn quorum_certificates_get_all<'a, I: IntoIterator<Item = &'a QcId>>(
         &self,
         qc_ids: I,
     ) -> Result<Vec<QuorumCertificate>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::quorum_certificates;
+        let mut qcs = vec![];
 
-        let qc_ids: Vec<String> = qc_ids.into_iter().map(serialize_hex).collect();
-
-        let qc_json = quorum_certificates::table
-            .select(quorum_certificates::json)
-            .filter(quorum_certificates::qc_id.eq_any(&qc_ids))
-            .get_results::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "quorum_certificates_get_all",
-                source: e,
-            })?;
-
-        if qc_json.len() != qc_ids.len() {
-            return Err(SqliteStorageError::NotAllItemsFound {
-                items: "QCs",
-                operation: "quorum_certificates_get_all",
-                details: format!(
-                    "quorum_certificates_get_all: expected {} quorum certificates, got {}",
-                    qc_ids.len(),
-                    qc_json.len()
-                ),
-            }
-            .into());
+        for qc_id in qc_ids {
+            let qc = self.quorum_certificates_get(qc_id)?;
+            qcs.push(qc);
         }
 
-        qc_json.iter().map(|j| deserialize_json(j)).collect()
-        */
+        Ok(qcs)
     }
 
     fn quorum_certificates_get_by_block_id(&self, block_id: &BlockId) -> Result<QuorumCertificate, StorageError> {
-        todo!()
-        /*
-        use crate::schema::quorum_certificates;
+        let operation = "quorum_certificates_get_by_block_id";
 
-        let qc_json = quorum_certificates::table
-            .select(quorum_certificates::json)
-            .filter(quorum_certificates::block_id.eq(serialize_hex(block_id)))
-            .first::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "quorum_certificates_get_by_block_id",
-                source: e,
-            })?;
+        type Cf = crate::model::quorum_certificate::BlockColumnFamily;
+        let cf = Cf::name();
 
-        deserialize_json(&qc_json)
-        */
+        let key_prefix = Cf::key_from_block_id(block_id);
+        let ordering = Ordering::Ascending;
+
+        let res = QuorumCertificateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?;
+
+        let Some(qc) = res else {
+            return Err(StorageError::NotFound { item: "quorum_certificate", key: format!("block_id={block_id}") });
+        };
+
+        Ok(qc)
     }
 
     fn transaction_pool_get_for_blocks(

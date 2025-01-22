@@ -10,7 +10,7 @@ use tari_dan_storage::{
 
 mod last_inserted {
     use tari_common_types::types::PublicKey;
-    use tari_dan_storage::consensus_models::{BlockId, LastExecuted, LastSentVote, LastVoted, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+    use tari_dan_storage::consensus_models::{BlockId, LastExecuted, LastSentVote, LastVoted, LockedBlock, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
 
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
     
@@ -97,6 +97,23 @@ mod last_inserted {
         tx.last_executed_set(&last_exec).unwrap();
         let res = tx.last_executed_get().unwrap();
         assert_eq_debug(&res, &last_exec);
+
+        // locked block
+        let epoch = Epoch::zero();
+        let mut locked_block = LockedBlock {
+            block_id: BlockId::genesis(),
+            height: NodeHeight(123),
+            epoch,
+        };
+        tx.locked_block_set(&locked_block).unwrap();
+        let res = tx.locked_block_get(epoch).unwrap();
+        assert_eq_debug(&res, &locked_block);
+
+        locked_block.height = locked_block.height + NodeHeight(1);
+
+        tx.locked_block_set(&locked_block).unwrap();
+        let res = tx.locked_block_get(epoch).unwrap();
+        assert_eq_debug(&res, &locked_block);
 
         tx.rollback().unwrap();
     }

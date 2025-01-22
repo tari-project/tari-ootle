@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -384,21 +384,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError> {
-        todo!()
-        /*
-        use crate::schema::locked_block;
-
-        let locked_block = locked_block::table
-            .filter(locked_block::epoch.eq(epoch.as_u64() as i64))
-            .order_by(locked_block::id.desc())
-            .first::<sql_models::LockedBlock>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "locked_block_get",
-                source: e,
-            })?;
-
-        locked_block.try_into()
-        */
+        let key_prefix = LockedBlockModel::key_prefix_by_epoch(epoch);
+        let value = LockedBlockModel::get_first(&self.tx, "locked_block_get", Some(&key_prefix), Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No locked block stored in database".to_string() })?;
+        Ok(value.locked_block)
     }
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {

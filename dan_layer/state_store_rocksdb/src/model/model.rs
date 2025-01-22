@@ -128,6 +128,30 @@ pub trait RocksdbModel {
         Ok(value)
     }
 
+    fn get_first(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Option<Self::Item>, RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+
+        let default_key_prefix = format!("{}_", Self::key_prefix());
+        let key_prefix = key_prefix_opt.unwrap_or(&default_key_prefix);
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+
+        let iterator_mode = match ordering {
+            Ordering::Ascending => rocksdb::IteratorMode::Start,
+            Ordering::Descending => rocksdb::IteratorMode::End,
+        };
+
+        let mut iterator = tx.iterator_opt(iterator_mode, options);
+        let Some(value) = iterator.next() else {
+            return Ok(None);
+        };
+        let (_, bytes) = value.map_err(|e| RocksDbStorageError::RocksDbError {
+            operation,
+            source: e,
+        })?;
+        let value = Self::decode(bytes.to_vec())?;
+        Ok(Some(value))
+    }
+
     fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf_name: &str, operation: &'static str, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Option<Self::Item>, RocksDbStorageError> {
         let cf = db.cf_handle(cf_name).unwrap();
 

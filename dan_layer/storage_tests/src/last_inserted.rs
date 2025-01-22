@@ -9,7 +9,8 @@ use tari_dan_storage::{
 };
 
 mod last_inserted {
-    use tari_dan_storage::consensus_models::{BlockId, LastVoted};
+    use tari_common_types::types::PublicKey;
+    use tari_dan_storage::consensus_models::{BlockId, LastSentVote, LastVoted, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
 
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
     
@@ -46,6 +47,26 @@ mod last_inserted {
         tx.last_voted_set(&last_voted).unwrap();
         let res = tx.last_voted_get().unwrap();
         assert_eq_debug(&res, &last_voted);
+
+        // last sent vote
+        let mut last_sent_vote = LastSentVote {
+            block_id: BlockId::genesis(),
+            epoch: Epoch::zero(),
+            block_height: NodeHeight(123),
+            decision: QuorumDecision::Accept,
+            signature: ValidatorSignature::new(PublicKey::default(), ValidatorSchnorrSignature::default()),
+        };
+        tx.last_sent_vote_set(&last_sent_vote).unwrap();
+        let res = tx.last_sent_vote_get().unwrap();
+        assert_eq_debug(&res, &last_sent_vote);
+
+        last_sent_vote.epoch = last_sent_vote.epoch + Epoch(1);
+
+        tx.last_sent_vote_set(&last_sent_vote).unwrap();
+        let res = tx.last_sent_vote_get().unwrap();
+        assert_eq_debug(&res, &last_sent_vote);
+
+        
 
         tx.rollback().unwrap();
     }

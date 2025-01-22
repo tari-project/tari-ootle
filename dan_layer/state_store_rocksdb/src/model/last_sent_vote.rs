@@ -1,4 +1,4 @@
-//  Copyright 2024. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,15 +20,21 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod model;
+use tari_dan_storage::consensus_models::LastSentVote;
+use crate::{model::model::RocksdbModel, utils::RocksdbTimestamp};
 
-pub mod block_transaction_execution;
-pub mod block;
-pub mod last_sent_vote;
-pub mod last_voted;
-pub mod state_transition;
-pub mod state_tree_shard_versions;
-pub mod substate;
-pub mod transaction_pool_state_update;
-pub mod transaction_pool;
-pub mod transaction;
+pub struct LastSentVoteModel {}
+
+impl RocksdbModel for LastSentVoteModel {
+    type Item = LastSentVote;
+
+    fn key_prefix() -> &'static str {
+        "lastsentvote"
+    }
+
+    fn key(_value: &Self::Item) -> String {
+        // values don't need to be fetched by any specific field, we only want to fetch the last one
+        let timestamp = RocksdbTimestamp::now();
+        format!("{}_{}", Self::key_prefix(), timestamp)
+    }
+}

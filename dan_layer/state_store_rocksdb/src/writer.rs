@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
+use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
 
 use bincode;
 
@@ -399,84 +399,49 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         foreign_proposal: &ForeignProposal,
         proposed_in_block: Option<BlockId>,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_proposals;
+        let operation = "foreign_proposals_upsert";
+        let tx: &mut Transaction<'_, TransactionDB> = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        let key = ForeignProposalModel::key(foreign_proposal);
+        let key_exists = ForeignProposalModel::key_exists(tx, operation, &key)?;
+        if !key_exists {
+            ForeignProposalModel::put(self.db.clone(), tx, operation, &foreign_proposal)?;
+        }
+
         let block = foreign_proposal.block();
-
-        let values = (
-            foreign_proposals::block_id.eq(serialize_hex(block.id())),
-            foreign_proposals::parent_block_id.eq(serialize_hex(block.parent())),
-            foreign_proposals::merkle_root.eq(block.merkle_root().to_string()),
-            foreign_proposals::network.eq(block.network().to_string()),
-            foreign_proposals::height.eq(block.height().as_u64() as i64),
-            foreign_proposals::epoch.eq(block.epoch().as_u64() as i64),
-            foreign_proposals::shard_group.eq(block.shard_group().encode_as_u32() as i32),
-            foreign_proposals::proposed_by.eq(serialize_hex(block.proposed_by().as_bytes())),
-            foreign_proposals::command_count.eq(block.commands().len() as i64),
-            foreign_proposals::commands.eq(serialize_json(block.commands())?),
-            foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
-            foreign_proposals::qc.eq(serialize_json(block.justify())?),
-            foreign_proposals::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
-            foreign_proposals::timestamp.eq(block.timestamp() as i64),
-            foreign_proposals::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-            foreign_proposals::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
-            // Extra
-            foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
-            foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
-            foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
-            foreign_proposals::extra_data.eq(foreign_proposal.block().extra_data().map(serialize_json).transpose()?),
-        );
-
-        diesel::insert_into(foreign_proposals::table)
-            .values(&values)
-            .on_conflict_do_nothing()
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_upsert",
-                source: e,
-            })?;
-
         if let Some(proposed_in_block) = proposed_in_block {
             self.foreign_proposals_set_proposed_in(block.id(), &proposed_in_block)?;
         }
 
         Ok(())
-        */
     }
 
     fn foreign_proposals_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_proposals;
-
-        diesel::delete(foreign_proposals::table)
-            .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_delete",
-                source: e,
-            })?;
+        let operation = "foreign_proposals_delete";
+        let tx: &mut Transaction<'_, TransactionDB> = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        let key = ForeignProposalModel::key_from_block_id(block_id);
+        ForeignProposalModel::delete(self.db.clone(), tx, operation, &key)?;
 
         Ok(())
-        */
     }
 
     fn foreign_proposals_delete_in_epoch(&mut self, epoch: Epoch) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_proposals;
+        let operation = "foreign_proposals_delete_in_epoch";
+        let tx: &mut Transaction<'_, TransactionDB> = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::delete(foreign_proposals::table)
-            .filter(foreign_proposals::epoch.eq(epoch.as_u64() as i64))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_delete_in_epoch",
-                source: e,
-            })?;
+        // get all the proposals for the epoch
+        type Cf = crate::model::foreign_proposal::EpochStatusColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::key_prefix_from_epoch(&epoch);
+        let proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
+
+        // delete all the epoch proposals in db
+        for proposal in proposals {
+            let key = ForeignProposalModel::key(&proposal);
+            ForeignProposalModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
 
         Ok(())
-        */
     }
 
     fn foreign_proposals_set_status(
@@ -484,21 +449,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: &BlockId,
         status: ForeignProposalStatus,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_proposals;
+        let operation = "foreign_proposals_set_status";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::update(foreign_proposals::table)
-            .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
-            .set(foreign_proposals::status.eq(status.to_string()))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_set_status",
-                source: e,
-            })?;
+        // fetch the proposal
+        let key: String = ForeignProposalModel::key_from_block_id(block_id);
+        let proposal = ForeignProposalModel::get(tx, operation, &key)?;
+
+        // set the value
+        let updated_proposal = ForeignProposal {
+            block: proposal.block,
+            block_pledge: proposal.block_pledge,
+            justify_qc: proposal.justify_qc,
+            proposed_by_block: proposal.proposed_by_block,
+            status,
+        };
+        
+        // update the block in rocksDb
+        ForeignProposalModel::put(self.db.clone(), tx, operation, &updated_proposal)?;
 
         Ok(())
-        */
     }
 
     fn foreign_proposals_set_proposed_in(
@@ -506,50 +476,55 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: &BlockId,
         proposed_in_block: &BlockId,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, foreign_proposals};
+        let operation = "foreign_proposals_set_proposed_in";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::update(foreign_proposals::table)
-            .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
-            .set((
-                foreign_proposals::proposed_in_block.eq(serialize_hex(proposed_in_block)),
-                foreign_proposals::proposed_in_block_height.eq(blocks::table
-                    .select(blocks::height)
-                    .filter(blocks::block_id.eq(serialize_hex(proposed_in_block)))
-                    .single_value()),
-                foreign_proposals::status.eq(ForeignProposalStatus::Proposed.to_string()),
-            ))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_set_proposed_in",
-                source: e,
-            })?;
+        // fetch the proposal
+        let key: String = ForeignProposalModel::key_from_block_id(block_id);
+        let proposal = ForeignProposalModel::get(tx, operation, &key)?;
+
+        // set the value
+        let updated_proposal = ForeignProposal {
+            block: proposal.block,
+            block_pledge: proposal.block_pledge,
+            justify_qc: proposal.justify_qc,
+            proposed_by_block: Some(*proposed_in_block),
+            status: ForeignProposalStatus::Proposed,
+        };
+        
+        // update the block in rocksDb
+        ForeignProposalModel::put(self.db.clone(), tx, operation, &updated_proposal)?;
 
         Ok(())
-        */
     }
 
     fn foreign_proposals_clear_proposed_in(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_proposals;
+        let operation = "foreign_proposals_clear_proposed_in";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::update(foreign_proposals::table)
-            .filter(foreign_proposals::proposed_in_block.eq(serialize_hex(proposed_in_block)))
-            .set((
-                foreign_proposals::proposed_in_block.eq(None::<String>),
-                foreign_proposals::proposed_in_block_height.eq(None::<i64>),
-                foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
-            ))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_clear_proposed_in",
-                source: e,
+        // get the proposal based on the "proposed_in_block" field
+        type Cf = crate::model::foreign_proposal::ProposedColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::key_prefix_from_proposed_by_block(&proposed_in_block);
+        let proposal = ForeignProposalModel::get_cf(self.db.clone(), tx, operation, cf, Some(&key_prefix), Ordering::Ascending)?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "foreign_proposals",
+                key: proposed_in_block.to_string(),
             })?;
 
+        // set the values
+        let updated_proposal = ForeignProposal {
+            block: proposal.block,
+            block_pledge: proposal.block_pledge,
+            justify_qc: proposal.justify_qc,
+            proposed_by_block: None,
+            status: ForeignProposalStatus::New,
+        };
+        
+        // update the block in rocksDb
+        ForeignProposalModel::put(self.db.clone(), tx, operation, &updated_proposal)?;
+
         Ok(())
-        */
     }
 
     fn foreign_send_counters_set(

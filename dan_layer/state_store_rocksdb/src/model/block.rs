@@ -33,6 +33,10 @@ use super::model::{ModelColumnFamily, RocksdbModel};
 pub struct BlockModel {}
 
 impl BlockModel {
+    pub fn key_from_block_id_str(block_id_str: &str) -> String {
+        format!("{}_{}", Self::key_prefix(), block_id_str)
+    }
+
     pub fn key_from_block_id(block_id: &BlockId) -> String {
         format!("{}_{}", Self::key_prefix(), block_id)
     }

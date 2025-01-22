@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -408,72 +408,34 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         block_ids: I,
     ) -> Result<Vec<ForeignProposal>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{foreign_proposals, quorum_certificates};
+        let mut proposals = vec![];
 
-        let foreign_proposals = foreign_proposals::table
-            .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
-            .filter(foreign_proposals::block_id.eq_any(block_ids.into_iter().map(serialize_hex)))
-            .get_results::<(sql_models::ForeignProposal, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_get_any",
-                source: e,
-            })?;
+        for block_id in block_ids {
+            let key = ForeignProposalModel::key_from_block_id(block_id);
+            let res = ForeignProposalModel::get_first(&self.tx, "foreign_proposals_get_any", Some(&key), Ordering::Descending)?;
+            if let Some(proposal) = res {
+                proposals.push(proposal);
+            }
+        }
 
-        foreign_proposals
-            .into_iter()
-            .map(|(proposal, qc)| {
-                let justify_qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "foreign_proposals_get_any",
-                    details: format!(
-                        "foreign proposal {} references non-existent quorum certificate {}",
-                        proposal.block_id, proposal.justify_qc_id
-                    ),
-                })?;
-                proposal.try_convert(justify_qc)
-            })
-            .collect()
-            */
+        // TODO: should we fetch the related quorum certificate like the sqlite implementation does?
+
+        Ok(proposals)
     }
 
     fn foreign_proposals_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_proposals;
-
-        let foreign_proposals = foreign_proposals::table
-            .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
-            .count()
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_exists",
-                source: e,
-            })?;
-
-        Ok(foreign_proposals > 0)
-        */
+        let key = ForeignProposalModel::key_from_block_id(block_id);
+        let proposal_exists = ForeignProposalModel::key_exists(&self.tx, "foreign_proposals_exists", &key)?;
+        Ok(proposal_exists)
     }
 
     fn foreign_proposals_has_unconfirmed(&self, epoch: Epoch) -> Result<bool, StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_proposals;
-
-        let foreign_proposals = foreign_proposals::table
-            .filter(foreign_proposals::epoch.eq(epoch.as_u64() as i64))
-            .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
-            .count()
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_has_unconfirmed",
-                source: e,
-            })?;
-
-        Ok(foreign_proposals > 0)
-        */
+        type Cf = crate::model::foreign_proposal::UnconfirmedColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::key_prefix_by_epoch(&epoch);
+        let res = ForeignProposalModel::get_cf(self.db.clone(), &self.tx, cf, "foreign_proposals_has_unconfirmed", Some(&key_prefix), Ordering::Ascending)?;
+        
+        Ok(res.is_some())
     }
 
     fn foreign_proposals_get_all_new(
@@ -481,13 +443,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         block_id: &BlockId,
         limit: usize,
     ) -> Result<Vec<ForeignProposal>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{foreign_proposals, quorum_certificates};
+        let operation = "foreign_proposals_get_all_new";
 
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::NotFound {
-                item: "foreign_proposals_get_all_new: Block".to_string(),
+                item: "foreign_proposals_get_all_new: Block",
                 key: block_id.to_string(),
             });
         }
@@ -495,37 +455,39 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let locked = self.get_current_locked_block()?;
         let pending_block_ids = self.get_block_ids_with_commands_between(&locked.block_id, block_id)?;
 
-        let foreign_proposals = foreign_proposals::table
-            .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
-            .filter(foreign_proposals::epoch.eq(locked.epoch.as_u64() as i64))
-            .filter(
-                foreign_proposals::proposed_in_block
-                    .is_null()
-                    .or(foreign_proposals::proposed_in_block
-                        .ne_all(pending_block_ids)
-                        .and(foreign_proposals::proposed_in_block_height.gt(locked.height.as_u64() as i64))),
-            )
-            .limit(i64::try_from(limit).unwrap_or(i64::MAX))
-            .get_results::<(sql_models::ForeignProposal, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_get_all_new",
-                source: e,
-            })?;
+        type Cf = crate::model::foreign_proposal::EpochStatusColumnFamily;
+        let cf = Cf::name();
 
-        foreign_proposals
+        let mut proposals = HashMap::new();
+
+        // get all proposals with status "New"
+        let key_prefix = Cf::key_prefix_from_epoch_and_status(&locked.epoch, &ForeignProposalStatus::New);
+        let new_proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, Ordering::Ascending)?;
+        proposals.extend(new_proposals
             .into_iter()
-            .map(|(proposal, qc)| {
-                let justify_qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "foreign_proposals_get_all_new",
-                    details: format!(
-                        "foreign proposal {} references non-existent quorum certificate {}",
-                        proposal.block_id, proposal.justify_qc_id
-                    ),
-                })?;
-                proposal.try_convert(justify_qc)
+            .map(|f| (f.block.id().clone(), f)));
+
+        // get all proposals with status "Proposed"
+        let key_prefix = Cf::key_prefix_from_epoch_and_status(&locked.epoch, &ForeignProposalStatus::Proposed);
+        let proposed_proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, Ordering::Ascending)?;
+        proposals.extend(proposed_proposals
+            .into_iter()
+            .map(|f| (f.block.id().clone(), f)));
+
+        let proposals: Vec<ForeignProposal> = proposals
+            .into_values()
+            .into_iter()
+            // we don't want proposals that are proposed in pending blocks 
+            .filter(|p| {
+                let Some(proposed_by) = p.proposed_by_block  else {
+                    return true;
+                };
+                !pending_block_ids.contains(&proposed_by.to_string())
             })
-            .collect()
-            */
+            // TODO: do we need to filter by proposal.proposed_in_block_height > locked.height?. We will need to store proposed_in_block_height field
+            .collect();
+
+        Ok(proposals)    
     }
 
     fn foreign_proposal_get_all_pending(
@@ -533,31 +495,28 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         from_block_id: &BlockId,
         to_block_id: &BlockId,
     ) -> Result<Vec<ForeignProposalAtom>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::blocks;
+        let operation = "foreign_proposal_get_all_pending";
 
-        let blocks = self.get_block_ids_with_commands_between(from_block_id, to_block_id)?;
+        let mut all_commands = vec![];
 
-        let all_commands: Vec<String> = blocks::table
-            .select(blocks::commands)
-            .filter(blocks::command_count.gt(0)) // if there is no command, then there is definitely no foreign proposal command
-            .filter(blocks::block_id.eq_any(blocks))
-            .load::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposal_get_all",
-                source: e,
-            })?;
-        let all_commands = all_commands
-            .into_iter()
-            .map(|commands| deserialize_json(commands.as_str()))
-            .collect::<Result<Vec<Vec<Command>>, _>>()?;
-        let all_commands = all_commands.into_iter().flatten().collect::<Vec<_>>();
+        let block_ids = self.get_block_ids_with_commands_between(from_block_id, to_block_id)?;
+        for block_id in block_ids {
+            let key = BlockModel::key_from_block_id_str(&block_id);
+            let block = BlockModel::get(&self.tx, operation, &key)?;
+
+            if block.command_count() > 0 {
+                for command in block.commands() {
+                    all_commands.push(command.clone());
+                }
+            }
+        }
+
+        all_commands.dedup();
+
         Ok(all_commands
             .into_iter()
             .filter_map(|command| command.foreign_proposal().cloned())
             .collect::<Vec<ForeignProposalAtom>>())
-            */
     }
 
     fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {

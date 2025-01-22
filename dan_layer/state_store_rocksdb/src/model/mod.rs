@@ -24,6 +24,7 @@ pub mod model;
 
 pub mod block_transaction_execution;
 pub mod block;
+pub mod foreign_proposal;
 pub mod high_qc;
 pub mod last_executed;
 pub mod last_proposed;

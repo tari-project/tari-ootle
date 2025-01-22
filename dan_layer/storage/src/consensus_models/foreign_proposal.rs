@@ -165,7 +165,7 @@ impl ForeignProposalAtom {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, Eq, PartialEq)]
 pub enum ForeignProposalStatus {
     /// New foreign proposal that has not yet been proposed
     #[default]

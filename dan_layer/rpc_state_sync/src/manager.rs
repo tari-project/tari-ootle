@@ -68,7 +68,7 @@ pub struct RpcStateSyncManager<TConsensusSpec: ConsensusSpec, TAddr: NodeAddress
 
 impl<TConsensusSpec, TAddr> RpcStateSyncManager<TConsensusSpec, TAddr>
 where
-    TConsensusSpec: ConsensusSpec<Addr = PeerAddress>,
+    TConsensusSpec: ConsensusSpec<Addr=PeerAddress>,
     TAddr: NodeAddressable + 'static,
 {
     pub fn new(
@@ -108,8 +108,8 @@ where
             .await
         {
             Ok(GetCheckpointResponse {
-                checkpoint: Some(checkpoint),
-            }) => match EpochCheckpoint::try_from(checkpoint) {
+                   checkpoint: Some(checkpoint),
+               }) => match EpochCheckpoint::try_from(checkpoint) {
                 Ok(cp) => Ok(Some(cp)),
                 Err(err) => Err(CommsRpcConsensusSyncError::InvalidResponse(err)),
             },
@@ -171,10 +171,10 @@ where
                 Ok(msg) => msg,
                 Err(err) if err.is_not_found() => {
                     return Ok(current_version);
-                },
+                }
                 Err(err) => {
                     return Err(err.into());
-                },
+                }
             };
 
             if msg.transitions.is_empty() {
@@ -355,13 +355,13 @@ where
                     QcId::zero(),
                     // *created_qc.id(),
                 )
-                .create(tx)?;
-            },
+                    .create(tx)?;
+            }
             SubstateUpdate::Destroy(SubstateDestroyedProof {
-                substate_id,
-                version,
-                destroyed_by_transaction,
-            }) => {
+                                        substate_id,
+                                        version,
+                                        destroyed_by_transaction,
+                                    }) => {
                 SubstateRecord::destroy(
                     tx,
                     VersionedSubstateId::new(substate_id, version),
@@ -372,7 +372,7 @@ where
                     &QcId::zero(),
                     &destroyed_by_transaction,
                 )?;
-            },
+            }
         }
 
         Ok(())
@@ -424,12 +424,48 @@ where
 
         Ok(())
     }
+
+    pub async fn sync_global_shard(&mut self) -> Result<(), CommsRpcConsensusSyncError> {
+        let current_epoch = self.epoch_manager.current_epoch().await?;
+        let prev_epoch_committees = self.get_sync_committees(current_epoch).await?;
+        let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
+        let global_shard = Shard::global();
+
+        let (_, committee) = prev_epoch_committees.first().ok_or(CommsRpcConsensusSyncError::NoCommittees(current_epoch))?;
+
+        // TODO: continue impl
+        let mut remaining_members = committee.len();
+        info!(target: LOG_TARGET, "🛜Syncing state for global shard {global_shard} and {}", current_epoch.saturating_sub(Epoch(1)));
+        for (addr, public_key) in &committee {
+            remaining_members = remaining_members.saturating_sub(1);
+            if our_vn.public_key == *public_key {
+                continue;
+            }
+            let mut client = match self.establish_rpc_session(addr).await {
+                Ok(c) => c,
+                Err(err) => {
+                    warn!(
+                                target: LOG_TARGET,
+                                "Failed to establish RPC session with vn {addr}: {err}. Attempting another VN if available"
+                            );
+                    if remaining_members == 0 {
+                        return Err(err);
+                    }
+                    continue;
+                }
+            };
+
+            break;
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl<TConsensusSpec, TAddr> SyncManager for RpcStateSyncManager<TConsensusSpec, TAddr>
 where
-    TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static,
+    TConsensusSpec: ConsensusSpec<Addr=PeerAddress> + Send + Sync + 'static,
     TAddr: NodeAddressable + 'static,
 {
     type Error = CommsRpcConsensusSyncError;
@@ -486,7 +522,7 @@ where
                             }
                             last_error = Some(err);
                             continue;
-                        },
+                        }
                     };
 
                     let checkpoint = match self.fetch_epoch_checkpoint(&mut client, current_epoch).await {
@@ -501,7 +537,7 @@ where
                                 "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
                             );
                             return Ok(());
-                        },
+                        }
                         Err(err) => {
                             warn!(
                                 target: LOG_TARGET,
@@ -512,7 +548,7 @@ where
                             }
                             last_error = Some(err);
                             continue;
-                        },
+                        }
                     };
                     info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
 
@@ -543,7 +579,7 @@ where
                             }
 
                             info!(target: LOG_TARGET, "🛜Synced state for {shard} to v{} with root {state_root}", current_version.unwrap_or(0));
-                        },
+                        }
                         Err(err) => {
                             warn!(
                                 target: LOG_TARGET,
@@ -555,7 +591,7 @@ where
                             }
                             last_error = Some(err);
                             continue;
-                        },
+                        }
                     }
                     break;
                 }

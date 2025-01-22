@@ -3,6 +3,7 @@
 
 use tari_consensus::hotstuff::{HotStuffError, ProposalValidationError};
 use tari_dan_app_utilities::template_manager::interface::TemplateManagerError;
+use tari_dan_common_types::Epoch;
 use tari_dan_storage::{
     consensus_models::{BlockId, TransactionPoolError},
     StorageError,
@@ -42,6 +43,8 @@ pub enum CommsRpcConsensusSyncError {
     TaskJoin(String),
     #[error("Failed to sync templates!")]
     TemplateSyncFailure,
+    #[error("No committees found for epoch {0}")]
+    NoCommittees(Epoch),
 }
 
 impl CommsRpcConsensusSyncError {

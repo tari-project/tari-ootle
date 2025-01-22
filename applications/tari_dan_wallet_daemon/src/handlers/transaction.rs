@@ -7,7 +7,7 @@ use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
 use tari_dan_app_utilities::json_encoding;
-use tari_dan_common_types::{optional::Optional, Epoch, SubstateRequirement};
+use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
 use tari_template_lib::{args, models::Amount};
 use tari_transaction::Transaction;
@@ -82,7 +82,7 @@ pub async fn handle_submit_instruction(
         signing_key_index: Some(fee_account.key_index),
         autofill_inputs: vec![],
         detect_inputs: req.override_inputs.unwrap_or_default(),
-        detect_inputs_use_unversioned: false,
+        detect_inputs_use_unversioned: true,
         proof_ids: vec![],
     };
     handle_submit(context, token, request).await
@@ -106,16 +106,24 @@ pub async fn handle_submit(
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
-        let substates = substates.into_iter().collect::<Vec<_>>();
+        let substates = substates
+            .into_iter()
+            .chain(
+                req.transaction
+                    .inputs()
+                    .into_iter()
+                    .map(|req| req.substate_id().clone()),
+            )
+            .collect::<Vec<_>>();
         let loaded_substates = sdk.substate_api().locate_dependent_substates(&substates).await?;
         loaded_substates
             .into_iter()
-            .chain(substates.into_iter().map(SubstateRequirement::unversioned))
-            .map(|mut input| {
+            .map(|input| {
                 if req.detect_inputs_use_unversioned {
-                    input.version = None;
+                    input.into_unversioned()
+                } else {
+                    input
                 }
-                input
             })
             .collect()
     } else {
@@ -135,8 +143,10 @@ pub async fn handle_submit(
         .with_inputs(detected_inputs)
         .build_and_seal(&key.key);
 
-    for input in transaction.inputs() {
-        debug!(target: LOG_TARGET, "Input: {}", input)
+    if log_enabled!(log::Level::Debug) {
+        for input in transaction.inputs() {
+            debug!(target: LOG_TARGET, "Input: {}", input)
+        }
     }
 
     for proof_id in req.proof_ids {
@@ -178,7 +188,17 @@ pub async fn handle_submit_dry_run(
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
         let substates = substates.into_iter().collect::<Vec<_>>();
-        sdk.substate_api().locate_dependent_substates(&substates).await?
+        let dependencies = sdk.substate_api().locate_dependent_substates(&substates).await?;
+        dependencies
+            .into_iter()
+            .map(|input| {
+                if req.detect_inputs_use_unversioned {
+                    input.into_unversioned()
+                } else {
+                    input
+                }
+            })
+            .collect()
     } else {
         vec![]
     };
@@ -395,6 +415,7 @@ pub async fn handle_publish_template(
             signing_key_index: Some(fee_account.key_index),
             autofill_inputs: vec![],
             detect_inputs: req.detect_inputs,
+            detect_inputs_use_unversioned: true,
             proof_ids: vec![],
         };
         let resp = handle_submit_dry_run(context, token, request).await?;

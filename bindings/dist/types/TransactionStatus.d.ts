@@ -1,1 +1,1 @@
-export type TransactionStatus = "New" | "DryRun" | "Pending" | "Accepted" | "Rejected" | "InvalidTransaction" | "OnlyFeeAccepted";
+export type TransactionStatus = "New" | "DryRun" | "DryRunFailed" | "Pending" | "Accepted" | "Rejected" | "InvalidTransaction" | "OnlyFeeAccepted";

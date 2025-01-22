@@ -273,6 +273,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
                 signing_key_index: None,
                 autofill_inputs: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
+                detect_inputs_use_unversioned: true,
                 proof_ids: vec![],
             })
             .await?;
@@ -337,6 +338,7 @@ async fn handle_submit_manifest(
                 signing_key_index: None,
                 autofill_inputs: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
+                detect_inputs_use_unversioned: true,
                 proof_ids: vec![],
             })
             .await?;

@@ -220,7 +220,11 @@ fn resolve_handler_error(answer_id: i64, e: &HandlerError) -> JsonRpcResponse {
         HandlerError::Anyhow(e) => resolve_any_error(answer_id, e),
         HandlerError::NotFound => JsonRpcResponse::error(
             answer_id,
-            JsonRpcError::new(JsonRpcErrorReason::ApplicationError(404), e.to_string(), json!({})),
+            JsonRpcError::new(
+                JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::NotFound as i32),
+                e.to_string(),
+                json!({}),
+            ),
         ),
     }
 }
@@ -229,6 +233,13 @@ fn resolve_any_error(answer_id: i64, e: &anyhow::Error) -> JsonRpcResponse {
     warn!(target: LOG_TARGET, "🌐 JSON-RPC error: {}", e);
     if let Some(handler_err) = e.downcast_ref::<HandlerError>() {
         return resolve_handler_error(answer_id, handler_err);
+    }
+
+    if let Some(error) = e.downcast_ref::<JsonRpcError>() {
+        return JsonRpcResponse::error(
+            answer_id,
+            JsonRpcError::new(error.error_reason(), error.to_string(), serde_json::Value::Null),
+        );
     }
 
     if let Some(error) = e.downcast_ref::<JwtApiError>() {
@@ -243,7 +254,18 @@ fn resolve_any_error(answer_id: i64, e: &anyhow::Error) -> JsonRpcResponse {
     } else {
         JsonRpcResponse::error(
             answer_id,
-            JsonRpcError::new(JsonRpcErrorReason::ApplicationError(500), e.to_string(), json!({})),
+            JsonRpcError::new(
+                JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::GeneralError as i32),
+                e.to_string(),
+                json!({}),
+            ),
         )
     }
+}
+
+#[repr(i32)]
+pub enum ApplicationErrorCode {
+    NotFound = 404,
+    TransactionRejected = 1000,
+    GeneralError = 500,
 }

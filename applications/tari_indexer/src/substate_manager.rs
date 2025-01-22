@@ -155,12 +155,12 @@ impl SubstateManager {
 
     pub async fn get_specific_substate(
         &self,
-        substate_address: &SubstateId,
+        substate_id: SubstateId,
         version: u32,
     ) -> Result<SubstateResult, anyhow::Error> {
         let substate_result = self
             .substate_scanner
-            .get_specific_substate_from_committee(substate_address, version)
+            .get_specific_substate_from_committee(substate_id, version)
             .await?;
         Ok(substate_result)
     }
@@ -170,8 +170,14 @@ impl SubstateManager {
         tx.get_non_fungible_collections().map_err(|e| e.into())
     }
 
-    pub async fn get_non_fungible_count(&self, substate_address: &SubstateId) -> Result<u64, anyhow::Error> {
-        let address_str = substate_address.to_address_string();
+    pub async fn get_non_fungible_count(&self, substate_id: &SubstateId) -> Result<u64, anyhow::Error> {
+        if !substate_id.is_resource() {
+            return Err(anyhow::anyhow!(
+                "get_non_fungible_count must be called with resource address, got {substate_id}"
+            ));
+        }
+
+        let address_str = substate_id.to_address_string();
         let mut tx = self.substate_store.create_read_tx()?;
         let count = tx.get_non_fungible_count(address_str)?;
         Ok(count as u64)
@@ -179,11 +185,11 @@ impl SubstateManager {
 
     pub async fn get_non_fungibles(
         &self,
-        substate_address: &SubstateId,
+        substate_id: &SubstateId,
         start_index: u64,
         end_index: u64,
     ) -> Result<Vec<NonFungibleResponse>, anyhow::Error> {
-        let non_fungibles = if let SubstateId::Resource(addr) = substate_address {
+        let non_fungibles = if let SubstateId::Resource(addr) = substate_id {
             self.substate_scanner
                 .get_non_fungibles(addr, start_index, Some(end_index))
                 .await?

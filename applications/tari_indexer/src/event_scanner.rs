@@ -227,15 +227,15 @@ impl EventScanner {
             .as_ref()
             .map_or(true, |t| *t == event.template_address());
 
-        let matches_substate_id = match &filter.substate_id {
-            Some(substate_id) => event.substate_id().map(|s| s == *substate_id).unwrap_or(false),
+        let matches_substate_id = match filter.substate_id {
+            Some(ref substate_id) => event.substate_id().map(|s| s == substate_id).unwrap_or(false),
             None => true,
         };
 
         let matches_entity_id = match &filter.entity_id {
             Some(entity_id) => event
                 .substate_id()
-                .map(|s| Self::entity_id_matches(&s, entity_id))
+                .map(|s| Self::entity_id_matches(s, entity_id))
                 .unwrap_or(false),
             None => true,
         };
@@ -248,13 +248,7 @@ impl EventScanner {
     }
 
     fn entity_id_matches(substate_id: &SubstateId, entity_id: &EntityId) -> bool {
-        match substate_id {
-            SubstateId::Component(c) => c.entity_id() == *entity_id,
-            SubstateId::Resource(r) => r.as_entity_id() == *entity_id,
-            SubstateId::Vault(v) => v.entity_id() == *entity_id,
-            // TODO: should all types of substate addresses expose the entity id?
-            _ => false,
-        }
+        substate_id.to_object_key().as_entity_id() == *entity_id
     }
 
     async fn store_events_in_db(
@@ -418,7 +412,7 @@ impl EventScanner {
                 .into_iter()
                 .map(|event| {
                     let substate = if let Some(substate_id) = event.substate_id() {
-                        substates.get(&substate_id).cloned()
+                        substates.get(substate_id).cloned()
                     } else {
                         None
                     };

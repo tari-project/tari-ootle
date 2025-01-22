@@ -651,8 +651,8 @@ where
     let substate_id = substate_id.into();
     let id = VersionedSubstateId::new(substate_id, 0);
     SubstateRecord {
-        substate_id: id.substate_id,
-        version: id.version,
+        version: id.version(),
+        substate_id: id.into_substate_id(),
         substate_value: value.into(),
         state_hash: Default::default(),
         created_by_transaction: Default::default(),

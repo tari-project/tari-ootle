@@ -209,7 +209,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
             .diff
             .iter()
             .rev()
-            .find(|change| change.versioned_substate_id().substate_id == *id)
+            .find(|change| change.versioned_substate_id().substate_id() == id)
         {
             let substate = ch.up().ok_or_else(|| SubstateStoreError::SubstateIsDown {
                 id: ch.versioned_substate_id().clone(),
@@ -302,7 +302,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
 
             let version = versioned_substate_id.version();
             self.add_new_lock(
-                versioned_substate_id.substate_id,
+                versioned_substate_id.into_substate_id(),
                 SubstateLock::new(transaction_id, version, requested_lock_type, is_local_only),
             );
             return Ok(());
@@ -402,7 +402,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
 
                 let version = versioned_substate_id.version();
                 self.add_new_lock(
-                    versioned_substate_id.substate_id,
+                    versioned_substate_id.into_substate_id(),
                     SubstateLock::new(transaction_id, version, requested_lock_type, is_local_only),
                 );
             },
@@ -459,7 +459,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
 
                 let version = versioned_substate_id.version();
                 self.add_new_lock(
-                    versioned_substate_id.substate_id,
+                    versioned_substate_id.into_substate_id(),
                     SubstateLock::new(transaction_id, version, SubstateLockType::Output, is_local_only),
                 );
             },
@@ -514,7 +514,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
 
                 let version = versioned_substate_id.version();
                 self.add_new_lock(
-                    versioned_substate_id.substate_id,
+                    versioned_substate_id.into_substate_id(),
                     SubstateLock::new(
                         transaction_id,
                         version,

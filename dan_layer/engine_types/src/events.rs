@@ -65,8 +65,8 @@ impl Event {
         }
     }
 
-    pub fn substate_id(&self) -> Option<SubstateId> {
-        self.substate_id.clone()
+    pub fn substate_id(&self) -> Option<&SubstateId> {
+        self.substate_id.as_ref()
     }
 
     pub fn template_address(&self) -> TemplateAddress {

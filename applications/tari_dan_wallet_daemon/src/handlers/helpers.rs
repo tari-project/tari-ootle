@@ -1,9 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::fmt::Display;
+use std::{collections::HashSet, fmt::Display};
 
-use tari_dan_common_types::{optional::Optional, VersionedSubstateId};
+use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
     models::Account,
@@ -17,6 +17,7 @@ use tokio::sync::broadcast;
 
 use crate::{
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
+    jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
 };
 
@@ -88,18 +89,11 @@ pub async fn wait_for_result_and_account(
 pub fn get_account_with_inputs(
     account: Option<ComponentAddressOrName>,
     sdk: &DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
-) -> Result<(Account, Vec<VersionedSubstateId>), anyhow::Error> {
+) -> Result<(Account, HashSet<SubstateRequirement>), anyhow::Error> {
     let account = get_account_or_default(account, &sdk.accounts_api())?;
 
-    let mut inputs = vec![];
-
-    // add the input for the source account component substate
-    let account_substate = sdk.substate_api().get_substate(&account.address)?;
-    inputs.push(account_substate.substate_id);
-
     // Add all versioned account child addresses as inputs
-    let child_addresses = sdk.substate_api().load_dependent_substates(&[&account.address])?;
-    inputs.extend(child_addresses);
+    let inputs = sdk.substate_api().load_dependent_substates(&[&account.address])?;
 
     Ok((account, inputs))
 }
@@ -146,6 +140,15 @@ pub(super) fn invalid_params<T: Display>(field: &str, details: Option<T>) -> any
             field,
             details.map(|d| format!(": {}", d)).unwrap_or_default()
         ),
+        serde_json::Value::Null,
+    )
+    .into()
+}
+
+pub(super) fn application<T: Display>(code: ApplicationErrorCode, details: T) -> anyhow::Error {
+    axum_jrpc::error::JsonRpcError::new(
+        axum_jrpc::error::JsonRpcErrorReason::ApplicationError(code as i32),
+        format!("Application error: '{details}",),
         serde_json::Value::Null,
     )
     .into()

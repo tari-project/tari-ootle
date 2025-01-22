@@ -5,6 +5,8 @@ import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
 export declare function substateIdToString(substateId: SubstateId | string | null): string;
 export declare function stringToSubstateId(substateId: string): SubstateId;
+export declare function shortenSubstateId(substateId: SubstateId | null | undefined, start?: number, end?: number): string;
+export declare function shortenString(string: string, start?: number, end?: number): string;
 export declare function rejectReasonToString(reason: RejectReason | null): string;
 export declare function getSubstateDiffFromTransactionResult(result: TransactionResult): SubstateDiff | null;
 export declare function getRejectReasonFromTransactionResult(result: TransactionResult): RejectReason | null;

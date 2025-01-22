@@ -410,7 +410,7 @@ impl From<&VersionedSubstateId> for proto::transaction::VersionedSubstateId {
     fn from(val: &VersionedSubstateId) -> Self {
         Self {
             substate_id: val.substate_id().to_bytes(),
-            version: val.version,
+            version: val.version(),
         }
     }
 }

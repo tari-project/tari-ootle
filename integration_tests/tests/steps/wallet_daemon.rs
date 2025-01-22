@@ -271,11 +271,12 @@ async fn when_i_burn_funds_with_wallet_daemon(
     );
 }
 
-#[when(expr = "I check the balance of {word} on wallet daemon {word} the amount is at {word} {int}")]
+#[when(regex = r"I check the balance of (\S+) on wallet daemon (\S+) the amount is (at )?(\S+) (\d+)")]
 async fn check_account_balance_via_daemon(
     world: &mut TariWorld,
     account_name: String,
     wallet_daemon_name: String,
+    _at: String,
     least_or_most: String,
     amount: i64,
 ) {
@@ -294,7 +295,14 @@ async fn check_account_balance_via_daemon(
                 panic!("Expected balance to be at most {} but was {}", amount, current_balance);
             }
         },
-        _ => panic!("Expected least or most, got {}", least_or_most),
+        "exactly" => {
+            if current_balance != amount {
+                println!("Expected balance to be exactly {} but was {}", amount, current_balance);
+                panic!("Expected balance to be exactly {} but was {}", amount, current_balance);
+            }
+        },
+
+        _ => panic!("Expected 'at least', 'at most' or 'exactly', got {}", least_or_most),
     }
 }
 
@@ -328,21 +336,6 @@ async fn wait_account_balance_via_daemon(
             panic!("Timeout waiting for balance. Current balance = {}", current_balance);
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-#[when(expr = "I check the balance of {word} on wallet daemon {word} the amount is exactly {int}")]
-async fn check_account_balance_is_exactly_via_daemon(
-    world: &mut TariWorld,
-    account_name: String,
-    wallet_daemon_name: String,
-    amount: i64,
-) {
-    // THis refreshes
-    let current_balance = wallet_daemon_cli::get_balance(world, &account_name, &wallet_daemon_name).await;
-    if current_balance != amount {
-        println!("Expected balance to be {} but was {}", amount, current_balance);
-        panic!("Expected balance to be {} but was {}", amount, current_balance);
     }
 }
 

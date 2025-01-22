@@ -7,12 +7,10 @@ use anyhow::anyhow;
 use log::info;
 use tari_common_types::types::PublicKey;
 use tari_crypto::{keys::PublicKey as PK, ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
-use tari_dan_common_types::SubstateRequirement;
 use tari_dan_wallet_sdk::{
     apis::{jwt::JrpcPermission, key_manager},
     models::Account,
 };
-use tari_engine_types::{instruction::Instruction, substate::SubstateId};
 use tari_template_builtin::ACCOUNT_NFT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args,
@@ -32,7 +30,8 @@ use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::get_account,
+    handlers::helpers::{application, get_account},
+    jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
 };
@@ -181,53 +180,33 @@ async fn mint_account_nft(
     let sdk = context.wallet_sdk();
     sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
 
-    let mut inputs = sdk
+    let inputs = sdk
         .substate_api()
-        .locate_dependent_substates(&[account.address.clone()])
+        .locate_dependent_substates(&[account.address.clone(), component_address.into()])
         .await?;
-
-    inputs.extend([SubstateRequirement::new(SubstateId::Component(component_address), None)]);
-
-    let instructions = vec![
-        Instruction::CallMethod {
-            component_address,
-            method: "mint".to_string(),
-            args: args![metadata],
-        },
-        Instruction::PutLastInstructionOutputOnWorkspace {
-            key: b"bucket".to_vec(),
-        },
-        Instruction::CallMethod {
-            component_address: account
-                .address
-                .as_component_address()
-                .expect("Failed to get account component address"),
-            method: "deposit".to_string(),
-            args: args![Workspace("bucket")],
-        },
-    ];
 
     let transaction = Transaction::builder()
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
-        .with_instructions(instructions)
+        .call_method(component_address, "mint", args![metadata])
+        .put_last_instruction_output_on_workspace(b"bucket".to_vec())
+        .call_method(account.address.as_component_address().unwrap(), "deposit", args![
+            Workspace("bucket")
+        ])
+        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(owner_sk);
 
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
-        .submit_transaction(transaction, inputs)
+        .submit_transaction(transaction, vec![])
         .await?;
 
     let event = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = event.finalize.result.reject() {
-        return Err(anyhow!(
-            "Mint new NFT using account {} was rejected: {}",
-            account,
-            reject
+    if let Some(reject) = event.finalize.full_reject() {
+        return Err(application(
+            ApplicationErrorCode::TransactionRejected,
+            format!("Mint new NFT using account {} was rejected: {}", account, reject),
         ));
-    }
-    if let Some(reason) = event.finalize.reject() {
-        return Err(anyhow!("Mint new NFT using account {}, failed: {}", account, reason));
     }
 
     Ok(event)
@@ -252,7 +231,7 @@ async fn create_account_nft(
     let transaction = Transaction::builder()
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .call_function(ACCOUNT_NFT_TEMPLATE_ADDRESS, "create", args![owner_token,])
-        .with_inputs(inputs)
+        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(owner_sk);
 
     let tx_id = sdk
@@ -263,18 +242,14 @@ async fn create_account_nft(
     sdk.transaction_api().submit_transaction(tx_id).await?;
 
     let event = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = event.finalize.result.reject() {
-        return Err(anyhow!(
-            "Create NFT resource address from account {} was rejected: {}",
-            account,
-            reject
-        ));
-    }
+
     if let Some(reason) = event.finalize.reject() {
-        return Err(anyhow!(
-            "Create NFT resource address transaction, from account {}, failed: {}",
-            account,
-            reason
+        return Err(application(
+            ApplicationErrorCode::TransactionRejected,
+            format!(
+                "Create NFT resource address transaction, from account {}, failed: {}",
+                account, reason
+            ),
         ));
     }
 

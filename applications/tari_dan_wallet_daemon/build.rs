@@ -28,7 +28,7 @@ fn exit_on_ci() {
     }
 }
 
-const BUILD: &[(&str, &[&str])] = &[
+const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["install"]),
     ("../../bindings", &["run", "ts-build"]),
     ("../../clients/javascript/wallet_daemon_client", &["install"]),
@@ -47,12 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
-    for (target, args) in BUILD {
-        if let Err(error) = Command::new(npm).args(["install"]).current_dir(target).status() {
-            println!("cargo:warning='npm install' error : {:?}", error);
-            exit_on_ci();
-            break;
-        }
+    for (target, args) in NPM_COMMANDS {
         match Command::new(npm).args(*args).current_dir(target).output() {
             Ok(output) if !output.status.success() => {
                 println!(

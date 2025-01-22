@@ -130,12 +130,12 @@ loggers:
     additive: true
 
   tari::dan:
-    level: info
+    level: debug
     appenders:
       - dan_layer
 
   tari::indexer:
-    level: info
+    level: debug
     appenders:
       - dan_layer
       - stdout

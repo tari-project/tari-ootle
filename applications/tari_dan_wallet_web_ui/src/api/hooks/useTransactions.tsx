@@ -25,11 +25,7 @@ import { transactionsGet, transactionsGetAll, transactionsPublishTemplate } from
 import { apiError } from "../helpers/types";
 import queryClient from "../queryClient";
 
-import type {
-  ComponentAddressOrName,
-  PublishTemplateRequest,
-  TransactionStatus,
-} from "@tari-project/typescript-bindings";
+import type { TransactionStatus } from "@tari-project/typescript-bindings";
 
 export const useTransactionDetails = (hash: string) => {
   return useQuery({

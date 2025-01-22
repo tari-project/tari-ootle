@@ -62,7 +62,10 @@ impl Evidence {
         for obj in outputs {
             let substate_address = obj.to_substate_address();
             let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence.add_shard_group(sg).insert_output(obj.substate_id, obj.version);
+            let version = obj.version();
+            evidence
+                .add_shard_group(sg)
+                .insert_output(obj.into_substate_id(), version);
         }
 
         evidence.evidence.sort_keys();

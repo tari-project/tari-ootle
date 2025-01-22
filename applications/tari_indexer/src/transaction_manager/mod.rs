@@ -32,7 +32,6 @@ use tari_dan_common_types::{
     SubstateRequirement,
     ToSubstateAddress,
 };
-use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerReader;
 use tari_indexer_lib::{
     substate_cache::SubstateCache,
@@ -135,21 +134,11 @@ where
 
     pub async fn get_substate(
         &self,
-        substate_address: SubstateId,
-        version: u32,
+        substate_requirement: &SubstateRequirement,
     ) -> Result<SubstateResult, TransactionManagerError> {
-        let shard = SubstateAddress::from_substate_id(&substate_address, version);
-
-        self.try_with_committee(iter::once(shard), 1, |mut client| {
-            // This double clone looks strange, but it's needed because this function is called in a loop
-            // and each iteration needs its own copy of the address (because of the move).
-            let substate_address = substate_address.clone();
-            async move {
-                let substate_address = substate_address.clone();
-                client
-                    .get_substate(SubstateAddress::from_substate_id(&substate_address, version))
-                    .await
-            }
+        let address = substate_requirement.to_substate_address_zero_version();
+        self.try_with_committee(iter::once(address), 1, |mut client| async move {
+            client.get_substate(substate_requirement).await
         })
         .await
     }

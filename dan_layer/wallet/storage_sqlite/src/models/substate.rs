@@ -12,7 +12,7 @@ use tari_engine_types::substate::SubstateId;
 use tari_template_lib::Hash;
 use tari_utilities::hex::Hex;
 
-use crate::schema::substates;
+use crate::{schema::substates, serialization::deserialize_json};
 
 #[derive(Debug, Clone, Queryable, Identifiable)]
 #[diesel(table_name = substates)]
@@ -21,6 +21,7 @@ pub struct Substate {
     pub module_name: Option<String>,
     pub address: String,
     pub parent_address: Option<String>,
+    pub referenced_substates: String,
     pub version: i32,
     pub transaction_hash: String,
     pub template_address: Option<String>,
@@ -33,6 +34,7 @@ impl Substate {
             module_name: self.module_name.clone(),
             substate_id: VersionedSubstateId::new(SubstateId::from_str(&self.address).unwrap(), self.version as u32),
             parent_address: self.parent_address.as_ref().map(|s| s.parse().unwrap()),
+            referenced_substates: deserialize_json(&self.referenced_substates)?,
             transaction_hash: FixedHash::from_hex(&self.transaction_hash).map_err(|e| {
                 WalletStorageError::DecodingError {
                     operation: "try_to_record",

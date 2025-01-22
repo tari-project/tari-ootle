@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashSet,
     ops::{Add, Deref, DerefMut, Sub},
     str::FromStr,
     sync::MutexGuard,
@@ -336,6 +337,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         &mut self,
         transaction_id: TransactionId,
         address: VersionedSubstateId,
+        referenced_substates: HashSet<SubstateId>,
         module_name: Option<String>,
         template_addr: Option<TemplateAddress>,
     ) -> Result<(), WalletStorageError> {
@@ -343,11 +345,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
         diesel::insert_into(substates::table)
             .values((
-                substates::address.eq(address.substate_id.to_string()),
+                substates::address.eq(address.substate_id().to_string()),
                 substates::transaction_hash.eq(transaction_id.to_string()),
                 substates::module_name.eq(&module_name),
                 substates::template_address.eq(template_addr.map(|a| a.to_string())),
-                substates::version.eq(address.version as i32),
+                substates::referenced_substates.eq(serialize_json(&referenced_substates)?),
+                substates::version.eq(address.version() as i32),
             ))
             .on_conflict(substates::address)
             .do_update()
@@ -355,7 +358,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 substates::transaction_hash.eq(transaction_id.to_string()),
                 substates::module_name.eq(&module_name),
                 substates::template_address.eq(template_addr.map(|a| a.to_string())),
-                substates::version.eq(address.version as i32),
+                substates::referenced_substates.eq(serialize_json(&referenced_substates)?),
+                substates::version.eq(address.version() as i32),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("substates_upsert_root", e))?;
@@ -368,22 +372,25 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         transaction_id: TransactionId,
         parent: SubstateId,
         child: VersionedSubstateId,
+        referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError> {
         use crate::schema::substates;
 
         diesel::insert_into(substates::table)
             .values((
-                substates::address.eq(child.substate_id.to_string()),
+                substates::address.eq(child.substate_id().to_string()),
                 substates::transaction_hash.eq(transaction_id.to_string()),
                 substates::parent_address.eq(Some(parent.to_string())),
-                substates::version.eq(child.version as i32),
+                substates::referenced_substates.eq(serialize_json(&referenced_substates)?),
+                substates::version.eq(child.version() as i32),
             ))
             .on_conflict(substates::address)
             .do_update()
             .set((
                 substates::transaction_hash.eq(transaction_id.to_string()),
                 substates::parent_address.eq(Some(parent.to_string())),
-                substates::version.eq(child.version as i32),
+                substates::referenced_substates.eq(serialize_json(&referenced_substates)?),
+                substates::version.eq(child.version() as i32),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("substates_upsert_child", e))?;

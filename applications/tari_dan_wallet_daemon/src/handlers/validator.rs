@@ -76,15 +76,14 @@ pub async fn handle_claim_validator_fees(
 
     let transaction = Transaction::builder()
         .with_fee_instructions(fee_instructions)
+        .with_inputs(inputs)
         .build_and_seal(&account_secret_key.key);
 
     // send the transaction
-    let required_inputs = inputs.into_iter().map(Into::into).collect();
-
     if req.dry_run {
         let transaction = sdk
             .transaction_api()
-            .submit_dry_run_transaction(transaction, required_inputs)
+            .submit_dry_run_transaction(transaction, vec![])
             .await?;
         return Ok(ClaimValidatorFeesResponse {
             transaction_id: *transaction.transaction.id(),
@@ -102,7 +101,7 @@ pub async fn handle_claim_validator_fees(
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
-        .submit_transaction(transaction, required_inputs)
+        .submit_transaction(transaction, vec![])
         .await?;
 
     let finalized = wait_for_result(&mut events, tx_id).await?;

@@ -25,8 +25,9 @@ impl ProcessDefinition for MinotariNode {
         let p2p_port = context.get_free_port("p2p").await?;
         let grpc_port = context.get_free_port("grpc").await?;
         let listen_ip = context.listen_ip();
-
-        let public_address = format!("/ip4/{listen_ip}/tcp/{p2p_port}");
+        let listener_address = format!("/ip4/{listen_ip}/tcp/{p2p_port}");
+        let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
+        let public_address = format!("/ip4/{public_ip}/tcp/{p2p_port}");
 
         let base_nodes = context.minotari_nodes();
         let mut base_node_addresses = Vec::new();
@@ -46,7 +47,7 @@ impl ProcessDefinition for MinotariNode {
             .arg(network.to_string())
             .arg("-pbase_node.p2p.transport.type=tcp")
             .arg(format!(
-                "-pbase_node.p2p.transport.tcp.listener_address={public_address}"
+                "-pbase_node.p2p.transport.tcp.listener_address={listener_address}"
             ))
             .arg(format!("-p{network}.base_node.identity_file=config/base_node_id.json"))
             .arg(format!("-pbase_node.p2p.public_addresses={public_address}"))

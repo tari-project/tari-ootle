@@ -7,6 +7,9 @@ export function substateIdToString(substateId) {
     if (typeof substateId === "string") {
         return substateId;
     }
+    if (typeof substateId !== "object") {
+        throw new Error(`Cannot convert: ${JSON.stringify(substateId)} to string`);
+    }
     if ("Component" in substateId) {
         return substateId.Component;
     }
@@ -58,6 +61,20 @@ export function stringToSubstateId(substateId) {
         default:
             throw new Error(`Unknown substate id: ${substateId}`);
     }
+}
+export function shortenSubstateId(substateId, start = 4, end = 4) {
+    if (substateId === null || substateId === undefined) {
+        return "";
+    }
+    const string = substateIdToString(substateId);
+    const parts = string.split("_", 2);
+    if (parts.length < 2) {
+        return string;
+    }
+    return parts[0] + "_" + shortenString(parts[1], start, end);
+}
+export function shortenString(string, start = 8, end = 8) {
+    return string.substring(0, start) + "..." + string.slice(-end);
 }
 export function rejectReasonToString(reason) {
     if (reason === null) {

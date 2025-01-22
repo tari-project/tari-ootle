@@ -24,6 +24,7 @@ pub mod model;
 
 pub mod block_transaction_execution;
 pub mod block;
+pub mod last_voted;
 pub mod state_transition;
 pub mod state_tree_shard_versions;
 pub mod substate;

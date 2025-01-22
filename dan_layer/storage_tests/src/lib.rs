@@ -8,3 +8,5 @@ mod transactions;
 mod helper;
 #[cfg(test)]
 mod substates;
+#[cfg(test)]
+mod last_inserted;

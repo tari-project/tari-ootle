@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -284,7 +284,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     pub(crate) fn get_commit_block_id(&self) -> Result<BlockId, StorageError> {
-        let block_opt = BlockModel::get_cf(self.db.clone(), &self.tx, model::block::IsCommittedColumnFamily::NAME, "get_commit_block_id", "", Ordering::Descending)?;
+        let block_opt = BlockModel::get_cf(self.db.clone(), &self.tx, model::block::IsCommittedColumnFamily::NAME, "get_commit_block_id", None, Ordering::Descending)?;
         match block_opt {
             Some(block) => Ok(*block.id()),
             None => Err(StorageError::General {
@@ -367,20 +367,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn last_voted_get(&self) -> Result<LastVoted, StorageError> {
-        todo!()
-        /*
-        use crate::schema::last_voted;
+        type Cf = crate::model::last_voted::TimestampColumnFamily;
+        let cf = Cf::name();
 
-        let last_voted = last_voted::table
-            .order_by(last_voted::id.desc())
-            .first::<sql_models::LastVoted>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_voted_get",
-                source: e,
-            })?;
+        let value = LastVotedModel::
+            get_cf(self.db.clone(), &self.tx, cf, "last_voted_get", None, Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No last voted stored in database".to_string() })?;
 
-        last_voted.try_into()
-        */
+        Ok(value.last_voted)
     }
 
     fn last_executed_get(&self) -> Result<LastExecuted, StorageError> {
@@ -1633,7 +1627,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         for req in substate_ids {
             let key_prefix = Cf::build_key_from_requirement(req);
-            if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)? {
+            if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)? {
                 substates.push(substate);
             }
         }
@@ -1657,7 +1651,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         for substate_id in substate_ids {
             let req = SubstateRequirement::new(substate_id.clone(), None);
             let key_prefix = Cf::build_key_from_requirement(&req);
-            if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)? {
+            if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)? {
                 substates.push(substate);
             }
         }
@@ -1676,7 +1670,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let req = SubstateRequirement::new(substate_id.clone(), None);
         let key_prefix = Cf::build_key_from_requirement(&req);
 
-        let res = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, &key_prefix, ordering)?;
+        let res = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?;
 
         match res {
             Some(substate) =>

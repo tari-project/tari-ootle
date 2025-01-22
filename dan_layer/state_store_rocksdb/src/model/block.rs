@@ -86,10 +86,13 @@ impl RocksdbModel for BlockModel {
         Self::key_from_block_id(item.id())
     }
 
-    fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf_name: &str, operation: &'static str, key_prefix: &str, ordering: Ordering) -> Result<Option<Self::Item>, RocksDbStorageError> {
+    fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf_name: &str, operation: &'static str, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Option<Self::Item>, RocksDbStorageError> {
         let cf = db.cf_handle(cf_name).unwrap();
 
         let mut options = rocksdb::ReadOptions::default();
+
+        let default_key_prefix = format!("{}_", Self::key_prefix());
+        let key_prefix = key_prefix_opt.unwrap_or(&default_key_prefix);
         options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
        
         let iterator_mode = match ordering {

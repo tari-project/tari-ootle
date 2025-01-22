@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
+use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
 
 use bincode;
 
@@ -380,44 +380,21 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn last_voted_set(&mut self, last_voted: &LastVoted) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::last_voted;
-
-        let insert = (
-            last_voted::block_id.eq(serialize_hex(last_voted.block_id)),
-            last_voted::height.eq(last_voted.height.as_u64() as i64),
-            last_voted::epoch.eq(last_voted.epoch.as_u64() as i64),
-        );
-
-        diesel::insert_into(last_voted::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_voted_set",
-                source: e,
-            })?;
+        let operation = "last_voted_set";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        LastVotedModel::put(self.db.clone(), tx, operation, &last_voted.into())?;
 
         Ok(())
-        */
     }
 
     fn last_votes_unset(&mut self, last_voted: &LastVoted) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::last_voted;
+        let operation = "last_votes_unset";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::delete(last_voted::table)
-            .filter(last_voted::block_id.eq(serialize_hex(last_voted.block_id)))
-            .filter(last_voted::height.eq(last_voted.height.as_u64() as i64))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_votes_unset",
-                source: e,
-            })?;
+        let key = LastVotedModel::key(&last_voted.into());
+        LastVotedModel::delete(self.db.clone(), tx, operation, &key)?;
 
         Ok(())
-        */
     }
 
     fn last_executed_set(&mut self, last_exec: &LastExecuted) -> Result<(), StorageError> {

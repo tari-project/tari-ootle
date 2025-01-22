@@ -82,7 +82,22 @@ mod last_inserted {
         let res = tx.last_executed_get().unwrap();
         assert_eq_debug(&res, &last_exec);
 
+        // last executed
+        let mut last_exec = LastExecuted {
+            block_id: BlockId::genesis(),
+            height: NodeHeight(123),
+            epoch: Epoch::zero(),
+        };
+        tx.last_executed_set(&last_exec).unwrap();
+        let res = tx.last_executed_get().unwrap();
+        assert_eq_debug(&res, &last_exec);
+
+        last_exec.epoch = last_exec.epoch + Epoch(1);
+
+        tx.last_executed_set(&last_exec).unwrap();
+        let res = tx.last_executed_get().unwrap();
+        assert_eq_debug(&res, &last_exec);
+
         tx.rollback().unwrap();
     }
-
 }

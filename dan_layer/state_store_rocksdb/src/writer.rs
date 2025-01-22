@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
+use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
 
 use bincode;
 
@@ -389,44 +389,21 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn last_proposed_set(&mut self, last_proposed: &LastProposed) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::last_proposed;
-
-        let insert = (
-            last_proposed::block_id.eq(serialize_hex(last_proposed.block_id)),
-            last_proposed::height.eq(last_proposed.height.as_u64() as i64),
-            last_proposed::epoch.eq(last_proposed.epoch.as_u64() as i64),
-        );
-
-        diesel::insert_into(last_proposed::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_proposed_set",
-                source: e,
-            })?;
+        let operation = "last_proposed_set";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        LastProposedModel::put(self.db.clone(), tx, operation, &last_proposed.into())?;
 
         Ok(())
-        */
     }
 
     fn last_proposed_unset(&mut self, last_proposed: &LastProposed) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::last_proposed;
+        let operation = "last_proposed_unset";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::delete(last_proposed::table)
-            .filter(last_proposed::block_id.eq(serialize_hex(last_proposed.block_id)))
-            .filter(last_proposed::height.eq(last_proposed.height.as_u64() as i64))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_proposed_unset",
-                source: e,
-            })?;
+        let key = LastProposedModel::key(&last_proposed.into());
+        LastProposedModel::delete(self.db.clone(), tx, operation, &key)?;
 
         Ok(())
-        */
     }
 
     fn leaf_block_set(&mut self, leaf_node: &LeafBlock) -> Result<(), StorageError> {

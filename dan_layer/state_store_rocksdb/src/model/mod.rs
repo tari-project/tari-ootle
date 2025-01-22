@@ -25,6 +25,7 @@ pub mod model;
 pub mod block_transaction_execution;
 pub mod block;
 pub mod last_executed;
+pub mod last_proposed;
 pub mod last_sent_vote;
 pub mod last_voted;
 pub mod state_transition;

@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -373,20 +373,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn last_proposed_get(&self) -> Result<LastProposed, StorageError> {
-        todo!()
-        /*
-        use crate::schema::last_proposed;
+        type Cf = crate::model::last_proposed::TimestampColumnFamily;
+        let cf = Cf::name();
 
-        let last_proposed = last_proposed::table
-            .order_by(last_proposed::id.desc())
-            .first::<sql_models::LastProposed>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_proposed_get",
-                source: e,
-            })?;
+        let value = LastProposedModel::
+            get_cf(self.db.clone(), &self.tx, cf, "last_proposed_get", None, Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No last executed stored in database".to_string() })?;
 
-        last_proposed.try_into()
-        */
+        Ok(value.last_proposed)
     }
 
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError> {

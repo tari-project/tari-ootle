@@ -10,7 +10,7 @@ use tari_dan_storage::{
 
 mod last_inserted {
     use tari_common_types::types::PublicKey;
-    use tari_dan_storage::consensus_models::{BlockId, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+    use tari_dan_storage::consensus_models::{BlockId, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
 
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
     
@@ -115,7 +115,7 @@ mod last_inserted {
         let res = tx.locked_block_get(epoch).unwrap();
         assert_eq_debug(&res, &locked_block);
 
-        // leat block
+        // leaf block
         let epoch = Epoch::zero();
         let mut leaf_block = LeafBlock {
             block_id: BlockId::genesis(),
@@ -131,6 +131,24 @@ mod last_inserted {
         tx.leaf_block_set(&leaf_block).unwrap();
         let res = tx.leaf_block_get(epoch).unwrap();
         assert_eq_debug(&res, &leaf_block);
+
+        // high qc
+        let epoch = Epoch::zero();
+        let mut high_qc = HighQc {
+            block_id: BlockId::genesis(),
+            epoch,
+            block_height: NodeHeight(123),
+            qc_id: QcId::zero(),
+        };
+        tx.high_qc_set(&high_qc).unwrap();
+        let res = tx.high_qc_get(epoch).unwrap();
+        assert_eq_debug(&res, &high_qc);
+
+        high_qc.block_height = high_qc.block_height + NodeHeight(1);
+
+        tx.high_qc_set(&high_qc).unwrap();
+        let res = tx.high_qc_get(epoch).unwrap();
+        assert_eq_debug(&res, &high_qc);
 
         tx.rollback().unwrap();
     }

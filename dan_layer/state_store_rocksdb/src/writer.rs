@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
+use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
 
 use bincode;
 
@@ -423,27 +423,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn high_qc_set(&mut self, high_qc: &HighQc) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::high_qcs;
-
-        let insert = (
-            high_qcs::block_id.eq(serialize_hex(high_qc.block_id)),
-            high_qcs::block_height.eq(high_qc.block_height().as_u64() as i64),
-            high_qcs::epoch.eq(high_qc.epoch().as_u64() as i64),
-            high_qcs::qc_id.eq(serialize_hex(high_qc.qc_id)),
-        );
-
-        diesel::insert_into(high_qcs::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "high_qc_set",
-                source: e,
-            })?;
+        let operation = "high_qc_set";
+        let tx: &mut Transaction<'_, TransactionDB> = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        HighQcModel::put(self.db.clone(), tx, operation, &high_qc.into())?;
 
         Ok(())
-        */
     }
 
     fn foreign_proposals_upsert(

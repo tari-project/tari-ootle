@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -398,21 +398,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError> {
-        todo!()
-        /*
-        use crate::schema::high_qcs;
-
-        let high_qc = high_qcs::table
-            .filter(high_qcs::epoch.eq(epoch.as_u64() as i64))
-            .order_by(high_qcs::id.desc())
-            .first::<sql_models::HighQc>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "high_qc_get",
-                source: e,
-            })?;
-
-        high_qc.try_into()
-        */
+        let key_prefix = HighQcModel::key_prefix_by_epoch(epoch);
+        let value = HighQcModel::get_first(&self.tx, "high_qc_get", Some(&key_prefix), Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No high qc stored in database".to_string() })?;
+        Ok(value.high_qc)
     }
 
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(

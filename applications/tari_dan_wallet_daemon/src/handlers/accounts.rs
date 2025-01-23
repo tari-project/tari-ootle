@@ -76,6 +76,7 @@ use crate::{
         get_account_or_default,
         get_account_with_inputs,
         invalid_params,
+        not_found,
         wait_for_result,
         wait_for_result_and_account,
     },
@@ -798,7 +799,7 @@ fn get_or_create_account<T: WalletStore>(
             let account = accounts_api
                 .get_default()
                 .optional()?
-                .ok_or_else(|| anyhow::anyhow!("No default account found. Please set a default account."))?;
+                .ok_or_else(|| not_found("No default account found. Please create or set a default account."))?;
 
             Some(account)
         },
@@ -814,11 +815,12 @@ fn get_or_create_account<T: WalletStore>(
             (account.address, account_secret_key, None)
         },
         None => {
-            let name = account
-                .as_ref()
-                .unwrap()
-                .name()
-                .ok_or_else(|| anyhow!("Account name must be provided when creating a new account"))?;
+            let name = account.as_ref().unwrap().name().ok_or_else(|| {
+                invalid_params(
+                    "account.Name",
+                    Some("Account name must be provided when creating a new account"),
+                )
+            })?;
             let account_secret_key = key_id
                 .map(|idx| sdk.key_manager_api().derive_key(key_manager::TRANSACTION_BRANCH, idx))
                 .unwrap_or_else(|| sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH))?;

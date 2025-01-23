@@ -33,6 +33,7 @@ const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["run", "ts-build"]),
     ("../../clients/javascript/wallet_daemon_client", &["install"]),
     ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
+    ("../tari_dan_wallet_web_ui", &["install"]),
     ("../tari_dan_wallet_web_ui", &["run", "build"]),
 ];
 

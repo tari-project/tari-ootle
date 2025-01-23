@@ -7,8 +7,8 @@ import { SubstateDiff } from "../types/SubstateDiff";
 import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
 
-export function substateIdToString(substateId: SubstateId | string | null): string {
-  if (substateId === null) {
+export function substateIdToString(substateId: SubstateId | string | null | undefined): string {
+  if (substateId === null || substateId === undefined) {
     return "";
   }
   if (typeof substateId === "string") {

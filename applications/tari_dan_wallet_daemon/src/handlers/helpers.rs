@@ -127,7 +127,7 @@ where
         result = accounts_api
             .get_default()
             .optional()?
-            .ok_or_else(|| anyhow::anyhow!("No default account found. Please set a default account."))?;
+            .ok_or_else(|| not_found("No default account found. Please create an account."))?;
     }
     Ok(result)
 }
@@ -149,6 +149,14 @@ pub(super) fn application<T: Display>(code: ApplicationErrorCode, details: T) ->
     axum_jrpc::error::JsonRpcError::new(
         axum_jrpc::error::JsonRpcErrorReason::ApplicationError(code as i32),
         format!("Application error: '{details}",),
+        serde_json::Value::Null,
+    )
+    .into()
+}
+pub(super) fn not_found<T: Display>(details: T) -> anyhow::Error {
+    axum_jrpc::error::JsonRpcError::new(
+        axum_jrpc::error::JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::NotFound as i32),
+        format!("Not found: {details}",),
         serde_json::Value::Null,
     )
     .into()

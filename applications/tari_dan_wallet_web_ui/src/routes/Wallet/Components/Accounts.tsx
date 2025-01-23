@@ -56,18 +56,18 @@ function Account(account: AccountInfo, index: number) {
     <TableRow key={index}>
       <DataTableCell>
         <Link
-          to={`/accounts/${account.account.name}`}
+          to={`/accounts/${substateIdToString(account.account.address)}`}
           style={{
             textDecoration: "none",
             color: "inherit",
           }}
         >
-          {account.account.name}
+          {account.account.name || shortenSubstateId(account.account.address)}
         </Link>
       </DataTableCell>
       <DataTableCell>
         {shortenSubstateId(account.account.address)}
-        <CopyToClipboard copy={account.account.address} />
+        <CopyToClipboard copy={substateIdToString(account.account.address)} />
       </DataTableCell>
       <DataTableCell>{account.account.key_index}</DataTableCell>
       <DataTableCell>
@@ -75,7 +75,7 @@ function Account(account: AccountInfo, index: number) {
         <CopyToClipboard copy={account.public_key} />
       </DataTableCell>
       <DataTableCell>
-        <IconButton component={Link} to={`/accounts/${account.account.name}`}>
+        <IconButton component={Link} to={`/accounts/${substateIdToString(account.account.address)}`}>
           <ChevronRight />
         </IconButton>
       </DataTableCell>
@@ -154,7 +154,7 @@ function Accounts() {
 
   const onClaimFreeCoins = async () => {
     await mutateCreateFeeTestCoins({
-      accountName: "TestAccount",
+      account: { Name: "NewAccount" },
       amount: 1_000_000_000,
       fee: 1000,
     });

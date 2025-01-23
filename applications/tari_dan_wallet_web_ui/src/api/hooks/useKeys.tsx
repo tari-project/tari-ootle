@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiError } from "../helpers/types";
+import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 import { keysCreate, keysList, keysSetActive } from "../../utils/json_rpc";
 
@@ -31,7 +31,7 @@ export const useKeysList = () => {
     queryFn: () => {
       return keysList({ branch: "transaction" });
     },
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
     },
   });
@@ -39,7 +39,7 @@ export const useKeysList = () => {
 
 export const useKeysCreate = () => {
   return useMutation(() => keysCreate({ branch: "transaction", specific_index: null }), {
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
     },
     onSuccess: () => {
@@ -55,7 +55,7 @@ export const useKeysSetActive = () => {
   };
 
   return useMutation(setActive, {
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
     },
     onSuccess: () => {

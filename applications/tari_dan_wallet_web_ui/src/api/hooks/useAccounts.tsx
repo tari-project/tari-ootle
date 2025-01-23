@@ -28,12 +28,13 @@ import {
   accountsCreateFreeTestCoins,
   accountsGet,
   accountsGetBalances,
+  accountsGetDefault,
   accountsList,
   accountsTransfer,
   nftList,
   transactionsPublishTemplate,
 } from "../../utils/json_rpc";
-import { apiError } from "../helpers/types";
+import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 import type {
   ComponentAccessRules,
@@ -52,7 +53,7 @@ export const useAccountsClaimBurn = (account: string, claimProof: string, fee: n
         key_id: null,
       }),
     {
-      onError: (error: apiError) => {
+      onError: (error: ApiError) => {
         error;
       },
       onSettled: () => {
@@ -79,7 +80,7 @@ export const useAccountsCreate = (
       });
     },
     {
-      onError: (error: apiError) => {
+      onError: (error: ApiError) => {
         error;
       },
       onSettled: () => {
@@ -89,39 +90,41 @@ export const useAccountsCreate = (
   );
 };
 
-export const useAccountsTransfer = (
-  account: string | null,
-  amount: number,
-  resource_address: string,
-  destination_public_key: string,
-  max_fee: number | null,
-  isConfidential: boolean,
-  output_to_revealed: boolean,
-  input_selection: ConfidentialTransferInputSelection,
-  badge: string | null,
-  dry_run: boolean,
-) => {
+export interface TransferParams {
+  account: ComponentAddressOrName | null;
+  amount: number;
+  resource_address: string;
+  destination_public_key: string;
+  max_fee: number | null;
+  isConfidential: boolean;
+  output_to_revealed: boolean;
+  input_selection: ConfidentialTransferInputSelection;
+  badge: string | null;
+  dry_run: boolean;
+}
+
+export const useAccountsTransfer = (params: TransferParams) => {
   return useMutation(
     () => {
       let transferRequest = {
-        account: account ? { Name: account } : null,
-        amount,
-        resource_address,
-        destination_public_key,
-        max_fee,
-        proof_from_badge_resource: badge,
-        input_selection,
-        output_to_revealed,
-        dry_run,
+        account: params.account,
+        amount: params.amount,
+        resource_address: params.resource_address,
+        destination_public_key: params.destination_public_key,
+        max_fee: params.max_fee,
+        proof_from_badge_resource: params.badge,
+        input_selection: params.input_selection,
+        output_to_revealed: params.output_to_revealed,
+        dry_run: params.dry_run,
       };
-      if (isConfidential) {
+      if (params.isConfidential) {
         return accountsConfidentialTransfer(transferRequest);
       } else {
         return accountsTransfer(transferRequest);
       }
     },
     {
-      onError: (error: apiError) => {
+      onError: (error: ApiError) => {
         error;
       },
       onSettled: () => {
@@ -133,16 +136,16 @@ export const useAccountsTransfer = (
 
 export const useAccountsCreateFreeTestCoins = () => {
   const createFreeTestCoins = async ({
-    accountName,
+    account,
     amount,
     fee,
   }: {
-    accountName: string | null;
+    account: ComponentAddressOrName;
     amount: number;
     fee: number | null;
   }) => {
     const result = await accountsCreateFreeTestCoins({
-      account: (accountName && { Name: accountName }) || null,
+      account,
       amount,
       max_fee: fee,
       key_id: null,
@@ -151,7 +154,7 @@ export const useAccountsCreateFreeTestCoins = () => {
   };
 
   return useMutation(createFreeTestCoins, {
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       console.error(error);
     },
     onSettled: () => {
@@ -165,28 +168,39 @@ export const useAccountsList = (offset: number, limit: number) => {
   return useQuery({
     queryKey: ["accounts"],
     queryFn: () => accountsList({ offset, limit }),
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
     },
   });
 };
 
-export const useAccountsGetBalances = (accountName: string, refresh: boolean = false) => {
+export const useAccountsGetBalances = (account: ComponentAddressOrName | null, refresh: boolean = false) => {
   return useQuery({
     queryKey: ["accounts_balances"],
-    queryFn: () => accountsGetBalances({ account: { Name: accountName }, refresh }),
-    onError: (error: apiError) => {
-      error;
-    },
+    queryFn: () => accountsGetBalances({ account, refresh }),
+    onError: (_error: ApiError) => {},
     refetchInterval: 5000,
   });
 };
 
-export const useAccountsGet = (name: string) => {
+export const useAccountsGetDefault = () => {
+  return useQuery({
+    queryKey: ["accounts_get_default"],
+    queryFn: () => accountsGetDefault({}),
+    refetchInterval: false,
+    notifyOnChangeProps: ["data", "error"],
+    retryOnMount: false,
+    retry: false,
+    onError: (error: ApiError) => {
+      error;
+    },
+  });
+};
+export const useAccountsGet = (account: ComponentAddressOrName) => {
   return useQuery({
     queryKey: ["accounts_get"],
-    queryFn: () => accountsGet({ name_or_address: { Name: name } }),
-    onError: (error: apiError) => {
+    queryFn: () => accountsGet({ name_or_address: account }),
+    onError: (error: ApiError) => {
       error;
     },
   });
@@ -196,7 +210,7 @@ export const useAccountNFTsList = (account: ComponentAddressOrName | null, offse
   return useQuery({
     queryKey: ["nfts_list"],
     queryFn: () => nftList({ account, offset, limit }),
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
     },
   });

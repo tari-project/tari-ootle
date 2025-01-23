@@ -227,7 +227,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
             let transaction_id = *transaction.id();
             self.state_store.with_write_tx(|tx| {
                 TransactionRecord::new(transaction)
-                    .set_abort_reason(RejectReason::InvalidTransaction(format!(
+                    .abort(RejectReason::InvalidTransaction(format!(
                         "Mempool validation failed: {e}"
                     )))
                     .insert(tx)

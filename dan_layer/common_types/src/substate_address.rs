@@ -298,6 +298,12 @@ impl ToSubstateAddress for &SubstateAddress {
     }
 }
 
+impl ToSubstateAddress for (&SubstateId, u32) {
+    fn to_substate_address(&self) -> SubstateAddress {
+        SubstateAddress::from_substate_id(self.0, self.1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{

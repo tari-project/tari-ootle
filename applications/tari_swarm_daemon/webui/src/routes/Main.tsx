@@ -621,10 +621,19 @@ function getDecision(tx: any): string {
   if (!tx) {
     return "-";
   }
+  const decision = tx.local_decision || tx.original_decision;
 
-  if (tx.remote_decision == "Abort") {
-    return "Abort";
+  if (typeof decision === "string") {
+    return decision;
   }
 
-  return tx.local_decision || tx.original_decision;
+  if (typeof decision !== "object") {
+    return JSON.stringify(decision);
+  }
+
+  if ("Abort" in decision) {
+    return "Abort(" + decision.Abort + ")";
+  }
+
+  return "Commit";
 }

@@ -33,8 +33,8 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::dan::hotstuff::substate_store::pending_store";
 
-pub struct PendingSubstateStore<'a, 'tx, TStore: StateStore + 'a + 'tx> {
-    store: &'a TStore::ReadTransaction<'tx>,
+pub struct PendingSubstateStore<'store, 'tx, TStore: StateStore + 'store + 'tx> {
+    store: &'store TStore::ReadTransaction<'tx>,
     /// Map from substate address to the index in the diff list of the corresponding change
     pending: HashMap<SubstateAddress, usize>,
     /// Map from substate id to the index in the diff list of the latest change
@@ -143,7 +143,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
     }
 }
 
-impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStore> {
+impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store, 'tx, TStore> {
     pub fn exists(&self, id: &VersionedSubstateId) -> Result<bool, SubstateStoreError> {
         if self.pending.contains_key(&id.to_substate_address()) {
             return Ok(true);
@@ -231,6 +231,32 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> PendingSubstateStore<'a, 'tx, TStor
             });
         }
         Ok(substate.into_substate())
+    }
+
+    pub fn has_any_conflicting_pledges<'a, I>(
+        &self,
+        transaction_id: &TransactionId,
+        substate_ids: I,
+    ) -> Result<bool, SubstateStoreError>
+    where
+        I: IntoIterator<Item = &'a SubstateId>,
+    {
+        let existing = self
+            .store
+            .foreign_substate_pledges_get_write_pledges_to_transaction(transaction_id, substate_ids)?;
+
+        if existing.is_empty() {
+            return Ok(false);
+        }
+
+        warn!(
+            target: LOG_TARGET,
+            "🔒️ Conflicting foreign pledges found for transaction {}: {}",
+            transaction_id,
+            existing.display()
+        );
+
+        Ok(true)
     }
 
     pub fn try_lock_all<I, L>(

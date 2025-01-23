@@ -300,6 +300,7 @@ pub enum RejectReason {
     OneOrMoreInputsNotFound(String),
     FailedToLockInputs(String),
     FailedToLockOutputs(String),
+    ForeignPledgeInputConflict,
     ForeignShardGroupDecidedToAbort {
         start_shard: u32,
         end_shard: u32,
@@ -317,6 +318,9 @@ impl Display for RejectReason {
             RejectReason::OneOrMoreInputsNotFound(msg) => write!(f, "One or more inputs not found: {}", msg),
             RejectReason::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
             RejectReason::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
+            RejectReason::ForeignPledgeInputConflict => {
+                write!(f, "Transaction conflicts with an existing foreign pledge",)
+            },
             RejectReason::ForeignShardGroupDecidedToAbort {
                 start_shard,
                 end_shard,

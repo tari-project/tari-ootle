@@ -36,6 +36,7 @@ use tari_dan_common_types::{
     NodeHeight,
     ShardGroup,
     SubstateAddress,
+    SubstateLockType,
     SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
@@ -70,7 +71,6 @@ use tari_dan_storage::{
         StateTransitionId,
         SubstateChange,
         SubstateLock,
-        SubstatePledge,
         SubstatePledges,
         SubstateRecord,
         TransactionPoolConfirmedStage,
@@ -78,7 +78,6 @@ use tari_dan_storage::{
         TransactionPoolStage,
         TransactionRecord,
         ValidatorConsensusStats,
-        VersionedSubstateIdLockIntent,
         Vote,
     },
     Ordering,
@@ -92,7 +91,7 @@ use tari_utilities::{hex::Hex, ByteArray};
 
 use crate::{
     error::SqliteStorageError,
-    serialization::{deserialize_hex_try_from, deserialize_json, parse_from_string, serialize_hex},
+    serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
     sql_models,
     sqlite_transaction::SqliteTransaction,
 };
@@ -2236,6 +2235,45 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
+    fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        exclude_transaction_id: Option<&TransactionId>,
+        substate_ids: I,
+        exclude_local_only: bool,
+    ) -> Result<Option<TransactionId>, StorageError> {
+        use crate::schema::substate_locks;
+
+        let mut substate_ids = substate_ids.into_iter().peekable();
+        if substate_ids.peek().is_none() {
+            return Ok(None);
+        }
+        let substate_ids = substate_ids.map(|id| id.to_string());
+        let mut query = substate_locks::table
+            .select(substate_locks::transaction_id)
+            .filter(substate_locks::substate_id.eq_any(substate_ids))
+            .filter(substate_locks::lock.eq(SubstateLockType::Write.as_str()))
+            .into_boxed();
+
+        if let Some(exclude_transaction_id) = exclude_transaction_id {
+            query = query.filter(substate_locks::transaction_id.ne(serialize_hex(exclude_transaction_id)));
+        }
+
+        if exclude_local_only {
+            query = query.filter(substate_locks::is_local_only.eq(false));
+        }
+
+        let transaction_id = query
+            .limit(1)
+            .get_result::<String>(self.connection())
+            .optional()
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "substate_locks_has_any_write_locks_for_substates",
+                source: e,
+            })?;
+
+        transaction_id.map(|id| deserialize_hex_try_from(&id)).transpose()
+    }
+
     fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError> {
         use crate::schema::substate_locks;
 
@@ -2407,7 +2445,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         checkpoint.try_into()
     }
 
-    fn foreign_substate_pledges_exists_for_address<T: ToSubstateAddress>(
+    fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
         transaction_id: &TransactionId,
         address: T,
@@ -2429,6 +2467,34 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(count > 0)
     }
 
+    fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I>(
+        &self,
+        transaction_id: &TransactionId,
+        substate_ids: I,
+    ) -> Result<SubstatePledges, StorageError>
+    where
+        I: IntoIterator<Item = &'a SubstateId>,
+    {
+        use crate::schema::foreign_substate_pledges;
+
+        let mut substate_ids = substate_ids.into_iter().map(|a| a.to_string()).peekable();
+        if substate_ids.peek().is_none() {
+            return Ok(SubstatePledges::new());
+        }
+
+        let pledges = foreign_substate_pledges::table
+            .filter(foreign_substate_pledges::transaction_id.eq(serialize_hex(transaction_id)))
+            .filter(foreign_substate_pledges::substate_id.eq_any(substate_ids))
+            .filter(foreign_substate_pledges::lock_type.eq(SubstateLockType::Write.as_str()))
+            .get_results::<sql_models::ForeignSubstatePledge>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "foreign_substate_pledges_any_pledged_to_different_transaction",
+                source: e,
+            })?;
+
+        pledges.into_iter().map(TryInto::try_into).collect()
+    }
+
     fn foreign_substate_pledges_get_all_by_transaction_id(
         &self,
         transaction_id: &TransactionId,
@@ -2443,24 +2509,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 source: e,
             })?;
 
-        #[allow(clippy::mutable_key_type)]
-        let mut pledges = SubstatePledges::with_capacity(recs.len());
-        for pledge in recs {
-            let substate_id = parse_from_string::<SubstateId>(&pledge.substate_id)?;
-            let version = pledge.version as u32;
-            let id = VersionedSubstateId::new(substate_id, version);
-            let lock_type = parse_from_string(&pledge.lock_type)?;
-            let lock_intent = VersionedSubstateIdLockIntent::new(id, lock_type, true);
-            let substate_value = pledge.substate_value.as_deref().map(deserialize_json).transpose()?;
-            let pledge = SubstatePledge::try_create(lock_intent.clone(), substate_value).ok_or_else(|| {
-                StorageError::DataInconsistency {
-                    details: format!("Invalid input substate pledge for {lock_intent}"),
-                }
-            })?;
-            pledges.push(pledge);
-        }
-
-        Ok(pledges)
+        recs.into_iter().map(TryInto::try_into).collect()
     }
 
     fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError> {

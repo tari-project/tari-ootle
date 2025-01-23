@@ -403,10 +403,7 @@ impl BlockHeader {
     }
 
     pub fn compute_command_merkle_root(commands: &BTreeSet<Command>) -> Result<FixedHash, BlockError> {
-        let hashes = commands
-            .iter()
-            .map(|cmd| TreeHash::from(cmd.hash().into_array()))
-            .peekable();
+        let hashes = commands.iter().map(|cmd| TreeHash::from(cmd.hash().into_array()));
         let hash = compute_merkle_root_for_hashes(hashes).map_err(BlockError::StateTreeError)?;
         Ok(FixedHash::from(hash.into_array()))
     }

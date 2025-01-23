@@ -22,10 +22,11 @@ use tari_dan_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    SubstateLockType,
     VersionedSubstateId,
 };
 use tari_dan_storage::{
-    consensus_models::{BlockId, Decision, QcId, SubstateRecord, SubstateRequirementLockIntent, TransactionRecord},
+    consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -87,9 +88,9 @@ impl Test {
             transaction: transaction.transaction().clone(),
             decision,
             fee,
-            inputs: inputs
+            input_locks: inputs
                 .iter()
-                .map(|input| SubstateRequirementLockIntent::write(input.clone(), input.version()))
+                .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
                 .collect(),
             new_outputs: new_outputs.clone(),
         });
@@ -117,14 +118,14 @@ impl Test {
         &self,
         dest: TestVnDestination,
         transaction: &TransactionRecord,
-        inputs: Vec<SubstateRequirementLockIntent>,
+        input_locks: Vec<(SubstateId, SubstateLockType)>,
         new_outputs: Vec<SubstateId>,
     ) -> &Self {
         self.add_execution_at_destination(dest, ExecuteSpec {
             transaction: transaction.transaction().clone(),
             decision: transaction.current_decision(),
             fee: transaction.transaction_fee().unwrap_or(1),
-            inputs,
+            input_locks,
             new_outputs,
         });
         self

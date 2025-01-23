@@ -162,12 +162,12 @@ impl TransactionRecord {
         self.abort_reason.as_ref()
     }
 
-    pub fn set_abort_reason(&mut self, reason: RejectReason) -> &mut Self {
+    pub fn abort(&mut self, reason: RejectReason) -> &mut Self {
         self.abort_reason = Some(reason);
         self
     }
 
-    pub fn has_any_local_inputs(&self, local_committee_info: &CommitteeInfo) -> bool {
+    pub fn is_involved_in_inputs(&self, local_committee_info: &CommitteeInfo) -> bool {
         self.transaction
             .all_inputs_iter()
             .any(|i| local_committee_info.includes_substate_id(i.substate_id()))
@@ -178,6 +178,10 @@ impl TransactionRecord {
     }
 
     pub fn into_execution(mut self) -> Option<TransactionExecution> {
+        self.take_execution()
+    }
+
+    fn take_execution(&mut self) -> Option<TransactionExecution> {
         // TODO: This is hacky. We're using this as a way to finalize the transaction which always expects some
         // execution result.
         let transaction_id = *self.transaction.id();
@@ -201,16 +205,21 @@ impl TransactionRecord {
             }
         } else {
             // If there's no abort reason or execution result, return None here
-            self.execution_result?
+            self.execution_result.take()?
         };
 
         Some(TransactionExecution {
             transaction_id,
             result,
-            abort_reason: self.abort_reason,
+            abort_reason: self.abort_reason.take(),
             resolved_inputs,
             resulting_outputs,
         })
+    }
+
+    pub fn into_transaction_and_execution(mut self) -> (Transaction, Option<TransactionExecution>) {
+        let maybe_execution = self.take_execution();
+        (self.transaction, maybe_execution)
     }
 
     pub fn into_final_result(self) -> Option<ExecuteResult> {

@@ -956,6 +956,8 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
             &block,
             shard_group,
         );
+        // TODO: all local VNs will broadcast this. This message only needs to be published once. Perhaps we can reduce
+        // this to $f+1$.
         if let Err(err) = outbound_messaging
             .broadcast(
                 shard_group,

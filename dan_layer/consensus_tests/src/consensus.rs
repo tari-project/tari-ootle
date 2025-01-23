@@ -18,23 +18,14 @@ use tari_dan_common_types::{
     crypto::create_key_pair,
     optional::Optional,
     Epoch,
-    LockIntent,
     NodeHeight,
+    SubstateLockType,
     SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
 };
 use tari_dan_storage::{
-    consensus_models::{
-        AbortReason,
-        BlockId,
-        Command,
-        Decision,
-        SubstateRecord,
-        SubstateRequirementLockIntent,
-        TransactionRecord,
-        VersionedSubstateIdLockIntent,
-    },
+    consensus_models::{AbortReason, BlockId, Command, Decision, SubstateRecord, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
 };
@@ -252,7 +243,7 @@ async fn node_requests_missing_transaction_from_local_leader() {
             &transaction,
             inputs
                 .into_iter()
-                .map(|input| SubstateRequirementLockIntent::write(input.clone(), input.version()))
+                .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
                 .collect(),
             vec![],
         );
@@ -435,14 +426,14 @@ async fn foreign_shard_group_decides_to_abort() {
     // non-byzantine nodes MUST have the same decision given the same pledges. However, this does test that is it not
     // possible for others to COMMIT without all committees agreeing to COMMIT.
     let mut tx2 = tx1.clone();
-    tx2.set_abort_reason(RejectReason::ExecutionFailure("Test aborted".to_string()));
+    tx2.abort(RejectReason::ExecutionFailure("Test aborted".to_string()));
 
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::Committee(0),
         &tx1,
         inputs
             .iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input.clone(), true).into())
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         vec![],
     )
@@ -451,7 +442,7 @@ async fn foreign_shard_group_decides_to_abort() {
         &tx2,
         inputs
             .into_iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         vec![],
     );
@@ -512,7 +503,7 @@ async fn multishard_local_inputs_foreign_outputs() {
         &tx1,
         inputs
             .into_iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         outputs_1.into_iter().chain(outputs_2).collect(),
     );
@@ -570,7 +561,7 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
         inputs
             .clone()
             .into_iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         outputs.clone(),
     );
@@ -582,7 +573,7 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
         &tx_abort,
         inputs
             .into_iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         outputs,
     );
@@ -645,7 +636,7 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
         inputs_0
             .into_iter()
             .chain(inputs_1)
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         outputs_0.into_iter().chain(outputs_2).collect(),
     );
@@ -700,7 +691,7 @@ async fn multishard_output_conflict_abort() {
         &tx1,
         inputs
             .into_iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         outputs.clone(),
     );
@@ -718,7 +709,7 @@ async fn multishard_output_conflict_abort() {
         &tx2,
         inputs
             .into_iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         outputs,
     );
@@ -794,7 +785,7 @@ async fn single_shard_inputs_from_previous_outputs() {
         &tx2,
         prev_outputs
             .into_iter()
-            .map(|input| SubstateRequirementLockIntent::write(input, 0))
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         vec![],
     );
@@ -857,7 +848,7 @@ async fn multishard_inputs_from_previous_outputs() {
         &tx2,
         prev_outputs
             .into_iter()
-            .map(|input| SubstateRequirementLockIntent::write(input, 0))
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         vec![],
     );
@@ -917,14 +908,14 @@ async fn single_shard_input_conflict() {
         transaction: tx1.transaction().clone(),
         decision: Decision::Commit,
         fee: 1,
-        inputs: vec![VersionedSubstateIdLockIntent::write(substate_id.clone(), true).into()],
+        input_locks: vec![(substate_id.substate_id().clone(), SubstateLockType::Write)],
         new_outputs: vec![],
     })
     .add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx2.transaction().clone(),
         decision: Decision::Commit,
         fee: 1,
-        inputs: vec![VersionedSubstateIdLockIntent::write(substate_id, true).into()],
+        input_locks: vec![(substate_id.substate_id().clone(), SubstateLockType::Write)],
         new_outputs: vec![],
     });
 
@@ -1182,9 +1173,9 @@ async fn single_shard_unversioned_inputs() {
         transaction: tx.transaction().clone(),
         decision: Decision::Commit,
         fee: 1,
-        inputs: inputs
+        input_locks: inputs
             .into_iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.into_substate_id(), SubstateLockType::Write))
             .collect(),
         new_outputs: vec![],
     });
@@ -1229,12 +1220,10 @@ async fn single_shard_unversioned_inputs() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "Flaky due to known problem"]
 async fn multishard_unversioned_input_conflict() {
-    // TODO: This test is flaky due to a known problem:
-    // SG0 pledges for tx_1 and tx_2, and SG1 pledges for tx_2
-    // pledges are exchanged but the current implementation does not detect pledges for the same substate for different
-    // transactions The transactions are halted
+    // CASE: Tx1 and Tx2 use id1 and id2 as inputs. Comm1 sequences Tx1 and simultaneously Comm2 sequences Tx2.
+    // When they exchange substates, they will try to sequence either transaction but will pick up the lock conflict and
+    // propose to abort.
     setup_logger();
     let mut test = Test::builder()
         .add_committee(0, vec!["1", "2"])
@@ -1267,9 +1256,9 @@ async fn multishard_unversioned_input_conflict() {
         transaction: tx1.transaction().clone(),
         decision: Decision::Commit,
         fee: 1,
-        inputs: vec![
-            VersionedSubstateIdLockIntent::write(id0.clone(), false).into(),
-            VersionedSubstateIdLockIntent::write(id1.clone(), false).into(),
+        input_locks: vec![
+            (id0.substate_id().clone(), SubstateLockType::Write),
+            (id1.substate_id().clone(), SubstateLockType::Write),
         ],
         new_outputs: vec![],
     })
@@ -1277,23 +1266,20 @@ async fn multishard_unversioned_input_conflict() {
         transaction: tx2.transaction().clone(),
         decision: Decision::Commit,
         fee: 1,
-        inputs: vec![
-            VersionedSubstateIdLockIntent::write(id0, false).into(),
-            VersionedSubstateIdLockIntent::write(id1, false).into(),
+        input_locks: vec![
+            (id0.substate_id().clone(), SubstateLockType::Write),
+            (id1.substate_id().clone(), SubstateLockType::Write),
         ],
         new_outputs: vec![],
     });
 
-    // Transactions are sorted in the blocks, because we have a "first come first serve" policy for locking objects
-    // the "first" will be Committed and the "last" Aborted
-    let mut sorted_tx_ids = [tx1.id(), tx2.id()];
-    sorted_tx_ids.sort();
-
+    // NOTE: we send tx1 to committee 0 and tx2 to committee 1 to loosely ensure that we create the situation this test
+    // is testing. If we sent to all, most of the time one or both of the transactions will commit.
     test.network()
-        .send_transaction(TestVnDestination::All, tx1.clone())
+        .send_transaction(TestVnDestination::Committee(0), tx1.clone())
         .await;
     test.network()
-        .send_transaction(TestVnDestination::All, tx2.clone())
+        .send_transaction(TestVnDestination::Committee(1), tx2.clone())
         .await;
 
     test.start_epoch(Epoch(1)).await;
@@ -1316,28 +1302,108 @@ async fn multishard_unversioned_input_conflict() {
     }
 
     test.assert_all_validators_at_same_height().await;
-    test.assert_all_validators_committed(tx1.id());
+
+    test.assert_all_validators_have_decision(tx1.id(), Decision::Abort(AbortReason::ForeignPledgeInputConflict))
+        .await;
+    test.assert_all_validators_have_decision(tx2.id(), Decision::Abort(AbortReason::ForeignPledgeInputConflict))
+        .await;
+
+    test.assert_clean_shutdown().await;
+    log::info!("total messages sent: {}", test.network().total_messages_sent());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multishard_unversioned_input_conflict_delay_prepare() {
+    // CASE: Tx1 and Tx2 use id1 as an input, Comm1 sequences Tx1 and simultaneously Comm2 sequences Tx2.
+    // Since the id2 and id3 substates are uncommon to the transactions and live in Comm2, Comm2 and lock both
+    // transactions. Comm1 will not have yet pledged a value for id1 to Tx1. This allows Comm1 to delay sequencing Tx1
+    // (due to a soft lock conflict) until Tx2 is finalized. The output of Tx2 will be pledged to Tx1.
+    // This is a natural consequence (i.e. no special code) of the local substate locks.
+    setup_logger();
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .start()
+        .await;
+
+    let id0 = test
+        .create_substates_on_vns(TestVnDestination::Committee(0), 1)
+        .pop()
+        .unwrap();
+    let id1 = test
+        .create_substates_on_vns(TestVnDestination::Committee(1), 1)
+        .pop()
+        .unwrap();
+    let id2 = test
+        .create_substates_on_vns(TestVnDestination::Committee(1), 1)
+        .pop()
+        .unwrap();
+
+    let tx1 = Transaction::builder()
+        .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
+        .add_input(SubstateRequirement::unversioned(id1.substate_id().clone()))
+        .build_and_seal(&Default::default());
+    let tx1 = TransactionRecord::new(tx1);
+
+    let tx2 = Transaction::builder()
+        .add_input(SubstateRequirement::unversioned(id0.substate_id().clone()))
+        .add_input(SubstateRequirement::unversioned(id2.substate_id().clone()))
+        .build_and_seal(&Default::default());
+    let tx2 = TransactionRecord::new(tx2);
+
+    test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: tx1.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1,
+        input_locks: vec![
+            (id0.substate_id().clone(), SubstateLockType::Write),
+            (id1.substate_id().clone(), SubstateLockType::Write),
+        ],
+        new_outputs: vec![],
+    })
+    .add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: tx2.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1,
+        input_locks: vec![
+            (id0.substate_id().clone(), SubstateLockType::Write),
+            (id2.substate_id().clone(), SubstateLockType::Write),
+        ],
+        new_outputs: vec![],
+    });
+
+    test.network()
+        .send_transaction(TestVnDestination::Committee(0), tx1.clone())
+        .await;
+    test.network()
+        .send_transaction(TestVnDestination::Committee(1), tx2.clone())
+        .await;
+
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+
+        let leaf1 = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        let leaf2 = test.get_validator(&TestAddress::new("3")).get_leaf_block();
+        if leaf1.height > NodeHeight(60) && leaf2.height > NodeHeight(60) {
+            panic!(
+                "Not all transaction committed after {}/{} blocks",
+                leaf1.height, leaf2.height
+            );
+        }
+    }
+
+    test.assert_all_validators_at_same_height().await;
+
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
     test.assert_all_validators_have_decision(tx2.id(), Decision::Commit)
         .await;
-    test.get_validator(&TestAddress::new("1"))
-        .state_store
-        .with_read_tx(|tx| {
-            let t1 = tx.transactions_get(tx1.id()).unwrap();
-            let t2 = tx.transactions_get(tx2.id()).unwrap();
-            let i1 = t1.resolved_inputs().unwrap();
-            let i2 = t2.resolved_inputs().unwrap();
-
-            i1.iter().for_each(|i| {
-                let other = i2.iter().find(|i2| i2.substate_id() == i.substate_id()).unwrap();
-                // Inputs are resolved to the latest UP version, since both consume the same substate, they will use
-                // different versions as their inputs
-                assert_ne!(i.version(), other.version());
-            });
-            Ok::<_, HotStuffError>(())
-        })
-        .unwrap();
 
     test.assert_clean_shutdown().await;
     log::info!("total messages sent: {}", test.network().total_messages_sent());
@@ -1471,9 +1537,9 @@ async fn multishard_publish_template() {
         transaction: tx.transaction().clone(),
         decision: Decision::Commit,
         fee: 1,
-        inputs: inputs
+        input_locks: inputs
             .into_iter()
-            .map(|input| VersionedSubstateIdLockIntent::write(input, true).into())
+            .map(|input| (input.into_substate_id(), SubstateLockType::Write))
             .collect(),
         new_outputs: vec![SubstateId::Template(template_id)],
     });

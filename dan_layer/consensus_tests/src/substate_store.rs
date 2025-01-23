@@ -15,7 +15,7 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, QcId, SubstateChange, SubstateRecord, SubstateRequirementLockIntent},
+    consensus_models::{Block, BlockId, QcId, RequireLockIntentRef, SubstateChange, SubstateRecord},
     StateStore,
 };
 use tari_engine_types::{
@@ -129,14 +129,14 @@ fn it_disallows_more_than_one_write_lock_non_local_only() {
     store
         .try_lock(
             tx_id(1),
-            &SubstateRequirementLockIntent::new(id.clone(), 0, SubstateLockType::Read),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Read),
             true,
         )
         .unwrap();
     store
         .try_lock(
             tx_id(2),
-            &SubstateRequirementLockIntent::new(id.clone(), 0, SubstateLockType::Read),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Read),
             true,
         )
         .unwrap();
@@ -148,7 +148,7 @@ fn it_disallows_more_than_one_write_lock_non_local_only() {
     let err = store
         .try_lock(
             tx_id(3),
-            &SubstateRequirementLockIntent::new(id.clone(), 0, SubstateLockType::Write),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Write),
             false,
         )
         .unwrap_err();
@@ -171,7 +171,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
     store
         .try_lock(
             tx_id(1),
-            &SubstateRequirementLockIntent::new(id.clone(), 0, SubstateLockType::Write),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Write),
             false,
         )
         .unwrap();
@@ -179,7 +179,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
     let err = store
         .try_lock(
             tx_id(2),
-            &SubstateRequirementLockIntent::new(id.to_next_version(), 0, SubstateLockType::Output),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output),
             false,
         )
         .unwrap_err();
@@ -192,7 +192,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
     store
         .try_lock(
             tx_id(1),
-            &SubstateRequirementLockIntent::new(id.to_next_version(), 0, SubstateLockType::Output),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output),
             false,
         )
         .unwrap();

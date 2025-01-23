@@ -79,20 +79,16 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
             .unwrap_or_else(|| panic!("Missing execution spec for transaction {}", transaction.id()));
 
         let resolved_inputs = spec
-            .inputs
+            .input_locks
             .into_iter()
-            .map(|spec| {
-                let substate = resolved_inputs.get(spec.substate_requirement()).unwrap_or_else(|| {
-                    panic!(
-                        "Missing input substate for transaction {} with requirement {}",
-                        id,
-                        spec.substate_requirement()
-                    )
-                });
+            .map(|(substate_id, lock_type)| {
+                let substate = resolved_inputs
+                    .get(&substate_id)
+                    .unwrap_or_else(|| panic!("Missing input substate {} for transaction {}", substate_id, id,));
                 VersionedSubstateIdLockIntent::new(
-                    VersionedSubstateId::new(spec.substate_id().clone(), substate.version()),
-                    spec.lock_type(),
-                    spec.requested_version().is_some(),
+                    VersionedSubstateId::new(substate_id, substate.version()),
+                    lock_type,
+                    true,
                 )
             })
             .collect::<Vec<_>>();

@@ -63,15 +63,19 @@ impl SubstateLockType {
             Self::Output => matches!(other, Self::Output),
         }
     }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Read => "Read",
+            Self::Write => "Write",
+            Self::Output => "Output",
+        }
+    }
 }
 
 impl fmt::Display for SubstateLockType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Read => write!(f, "Read"),
-            Self::Write => write!(f, "Write"),
-            Self::Output => write!(f, "Output"),
-        }
+        write!(f, "{}", self.as_str())
     }
 }
 

@@ -4,7 +4,6 @@
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    iter::Peekable,
     ops::{Deref, RangeInclusive},
 };
 
@@ -317,6 +316,13 @@ pub trait StateStoreReadTransaction: Sized {
         transaction_id: &TransactionId,
     ) -> Result<Vec<LockedSubstateValue>, StorageError>;
 
+    fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        exclude_transaction_id: Option<&TransactionId>,
+        substate_ids: I,
+        exclude_local_only: bool,
+    ) -> Result<Option<TransactionId>, StorageError>;
+
     fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError>;
 
     fn pending_state_tree_diffs_get_all_up_to_commit_block(
@@ -340,11 +346,16 @@ pub trait StateStoreReadTransaction: Sized {
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError>;
 
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
-    fn foreign_substate_pledges_exists_for_address<T: ToSubstateAddress>(
+    fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
         transaction_id: &TransactionId,
         address: T,
     ) -> Result<bool, StorageError>;
+    fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        transaction_id: &TransactionId,
+        substate_ids: I,
+    ) -> Result<SubstatePledges, StorageError>;
     fn foreign_substate_pledges_get_all_by_transaction_id(
         &self,
         transaction_id: &TransactionId,
@@ -532,7 +543,7 @@ pub trait StateStoreWriteTransaction {
 
     fn substate_locks_remove_many_for_transactions<'a, I: Iterator<Item = &'a TransactionId>>(
         &mut self,
-        transaction_ids: Peekable<I>,
+        transaction_ids: I,
     ) -> Result<(), StorageError>;
 
     fn substate_locks_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError>;

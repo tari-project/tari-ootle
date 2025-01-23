@@ -382,7 +382,10 @@ where TConsensusSpec: ConsensusSpec
 
             let atom = cmd.transaction().expect("Command must be a transaction");
 
-            let Some(mut pool_tx) = change_set.get_transaction(tx, &locked_block, &leaf, atom.id())? else {
+            let Some(mut pool_tx) = change_set
+                .get_transaction(tx, &locked_block, &leaf, atom.id())
+                .optional()?
+            else {
                 return Err(HotStuffError::InvariantError(format!(
                     "Transaction {} in newly justified block {} not found in the pool",
                     atom.id(),
@@ -755,7 +758,7 @@ where TConsensusSpec: ConsensusSpec
                 substate_store,
                 local_committee_info,
                 parent_block.epoch(),
-                *tx_rec.transaction_id(),
+                tx_rec,
                 parent_block.block_id(),
             )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
@@ -929,6 +932,9 @@ where TConsensusSpec: ConsensusSpec
         if !transaction.has_all_required_input_pledges(tx, local_committee_info)? {
             // TODO: investigate - this case does occur when all_input_shard_groups_prepared is used vs
             //       all_shard_groups_prepared in can_continue_to, not sure why.
+            // Once case where this can happen if we received a LocalAccept pledge, which will skip sending the substate
+            // values, but not LocalPrepare (which contains substate values). This could be solved by
+            // (re-)requesting the LocalPrepare pledge.
             error!(
                 target: LOG_TARGET,
                 "BUG: attempted to propose transaction {} as AllPrepared but not all input pledges were found. This transaction should not have been marked as ready.",
@@ -939,13 +945,9 @@ where TConsensusSpec: ConsensusSpec
         let mut execution = self.execute_transaction(tx, &parent_block.block_id, parent_block.epoch, transaction)?;
 
         // Try to lock all local outputs
-        let local_outputs = execution
-            .resulting_outputs()
-            .iter()
-            .filter(|o| {
-                o.substate_id().is_transaction_receipt() || local_committee_info.includes_substate_id(o.substate_id())
-            })
-            .cloned();
+        let local_outputs = execution.resulting_outputs().iter().filter(|o| {
+            o.substate_id().is_transaction_receipt() || local_committee_info.includes_substate_id(o.substate_id())
+        });
         let lock_status = substate_store.try_lock_all(*tx_rec.transaction_id(), local_outputs, false)?;
         if let Some(err) = lock_status.failures().first() {
             warn!(

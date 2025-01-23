@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, iter::Peekable, ops::Deref};
+use std::{cmp, ops::Deref};
 
 use diesel::{
     dsl,
@@ -1623,10 +1623,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
     fn substate_locks_remove_many_for_transactions<'a, I: Iterator<Item = &'a TransactionId>>(
         &mut self,
-        mut transaction_ids: Peekable<I>,
+        transaction_ids: I,
     ) -> Result<(), StorageError> {
         use crate::schema::substate_locks;
 
+        let mut transaction_ids = transaction_ids.peekable();
         // NOTE: looked at the diesel code and if the iterator is empty, this executes WHERE 0=1 which is fine, but
         // let's check the peekable iterator to save an OP.
         if transaction_ids.peek().is_none() {
@@ -1817,7 +1818,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                     foreign_substate_pledges::substate_id.eq(substate_id.substate_id().to_string()),
                     foreign_substate_pledges::version.eq(substate_id.version() as i32),
                     foreign_substate_pledges::shard_group.eq(shard_group.encode_as_u32() as i32),
-                    foreign_substate_pledges::lock_type.eq(lock_type.to_string()),
+                    foreign_substate_pledges::lock_type.eq(lock_type.as_str()),
                     foreign_substate_pledges::substate_value.eq(Some(serialize_json(&substate)?)),
                 ))
             },
@@ -1827,7 +1828,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 foreign_substate_pledges::substate_id.eq(substate_id.substate_id().to_string()),
                 foreign_substate_pledges::version.eq(substate_id.version() as i32),
                 foreign_substate_pledges::shard_group.eq(shard_group.encode_as_u32() as i32),
-                foreign_substate_pledges::lock_type.eq(SubstateLockType::Output.to_string()),
+                foreign_substate_pledges::lock_type.eq(SubstateLockType::Output.as_str()),
                 foreign_substate_pledges::substate_value.eq(None),
             )),
         });

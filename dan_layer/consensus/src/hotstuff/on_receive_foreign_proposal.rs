@@ -125,7 +125,7 @@ where TConsensusSpec: ConsensusSpec
             message.block_id,
         );
         if self.recently_requested.contains(&message.block_id) {
-            warn!(
+            info!(
                 target: LOG_TARGET,
                 "🌐 FOREIGN PROPOSAL: Already requested block {}. Ignoring.",
                 message.block_id,

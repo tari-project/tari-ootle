@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display, iter, iter::Peekable, ops::RangeInclusive};
+use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display, iter, ops::RangeInclusive};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
@@ -171,7 +171,7 @@ impl SubstateRecord {
 
     pub fn unlock_all<'a, TTx: StateStoreWriteTransaction, I: Iterator<Item = &'a TransactionId>>(
         tx: &mut TTx,
-        transaction_ids: Peekable<I>,
+        transaction_ids: I,
     ) -> Result<(), StorageError> {
         tx.substate_locks_remove_many_for_transactions(transaction_ids)
     }

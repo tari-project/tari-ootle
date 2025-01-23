@@ -12,3 +12,5 @@ mod substates;
 mod last_inserted;
 #[cfg(test)]
 mod quorum_certificates;
+#[cfg(test)]
+mod foreign_proposals;

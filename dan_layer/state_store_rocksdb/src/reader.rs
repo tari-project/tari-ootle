@@ -487,6 +487,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             // TODO: do we need to filter by proposal.proposed_in_block_height > locked.height?. We will need to store proposed_in_block_height field
             .collect();
 
+        // TODO: use "limit" in rocksdb
+
         Ok(proposals)    
     }
 

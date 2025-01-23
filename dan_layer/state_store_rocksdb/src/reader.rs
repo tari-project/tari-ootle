@@ -327,20 +327,9 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     fn get_current_locked_block(&self) -> Result<LockedBlock, StorageError> {
-        todo!()
-        /*
-        use crate::schema::locked_block;
-
-        let locked_block = locked_block::table
-            .order_by(locked_block::id.desc())
-            .first::<sql_models::LockedBlock>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "get_current_locked_block",
-                source: e,
-            })?;
-
-        locked_block.try_into()
-        */
+        let value = LockedBlockModel::get_first(&self.tx, "get_current_locked_block", None, Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No locked block stored in database".to_string() })?;
+        Ok(value.locked_block)
     }
 }
 

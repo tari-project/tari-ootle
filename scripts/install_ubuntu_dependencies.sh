@@ -19,4 +19,6 @@ apt-get install --no-install-recommends --assume-yes \
   build-essential \
   libudev-dev \
   libhidapi-dev \
-  zip
+  zip \
+  npm
+npm install typescript -g

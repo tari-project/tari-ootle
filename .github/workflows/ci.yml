@@ -137,7 +137,7 @@ jobs:
 
       - name: install typescript
         run: |
-          npm install typescript -g
+          npm install typescript
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -169,7 +169,7 @@ jobs:
 
       - name: install typescript
         run: |
-          npm install typescript -g
+          npm install typescript
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -226,7 +226,7 @@ jobs:
 
       - name: install typescript
         run: |
-          npm install typescript -g
+          npm install typescript
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::RocksdbSeq};
+use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -67,113 +67,6 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
             db: db.clone(),
             transaction: Some(RocksDbStateStoreReadTransaction::new(db, tx)),
         }
-    }
-
-    fn parked_blocks_remove(&mut self, block_id: &str) -> Result<(Block, Vec<ForeignProposal>), StorageError> {
-        todo!()
-        /*
-        use crate::schema::parked_blocks;
-
-        let parked_block = parked_blocks::table
-            .filter(parked_blocks::block_id.eq(&block_id))
-            .first::<sql_models::ParkedBlock>(self.connection())
-            .optional()
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "parked_blocks_remove",
-                source: e,
-            })?
-            .ok_or_else(|| StorageError::NotFound {
-                item: "parked_blocks".to_string(),
-                key: block_id.to_string(),
-            })?;
-
-        diesel::delete(parked_blocks::table)
-            .filter(parked_blocks::block_id.eq(&block_id))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "parked_blocks_remove",
-                source: e,
-            })?;
-
-        parked_block.try_into()
-        */
-    }
-
-    fn parked_blocks_insert(
-        &mut self,
-        block: &Block,
-        foreign_proposals: &[ForeignProposal],
-    ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, parked_blocks};
-
-        // check if block exists in blocks table using count query
-        let block_id = serialize_hex(block.id());
-
-        let block_exists = blocks::table
-            .count()
-            .filter(blocks::block_id.eq(&block_id))
-            .first::<i64>(self.connection())
-            .map(|count| count > 0)
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "parked_blocks_insert",
-                source: e,
-            })?;
-
-        if block_exists {
-            return Err(StorageError::QueryError {
-                reason: format!("Cannot park block {block_id} that already exists in blocks table"),
-            });
-        }
-
-        // check if block already exists in parked_blocks
-        let already_parked = parked_blocks::table
-            .count()
-            .filter(parked_blocks::block_id.eq(&block_id))
-            .first::<i64>(self.connection())
-            .map(|count| count > 0)
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "parked_blocks_insert",
-                source: e,
-            })?;
-
-        if already_parked {
-            return Ok(());
-        }
-
-        let insert = (
-            parked_blocks::block_id.eq(&block_id),
-            parked_blocks::parent_block_id.eq(serialize_hex(block.parent())),
-            parked_blocks::network.eq(block.network().to_string()),
-            parked_blocks::merkle_root.eq(block.merkle_root().to_string()),
-            parked_blocks::height.eq(block.height().as_u64() as i64),
-            parked_blocks::epoch.eq(block.epoch().as_u64() as i64),
-            parked_blocks::shard_group.eq(block.shard_group().encode_as_u32() as i32),
-            parked_blocks::proposed_by.eq(serialize_hex(block.proposed_by().as_bytes())),
-            parked_blocks::command_count.eq(block.commands().len() as i64),
-            parked_blocks::commands.eq(serialize_json(block.commands())?),
-            parked_blocks::total_leader_fee.eq(block.total_leader_fee() as i64),
-            parked_blocks::justify.eq(serialize_json(block.justify())?),
-            parked_blocks::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
-            parked_blocks::signature.eq(block.signature().map(serialize_json).transpose()?),
-            parked_blocks::timestamp.eq(block.timestamp() as i64),
-            parked_blocks::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-            parked_blocks::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
-            parked_blocks::foreign_proposals.eq(serialize_json(foreign_proposals)?),
-            parked_blocks::extra_data.eq(block.extra_data().map(serialize_json).transpose()?),
-        );
-
-        diesel::insert_into(parked_blocks::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "parked_blocks_upsert",
-                source: e,
-            })?;
-
-        Ok(())
-        */
     }
 }
 
@@ -243,57 +136,36 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn block_diffs_insert(&mut self, block_id: &BlockId, changes: &[SubstateChange]) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::block_diffs;
+        let operation = "block_diffs_insert";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let block_id = serialize_hex(block_id);
-        // We commit in chunks because we can hit the SQL variable limit
-        for chunk in changes.chunks(1000) {
-            let values = chunk
-                .iter()
-                .map(|ch| {
-                    Ok((
-                        block_diffs::block_id.eq(&block_id),
-                        block_diffs::transaction_id.eq(serialize_hex(ch.transaction_id())),
-                        block_diffs::substate_id.eq(ch.versioned_substate_id().substate_id().to_string()),
-                        block_diffs::version.eq(ch.versioned_substate_id().version() as i32),
-                        block_diffs::shard.eq(ch.shard().as_u32() as i32),
-                        block_diffs::change.eq(ch.as_change_string()),
-                        block_diffs::state.eq(ch.substate().map(serialize_json).transpose()?),
-                    ))
-                })
-                .collect::<Result<Vec<_>, StorageError>>()?;
+        // TODO: use batch insertion in rocksdb
+        for change in changes {
+            let block_diff_data = BlockDiffData {
+                block_id: *block_id,
+                substate_id: change.versioned_substate_id().substate_id.clone(),
+                change: change.clone(),
+                created_at: RocksdbTimestamp::now(),
+            };
 
-            diesel::insert_into(block_diffs::table)
-                .values(values)
-                .execute(self.connection())
-                .map(|_| ())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "block_diffs_insert",
-                    source: e,
-                })?;
+            BlockDiffModel::put(self.db.clone(), tx, operation, &block_diff_data)?;
         }
 
         Ok(())
-        */
     }
 
     fn block_diffs_remove(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::block_diffs;
+        let operation = "block_diffs_remove";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::delete(block_diffs::table)
-            .filter(block_diffs::block_id.eq(serialize_hex(block_id)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "block_diffs_remove",
-                source: e,
-            })?;
+        let key_prefix = BlockDiffModel::build_key_prefix(*block_id, None);
+        let values = BlockDiffModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?;
+        for value in values {
+            let key = BlockDiffModel::key(&value);
+            BlockDiffModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
 
         Ok(())
-        */
     }
 
     fn quorum_certificates_insert(&mut self, qc: &QuorumCertificate) -> Result<(), StorageError> {

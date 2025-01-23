@@ -31,46 +31,14 @@ fn random_substate_id() -> SubstateId {
     SubstateId::Component(address)
 }
 
-fn build_substate(substate_id: &SubstateId, version: u32) -> SubstateRecord {
-    let entity_id = substate_id.to_object_key().as_entity_id();
-    SubstateRecord {
-            substate_id: substate_id.clone(), 
-            version,
-            substate_value: SubstateValue::Component(ComponentHeader {
-                template_address: TemplateAddress::default(),
-                module_name: "foo".to_string(),
-                owner_key: None,
-                owner_rule: OwnerRule::None,
-                access_rules: ComponentAccessRules::allow_all(),
-                entity_id,
-                body: ComponentBody {
-                    state: tari_bor::Value::Null,
-                },
-            }),
-            state_hash: FixedHash::default(),
-            created_by_transaction: TransactionId::default(),
-            created_justify: QcId::zero(),
-            created_block: BlockId::genesis(),
-            created_height: NodeHeight::zero(),
-            created_by_shard: Shard::zero(),
-            created_at_epoch: Epoch::zero(),
-            destroyed: None,
-    }
-}
-
 mod substates {
     use std::collections::HashSet;
 
-    use tari_dan_common_types::{shard::Shard, ExtraData, NumPreshards, ShardGroup, SubstateRequirement, VersionedSubstateId};
-    use tari_dan_storage::consensus_models::{BlockId, QcId, SubstateDestroyed, SubstateRecord};
-    use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}, TemplateAddress};
-    use tari_state_tree::Node;
-    use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, EntityId}, prelude::AccessRules};
-    use tari_template_lib::prelude::ComponentAccessRules;
+    use tari_dan_common_types::{shard::Shard, SubstateRequirement, VersionedSubstateId};
+    use tari_dan_storage::consensus_models::QcId;
     use tari_transaction::TransactionId;
 
-    use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite, create_tx_atom};
-    use tari_engine_types::serde_with::hex::option;
+    use crate::helper::{assert_eq_debug, build_substate_record, create_rocksdb, create_sqlite};
     
     use super::*;
 
@@ -93,18 +61,18 @@ mod substates {
 
         // substate 1
         let substate1_id = random_substate_id();
-        let substate1 = build_substate(&substate1_id, 0);
+        let substate1 = build_substate_record(&substate1_id, 0);
         let substate1_address = substate1.to_substate_address();
         tx.substates_create(&substate1).unwrap();
 
         // substate 1 (version 1)
-        let substate1b = build_substate(&substate1_id, 1);
+        let substate1b = build_substate_record(&substate1_id, 1);
         let substate1b_address = substate1b.to_substate_address();
         tx.substates_create(&substate1b).unwrap();
 
         // substate 2
         let substate2_id = random_substate_id();
-        let substate2 = build_substate(&substate2_id, 0);
+        let substate2 = build_substate_record(&substate2_id, 0);
         let substate2_address = substate2.to_substate_address();
         tx.substates_create(&substate2).unwrap();
 

@@ -14,3 +14,5 @@ mod last_inserted;
 mod quorum_certificates;
 #[cfg(test)]
 mod foreign_proposals;
+#[cfg(test)]
+mod block_diffs;

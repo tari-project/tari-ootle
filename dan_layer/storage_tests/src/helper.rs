@@ -1,9 +1,11 @@
 use tari_common_types::types::FixedHash;
-use tari_dan_storage::consensus_models::{BlockId, Decision, TransactionAtom};
-use tari_engine_types::substate::SubstateId;
+use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
+use tari_dan_storage::consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionAtom};
+use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_template_lib::models::{ComponentAddress, ComponentKey, EntityId, ObjectKey};
+use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress}, prelude::AccessRules};
+use tari_template_lib::prelude::ComponentAccessRules;
 use tempfile::tempdir;
 
 use rand::{rngs::OsRng, Rng, RngCore};
@@ -44,6 +46,33 @@ pub fn create_random_substate_id() -> SubstateId {
     let rand_bytes = OsRng.gen::<[u8; ComponentKey::LENGTH]>();
     let component_key = ComponentKey::new(copy_fixed(&rand_bytes));
     SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
+}
+
+pub fn build_substate_record(substate_id: &SubstateId, version: u32) -> SubstateRecord {
+    let entity_id = substate_id.to_object_key().as_entity_id();
+    SubstateRecord {
+            substate_id: substate_id.clone(), 
+            version,
+            substate_value: SubstateValue::Component(ComponentHeader {
+                template_address: TemplateAddress::default(),
+                module_name: "foo".to_string(),
+                owner_key: None,
+                owner_rule: OwnerRule::None,
+                access_rules: ComponentAccessRules::allow_all(),
+                entity_id,
+                body: ComponentBody {
+                    state: tari_bor::Value::Null,
+                },
+            }),
+            state_hash: FixedHash::default(),
+            created_by_transaction: TransactionId::default(),
+            created_justify: QcId::zero(),
+            created_block: BlockId::genesis(),
+            created_height: NodeHeight::zero(),
+            created_by_shard: Shard::zero(),
+            created_at_epoch: Epoch::zero(),
+            destroyed: None,
+    }
 }
 
 pub fn copy_fixed<const SZ: usize>(bytes: &[u8]) -> [u8; SZ] {

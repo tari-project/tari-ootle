@@ -259,16 +259,13 @@ pub trait RocksdbModel {
     fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<(), RocksDbStorageError> {
         // we need to have the main value to delete CF values later
         let value = Self::get(tx, operation, key)?;
-
         tx.delete(key)
             .map_err(|e| RocksDbStorageError::RocksDbError {
             operation,
             source: e,
         })?;
-
         // we also need to delete related CF keys
         Self::delete_from_cfs(db.clone(), tx, operation, &value)?;
-
         Ok(())
     }
 

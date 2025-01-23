@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1094,20 +1094,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError> {
-        todo!()
-        /*
-        use crate::schema::block_diffs;
+        let key_prefix = BlockDiffModel::build_key_prefix(*block_id, None);
+        let values = BlockDiffModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?;
 
-        let block_diff = block_diffs::table
-            .filter(block_diffs::block_id.eq(serialize_hex(block_id)))
-            .get_results::<sql_models::BlockDiff>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "block_diffs_get",
-                source: e,
-            })?;
-
-        sql_models::BlockDiff::try_load(*block_id, block_diff)
-        */
+        Ok(BlockDiffData::load(*block_id, values))
     }
 
     fn block_diffs_get_last_change_for_substate(
@@ -1115,24 +1105,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         block_id: &BlockId,
         substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError> {
-        todo!()
-        /*
-        use crate::schema::block_diffs;
         let commit_block = self.get_commit_block_id()?;
         let block_ids = self.get_block_ids_with_commands_between(&commit_block, block_id)?;
 
-        let diff = block_diffs::table
-            .filter(block_diffs::block_id.eq_any(block_ids))
-            .filter(block_diffs::substate_id.eq(substate_id.to_string()))
-            .order_by(block_diffs::id.desc())
-            .first::<sql_models::BlockDiff>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "block_diffs_get_last_change_for_substate",
-                source: e,
-            })?;
+        let mut diffs = vec![];
+        for block_id in block_ids {
+            let key_prefix = BlockDiffModel::build_key_prefix_str(&block_id, Some(substate_id));
+            let values = BlockDiffModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
+            diffs.extend(values);
+        }
 
-        sql_models::BlockDiff::try_convert_change(diff)
-        */
+        // we want the most recent change
+        diffs.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        let most_recent_diff = diffs.first()
+            .ok_or_else(|| StorageError::General { details: "No block_diffs found".to_string() })?;
+        Ok(most_recent_diff.change.clone())
     }
 
     fn quorum_certificates_get(&self, qc_id: &QcId) -> Result<QuorumCertificate, StorageError> {

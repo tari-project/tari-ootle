@@ -136,14 +136,7 @@ impl SubstateManager {
         version: Option<u32>,
     ) -> Result<Option<SubstateResponse>, anyhow::Error> {
         let mut tx = self.substate_store.create_read_tx()?;
-        if let Some(row) = tx.get_substate(substate_address)? {
-            // if a version is requested, we must check that it matches the one in db
-            if let Some(version) = version {
-                if i64::from(version) != row.version {
-                    return Ok(None);
-                }
-            }
-
+        if let Some(row) = tx.get_substate(substate_address, version)? {
             // the substate is present in db and the version matches the requested version
             let substate_resp = row.try_into()?;
             return Ok(Some(substate_resp));

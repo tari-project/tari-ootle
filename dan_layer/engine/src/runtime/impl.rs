@@ -660,6 +660,17 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         true
                     })?;
 
+                    // add event to indicate that there is a change in component
+                    let (template_address, module_name) =
+                        state.current_template().map(|(addr, name)| (*addr, name.to_string()))?;
+                    state.push_event(Event::new(
+                        Some(component_lock.address().clone()),
+                        template_address,
+                        state.transaction_hash(),
+                        "component-updated".to_string(),
+                        Metadata::from([("module_name".to_string(), module_name)]),
+                    ));
+
                     Ok(InvokeResult::unit())
                 })
             },

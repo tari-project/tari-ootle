@@ -20,5 +20,5 @@ apt-get install --no-install-recommends --assume-yes \
   libudev-dev \
   libhidapi-dev \
   zip \
-  npm
+  nodejs
 npm install typescript -g

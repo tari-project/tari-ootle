@@ -32,7 +32,7 @@ import IconButton from "@mui/material/IconButton";
 import MenuOpenOutlinedIcon from "@mui/icons-material/MenuOpenOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
 import MenuItems from "../Components/MenuItems";
-import { Stack, ThemeProvider } from "@mui/material";
+import { Dialog, Stack, ThemeProvider } from "@mui/material";
 import { Outlet, Link } from "react-router-dom";
 import Logo from "../assets/Logo";
 import Container from "@mui/material/Container";
@@ -45,6 +45,10 @@ import { createTheme } from "@mui/material/styles";
 import { light, dark, componentSettings } from "./tokens";
 import { lightAlpha } from "./colors";
 import WalletConnectLink from "../Components/WalletConnectLink";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import useAccountStore from "../store/accountStore";
+import { Check } from "@mui/icons-material";
 
 const drawerWidth = 300;
 
@@ -101,6 +105,11 @@ const Drawer = styled(MuiDrawer, {
 export default function Layout() {
   const [open, setOpen] = useState(false);
   const { themeMode } = useThemeStore();
+  const { popup, setPopup } = useAccountStore();
+
+  const handleClose = () => {
+    setPopup({ visible: false });
+  };
   const toggleDrawer = () => {
     setOpen(!open);
   };
@@ -116,6 +125,19 @@ export default function Layout() {
 
   return (
     <ThemeProvider theme={theme}>
+      <Dialog open={popup.visible || false} onClose={handleClose}>
+        <DialogTitle>
+          {popup?.error ? (
+            <h2 style={{ color: "red" }}>{popup?.title}</h2>
+          ) : (
+            <h2>
+              <Check style={{ color: "green" }} />
+              {popup?.title}
+            </h2>
+          )}
+        </DialogTitle>
+        <DialogContent className="dialog-content">{popup?.message}</DialogContent>
+      </Dialog>
       <Box sx={{ display: "flex" }}>
         <CssBaseline />
         <AppBar
@@ -164,7 +186,7 @@ export default function Layout() {
               <Stack direction="row" spacing={1}>
                 <ConnectorLink />
                 <WalletConnectLink />
-              </Stack>          
+              </Stack>
             </Box>
           </Toolbar>
         </AppBar>

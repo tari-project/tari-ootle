@@ -36,11 +36,11 @@ import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
-import { shortenString } from "../../../utils/helpers";
+import { shortenString, shortenSubstateId, substateIdToString } from "../../../utils/helpers";
 import NFTList from "../../../Components/NFTList";
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./SendMoney";
-import { ResourceAddress, ResourceType, VaultId, BalanceEntry } from "@tari-project/typescript-bindings";
+import { ResourceAddress, ResourceType, VaultId, BalanceEntry, Account } from "@tari-project/typescript-bindings";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -65,10 +65,15 @@ function BalanceRow(props: BalanceRowProps) {
   return (
     <TableRow key={token_symbol || resource_address}>
       <DataTableCell>
-        <span title={vault_address}>{token_symbol || shortenString(resource_address)}</span>
-        <CopyToClipboard copy={token_symbol || resource_address} />
+        <span title={vault_address}>{shortenSubstateId(vault_address)}</span>
+        <CopyToClipboard copy={substateIdToString(vault_address)} title="Copy vault address" />
       </DataTableCell>
-      <DataTableCell>{resource_type}</DataTableCell>
+      <DataTableCell>
+        <span title={resource_address}>
+          {token_symbol || shortenSubstateId(resource_address)} {resource_type}
+        </span>
+        <CopyToClipboard copy={resource_address} title="Copy resource address" />
+      </DataTableCell>
       <DataTableCell>{showBalance ? balance : "*************"}</DataTableCell>
       <DataTableCell>
         <ConfidentialBalance show={showBalance} resourceType={resource_type} balance={confidential_balance} />
@@ -118,7 +123,7 @@ function tabProps(index: number) {
   };
 }
 
-function Assets({ accountName }: { accountName: string }) {
+function Assets({ account }: { account: Account }) {
   const [resourceToSend, setResourceToSend] = useState<{
     address: ResourceAddress;
     resource_type: ResourceType;
@@ -130,14 +135,14 @@ function Assets({ accountName }: { accountName: string }) {
     isError: balancesIsError,
     error: balancesError,
     isFetching: balancesIsFetching,
-  } = useAccountsGetBalances(accountName);
+  } = useAccountsGetBalances({ ComponentAddress: substateIdToString(account.address) });
 
   const {
     data: nftsListData,
     isError: nftsListIsError,
     error: nftsListError,
     isFetching: nftsListIsFetching,
-  } = useAccountNFTsList({ Name: accountName }, 0, 10);
+  } = useAccountNFTsList({ ComponentAddress: substateIdToString(account.address) }, 0, 10);
 
   const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
     setValue(newValue);
@@ -172,8 +177,8 @@ function Assets({ accountName }: { accountName: string }) {
             <Table>
               <TableHead>
                 <TableRow>
+                  <TableCell>Vault</TableCell>
                   <TableCell>Resource</TableCell>
-                  <TableCell>Resource Type</TableCell>
                   <TableCell>Revealed Balance</TableCell>
                   <TableCell>Confidential Balance</TableCell>
                   <TableCell></TableCell>

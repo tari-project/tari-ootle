@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use log::*;
 use tari_dan_common_types::{
@@ -102,37 +102,53 @@ where
             .with_write_tx(|tx| tx.transactions_insert(&transaction, &required_substates, None, true))?;
 
         let tx_id = *transaction.id();
-        let query = self
+        let result = self
             .network_interface
             .submit_dry_run_transaction(transaction, required_substates)
             .await
-            .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()))?;
+            .map_err(|e| TransactionApiError::NetworkInterfaceError(e.to_string()));
 
-        match &query.result {
-            TransactionFinalizedResult::Pending => {
-                return Err(TransactionApiError::NetworkInterfaceError(
-                    "Pending execution result returned from dry run".to_string(),
-                ));
+        match result {
+            Ok(query) => match &query.result {
+                TransactionFinalizedResult::Pending => {
+                    return Err(TransactionApiError::NetworkInterfaceError(
+                        "Pending execution result returned from dry run".to_string(),
+                    ));
+                },
+                TransactionFinalizedResult::Finalized {
+                    execution_result,
+                    finalized_time,
+                    execution_time,
+                    ..
+                } => {
+                    self.store.with_write_tx(|tx| {
+                        tx.transactions_set_result_and_status(
+                            query.transaction_id,
+                            execution_result.as_ref().map(|e| &e.finalize),
+                            execution_result
+                                .as_ref()
+                                .map(|e| e.finalize.fee_receipt.total_fees_charged()),
+                            None,
+                            TransactionStatus::DryRun,
+                            Some(*execution_time),
+                            Some(*finalized_time),
+                        )
+                    })?;
+                },
             },
-            TransactionFinalizedResult::Finalized {
-                execution_result,
-                finalized_time,
-                execution_time,
-                ..
-            } => {
+            Err(err) => {
                 self.store.with_write_tx(|tx| {
                     tx.transactions_set_result_and_status(
-                        query.transaction_id,
-                        execution_result.as_ref().map(|e| &e.finalize),
-                        execution_result
-                            .as_ref()
-                            .map(|e| e.finalize.fee_receipt.total_fees_charged()),
+                        tx_id,
                         None,
-                        TransactionStatus::DryRun,
-                        Some(*execution_time),
-                        Some(*finalized_time),
+                        None,
+                        None,
+                        TransactionStatus::DryRunFailed,
+                        None,
+                        None,
                     )
                 })?;
+                return Err(err);
             },
         }
 
@@ -280,6 +296,7 @@ where
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn commit_result(
         &self,
         tx: &mut TStore::WriteTransaction<'_>,
@@ -299,7 +316,7 @@ where
             };
 
             if let Some(parent) = downed.parent_address {
-                downed_substates_with_parents.insert(downed.substate_id.substate_id, parent);
+                downed_substates_with_parents.insert(downed.substate_id.into_substate_id(), parent);
             }
         }
 
@@ -307,29 +324,69 @@ where
 
         for (component_addr, substate) in components {
             let header = substate.substate_value().component().unwrap();
+            let indexed = IndexedWellKnownTypes::from_value(header.state())?;
 
             debug!(target: LOG_TARGET, "Substate {} up", component_addr);
             tx.substates_upsert_root(
                 transaction_id,
                 VersionedSubstateId::new(component_addr.clone(), substate.version()),
+                indexed.referenced_substates().collect(),
                 Some(header.module_name.clone()),
                 Some(header.template_address),
             )?;
 
             let value = IndexedWellKnownTypes::from_value(header.state())?;
 
-            for owned_addr in value.referenced_substates() {
-                if let Some(pos) = rest.iter().position(|(addr, _)| addr == &owned_addr) {
+            for owned_id in value.referenced_substates() {
+                if let Some(pos) = rest.iter().position(|(addr, _)| addr == &owned_id) {
                     let (_, s) = rest.swap_remove(pos);
                     // If there was a previous parent for this substate, we keep it as is.
                     let parent = downed_substates_with_parents
-                        .get(&owned_addr)
+                        .get(&owned_id)
                         .cloned()
                         .unwrap_or_else(|| component_addr.clone());
-                    tx.substates_upsert_child(transaction_id, parent, VersionedSubstateId {
-                        substate_id: owned_addr,
-                        version: s.version(),
-                    })?;
+
+                    if owned_id.is_vault() {
+                        if let Some(vault) = tx.vaults_get(&owned_id).optional()? {
+                            // The vault for an account may have been mutated without mutating the account component
+                            // If we know this vault, set it as a child of the account
+                            tx.substates_upsert_child(
+                                transaction_id,
+                                vault.account_address.clone(),
+                                VersionedSubstateId::new(owned_id, substate.version()),
+                                [vault.resource_address.into()].into_iter().collect(),
+                            )?;
+                            if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
+                                tx.substates_upsert_child(
+                                    transaction_id,
+                                    vault.account_address,
+                                    resource.substate_id,
+                                    HashSet::new(),
+                                )?;
+                            }
+                        } else {
+                            tx.substates_upsert_root(
+                                transaction_id,
+                                VersionedSubstateId::new(owned_id, substate.version()),
+                                [(*s.substate_value().vault().unwrap().resource_address()).into()]
+                                    .into_iter()
+                                    .collect(),
+                                None,
+                                None,
+                            )?;
+                        }
+                        continue;
+                    }
+
+                    let maybe_substate = tx.substates_get(&owned_id).optional()?;
+                    tx.substates_upsert_child(
+                        transaction_id,
+                        parent,
+                        VersionedSubstateId::new(owned_id, s.version()),
+                        maybe_substate
+                            .map(|s| s.referenced_substates.into_iter().collect())
+                            .unwrap_or_default(),
+                    )?;
                 }
             }
         }
@@ -339,21 +396,46 @@ where
                 if let Some(vault) = tx.vaults_get(id).optional()? {
                     // The vault for an account may have been mutated without mutating the account component
                     // If we know this vault, set it as a child of the account
-                    tx.substates_upsert_child(transaction_id, vault.account_address, VersionedSubstateId {
-                        substate_id: id.clone(),
-                        version: substate.version(),
-                    })?;
-                    continue;
+                    tx.substates_upsert_child(
+                        transaction_id,
+                        vault.account_address.clone(),
+                        VersionedSubstateId::new(id.clone(), substate.version()),
+                        [vault.resource_address.into()].into_iter().collect(),
+                    )?;
+                    if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
+                        tx.substates_upsert_child(
+                            transaction_id,
+                            vault.account_address,
+                            resource.substate_id,
+                            HashSet::new(),
+                        )?;
+                    }
+                } else {
+                    tx.substates_upsert_root(
+                        transaction_id,
+                        VersionedSubstateId::new(id.clone(), substate.version()),
+                        [(*substate.substate_value().vault().unwrap().resource_address()).into()]
+                            .into_iter()
+                            .collect(),
+                        None,
+                        None,
+                    )?;
                 }
+                continue;
             }
+            let indexed = substate
+                .substate_value()
+                .component()
+                .map(|c| IndexedWellKnownTypes::from_value(c.state()))
+                .transpose()?;
+
+            let maybe_obj = tx.substates_get(id).optional()?;
             tx.substates_upsert_root(
                 transaction_id,
-                VersionedSubstateId {
-                    substate_id: id.clone(),
-                    version: substate.version(),
-                },
-                None,
-                None,
+                VersionedSubstateId::new(id.clone(), substate.version()),
+                indexed.as_ref().iter().flat_map(|i| i.referenced_substates()).collect(),
+                maybe_obj.as_ref().and_then(|o| o.module_name.clone()),
+                maybe_obj.as_ref().and_then(|o| o.template_address),
             )?;
         }
 

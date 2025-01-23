@@ -52,8 +52,8 @@ pub fn create_execution_result_for_transaction(
                     // Generate consistent state for the component by simply using the ID
                     let state = tari_bor::to_value(output.versioned_substate_id()).unwrap();
                     diff.up(
-                        output.versioned_substate_id().substate_id.clone(),
-                        Substate::new(output.versioned_substate_id().version, ComponentHeader {
+                        output.versioned_substate_id().substate_id().clone(),
+                        Substate::new(output.versioned_substate_id().version(), ComponentHeader {
                             template_address: Default::default(),
                             module_name: "Test".to_string(),
                             owner_key: Default::default(),
@@ -61,7 +61,7 @@ pub fn create_execution_result_for_transaction(
                             access_rules: Default::default(),
                             entity_id: output
                                 .versioned_substate_id()
-                                .substate_id
+                                .substate_id()
                                 .as_component_address()
                                 .unwrap()
                                 .entity_id(),
@@ -77,8 +77,8 @@ pub fn create_execution_result_for_transaction(
                         .expect("No publish template instruction found in transaction")
                         .to_vec();
                     diff.up(
-                        output.versioned_substate_id().substate_id.clone(),
-                        Substate::new(output.versioned_substate_id().version, PublishedTemplate { binary }),
+                        output.versioned_substate_id().substate_id().clone(),
+                        Substate::new(output.versioned_substate_id().version(), PublishedTemplate { binary }),
                     );
                 },
                 _ => {

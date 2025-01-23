@@ -2016,16 +2016,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 source: e,
             })?;
 
-        // let results = substates::table
-        //     .group_by(substates::substate_id)
-        //     .select((substates::all_columns, dsl::max(substates::version))
-        //     .filter(substates::substate_id.eq_any(substate_ids.into_iter().map(ToString::to_string)))
-        //     .get_results::<(sql_models::SubstateRecord, Option<i32>)>(self.connection())
-        //     .map_err(|e| SqliteStorageError::DieselError {
-        //         operation: "substates_get_any_max_version",
-        //         source: e,
-        //     })?;
-
         results.into_iter().map(TryInto::try_into).collect()
     }
 

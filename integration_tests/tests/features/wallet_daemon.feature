@@ -79,7 +79,7 @@ Feature: Wallet Daemon
     When I check the balance of ACC_1 on wallet daemon WALLET_D the amount is at least 8000
     # TODO: Figure out why this is taking more than 10 seconds to update
     #        When I wait for ACC_2 on wallet daemon WALLET_D to have balance eq 50
-  
+
   Scenario: Claim and transfer confidential assets via wallet daemon
         # Initialize a base node, wallet, miner and VN
     Given a base node BASE
@@ -135,5 +135,7 @@ Feature: Wallet Daemon
     # Create two accounts to test sending the tokens
     When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
 
-        # Mint a new account NFT
+    When I print the cucumber world
+
+    # Mint a new account NFT
     When I mint a new non fungible token NFT on ACC using wallet daemon WALLET_D

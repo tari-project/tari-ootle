@@ -180,7 +180,6 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         .all_inputs_iter()
                         .map(|i| i.or_zero_version().to_substate_address()),
                 );
-                // TODO: consider sending Decision::Abort(AbortReason) in the block.
                 // Currently this message will differ depending on which involved shard is asked.
                 // e.g. local nodes will say "failed to lock inputs", foreign nodes will say "foreign shard abort"
                 transaction.set_abort_reason(RejectReason::OneOrMoreInputsNotFound(err.to_string()));

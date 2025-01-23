@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashSet,
     ops::{Deref, DerefMut},
     time::Duration,
 };
@@ -248,6 +249,7 @@ pub trait WalletStoreWriter {
         &mut self,
         transaction_id: TransactionId,
         address: VersionedSubstateId,
+        referenced_substates: HashSet<SubstateId>,
         module_name: Option<String>,
         template_addr: Option<TemplateAddress>,
     ) -> Result<(), WalletStorageError>;
@@ -256,6 +258,7 @@ pub trait WalletStoreWriter {
         transaction_id: TransactionId,
         parent: SubstateId,
         address: VersionedSubstateId,
+        referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError>;
     fn substates_remove(&mut self, substate: &SubstateId) -> Result<SubstateModel, WalletStorageError>;
 

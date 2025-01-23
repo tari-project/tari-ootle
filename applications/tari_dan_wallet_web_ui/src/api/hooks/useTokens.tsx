@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiError } from "../helpers/types";
+import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 import { authGetAllJwt, authRevoke } from "../../utils/json_rpc";
 
@@ -31,7 +31,7 @@ export const useGetAllTokens = () => {
     queryFn: () => {
       return authGetAllJwt({});
     },
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
     },
   });
@@ -43,7 +43,7 @@ export const useAuthRevokeToken = () => {
     return result;
   };
   return useMutation(revokeToken, {
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
       console.error(error);
     },

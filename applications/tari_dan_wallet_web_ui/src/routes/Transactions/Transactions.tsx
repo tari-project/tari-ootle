@@ -41,19 +41,24 @@ import { DataTableCell } from "../../Components/StyledComponents";
 import { useGetAllTransactions } from "../../api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
 import { useAccountsGet } from "../../api/hooks/useAccounts";
-import type { FinalizeResult, Transaction, TransactionStatus } from "@tari-project/typescript-bindings";
+import {
+  Account,
+  FinalizeResult,
+  substateIdToString,
+  Transaction,
+  TransactionStatus,
+} from "@tari-project/typescript-bindings";
 
-export default function Transactions({ accountName }: { accountName: string }) {
-  const { data: accountsData } = useAccountsGet(accountName);
+export default function Transactions({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const { data, isLoading, error, isError, refetch } = useGetAllTransactions(
     null,
-    (accountsData && (accountsData?.account.address as unknown as string)) || null,
+    account ? substateIdToString(account.address) : null,
   );
   useEffect(() => {
     refetch();
-  }, [accountsData?.account.address]);
+  }, [account]);
   const theme = useTheme();
 
   return (

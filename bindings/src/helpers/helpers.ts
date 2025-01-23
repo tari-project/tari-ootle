@@ -7,12 +7,15 @@ import { SubstateDiff } from "../types/SubstateDiff";
 import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
 
-export function substateIdToString(substateId: SubstateId | string | null): string {
-  if (substateId === null) {
+export function substateIdToString(substateId: SubstateId | string | null | undefined): string {
+  if (substateId === null || substateId === undefined) {
     return "";
   }
   if (typeof substateId === "string") {
     return substateId;
+  }
+  if (typeof substateId !== "object") {
+    throw new Error(`Cannot convert: ${JSON.stringify(substateId)} to string`);
   }
   if ("Component" in substateId) {
     return substateId.Component;
@@ -68,6 +71,22 @@ export function stringToSubstateId(substateId: string): SubstateId {
     default:
       throw new Error(`Unknown substate id: ${substateId}`);
   }
+}
+
+export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 4, end: number = 4) {
+  if (substateId === null || substateId === undefined) {
+    return "";
+  }
+  const string = substateIdToString(substateId);
+  const parts = string.split("_", 2);
+  if (parts.length < 2) {
+    return string;
+  }
+  return parts[0] + "_" + shortenString(parts[1], start, end);
+}
+
+export function shortenString(string: string, start: number = 8, end: number = 8) {
+  return string.substring(0, start) + "..." + string.slice(-end);
 }
 
 export function rejectReasonToString(reason: RejectReason | null): string {

@@ -60,14 +60,15 @@ CREATE INDEX transactions_idx_status ON transactions (status);
 -- Substates
 CREATE TABLE substates
 (
-    id               INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    module_name      TEXT     NULL,
-    address          TEXT     NOT NULL,
-    parent_address   TEXT     NULL,
-    version          INTEGER  NOT NULL,
-    transaction_hash TEXT     NOT NULL,
-    template_address TEXT     NULL,
-    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                   INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    module_name          TEXT     NULL,
+    address              TEXT     NOT NULL,
+    parent_address       TEXT     NULL,
+    referenced_substates TEXT     NOT NULL,
+    version              INTEGER  NOT NULL,
+    transaction_hash     TEXT     NOT NULL,
+    template_address     TEXT     NULL,
+    created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX substates_idx_transaction_hash ON substates (transaction_hash);

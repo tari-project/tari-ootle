@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, decode_exact, encode};
-use tari_dan_common_types::{NodeAddressable, PeerAddress, SubstateAddress};
+use tari_dan_common_types::{NodeAddressable, PeerAddress, SubstateRequirement};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
@@ -43,7 +43,7 @@ pub trait ValidatorNodeRpcClient: Send + Sync {
         transaction_id: TransactionId,
     ) -> Result<TransactionResultStatus, Self::Error>;
 
-    async fn get_substate(&mut self, shard: SubstateAddress) -> Result<SubstateResult, Self::Error>;
+    async fn get_substate(&mut self, substate_req: &SubstateRequirement) -> Result<SubstateResult, Self::Error>;
     async fn get_virtual_substate(&mut self, address: VirtualSubstateId) -> Result<VirtualSubstate, Self::Error>;
 }
 
@@ -76,6 +76,16 @@ pub enum SubstateResult {
         created_by_tx: TransactionId,
         deleted_by_tx: TransactionId,
     },
+}
+
+impl SubstateResult {
+    pub fn version(&self) -> Option<u32> {
+        match self {
+            SubstateResult::Up { substate, .. } => Some(substate.version()),
+            SubstateResult::Down { version, .. } => Some(*version),
+            SubstateResult::DoesNotExist => None,
+        }
+    }
 }
 
 pub struct TariValidatorNodeRpcClient<TMsg: MessageSpec> {
@@ -118,11 +128,11 @@ impl<TMsg: MessageSpec> ValidatorNodeRpcClient for TariValidatorNodeRpcClient<TM
         Ok(id)
     }
 
-    async fn get_substate(&mut self, address: SubstateAddress) -> Result<SubstateResult, Self::Error> {
+    async fn get_substate(&mut self, substate_req: &SubstateRequirement) -> Result<SubstateResult, Self::Error> {
         let mut client = self.client_connection().await?;
 
         let request = proto::rpc::GetSubstateRequest {
-            address: address.as_bytes().to_vec(),
+            substate_requirement: Some(substate_req.into()),
         };
 
         let resp = client.get_substate(request).await?;

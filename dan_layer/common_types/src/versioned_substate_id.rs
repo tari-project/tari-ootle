@@ -50,6 +50,10 @@ impl SubstateRequirement {
         self.substate_id
     }
 
+    pub fn into_unversioned(self) -> Self {
+        Self::unversioned(self.substate_id)
+    }
+
     pub fn version(&self) -> Option<u32> {
         self.version
     }
@@ -145,6 +149,12 @@ impl PartialEq for SubstateRequirement {
     }
 }
 
+impl PartialEq<SubstateId> for SubstateRequirement {
+    fn eq(&self, other: &SubstateId) -> bool {
+        self.substate_id == *other
+    }
+}
+
 impl Eq for SubstateRequirement {}
 
 // Only consider the substate id in maps. This means that duplicates found if the substate id is the same regardless of
@@ -152,6 +162,12 @@ impl Eq for SubstateRequirement {}
 impl std::hash::Hash for SubstateRequirement {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.substate_id.hash(state);
+    }
+}
+
+impl Borrow<SubstateId> for SubstateRequirement {
+    fn borrow(&self) -> &SubstateId {
+        &self.substate_id
     }
 }
 
@@ -166,8 +182,8 @@ pub struct SubstateRequirementParseError(String);
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct VersionedSubstateId {
-    pub substate_id: SubstateId,
-    pub version: u32,
+    substate_id: SubstateId,
+    version: u32,
 }
 
 impl VersionedSubstateId {
@@ -180,6 +196,10 @@ impl VersionedSubstateId {
 
     pub fn substate_id(&self) -> &SubstateId {
         &self.substate_id
+    }
+
+    pub fn into_substate_id(self) -> SubstateId {
+        self.substate_id
     }
 
     pub fn version(&self) -> u32 {
@@ -201,6 +221,10 @@ impl VersionedSubstateId {
             substate_id: &self.substate_id,
             version: self.version,
         }
+    }
+
+    pub fn into_unversioned_requirement(self) -> SubstateRequirement {
+        SubstateRequirement::unversioned(self.substate_id)
     }
 }
 

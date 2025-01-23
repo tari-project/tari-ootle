@@ -324,12 +324,13 @@ impl SubstatePledge {
     pub fn satisfies_requirement(&self, req: &SubstateRequirement) -> bool {
         // Check if a requirement is met by this pledge. If the requirement does not specify a version, then the version
         // requirement is, by definition, met.
-        req.version.map_or(true, |v| v == self.versioned_substate_id().version) &&
+        req.version
+            .map_or(true, |v| v == self.versioned_substate_id().version()) &&
             self.substate_id() == req.substate_id()
     }
 
     pub fn satisfies_substate_and_version(&self, substate_id: &SubstateId, version: u32) -> bool {
-        self.versioned_substate_id().version == version && self.substate_id() == substate_id
+        self.versioned_substate_id().version() == version && self.substate_id() == substate_id
     }
 
     pub fn satisfies_lock_intent<T: LockIntent>(&self, lock_intent: T) -> bool {
@@ -352,7 +353,7 @@ impl SubstatePledge {
 impl Hash for SubstatePledge {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.substate_id().hash(state);
-        self.versioned_substate_id().version.hash(state);
+        self.versioned_substate_id().version().hash(state);
         self.as_substate_lock_type().hash(state);
     }
 }

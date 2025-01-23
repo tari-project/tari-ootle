@@ -10,7 +10,6 @@ use rand::rngs::OsRng;
 use serde_json::json;
 use tari_common_types::types::PublicKey;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _};
-use tari_dan_common_types::optional::Optional;
 use tari_dan_wallet_crypto::{AlwaysMissLookupTable, ConfidentialProofStatement, IoReaderValueLookup};
 use tari_dan_wallet_sdk::{
     apis::{jwt::JrpcPermission, key_manager},
@@ -94,16 +93,9 @@ pub async fn handle_create_transfer_proof(
         &account_secret.key,
     )?;
 
-    let known_resource_substate_address = sdk
-        .substate_api()
-        .get_substate(&req.resource_address.into())
-        .optional()?;
     let resource = sdk
         .substate_api()
-        .scan_for_substate(
-            &req.resource_address.into(),
-            known_resource_substate_address.map(|s| s.substate_id.version),
-        )
+        .scan_for_substate(&req.resource_address.into(), None)
         .await?;
     let resource_view_key = resource
         .substate

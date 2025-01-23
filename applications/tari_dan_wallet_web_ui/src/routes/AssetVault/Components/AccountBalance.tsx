@@ -30,26 +30,44 @@ import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { useAccountsGetBalances } from "../../../api/hooks/useAccounts";
 import TariGem from "../../../assets/TariGem";
 import useAccountStore from "../../../store/accountStore";
+import { substateIdToString } from "@tari-project/typescript-bindings";
+import { useEffect } from "react";
 
-function AccountBalance({ accountName }: { accountName: string }) {
-  const { showBalance, setShowBalance } = useAccountStore();
+export default function AccountBalance() {
+  const theme = useTheme();
+  const { showBalance, setShowBalance, account } = useAccountStore();
+  if (!account) return <></>;
+
   const {
     data: balancesData,
     isError: balancesIsError,
     error: balancesError,
     isFetching: balancesIsFetching,
-  } = useAccountsGetBalances(accountName || "");
-  const theme = useTheme();
+    isLoading: balancesIsLoading,
+    isRefetching: balancesIsRefetching,
+    refetch,
+  } = useAccountsGetBalances({ ComponentAddress: substateIdToString(account.address) });
 
-  const balance =
-    balancesData?.balances[0]?.balance && balancesData?.balances[0]?.confidential_balance
-      ? balancesData?.balances[0]?.balance + balancesData?.balances[0]?.confidential_balance
-      : 0;
+  useEffect(() => {
+    refetch();
+  }, [account]);
 
-  const formattedBalance = balance.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  const balanceObj = balancesData?.balances.find((b) => b.token_symbol === "XTR") || balancesData?.balances[0];
+  const balance = balanceObj?.balance || 0 + (balanceObj?.confidential_balance || 0);
+
+  let formattedBalance = "";
+  if (balancesIsLoading || balancesIsRefetching) {
+    formattedBalance = "...";
+  } else {
+    if (showBalance) {
+      formattedBalance = balance.toLocaleString("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      });
+    } else {
+      formattedBalance = "************";
+    }
+  }
 
   return (
     <FetchStatusCheck
@@ -74,17 +92,9 @@ function AccountBalance({ accountName }: { accountName: string }) {
             }}
           >
             <Typography variant="h2">
-              {showBalance
-                ? (
-                    <>
-                      <TariGem fill={theme.palette.text.primary} /> {formattedBalance}
-                    </>
-                  ) || (
-                    <>
-                      <TariGem fill={theme.palette.text.primary} /> 0
-                    </>
-                  )
-                : "************"}
+              <>
+                <TariGem fill={theme.palette.text.primary} /> {formattedBalance}
+              </>
             </Typography>
             <IconButton onClick={() => setShowBalance(!showBalance)}>
               {showBalance ? (
@@ -99,5 +109,3 @@ function AccountBalance({ accountName }: { accountName: string }) {
     </FetchStatusCheck>
   );
 }
-
-export default AccountBalance;

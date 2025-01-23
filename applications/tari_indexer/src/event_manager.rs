@@ -25,7 +25,7 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use log::*;
 use tari_crypto::tari_utilities::message_format::MessageFormat;
 use tari_dan_app_utilities::substate_file_cache::SubstateFileCache;
-use tari_dan_common_types::PeerAddress;
+use tari_dan_common_types::{PeerAddress, SubstateRequirement};
 use tari_engine_types::{events::Event, substate::SubstateId};
 use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
@@ -154,7 +154,7 @@ impl EventManager {
             }
             let network_version_events = self
                 .substate_scanner
-                .get_events_for_substate_and_version(&substate_id, v)
+                .get_events_for_substate_and_version(&SubstateRequirement::with_version(substate_id.clone(), v))
                 .await?;
             events.extend(network_version_events);
         }
@@ -170,9 +170,7 @@ impl EventManager {
         // because the same substate_id with different version
         // can be processed in the same transaction, we need to avoid
         // duplicates
-        for (_, event) in network_events {
-            events.push(event);
-        }
+        events.extend(network_events);
 
         Ok(events)
     }

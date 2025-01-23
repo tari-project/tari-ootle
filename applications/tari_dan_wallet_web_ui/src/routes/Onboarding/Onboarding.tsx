@@ -31,10 +31,11 @@ import { useTheme } from "@mui/material/styles";
 import Loading from "../../Components/Loading";
 import { useAccountsCreateFreeTestCoins } from "../../api/hooks/useAccounts";
 import useAccountStore from "../../store/accountStore";
+import { substateIdToString } from "@tari-project/typescript-bindings";
 
 function Onboarding() {
   const { mutate, status } = useAccountsCreateFreeTestCoins();
-  const { setAccountName } = useAccountStore();
+  const { setAccount, setPublicKey } = useAccountStore();
   const theme = useTheme();
 
   const [accountFormState, setAccountFormState] = useState({
@@ -44,13 +45,14 @@ function Onboarding() {
   const handleCreateAccount = () => {
     mutate(
       {
-        accountName: accountFormState.accountName,
+        account: { Name: accountFormState.accountName },
         amount: 1_000_000_000,
         fee: 1000,
       },
       {
-        onSuccess: () => {
-          setAccountName(accountFormState.accountName);
+        onSuccess: (resp) => {
+          setAccount(resp.account);
+          setPublicKey(resp.public_key);
         },
       },
     );

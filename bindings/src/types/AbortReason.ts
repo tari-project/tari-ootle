@@ -8,7 +8,6 @@ export type AbortReason =
   | "LockInputsFailed"
   | "LockOutputsFailed"
   | "LockInputsOutputsFailed"
-  | "LeaderProposalVsLocalDecisionMismatch"
   | "InvalidTransaction"
   | "ExecutionFailure"
   | "OneOrMoreInputsNotFound"

@@ -169,8 +169,8 @@ impl Test {
             .map(|id| {
                 let value = make_test_component(id.substate_id().as_component_address().unwrap().entity_id());
                 SubstateRecord::new(
-                    id.substate_id.clone(),
-                    id.version,
+                    id.substate_id().clone(),
+                    id.version(),
                     value,
                     Shard::zero(),
                     Epoch(0),

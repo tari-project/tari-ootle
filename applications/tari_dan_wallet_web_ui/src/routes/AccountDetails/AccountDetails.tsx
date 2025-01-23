@@ -53,20 +53,20 @@ function BalanceRow(props: BalanceEntry) {
 }
 
 function AccountDetailsLayout() {
-  const { name: accountName } = useParams();
+  const { id: accountId } = useParams();
   const {
     data: balancesData,
     isLoading: balancesIsLoading,
     isError: balancesIsError,
     error: balancesError,
-  } = useAccountsGetBalances(accountName || "");
+  } = useAccountsGetBalances(accountId ? { ComponentAddress: accountId } : null);
 
   const {
     data: accountsData,
     isLoading: accountsIsLoading,
     isError: accountsIsError,
     error: accountsError,
-  } = useAccountsGet(accountName || "");
+  } = useAccountsGet({ ComponentAddress: accountId || "" });
 
   const name = accountsData?.account?.name || null;
   const {

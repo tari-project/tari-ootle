@@ -10,15 +10,20 @@ use tari_common_types::types::{PrivateKey, PublicKey};
 use tari_crypto::keys::PublicKey as _;
 use tari_dan_common_types::{
     optional::{IsNotFoundError, Optional},
-    VersionedSubstateId,
+    substate_type::SubstateType,
+    SubstateRequirement,
 };
 use tari_dan_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProofStatement};
-use tari_engine_types::{component::new_component_address_from_public_key, substate::SubstateId};
+use tari_engine_types::{
+    component::new_component_address_from_public_key,
+    indexed_value::IndexedWellKnownTypes,
+    substate::SubstateId,
+};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::{Amount, ComponentAddress, ResourceAddress},
+    models::{Amount, ComponentAddress, ResourceAddress, VaultId},
 };
 use tari_transaction::Transaction;
 
@@ -211,71 +216,100 @@ where
     async fn resolve_destination_account(
         &self,
         destination_pk: &PublicKey,
-    ) -> Result<(VersionedSubstateId, bool), ConfidentialTransferApiError> {
+    ) -> Result<AccountDetails, ConfidentialTransferApiError> {
         let account_component = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, destination_pk);
+        // Is it an account we own?
+        if let Some(vaults) = self
+            .accounts_api
+            .get_vaults_by_account(&account_component.into())
+            .optional()?
+        {
+            return Ok(AccountDetails {
+                address: account_component,
+                vaults: vaults
+                    .into_iter()
+                    .map(|v| v.address.as_vault_id().expect("BUG: not vault id"))
+                    .collect(),
+                exists: true,
+            });
+        }
+
         match self
             .substate_api
             .scan_for_substate(&account_component.into(), None)
             .await
             .optional()?
         {
-            Some(ValidatorScanResult { address, .. }) => Ok((address, true)),
-            None => Ok((VersionedSubstateId::new(account_component, 0), false)),
+            Some(ValidatorScanResult { address, substate, .. }) => {
+                let indexed_component = substate
+                    .component()
+                    .map(|c| IndexedWellKnownTypes::from_value(c.state()))
+                    .transpose()
+                    .map_err(|e| ConfidentialTransferApiError::UnexpectedIndexerResponse {
+                        details: format!("Failed to extract vaults from account component: {e}"),
+                    })?
+                    .ok_or_else(|| ConfidentialTransferApiError::UnexpectedIndexerResponse {
+                        details: format!(
+                            "Expected indexer to return a component for account {} but it returned {} (value type: {})",
+                            account_component,
+                            address,
+                            SubstateType::from(&substate)
+                        ),
+                    })?;
+                Ok(AccountDetails {
+                    address: account_component,
+                    vaults: indexed_component.vault_ids().to_vec(),
+                    exists: true,
+                })
+            },
+            None => Ok(AccountDetails {
+                address: account_component,
+                vaults: vec![],
+                exists: false,
+            }),
         }
     }
 
     #[allow(clippy::too_many_lines)]
     pub async fn transfer(&self, params: TransferParams) -> Result<TransferOutput, ConfidentialTransferApiError> {
         let from_account = self.accounts_api.get_account_by_address(&params.from_account.into())?;
-        let (to_account, dest_account_exists) =
-            self.resolve_destination_account(&params.destination_public_key).await?;
+        let to_account = self.resolve_destination_account(&params.destination_public_key).await?;
         let from_account_address = from_account.address.as_component_address().unwrap();
 
         // Determine Transaction Inputs
         let mut inputs = Vec::new();
 
+        let dest_account_exists = to_account.exists;
         if dest_account_exists {
-            inputs.push(to_account.clone());
+            inputs.push(SubstateRequirement::unversioned(to_account.address));
+            inputs.extend(to_account.vaults.into_iter().map(SubstateRequirement::unversioned))
         }
 
         let account = self.accounts_api.get_account_by_address(&params.from_account.into())?;
         let account_substate = self.substate_api.get_substate(&params.from_account.into())?;
-        inputs.push(account_substate.substate_id);
+        inputs.push(account_substate.substate_id.into_unversioned_requirement());
 
         // Add all versioned account child addresses as inputs
         let child_addresses = self.substate_api.load_dependent_substates(&[&account.address])?;
-        inputs.extend(child_addresses);
+        inputs.extend(child_addresses.into_iter().map(|a| a.into_unversioned()));
 
         let src_vault = self
             .accounts_api
             .get_vault_by_resource(&account.address, &params.resource_address)?;
         let src_vault_substate = self.substate_api.get_substate(&src_vault.address)?;
-        inputs.push(src_vault_substate.substate_id);
+        inputs.push(src_vault_substate.substate_id.into_unversioned_requirement());
 
         // add the input for the resource address to be transferred
-        let maybe_known_resource = self
-            .substate_api
-            .get_substate(&params.resource_address.into())
-            .optional()?;
+        inputs.push(SubstateRequirement::unversioned(params.resource_address));
+
+        // We need to fetch the resource substate to check if there is a view key present.
         let resource_substate = self
             .substate_api
-            .scan_for_substate(
-                &SubstateId::Resource(params.resource_address),
-                maybe_known_resource.map(|r| r.substate_id.version),
-            )
+            .scan_for_substate(&SubstateId::Resource(params.resource_address), None)
             .await?;
-        inputs.push(resource_substate.address.clone());
 
         if let Some(ref resource_address) = params.proof_from_resource {
-            let maybe_known_resource = self.substate_api.get_substate(&(*resource_address).into()).optional()?;
-            let resource_substate = self
-                .substate_api
-                .scan_for_substate(
-                    &SubstateId::Resource(*resource_address),
-                    maybe_known_resource.map(|r| r.substate_id.version),
-                )
-                .await?;
-            inputs.push(resource_substate.address.clone());
+            inputs.push(SubstateRequirement::unversioned(*resource_address));
         }
 
         // Reserve and lock input funds for fees
@@ -452,17 +486,13 @@ where
                 proof
             ])
             .put_last_instruction_output_on_workspace("bucket")
-            .call_method(
-                to_account.substate_id.as_component_address().unwrap(),
-                "deposit",
-                args![Workspace("bucket")],
-            );
+            .call_method(to_account.address, "deposit", args![Workspace("bucket")]);
 
         if params.proof_from_resource.is_some() {
             builder = builder.drop_all_proofs_in_workspace();
         }
 
-        let transaction = builder.build_and_seal(&account_secret.key);
+        let transaction = builder.with_inputs(inputs).build_and_seal(&account_secret.key);
 
         self.outputs_api
             .proofs_set_transaction_hash(inputs_to_spend.proof_id, *transaction.id())?;
@@ -471,7 +501,7 @@ where
 
         Ok(TransferOutput {
             transaction,
-            inputs,
+            autofill_inputs: vec![],
             fee_transaction_proof_id: Some(fee_inputs_to_spend.proof_id),
             transaction_proof_id: Some(inputs_to_spend.proof_id),
         })
@@ -512,7 +542,7 @@ where
 
 pub struct TransferOutput {
     pub transaction: Transaction,
-    pub inputs: Vec<VersionedSubstateId>,
+    pub autofill_inputs: Vec<SubstateRequirement>,
     pub fee_transaction_proof_id: Option<ConfidentialProofId>,
     pub transaction_proof_id: Option<ConfidentialProofId>,
 }
@@ -620,4 +650,10 @@ impl IsNotFoundError for ConfidentialTransferApiError {
     fn is_not_found_error(&self) -> bool {
         matches!(self, Self::StoreError(e) if e.is_not_found_error() )
     }
+}
+
+pub struct AccountDetails {
+    pub address: ComponentAddress,
+    pub vaults: Vec<VaultId>,
+    pub exists: bool,
 }

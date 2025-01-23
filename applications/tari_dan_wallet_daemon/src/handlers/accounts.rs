@@ -36,7 +36,6 @@ use tari_template_lib::{
     models::{Amount, UnclaimedConfidentialOutputAddress},
     prelude::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
 };
-use tari_transaction::Transaction;
 use tari_wallet_daemon_client::{
     types::{
         AccountGetDefaultRequest,
@@ -77,6 +76,7 @@ use crate::{
         get_account_with_inputs,
         invalid_params,
         not_found,
+        transaction_builder,
         wait_for_result,
         wait_for_result_and_account,
     },
@@ -123,7 +123,7 @@ pub async fn handle_create(
     );
 
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(default_account.address.as_component_address().unwrap(), max_fee)
         .create_account(owner_pk.clone())
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
@@ -219,7 +219,7 @@ pub async fn handle_invoke(
     let inputs = sdk.substate_api().load_dependent_substates(&[&account.address])?;
 
     let account_address = account.address.as_component_address().unwrap();
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account_address, req.max_fee.unwrap_or(DEFAULT_FEE))
         .call_method(account_address, &req.method, req.args)
         .with_inputs(inputs)
@@ -320,6 +320,7 @@ pub async fn handle_reveal_funds(
 
     // If the caller aborts the request early, this async block would be aborted at any await point. To avoid this, we
     // spawn a task that will continue running.
+    let ctx = context.clone();
     task::spawn(async move {
         let account = get_account_or_default(req.account, &sdk.accounts_api())?;
 
@@ -384,7 +385,7 @@ pub async fn handle_reveal_funds(
 
         let account_address = account.address.as_component_address().unwrap();
 
-        let mut builder = Transaction::builder();
+        let mut builder = transaction_builder(&ctx);
         if req.pay_fee_from_reveal {
             builder = builder.with_fee_instructions(vec![
                 Instruction::CallMethod {
@@ -687,7 +688,7 @@ async fn finish_claiming<T: WalletStore>(
         method: "pay_fee".to_string(),
         args: args![max_fee],
     });
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_fee_instructions(instructions)
         .with_inputs(inputs)
         .build_and_seal(&account_secret_key.key);
@@ -935,7 +936,7 @@ pub async fn handle_transfer(
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_fee_instructions(fee_instructions)
         .with_instructions(instructions)
         .add_input(resource_substate_address)

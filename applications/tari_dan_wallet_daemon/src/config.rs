@@ -24,7 +24,12 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use config::Config;
 use serde::{Deserialize, Serialize};
-use tari_common::{configuration::CommonConfig, ConfigurationError, DefaultConfigLoader, SubConfigPath};
+use tari_common::{
+    configuration::{CommonConfig, Network},
+    ConfigurationError,
+    DefaultConfigLoader,
+    SubConfigPath,
+};
 use tari_dan_common_types::crypto::create_secret;
 
 #[derive(Debug, Clone)]
@@ -48,6 +53,8 @@ impl ApplicationConfig {
 #[allow(clippy::struct_excessive_bools)]
 pub struct WalletDaemonConfig {
     override_from: Option<String>,
+    /// Network that is used to send transactions.
+    pub network: Network,
     /// The wallet daemon listening address
     pub json_rpc_address: Option<SocketAddr>,
     /// The jrpc address where the UI should connect (it can be the same as the json_rpc_addr, but doesn't have to be),
@@ -76,6 +83,7 @@ impl Default for WalletDaemonConfig {
     fn default() -> Self {
         Self {
             override_from: None,
+            network: Default::default(),
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
             ui_connect_address: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),

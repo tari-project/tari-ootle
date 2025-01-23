@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -35,7 +35,7 @@ import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
 import { useFilePicker } from "use-file-picker";
-import { ResourceAddress, ResourceType } from "@tari-project/typescript-bindings";
+import { ResourceAddress, ResourceType, substateIdToString } from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
 import { usePublishTemplate } from "../../../api/hooks/useTransactions";
 import { Input } from "@mui/material";
@@ -92,7 +92,7 @@ function PublishTemplateDialog(props: DialogProps) {
   });
   const [allValid, setAllValid] = useState(false);
 
-  const { accountName, setPopup } = useAccountStore();
+  const { account, setPopup } = useAccountStore();
 
   const theme = useTheme();
 
@@ -121,33 +121,35 @@ function PublishTemplateDialog(props: DialogProps) {
     });
   }
 
-  const onSubmit = async () => {
-    if (accountName) {
-      setDisabled(true);
-      const isDryRun = !formState.maxFee;
-      publishTemplate({
-        fee_account: { Name: accountName },
-        binary: base64FromArrayBuffer(formState.binary!),
-        max_fee: isDryRun ? 1_000_000 : Number(formState.maxFee) || 0,
-        detect_inputs: true,
-        dry_run: isDryRun,
-      })
-        .then((resp) => {
-          if (isDryRun) {
-            setFormState({ ...formState, maxFee: resp.dry_run_fee! });
-          } else {
-            setFormState(INITIAL_VALUES);
-            props.onSendComplete?.();
-            setPopup({ title: "Publish template transaction submitted", error: false });
-          }
-        })
-        .catch((e) => {
-          setPopup({ title: "Publish failed", error: true, message: e.message });
-        })
-        .finally(() => {
-          setDisabled(false);
-        });
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!account) {
+      return;
     }
+    setDisabled(true);
+    const isDryRun = !formState.maxFee;
+    publishTemplate({
+      fee_account: { ComponentAddress: substateIdToString(account.address) },
+      binary: base64FromArrayBuffer(formState.binary!),
+      max_fee: isDryRun ? 1_000_000 : Number(formState.maxFee) || 0,
+      detect_inputs: true,
+      dry_run: isDryRun,
+    })
+      .then((resp) => {
+        if (isDryRun) {
+          setFormState({ ...formState, maxFee: resp.dry_run_fee! });
+        } else {
+          setFormState(INITIAL_VALUES);
+          props.onSendComplete?.();
+          setPopup({ title: "Publish template transaction submitted", error: false });
+        }
+      })
+      .catch((e) => {
+        setPopup({ title: "Publish failed", error: true, message: e.message });
+      })
+      .finally(() => {
+        setDisabled(false);
+      });
   };
 
   const handleClose = () => {

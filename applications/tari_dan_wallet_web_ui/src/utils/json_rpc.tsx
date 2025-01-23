@@ -194,6 +194,7 @@ export const accountsGetBalances = (request: AccountsGetBalancesRequest): Promis
   client().then((c) => c.accountsGetBalances(request));
 export const accountsGet = (request: AccountGetRequest): Promise<AccountGetResponse> =>
   client().then((c) => c.accountsGet(request));
+
 export const accountsTransfer = (request: AccountsTransferRequest): Promise<AccountsTransferResponse> =>
   client().then((c) => c.accountsTransfer(request));
 export const accountsConfidentialTransfer = (

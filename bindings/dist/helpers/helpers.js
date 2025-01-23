@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 export function substateIdToString(substateId) {
-    if (substateId === null) {
+    if (substateId === null || substateId === undefined) {
         return "";
     }
     if (typeof substateId === "string") {

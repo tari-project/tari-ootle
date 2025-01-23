@@ -103,7 +103,10 @@ function ViewVaultBalance() {
         paddingTop: theme.spacing(3),
       }}
     >
-      <p>Brute force a vault balance using a secret view key</p>
+      <p>
+        Brute force an external vault balance using a secret view key. This applies to resources that have the view key
+        enabled.
+      </p>
       <Box>
         <ViewVaultBalanceForm />
       </Box>

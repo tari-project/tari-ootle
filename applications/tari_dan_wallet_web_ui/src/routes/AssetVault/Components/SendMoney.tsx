@@ -42,6 +42,7 @@ import {
   ConfidentialTransferInputSelection,
   TransactionResult,
   BalanceEntry,
+  substateIdToString,
 } from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
 
@@ -93,43 +94,38 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   });
   const [allValid, setAllValid] = useState(false);
 
-  const { accountName, setPopup } = useAccountStore();
+  const { account, setPopup } = useAccountStore();
+  if (!account) {
+    return null;
+  }
 
   const theme = useTheme();
 
-  const { data } = useAccountsGetBalances(accountName);
+  const { data } = useAccountsGetBalances({ ComponentAddress: substateIdToString(account.address) });
   const badges = data?.balances
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && b.balance > 0)
     .map((b: BalanceEntry) => b.resource_address) as string[];
 
   // TODO: we should have separate calls for confidential and non-confidential transfers
-  const { mutateAsync: sendIt } = useAccountsTransfer(
-    accountName,
-    parseInt(transferFormState.amount),
+  const transfer = {
+    account: { ComponentAddress: substateIdToString(account.address) },
+    amount: parseInt(transferFormState.amount),
     // HACK: default to XTR2 because the resource is only set when open==true, and we cannot conditionally call hooks i.e. when props.resource_address is set
-    props.resource_address || XTR2,
-    transferFormState.publicKey,
-    parseInt(transferFormState.fee),
-    // estimatedFee,
-    props.resource_type === "Confidential",
-    !transferFormState.outputToConfidential,
-    transferFormState.inputSelection as ConfidentialTransferInputSelection,
-    transferFormState.badge,
-    false,
-  );
+    resource_address: props.resource_address || XTR2,
+    destination_public_key: transferFormState.publicKey,
+    isConfidential: props.resource_type === "Confidential",
+    output_to_revealed: !transferFormState.outputToConfidential,
+    input_selection: transferFormState.inputSelection as ConfidentialTransferInputSelection,
+    badge: transferFormState.badge,
+  };
 
-  const { mutateAsync: calculateFeeEstimate } = useAccountsTransfer(
-    accountName,
-    parseInt(transferFormState.amount),
-    props.resource_address || XTR2,
-    transferFormState.publicKey,
-    3000,
-    props.resource_type === "Confidential",
-    !transferFormState.outputToConfidential,
-    transferFormState.inputSelection as ConfidentialTransferInputSelection,
-    transferFormState.badge,
-    true,
-  );
+  const { mutateAsync: sendIt } = useAccountsTransfer({
+    ...transfer,
+    dry_run: false,
+    max_fee: parseInt(transferFormState.fee),
+  });
+
+  const { mutateAsync: calculateFeeEstimate } = useAccountsTransfer({ ...transfer, dry_run: true, max_fee: 3000 });
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
     setTransferFormState({
@@ -159,45 +155,47 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   }
 
   const onTransfer = async () => {
-    if (accountName) {
-      setDisabled(true);
-      if (!isNaN(parseInt(transferFormState.fee))) {
-        sendIt?.()
-          .then(() => {
-            setTransferFormState(INITIAL_VALUES);
-            props.onSendComplete?.();
-            setPopup({ title: "Send successful", error: false });
-          })
-          .catch((e) => {
-            setPopup({ title: "Send failed", error: true, message: e.message });
-          })
-          .finally(() => {
-            setDisabled(false);
-          });
-      } else {
-        calculateFeeEstimate?.()
-          .then((result) => {
-            if (!("Accept" in result.result.result)) {
-              setPopup({
-                title: "Fee estimate failed",
-                error: true,
-                // TODO: fix this
-                message: JSON.stringify(
-                  unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
-                    unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
-                ),
-              });
-              return;
-            }
-            setTransferFormState({ ...transferFormState, fee: result.fee.toString() });
-          })
-          .catch((e) => {
-            setPopup({ title: "Fee estimate failed", error: true, message: e.message });
-          })
-          .finally(() => {
-            setDisabled(false);
-          });
-      }
+    if (!account) {
+      return;
+    }
+
+    setDisabled(true);
+    if (!isNaN(parseInt(transferFormState.fee))) {
+      sendIt?.()
+        .then(() => {
+          setTransferFormState(INITIAL_VALUES);
+          props.onSendComplete?.();
+          setPopup({ title: "Send successful", error: false });
+        })
+        .catch((e) => {
+          setPopup({ title: "Send failed", error: true, message: e.message });
+        })
+        .finally(() => {
+          setDisabled(false);
+        });
+    } else {
+      calculateFeeEstimate?.()
+        .then((result) => {
+          if (!("Accept" in result.result.result)) {
+            setPopup({
+              title: "Fee estimate failed",
+              error: true,
+              // TODO: fix this
+              message: JSON.stringify(
+                unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
+                  unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
+              ),
+            });
+            return;
+          }
+          setTransferFormState({ ...transferFormState, fee: result.fee.toString() });
+        })
+        .catch((e) => {
+          setPopup({ title: "Fee estimate failed", error: true, message: e.message });
+        })
+        .finally(() => {
+          setDisabled(false);
+        });
     }
   };
 

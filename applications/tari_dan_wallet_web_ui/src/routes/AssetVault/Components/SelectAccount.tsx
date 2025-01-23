@@ -32,10 +32,10 @@ import Select, { SelectChangeEvent } from "@mui/material/Select";
 import Dialog from "./AddAccount";
 import useAccountStore from "../../../store/accountStore";
 import { useAccountsList } from "../../../api/hooks/useAccounts";
-import type { AccountInfo } from "@tari-project/typescript-bindings";
+import { AccountInfo, substateIdToString } from "@tari-project/typescript-bindings";
 
 function SelectAccount() {
-  const { accountName, setAccountName } = useAccountStore();
+  const { account, setAccount, setPublicKey } = useAccountStore();
   const { data: dataAccountsList } = useAccountsList(0, 10);
   const [dialogOpen, setDialogOpen] = useState(false);
   const theme = useTheme();
@@ -43,7 +43,14 @@ function SelectAccount() {
   const handleChange = (event: SelectChangeEvent) => {
     const selectedValue = event.target.value as string;
     if (selectedValue !== "addAccount") {
-      setAccountName(event.target.value as string);
+      const account = dataAccountsList?.accounts.find(
+        (info: AccountInfo) => substateIdToString(info.account.address) === selectedValue,
+      );
+      if (account) {
+        setAccount(account.account);
+        setPublicKey(account.public_key);
+        // setAccountName(event.target.value as string);
+      }
     }
   };
 
@@ -59,20 +66,17 @@ function SelectAccount() {
           labelId="account-select-label"
           id="account-select"
           value={
-            dataAccountsList?.accounts.some((account: AccountInfo) => account.account.name == accountName)
-              ? accountName
+            dataAccountsList?.accounts.some((info: AccountInfo) => info.account.address === account?.address)
+              ? substateIdToString(account!.address)
               : "addAccount"
           }
           label="Account"
           onChange={handleChange}
         >
           {dataAccountsList?.accounts.map((account: AccountInfo) => {
-            if (account.account.name === null) {
-              return null;
-            }
             return (
-              <MenuItem key={account.public_key} value={account.account.name}>
-                {account.account.name}
+              <MenuItem key={account.public_key} value={substateIdToString(account.account.address)}>
+                {account.account.name || "<No Name>"}
               </MenuItem>
             );
           })}

@@ -27,6 +27,7 @@ import { GridHeadCell, GridDataCell } from "../../../Components/StyledComponents
 import { useAccountsGet } from "../../../api/hooks/useAccounts";
 import { shortenString, shortenSubstateId, substateIdToString } from "../../../utils/helpers";
 import { styled } from "@mui/material/styles";
+import useAccountStore from "../../../store/accountStore";
 
 const GridContainer = styled(Box)(({ theme }) => ({
   display: "grid",
@@ -43,37 +44,27 @@ const GridContainer = styled(Box)(({ theme }) => ({
   },
 }));
 
-function AccountDetails({ accountName }: { accountName: string }) {
-  const {
-    data: accountsData,
-    isError: accountsIsError,
-    error: accountsError,
-    isFetching: accountsIsFetching,
-  } = useAccountsGet(accountName);
+function AccountDetails() {
+  const { account, publicKey } = useAccountStore();
+  if (!account) {
+    return <>Loading...</>;
+  }
 
   return (
-    <FetchStatusCheck
-      isError={accountsIsError}
-      errorMessage={accountsError?.message || "Error fetching data"}
-      isLoading={accountsIsFetching}
-    >
-      {accountsData && (
-        <GridContainer>
-          <GridHeadCell className="head1">Name</GridHeadCell>
-          <GridHeadCell className="head2">Address</GridHeadCell>
-          <GridHeadCell className="head3">Public Key</GridHeadCell>
-          <GridDataCell className="content1">{accountsData.account.name}</GridDataCell>
-          <GridDataCell className="content2">
-            {shortenSubstateId(accountsData.account.address)}
-            <CopyToClipboard copy={substateIdToString(accountsData.account.address)} />
-          </GridDataCell>
-          <GridDataCell className="content3">
-            {shortenString(accountsData.public_key)}
-            <CopyToClipboard copy={accountsData.public_key} />
-          </GridDataCell>
-        </GridContainer>
-      )}
-    </FetchStatusCheck>
+    <GridContainer>
+      <GridHeadCell className="head1">Name</GridHeadCell>
+      <GridHeadCell className="head2">Address</GridHeadCell>
+      <GridHeadCell className="head3">Public Key</GridHeadCell>
+      <GridDataCell className="content1">{account.name}</GridDataCell>
+      <GridDataCell className="content2">
+        {shortenSubstateId(account.address)}
+        <CopyToClipboard copy={substateIdToString(account.address)} />
+      </GridDataCell>
+      <GridDataCell className="content3">
+        {shortenString(publicKey)}
+        <CopyToClipboard copy={publicKey} />
+      </GridDataCell>
+    </GridContainer>
   );
 }
 

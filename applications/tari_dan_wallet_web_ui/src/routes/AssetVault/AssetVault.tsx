@@ -20,21 +20,35 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsList } from "../../api/hooks/useAccounts";
+import { useAccountsGetDefault, useAccountsList } from "../../api/hooks/useAccounts";
 import useAccountStore from "../../store/accountStore";
 import Onboarding from "../Onboarding/Onboarding";
 import MyAssets from "./Components/MyAssets";
+import { substateIdToString } from "@tari-project/typescript-bindings";
+import { useEffect } from "react";
+import FetchStatusCheck from "../../Components/FetchStatusCheck";
 
 function AssetVault() {
-  const { accountName, setAccountName } = useAccountStore();
+  const { account, setAccount, setPublicKey } = useAccountStore();
+  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
 
-  const { data: dataAccountsList } = useAccountsList(0, 10);
+  useEffect(() => {
+    if (!isError && defaultAccount) {
+      setAccount(defaultAccount.account);
+      setPublicKey(defaultAccount.public_key);
+    }
 
-  if (!accountName && dataAccountsList && dataAccountsList.accounts.length > 0) {
-    setAccountName(dataAccountsList.accounts[0].account.name || "");
-  }
+    if (error) {
+      console.info(error);
+    }
+  }, [defaultAccount, isError]);
 
-  return <>{accountName ? <MyAssets /> : <Onboarding />}</>;
+  return (
+    <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
+      {account ? <MyAssets /> : <Onboarding />}
+      {/*{accountId ? <>{accountId}</> : <Onboarding />}*/}
+    </FetchStatusCheck>
+  );
 }
 
 export default AssetVault;

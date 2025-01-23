@@ -21,35 +21,32 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { Account } from "@tari-project/typescript-bindings";
 
 interface Store {
   showBalance: boolean;
   setShowBalance: (show: boolean) => void;
-  accountName: string;
-  setAccountName: (name: string) => void;
+  account: Account | null;
+  setAccount: (account: Account) => void;
+  publicKey: string;
+  setPublicKey: (publicKey: string) => void;
   indexer: string;
   setIndexer: (indexer: string) => void;
   popup: any;
   setPopup: (popup: any) => void;
 }
 
-const useAccountStore = create<Store>()(
-  persist<Store>(
-    (set) => ({
-      showBalance: true,
-      setShowBalance: (show) => set({ showBalance: show }),
-      accountName: "",
-      setAccountName: (name) => set({ accountName: name }),
-      indexer: "",
-      setIndexer: (indexer) => set({ indexer: indexer }),
-      popup: { visible: false },
-      setPopup: (popup) => set({ popup: { visible: true, ...popup } }),
-    }),
-    {
-      name: "account-store",
-    },
-  ),
-);
+const useAccountStore = create<Store>()((set) => ({
+  showBalance: true,
+  setShowBalance: (show) => set({ showBalance: show }),
+  account: null,
+  setAccount: (account) => set({ account: account }),
+  publicKey: "",
+  setPublicKey: (publicKey) => set({ publicKey: publicKey }),
+  indexer: "",
+  setIndexer: (indexer) => set({ indexer: indexer }),
+  popup: { visible: false },
+  setPopup: (popup) => set({ popup: { visible: true, ...popup } }),
+}));
 
 export default useAccountStore;

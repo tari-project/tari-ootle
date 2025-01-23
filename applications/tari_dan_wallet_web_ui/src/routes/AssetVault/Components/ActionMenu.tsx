@@ -29,18 +29,30 @@ import useAccountStore from "../../../store/accountStore";
 import SendMoney from "./SendMoney";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
+import { substateIdToString } from "@tari-project/typescript-bindings";
 
 function ActionMenu() {
   const { mutate } = useAccountsCreateFreeTestCoins();
-  const { accountName, setAccountName } = useAccountStore();
+  const { account, setAccount, setPublicKey } = useAccountStore();
   const theme = useTheme();
+  if (!account) {
+    return null;
+  }
 
   const onClaimFreeCoins = () => {
-    mutate({
-      accountName: accountName,
-      amount: 1_000_000_000,
-      fee: 1000,
-    });
+    mutate(
+      {
+        account: { ComponentAddress: substateIdToString(account.address) },
+        amount: 1_000_000_000,
+        fee: 1000,
+      },
+      {
+        onSuccess: (resp) => {
+          setAccount(resp.account);
+          setPublicKey(resp.public_key);
+        },
+      },
+    );
   };
 
   return (

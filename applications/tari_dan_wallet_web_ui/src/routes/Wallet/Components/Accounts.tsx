@@ -41,7 +41,6 @@ import InputLabel from "@mui/material/InputLabel";
 import { ChevronRight } from "@mui/icons-material";
 import IconButton from "@mui/material/IconButton";
 import { BoxHeading2, DataTableCell } from "../../../Components/StyledComponents";
-import { shortenString, toHexString } from "../../../utils/helpers";
 import {
   useAccountsCreate,
   useAccountsCreateFreeTestCoins,
@@ -50,13 +49,9 @@ import {
 } from "../../../api/hooks/useAccounts";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import queryClient from "../../../api/queryClient";
-import type { AccountInfo } from "@tari-project/typescript-bindings";
+import { AccountInfo, substateIdToString, shortenString, shortenSubstateId } from "@tari-project/typescript-bindings";
 
 function Account(account: AccountInfo, index: number) {
-  const { pathname } = useLocation();
-  if (!("Component" in account.account.address)) {
-    return null;
-  }
   return (
     <TableRow key={index}>
       <DataTableCell>
@@ -71,8 +66,8 @@ function Account(account: AccountInfo, index: number) {
         </Link>
       </DataTableCell>
       <DataTableCell>
-        {shortenString(account.account.address.Component)}
-        <CopyToClipboard copy={account.account.address.Component} />
+        {shortenSubstateId(account.account.address)}
+        <CopyToClipboard copy={account.account.address} />
       </DataTableCell>
       <DataTableCell>{account.account.key_index}</DataTableCell>
       <DataTableCell>
@@ -89,7 +84,6 @@ function Account(account: AccountInfo, index: number) {
 }
 
 function Accounts() {
-  const [error, setError] = useState<String>();
   const [showAccountDialog, setShowAddAccountDialog] = useState(false);
   const [showClaimDialog, setShowClaimBurnDialog] = useState(false);
   const [accountFormState, setAccountFormState] = useState({
@@ -191,7 +185,6 @@ function Accounts() {
 
   return (
     <>
-      {error ? <Alert severity="error">{error}</Alert> : null}
       <BoxHeading2
         style={{
           display: "flex",
@@ -246,13 +239,10 @@ function Accounts() {
                   style={{ flexGrow: 1, minWidth: "200px" }}
                 >
                   {dataAccountsList?.accounts.map((account: AccountInfo, index: number) => {
-                    if (!("Component" in account.account.address)) {
-                      return null;
-                    }
                     return (
                       <MenuItem
-                        key={toHexString(account.account.address.Component)}
-                        value={"component_" + toHexString(account.account.address.Component)}
+                        key={substateIdToString(account.account.address)}
+                        value={substateIdToString(account.account.address)}
                       >
                         {account.account.name}
                       </MenuItem>

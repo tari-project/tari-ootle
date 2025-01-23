@@ -21,16 +21,11 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Typography from "@mui/material/Typography";
-import TextField from "@mui/material/TextField";
-import { useState } from "react";
-import { Form } from "react-router-dom";
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
 import Box from "@mui/material/Box";
-import useAccountStore from "../../../store/accountStore";
 import { useTheme } from "@mui/material/styles";
 import IndexerSettings from "./IndexerSettings";
 import { Divider } from "@mui/material";
+import React from "react";
 
 function GeneralSettings() {
   const theme = useTheme();
@@ -41,13 +36,13 @@ function GeneralSettings() {
     },
   ];
 
-  const renderItems = items.map((item) => {
+  const renderedItems = items.map((item, i) => {
     return (
-      <>
+      <React.Fragment key={i}>
         <Typography>{item.label}</Typography>
         <Box>{item.content}</Box>
         <Divider />
-      </>
+      </React.Fragment>
     );
   });
 
@@ -60,7 +55,7 @@ function GeneralSettings() {
         paddingTop: theme.spacing(3),
       }}
     >
-      {renderItems}
+      {renderedItems}
     </Box>
   );
 }

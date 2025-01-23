@@ -47,6 +47,6 @@ pub enum TransactionValidationError {
     NetworkingError(#[from] NetworkingError),
     #[error("Unknown network byte \"{0:?}\": {1}")]
     UnknownNetwork(u8, ConfigurationError),
-    #[error("Network mismatch! Current network: {0}, Transaction network: {1}")]
-    NetworkMismatch(Network, Network),
+    #[error("Network mismatch! Current network: {actual}, Transaction network: {expected}")]
+    NetworkMismatch { actual: Network, expected: Network },
 }

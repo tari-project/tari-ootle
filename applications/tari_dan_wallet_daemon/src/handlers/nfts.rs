@@ -30,9 +30,8 @@ use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{application, get_account},
+    handlers::helpers::{application, get_account, transaction_builder},
     jrpc_server::ApplicationErrorCode,
-    handlers::helpers::{get_account, transaction_builder},
     services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
 };

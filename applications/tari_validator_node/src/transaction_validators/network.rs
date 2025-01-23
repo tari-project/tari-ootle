@@ -33,7 +33,10 @@ impl Validator<Transaction> for TransactionNetworkValidator {
                     Ok(())
                 } else {
                     warn!(target: LOG_TARGET, "TransactionNetworkValidator - FAIL: mismatching networks: TX: {} != Current: {}", tx_network, self.network);
-                    Err(Self::Error::NetworkMismatch(self.network, tx_network))
+                    Err(Self::Error::NetworkMismatch {
+                        actual: self.network,
+                        expected: tx_network,
+                    })
                 }
             },
         }
@@ -90,7 +93,7 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(
             result.err().unwrap(),
-            TransactionValidationError::NetworkMismatch(_, _)
+            TransactionValidationError::NetworkMismatch { actual: _, expected: _ },
         ));
     }
 

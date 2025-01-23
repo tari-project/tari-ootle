@@ -667,7 +667,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         Some(component_lock.address().clone()),
                         template_address,
                         state.transaction_hash(),
-                        "component-updated".to_string(),
+                        "std.component.updated".to_string(),
                         Metadata::from([("module_name".to_string(), module_name)]),
                     ));
 

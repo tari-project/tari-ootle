@@ -3,12 +3,13 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{optional::Optional, shard::Shard};
 
 use super::BlockId;
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignSendCounters {
     pub counters: HashMap<Shard, u64>,
 }

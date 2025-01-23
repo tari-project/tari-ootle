@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -522,37 +522,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_send_counters;
-
-        let counter = foreign_send_counters::table
-            .filter(foreign_send_counters::block_id.eq(serialize_hex(block_id)))
-            .first::<sql_models::ForeignSendCounters>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_send_counters_get",
-                source: e,
-            })?;
-
-        counter.try_into()
-        */
+        let key_prefix = ForeignSendCounterModel::key_prefix_by_block_id(block_id);
+        let value = ForeignSendCounterModel::get_first(&self.tx, "foreign_send_counters_get", Some(&key_prefix), Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No foreign send counter in database".to_string() })?;
+        Ok(value.counters)
     }
 
     fn foreign_receive_counters_get(&self) -> Result<ForeignReceiveCounters, StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_receive_counters;
-
-        let counter = foreign_receive_counters::table
-            .order_by(foreign_receive_counters::id.desc())
-            .first::<sql_models::ForeignReceiveCounters>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_receive_counters_get",
-                source: e,
-            })?;
-
-        counter.try_into()
-        */
+        let value = ForeignReceiveCounterModel::get_first(&self.tx, "foreign_send_counters_get", None, Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No foreign receive counter in database".to_string() })?;
+        Ok(value.counters)
     }
 
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError> {

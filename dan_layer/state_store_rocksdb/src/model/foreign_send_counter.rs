@@ -1,4 +1,4 @@
-//  Copyright 2024. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,25 +20,44 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod model;
+use serde::{Deserialize, Serialize};
+use tari_dan_storage::consensus_models::{BlockId, ForeignSendCounters};
+use crate::{model::model::RocksdbModel, utils::RocksdbTimestamp};
 
-pub mod block;
-pub mod block_diff;
-pub mod block_transaction_execution;
-pub mod foreign_proposal;
-pub mod high_qc;
-pub mod last_executed;
-pub mod last_proposed;
-pub mod foreign_receive_counter;
-pub mod foreign_send_counter;
-pub mod last_sent_vote;
-pub mod last_voted;
-pub mod leaf_block;
-pub mod locked_block;
-pub mod quorum_certificate;
-pub mod state_transition;
-pub mod state_tree_shard_versions;
-pub mod substate;
-pub mod transaction_pool_state_update;
-pub mod transaction_pool;
-pub mod transaction;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForeignSendCounterData {
+    pub block_id: BlockId,
+    pub counters: ForeignSendCounters,
+    // we need this field to keep track of insertion order
+    pub created_at: RocksdbTimestamp,
+}
+
+impl ForeignSendCounterData {
+    pub fn new(block_id: BlockId, counters: ForeignSendCounters) -> Self {
+        Self {
+            block_id,
+            counters,
+            created_at: RocksdbTimestamp::now(),
+        }
+    }
+}
+
+pub struct ForeignSendCounterModel {}
+
+impl ForeignSendCounterModel {
+    pub fn key_prefix_by_block_id(block: &BlockId) -> String {
+        format!("{}_{}_", Self::key_prefix(), block)
+    }
+}
+
+impl RocksdbModel for ForeignSendCounterModel {
+    type Item = ForeignSendCounterData;
+
+    fn key_prefix() -> &'static str {
+        "foreignsendcounters"
+    }
+
+    fn key(value: &Self::Item) -> String {
+        format!("{}_{}_{}", Self::key_prefix(), value.block_id, value.created_at)
+    }
+}

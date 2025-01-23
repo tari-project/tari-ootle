@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -404,47 +404,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         foreign_send_counter: &ForeignSendCounters,
         block_id: &BlockId,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_send_counters;
+        let operation = "foreign_send_counters_set";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();   
 
-        let insert = (
-            foreign_send_counters::block_id.eq(serialize_hex(block_id)),
-            foreign_send_counters::counters.eq(serialize_json(&foreign_send_counter.counters)?),
-        );
+        let value = ForeignSendCounterData::new(*block_id, foreign_send_counter.clone());
 
-        diesel::insert_into(foreign_send_counters::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_send_counters_set",
-                source: e,
-            })?;
+        ForeignSendCounterModel::put(self.db.clone(), tx, operation, &value)?;
 
         Ok(())
-        */
     }
 
     fn foreign_receive_counters_set(
         &mut self,
         foreign_receive_counter: &ForeignReceiveCounters,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_receive_counters;
+        let operation = "foreign_receive_counters_set";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();   
 
-        let insert = (foreign_receive_counters::counters.eq(serialize_json(&foreign_receive_counter.counters)?),);
-
-        diesel::insert_into(foreign_receive_counters::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_receive_counters_set",
-                source: e,
-            })?;
+        ForeignReceiveCounterModel::put(self.db.clone(), tx, operation, &foreign_receive_counter.into())?;
 
         Ok(())
-        */
     }
 
     fn transactions_insert(&mut self, tx_rec: &TransactionRecord) -> Result<(), StorageError> {

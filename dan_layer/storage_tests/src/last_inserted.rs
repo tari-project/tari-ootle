@@ -10,7 +10,8 @@ use tari_dan_storage::{
 
 mod last_inserted {
     use tari_common_types::types::PublicKey;
-    use tari_dan_storage::consensus_models::{BlockId, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+    use tari_dan_common_types::{shard::Shard, NumPreshards, ShardGroup};
+    use tari_dan_storage::consensus_models::{BlockId, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
 
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
     
@@ -149,6 +150,25 @@ mod last_inserted {
         tx.high_qc_set(&high_qc).unwrap();
         let res = tx.high_qc_get(epoch).unwrap();
         assert_eq_debug(&res, &high_qc);
+
+        // foreign send counters
+        let shard = Shard::zero();
+        let block_id = BlockId::genesis();
+        let mut counter = ForeignSendCounters::new();
+        counter.increment_counter(shard);
+
+        tx.foreign_send_counters_set(&counter, &block_id).unwrap();
+        let res = tx.foreign_send_counters_get(&block_id).unwrap();
+        assert_eq_debug(&res, &counter);
+
+        // foreign receive counters
+        let shard_group = ShardGroup::all_shards(NumPreshards::P1);
+        let mut counter = ForeignReceiveCounters::new();
+        counter.increment_group(shard_group);
+
+        tx.foreign_receive_counters_set(&counter).unwrap();
+        let res = tx.foreign_receive_counters_get().unwrap();
+        assert_eq_debug(&res, &counter);
 
         tx.rollback().unwrap();
     }

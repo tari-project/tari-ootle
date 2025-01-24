@@ -25,6 +25,7 @@ use std::{collections::HashMap, str::FromStr, time::Duration};
 use anyhow::{anyhow, bail};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde_json::json;
+use tari_common::configuration::Network;
 use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     signatures::CommitmentSignature,
@@ -72,7 +73,12 @@ use tari_wallet_daemon_client::{
 };
 use tokio::{task::JoinSet, time::timeout};
 
-use crate::{helpers::get_address_from_output, validator_node_cli::add_substate_ids, TariWorld};
+use crate::{
+    helpers::get_address_from_output,
+    util::transaction_builder,
+    validator_node_cli::add_substate_ids,
+    TariWorld,
+};
 
 pub async fn claim_burn(
     world: &mut TariWorld,
@@ -199,7 +205,7 @@ pub async fn transfer_confidential(
     let withdraw_proof = transfer_proof_resp.proof;
     let proof_id = transfer_proof_resp.proof_id;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder()
         .fee_transaction_pay_from_component(source_component_address, Amount(2000))
         .call_method(source_component_address, "withdraw_confidential", args![
             resource_address,
@@ -458,7 +464,7 @@ pub async fn submit_manifest_with_signing_keys(
 
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder()
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
@@ -540,7 +546,7 @@ pub async fn submit_manifest(
 
     let AccountGetResponse { account, .. } = client.accounts_get_default().await.unwrap();
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder()
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
@@ -650,7 +656,7 @@ pub async fn create_component(
         .await
         .unwrap();
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder()
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
         .call_function(template_address, &function_call, args)
         .with_min_epoch(min_epoch)
@@ -755,7 +761,7 @@ pub async fn call_component(
         ]
     };
 
-    let tx = Transaction::builder()
+    let tx = transaction_builder()
         .fee_transaction_pay_from_component(account_component_address, Amount(1000))
         .call_method(source_component_address, &function_call, vec![])
         .with_inputs(inputs)
@@ -811,7 +817,7 @@ pub async fn concurrent_call_component(
     for _ in 0..times {
         let acc = account.clone();
         let clt = client.clone();
-        let tx = Transaction::builder()
+        let tx = transaction_builder()
             .fee_transaction_pay_from_component(account_component_address, Amount(1000))
             .call_method(source_component_address, &function_call, vec![])
             .build_unsigned_transaction();

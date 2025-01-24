@@ -63,6 +63,7 @@ pub mod indexer;
 pub mod logging;
 pub mod miner;
 pub mod template;
+pub mod util;
 pub mod validator_node;
 pub mod validator_node_cli;
 pub mod wallet;

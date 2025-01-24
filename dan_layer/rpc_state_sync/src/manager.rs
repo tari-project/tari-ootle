@@ -149,7 +149,7 @@ where
 
         info!(
             target: LOG_TARGET,
-            "🛜Syncing from v{} to state transition {last_state_transition_id}",
+            "🛜Syncing from v{} to state transition {last_state_transition_id:?}",
             current_version.unwrap_or(0),
         );
 

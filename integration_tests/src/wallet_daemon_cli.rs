@@ -25,7 +25,6 @@ use std::{collections::HashMap, str::FromStr, time::Duration};
 use anyhow::{anyhow, bail};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde_json::json;
-use tari_common::configuration::Network;
 use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     signatures::CommitmentSignature,
@@ -44,7 +43,7 @@ use tari_template_lib::{
     prelude::{ComponentAddress, ResourceAddress},
     resource::TOKEN_SYMBOL,
 };
-use tari_transaction::{Transaction, UnsignedTransaction};
+use tari_transaction::UnsignedTransaction;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_validator_node_cli::command::transaction::CliArg;
 use tari_wallet_daemon_client::{

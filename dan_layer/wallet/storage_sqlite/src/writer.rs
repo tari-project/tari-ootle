@@ -227,7 +227,12 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
     // -------------------------------- Config -------------------------------- //
 
-    fn config_set<T: Serialize>(&mut self, key: &str, value: &T, is_encrypted: bool) -> Result<(), WalletStorageError> {
+    fn config_set<T: Serialize + ?Sized>(
+        &mut self,
+        key: &str,
+        value: &T,
+        is_encrypted: bool,
+    ) -> Result<(), WalletStorageError> {
         use crate::schema::config;
 
         let exists = config::table

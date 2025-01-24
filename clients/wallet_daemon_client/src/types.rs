@@ -1143,6 +1143,18 @@ pub struct SettingsSetResponse {}
 )]
 pub struct SettingsGetResponse {
     pub indexer_url: String,
+    pub network: NetworkInfo,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct NetworkInfo {
+    pub name: String,
+    pub byte: u8,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

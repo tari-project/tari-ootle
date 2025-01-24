@@ -32,6 +32,7 @@ use crate::{
         accounts::{AccountsApi, AccountsApiError},
         confidential_crypto::{ConfidentialCryptoApi, ConfidentialCryptoApiError},
         confidential_outputs::{ConfidentialOutputsApi, ConfidentialOutputsApiError},
+        config::{ConfigApi, ConfigApiError},
         key_manager,
         key_manager::{KeyManagerApi, KeyManagerApiError},
         substate::{SubstateApiError, SubstatesApi, ValidatorScanResult},
@@ -49,6 +50,7 @@ pub struct ConfidentialTransferApi<'a, TStore, TNetworkInterface> {
     outputs_api: ConfidentialOutputsApi<'a, TStore>,
     substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
     crypto_api: ConfidentialCryptoApi,
+    config_api: ConfigApi<'a, TStore>,
 }
 
 impl<'a, TStore, TNetworkInterface> ConfidentialTransferApi<'a, TStore, TNetworkInterface>
@@ -63,6 +65,7 @@ where
         outputs_api: ConfidentialOutputsApi<'a, TStore>,
         substate_api: SubstatesApi<'a, TStore, TNetworkInterface>,
         crypto_api: ConfidentialCryptoApi,
+        config_api: ConfigApi<'a, TStore>,
     ) -> Self {
         Self {
             key_manager_api,
@@ -70,6 +73,7 @@ where
             outputs_api,
             substate_api,
             crypto_api,
+            config_api,
         }
     }
 
@@ -467,32 +471,41 @@ where
             Amount::zero(),
         )?;
 
-        let mut builder = Transaction::builder()
-            .fee_transaction_pay_from_component_confidential(from_account_address, fee_withdraw_proof);
-
-        if !dest_account_exists {
-            builder = builder.create_account(params.destination_public_key.clone());
-        }
-
-        if let Some(ref badge) = params.proof_from_resource {
-            builder = builder
-                .call_method(from_account_address, "create_proof_for_resource", args![badge])
-                .put_last_instruction_output_on_workspace("proof");
-        }
-
-        builder = builder
+        let network = self.config_api.get_network()?;
+        let transaction = Transaction::builder()
+            .for_network(network.as_byte())
+            .fee_transaction_pay_from_component_confidential(from_account_address, fee_withdraw_proof)
+            .then(|builder| {
+                if dest_account_exists {
+                    builder
+                } else {
+                    builder.create_account(params.destination_public_key.clone())
+                }
+            })
+            .then(|builder| {
+                if let Some(ref badge) = params.proof_from_resource {
+                    builder
+                        .call_method(from_account_address, "create_proof_for_resource", args![badge])
+                        .put_last_instruction_output_on_workspace("proof")
+                } else {
+                    builder
+                }
+            })
             .call_method(from_account_address, "withdraw_confidential", args![
                 params.resource_address,
                 proof
             ])
             .put_last_instruction_output_on_workspace("bucket")
-            .call_method(to_account.address, "deposit", args![Workspace("bucket")]);
-
-        if params.proof_from_resource.is_some() {
-            builder = builder.drop_all_proofs_in_workspace();
-        }
-
-        let transaction = builder.with_inputs(inputs).build_and_seal(&account_secret.key);
+            .call_method(to_account.address, "deposit", args![Workspace("bucket")])
+            .then(|builder| {
+                if params.proof_from_resource.is_some() {
+                    builder.drop_all_proofs_in_workspace()
+                } else {
+                    builder
+                }
+            })
+            .with_inputs(inputs)
+            .build_and_seal(&account_secret.key);
 
         self.outputs_api
             .proofs_set_transaction_hash(inputs_to_spend.proof_id, *transaction.id())?;
@@ -644,6 +657,8 @@ pub enum ConfidentialTransferApiError {
     InvalidParameter { param: &'static str, reason: String },
     #[error("Unexpected indexer response: {details}")]
     UnexpectedIndexerResponse { details: String },
+    #[error("Config API error: {0}")]
+    ConfigApi(#[from] ConfigApiError),
 }
 
 impl IsNotFoundError for ConfidentialTransferApiError {

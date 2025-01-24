@@ -25,11 +25,16 @@ import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import IndexerSettings from "./IndexerSettings";
 import { Divider } from "@mui/material";
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { settingsGet } from "../../../utils/json_rpc";
 
 function GeneralSettings() {
   const theme = useTheme();
   const items = [
+    {
+      label: "Network",
+      content: <NetworkSettings />,
+    },
     {
       label: "Indexer Url",
       content: <IndexerSettings />,
@@ -58,6 +63,18 @@ function GeneralSettings() {
       {renderedItems}
     </Box>
   );
+}
+
+function NetworkSettings() {
+  const [network, setNetwork] = useState("");
+
+  useEffect(() => {
+    settingsGet().then((res) => {
+      setNetwork(res.network.name);
+    });
+  }, []);
+
+  return <Typography>{network}</Typography>;
 }
 
 export default GeneralSettings;

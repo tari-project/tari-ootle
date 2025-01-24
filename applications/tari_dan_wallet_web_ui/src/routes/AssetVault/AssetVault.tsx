@@ -25,8 +25,9 @@ import useAccountStore from "../../store/accountStore";
 import Onboarding from "../Onboarding/Onboarding";
 import MyAssets from "./Components/MyAssets";
 import { substateIdToString } from "@tari-project/typescript-bindings";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
+import { ApiError } from "../../api/helpers/types";
 
 function AssetVault() {
   const { account, setAccount, setPublicKey } = useAccountStore();
@@ -46,7 +47,6 @@ function AssetVault() {
   return (
     <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
       {account ? <MyAssets /> : <Onboarding />}
-      {/*{accountId ? <>{accountId}</> : <Onboarding />}*/}
     </FetchStatusCheck>
   );
 }

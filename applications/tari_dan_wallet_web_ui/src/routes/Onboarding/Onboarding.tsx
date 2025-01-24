@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 import { Form } from "react-router-dom";
 import TextField from "@mui/material/TextField/TextField";
 import Box from "@mui/material/Box";
@@ -42,7 +42,8 @@ function Onboarding() {
     accountName: "",
   });
 
-  const handleCreateAccount = () => {
+  const handleCreateAccount = (e: FormEvent) => {
+    e.preventDefault();
     mutate(
       {
         account: { Name: accountFormState.accountName },
@@ -59,7 +60,6 @@ function Onboarding() {
   };
 
   const onAccountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.preventDefault();
     setAccountFormState({
       ...accountFormState,
       [e.target.name]: e.target.value,

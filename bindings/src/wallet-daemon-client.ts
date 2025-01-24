@@ -60,6 +60,7 @@ export * from "./types/wallet-daemon-client/TransactionWaitResultRequest";
 export * from "./types/wallet-daemon-client/ClaimValidatorFeesResponse";
 export * from "./types/wallet-daemon-client/ConfidentialCreateOutputProofRequest";
 export * from "./types/wallet-daemon-client/KeysCreateRequest";
+export * from "./types/wallet-daemon-client/NetworkInfo";
 export * from "./types/wallet-daemon-client/SettingsGetResponse";
 export * from "./types/wallet-daemon-client/TransactionSubmitDryRunResponse";
 export * from "./types/wallet-daemon-client/ClaimBurnResponse";

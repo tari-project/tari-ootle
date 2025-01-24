@@ -140,6 +140,6 @@ pub fn initialize_wallet_sdk(
         config.dan_wallet_daemon.indexer_node_json_rpc_url.clone()
     };
     let indexer = IndexerJsonRpcNetworkInterface::new(indexer_jrpc_endpoint);
-    let wallet_sdk = DanWalletSdk::initialize(store, indexer, sdk_config)?;
+    let wallet_sdk = DanWalletSdk::initialize(config.dan_wallet_daemon.network, store, indexer, sdk_config)?;
     Ok(wallet_sdk)
 }

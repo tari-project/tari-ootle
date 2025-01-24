@@ -191,18 +191,14 @@ export const useAccountsGetDefault = () => {
     notifyOnChangeProps: ["data", "error"],
     retryOnMount: false,
     retry: false,
-    onError: (error: ApiError) => {
-      error;
-    },
+    onError: (_error: ApiError) => {},
   });
 };
 export const useAccountsGet = (account: ComponentAddressOrName) => {
   return useQuery({
     queryKey: ["accounts_get"],
     queryFn: () => accountsGet({ name_or_address: account }),
-    onError: (error: ApiError) => {
-      error;
-    },
+    onError: (_error: ApiError) => {},
   });
 };
 
@@ -210,8 +206,6 @@ export const useAccountNFTsList = (account: ComponentAddressOrName | null, offse
   return useQuery({
     queryKey: ["nfts_list"],
     queryFn: () => nftList({ account, offset, limit }),
-    onError: (error: ApiError) => {
-      error;
-    },
+    onError: (_error: ApiError) => {},
   });
 };

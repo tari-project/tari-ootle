@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
+use tari_common::configuration::Network;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -41,6 +42,8 @@ pub struct WriteArgs {
     pub manifest_args_file: Option<PathBuf>,
     #[clap(long, short = 'k', alias = "signer")]
     pub signer_secret_key: Option<String>,
+    #[clap(long, short = 'n')]
+    pub network: Option<Network>,
 }
 #[derive(Args, Debug)]
 pub struct ReadArgs {

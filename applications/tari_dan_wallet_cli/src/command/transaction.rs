@@ -61,6 +61,7 @@ use tari_wallet_daemon_client::{
         AccountGetResponse,
         AccountsTransferRequest,
         ConfidentialTransferRequest,
+        SettingsGetResponse,
         TransactionGetResultRequest,
         TransactionSubmitDryRunRequest,
         TransactionSubmitRequest,
@@ -241,7 +242,10 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         fee_account = client.accounts_get_default().await?.account;
     }
 
+    let SettingsGetResponse { network, .. } = client.get_settings().await?;
+
     let mut builder = Transaction::builder()
+        .for_network(network.byte)
         .fee_transaction_pay_from_component(
             fee_account.address.as_component_address().unwrap(),
             Amount::try_from(common.max_fee.unwrap_or(1000))?,
@@ -309,7 +313,10 @@ async fn handle_submit_manifest(
         fee_account = client.accounts_get_default().await?.account;
     }
 
+    let SettingsGetResponse { network, .. } = client.get_settings().await?;
+
     let builder = Transaction::builder()
+        .for_network(network.byte)
         .with_fee_instructions(
             instructions
                 .fee_instructions

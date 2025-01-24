@@ -9,7 +9,6 @@ use tari_template_lib::{
     constants::XTR,
     models::{Amount, ComponentAddress, ResourceAddress, VaultId},
 };
-use tari_transaction::Transaction;
 
 use crate::runner::Runner;
 
@@ -28,7 +27,8 @@ impl Runner {
             .accounts_api()
             .get_vault_by_resource(&in_account.address, &XTR)?;
 
-        let transaction = Transaction::builder()
+        let transaction = self
+            .new_transaction_builder()
             .fee_transaction_pay_from_component(in_account.address.as_component_address().unwrap(), Amount(1000))
             .call_function(self.faucet_template.address, "mint", args![Amount(1_000_000_000)])
             .with_inputs([

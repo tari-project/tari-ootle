@@ -17,7 +17,7 @@ use tari_template_lib::{
     crypto::RistrettoPublicKeyBytes,
     prelude::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
 };
-use tari_transaction::{Transaction, TransactionId};
+use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::types::{
     GetAccountNftRequest,
     GetAccountNftResponse,
@@ -30,7 +30,7 @@ use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{application, get_account},
+    handlers::helpers::{application, get_account, transaction_builder},
     jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
@@ -185,7 +185,7 @@ async fn mint_account_nft(
         .locate_dependent_substates(&[account.address.clone(), component_address.into()])
         .await?;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .call_method(component_address, "mint", args![metadata])
         .put_last_instruction_output_on_workspace(b"bucket".to_vec())
@@ -228,7 +228,7 @@ async fn create_account_nft(
         .locate_dependent_substates(&[account.address.clone()])
         .await?;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .call_function(ACCOUNT_NFT_TEMPLATE_ADDRESS, "create", args![owner_token,])
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))

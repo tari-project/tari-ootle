@@ -135,10 +135,6 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: install typescript
-        run: |
-          npm install typescript
-
       - name: toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
@@ -166,10 +162,6 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
-
-      - name: install typescript
-        run: |
-          npm install typescript
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -223,10 +215,6 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
-
-      - name: install typescript
-        run: |
-          npm install typescript
 
       - name: toolchain
         uses: dtolnay/rust-toolchain@stable

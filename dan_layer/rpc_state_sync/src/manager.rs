@@ -24,6 +24,7 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_dan_p2p::proto::rpc::{GetCheckpointRequest, GetCheckpointResponse, SyncStateRequest};
+use tari_dan_storage::global::models::ValidatorNode;
 use tari_dan_storage::{
     consensus_models::{
         EpochCheckpoint,
@@ -425,18 +426,19 @@ where
         Ok(())
     }
 
-    pub async fn sync_global_shard(&mut self) -> Result<(), CommsRpcConsensusSyncError> {
-        let current_epoch = self.epoch_manager.current_epoch().await?;
-        let prev_epoch_committees = self.get_sync_committees(current_epoch).await?;
-        let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
-        let global_shard = Shard::global();
-
-        let (_, committee) = prev_epoch_committees.first().ok_or(CommsRpcConsensusSyncError::NoCommittees(current_epoch))?;
-
-        // TODO: continue impl
+    /// Synchronizes the given [`Shard`].
+    pub async fn sync_shard(
+        &mut self,
+        shard: Shard,
+        current_epoch: Epoch,
+        committee: &Committee<PeerAddress>,
+        our_vn: &ValidatorNode<PeerAddress>,
+    ) -> Result<(), CommsRpcConsensusSyncError> {
         let mut remaining_members = committee.len();
-        info!(target: LOG_TARGET, "🛜Syncing state for global shard {global_shard} and {}", current_epoch.saturating_sub(Epoch(1)));
-        for (addr, public_key) in &committee {
+        let mut last_error = None;
+
+        info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", current_epoch.saturating_sub(Epoch(1)));
+        for (addr, public_key) in committee {
             remaining_members = remaining_members.saturating_sub(1);
             if our_vn.public_key == *public_key {
                 continue;
@@ -451,9 +453,79 @@ where
                     if remaining_members == 0 {
                         return Err(err);
                     }
+                    last_error = Some(err);
                     continue;
                 }
             };
+
+            // fetch checkpoint
+            let checkpoint = match self.fetch_epoch_checkpoint(&mut client, current_epoch).await {
+                Ok(Some(cp)) => cp,
+                Ok(None) => {
+                    // TODO: we should check with f + 1 validators in this case. If a single validator reports
+                    // this falsely, this will prevent us from continuing with consensus for a long time (state
+                    // root will mismatch).
+                    // TODO: we should instead ask the base layer if this is the first epoch in the network
+                    warn!(
+                                target: LOG_TARGET,
+                                "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
+                            );
+                    return Ok(());
+                }
+                Err(err) => {
+                    warn!(
+                                target: LOG_TARGET,
+                                "⚠️Failed to fetch checkpoint from {addr}: {err}. Attempting another peer if available"
+                            );
+                    if remaining_members == 0 {
+                        return Err(err);
+                    }
+                    last_error = Some(err);
+                    continue;
+                }
+            };
+            info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
+
+            self.validate_checkpoint(&checkpoint)?;
+            self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
+
+            match self.start_state_sync(&mut client, shard, &checkpoint).await {
+                Ok(current_version) => {
+                    let state_root = self.get_state_root_for_shard(shard, current_version)?;
+
+                    if state_root != checkpoint.get_shard_root(shard) {
+                        error!(
+                                    target: LOG_TARGET,
+                                    "❌State root mismatch for {shard}. Expected {expected} but got {actual}",
+                                    expected = checkpoint.get_shard_root(shard),
+                                    actual = state_root,
+                                );
+                        last_error = Some(CommsRpcConsensusSyncError::StateRootMismatch {
+                            expected: TreeHash::from(checkpoint.block().state_merkle_root().into_array()),
+                            actual: state_root,
+                        });
+                        // TODO: rollback state
+                        if remaining_members == 0 {
+                            return Err(last_error.unwrap());
+                        }
+
+                        continue;
+                    }
+
+                    info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {state_root}", current_version.unwrap_or(0));
+                }
+                Err(err) => {
+                    warn!(
+                                target: LOG_TARGET,
+                                "⚠️Failed to sync state from {addr}: {err}. Attempting another peer if available"
+                            );
+
+                    if remaining_members == 0 {
+                        return Err(err);
+                    }
+                    continue;
+                }
+            }
 
             break;
         }
@@ -497,109 +569,19 @@ where
         let prev_epoch_committees = self.get_sync_committees(current_epoch).await?;
         let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
 
-        let mut last_error = None;
+        // sync global shard
+        if let Ok((_, first_committee)) = prev_epoch_committees.first()
+            .ok_or(Self::Error::NoCommittees(current_epoch)) {
+            self.sync_shard(Shard::global(), current_epoch, first_committee, &our_vn).await?;
+        }
+
         // Sync data from each committee in range of the committee we're joining.
         // NOTE: we don't have to worry about substates in address range because shard boundaries are fixed.
         for (shard_group, mut committee) in prev_epoch_committees {
             committee.shuffle();
             for shard in shard_group.shard_iter() {
-                let mut remaining_members = committee.len();
-                info!(target: LOG_TARGET, "🛜Syncing state for {shard} and {}", current_epoch.saturating_sub(Epoch(1)));
-                for (addr, public_key) in &committee {
-                    remaining_members = remaining_members.saturating_sub(1);
-                    if our_vn.public_key == *public_key {
-                        continue;
-                    }
-                    let mut client = match self.establish_rpc_session(addr).await {
-                        Ok(c) => c,
-                        Err(err) => {
-                            warn!(
-                                target: LOG_TARGET,
-                                "Failed to establish RPC session with vn {addr}: {err}. Attempting another VN if available"
-                            );
-                            if remaining_members == 0 {
-                                return Err(err);
-                            }
-                            last_error = Some(err);
-                            continue;
-                        }
-                    };
-
-                    let checkpoint = match self.fetch_epoch_checkpoint(&mut client, current_epoch).await {
-                        Ok(Some(cp)) => cp,
-                        Ok(None) => {
-                            // TODO: we should check with f + 1 validators in this case. If a single validator reports
-                            // this falsely, this will prevent us from continuing with consensus for a long time (state
-                            // root will mismatch).
-                            // TODO: we should instead ask the base layer if this is the first epoch in the network
-                            warn!(
-                                target: LOG_TARGET,
-                                "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
-                            );
-                            return Ok(());
-                        }
-                        Err(err) => {
-                            warn!(
-                                target: LOG_TARGET,
-                                "⚠️Failed to fetch checkpoint from {addr}: {err}. Attempting another peer if available"
-                            );
-                            if remaining_members == 0 {
-                                return Err(err);
-                            }
-                            last_error = Some(err);
-                            continue;
-                        }
-                    };
-                    info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
-
-                    self.validate_checkpoint(&checkpoint)?;
-                    self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
-
-                    match self.start_state_sync(&mut client, shard, &checkpoint).await {
-                        Ok(current_version) => {
-                            let state_root = self.get_state_root_for_shard(shard, current_version)?;
-
-                            if state_root != checkpoint.get_shard_root(shard) {
-                                error!(
-                                    target: LOG_TARGET,
-                                    "❌State root mismatch for {shard}. Expected {expected} but got {actual}",
-                                    expected = checkpoint.get_shard_root(shard),
-                                    actual = state_root,
-                                );
-                                last_error = Some(CommsRpcConsensusSyncError::StateRootMismatch {
-                                    expected: TreeHash::from(checkpoint.block().state_merkle_root().into_array()),
-                                    actual: state_root,
-                                });
-                                // TODO: rollback state
-                                if remaining_members == 0 {
-                                    return Err(last_error.unwrap());
-                                }
-
-                                continue;
-                            }
-
-                            info!(target: LOG_TARGET, "🛜Synced state for {shard} to v{} with root {state_root}", current_version.unwrap_or(0));
-                        }
-                        Err(err) => {
-                            warn!(
-                                target: LOG_TARGET,
-                                "⚠️Failed to sync state from {addr}: {err}. Attempting another peer if available"
-                            );
-
-                            if remaining_members == 0 {
-                                return Err(err);
-                            }
-                            last_error = Some(err);
-                            continue;
-                        }
-                    }
-                    break;
-                }
+                self.sync_shard(shard, current_epoch, &committee, &our_vn).await?;
             }
-        }
-
-        if let Some(err) = last_error {
-            return Err(err);
         }
 
         info!(target: LOG_TARGET, "🛜State sync complete");

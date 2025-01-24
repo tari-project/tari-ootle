@@ -20,17 +20,7 @@ use diesel::{
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{
-    optional::Optional,
-    shard::Shard,
-    Epoch,
-    NodeAddressable,
-    NodeHeight,
-    ShardGroup,
-    SubstateLockType,
-    ToSubstateAddress,
-    VersionedSubstateId,
-};
+use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeAddressable, NodeHeight, NumPreshards, ShardGroup, SubstateLockType, ToSubstateAddress, VersionedSubstateId};
 use tari_dan_storage::{
     consensus_models::{
         Block,
@@ -1670,6 +1660,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             });
         }
 
+        let shard = if substate.substate_id.is_global() {
+            Shard::global()
+        } else {
+            substate.created_by_shard
+        };
+
         let values = (
             substates::address.eq(serialize_hex(substate.to_substate_address())),
             substates::substate_id.eq(substate.substate_id.to_string()),
@@ -1681,7 +1677,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             substates::created_block.eq(serialize_hex(substate.created_block)),
             substates::created_height.eq(substate.created_height.as_u64() as i64),
             substates::created_at_epoch.eq(substate.created_at_epoch.as_u64() as i64),
-            substates::created_by_shard.eq(substate.created_by_shard.as_u32() as i32),
+            substates::created_by_shard.eq(shard.as_u32() as i32),
         );
 
         diesel::insert_into(substates::table)
@@ -1694,7 +1690,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
         let seq = state_transitions::table
             .select(dsl::max(state_transitions::seq))
-            .filter(state_transitions::shard.eq(substate.created_by_shard.as_u32() as i32))
+            .filter(state_transitions::shard.eq(shard.as_u32() as i32))
             .first::<Option<i64>>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "substates_create",
@@ -1707,7 +1703,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         let values = (
             state_transitions::seq.eq(next_seq),
             state_transitions::epoch.eq(substate.created_at_epoch.as_u64() as i64),
-            state_transitions::shard.eq(substate.created_by_shard.as_u32() as i32),
+            state_transitions::shard.eq(shard.as_u32() as i32),
             state_transitions::substate_address.eq(serialize_hex(substate.to_substate_address())),
             state_transitions::substate_id.eq(substate.substate_id.to_string()),
             state_transitions::version.eq(substate.version as i32),

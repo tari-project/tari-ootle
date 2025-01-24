@@ -87,7 +87,7 @@ pub async fn spawn(
     let hs_config = HotstuffConfig {
         network,
         sidechain_id,
-        consensus_constants,
+        consensus_constants: consensus_constants.clone(),
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

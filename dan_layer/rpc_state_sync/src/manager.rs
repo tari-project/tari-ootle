@@ -7,6 +7,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::StreamExt;
 use log::*;
+use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
     traits::{ConsensusSpec, SyncManager, SyncStatus},

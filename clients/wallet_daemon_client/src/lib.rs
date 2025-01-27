@@ -112,6 +112,7 @@ use crate::{
         PublishTemplateResponse,
         RevealFundsRequest,
         RevealFundsResponse,
+        SettingsGetResponse,
         TransactionGetAllRequest,
         TransactionGetAllResponse,
         TransactionGetRequest,
@@ -499,6 +500,10 @@ impl WalletDaemonClient {
     ) -> Result<PublishTemplateResponse, WalletDaemonClientError> {
         self.send_request("transactions.publish_template", request.borrow())
             .await
+    }
+
+    pub async fn get_settings(&mut self) -> Result<SettingsGetResponse, WalletDaemonClientError> {
+        self.send_request("settings.get", &json!({})).await
     }
 
     fn next_request_id(&mut self) -> i64 {

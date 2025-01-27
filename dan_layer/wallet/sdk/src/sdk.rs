@@ -3,6 +3,7 @@
 
 use std::{sync::Arc, time::Duration};
 
+use tari_common::configuration::Network;
 use tari_crypto::tari_utilities::SafePassword;
 use tari_dan_common_types::optional::{IsNotFoundError, Optional};
 use tari_key_manager::cipher_seed::CipherSeed;
@@ -51,11 +52,17 @@ where
     TNetworkInterface::Error: IsNotFoundError,
 {
     pub fn initialize(
+        network: Network,
         store: TStore,
         indexer: TNetworkInterface,
         config: WalletSdkConfig,
     ) -> Result<Self, WalletSdkError> {
         let cipher_seed = Self::get_or_create_cipher_seed(&store)?;
+
+        let config_api = ConfigApi::new(&store);
+        if !config_api.exists(ConfigKey::Network)? {
+            config_api.set(ConfigKey::Network, network.as_key_str(), false)?;
+        }
 
         Ok(Self {
             store,
@@ -121,6 +128,7 @@ where
             self.confidential_outputs_api(),
             self.substate_api(),
             self.confidential_crypto_api(),
+            self.config_api(),
         )
     }
 

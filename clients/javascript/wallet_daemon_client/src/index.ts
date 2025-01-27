@@ -346,6 +346,8 @@ export class WalletDaemonClient {
       { token: this.token, timeout_millis: null },
     );
 
+    // TODO: Handle errors by throwing a custom error type
+
     return response;
   }
 }

@@ -13,7 +13,6 @@ use tari_template_lib::{
     models::{Amount, ComponentAddress, VaultId},
     prelude::{ResourceAddress, ResourceType, XTR},
 };
-use tari_transaction::Transaction;
 
 use crate::{faucet::Faucet, runner::Runner, timer::TraceTimer};
 
@@ -37,7 +36,8 @@ impl Runner {
             .accounts_api()
             .get_vault_by_resource(&in_account.address, &XTR)?;
 
-        let transaction = Transaction::builder()
+        let transaction = self
+            .new_transaction_builder()
             .fee_transaction_pay_from_component(
                 in_account.address.as_component_address().unwrap(),
                 Amount(1000 * num_tariswaps as i64),
@@ -121,7 +121,8 @@ impl Runner {
                     .get_vault_by_resource(&account.address, &tariswap.lp_resource_address)
                     .optional()?;
 
-                let transaction = Transaction::builder()
+                let transaction = self
+                    .new_transaction_builder()
                     .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.address)))
                     .with_inputs([
                         SubstateRequirement::unversioned(account.address.clone()),
@@ -235,7 +236,8 @@ impl Runner {
                     .accounts_api()
                     .get_vault_by_resource(&account.address, &tariswap.lp_resource_address)
                     .optional()?;
-                let transaction = Transaction::builder()
+                let transaction = self
+                    .new_transaction_builder()
                     .with_inputs(maybe_lp_vault.map(|v| SubstateRequirement::unversioned(v.address)))
                     .with_inputs([
                         SubstateRequirement::unversioned(account.address.clone()),
@@ -305,7 +307,8 @@ impl Runner {
                     .accounts_api()
                     .get_vault_by_resource(&account.address, &faucet.resource_address)?;
                 let tariswap = &tariswaps[i % tariswaps.len()];
-                let transaction = Transaction::builder()
+                let transaction = self
+                    .new_transaction_builder()
                     .with_inputs([
                         SubstateRequirement::unversioned(account.address.clone()),
                         SubstateRequirement::unversioned(xtr_vault.address),

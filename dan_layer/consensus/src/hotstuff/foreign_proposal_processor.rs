@@ -212,12 +212,16 @@ pub fn process_foreign_block<TStore: StateStore>(
                             .iter()
                             .filter(|(sg, _)| **sg != local_committee_info.shard_group())
                             .any(|(sg, conflicting_evidence)| {
-                                tx_rec.evidence().get(sg).is_some_and(|e| {
-                                    e.inputs().iter().any(|(id, e)| {
+                                tx_rec.evidence().get(sg).is_some_and(|shard_ev| {
+                                    shard_ev.inputs().iter().any(|(id, e)| {
                                         // If the current transaction (tx_rec) has a strict input version, it will be
                                         // aborted later.
-                                        e.as_ref().is_some_and(|e| e.is_write) &&
-                                            conflicting_evidence.inputs().contains_key(id)
+                                        let conflicting_is_write = e.as_ref().map_or(true, |e| e.is_write);
+                                        conflicting_evidence.inputs().iter().any(|(input_id, input)| {
+                                            // Are either write?
+                                            (conflicting_is_write || input.as_ref().map_or(true, |e| e.is_write)) &&
+                                                input_id == id
+                                        })
                                     })
                                 })
                             });

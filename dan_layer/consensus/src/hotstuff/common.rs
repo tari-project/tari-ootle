@@ -272,7 +272,19 @@ where
     let qcs = blocks.into_iter().map(|b| b.into_justify()).collect();
 
     // Fetch the state roots of the shards in the shard group
-    let mut shard_roots = IndexMap::with_capacity(shard_group.len());
+    let mut shard_roots = IndexMap::with_capacity(shard_group.len() + 1);
+
+    // adding global shard first
+    if let Some(version) = tx.state_tree_versions_get_latest(Shard::global())? {
+        let scoped_store = ShardScopedTreeStoreReader::new(&**tx, Shard::global());
+        let jmt = JellyfishMerkleTree::new(&scoped_store);
+        let root_hash = jmt
+            .get_root_hash(version)
+            .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
+        
+        shard_roots.insert(Shard::global(), root_hash);
+    }
+
     for shard in shard_group.shard_iter() {
         let Some(version) = tx.state_tree_versions_get_latest(shard)? else {
             // At v0 there have been no state changes

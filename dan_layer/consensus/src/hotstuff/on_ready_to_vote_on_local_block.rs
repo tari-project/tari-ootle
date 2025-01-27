@@ -1815,7 +1815,7 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::MintConfidentialOutputUnknown));
         };
         let id = VersionedSubstateId::new(utxo.commitment, 0);
-        let shard = id.to_substate_address().to_shard(local_committee_info.num_preshards());
+        let shard = id.to_shard(local_committee_info.num_preshards());
         let change = SubstateChange::Up {
             id,
             shard,

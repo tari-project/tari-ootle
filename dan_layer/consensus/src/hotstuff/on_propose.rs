@@ -573,7 +573,7 @@ where
         // This relies on the UTXO commands being ordered after transaction commands
         for utxo in batch.burnt_utxos {
             let id = VersionedSubstateId::new(utxo.commitment, 0);
-            let shard = id.to_substate_address().to_shard(local_committee_info.num_preshards());
+            let shard = id.to_shard(local_committee_info.num_preshards());
             let change = SubstateChange::Up {
                 id,
                 shard,
@@ -1073,7 +1073,6 @@ pub fn get_non_local_shards(diff: &[SubstateChange], local_committee_info: &Comm
     diff.iter()
         .map(|ch| {
             ch.versioned_substate_id()
-                .to_substate_address()
                 .to_shard(local_committee_info.num_preshards())
         })
         .filter(|shard| local_committee_info.shard_group().contains(shard))

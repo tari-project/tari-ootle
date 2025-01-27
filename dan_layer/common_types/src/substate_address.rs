@@ -11,7 +11,6 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_bor::BorError;
 use tari_common_types::types::{FixedHash, FixedHashSizeError};
 use tari_crypto::tari_utilities::{
     hex::{from_hex, Hex},
@@ -57,11 +56,6 @@ impl SubstateAddress {
         buf[ObjectKey::LENGTH..].copy_from_slice(&version.to_be_bytes());
 
         Self(buf)
-    }
-
-    pub fn to_substate_id(&self) -> Result<SubstateId, BorError> {
-        // TODO: fix this, it cant convert atm
-        SubstateId::from_bytes(&self.0.as_ref()[..ObjectKey::LENGTH])
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -144,23 +138,6 @@ impl SubstateAddress {
     /// Calculates and returns the shard number that this SubstateAddress belongs.
     /// A shard is a division of the 256-bit shard space where the boundary of the division if always a power of two.
     pub fn to_shard(&self, num_shards: NumPreshards) -> Shard {
-        // if the corresponding substate ID is a global one, just return global shard
-        match self.to_substate_id() {
-            Ok(substate_id) => {
-                if substate_id.is_global() {
-                    return Shard::global();
-                }
-            }
-            Err(error) => {
-                println!("Error getting substate id: {:?}", error);
-            }
-        }
-        // if let Ok(substate_id) = self.to_substate_id() {
-        //     if substate_id.is_global() {
-        //         return Shard::global();
-        //     }
-        // }
-        
         if num_shards.as_u32() == 1 || self.is_zero() {
             return Shard::first();
         }
@@ -540,21 +517,6 @@ mod tests {
             range.end(),
             end,
         );
-    }
-
-    mod to_shard {
-        use super::*;
-        use tari_engine_types::published_template::PublishedTemplateAddress;
-
-        #[test]
-        fn it_returns_global_shard_number() {
-            let template_address =  PublishedTemplateAddress::from_hex("cb240c42d65c8463a036cc663f4006cef1f01cbad76efd47d5f616fd4cc37976")
-                .expect("invalid published template address");
-            let substate_address: SubstateAddress =
-                SubstateAddress::from_object_key(template_address.as_object_key(), 0);
-            let shard = substate_address.to_shard(NumPreshards::P1);
-            assert_eq!(shard, Shard::global(), "{shard} is not the global one: {}", Shard::global());
-        }
     }
 
     mod to_shard_group {

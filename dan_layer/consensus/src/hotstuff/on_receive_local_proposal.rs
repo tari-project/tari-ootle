@@ -3,30 +3,6 @@
 
 use std::{collections::HashSet, mem};
 
-use log::*;
-use tari_dan_common_types::{
-    committee::{Committee, CommitteeInfo},
-    optional::Optional,
-    Epoch,
-    NodeHeight,
-};
-use tari_dan_storage::{
-    consensus_models::{
-        Block,
-        ForeignProposalStatus,
-        HighQc,
-        LastSentVote,
-        QuorumDecision,
-        TransactionPool,
-        ValidBlock,
-        Vote,
-    },
-    StateStore,
-    StateStoreWriteTransaction,
-};
-use tari_epoch_manager::EpochManagerReader;
-use tokio::{sync::broadcast, task};
-
 use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
@@ -53,6 +29,25 @@ use crate::{
         VoteSignatureService,
     },
 };
+use log::*;
+use tari_dan_common_types::shard::Shard;
+use tari_dan_common_types::{committee::{Committee, CommitteeInfo}, optional::Optional, Epoch, NodeHeight, ShardGroup};
+use tari_dan_storage::{
+    consensus_models::{
+        Block,
+        ForeignProposalStatus,
+        HighQc,
+        LastSentVote,
+        QuorumDecision,
+        TransactionPool,
+        ValidBlock,
+        Vote,
+    },
+    StateStore,
+    StateStoreWriteTransaction,
+};
+use tari_epoch_manager::EpochManagerReader;
+use tokio::{sync::broadcast, task};
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_local_proposal";
 

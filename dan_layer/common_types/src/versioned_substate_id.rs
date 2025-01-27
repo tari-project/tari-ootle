@@ -185,6 +185,14 @@ impl VersionedSubstateId {
     pub fn version(&self) -> u32 {
         self.version
     }
+    
+    
+    pub fn to_shard(&self, num_preshards: NumPreshards) -> Shard {
+        if self.substate_id.is_global() {
+            return Shard::global();
+        }
+        self.to_substate_address().to_shard(num_preshards)
+    }
 
     pub fn to_previous_version(&self) -> Option<Self> {
         self.version

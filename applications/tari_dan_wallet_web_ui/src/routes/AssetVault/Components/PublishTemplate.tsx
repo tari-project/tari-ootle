@@ -201,7 +201,7 @@ function PublishTemplateDialog(props: DialogProps) {
 
   return (
     <Dialog open={props.open} onClose={handleClose}>
-      <DialogTitle>Send {props.resource_address}</DialogTitle>
+      <DialogTitle>Publish Template</DialogTitle>
       <DialogContent className="dialog-content">
         <Form onSubmit={onSubmit} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
           {accounts && (

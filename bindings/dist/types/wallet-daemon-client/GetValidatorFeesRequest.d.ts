@@ -1,5 +1,6 @@
-import type { Epoch } from "../Epoch";
+import type { AccountOrKeyIndex } from "./AccountOrKeyIndex";
+import type { ShardGroup } from "../ShardGroup";
 export interface GetValidatorFeesRequest {
-    validator_public_key: string;
-    epoch: Epoch;
+    account_or_key: AccountOrKeyIndex;
+    shard_group: ShardGroup | null;
 }

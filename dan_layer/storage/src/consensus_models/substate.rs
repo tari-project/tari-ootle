@@ -100,7 +100,7 @@ impl SubstateRecord {
     }
 
     pub fn to_substate_requirement(&self) -> SubstateRequirement {
-        SubstateRequirement::with_version(self.substate_id.clone(), self.version)
+        SubstateRequirement::versioned(self.substate_id.clone(), self.version)
     }
 
     pub fn substate_id(&self) -> &SubstateId {

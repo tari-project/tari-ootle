@@ -29,7 +29,6 @@ use crate::{
     event_subscription::EventSubscription,
     p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
     transaction_validators::{
-        ClaimFeeTransactionValidator,
         EpochRangeValidator,
         FeeTransactionValidator,
         HasInputs,
@@ -144,9 +143,6 @@ pub fn create_transaction_validator(
                 .and_then(TransactionSignatureValidator)
                 .and_then(TemplateExistsValidator::new(template_manager)),
         )
-        .map_context(
-            |c| c.current_epoch,
-            EpochRangeValidator::new().and_then(ClaimFeeTransactionValidator::new()),
-        )
+        .map_context(|c| c.current_epoch, EpochRangeValidator::new())
         .map_context(|_| (), FeeTransactionValidator)
 }

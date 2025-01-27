@@ -34,7 +34,7 @@ use tari_transaction::{Transaction, TransactionId};
 
 use super::{PledgedTransaction, PreparedTransaction};
 use crate::{
-    hotstuff::substate_store::{LockStatus, PendingSubstateStore},
+    hotstuff::substate_store::{LockStatus, PendingSubstateStore, SubstateStoreError},
     tracing::TraceTimer,
     traits::{BlockTransactionExecutor, BlockTransactionExecutorError},
 };
@@ -81,9 +81,15 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     resolved_substates.insert(id.into(), version);
                 },
                 None => {
-                    let version = store.get_latest_version(&input.substate_id)?;
-                    info!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input} to version {version}");
-                    resolved_substates.insert(input, version);
+                    let latest = store.get_latest_version(&input.substate_id)?;
+                    if latest.is_down() {
+                        return Err(SubstateStoreError::SubstateIsDown {
+                            id: input.with_version(latest.version()),
+                        }
+                        .into());
+                    }
+                    info!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input} to version {}",latest.version());
+                    resolved_substates.insert(input, latest.version());
                 },
             }
         }

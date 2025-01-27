@@ -38,8 +38,8 @@ export function substateIdToString(substateId: SubstateId | string | null | unde
   if ("TransactionReceipt" in substateId) {
     return substateId.TransactionReceipt;
   }
-  if ("FeeClaim" in substateId) {
-    return substateId.FeeClaim;
+  if ("ValidatorFeePool" in substateId) {
+    return substateId.ValidatorFeePool;
   }
   console.error("Unknown substate id", substateId);
   return "Unknown";
@@ -66,8 +66,8 @@ export function stringToSubstateId(substateId: string): SubstateId {
       return { UnclaimedConfidentialOutput: parts[1] };
     case "txreceipt":
       return { TransactionReceipt: parts[1] };
-    case "feeclaim":
-      return { FeeClaim: parts[1] };
+    case "vnfp":
+      return { ValidatorFeePool: parts[1] };
     default:
       throw new Error(`Unknown substate id: ${substateId}`);
   }

@@ -249,28 +249,27 @@ export default function TransactionDetails() {
                     </div>
                   </>
                 )}
-                {transaction?.fee_instructions && (
-                  <Accordion expanded={expandedPanels.includes("panel1")}
-                             onChange={handleChange("panel1")}>
-                    <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
-                      <Typography>Fee Instructions</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <FeeInstructions data={transaction.fee_instructions} />
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-                {transaction?.instructions && (
-                  <Accordion expanded={expandedPanels.includes("panel2")}
-                             onChange={handleChange("panel2")}>
-                    <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
-                      <Typography>Instructions</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
+                <Accordion expanded={expandedPanels.includes("panel1")}
+                           onChange={handleChange("panel1")}>
+                  <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
+                    <Typography>Fee Instructions</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {transaction?.fee_instructions?.length ?
+                      <Instructions data={transaction.fee_instructions} /> : "Empty"}
+                  </AccordionDetails>
+                </Accordion>
+                <Accordion expanded={expandedPanels.includes("panel2")}
+                           onChange={handleChange("panel2")}>
+                  <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
+                    <Typography>Instructions</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {transaction?.instructions?.length ? (
                       <Instructions data={transaction.instructions} />
-                    </AccordionDetails>
-                  </Accordion>
-                )}
+                    ) : "Empty"}
+                  </AccordionDetails>
+                </Accordion>
                 {result && events && (
                   <Accordion expanded={expandedPanels.includes("panel3")}
                              onChange={handleChange("panel3")}>

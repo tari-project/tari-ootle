@@ -23,7 +23,7 @@
 use std::convert::{TryFrom, TryInto};
 
 use log::*;
-use tari_bor::{decode_exact, encode};
+use tari_bor::encode;
 use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
 use tari_dan_p2p::{
@@ -51,7 +51,7 @@ use tari_dan_storage::{
     consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
-use tari_engine_types::{virtual_substate::VirtualSubstateId, TemplateAddress};
+use tari_engine_types::TemplateAddress;
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_state_store_sqlite::SqliteStateStore;
@@ -66,7 +66,6 @@ use crate::{
         rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
         services::mempool::MempoolHandle,
     },
-    virtual_substate::VirtualSubstateManager,
 };
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";
@@ -76,7 +75,6 @@ pub struct ValidatorNodeRpcServiceImpl {
     template_manager: TemplateManagerHandle,
     shard_state_store: SqliteStateStore<PeerAddress>,
     mempool: MempoolHandle,
-    virtual_substate_manager: VirtualSubstateManager<SqliteStateStore<PeerAddress>, EpochManagerHandle<PeerAddress>>,
     consensus: ConsensusHandle,
 }
 
@@ -86,10 +84,6 @@ impl ValidatorNodeRpcServiceImpl {
         template_manager: TemplateManagerHandle,
         shard_state_store: SqliteStateStore<PeerAddress>,
         mempool: MempoolHandle,
-        virtual_substate_manager: VirtualSubstateManager<
-            SqliteStateStore<PeerAddress>,
-            EpochManagerHandle<PeerAddress>,
-        >,
         consensus: ConsensusHandle,
     ) -> Self {
         Self {
@@ -97,7 +91,6 @@ impl ValidatorNodeRpcServiceImpl {
             template_manager,
             shard_state_store,
             mempool,
-            virtual_substate_manager,
             consensus,
         }
     }
@@ -219,30 +212,6 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 destroyed_transaction_hash: vec![],
                 quorum_certificates: vec![(&created_qc).into()],
             }
-        };
-
-        Ok(Response::new(resp))
-    }
-
-    async fn get_virtual_substate(
-        &self,
-        req: Request<proto::rpc::GetVirtualSubstateRequest>,
-    ) -> Result<Response<proto::rpc::GetVirtualSubstateResponse>, RpcStatus> {
-        let req = req.into_message();
-
-        let address = decode_exact::<VirtualSubstateId>(&req.address)
-            .map_err(|e| RpcStatus::bad_request(format!("Invalid encoded substate id: {}", e)))?;
-
-        let substate = self
-            .virtual_substate_manager
-            .generate_for_address(&address)
-            .await
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-        let resp = proto::rpc::GetVirtualSubstateResponse {
-            substate: encode(&substate).map_err(|e| RpcStatus::general(format!("Unable to encode substate: {}", e)))?,
-            // TODO: evidence for the correctness of the substate
-            quorum_certificates: vec![],
         };
 
         Ok(Response::new(resp))

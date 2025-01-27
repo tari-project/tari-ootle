@@ -20,6 +20,7 @@ pub struct ProcessContext<'a> {
     bin: &'a PathBuf,
     envs: &'a [(String, String)],
     base_path: PathBuf,
+    processes_path: PathBuf,
     network: Network,
     listen_ip: IpAddr,
     port_allocator: &'a mut AllocatedPorts,
@@ -33,6 +34,7 @@ impl<'a> ProcessContext<'a> {
         bin: &'a PathBuf,
         envs: &'a [(String, String)],
         base_path: PathBuf,
+        processes_path: PathBuf,
         network: Network,
         listen_ip: IpAddr,
         port_allocator: &'a mut AllocatedPorts,
@@ -44,6 +46,7 @@ impl<'a> ProcessContext<'a> {
             bin,
             envs,
             base_path,
+            processes_path,
             network,
             listen_ip,
             port_allocator,
@@ -62,6 +65,10 @@ impl<'a> ProcessContext<'a> {
 
     pub fn base_path(&self) -> &PathBuf {
         &self.base_path
+    }
+
+    pub fn processes_path(&self) -> &PathBuf {
+        &self.processes_path
     }
 
     pub fn network(&self) -> Network {

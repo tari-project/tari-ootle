@@ -27,36 +27,30 @@ pub trait ValidatorNodeRpcService: Send + Sync + 'static {
     ) -> Result<Response<proto::GetTransactionResultResponse>, RpcStatus>;
 
     #[rpc(method = 4)]
-    async fn get_virtual_substate(
-        &self,
-        req: Request<proto::GetVirtualSubstateRequest>,
-    ) -> Result<Response<proto::GetVirtualSubstateResponse>, RpcStatus>;
-
-    #[rpc(method = 5)]
     async fn sync_blocks(
         &self,
         request: Request<proto::SyncBlocksRequest>,
     ) -> Result<Streaming<proto::SyncBlocksResponse>, RpcStatus>;
 
-    #[rpc(method = 6)]
+    #[rpc(method = 5)]
     async fn get_high_qc(
         &self,
         request: Request<proto::GetHighQcRequest>,
     ) -> Result<Response<proto::GetHighQcResponse>, RpcStatus>;
 
-    #[rpc(method = 7)]
+    #[rpc(method = 6)]
     async fn get_checkpoint(
         &self,
         request: Request<proto::GetCheckpointRequest>,
     ) -> Result<Response<proto::GetCheckpointResponse>, RpcStatus>;
 
-    #[rpc(method = 8)]
+    #[rpc(method = 7)]
     async fn sync_state(
         &self,
         request: Request<proto::SyncStateRequest>,
     ) -> Result<Streaming<proto::SyncStateResponse>, RpcStatus>;
 
-    #[rpc(method = 9)]
+    #[rpc(method = 8)]
     async fn sync_templates(
         &self,
         request: Request<proto::SyncTemplatesRequest>,

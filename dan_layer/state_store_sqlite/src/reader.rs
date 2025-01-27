@@ -7,7 +7,6 @@ use std::{
     ops::RangeInclusive,
 };
 
-use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{
     dsl,
     query_builder::SqlQuery,
@@ -1176,27 +1175,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 source: e,
             })?;
         txs.into_iter().map(|s| deserialize_hex_try_from(&s)).collect()
-    }
-
-    fn blocks_get_total_leader_fee_for_epoch(
-        &self,
-        epoch: Epoch,
-        validator_public_key: &PublicKey,
-    ) -> Result<u64, StorageError> {
-        use crate::schema::blocks;
-
-        let total_fee = blocks::table
-            .select(diesel::dsl::sum(blocks::total_leader_fee))
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::proposed_by.eq(serialize_hex(validator_public_key.as_bytes())))
-            .first::<Option<BigDecimal>>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_fees_get_total_fee_for_epoch",
-                source: e,
-            })?
-            .unwrap_or(BigDecimal::default());
-
-        Ok(total_fee.to_u64().expect("total fee overflows u64"))
     }
 
     fn blocks_get_any_with_epoch_range(

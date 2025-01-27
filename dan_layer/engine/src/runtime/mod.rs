@@ -54,8 +54,6 @@ mod workspace;
 use std::{fmt::Debug, sync::Arc};
 
 use tari_bor::decode_exact;
-use tari_common_types::types::PublicKey;
-use tari_dan_common_types::Epoch;
 use tari_engine_types::{
     commit_result::FinalizeResult,
     component::ComponentHeader,
@@ -63,6 +61,7 @@ use tari_engine_types::{
     indexed_value::IndexedValue,
     lock::LockFlag,
     substate::SubstateValue,
+    vn_fee_pool::ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
     args::{
@@ -157,7 +156,7 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn claim_burn(&self, claim: ConfidentialClaim) -> Result<(), RuntimeError>;
 
-    fn claim_validator_fees(&self, epoch: Epoch, validator_public_key: PublicKey) -> Result<(), RuntimeError>;
+    fn claim_validator_fees(&self, address: ValidatorFeePoolAddress) -> Result<(), RuntimeError>;
 
     fn set_fee_checkpoint(&self) -> Result<(), RuntimeError>;
     fn reset_to_fee_checkpoint(&self) -> Result<(), RuntimeError>;

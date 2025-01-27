@@ -26,7 +26,7 @@ pub struct WorkingStateStore {
     // This must be ordered deterministically since we use this to create the substate diff
     new_substates: IndexMap<SubstateId, SubstateValue>,
 
-    loaded_substates: HashMap<SubstateId, SubstateValue>,
+    loaded_substates: HashMap<SubstateId, Substate>,
     locked_substates: LockedSubstates,
 
     state_store: ReadOnlyMemoryStateStore,
@@ -42,12 +42,12 @@ impl WorkingStateStore {
         }
     }
 
-    pub fn try_lock(&mut self, address: &SubstateId, lock_flag: LockFlag) -> Result<LockId, RuntimeError> {
-        if !self.exists(address)? {
-            return Err(RuntimeError::SubstateNotFound { id: address.clone() });
+    pub fn try_lock(&mut self, id: &SubstateId, lock_flag: LockFlag) -> Result<LockId, RuntimeError> {
+        if !self.exists(id)? {
+            return Err(RuntimeError::SubstateNotFound { id: id.clone() });
         }
-        let lock_id = self.locked_substates.try_lock(address, lock_flag)?;
-        self.load(address)?;
+        let lock_id = self.locked_substates.try_lock(id, lock_flag)?;
+        self.load(id)?;
         Ok(lock_id)
     }
 
@@ -75,18 +75,19 @@ impl WorkingStateStore {
     ) -> Result<Option<R>, RuntimeError> {
         let lock = self.locked_substates.get(lock_id, LockFlag::Write)?;
         if let Some(mut substate) = self.loaded_substates.remove(lock.address()) {
-            return match callback(lock.address(), &mut substate)? {
+            match callback(lock.address(), substate.substate_value_mut())? {
                 Some(ret) => {
-                    self.new_substates.insert(lock.address().clone(), substate);
-                    Ok(Some(ret))
+                    self.new_substates
+                        .insert(lock.address().clone(), substate.into_substate_value());
+                    return Ok(Some(ret));
                 },
                 None => {
-                    // It is undefined to mutate the state and return None from the callback. We do not assert this
-                    // however which is risky.
+                    // It is undefined (i.e. a bug) to mutate the state and return None from the callback.
+                    // We do not explicitly assert this however for performance reasons.
                     self.loaded_substates.insert(lock.address().clone(), substate);
-                    Ok(None)
+                    return Ok(None);
                 },
-            };
+            }
         }
 
         let substate_mut = self
@@ -96,7 +97,7 @@ impl WorkingStateStore {
                 address: lock.address().clone(),
             })?;
 
-        // Since the substate is already mutated, we dont really care if the callback mutates it again or not
+        // Since the substate is already mutated, we don't really care if the callback mutates it again or not
         callback(lock.address(), substate_mut)
     }
 
@@ -109,7 +110,7 @@ impl WorkingStateStore {
     fn get_ref(&self, address: &SubstateId) -> Result<&SubstateValue, LockError> {
         self.new_substates
             .get(address)
-            .or_else(|| self.loaded_substates.get(address))
+            .or_else(|| self.loaded_substates.get(address).map(|s| s.substate_value()))
             .ok_or_else(|| LockError::SubstateNotLocked {
                 address: address.clone(),
             })
@@ -117,7 +118,8 @@ impl WorkingStateStore {
 
     fn get_for_mut(&mut self, address: &SubstateId) -> Result<&mut SubstateValue, LockError> {
         if let Some(substate) = self.loaded_substates.remove(address) {
-            self.new_substates.insert(address.clone(), substate);
+            self.new_substates
+                .insert(address.clone(), substate.into_substate_value());
         }
 
         if let Some(substate_mut) = self.new_substates.get_mut(address) {
@@ -156,8 +158,7 @@ impl WorkingStateStore {
             .get_state(id)
             .optional()?
             .ok_or_else(|| RuntimeError::SubstateNotFound { id: id.clone() })?;
-        let substate = substate.substate_value().clone();
-        self.loaded_substates.insert(id.clone(), substate);
+        self.loaded_substates.insert(id.clone(), substate.clone());
         Ok(())
     }
 
@@ -192,9 +193,13 @@ impl WorkingStateStore {
     }
 
     pub(super) fn get_unmodified_substate(&self, address: &SubstateId) -> Result<&Substate, RuntimeError> {
-        self.state_store
-            .get_state(address)
-            .optional()?
-            .ok_or_else(|| RuntimeError::SubstateNotFound { id: address.clone() })
+        match self.loaded_substates.get(address) {
+            Some(substate) => Ok(substate),
+            None => self
+                .state_store
+                .get_state(address)
+                .optional()?
+                .ok_or_else(|| RuntimeError::SubstateNotFound { id: address.clone() }),
+        }
     }
 }

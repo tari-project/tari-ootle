@@ -26,7 +26,7 @@ use log::*;
 use tari_bor::to_value;
 use tari_common::configuration::Network;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch};
+use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::new_component_address_from_public_key,
@@ -327,13 +327,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 runtime.interface().claim_burn(*claim)?;
                 Ok(InstructionResult::empty())
             },
-            Instruction::ClaimValidatorFees {
-                epoch,
-                validator_public_key,
-            } => {
-                runtime
-                    .interface()
-                    .claim_validator_fees(Epoch(epoch), validator_public_key)?;
+            Instruction::ClaimValidatorFees { address } => {
+                runtime.interface().claim_validator_fees(address)?;
                 Ok(InstructionResult::empty())
             },
             Instruction::AssertBucketContains {

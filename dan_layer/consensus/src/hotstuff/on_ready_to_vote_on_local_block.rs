@@ -52,6 +52,7 @@ use tokio::sync::broadcast;
 
 use crate::{
     hotstuff::{
+        apply_leader_fee_to_substate_store,
         block_change_set::{BlockDecision, ProposedBlockChangeSet},
         calculate_state_merkle_root,
         error::HotStuffError,
@@ -110,6 +111,7 @@ where TConsensusSpec: ConsensusSpec
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         valid_block: &ValidBlock,
         local_committee_info: &CommitteeInfo,
+        proposer_claim_public_key_bytes: [u8; 32],
         can_propose_epoch_end: bool,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
@@ -139,6 +141,7 @@ where TConsensusSpec: ConsensusSpec
                 tx,
                 valid_block.block(),
                 local_committee_info,
+                proposer_claim_public_key_bytes,
                 can_propose_epoch_end,
                 change_set,
             )?;
@@ -317,6 +320,7 @@ where TConsensusSpec: ConsensusSpec
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         block: &Block,
         local_committee_info: &CommitteeInfo,
+        proposer_claim_public_key_bytes: [u8; 32],
         can_propose_epoch_end: bool,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
@@ -538,6 +542,20 @@ where TConsensusSpec: ConsensusSpec
             );
             proposed_block_change_set.no_vote(NoVoteReason::TotalLeaderFeeDisagreement);
             return Ok(());
+        }
+
+        // Apply leader fee to substate store before we calculate the state root
+        if total_leader_fee > 0 {
+            let total_leader_fee_amt = total_leader_fee.try_into().map_err(|_| {
+                HotStuffError::InvariantError(format!("Total leader fee {total_leader_fee} under/overflows Amount"))
+            })?;
+            apply_leader_fee_to_substate_store(
+                &mut substate_store,
+                proposer_claim_public_key_bytes,
+                local_committee_info.shard_group().start(),
+                local_committee_info.num_preshards(),
+                total_leader_fee_amt,
+            )?;
         }
 
         let pending = PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, block.parent())?;

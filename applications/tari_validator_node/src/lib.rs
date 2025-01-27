@@ -33,9 +33,9 @@ mod json_rpc;
 mod metrics;
 mod p2p;
 mod substate_resolver;
-mod virtual_substate;
 
 mod file_l1_submitter;
+mod state_bootstrap;
 pub mod transaction_validators;
 mod validator;
 mod validator_registration_file;

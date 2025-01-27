@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
@@ -154,7 +154,8 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     });
   }
 
-  const onTransfer = async () => {
+  const onTransfer = async (e: FormEvent) => {
+    e.preventDefault();
     if (!account) {
       return;
     }

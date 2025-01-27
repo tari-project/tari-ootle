@@ -188,15 +188,15 @@ pub(crate) fn add_substate_ids(world: &mut TariWorld, outputs_name: String, diff
                 });
                 counters[6] += 1;
             },
-            SubstateId::FeeClaim(_) => {
-                outputs.insert(format!("fee_claim/{}", counters[7]), SubstateRequirement {
+            SubstateId::Template(_) => {
+                outputs.insert(format!("published_template/{}", counters[8]), SubstateRequirement {
                     substate_id: addr.clone(),
                     version: Some(data.version()),
                 });
                 counters[7] += 1;
             },
-            SubstateId::Template(_) => {
-                outputs.insert(format!("published_template/{}", counters[8]), SubstateRequirement {
+            SubstateId::ValidatorFeePool(_) => {
+                outputs.insert(format!("validator_fee_pool/{}", counters[8]), SubstateRequirement {
                     substate_id: addr.clone(),
                     version: Some(data.version()),
                 });

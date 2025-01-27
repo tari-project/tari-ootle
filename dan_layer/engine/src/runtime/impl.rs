@@ -24,9 +24,8 @@ use std::sync::Arc;
 
 use log::{warn, *};
 use tari_common::configuration::Network;
-use tari_common_types::types::PublicKey;
 use tari_crypto::{range_proof::RangeProofService, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch};
+use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_engine_types::{
     base_layer_hashing::ownership_proof_hasher64,
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
@@ -43,6 +42,7 @@ use tari_engine_types::{
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
+    vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
 };
 use tari_template_abi::{TemplateDef, Type};
@@ -2234,9 +2234,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn claim_validator_fees(&self, epoch: Epoch, validator_public_key: PublicKey) -> Result<(), RuntimeError> {
+    fn claim_validator_fees(&self, pool_address: ValidatorFeePoolAddress) -> Result<(), RuntimeError> {
         self.tracker.write_with(|state| {
-            let resource = state.claim_fee(epoch, validator_public_key)?;
+            let resource = state.withdraw_all_fees_from_pool(pool_address)?;
             let bucket_id = state.new_bucket_id();
             state.new_bucket(bucket_id, resource)?;
             state.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);

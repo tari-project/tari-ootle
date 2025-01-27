@@ -57,7 +57,7 @@ fn it_allows_substate_up_for_v0() {
         })
         .unwrap();
 
-    let s = store.get_latest(&id).unwrap();
+    let s = store.get_latest_change(&id).unwrap().into_up().unwrap();
     assert_substate_eq(s, new_substate(0, 0));
 }
 
@@ -71,7 +71,7 @@ fn it_allows_down_then_up() {
     let tx = store.create_read_tx().unwrap();
     let mut store = create_pending_store(&tx);
 
-    let s = store.get_latest(id.substate_id()).unwrap();
+    let s = store.get_latest_change(id.substate_id()).unwrap().into_up().unwrap();
     assert_substate_eq(s, new_substate(0, 0));
 
     store
@@ -93,7 +93,7 @@ fn it_allows_down_then_up() {
 
     let s = store.get(id.to_next_version().as_ref()).unwrap();
     assert_substate_eq(s, new_substate(1, 1));
-    let s = store.get_latest(id.substate_id()).unwrap();
+    let s = store.get_latest_change(id.substate_id()).unwrap().into_up().unwrap();
     assert_substate_eq(s, new_substate(1, 1));
 }
 

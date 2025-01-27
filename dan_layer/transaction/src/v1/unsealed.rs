@@ -97,23 +97,6 @@ impl UnsealedTransactionV1 {
         (self.transaction.fee_instructions, self.transaction.instructions)
     }
 
-    pub fn fee_claims(&self) -> impl Iterator<Item = (Epoch, PublicKey)> + '_ {
-        self.instructions()
-            .iter()
-            .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::ClaimValidatorFees {
-                    epoch,
-                    validator_public_key,
-                } = instruction
-                {
-                    Some((Epoch(*epoch), validator_public_key.clone()))
-                } else {
-                    None
-                }
-            })
-    }
-
     pub fn min_epoch(&self) -> Option<Epoch> {
         self.transaction.min_epoch
     }

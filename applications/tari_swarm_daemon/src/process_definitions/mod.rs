@@ -10,6 +10,7 @@ mod minotari_wallet;
 mod signaling_server;
 mod validator_node;
 mod wallet_daemon;
+mod wallet_daemon_create_key;
 
 pub use context::*;
 pub use definition::*;
@@ -25,5 +26,6 @@ pub fn get_definition(instance_type: InstanceType) -> Box<dyn ProcessDefinition 
         InstanceType::TariWalletDaemon => Box::new(wallet_daemon::WalletDaemon::new()),
         InstanceType::TariIndexer => Box::new(indexer::Indexer::new()),
         InstanceType::TariSignalingServer => Box::new(signaling_server::SignalingServer::new()),
+        InstanceType::TariWalletDaemonCreateKey => Box::new(wallet_daemon_create_key::WalletDaemonCreateKey::new()),
     }
 }

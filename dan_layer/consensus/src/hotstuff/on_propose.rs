@@ -59,11 +59,13 @@ use tokio::task;
 
 use crate::{
     hotstuff::{
+        apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
         error::HotStuffError,
         filter_diff_for_committee,
         substate_store::PendingSubstateStore,
+        to_public_key_bytes,
         transaction_manager::{
             ConsensusTransactionManager,
             LocalPreparedTransaction,
@@ -131,6 +133,7 @@ where TConsensusSpec: ConsensusSpec
         next_height: NodeHeight,
         local_committee: &Committee<TConsensusSpec::Addr>,
         local_committee_info: CommitteeInfo,
+        local_claim_public_key: &PublicKey,
         leaf_block: LeafBlock,
         propose_epoch_end: bool,
     ) -> Result<(), HotStuffError> {
@@ -156,6 +159,8 @@ where TConsensusSpec: ConsensusSpec
         let base_layer_block_height = current_base_layer_block_height;
 
         let on_propose = self.clone();
+        let local_claim_public_key = to_public_key_bytes(local_claim_public_key);
+
         let (next_block, foreign_proposals) = task::spawn_blocking(move || {
             on_propose.store.with_write_tx(|tx| {
                 let high_qc = HighQc::get(&**tx, epoch)?;
@@ -175,6 +180,7 @@ where TConsensusSpec: ConsensusSpec
                     leaf_block,
                     high_qc_cert,
                     &local_committee_info,
+                    local_claim_public_key,
                     false,
                     base_layer_block_height,
                     base_layer_block_hash,
@@ -436,6 +442,7 @@ where TConsensusSpec: ConsensusSpec
         parent_block: LeafBlock,
         high_qc_certificate: QuorumCertificate,
         local_committee_info: &CommitteeInfo,
+        local_claim_public_key_bytes: [u8; 32],
         dont_propose_transactions: bool,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
@@ -565,7 +572,7 @@ where TConsensusSpec: ConsensusSpec
                     .unwrap_or(0);
                 // TODO: a BTreeSet changes the order from the original batch. Uncertain if this is a problem since the
                 // proposer also processes transactions in the completed block order, however on_propose does perform
-                // some operations (e.g. prepare, execute) in batch order. To ensure safety, we should process
+                // some operations (e.g. prepare, execute) in batch order. To ensure correctness, we should process
                 // on_propose in canonical order.
                 commands.insert(command);
             }
@@ -597,6 +604,24 @@ where TConsensusSpec: ConsensusSpec
 
         let pending_tree_diffs =
             PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, start_of_chain_block.block_id())?;
+
+        // Add proposer fee substate
+        if total_leader_fee > 0 {
+            let total_leader_fee_amt = total_leader_fee.try_into().map_err(|e| {
+                HotStuffError::InvariantError(format!(
+                    "Total leader fee ({total_leader_fee}) under/overflowed the Amount type: {e}"
+                ))
+            })?;
+
+            // Apply leader fee to substate store before we calculate the state root
+            apply_leader_fee_to_substate_store(
+                &mut substate_store,
+                local_claim_public_key_bytes,
+                local_committee_info.shard_group().start(),
+                local_committee_info.num_preshards(),
+                total_leader_fee_amt,
+            )?;
+        }
 
         let (state_root, _) = calculate_state_merkle_root(
             tx,

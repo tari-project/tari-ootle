@@ -5,6 +5,7 @@ export type AbortReason =
   | "TransactionAtomMustBeAbort"
   | "TransactionAtomMustBeCommit"
   | "InputLockConflict"
+  | "ForeignPledgeInputConflict"
   | "LockInputsFailed"
   | "LockOutputsFailed"
   | "LockInputsOutputsFailed"

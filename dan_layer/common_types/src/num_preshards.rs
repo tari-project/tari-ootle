@@ -5,7 +5,7 @@ use std::{error::Error, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
-use crate::ShardGroup;
+use crate::{shard::Shard, ShardGroup};
 
 #[cfg_attr(
     feature = "ts",
@@ -34,6 +34,10 @@ impl NumPreshards {
 
     pub fn is_one(self) -> bool {
         self == Self::P1
+    }
+
+    pub fn all_shards_iter(&self) -> impl Iterator<Item = Shard> {
+        (0..self.as_u32()).map(Shard::from)
     }
 
     pub fn all_shard_groups_iter(&self, num_committees: u32) -> impl Iterator<Item = ShardGroup> {

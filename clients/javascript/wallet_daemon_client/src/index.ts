@@ -78,7 +78,7 @@ import {
   SubstateId,
   substateIdToString,
   stringToSubstateId,
-  rejectReasonToString,
+  rejectReasonToString, GetValidatorFeesRequest, GetValidatorFeesResponse,
 } from "@tari-project/typescript-bindings";
 import { FetchRpcTransport, RpcTransport } from "./transports";
 
@@ -316,6 +316,10 @@ export class WalletDaemonClient {
 
   public validatorsClaimFees(params: ClaimValidatorFeesRequest): Promise<ClaimValidatorFeesResponse> {
     return this.__invokeRpc("validators.claim_fees", params);
+  }
+
+  public validatorsGetFees(params: GetValidatorFeesRequest): Promise<GetValidatorFeesResponse> {
+    return this.__invokeRpc("validators.get_fees", params);
   }
 
   public rpcDiscover(): Promise<string> {

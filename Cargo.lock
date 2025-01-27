@@ -9849,6 +9849,7 @@ dependencies = [
  "base64 0.20.0",
  "clap 3.2.25",
  "config",
+ "either",
  "futures 0.3.31",
  "humantime-serde",
  "include_dir",
@@ -10416,7 +10417,6 @@ name = "tari_state_store_sqlite"
 version = "0.8.0"
 dependencies = [
  "anyhow",
- "bigdecimal",
  "diesel",
  "diesel_migrations",
  "hex",
@@ -10654,6 +10654,7 @@ dependencies = [
  "axum-jrpc",
  "clap 3.2.25",
  "config",
+ "either",
  "futures 0.3.31",
  "include_dir",
  "indexmap 2.6.0",

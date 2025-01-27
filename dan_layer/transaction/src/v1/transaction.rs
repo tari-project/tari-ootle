@@ -6,7 +6,6 @@ use std::{collections::HashSet, fmt::Display};
 use indexmap::IndexSet;
 use log::*;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{
     Epoch,
     NumPreshards,
@@ -190,23 +189,6 @@ impl TransactionV1 {
         &mut self.filled_inputs
     }
 
-    pub fn fee_claims(&self) -> impl Iterator<Item = (Epoch, PublicKey)> + '_ {
-        self.instructions()
-            .iter()
-            .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::ClaimValidatorFees {
-                    epoch,
-                    validator_public_key,
-                } = instruction
-                {
-                    Some((Epoch(*epoch), validator_public_key.clone()))
-                } else {
-                    None
-                }
-            })
-    }
-
     pub fn min_epoch(&self) -> Option<Epoch> {
         self.body.min_epoch()
     }
@@ -254,6 +236,9 @@ impl TransactionV1 {
                 },
                 Instruction::ClaimBurn { claim } => {
                     substates.insert(SubstateId::UnclaimedConfidentialOutput(claim.output_address));
+                },
+                Instruction::ClaimValidatorFees { address, .. } => {
+                    substates.insert(SubstateId::ValidatorFeePool(*address));
                 },
                 _ => {},
             }

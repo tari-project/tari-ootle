@@ -38,6 +38,7 @@ use crate::{
         on_ready_to_vote_on_local_block::OnReadyToVoteOnLocalBlock,
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
         pacemaker_handle::PaceMakerHandle,
+        to_public_key_bytes,
         transaction_manager::ConsensusTransactionManager,
         HotstuffConfig,
         HotstuffEvent,
@@ -210,8 +211,21 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(false);
         }
 
+        // TODO: perf - we may want to cache this
+        let proposer_vn = self
+            .epoch_manager
+            .get_validator_node_by_public_key(valid_block.epoch(), valid_block.proposed_by().clone())
+            .await?;
+        let proposer_claim_public_key_bytes = to_public_key_bytes(&proposer_vn.fee_claim_public_key);
+
         let result = self
-            .process_block(current_epoch, *local_committee_info, local_committee, valid_block)
+            .process_block(
+                current_epoch,
+                *local_committee_info,
+                local_committee,
+                proposer_claim_public_key_bytes,
+                valid_block,
+            )
             .await;
 
         match result {
@@ -234,6 +248,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         current_epoch: Epoch,
         local_committee_info: CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
+        proposer_claim_public_key_bytes: [u8; 32],
         valid_block: ValidBlock,
     ) -> Result<bool, HotStuffError> {
         let em_epoch = self.epoch_manager.current_epoch().await?;
@@ -262,6 +277,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         tx,
                         &valid_block,
                         &local_committee_info,
+                        proposer_claim_public_key_bytes,
                         can_propose_epoch_end,
                         &mut change_set,
                     )?;

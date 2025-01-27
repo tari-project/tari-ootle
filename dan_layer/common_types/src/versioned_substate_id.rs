@@ -35,7 +35,7 @@ impl SubstateRequirement {
         }
     }
 
-    pub fn with_version<T: Into<SubstateId>>(id: T, version: u32) -> Self {
+    pub fn versioned<T: Into<SubstateId>>(id: T, version: u32) -> Self {
         Self {
             substate_id: id.into(),
             version: Some(version),
@@ -56,6 +56,10 @@ impl SubstateRequirement {
 
     pub fn version(&self) -> Option<u32> {
         self.version
+    }
+
+    pub fn with_version(self, version: u32) -> VersionedSubstateId {
+        VersionedSubstateId::new(self.substate_id, version)
     }
 
     pub fn to_substate_address(&self) -> Option<SubstateAddress> {
@@ -133,7 +137,7 @@ impl Display for SubstateRequirement {
 
 impl From<VersionedSubstateId> for SubstateRequirement {
     fn from(value: VersionedSubstateId) -> Self {
-        Self::with_version(value.substate_id, value.version)
+        Self::versioned(value.substate_id, value.version)
     }
 }
 

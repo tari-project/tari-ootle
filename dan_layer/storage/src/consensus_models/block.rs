@@ -766,14 +766,6 @@ impl Block {
         tx.blocks_get_ids_by_parent(self.id())
     }
 
-    pub fn get_total_due_for_epoch<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        epoch: Epoch,
-        validator_public_key: &PublicKey,
-    ) -> Result<u64, StorageError> {
-        tx.blocks_get_total_leader_fee_for_epoch(epoch, validator_public_key)
-    }
-
     pub fn get_any_with_epoch_range_for_validator<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         range: RangeInclusive<Epoch>,

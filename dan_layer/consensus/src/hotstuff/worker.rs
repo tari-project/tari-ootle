@@ -7,7 +7,7 @@ use std::{
 };
 
 use log::*;
-use tari_common_types::types::FixedHash;
+use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     optional::Optional,
@@ -274,6 +274,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let current_epoch = self.pacemaker.current_view().get_epoch();
         self.request_initial_catch_up_sync(current_epoch).await?;
         let mut prev_epoch = current_epoch;
+        let mut local_claim_public_key = self
+            .epoch_manager
+            .get_our_validator_node(current_epoch)
+            .await?
+            .fee_claim_public_key;
 
         loop {
             let current_height = self.pacemaker.current_view().get_height();
@@ -283,6 +288,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             if prev_epoch != current_epoch {
                 local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
                 local_committee = self.epoch_manager.get_local_committee(current_epoch).await?;
+                local_claim_public_key = self
+                    .epoch_manager
+                    .get_our_validator_node(current_epoch)
+                    .await?
+                    .fee_claim_public_key;
                 prev_epoch = current_epoch;
             }
 
@@ -304,14 +314,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 },
 
                 forced_height = on_force_beat.wait() => {
-                    if let Err(e) = self.on_force_beat(current_epoch, forced_height, &local_committee_info, &local_committee).await {
+                    if let Err(e) = self.on_force_beat(current_epoch, forced_height, &local_committee_info, &local_committee, &local_claim_public_key).await {
                         self.on_failure("propose_if_leader", &e).await;
                         return Err(e);
                     }
                 },
 
                 _ = on_beat.wait() => {
-                    if let Err(e) = self.on_beat(current_epoch,  &local_committee_info, &local_committee).await {
+                    if let Err(e) = self.on_beat(current_epoch,  &local_committee_info, &local_committee, &local_claim_public_key).await {
                         self.on_failure("on_beat", &e).await;
                         return Err(e);
                     }
@@ -658,6 +668,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         epoch: Epoch,
         local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
+        local_claim_public_key: &PublicKey,
     ) -> Result<(), HotStuffError> {
         let leaf_block = self.state_store.with_read_tx(|tx| LeafBlock::get(tx, epoch))?;
         let next_height = leaf_block.height() + NodeHeight(1);
@@ -702,8 +713,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             }
         }
 
-        self.propose_now(epoch, next_height, local_committee_info, local_committee)
-            .await?;
+        self.propose_now(
+            epoch,
+            next_height,
+            local_committee_info,
+            local_committee,
+            local_claim_public_key,
+        )
+        .await?;
 
         Ok(())
     }
@@ -716,6 +733,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         forced_height: Option<NodeHeight>,
         local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
+        local_claim_public_key: &PublicKey,
     ) -> Result<(), HotStuffError> {
         let next_height = match forced_height {
             Some(height) => {
@@ -752,8 +770,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .len(),
         );
 
-        self.propose_now(epoch, next_height, local_committee_info, local_committee)
-            .await?;
+        self.propose_now(
+            epoch,
+            next_height,
+            local_committee_info,
+            local_committee,
+            local_claim_public_key,
+        )
+        .await?;
 
         Ok(())
     }
@@ -764,6 +788,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         next_height: NodeHeight,
         local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
+        local_claim_public_key: &PublicKey,
     ) -> Result<(), HotStuffError> {
         let mut leaf_block = self.state_store.with_read_tx(|tx| LeafBlock::get(tx, epoch))?;
         if next_height > leaf_block.height + NodeHeight(1) {
@@ -806,6 +831,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 next_height,
                 local_committee,
                 *local_committee_info,
+                local_claim_public_key,
                 leaf_block,
                 propose_epoch_end,
             )

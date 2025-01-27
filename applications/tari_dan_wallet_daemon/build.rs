@@ -60,13 +60,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
                 println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
                 exit_on_ci();
-                break;
+                // Ignore it unless on CI
+                continue;
             },
             Err(error) => {
                 println!("cargo:warning='npm run build' error : {:?}", error);
                 println!("cargo:warning=The web ui will not be included!");
                 exit_on_ci();
-                break;
+                continue;
             },
             _ => {},
         }

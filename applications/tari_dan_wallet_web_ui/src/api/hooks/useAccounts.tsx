@@ -33,6 +33,7 @@ import {
   accountsTransfer,
   nftList,
   transactionsPublishTemplate,
+  validatorsGetFees,
 } from "../../utils/json_rpc";
 import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
@@ -40,6 +41,7 @@ import type {
   ComponentAccessRules,
   ConfidentialTransferInputSelection,
   ComponentAddressOrName,
+  AccountOrKeyIndex,
 } from "@tari-project/typescript-bindings";
 
 //   Fees are passed as strings because Amount is tagged
@@ -207,5 +209,15 @@ export const useAccountNFTsList = (account: ComponentAddressOrName | null, offse
     queryKey: ["nfts_list"],
     queryFn: () => nftList({ account, offset, limit }),
     onError: (_error: ApiError) => {},
+  });
+};
+
+export const useValidatorFees = (accountOrKeyIndex: AccountOrKeyIndex, shardGroup = null) => {
+  return useQuery({
+    queryKey: ["validator_fees"],
+    queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyIndex, shard_group: shardGroup }),
+    onError: (error: ApiError) => {
+      error;
+    },
   });
 };

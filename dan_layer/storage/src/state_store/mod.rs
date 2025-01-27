@@ -187,11 +187,7 @@ pub trait StateStoreReadTransaction: Sized {
     fn blocks_get_ids_by_parent(&self, parent: &BlockId) -> Result<Vec<BlockId>, StorageError>;
     fn blocks_get_parent_chain(&self, block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError>;
     fn blocks_get_pending_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError>;
-    fn blocks_get_total_leader_fee_for_epoch(
-        &self,
-        epoch: Epoch,
-        validator_public_key: &PublicKey,
-    ) -> Result<u64, StorageError>;
+
     fn blocks_get_any_with_epoch_range(
         &self,
         epoch_range: RangeInclusive<Epoch>,

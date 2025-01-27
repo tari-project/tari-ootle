@@ -13,11 +13,12 @@ pub struct ListIndexersRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListIndexersResponse {
-    pub nodes: Vec<ValidatorNodeInfo>,
+    pub nodes: Vec<IndexerInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidatorNodeInfo {
+pub struct IndexerInfo {
+    pub instance_id: InstanceId,
     pub name: String,
     pub web: String,
     pub jrpc: String,
@@ -39,7 +40,8 @@ pub async fn list(context: &HandlerContext, _req: ListIndexersRequest) -> Result
             let web = format!("http://{public_ip}:{web_port}");
             let jrpc = format!("http://{public_ip}:{json_rpc_port}");
 
-            Ok(ValidatorNodeInfo {
+            Ok(IndexerInfo {
+                instance_id: instance.id,
                 name: instance.name,
                 web,
                 jrpc,

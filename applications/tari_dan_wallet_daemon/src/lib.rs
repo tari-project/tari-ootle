@@ -33,7 +33,7 @@ mod webrtc;
 use std::{fs, panic, process};
 
 use log::*;
-use tari_dan_common_types::optional::Optional;
+use tari_dan_common_types::{optional::Optional, NumPreshards};
 use tari_dan_wallet_sdk::{
     apis::{
         config::{ConfigApi, ConfigKey},
@@ -59,6 +59,8 @@ use crate::{
 const LOG_TARGET: &str = "tari::dan::wallet_daemon";
 
 const DEFAULT_FEE: Amount = Amount::new(1500);
+// TODO: must match the global network value. All testnets currently have 256 pre-shards.
+const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 
 pub async fn run_tari_dan_wallet_daemon(
     config: ApplicationConfig,

@@ -47,7 +47,6 @@ use tari_template_lib::{
 use crate::{
     component::ComponentHeader,
     confidential::UnclaimedConfidentialOutput,
-    fee_claim::{FeeClaim, FeeClaimAddress},
     hashing::{hasher32, substate_value_hasher32, EngineHashDomainLabel},
     non_fungible::NonFungibleContainer,
     non_fungible_index::NonFungibleIndex,
@@ -55,6 +54,7 @@ use crate::{
     resource::Resource,
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     vault::Vault,
+    vn_fee_pool::{ValidatorFeePool, ValidatorFeePoolAddress},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +78,10 @@ impl Substate {
 
     pub fn substate_value(&self) -> &SubstateValue {
         &self.substate
+    }
+
+    pub fn substate_value_mut(&mut self) -> &mut SubstateValue {
+        &mut self.substate
     }
 
     pub fn into_substate_value(self) -> SubstateValue {
@@ -125,8 +129,8 @@ pub enum SubstateId {
     NonFungible(NonFungibleAddress),
     NonFungibleIndex(NonFungibleIndexAddress),
     TransactionReceipt(TransactionReceiptAddress),
-    FeeClaim(FeeClaimAddress),
     Template(PublishedTemplateAddress),
+    ValidatorFeePool(ValidatorFeePoolAddress),
 }
 
 impl SubstateId {
@@ -165,21 +169,6 @@ impl SubstateId {
         }
     }
 
-    /// Returns true for any substate that has is "versionable" i.e. can have a version > 0, otherwise false.
-    pub fn is_versioned(&self) -> bool {
-        match self {
-            SubstateId::Component(_) |
-            SubstateId::Resource(_) |
-            SubstateId::Vault(_) |
-            SubstateId::NonFungibleIndex(_) |
-            SubstateId::Template(_) |
-            SubstateId::NonFungible(_) => true,
-            SubstateId::UnclaimedConfidentialOutput(_) |
-            SubstateId::TransactionReceipt(_) |
-            SubstateId::FeeClaim(_) => false,
-        }
-    }
-
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(self).unwrap()
     }
@@ -214,8 +203,8 @@ impl SubstateId {
             },
             SubstateId::UnclaimedConfidentialOutput(addr) => *addr.as_object_key(),
             SubstateId::TransactionReceipt(addr) => *addr.as_object_key(),
-            SubstateId::FeeClaim(addr) => *addr.as_object_key(),
             SubstateId::Template(addr) => *addr.as_object_key(),
+            SubstateId::ValidatorFeePool(addr) => *addr.as_object_key(),
         }
     }
 
@@ -329,12 +318,6 @@ impl From<UnclaimedConfidentialOutputAddress> for SubstateId {
     }
 }
 
-impl From<FeeClaimAddress> for SubstateId {
-    fn from(address: FeeClaimAddress) -> Self {
-        Self::FeeClaim(address)
-    }
-}
-
 impl From<TransactionReceiptAddress> for SubstateId {
     fn from(address: TransactionReceiptAddress) -> Self {
         Self::TransactionReceipt(address)
@@ -344,6 +327,12 @@ impl From<TransactionReceiptAddress> for SubstateId {
 impl From<PublishedTemplateAddress> for SubstateId {
     fn from(address: PublishedTemplateAddress) -> Self {
         Self::Template(address)
+    }
+}
+
+impl From<ValidatorFeePoolAddress> for SubstateId {
+    fn from(address: ValidatorFeePoolAddress) -> Self {
+        Self::ValidatorFeePool(address)
     }
 }
 
@@ -438,20 +427,6 @@ impl TryFrom<SubstateId> for UnclaimedConfidentialOutputAddress {
     }
 }
 
-impl TryFrom<SubstateId> for FeeClaimAddress {
-    type Error = InvalidSubstateIdVariant;
-
-    fn try_from(value: SubstateId) -> Result<Self, Self::Error> {
-        match value {
-            SubstateId::FeeClaim(addr) => Ok(addr),
-            _ => Err(InvalidSubstateIdVariant {
-                substate_id: value,
-                expected: any::type_name::<Self>(),
-            }),
-        }
-    }
-}
-
 impl TryFrom<SubstateId> for TransactionReceiptAddress {
     type Error = InvalidSubstateIdVariant;
 
@@ -490,8 +465,8 @@ impl Display for SubstateId {
             SubstateId::NonFungibleIndex(addr) => write!(f, "{}", addr),
             SubstateId::UnclaimedConfidentialOutput(commitment_address) => write!(f, "{}", commitment_address),
             SubstateId::TransactionReceipt(addr) => write!(f, "{}", addr),
-            SubstateId::FeeClaim(addr) => write!(f, "{}", addr),
             SubstateId::Template(addr) => write!(f, "{}", addr),
+            SubstateId::ValidatorFeePool(addr) => write!(f, "{}", addr),
         }
     }
 }
@@ -539,13 +514,14 @@ impl FromStr for SubstateId {
                     TransactionReceiptAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::TransactionReceipt(tx_receipt_addr))
             },
-            Some(("feeclaim", addr)) => {
-                let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
-                Ok(SubstateId::FeeClaim(addr.into()))
-            },
             Some(("template", addr)) => {
                 let addr = Hash::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
                 Ok(SubstateId::Template(addr.into()))
+            },
+            Some(("vnfp", addr)) => {
+                let addr =
+                    ValidatorFeePoolAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                Ok(SubstateId::ValidatorFeePool(addr))
             },
             Some(_) | None => Err(InvalidSubstateIdFormat(s.to_string())),
         }
@@ -575,8 +551,8 @@ impl_partial_eq!(VaultId, Vault);
 impl_partial_eq!(UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput);
 impl_partial_eq!(NonFungibleAddress, NonFungible);
 impl_partial_eq!(TransactionReceiptAddress, TransactionReceipt);
-impl_partial_eq!(FeeClaimAddress, FeeClaim);
 impl_partial_eq!(PublishedTemplateAddress, Template);
+impl_partial_eq!(ValidatorFeePoolAddress, ValidatorFeePool);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -592,8 +568,8 @@ pub enum SubstateValue {
     NonFungibleIndex(NonFungibleIndex),
     UnclaimedConfidentialOutput(UnclaimedConfidentialOutput),
     TransactionReceipt(TransactionReceipt),
-    FeeClaim(FeeClaim),
     Template(PublishedTemplate),
+    ValidatorFeePool(ValidatorFeePool),
 }
 
 impl SubstateValue {
@@ -765,6 +741,20 @@ impl SubstateValue {
         }
     }
 
+    pub fn as_validator_fee_pool(&self) -> Option<&ValidatorFeePool> {
+        match self {
+            SubstateValue::ValidatorFeePool(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_validator_fee_pool_mut(&mut self) -> Option<&mut ValidatorFeePool> {
+        match self {
+            SubstateValue::ValidatorFeePool(value) => Some(value),
+            _ => None,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(self).unwrap()
     }
@@ -804,12 +794,6 @@ impl From<NonFungibleIndex> for SubstateValue {
     }
 }
 
-impl From<FeeClaim> for SubstateValue {
-    fn from(fee_claim: FeeClaim) -> Self {
-        Self::FeeClaim(fee_claim)
-    }
-}
-
 impl From<TransactionReceipt> for SubstateValue {
     fn from(tx_receipt: TransactionReceipt) -> Self {
         Self::TransactionReceipt(tx_receipt)
@@ -828,20 +812,9 @@ impl From<PublishedTemplate> for SubstateValue {
     }
 }
 
-impl Display for SubstateValue {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        // TODO: improve output
-        match self {
-            SubstateValue::Component(component) => write!(f, "{:?}", component.state()),
-            SubstateValue::Resource(resource) => write!(f, "{:?}", resource,),
-            SubstateValue::Vault(vault) => write!(f, "{:?}", vault),
-            SubstateValue::NonFungible(nft) => write!(f, "{:?}", nft),
-            SubstateValue::NonFungibleIndex(index) => write!(f, "{:?}", index),
-            SubstateValue::UnclaimedConfidentialOutput(commitment) => write!(f, "{:?}", commitment),
-            SubstateValue::TransactionReceipt(tx_receipt) => write!(f, "{:?}", tx_receipt),
-            SubstateValue::FeeClaim(fee_claim) => write!(f, "{:?}", fee_claim),
-            SubstateValue::Template(template) => write!(f, "{:?}", template),
-        }
+impl From<ValidatorFeePool> for SubstateValue {
+    fn from(value: ValidatorFeePool) -> Self {
+        Self::ValidatorFeePool(value)
     }
 }
 
@@ -966,7 +939,7 @@ mod tests {
                 "nft_a7cf4fd18ada7f367b1c102a9c158abc3754491665033231c5eb907fffffffff_uuid_7f19c3fe5fa13ff66a0d379fe5f9e3508acbd338db6bedd7350d8d565b2c5d32",
             );
             check("nftindex_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_0");
-            check("feeclaim_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
+            check("vnfp_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("txreceipt_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("commitment_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");
             check("template_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff");

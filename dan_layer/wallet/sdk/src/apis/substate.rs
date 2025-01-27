@@ -17,6 +17,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceiptAddress,
     TemplateAddress,
 };
+use tari_template_lib::constants::XTR;
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -165,8 +166,13 @@ where
                                 self.scan_for_substate(&resx_addr, None).await?;
                             substate_ids.insert(id.into());
                         },
+                        SubstateValue::ValidatorFeePool(_) => {
+                            let resx_addr = SubstateId::Resource(XTR);
+                            if substate_ids.contains(&resx_addr) {
+                                continue;
+                            }
+                        },
                         SubstateValue::UnclaimedConfidentialOutput(_) => {},
-                        SubstateValue::FeeClaim(_) => {},
                         SubstateValue::Template(_) => {},
                     }
 

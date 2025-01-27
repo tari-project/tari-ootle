@@ -1,10 +1,12 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use core::fmt;
 use std::{
     fmt::{Display, Formatter},
     iter,
     ops::RangeInclusive,
+    str::FromStr,
 };
 
 use borsh::BorshSerialize;
@@ -70,7 +72,7 @@ impl ShardGroup {
         Some(Self::new(start, end))
     }
 
-    pub fn shard_iter(&self) -> impl Iterator<Item = Shard> + '_ {
+    pub fn shard_iter(self) -> impl Iterator<Item = Shard> + 'static {
         iter::successors(Some(self.start), move |&shard| {
             if shard == self.end_inclusive {
                 None
@@ -119,13 +121,42 @@ impl ShardGroup {
             shard_size * U256::from(self.end_inclusive.as_u32()) + shard_size + U256::from(self.end_inclusive.as_u32());
         SubstateAddress::from_u256_zero_version(start)..=SubstateAddress::from_u256_zero_version(end - 1)
     }
+
+    pub fn to_parsable_string(&self) -> String {
+        let mut s = String::new();
+        self.write_parsable_string(&mut s).unwrap();
+        s
+    }
+
+    pub fn write_parsable_string<W: fmt::Write>(&self, f: &mut W) -> fmt::Result {
+        write!(f, "{}-{}", self.start.as_u32(), self.end_inclusive.as_u32())
+    }
 }
 
 impl Display for ShardGroup {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ShardGroup({}-{})", self.start.as_u32(), self.end_inclusive.as_u32())
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "ShardGroup(")?;
+        self.write_parsable_string(f)?;
+        write!(f, ")")
     }
 }
+
+impl FromStr for ShardGroup {
+    type Err = ShardGroupParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split('-');
+        let start = parts.next().ok_or_else(|| ShardGroupParseError(s.to_string()))?;
+        let start = start.parse::<u32>().map_err(|_| ShardGroupParseError(s.to_string()))?;
+        let end = parts.next().ok_or_else(|| ShardGroupParseError(s.to_string()))?;
+        let end = end.parse::<u32>().map_err(|_| ShardGroupParseError(s.to_string()))?;
+        Ok(ShardGroup::new(start, end))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("Invalid ShardGroup string '{0}'")]
+pub struct ShardGroupParseError(pub String);
 
 #[cfg(test)]
 mod tests {
@@ -150,5 +181,17 @@ mod tests {
         let range = sg.to_substate_address_range(NumPreshards::P64);
         assert_eq!(*range.start(), SubstateAddress::zero());
         assert_eq!(*range.end(), SubstateAddress::max());
+    }
+
+    #[test]
+    fn to_string_and_parsing() {
+        let sg = ShardGroup::new(0, 63);
+        let s = sg.to_parsable_string();
+        assert_eq!(s, "0-63");
+        let sg2 = s.parse::<ShardGroup>().unwrap();
+        assert_eq!(sg, sg2);
+
+        let n = u64::from(u32::MAX) + 1;
+        format!("{n}-999").parse::<ShardGroup>().unwrap_err();
     }
 }

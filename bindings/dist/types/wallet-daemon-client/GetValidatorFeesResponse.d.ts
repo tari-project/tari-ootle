@@ -1,5 +1,5 @@
-import type { Amount } from "../Amount";
-import type { Epoch } from "../Epoch";
+import type { FeePoolDetails } from "./FeePoolDetails";
+import type { Shard } from "../Shard";
 export interface GetValidatorFeesResponse {
-    fee_summary: Record<Epoch, Amount>;
+    fees: Record<Shard, FeePoolDetails>;
 }

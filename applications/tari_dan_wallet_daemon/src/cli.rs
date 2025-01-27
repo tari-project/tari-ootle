@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
@@ -40,8 +40,8 @@ pub struct Cli {
     pub signaling_server_address: Option<SocketAddr>,
     #[clap(long, alias = "indexer-url")]
     pub indexer_node_json_rpc_url: Option<String>,
-    #[clap(long)]
-    pub derive_secret: Option<u64>,
+    #[clap(subcommand)]
+    pub command: Option<Subcommand>,
 }
 
 impl Cli {
@@ -79,4 +79,19 @@ impl ConfigOverrideProvider for Cli {
         }
         overrides
     }
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum Subcommand {
+    #[clap(name = "run", about = "Run the wallet daemon")]
+    Run,
+    #[clap(about = "Generate a new key and output the public key")]
+    CreateKey {
+        #[clap(long, alias = "key")]
+        key_index: Option<u64>,
+        #[clap(long)]
+        set_active: bool,
+        #[clap(long, alias = "output", short = 'o')]
+        output_path: Option<PathBuf>,
+    },
 }

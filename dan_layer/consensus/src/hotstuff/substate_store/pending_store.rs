@@ -156,25 +156,31 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         Ok(false)
     }
 
-    pub fn get_latest_version(&self, id: &SubstateId) -> Result<u32, SubstateStoreError> {
+    pub fn get_latest_version(&self, id: &SubstateId) -> Result<LatestSubstateVersion, SubstateStoreError> {
         if let Some(ch) = self.head.get(id).map(|&pos| &self.diff[pos]) {
-            if ch.is_down() {
-                return Err(SubstateStoreError::SubstateIsDown {
-                    id: ch.versioned_substate_id().clone(),
-                });
-            }
-            return Ok(ch.versioned_substate_id().version());
+            // if ch.is_down() {
+            //     return Err(SubstateStoreError::SubstateIsDown {
+            //         id: ch.versioned_substate_id().clone(),
+            //     });
+            // }
+            return Ok(LatestSubstateVersion {
+                version: ch.versioned_substate_id().version(),
+                is_up: ch.is_up(),
+            });
         }
 
         if let Some(change) = BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, id).optional()? {
-            if change.is_down() {
-                return Err(SubstateStoreError::SubstateIsDown {
-                    id: change.versioned_substate_id().clone(),
-                });
-            }
+            // if change.is_down() {
+            //     return Err(SubstateStoreError::SubstateIsDown {
+            //         id: change.versioned_substate_id().clone(),
+            //     });
+            // }
 
             let version = change.versioned_substate_id().version();
-            return Ok(version);
+            return Ok(LatestSubstateVersion {
+                version,
+                is_up: change.is_up(),
+            });
         }
 
         let (version, is_destroyed) = SubstateRecord::get_latest_version(self.read_transaction(), id)
@@ -182,13 +188,16 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             .ok_or_else(|| SubstateStoreError::SubstateNotFound {
                 id: VersionedSubstateId::new(id.clone(), 0),
             })?;
-        if is_destroyed {
-            return Err(SubstateStoreError::SubstateIsDown {
-                id: VersionedSubstateId::new(id.clone(), version),
-            });
-        }
+        // if is_destroyed {
+        //     return Err(SubstateStoreError::SubstateIsDown {
+        //         id: VersionedSubstateId::new(id.clone(), version),
+        //     });
+        // }
 
-        Ok(version)
+        Ok(LatestSubstateVersion {
+            version,
+            is_up: !is_destroyed,
+        })
     }
 
     pub fn get_many<I: IntoIterator<Item = (SubstateRequirement, u32)> + ExactSizeIterator>(
@@ -204,33 +213,34 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         Ok(substates)
     }
 
-    pub fn get_latest(&self, id: &SubstateId) -> Result<Substate, SubstateStoreError> {
+    pub fn get_latest_change(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
         if let Some(ch) = self
             .diff
             .iter()
             .rev()
             .find(|change| change.versioned_substate_id().substate_id() == id)
         {
-            let substate = ch.up().ok_or_else(|| SubstateStoreError::SubstateIsDown {
-                id: ch.versioned_substate_id().clone(),
-            })?;
-            return Ok(substate.clone());
+            return Ok(ch.clone());
         }
 
         if let Some(change) = BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, id).optional()? {
-            let id = change.versioned_substate_id().clone();
-            return change
-                .into_up()
-                .ok_or_else(|| SubstateStoreError::SubstateIsDown { id });
+            return Ok(change);
         }
 
         let substate = SubstateRecord::get_latest(self.read_transaction(), id)?;
-        if substate.is_destroyed() {
-            return Err(SubstateStoreError::SubstateIsDown {
-                id: substate.to_versioned_substate_id(),
+        if let Some(destroyed) = substate.destroyed() {
+            return Ok(SubstateChange::Down {
+                id: VersionedSubstateId::new(id.clone(), substate.version()),
+                shard: destroyed.by_shard,
+                transaction_id: destroyed.by_transaction,
             });
         }
-        Ok(substate.into_substate())
+        Ok(SubstateChange::Up {
+            id: VersionedSubstateId::new(id.clone(), substate.version()),
+            shard: substate.created_by_shard,
+            transaction_id: substate.created_by_transaction,
+            substate: substate.into_substate(),
+        })
     }
 
     pub fn has_any_conflicting_pledges<'a, I>(
@@ -752,5 +762,25 @@ impl LockStatus {
 
     pub fn is_hard_conflict(&self) -> bool {
         self.hard_conflict_idx.is_some()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LatestSubstateVersion {
+    version: u32,
+    is_up: bool,
+}
+
+impl LatestSubstateVersion {
+    pub fn is_down(&self) -> bool {
+        !self.is_up
+    }
+
+    pub fn is_up(&self) -> bool {
+        self.is_up
+    }
+
+    pub fn version(&self) -> u32 {
+        self.version
     }
 }

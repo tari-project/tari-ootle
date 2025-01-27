@@ -258,7 +258,7 @@ function ShowInfo(params: any) {
     horizontal,
     onReload,
   } = params;
-  // const [unprocessedTx, setUnprocessedTx] = useState([]);
+
   const nameInfo = name && (
     <div>
       <pre></pre>
@@ -314,15 +314,15 @@ function ShowInfo(params: any) {
   };
 
   const handleOnStart = () => {
-    jsonRpc("start_instance", { by_name: name }).then(onReload);
+    jsonRpc("start_instance", { by_id: node.instance_id }).then(onReload);
   };
 
   const handleOnStop = () => {
-    jsonRpc("stop_instance", { by_name: name }).then(onReload);
+    jsonRpc("stop_instance", { by_id: node.instance_id }).then(onReload);
   };
 
   const handleDeleteData = () => {
-    jsonRpc("delete_data", { name }).then(onReload);
+    jsonRpc("delete_data", { by_id: node.instance_id }).then(onReload);
   };
 
 

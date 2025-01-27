@@ -29,12 +29,11 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 import CodeBlockDialog from "../../Components/CodeBlock";
-import type { SubstateRecord } from "@tari-project/typescript-bindings";
+import { substateIdToString, SubstateRecord } from "@tari-project/typescript-bindings";
 
 function RowData({ info, state }: { info: SubstateRecord; state: string }, index: number) {
   const [open, setOpen] = useState(false);
-  const itemKey = Object.keys(info.substate_id)[0];
-  const itemValue = Object.values(info.substate_id)[0];
+  const substateId = substateIdToString(info.substate_id);
   return (
     <>
       <TableRow key={`${index}-1`}>
@@ -67,10 +66,7 @@ function RowData({ info, state }: { info: SubstateRecord; state: string }, index
             {state}
           </div>
         </DataTableCell>
-        <DataTableCell>{itemKey}</DataTableCell>
-        <DataTableCell>
-          {itemValue && typeof itemValue === "object" ? JSON.stringify(itemValue) : String(itemValue)}
-        </DataTableCell>
+        <DataTableCell>{substateId}:{info.version}</DataTableCell>
       </TableRow>
       <TableRow key={`${index}-2`}>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>

@@ -52,6 +52,7 @@ axum = { workspace = true }
 axum-jrpc = { workspace = true, features = ["anyhow_error"] }
 clap = { workspace = true, features = ["env"] }
 config = { workspace = true }
+either = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true }
 indexmap = { workspace = true }

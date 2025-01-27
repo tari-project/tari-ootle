@@ -62,20 +62,20 @@ impl TestEpochManager {
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
-                public_key,
+                public_key: public_key.clone(),
                 shard_key,
                 start_epoch: our_validator_node.start_epoch,
                 end_epoch: None,
-                fee_claim_public_key: PublicKey::default(),
+                fee_claim_public_key: public_key,
             });
         } else {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
-                public_key,
+                public_key: public_key.clone(),
                 shard_key,
                 start_epoch: Epoch(0),
                 end_epoch: None,
-                fee_claim_public_key: PublicKey::default(),
+                fee_claim_public_key: public_key,
             });
         }
         copy
@@ -87,7 +87,7 @@ impl TestEpochManager {
             for (address, pk) in &committee.members {
                 let substate_id = random_substate_in_shard_group(shard_group, TEST_NUM_PRESHARDS);
                 let substate_id = VersionedSubstateId::new(substate_id, 0);
-                state.validator_shards.insert(
+                state.validator_nodes.insert(
                     address.clone(),
                     (
                         ValidatorNode {
@@ -96,7 +96,7 @@ impl TestEpochManager {
                             shard_key: substate_id.to_substate_address(),
                             start_epoch: Epoch(0),
                             end_epoch: None,
-                            fee_claim_public_key: Default::default(),
+                            fee_claim_public_key: pk.clone(),
                         },
                         shard_group,
                     ),
@@ -109,7 +109,7 @@ impl TestEpochManager {
     }
 
     pub async fn all_validators(&self) -> Vec<(ValidatorNode<TestAddress>, ShardGroup)> {
-        self.state_lock().await.validator_shards.values().cloned().collect()
+        self.state_lock().await.validator_nodes.values().cloned().collect()
     }
 
     pub async fn all_committees(&self) -> HashMap<ShardGroup, Committee<TestAddress>> {
@@ -152,7 +152,7 @@ impl EpochManagerReader for TestEpochManager {
         _epoch: Epoch,
         addr: &Self::Addr,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
-        let (vn, _) = self.state_lock().await.validator_shards[addr].clone();
+        let (vn, _) = self.state_lock().await.validator_nodes[addr].clone();
         Ok(vn)
     }
 
@@ -303,10 +303,10 @@ impl EpochManagerReader for TestEpochManager {
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
         let lock = self.state_lock().await;
         let (vn, _) = lock
-            .validator_shards
+            .validator_nodes
             .values()
             .find(|(vn, _)| vn.public_key == public_key)
-            .unwrap();
+            .unwrap_or_else(|| panic!("Validator node not found for public key {}", public_key));
 
         Ok(ValidatorNode {
             address: vn.address.clone(),
@@ -344,7 +344,7 @@ pub struct TestEpochManagerState {
     pub last_block_of_current_epoch: FixedHash,
     pub is_epoch_active: bool,
     #[allow(clippy::type_complexity)]
-    pub validator_shards: HashMap<TestAddress, (ValidatorNode<TestAddress>, ShardGroup)>,
+    pub validator_nodes: HashMap<TestAddress, (ValidatorNode<TestAddress>, ShardGroup)>,
     pub committees: HashMap<ShardGroup, Committee<TestAddress>>,
     pub address_shard: HashMap<TestAddress, ShardGroup>,
     pub eviction_proofs: Vec<tari_sidechain::EvictionProof>,
@@ -356,7 +356,7 @@ impl Default for TestEpochManagerState {
             current_epoch: Epoch(0),
             current_block_info: (0, FixedHash::default()),
             last_block_of_current_epoch: FixedHash::default(),
-            validator_shards: HashMap::new(),
+            validator_nodes: HashMap::new(),
             is_epoch_active: false,
             committees: HashMap::new(),
             address_shard: HashMap::new(),

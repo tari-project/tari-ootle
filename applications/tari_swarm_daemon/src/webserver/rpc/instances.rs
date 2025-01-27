@@ -171,7 +171,8 @@ pub async fn list(context: &HandlerContext, req: ListInstancesRequest) -> Result
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeleteInstanceDataRequest {
-    pub name: String,
+    pub by_name: Option<String>,
+    pub by_id: Option<InstanceId>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -183,17 +184,26 @@ pub async fn delete_data(
     context: &HandlerContext,
     req: DeleteInstanceDataRequest,
 ) -> Result<DeleteInstanceDataResponse, anyhow::Error> {
-    let instance = context
-        .process_manager()
-        .get_instance_by_name(req.name)
-        .await?
-        .ok_or_else(|| {
-            JsonRpcError::new(
-                JsonRpcErrorReason::ApplicationError(404),
-                "Instance not found".to_string(),
+    let instance = match (req.by_name, req.by_id) {
+        (_, Some(id)) => context.process_manager().get_instance(id).await?,
+        (Some(name), None) => context.process_manager().get_instance_by_name(name).await?,
+        (None, None) => {
+            return Err(JsonRpcError::new(
+                JsonRpcErrorReason::InvalidParams,
+                "Either `by_name` or `by_id` must be provided".to_string(),
                 serde_json::Value::Null,
             )
-        })?;
+            .into());
+        },
+    };
+
+    let instance = instance.ok_or_else(|| {
+        JsonRpcError::new(
+            JsonRpcErrorReason::ApplicationError(404),
+            "Instance not found".to_string(),
+            serde_json::Value::Null,
+        )
+    })?;
 
     context.process_manager().stop_instance(instance.id).await?;
     context.process_manager().delete_instance_data(instance.id).await?;

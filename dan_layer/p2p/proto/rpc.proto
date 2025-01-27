@@ -151,17 +151,6 @@ enum PayloadResultStatus {
   Finalized = 1;
 }
 
-message GetVirtualSubstateRequest {
-  bytes address = 1;
-}
-
-message GetVirtualSubstateResponse {
-  // Encoded Substate
-  bytes substate = 1;
-  repeated tari.dan.consensus.QuorumCertificate quorum_certificates = 2;
-}
-
-
 // Minimal substate data
 message SubstateData {
   bytes substate_id = 1;

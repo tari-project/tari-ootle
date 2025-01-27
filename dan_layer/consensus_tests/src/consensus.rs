@@ -773,7 +773,7 @@ async fn single_shard_inputs_from_previous_outputs() {
     let (tx1, _, outputs) = test.send_transaction_to_all(Decision::Commit, 1, 5, 5).await;
     let prev_outputs = outputs
         .iter()
-        .map(|output| SubstateRequirement::with_version(output.clone(), 0))
+        .map(|output| SubstateRequirement::versioned(output.clone(), 0))
         .collect::<Vec<_>>();
 
     let tx2 = Transaction::builder()
@@ -836,7 +836,7 @@ async fn multishard_inputs_from_previous_outputs() {
     let (tx1, _, outputs) = test.send_transaction_to_all(Decision::Commit, 1, 5, 2).await;
     let prev_outputs = outputs
         .iter()
-        .map(|output| SubstateRequirement::with_version(output.clone(), 0))
+        .map(|output| SubstateRequirement::versioned(output.clone(), 0))
         .collect::<Vec<_>>();
 
     let tx2 = Transaction::builder()

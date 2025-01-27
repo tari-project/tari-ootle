@@ -103,15 +103,14 @@ async fn when_i_claim_burn_via_wallet_daemon_it_fails(
     .unwrap_err();
 }
 
-#[when(expr = "I claim fees for validator {word} and epoch {int} into account {word} using the wallet daemon {word}")]
+#[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}")]
 async fn when_i_claim_fees_for_validator_and_epoch(
     world: &mut TariWorld,
     validator_node: String,
-    epoch: u64,
     account_name: String,
     wallet_daemon_name: String,
 ) {
-    let resp = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, epoch, false)
+    let resp = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, false)
         .await
         .unwrap();
     resp.result.result.accept().unwrap_or_else(|| {
@@ -122,18 +121,14 @@ async fn when_i_claim_fees_for_validator_and_epoch(
     });
 }
 
-#[when(
-    expr = "I claim fees for validator {word} and epoch {int} into account {word} using the wallet daemon {word}, it \
-            fails"
-)]
+#[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}, it fails")]
 async fn when_i_claim_fees_for_validator_and_epoch_fails(
     world: &mut TariWorld,
     validator_node: String,
-    epoch: u64,
     account_name: String,
     wallet_daemon_name: String,
 ) {
-    let err = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, epoch, false)
+    let err = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, false)
         .await
         .unwrap_err();
 

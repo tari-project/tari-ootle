@@ -203,11 +203,12 @@ impl WorkingState {
 
         // add event to indicate that there is a change in component
         let (template_address, module_name) = self.current_template().map(|(addr, name)| (*addr, name.to_string()))?;
-        self.push_event(Event::new(
+        self.push_event(Event::std(
             Some(locked.address().clone()),
             template_address,
             self.transaction_hash(),
-            "std.component.updated".to_string(),
+            "component",
+            "updated",
             tari_template_lib::models::Metadata::from([("module_name".to_string(), module_name)]),
         ));
 

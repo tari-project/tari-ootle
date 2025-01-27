@@ -82,7 +82,7 @@ Feature: Indexer node
 #    Then the indexer IDX returns 6 non fungibles for resource NFT/resources/0
 
     # Scan the network for the event emitted on ACC creation
-    When indexer IDX scans the network events for account ACC with topics component-created,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,deposit,component-created,pay_fee,pay_fee,deposit,deposit,deposit,deposit,deposit,deposit
+    When indexer IDX scans the network events for account ACC with topics std.component.created,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,deposit,std.component.updated,std.component.created,pay_fee,pay_fee,deposit,std.component.updated,deposit,deposit,deposit,deposit,deposit
 
   Scenario: Indexer GraphQL requests work
     # Initialize a base node, wallet, miner and VN
@@ -121,10 +121,10 @@ Feature: Indexer node
 
     ##### Scenario
     # Scan the network for the event emitted on ACC_1 creation
-    When indexer IDX scans the network events for account ACC_1 with topics component-created,pay_fee,component-created,pay_fee
+    When indexer IDX scans the network events for account ACC_1 with topics std.component.created,pay_fee,std.component.created,pay_fee
 
     # Scan the network for the event emitted on ACC_2 creation
-    When indexer IDX scans the network events for account ACC_2 with topics component-created,pay_fee,component-created,pay_fee
+    When indexer IDX scans the network events for account ACC_2 with topics std.component.created,pay_fee,std.component.created,pay_fee
 
   Scenario: Indexer GraphQL filtering and pagination of events
 

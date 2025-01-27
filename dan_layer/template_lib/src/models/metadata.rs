@@ -106,6 +106,14 @@ impl IntoIterator for Metadata {
     }
 }
 
+impl<K: ToString, V: Into<String>> FromIterator<(K, V)> for Metadata {
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
+        Self(BorTag::new(
+            iter.into_iter().map(|(k, v)| (k.to_string(), v.into())).collect(),
+        ))
+    }
+}
+
 impl Default for Metadata {
     fn default() -> Self {
         Self::new()

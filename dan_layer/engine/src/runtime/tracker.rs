@@ -196,11 +196,12 @@ impl StateTracker {
 
             state.new_substate(substate_id.clone(), SubstateValue::Component(component))?;
 
-            state.push_event(Event::new(
+            state.push_event(Event::std(
                 Some(substate_id),
                 template_address,
                 state.transaction_hash(),
-                "component-created".to_string(),
+                "component",
+                "created",
                 Metadata::from([("module_name".to_string(), module_name)]),
             ));
 

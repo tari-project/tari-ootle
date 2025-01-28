@@ -150,7 +150,7 @@ mod test {
                 let shard = Shard::from(shard_index);
                 let range = shard.to_substate_address_range(num_of_shards);
                 if shard_index == 0 {
-                    assert_eq!(range.start().to_u256(), U256::ONE, "First shard should start at 0");
+                    assert_eq!(range.start().to_u256(), U256::ZERO, "First shard should start at 0");
                 } else {
                     assert_eq!(
                         range.start().to_u256(),

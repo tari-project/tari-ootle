@@ -161,7 +161,7 @@ impl Test {
                     .take(num)
                     .map(|id| VersionedSubstateId::new(id, 0))
                     .collect::<Vec<_>>()
-            }
+            },
         };
 
         let substates = substate_ids
@@ -238,7 +238,7 @@ impl Test {
                     Err(_) => {
                         self.dump_pool_info();
                         panic!("Timeout waiting for Hotstuff event");
-                    }
+                    },
                 }
             } else {
                 self.on_hotstuff_event().await
@@ -258,7 +258,7 @@ impl Test {
                 other => {
                     log::info!("[{}] Ignoring event: {:?}", address, other);
                     continue;
-                }
+                },
             }
         }
     }
@@ -352,7 +352,7 @@ impl Test {
             log::info!("{} has {} transactions in pool", vn.address, transactions.len());
             transactions.iter().filter(|tx| tx.is_finalized()).count() >= n
         })
-            .await
+        .await
     }
 
     pub async fn wait_for_pool_count(&self, dest: TestVnDestination, count: usize) {
@@ -364,7 +364,7 @@ impl Test {
             log::info!("{} has {} transactions in pool", vn.address, c);
             c >= count
         })
-            .await
+        .await
     }
 
     pub fn with_all_validators(&self, f: impl FnMut(&Validator)) {
@@ -683,7 +683,7 @@ impl TestBuilder {
             &self.failure_nodes,
             shutdown.to_signal(),
         )
-            .await;
+        .await;
         let network = spawn_network(channels, shutdown.to_signal(), self.message_filter);
 
         Test {

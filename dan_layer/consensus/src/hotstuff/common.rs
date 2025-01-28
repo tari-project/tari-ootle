@@ -281,7 +281,7 @@ where
         let root_hash = jmt
             .get_root_hash(version)
             .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
-        
+
         shard_roots.insert(Shard::global(), root_hash);
     }
 

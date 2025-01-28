@@ -12,19 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{shard::Shard, uint::U256, NumPreshards, SubstateAddress};
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    BorshSerialize
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -82,7 +70,7 @@ impl ShardGroup {
         Some(Self::new(start, end))
     }
 
-    pub fn shard_iter(&self) -> impl Iterator<Item=Shard> + '_ {
+    pub fn shard_iter(&self) -> impl Iterator<Item = Shard> + '_ {
         iter::successors(Some(self.start), move |&shard| {
             if shard == self.end_inclusive {
                 None

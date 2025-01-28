@@ -8,19 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{uint::U256, NumPreshards, SubstateAddress};
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    BorshSerialize
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -38,7 +26,9 @@ impl Shard {
 
     /// Returns global shard number.
     /// It is a reserved shard for globally handled substates.
-    pub const fn global() -> Shard { Shard(0) }
+    pub const fn global() -> Shard {
+        Shard(0)
+    }
 
     pub const fn is_zero(&self) -> bool {
         self.0 == 0

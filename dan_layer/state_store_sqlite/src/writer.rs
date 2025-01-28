@@ -20,7 +20,18 @@ use diesel::{
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeAddressable, NodeHeight, NumPreshards, ShardGroup, SubstateLockType, ToSubstateAddress, VersionedSubstateId};
+use tari_dan_common_types::{
+    optional::Optional,
+    shard::Shard,
+    Epoch,
+    NodeAddressable,
+    NodeHeight,
+    NumPreshards,
+    ShardGroup,
+    SubstateLockType,
+    ToSubstateAddress,
+    VersionedSubstateId,
+};
 use tari_dan_storage::{
     consensus_models::{
         Block,

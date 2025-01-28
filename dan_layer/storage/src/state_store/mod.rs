@@ -11,7 +11,19 @@ use std::{
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_dan_common_types::{shard::Shard, Epoch, NodeAddressable, NodeHeight, NumPreshards, ShardGroup, SubstateAddress, SubstateRequirement, ToSubstateAddress, VersionedSubstateId, VersionedSubstateIdRef};
+use tari_dan_common_types::{
+    shard::Shard,
+    Epoch,
+    NodeAddressable,
+    NodeHeight,
+    NumPreshards,
+    ShardGroup,
+    SubstateAddress,
+    SubstateRequirement,
+    ToSubstateAddress,
+    VersionedSubstateId,
+    VersionedSubstateIdRef,
+};
 use tari_engine_types::substate::SubstateId;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 use tari_template_lib::models::UnclaimedConfidentialOutputAddress;

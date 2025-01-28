@@ -345,7 +345,7 @@ pub async fn spawn_services(
         template_manager.clone(),
         template_manager_service.clone(),
     )
-        .await;
+    .await;
     handles.push(consensus_join_handle);
 
     let (mempool, join_handle) = mempool::spawn(
@@ -406,7 +406,7 @@ pub async fn spawn_services(
         consensus_handle.clone(),
         template_manager_service.clone(),
     )
-        .await?;
+    .await?;
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
     save_identities(config, &keypair)?;
@@ -463,7 +463,7 @@ async fn create_registration_file(
         config.common.base_path.join("registration.json"),
         serde_json::to_string(&registration)?,
     )
-        .context("failed to write registration file")?;
+    .context("failed to write registration file")?;
     Ok(())
 }
 
@@ -669,7 +669,7 @@ where
         created_at_epoch: Epoch(0),
         destroyed: None,
     }
-        .create(tx)?;
+    .create(tx)?;
     Ok(())
 }
 

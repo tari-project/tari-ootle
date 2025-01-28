@@ -205,8 +205,7 @@ impl VersionedSubstateId {
     pub fn version(&self) -> u32 {
         self.version
     }
-    
-    
+
     pub fn to_shard(&self, num_preshards: NumPreshards) -> Shard {
         if self.substate_id.is_global() {
             return Shard::global();

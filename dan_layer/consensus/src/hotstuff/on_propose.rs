@@ -99,8 +99,7 @@ pub struct OnPropose<TConsensusSpec: ConsensusSpec> {
 }
 
 impl<TConsensusSpec> OnPropose<TConsensusSpec>
-where
-    TConsensusSpec: ConsensusSpec,
+where TConsensusSpec: ConsensusSpec
 {
     pub fn new(
         config: HotstuffConfig,
@@ -209,7 +208,7 @@ where
                 Ok::<_, HotStuffError>((next_block, foreign_proposals))
             })
         })
-            .await??;
+        .await??;
 
         info!(
             target: LOG_TARGET,
@@ -322,7 +321,7 @@ where
                     let atom = tx_rec.get_local_transaction_atom();
                     Ok(Some(Command::LocalPrepare(atom)))
                 }
-            }
+            },
             // Leader thinks all foreign PREPARE pledges have been received (condition for LocalPrepared stage to be
             // ready)
             TransactionPoolStage::LocalPrepared => self.all_or_some_prepare_transaction(
@@ -345,7 +344,7 @@ where
             // (COMMIT/ABORT)
             TransactionPoolStage::LocalAccepted => {
                 self.accept_transaction(tx, start_of_chain_id, &mut tx_rec, local_committee_info, substate_store)
-            }
+            },
             // Not reachable as there is nothing to propose for these stages. To confirm that all local nodes
             // agreed with the Accept, more (possibly empty) blocks with QCs will be
             // proposed and accepted, otherwise the Accept block will not be committed.
@@ -356,7 +355,7 @@ where
                     "It is invalid for TransactionPoolStage::{} to be ready to propose",
                     tx_rec.current_stage()
                 )
-            }
+            },
         }
     }
 
@@ -820,7 +819,7 @@ where
 
                 let atom = tx_rec.get_current_transaction_atom();
                 Command::LocalOnly(atom)
-            }
+            },
             PreparedTransaction::LocalOnly(LocalPreparedTransaction::EarlyAbort { execution }) => {
                 info!(
                     target: LOG_TARGET,
@@ -843,7 +842,7 @@ where
                 executed_transactions.insert(*tx_rec.transaction_id(), execution);
                 let atom = tx_rec.get_current_transaction_atom();
                 Command::LocalOnly(atom)
-            }
+            },
 
             PreparedTransaction::MultiShard(multishard) => {
                 match multishard.current_decision() {
@@ -881,7 +880,7 @@ where
                                 .evidence_mut()
                                 .update(&multishard.to_initial_evidence(local_committee_info));
                         }
-                    }
+                    },
                     Decision::Abort(reason) => {
                         warn!(target: LOG_TARGET, "Prepare transaction abort: {reason:?}");
                         let initial_evidence = multishard.to_initial_evidence(local_committee_info);
@@ -894,7 +893,7 @@ where
                         );
                         tx_rec.evidence_mut().update(&initial_evidence);
                         executed_transactions.insert(*tx_rec.transaction_id(), execution);
-                    }
+                    },
                 }
 
                 info!(
@@ -906,7 +905,7 @@ where
 
                 let atom = tx_rec.get_local_transaction_atom();
                 Command::Prepare(atom)
-            }
+            },
         };
 
         Ok(Some(command))

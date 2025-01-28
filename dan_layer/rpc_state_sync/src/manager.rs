@@ -7,8 +7,8 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::StreamExt;
 use log::*;
-use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_consensus::{
+    consensus_constants::ConsensusConstants,
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
     traits::{ConsensusSpec, SyncManager, SyncStatus},
 };
@@ -25,7 +25,6 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_dan_p2p::proto::rpc::{GetCheckpointRequest, GetCheckpointResponse, SyncStateRequest};
-use tari_dan_storage::global::models::ValidatorNode;
 use tari_dan_storage::{
     consensus_models::{
         EpochCheckpoint,
@@ -38,6 +37,7 @@ use tari_dan_storage::{
         SubstateRecord,
         SubstateUpdate,
     },
+    global::models::ValidatorNode,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -70,7 +70,7 @@ pub struct RpcStateSyncManager<TConsensusSpec: ConsensusSpec, TAddr: NodeAddress
 
 impl<TConsensusSpec, TAddr> RpcStateSyncManager<TConsensusSpec, TAddr>
 where
-    TConsensusSpec: ConsensusSpec<Addr=PeerAddress>,
+    TConsensusSpec: ConsensusSpec<Addr = PeerAddress>,
     TAddr: NodeAddressable + 'static,
 {
     pub fn new(
@@ -110,8 +110,8 @@ where
             .await
         {
             Ok(GetCheckpointResponse {
-                   checkpoint: Some(checkpoint),
-               }) => match EpochCheckpoint::try_from(checkpoint) {
+                checkpoint: Some(checkpoint),
+            }) => match EpochCheckpoint::try_from(checkpoint) {
                 Ok(cp) => Ok(Some(cp)),
                 Err(err) => Err(CommsRpcConsensusSyncError::InvalidResponse(err)),
             },
@@ -173,10 +173,10 @@ where
                 Ok(msg) => msg,
                 Err(err) if err.is_not_found() => {
                     return Ok(current_version);
-                }
+                },
                 Err(err) => {
                     return Err(err.into());
-                }
+                },
             };
 
             if msg.transitions.is_empty() {
@@ -359,13 +359,13 @@ where
                     QcId::zero(),
                     // *created_qc.id(),
                 )
-                    .create(tx)?;
-            }
+                .create(tx)?;
+            },
             SubstateUpdate::Destroy(SubstateDestroyedProof {
-                                        substate_id,
-                                        version,
-                                        destroyed_by_transaction,
-                                    }) => {
+                substate_id,
+                version,
+                destroyed_by_transaction,
+            }) => {
                 SubstateRecord::destroy(
                     tx,
                     VersionedSubstateId::new(substate_id, version),
@@ -376,7 +376,7 @@ where
                     &QcId::zero(),
                     &destroyed_by_transaction,
                 )?;
-            }
+            },
         }
 
         Ok(())
@@ -450,15 +450,15 @@ where
                 Ok(c) => c,
                 Err(err) => {
                     warn!(
-                                target: LOG_TARGET,
-                                "Failed to establish RPC session with vn {addr}: {err}. Attempting another VN if available"
-                            );
+                        target: LOG_TARGET,
+                        "Failed to establish RPC session with vn {addr}: {err}. Attempting another VN if available"
+                    );
                     if remaining_members == 0 {
                         return Err(err);
                     }
                     last_error = Some(err);
                     continue;
-                }
+                },
             };
 
             // fetch checkpoint
@@ -470,22 +470,22 @@ where
                     // root will mismatch).
                     // TODO: we should instead ask the base layer if this is the first epoch in the network
                     warn!(
-                                target: LOG_TARGET,
-                                "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
-                            );
+                        target: LOG_TARGET,
+                        "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
+                    );
                     return Ok(());
-                }
+                },
                 Err(err) => {
                     warn!(
-                                target: LOG_TARGET,
-                                "⚠️Failed to fetch checkpoint from {addr}: {err}. Attempting another peer if available"
-                            );
+                        target: LOG_TARGET,
+                        "⚠️Failed to fetch checkpoint from {addr}: {err}. Attempting another peer if available"
+                    );
                     if remaining_members == 0 {
                         return Err(err);
                     }
                     last_error = Some(err);
                     continue;
-                }
+                },
             };
             info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
 
@@ -498,11 +498,11 @@ where
 
                     if state_root != checkpoint.get_shard_root(shard) {
                         error!(
-                                    target: LOG_TARGET,
-                                    "❌State root mismatch for {shard}. Expected {expected} but got {actual}",
-                                    expected = checkpoint.get_shard_root(shard),
-                                    actual = state_root,
-                                );
+                            target: LOG_TARGET,
+                            "❌State root mismatch for {shard}. Expected {expected} but got {actual}",
+                            expected = checkpoint.get_shard_root(shard),
+                            actual = state_root,
+                        );
                         last_error = Some(CommsRpcConsensusSyncError::StateRootMismatch {
                             expected: TreeHash::from(checkpoint.block().state_merkle_root().into_array()),
                             actual: state_root,
@@ -516,18 +516,18 @@ where
                     }
 
                     info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {state_root}", current_version.unwrap_or(0));
-                }
+                },
                 Err(err) => {
                     warn!(
-                                target: LOG_TARGET,
-                                "⚠️Failed to sync state from {addr}: {err}. Attempting another peer if available"
-                            );
+                        target: LOG_TARGET,
+                        "⚠️Failed to sync state from {addr}: {err}. Attempting another peer if available"
+                    );
 
                     if remaining_members == 0 {
                         return Err(err);
                     }
                     continue;
-                }
+                },
             }
 
             break;
@@ -540,7 +540,7 @@ where
 #[async_trait]
 impl<TConsensusSpec, TAddr> SyncManager for RpcStateSyncManager<TConsensusSpec, TAddr>
 where
-    TConsensusSpec: ConsensusSpec<Addr=PeerAddress> + Send + Sync + 'static,
+    TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static,
     TAddr: NodeAddressable + 'static,
 {
     type Error = CommsRpcConsensusSyncError;
@@ -573,9 +573,12 @@ where
         let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
 
         // sync global shard
-        if let Ok((_, first_committee)) = prev_epoch_committees.first()
-            .ok_or(Self::Error::NoCommittees(current_epoch)) {
-            self.sync_shard(Shard::global(), current_epoch, first_committee, &our_vn).await?;
+        if let Ok((_, first_committee)) = prev_epoch_committees
+            .first()
+            .ok_or(Self::Error::NoCommittees(current_epoch))
+        {
+            self.sync_shard(Shard::global(), current_epoch, first_committee, &our_vn)
+                .await?;
         }
 
         // Sync data from each committee in range of the committee we're joining.

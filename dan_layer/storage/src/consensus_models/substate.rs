@@ -5,7 +5,14 @@ use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display, iter, iter::P
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, SubstateAddress, SubstateRequirement, VersionedSubstateId};
+use tari_dan_common_types::{
+    shard::Shard,
+    Epoch,
+    NodeHeight,
+    SubstateAddress,
+    SubstateRequirement,
+    VersionedSubstateId,
+};
 use tari_engine_types::substate::{hash_substate, Substate, SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
 

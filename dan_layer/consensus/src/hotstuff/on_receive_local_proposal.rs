@@ -3,6 +3,32 @@
 
 use std::{collections::HashSet, mem};
 
+use log::*;
+use tari_dan_common_types::{
+    committee::{Committee, CommitteeInfo},
+    optional::Optional,
+    shard::Shard,
+    Epoch,
+    NodeHeight,
+    ShardGroup,
+};
+use tari_dan_storage::{
+    consensus_models::{
+        Block,
+        ForeignProposalStatus,
+        HighQc,
+        LastSentVote,
+        QuorumDecision,
+        TransactionPool,
+        ValidBlock,
+        Vote,
+    },
+    StateStore,
+    StateStoreWriteTransaction,
+};
+use tari_epoch_manager::EpochManagerReader;
+use tokio::{sync::broadcast, task};
+
 use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
@@ -29,25 +55,6 @@ use crate::{
         VoteSignatureService,
     },
 };
-use log::*;
-use tari_dan_common_types::shard::Shard;
-use tari_dan_common_types::{committee::{Committee, CommitteeInfo}, optional::Optional, Epoch, NodeHeight, ShardGroup};
-use tari_dan_storage::{
-    consensus_models::{
-        Block,
-        ForeignProposalStatus,
-        HighQc,
-        LastSentVote,
-        QuorumDecision,
-        TransactionPool,
-        ValidBlock,
-        Vote,
-    },
-    StateStore,
-    StateStoreWriteTransaction,
-};
-use tari_epoch_manager::EpochManagerReader;
-use tokio::{sync::broadcast, task};
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_local_proposal";
 
@@ -231,6 +238,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         valid_block: ValidBlock,
     ) -> Result<bool, HotStuffError> {
+        debug!(target: LOG_TARGET, "RECV-LOCAL-PROPOSAL - [{:?}] Starting processing block: {}", current_epoch, valid_block);
+
         let em_epoch = self.epoch_manager.current_epoch().await?;
         let can_propose_epoch_end = em_epoch > current_epoch;
         let is_epoch_end = valid_block.block().is_epoch_end();

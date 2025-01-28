@@ -220,7 +220,7 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
                 created_at_epoch: 0.into(),
                 destroyed: None,
             }
-                .create(tx)
+            .create(tx)
         })
         .unwrap();
 
@@ -265,7 +265,7 @@ fn new_substate_value(seed: u8) -> SubstateValue {
             state: tari_bor::Value::Null,
         },
     }
-        .into()
+    .into()
 }
 
 fn tx_id(seed: u8) -> tari_transaction::TransactionId {

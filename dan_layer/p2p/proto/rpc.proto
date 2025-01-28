@@ -113,7 +113,7 @@ message VnStateSyncResponse {
 }
 
 message GetSubstateRequest {
-  bytes address = 1;
+  tari.dan.transaction.SubstateRequirement substate_requirement = 1;
 }
 
 message GetSubstateResponse {

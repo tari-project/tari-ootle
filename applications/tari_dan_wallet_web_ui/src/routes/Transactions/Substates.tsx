@@ -29,7 +29,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 import CodeBlockExpand from "../../Components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
-import type { Substate, SubstateId, TransactionResult } from "@tari-project/typescript-bindings";
+import { Substate, SubstateId, substateIdToString, TransactionResult } from "@tari-project/typescript-bindings";
 
 function SubstateRowData(
   {
@@ -45,8 +45,8 @@ function SubstateRowData(
 ) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
-  const itemKey = Object.keys(id)[0];
-  const itemValue = Object.values(id)[0];
+
+  const substateId = substateIdToString(id);
   return (
     <>
       <TableRow key={`${index}-1`}>
@@ -75,18 +75,14 @@ function SubstateRowData(
             ) : (
               <IoArrowDownCircle style={{ width: 22, height: 22, color: "#ECA86A" }} />
             )}
-            {state}(
-            {substate !== null && substate !== undefined
-              ? typeof substate === "number"
-                ? substate
-                : substate.version
-              : ""}
-            )
+            {state}
           </div>
         </DataTableCell>
-        <DataTableCell>{itemKey}</DataTableCell>
         <DataTableCell>
-          {itemValue && typeof itemValue === "object" ? JSON.stringify(itemValue) : String(itemValue)}
+          {substateId}{" "}
+          {substate !== null && substate !== undefined
+            ? "v" + (typeof substate === "number" ? substate : substate.version)
+            : ""}
         </DataTableCell>
       </TableRow>
       <TableRow key={`${index}-2`}>

@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
@@ -457,7 +457,7 @@ pub struct Connection {
     pub age: Duration,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub ping_latency: Option<Duration>,
-    pub user_agent: Option<Arc<String>>,
+    pub user_agent: Option<String>,
 }
 
 #[derive(Serialize, Debug)]

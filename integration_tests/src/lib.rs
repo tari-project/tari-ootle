@@ -63,6 +63,7 @@ pub mod indexer;
 pub mod logging;
 pub mod miner;
 pub mod template;
+pub mod util;
 pub mod validator_node;
 pub mod validator_node_cli;
 pub mod wallet;
@@ -207,6 +208,11 @@ impl TariWorld {
 
         for (name, mut p) in self.validator_nodes.drain(..) {
             println!("Shutting down validator node {}", name);
+            p.shutdown.trigger();
+        }
+
+        for (name, mut p) in self.vn_seeds.drain(..) {
+            println!("Shutting down validator node seed {}", name);
             p.shutdown.trigger();
         }
 

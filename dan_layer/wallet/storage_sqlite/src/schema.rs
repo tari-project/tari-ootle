@@ -94,6 +94,7 @@ diesel::table! {
         module_name -> Nullable<Text>,
         address -> Text,
         parent_address -> Nullable<Text>,
+        referenced_substates -> Text,
         version -> Integer,
         transaction_hash -> Text,
         template_address -> Nullable<Text>,

@@ -54,6 +54,9 @@ where
         original_transaction: Transaction,
         substate_requirements: Vec<SubstateRequirement>,
     ) -> Result<(Transaction, HashMap<SubstateId, Substate>), TransactionAutofillerError> {
+        if substate_requirements.is_empty() {
+            return Ok((original_transaction, HashMap::new()));
+        }
         // we will include the inputs and outputs into the "involved_objects" field
         // note that the transaction hash will not change as the "involved_objects" is not part of the hash
         let mut autofilled_transaction = original_transaction;
@@ -105,10 +108,10 @@ where
             // we need to fetch (in parallel) the latest version of all the related substates
             let mut handles = HashMap::new();
             let substate_scanner_ref = self.substate_scanner.clone();
-            for address in related_addresses {
-                info!(target: LOG_TARGET, "✏️️️ Found {} related substates", address);
-                let handle = tokio::spawn(get_substate(substate_scanner_ref.clone(), address.clone(), None));
-                handles.insert(address.clone(), handle);
+            for id in related_addresses {
+                info!(target: LOG_TARGET, "✏️️️ Found {} related substates", id);
+                let handle = tokio::spawn(get_substate(substate_scanner_ref.clone(), id.clone(), None));
+                handles.insert(id, handle);
             }
             for (address, handle) in handles {
                 let scan_res = handle.await??;
@@ -189,9 +192,9 @@ where
     }
 }
 
-pub async fn get_substate<TEpochManager, TVnClient, TAddr, TSubstateCache>(
+pub(crate) async fn get_substate<TEpochManager, TVnClient, TAddr, TSubstateCache>(
     substate_scanner: Arc<SubstateScanner<TEpochManager, TVnClient, TSubstateCache>>,
-    substate_address: SubstateId,
+    substate_id: SubstateId,
     version_hint: Option<u32>,
 ) -> Result<SubstateResult, IndexerError>
 where
@@ -200,5 +203,5 @@ where
     TAddr: NodeAddressable,
     TSubstateCache: SubstateCache,
 {
-    substate_scanner.get_substate(&substate_address, version_hint).await
+    substate_scanner.get_substate(&substate_id, version_hint).await
 }

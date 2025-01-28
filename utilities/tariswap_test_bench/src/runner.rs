@@ -4,11 +4,12 @@
 use std::{path::Path, time::Duration};
 
 use log::info;
+use tari_common::configuration::Network;
 use tari_dan_wallet_daemon::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_dan_wallet_sdk::{DanWalletSdk, WalletSdkConfig};
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_engine_types::commit_result::FinalizeResult;
-use tari_transaction::{Transaction, TransactionId};
+use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
 use tari_validator_node_client::types::TemplateMetadata;
 use tokio::time;
 use url::Url;
@@ -101,6 +102,11 @@ impl Runner {
         );
         info!("  - Num substates created: {}", self.stats.num_substates_created());
     }
+
+    pub fn new_transaction_builder(&self) -> TransactionBuilder {
+        // 0x10 is LocalNet - avoiding having to include tari_common
+        Transaction::builder().for_network(0x10)
+    }
 }
 
 fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result<WalletSdk, anyhow::Error> {
@@ -113,6 +119,6 @@ fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result
         jwt_secret_key: "secret".to_string(),
     };
     let indexer = IndexerJsonRpcNetworkInterface::new(indexer_url);
-    let wallet = DanWalletSdk::initialize(store, indexer, sdk_config)?;
+    let wallet = DanWalletSdk::initialize(Network::LocalNet, store, indexer, sdk_config)?;
     Ok(wallet)
 }

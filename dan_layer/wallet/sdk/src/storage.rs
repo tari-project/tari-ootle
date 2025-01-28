@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashSet,
     ops::{Deref, DerefMut},
     time::Duration,
 };
@@ -123,6 +124,7 @@ pub trait WalletStoreReader {
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
     // Config
     fn config_get<T: serde::de::DeserializeOwned>(&mut self, key: &str) -> Result<Config<T>, WalletStorageError>;
+    fn config_exists(&mut self, key: &str) -> Result<bool, WalletStorageError>;
     // JWT
     fn jwt_get_all(&mut self) -> Result<Vec<(i32, Option<String>)>, WalletStorageError>;
     // Transactions
@@ -217,7 +219,7 @@ pub trait WalletStoreWriter {
     fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
 
     // Config
-    fn config_set<T: serde::Serialize>(
+    fn config_set<T: serde::Serialize + ?Sized>(
         &mut self,
         key: &str,
         value: &T,
@@ -248,6 +250,7 @@ pub trait WalletStoreWriter {
         &mut self,
         transaction_id: TransactionId,
         address: VersionedSubstateId,
+        referenced_substates: HashSet<SubstateId>,
         module_name: Option<String>,
         template_addr: Option<TemplateAddress>,
     ) -> Result<(), WalletStorageError>;
@@ -256,6 +259,7 @@ pub trait WalletStoreWriter {
         transaction_id: TransactionId,
         parent: SubstateId,
         address: VersionedSubstateId,
+        referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError>;
     fn substates_remove(&mut self, substate: &SubstateId) -> Result<SubstateModel, WalletStorageError>;
 

@@ -27,7 +27,12 @@ import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import { useEffect } from "react";
 import { InnerHeading, StyledPaper } from "../../../Components/StyledComponents";
-import { useAccountNFTsList, useAccountsGet, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
+import {
+  useAccountNFTsList,
+  useAccountsGet,
+  useAccountsGetBalances,
+  useAccountsGetDefault,
+} from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
 import Transactions from "../../Transactions/Transactions";
 import AccountBalance from "./AccountBalance";
@@ -35,19 +40,30 @@ import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
 import SelectAccount from "./SelectAccount";
+import FetchStatusCheck from "../../../Components/FetchStatusCheck";
+import { substateIdToString } from "@tari-project/typescript-bindings";
 
 function MyAssets() {
-  const accountName = useAccountStore((state) => state.accountName);
-  const { refetch: balancesRefetch } = useAccountsGetBalances(accountName);
-  const { refetch: nftsListRefetch } = useAccountNFTsList({ Name: accountName }, 0, 10);
-  const { refetch: accountsRefetch } = useAccountsGet(accountName);
   const theme = useTheme();
+  const { account } = useAccountStore();
 
-  useEffect(() => {
-    accountsRefetch();
-    balancesRefetch();
-    nftsListRefetch();
-  }, [accountName]);
+  if (!account) {
+    return <>Loading...</>;
+  }
+
+  // const { refetch: balancesRefetch, data } = useAccountsGetBalances({
+  //   ComponentAddress: substateIdToString(account.address),
+  // });
+  // const { refetch: nftsListRefetch } = useAccountNFTsList(
+  //   { ComponentAddress: substateIdToString(account.address) },
+  //   0,
+  //   10,
+  // );
+
+  // useEffect(() => {
+  //   balancesRefetch();
+  //   nftsListRefetch();
+  // }, [accountId]);
 
   return (
     <>
@@ -73,6 +89,7 @@ function MyAssets() {
         </Box>
         <Divider />
       </Grid>
+
       <Grid
         item
         xs={12}
@@ -94,7 +111,7 @@ function MyAssets() {
             alignItems: "center",
           }}
         >
-          <AccountBalance accountName={accountName} />
+          <AccountBalance />
           <SelectAccount />
         </Box>
       </Grid>
@@ -102,19 +119,19 @@ function MyAssets() {
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <InnerHeading>Account Details</InnerHeading>
-          <AccountDetails accountName={accountName} />
+          <AccountDetails />
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <InnerHeading>Assets</InnerHeading>
-          <Assets accountName={accountName} />
+          <Assets account={account} />
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <InnerHeading>Transactions</InnerHeading>
-          <Transactions accountName={accountName} />
+          <Transactions account={account} />
         </StyledPaper>
       </Grid>
     </>

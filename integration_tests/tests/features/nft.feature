@@ -27,11 +27,9 @@ Feature: NFTs
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register the "basic_nft" template
-    When base wallet WALLET registers the template "basic_nft"
-    When miner MINER mines 20 new blocks
-    Then VN has scanned to height 53
-    Then the template "basic_nft" is listed as registered by the validator node VN
+    # Publish the "basic_nft" template
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 
     ###### Scenario
     # Create two accounts to deposit the minted NFTs
@@ -78,6 +76,7 @@ Feature: NFTs
   sparkle_nft.burn(acc_bucket);
   ```
 
+
   Scenario: Create resource and mint in one transaction
 
     ##### Setup
@@ -100,13 +99,9 @@ Feature: NFTs
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-
-    # Register the "basic_nft" template
-    When base wallet WALLET registers the template "basic_nft"
-    When miner MINER mines 20 new blocks
-    Then VN has scanned to height 53
-    Then the template "basic_nft" is listed as registered by the validator node VN
-
+    # Publish the "basic_nft" template
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "basic_nft" using account ACC
 
     ###### Scenario
     # Create an account to deposit the minted NFT

@@ -28,9 +28,10 @@ import Tooltip from "@mui/material/Tooltip";
 interface CopyProps {
   copy: string;
   floatright?: boolean;
+  title?: string;
 }
 
-const CopyToClipboard = ({ copy, floatright }: CopyProps) => {
+const CopyToClipboard = ({ copy, floatright, title }: CopyProps) => {
   const [open, setOpen] = useState(false);
   const handleClick = (copyThis: string) => {
     setOpen(true);
@@ -52,7 +53,7 @@ const CopyToClipboard = ({ copy, floatright }: CopyProps) => {
             : { marginLeft: "10px", marginRight: "10px" }
         }
       >
-        <Tooltip title={!open ? copy : "Copied to clipboard"} arrow>
+        <Tooltip title={!open ? title || copy : "Copied to clipboard"} arrow>
           <ContentCopyIcon
             color="primary"
             style={{

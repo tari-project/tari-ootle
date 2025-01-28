@@ -15,7 +15,6 @@ use tari_template_lib::{
     models::Amount,
     resource::ResourceType,
 };
-use tari_transaction::Transaction;
 
 use crate::{faucet::Faucet, runner::Runner};
 
@@ -26,7 +25,8 @@ impl Runner {
 
         let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &owner_public_key);
 
-        let transaction = Transaction::builder()
+        let transaction = self
+            .new_transaction_builder()
             .with_fee_instructions_builder(|builder| {
                 builder
                     .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(1_000_000_000)])
@@ -76,7 +76,7 @@ impl Runner {
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        let mut builder = Transaction::builder().fee_transaction_pay_from_component(
+        let mut builder = self.new_transaction_builder().fee_transaction_pay_from_component(
             pay_fee_account.address.as_component_address().unwrap(),
             Amount(1000 * owners.len() as i64),
         );
@@ -139,7 +139,8 @@ impl Runner {
         let mut tx_ids = Vec::with_capacity(all_accounts.len());
 
         for accounts in all_accounts.chunks(100) {
-            let transaction = Transaction::builder()
+            let transaction = self
+                .new_transaction_builder()
                 .fee_transaction_pay_from_component(
                     fee_account.address.as_component_address().unwrap(),
                     Amount(1000 * accounts.len() as i64),

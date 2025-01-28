@@ -244,8 +244,8 @@ pub enum RuntimeError {
     #[error("Address allocation type mismatch: {address}")]
     AddressAllocationTypeMismatch { address: SubstateId },
 
-    #[error("Invalid event topic {topic}")]
-    InvalidEventTopic { topic: String },
+    #[error("Invalid event topic '{topic}': 'std' prefix is reserved for built-in events")]
+    InvalidEventTopicStdPrefix { topic: String },
 
     #[error("Numeric conversion error: {details}")]
     NumericConversionError { details: String },

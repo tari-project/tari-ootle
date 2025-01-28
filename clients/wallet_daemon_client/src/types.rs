@@ -139,6 +139,7 @@ pub struct TransactionSubmitDryRunRequest {
     pub signing_key_index: Option<u64>,
     pub autofill_inputs: Vec<SubstateRequirement>,
     pub detect_inputs: bool,
+    pub detect_inputs_use_unversioned: bool,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub proof_ids: Vec<ConfidentialProofId>,
 }
@@ -1142,6 +1143,18 @@ pub struct SettingsSetResponse {}
 )]
 pub struct SettingsGetResponse {
     pub indexer_url: String,
+    pub network: NetworkInfo,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct NetworkInfo {
+    pub name: String,
+    pub byte: u8,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

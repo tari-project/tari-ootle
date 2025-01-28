@@ -4,6 +4,7 @@
 use std::{convert::Infallible, time::Duration};
 
 use async_trait::async_trait;
+use tari_common::configuration::Network;
 use tari_common_types::types::Commitment;
 use tari_crypto::commitment::HomomorphicCommitmentFactory;
 use tari_dan_common_types::{optional::Optional, SubstateRequirement};
@@ -140,7 +141,7 @@ impl Test {
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
 
-        let sdk = DanWalletSdk::initialize(store.clone(), PanicIndexer, WalletSdkConfig {
+        let sdk = DanWalletSdk::initialize(Network::LocalNet, store.clone(), PanicIndexer, WalletSdkConfig {
             password: None,
             jwt_expiry: Duration::from_secs(60),
             jwt_secret_key: "secret_key".to_string(),

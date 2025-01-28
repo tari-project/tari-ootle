@@ -4,7 +4,7 @@
 @concurrent
 @epoch_change
 Feature: Epoch change
-
+  
   Scenario: EndEpoch command is used on epoch change
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE
@@ -15,35 +15,31 @@ Feature: Epoch change
     Given a validator node VAL connected to base node BASE and wallet daemon WALLET_D
     Given validator VAL nodes connect to all other validators
 
-    # The wallet must have some funds before the VN sends transactions
-    When miner MINER mines 6 new blocks
-    When wallet WALLET has at least 20000 T
-
-    # VN registration
+    # Register VN
+    When miner MINER mines 10 new blocks
+    When wallet WALLET has at least 2000 T
     When validator node VAL sends a registration transaction to base wallet WALLET
-    When base wallet WALLET registers the template "faucet"
-
-    # Mine them into registered epoch
     When miner MINER mines 26 new blocks
-    Then VAL has scanned to height 29
     Then the validator node VAL is listed as registered
-    Then the template "faucet" is listed as registered by the validator node VAL
 
     # Initialize indexer and connect wallet daemon
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
     # Create account
-    When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+
+    # Publish the "counter" template
+    When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
     # Push a transaction through to get blocks
 #    When I call function "mint" on template "faucet" on VAL with args "amount_10000" named "FAUCET"
     When I call function "mint" on template "faucet" with args "amount_10000" using account ACC to pay fees via wallet daemon WALLET_D named "FAUCET"
 
     When Block count on VN VAL is at least 6
-    When miner MINER mines 5 new blocks
-    Then VAL has scanned to height 34
-    Then the validator node VAL has ended epoch 2
+    When miner MINER mines 7 new blocks
+    Then VAL has scanned to height 40
+    Then the validator node VAL has ended epoch 3
 
 #  @serial
 #  Scenario: Committee is split into two during epoch change

@@ -49,7 +49,7 @@ fn cannot_use_standard_topic() {
             .build_and_seal(&private_key),
         [].into(),
     );
-    assert_reject_reason(reason, RuntimeError::InvalidEventTopic {
+    assert_reject_reason(reason, RuntimeError::InvalidEventTopicStdPrefix {
         topic: invalid_topic.to_owned(),
     });
 }

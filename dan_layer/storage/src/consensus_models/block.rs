@@ -669,9 +669,10 @@ impl Block {
                     transaction_id,
                     substate,
                 } => {
+                    let version = id.version();
                     SubstateRecord::new(
-                        id.substate_id,
-                        id.version,
+                        id.into_substate_id(),
+                        version,
                         substate.into_substate_value(),
                         shard,
                         self.epoch(),

@@ -108,7 +108,7 @@ export default function AccessTokens() {
 
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - (data?.jwt.length || 0)) : 0;
 
-  const handleChangePage = (event: unknown, newPage: number) => {
+  const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
@@ -215,7 +215,7 @@ export default function AccessTokens() {
               {data?.jwt
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map(({ id, name, permissions, exp }: Claims) => {
-                  const date = new Date(Number(exp * 1000n));
+                  const date = new Date(Number(exp) * 1000);
                   const formattedDate = `${date.toISOString().slice(0, 10)} ${date.toISOString().slice(11, 16)}`;
                   return (
                     <RowData key={id} id={id} name={name} permissions={permissions} formattedDate={formattedDate} />

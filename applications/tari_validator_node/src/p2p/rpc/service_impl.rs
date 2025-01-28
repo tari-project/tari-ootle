@@ -25,7 +25,7 @@ use std::convert::{TryFrom, TryInto};
 use log::*;
 use tari_bor::{decode_exact, encode};
 use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
-use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateAddress};
+use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{
@@ -134,15 +134,47 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
     async fn get_substate(&self, req: Request<GetSubstateRequest>) -> Result<Response<GetSubstateResponse>, RpcStatus> {
         let req = req.into_message();
 
-        let address = SubstateAddress::from_bytes(&req.address)
-            .map_err(|e| RpcStatus::bad_request(format!("Invalid encoded substate id: {}", e)))?;
+        let substate_requirement = req
+            .substate_requirement
+            .map(SubstateRequirement::try_from)
+            .transpose()
+            .map_err(|e| RpcStatus::bad_request(format!("Invalid substate requirement: {e}")))?
+            .ok_or_else(|| RpcStatus::bad_request("Missing substate requirement"))?;
 
+        if !substate_requirement.substate_id().is_global() {
+            let current_epoch = self
+                .epoch_manager
+                .current_epoch()
+                .await
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+            let local_committee_info = self
+                .epoch_manager
+                .get_local_committee_info(current_epoch)
+                .await
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+            if !local_committee_info.includes_substate_id(substate_requirement.substate_id()) {
+                return Err(RpcStatus::bad_request(format!(
+                    "This node in {} does not store {}",
+                    local_committee_info.shard_group(),
+                    substate_requirement
+                )));
+            }
+        }
+
+        debug!(
+            target: LOG_TARGET,
+            "Querying substate {substate_requirement} from the state store"
+        );
         let tx = self
             .shard_state_store
             .create_read_tx()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        let maybe_substate = SubstateRecord::get(&tx, &address)
+        let maybe_substate = substate_requirement
+            .to_substate_address()
+            .map(|address| SubstateRecord::get(&tx, &address))
+            // Just fetch the latest if no version is supplied as a requirement
+            .unwrap_or_else(|| SubstateRecord::get_latest(&tx, substate_requirement.substate_id()))
             .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 

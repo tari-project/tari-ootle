@@ -26,13 +26,11 @@ Feature: Counter template
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register the "counter" template
-    When base wallet WALLET registers the template "counter"
-    When miner MINER mines 20 new blocks
-    Then VN has scanned to height 53
-
     # Create the sender account
-    When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+
+    # Publish the "counter" template
+    When wallet daemon WALLET_D publishes the template "counter" using account ACC
 
     # The initial value of the counter must be 0
     When I call function "new" on template "counter" using account ACC to pay fees via wallet daemon WALLET_D named "COUNTER"
@@ -66,13 +64,11 @@ Feature: Counter template
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register the "counter" template
-    When base wallet WALLET registers the template "counter"
-    When miner MINER mines 20 new blocks
-    Then VN has scanned to height 53
-
     # Create the sender account
-    When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+
+    # Publish the "counter" template
+    When wallet daemon WALLET_D publishes the template "counter" using account ACC
 
     # The initial value of the counter must be 0
     When I call function "new" on template "counter" using account ACC to pay fees via wallet daemon WALLET_D named "COUNTER"

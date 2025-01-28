@@ -36,7 +36,6 @@ use tari_template_lib::{
     models::{Amount, UnclaimedConfidentialOutputAddress},
     prelude::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
 };
-use tari_transaction::Transaction;
 use tari_wallet_daemon_client::{
     types::{
         AccountGetDefaultRequest,
@@ -76,6 +75,8 @@ use crate::{
         get_account_or_default,
         get_account_with_inputs,
         invalid_params,
+        not_found,
+        transaction_builder,
         wait_for_result,
         wait_for_result_and_account,
     },
@@ -122,10 +123,10 @@ pub async fn handle_create(
     );
 
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(default_account.address.as_component_address().unwrap(), max_fee)
         .create_account(owner_pk.clone())
-        .with_inputs(inputs)
+        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&signing_key.key);
 
     let mut events = context.notifier().subscribe();
@@ -217,12 +218,8 @@ pub async fn handle_invoke(
 
     let inputs = sdk.substate_api().load_dependent_substates(&[&account.address])?;
 
-    let inputs = inputs
-        .into_iter()
-        .map(|s| SubstateRequirement::new(s.substate_id.clone(), Some(s.version)));
-
     let account_address = account.address.as_component_address().unwrap();
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account_address, req.max_fee.unwrap_or(DEFAULT_FEE))
         .call_method(account_address, &req.method, req.args)
         .with_inputs(inputs)
@@ -323,6 +320,7 @@ pub async fn handle_reveal_funds(
 
     // If the caller aborts the request early, this async block would be aborted at any await point. To avoid this, we
     // spawn a task that will continue running.
+    let ctx = context.clone();
     task::spawn(async move {
         let account = get_account_or_default(req.account, &sdk.accounts_api())?;
 
@@ -387,7 +385,7 @@ pub async fn handle_reveal_funds(
 
         let account_address = account.address.as_component_address().unwrap();
 
-        let mut builder = Transaction::builder();
+        let mut builder = transaction_builder(&ctx);
         if req.pay_fee_from_reveal {
             builder = builder.with_fee_instructions(vec![
                 Instruction::CallMethod {
@@ -424,12 +422,9 @@ pub async fn handle_reveal_funds(
         let account_substate = sdk.substate_api().get_substate(&account.address)?;
         // Add all versioned account child addresses as inputs
         let child_addresses = sdk.substate_api().load_dependent_substates(&[&account.address])?;
-        let mut inputs = vec![account_substate.substate_id];
+        let mut inputs = Vec::with_capacity(child_addresses.len() + 1);
+        inputs.push(SubstateRequirement::from(account_substate.substate_id));
         inputs.extend(child_addresses);
-
-        let inputs = inputs
-            .into_iter()
-            .map(|addr| SubstateRequirement::new(addr.substate_id.clone(), Some(addr.version)));
 
         let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
 
@@ -693,7 +688,7 @@ async fn finish_claiming<T: WalletStore>(
         method: "pay_fee".to_string(),
         args: args![max_fee],
     });
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_fee_instructions(instructions)
         .with_inputs(inputs)
         .build_and_seal(&account_secret_key.key);
@@ -805,28 +800,28 @@ fn get_or_create_account<T: WalletStore>(
             let account = accounts_api
                 .get_default()
                 .optional()?
-                .ok_or_else(|| anyhow::anyhow!("No default account found. Please set a default account."))?;
+                .ok_or_else(|| not_found("No default account found. Please create or set a default account."))?;
 
             Some(account)
         },
     };
     let (account_address, account_secret_key, new_account_name) = match maybe_account {
         Some(account) => {
-            let key_index = key_id.unwrap_or(account.key_index);
             let account_secret_key = sdk
                 .key_manager_api()
-                .derive_key(key_manager::TRANSACTION_BRANCH, key_index)?;
+                .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
             let account_substate = sdk.substate_api().get_substate(&account.address)?;
             inputs.push(account_substate.substate_id.into());
 
             (account.address, account_secret_key, None)
         },
         None => {
-            let name = account
-                .as_ref()
-                .unwrap()
-                .name()
-                .ok_or_else(|| anyhow!("Account name must be provided when creating a new account"))?;
+            let name = account.as_ref().unwrap().name().ok_or_else(|| {
+                invalid_params(
+                    "account.Name",
+                    Some("Account name must be provided when creating a new account"),
+                )
+            })?;
             let account_secret_key = key_id
                 .map(|idx| sdk.key_manager_api().derive_key(key_manager::TRANSACTION_BRANCH, idx))
                 .unwrap_or_else(|| sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH))?;
@@ -863,7 +858,7 @@ pub async fn handle_transfer(
         .accounts_api()
         .get_vault_by_resource(&account.address, &req.resource_address)?;
     let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
-    inputs.push(src_vault_substate.substate_id);
+    inputs.insert(src_vault_substate.substate_id.into());
 
     // add the input for the resource address to be transfered
     let resource_substate = sdk
@@ -871,10 +866,10 @@ pub async fn handle_transfer(
         .scan_for_substate(&SubstateId::Resource(req.resource_address), None)
         .await?;
     let resource_substate_address = SubstateRequirement::new(
-        resource_substate.address.substate_id.clone(),
-        Some(resource_substate.address.version),
+        resource_substate.address.substate_id().clone(),
+        Some(resource_substate.address.version()),
     );
-    inputs.push(resource_substate.address);
+    inputs.insert(resource_substate.address.into());
 
     let mut instructions = vec![];
     let mut fee_instructions = vec![];
@@ -888,7 +883,7 @@ pub async fn handle_transfer(
         .optional()?;
 
     if let Some(ValidatorScanResult { address, .. }) = existing_account {
-        inputs.push(address);
+        inputs.insert(address.into());
     } else {
         instructions.push(Instruction::CreateAccount {
             public_key_address: req.destination_public_key,
@@ -941,19 +936,19 @@ pub async fn handle_transfer(
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_fee_instructions(fee_instructions)
         .with_instructions(instructions)
-        .with_inputs(vec![resource_substate_address])
+        .add_input(resource_substate_address)
+        .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
 
-    let required_inputs = inputs.into_iter().map(Into::into).collect();
     // If dry run we can return the result immediately
     if req.dry_run {
         let transaction_id = *transaction.id();
         let execute_result = context
             .transaction_service()
-            .submit_dry_run_transaction(transaction, required_inputs)
+            .submit_dry_run_transaction(transaction, vec![])
             .await?;
         let finalize = execute_result.finalize;
         return Ok(AccountsTransferResponse {
@@ -968,7 +963,7 @@ pub async fn handle_transfer(
     let mut events = context.notifier().subscribe();
     let tx_id = context
         .transaction_service()
-        .submit_transaction(transaction, required_inputs)
+        .submit_transaction(transaction, vec![])
         .await?;
 
     let finalized = wait_for_result(&mut events, tx_id).await?;
@@ -976,7 +971,7 @@ pub async fn handle_transfer(
     if let Some(reject) = finalized.finalize.result.reject() {
         return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
     }
-    if let Some(reason) = finalized.finalize.reject() {
+    if let Some(reason) = finalized.finalize.full_reject() {
         return Err(anyhow::anyhow!(
             "Fee transaction succeeded (fees charged) however the transaction failed: {}",
             reason
@@ -1011,6 +1006,8 @@ pub async fn handle_confidential_transfer(
     }
     let transaction_service = context.transaction_service().clone();
 
+    // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
+    // cause funds to remain locked indefinitely.
     task::spawn(async move {
         let account = get_account_or_default(req.account, &sdk.accounts_api())?;
 
@@ -1032,10 +1029,7 @@ pub async fn handle_confidential_transfer(
         if req.dry_run {
             let transaction_id = *transfer.transaction.id();
             let exec_result = transaction_service
-                .submit_dry_run_transaction(
-                    transfer.transaction,
-                    transfer.inputs.into_iter().map(Into::into).collect(),
-                )
+                .submit_dry_run_transaction(transfer.transaction, transfer.autofill_inputs)
                 .await?;
             let finalize = exec_result.finalize;
             return Ok(ConfidentialTransferResponse {
@@ -1047,10 +1041,7 @@ pub async fn handle_confidential_transfer(
 
         let mut events = notifier.subscribe();
         let tx_id = transaction_service
-            .submit_transaction(
-                transfer.transaction,
-                transfer.inputs.into_iter().map(Into::into).collect(),
-            )
+            .submit_transaction(transfer.transaction, transfer.autofill_inputs)
             .await?;
 
         notifier.notify(TransactionSubmittedEvent {

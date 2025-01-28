@@ -61,14 +61,14 @@ root:
 loggers:
   # Route log events common to every application to all appenders
   tari::dan_wallet_daemon:
-    level: info
+    level: debug
     appenders:
       - dan_layer
       - stdout
     additive: false
 
   tari::dan:
-    level: info
+    level: debug
     appenders:
       - dan_layer
       - stdout

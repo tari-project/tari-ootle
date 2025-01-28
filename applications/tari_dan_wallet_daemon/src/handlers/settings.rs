@@ -3,7 +3,7 @@
 
 use tari_dan_common_types::optional::Optional;
 use tari_dan_wallet_sdk::apis::{config::ConfigKey, jwt::JrpcPermission};
-use tari_wallet_daemon_client::types::{SettingsGetResponse, SettingsSetRequest, SettingsSetResponse};
+use tari_wallet_daemon_client::types::{NetworkInfo, SettingsGetResponse, SettingsSetRequest, SettingsSetResponse};
 
 use crate::handlers::HandlerContext;
 
@@ -19,8 +19,15 @@ pub async fn handle_get(
         .get(ConfigKey::IndexerUrl)
         .optional()?
         .unwrap_or_else(|| sdk.get_network_interface().get_endpoint().to_string());
+    let network = sdk.config_api().get_network()?;
 
-    Ok(SettingsGetResponse { indexer_url })
+    Ok(SettingsGetResponse {
+        indexer_url,
+        network: NetworkInfo {
+            name: network.to_string(),
+            byte: network.as_byte(),
+        },
+    })
 }
 
 pub async fn handle_set(

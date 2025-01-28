@@ -47,18 +47,35 @@ import type {
   SubstateType,
 } from "@tari-project/typescript-bindings";
 
+const DEFAULT_WALLET_ADDRESS = new URL(
+  import.meta.env.VITE_DAEMON_JRPC_ADDRESS ||
+  import.meta.env.VITE_JSON_RPC_ADDRESS ||
+  import.meta.env.VITE_JRPC_ADDRESS ||
+  "http://localhost:9000",
+);
+
+export async function getClientAddress(): Promise<URL> {
+  try {
+    const resp = await fetch("/json_rpc_address");
+    if (resp.status === 200) {
+      const url = await resp.text();
+      try {
+        return new URL(url);
+      } catch (e) {
+        throw new Error(`Invalid URL: ${url} : {e}`);
+      }
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+
+  return DEFAULT_WALLET_ADDRESS;
+}
+
 async function jsonRpc(method: string, params: any = null) {
   let id = 0;
   id += 1;
-  let address = "http://localhost:18300";
-  try {
-    address = await (await fetch("/json_rpc_address")).text();
-    if (!address.startsWith("http")) {
-      address = "http://" + address;
-    }
-  } catch (e) {
-    console.warn("Failed to fetch address", e);
-  }
+  let address = await getClientAddress();
   let response = await fetch(address, {
     method: "POST",
     body: JSON.stringify({

@@ -22,14 +22,10 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { transactionsGet, transactionsGetAll, transactionsPublishTemplate } from "../../utils/json_rpc";
-import { apiError } from "../helpers/types";
+import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 
-import type {
-  ComponentAddressOrName,
-  PublishTemplateRequest,
-  TransactionStatus,
-} from "@tari-project/typescript-bindings";
+import type { TransactionStatus } from "@tari-project/typescript-bindings";
 
 export const useTransactionDetails = (hash: string) => {
   return useQuery({
@@ -37,7 +33,7 @@ export const useTransactionDetails = (hash: string) => {
     queryFn: () => {
       return transactionsGet({ transaction_id: hash });
     },
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
     },
   });
@@ -47,7 +43,7 @@ export const useGetAllTransactions = (status: TransactionStatus | null, componen
   return useQuery({
     queryKey: ["transactions"],
     queryFn: () => transactionsGetAll({ status: status, component: component }),
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       error;
     },
     refetchInterval: 5000,
@@ -57,7 +53,7 @@ export const useGetAllTransactions = (status: TransactionStatus | null, componen
 
 export const usePublishTemplate = () => {
   return useMutation(transactionsPublishTemplate, {
-    onError: (error: apiError) => {
+    onError: (error: ApiError) => {
       console.error(error);
     },
     onSettled: () => {

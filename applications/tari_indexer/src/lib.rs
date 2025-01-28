@@ -153,13 +153,17 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
         // Run the http ui
         if let Some(address) = config.indexer.http_ui_address {
-            task::spawn(run_http_ui_server(
-                address,
-                config
-                    .indexer
-                    .ui_connect_address
-                    .unwrap_or_else(|| jrpc_address.to_string()),
-            ));
+            let mut public_jrpc_address = config
+                .indexer
+                .ui_connect_address
+                .unwrap_or_else(|| jrpc_address.to_string());
+            if !public_jrpc_address.starts_with("http://") && !public_jrpc_address.starts_with("https://") {
+                public_jrpc_address = format!("http://{}", public_jrpc_address);
+            }
+
+            let public_jrpc_address = url::Url::parse(&public_jrpc_address)
+                .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Invalid ui_connect_address: {err}")))?;
+            task::spawn(run_http_ui_server(address, public_jrpc_address));
         }
     }
 

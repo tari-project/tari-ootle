@@ -121,7 +121,13 @@ use crate::{
         NopLogger,
     },
     substate_resolver::TariSubstateResolver,
-    transaction_validators::{FeeTransactionValidator, HasInputs, TemplateExistsValidator, TransactionValidationError},
+    transaction_validators::{
+        FeeTransactionValidator,
+        HasInputs,
+        TemplateExistsValidator,
+        TransactionNetworkValidator,
+        TransactionValidationError,
+    },
     validator::Validator,
     validator_registration_file::ValidatorRegistrationFile,
     virtual_substate::VirtualSubstateManager,
@@ -344,7 +350,7 @@ pub async fn spawn_services(
 
     let (mempool, join_handle) = mempool::spawn(
         epoch_manager.clone(),
-        create_mempool_transaction_validator(template_manager.clone()),
+        create_mempool_transaction_validator(config.network, template_manager.clone()),
         state_store.clone(),
         consensus_handle.clone(),
         networking.clone(),
@@ -651,8 +657,8 @@ where
     let substate_id = substate_id.into();
     let id = VersionedSubstateId::new(substate_id, 0);
     SubstateRecord {
-        substate_id: id.substate_id,
-        version: id.version,
+        version: id.version(),
+        substate_id: id.into_substate_id(),
         substate_value: value.into(),
         state_hash: Default::default(),
         created_by_transaction: Default::default(),
@@ -668,9 +674,11 @@ where
 }
 
 fn create_mempool_transaction_validator(
+    network: Network,
     template_manager: TemplateManager<PeerAddress>,
-) -> impl Validator<Transaction, Context=(), Error=TransactionValidationError> {
-    HasInputs::new()
+) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
+    TransactionNetworkValidator::new(network)
+        .and_then(HasInputs::new())
         .and_then(TemplateExistsValidator::new(template_manager))
         .and_then(FeeTransactionValidator)
 }

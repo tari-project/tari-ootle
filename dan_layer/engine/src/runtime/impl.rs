@@ -122,11 +122,6 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::dan::engine::runtime::impl";
 
-// Topics for builtin events emmitted by the engine
-const STANDARD_TOPIC_PREFIX: &str = "std.";
-const VAULT_DEPOSIT_TOPIC: &str = "std.vault.deposit";
-const VAULT_WITHDRAW_TOPIC: &str = "std.vault.withdraw";
-
 #[derive(Clone)]
 pub struct RuntimeInterfaceImpl<TTemplateProvider> {
     tracker: StateTracker,
@@ -224,7 +219,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn emit_vault_events<T: Into<String>>(
         &self,
-        topic: T,
+        action: T,
         vault_id: VaultId,
         vault_lock: &LockedSubstate,
         amount: Amount,
@@ -232,37 +227,28 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         state: &mut WorkingState,
     ) -> Result<(), RuntimeError> {
         let tx_hash = self.entity_id_provider.transaction_hash();
-        let (template_address, _) = state.current_template()?;
-        let resource_address = state.get_vault(vault_lock)?.resource_address();
+        let (&template_address, _) = state.current_template()?;
+        let &resource_address = state.get_vault(vault_lock)?.resource_address();
 
-        let mut payload = Metadata::new();
-        payload.insert("vault_id", vault_id.to_string());
-        payload.insert("resource_address", resource_address.to_string());
-        payload.insert("resource_type", resource_type.to_string());
-        payload.insert("amount", amount.to_string());
+        let payload = Metadata::from_iter([
+            ("vault_id", vault_id.to_string()),
+            ("resource_address", resource_address.to_string()),
+            ("resource_type", resource_type.to_string()),
+            ("amount", amount.to_string()),
+        ]);
 
-        let topic = topic.into();
+        let action = action.into();
 
-        // we emit multiple events referencing vault and resource address
-        // this way indexers/clients can search by any one
-        let vault_event = Event::new(
+        let vault_event = Event::std(
             Some(SubstateId::Vault(vault_id)),
-            *template_address,
+            template_address,
             tx_hash,
-            topic.clone(),
-            payload.clone(),
-        );
-        let resource_event = Event::new(
-            Some(SubstateId::Resource(*resource_address)),
-            *template_address,
-            tx_hash,
-            topic,
+            "vault",
+            &action,
             payload,
         );
         debug!(target: LOG_TARGET, "Emitted vault event {}", vault_event);
-        debug!(target: LOG_TARGET, "Emitted resource event {}", resource_event);
         state.push_event(vault_event);
-        state.push_event(resource_event);
 
         Ok(())
     }
@@ -425,8 +411,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn emit_event(&self, topic: String, payload: Metadata) -> Result<(), RuntimeError> {
         // forbid template users to emit events that can be confused with the ones emitted by the engine
-        if topic.starts_with(STANDARD_TOPIC_PREFIX) {
-            return Err(RuntimeError::InvalidEventTopic { topic });
+        if Event::topic_has_std_prefix(&topic) {
+            return Err(RuntimeError::InvalidEventTopicStdPrefix { topic });
         }
 
         self.invoke_modules_on_runtime_call("emit_event")?;
@@ -1194,7 +1180,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     // Emit a builtin event for the deposit
                     self.emit_vault_events(
-                        VAULT_DEPOSIT_TOPIC.to_owned(),
+                        "deposit",
                         vault_id,
                         &vault_lock,
                         bucket.amount(),
@@ -1270,7 +1256,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     // Emit a builtin event for the withdraw
                     self.emit_vault_events(
-                        VAULT_WITHDRAW_TOPIC,
+                        "withdraw",
                         vault_id,
                         &vault_lock,
                         amount,

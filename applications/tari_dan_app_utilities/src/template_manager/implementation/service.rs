@@ -410,6 +410,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
 
                 // do syncing
                 for (committee, addresses) in &mut committees {
+                    let mut sync_successful = false;
                     for (addr, _) in &committee.members {
                         // syncing current part of batch
                         match Self::vn_client(client_factory.clone(), addr).await {
@@ -484,6 +485,7 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                                                         }
                                                     }
 
+                                                    sync_successful = true;
                                                     info!(target: LOG_TARGET, "✅ Template synced successfully: {}", template_address);
                                                     break;
                                                 },
@@ -501,6 +503,10 @@ impl<TAddr: NodeAddressable + 'static> TemplateManagerService<TAddr> {
                             Err(error) => {
                                 warn!(target: LOG_TARGET, "Failed to connect to VN at {addr}: {error:?}");
                             },
+                        }
+
+                        if sync_successful {
+                            break;
                         }
                     }
                 }

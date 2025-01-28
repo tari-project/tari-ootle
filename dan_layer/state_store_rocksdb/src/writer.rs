@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -1227,85 +1227,42 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn foreign_substate_pledges_save(
         &mut self,
         transaction_id: &TransactionId,
-        shard_group: ShardGroup,
+        // TODO: seems like this field is not really needed/used?
+        _shard_group: ShardGroup,
         pledges: &SubstatePledges,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_substate_pledges;
-        let tx_id_hex = serialize_hex(transaction_id);
-
-        let values = pledges.iter().map(|pledge| match pledge {
-            SubstatePledge::Input {
-                substate_id,
-                is_write,
-                substate,
-            } => {
-                let lock_type = if *is_write {
-                    SubstateLockType::Write
-                } else {
-                    SubstateLockType::Read
-                };
-                Ok::<_, StorageError>((
-                    foreign_substate_pledges::transaction_id.eq(&tx_id_hex),
-                    foreign_substate_pledges::address.eq(serialize_hex(substate_id.to_substate_address())),
-                    foreign_substate_pledges::substate_id.eq(substate_id.substate_id().to_string()),
-                    foreign_substate_pledges::version.eq(substate_id.version() as i32),
-                    foreign_substate_pledges::shard_group.eq(shard_group.encode_as_u32() as i32),
-                    foreign_substate_pledges::lock_type.eq(lock_type.to_string()),
-                    foreign_substate_pledges::substate_value.eq(Some(serialize_json(&substate)?)),
-                ))
-            },
-            SubstatePledge::Output { substate_id } => Ok::<_, StorageError>((
-                foreign_substate_pledges::transaction_id.eq(&tx_id_hex),
-                foreign_substate_pledges::address.eq(serialize_hex(substate_id.to_substate_address())),
-                foreign_substate_pledges::substate_id.eq(substate_id.substate_id().to_string()),
-                foreign_substate_pledges::version.eq(substate_id.version() as i32),
-                foreign_substate_pledges::shard_group.eq(shard_group.encode_as_u32() as i32),
-                foreign_substate_pledges::lock_type.eq(SubstateLockType::Output.to_string()),
-                foreign_substate_pledges::substate_value.eq(None),
-            )),
-        });
-
-        for value in values {
-            diesel::insert_into(foreign_substate_pledges::table)
-                .values(value?)
-                // This is not supported for batch inserts, which is why we do multiple inserts
-                .on_conflict_do_nothing()
-                .execute(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "foreign_substate_pledges_insert",
-                    source: e,
-                })?;
+        let operation = "foreign_substate_pledges_save";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        
+        for pledge in pledges {
+            let value = ForeignSubstatePledgeData {
+                transaction_id: *transaction_id,
+                substate_address: pledge.to_substate_address(),
+                pledge: pledge.clone(),
+            };
+            ForeignSubstatePledgeModel::put(self.db.clone(), tx, operation, &value)?;
         }
 
         Ok(())
-        */
     }
 
     fn foreign_substate_pledges_remove_many<'a, I: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         transaction_ids: I,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_substate_pledges;
-
-        let num_deleted = diesel::delete(foreign_substate_pledges::table)
-            .filter(foreign_substate_pledges::transaction_id.eq_any(transaction_ids.into_iter().map(serialize_hex)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_substate_pledges_remove_many",
-                source: e,
-            })?;
-
-        debug!(
-            target: LOG_TARGET,
-            "Deleted {num_deleted} foreign substate pledges",
-        );
+        let operation = "foreign_substate_pledges_remove_many";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        
+        for transaction_id in transaction_ids {
+            let key_prefix = ForeignSubstatePledgeModel::key_from_transaction_and_address(transaction_id, None);
+            let pledges = ForeignSubstatePledgeModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?;
+            for pledge in pledges {
+                let key = ForeignSubstatePledgeModel::key(&pledge);
+                ForeignSubstatePledgeModel::delete(self.db.clone(), tx, operation, &key)?;
+            }
+        }
 
         Ok(())
-        */
     }
 
     fn pending_state_tree_diffs_insert(

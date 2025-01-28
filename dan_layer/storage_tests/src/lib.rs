@@ -16,3 +16,5 @@ mod quorum_certificates;
 mod foreign_proposals;
 #[cfg(test)]
 mod block_diffs;
+#[cfg(test)]
+mod foreign_substate_pledges;

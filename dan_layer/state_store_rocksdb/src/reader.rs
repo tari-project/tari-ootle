@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1822,61 +1822,25 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         transaction_id: &TransactionId,
         address: T,
     ) -> Result<bool, StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_substate_pledges;
-
+        let operation = "foreign_substate_pledges_exists_for_address";
         let address = address.to_substate_address();
-        let count = foreign_substate_pledges::table
-            .count()
-            .filter(foreign_substate_pledges::transaction_id.eq(serialize_hex(transaction_id)))
-            .filter(foreign_substate_pledges::address.eq(serialize_hex(address)))
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_substate_pledges_exists",
-                source: e,
-            })?;
-
-        Ok(count > 0)
-        */
+        let key = ForeignSubstatePledgeModel::key_from_transaction_and_address(transaction_id, Some(&address));
+        
+        Ok(ForeignSubstatePledgeModel::key_exists(&self.tx, operation, &key)?)
     }
 
     fn foreign_substate_pledges_get_all_by_transaction_id(
         &self,
         transaction_id: &TransactionId,
     ) -> Result<SubstatePledges, StorageError> {
-        todo!()
-        /*
-        use crate::schema::foreign_substate_pledges;
-
-        let recs = foreign_substate_pledges::table
-            .filter(foreign_substate_pledges::transaction_id.eq(serialize_hex(transaction_id)))
-            .get_results::<sql_models::ForeignSubstatePledge>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_substate_pledges_get",
-                source: e,
-            })?;
-
-        #[allow(clippy::mutable_key_type)]
-        let mut pledges = SubstatePledges::with_capacity(recs.len());
-        for pledge in recs {
-            let substate_id = parse_from_string(&pledge.substate_id)?;
-            let version = pledge.version as u32;
-            let id = VersionedSubstateId::new(substate_id, version);
-            let lock_type = parse_from_string(&pledge.lock_type)?;
-            let lock_intent = VersionedSubstateIdLockIntent::new(id, lock_type, true);
-            let substate_value = pledge.substate_value.as_deref().map(deserialize_json).transpose()?;
-            let pledge = SubstatePledge::try_create(lock_intent.clone(), substate_value).ok_or_else(|| {
-                StorageError::DataInconsistency {
-                    details: format!("Invalid input substate pledge for {lock_intent}"),
-                }
-            })?;
-            pledges.insert(pledge);
-        }
-
-        Ok(pledges)
-        */
+        let key_prefix = ForeignSubstatePledgeModel::key_from_transaction_and_address(transaction_id, None);
+        let foreign_pledges = ForeignSubstatePledgeModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?;
+        let substate_pledges = foreign_pledges
+            .into_iter()
+            .map(|p| p.pledge)
+            .collect();
+        
+        Ok(substate_pledges)
     }
 
     fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError> {

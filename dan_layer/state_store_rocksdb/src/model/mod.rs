@@ -31,6 +31,7 @@ pub mod last_executed;
 pub mod last_proposed;
 pub mod foreign_receive_counter;
 pub mod foreign_send_counter;
+pub mod foreign_substate_pledge;
 pub mod last_sent_vote;
 pub mod last_voted;
 pub mod leaf_block;

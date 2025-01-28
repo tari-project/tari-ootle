@@ -53,17 +53,7 @@ pub fn build_substate_record(substate_id: &SubstateId, version: u32) -> Substate
     SubstateRecord {
             substate_id: substate_id.clone(), 
             version,
-            substate_value: SubstateValue::Component(ComponentHeader {
-                template_address: TemplateAddress::default(),
-                module_name: "foo".to_string(),
-                owner_key: None,
-                owner_rule: OwnerRule::None,
-                access_rules: ComponentAccessRules::allow_all(),
-                entity_id,
-                body: ComponentBody {
-                    state: tari_bor::Value::Null,
-                },
-            }),
+            substate_value: build_substate_value(Some(entity_id)),
             state_hash: FixedHash::default(),
             created_by_transaction: TransactionId::default(),
             created_justify: QcId::zero(),
@@ -73,6 +63,20 @@ pub fn build_substate_record(substate_id: &SubstateId, version: u32) -> Substate
             created_at_epoch: Epoch::zero(),
             destroyed: None,
     }
+}
+
+pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
+    SubstateValue::Component(ComponentHeader {
+        template_address: TemplateAddress::default(),
+        module_name: "foo".to_string(),
+        owner_key: None,
+        owner_rule: OwnerRule::None,
+        access_rules: ComponentAccessRules::allow_all(),
+        entity_id: entity_id.unwrap_or_default(),
+        body: ComponentBody {
+            state: tari_bor::Value::Null,
+        },
+    })
 }
 
 pub fn copy_fixed<const SZ: usize>(bytes: &[u8]) -> [u8; SZ] {

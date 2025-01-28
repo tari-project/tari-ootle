@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use log::*;
 use tari_consensus::{
-    consensus_constants::ConsensusConstants,
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
     traits::{ConsensusSpec, SyncManager, SyncStatus},
 };
@@ -438,7 +437,6 @@ where
         our_vn: &ValidatorNode<PeerAddress>,
     ) -> Result<(), CommsRpcConsensusSyncError> {
         let mut remaining_members = committee.len();
-        let mut last_error = None;
 
         info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", current_epoch.saturating_sub(Epoch(1)));
         for (addr, public_key) in committee {
@@ -456,7 +454,6 @@ where
                     if remaining_members == 0 {
                         return Err(err);
                     }
-                    last_error = Some(err);
                     continue;
                 },
             };
@@ -483,7 +480,6 @@ where
                     if remaining_members == 0 {
                         return Err(err);
                     }
-                    last_error = Some(err);
                     continue;
                 },
             };
@@ -503,13 +499,13 @@ where
                             expected = checkpoint.get_shard_root(shard),
                             actual = state_root,
                         );
-                        last_error = Some(CommsRpcConsensusSyncError::StateRootMismatch {
-                            expected: TreeHash::from(checkpoint.block().state_merkle_root().into_array()),
-                            actual: state_root,
-                        });
+
                         // TODO: rollback state
                         if remaining_members == 0 {
-                            return Err(last_error.unwrap());
+                            return Err(CommsRpcConsensusSyncError::StateRootMismatch {
+                                expected: TreeHash::from(checkpoint.block().state_merkle_root().into_array()),
+                                actual: state_root,
+                            });
                         }
 
                         continue;

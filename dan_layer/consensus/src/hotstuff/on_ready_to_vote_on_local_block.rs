@@ -12,7 +12,6 @@ use tari_dan_common_types::{
     shard::Shard,
     Epoch,
     ShardGroup,
-    ToSubstateAddress,
     VersionedSubstateId,
 };
 use tari_dan_storage::{

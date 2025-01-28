@@ -7,10 +7,8 @@ use log::*;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     optional::Optional,
-    shard::Shard,
     Epoch,
     NodeHeight,
-    ShardGroup,
 };
 use tari_dan_storage::{
     consensus_models::{

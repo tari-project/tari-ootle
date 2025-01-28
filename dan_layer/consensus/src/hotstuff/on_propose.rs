@@ -18,7 +18,6 @@ use tari_dan_common_types::{
     Epoch,
     ExtraData,
     NodeHeight,
-    ToSubstateAddress,
     VersionedSubstateId,
 };
 use tari_dan_storage::{

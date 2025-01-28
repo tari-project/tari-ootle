@@ -16,7 +16,6 @@ use tari_dan_common_types::{
     Epoch,
     NodeAddressable,
     NodeHeight,
-    NumPreshards,
     ShardGroup,
     SubstateAddress,
     SubstateRequirement,

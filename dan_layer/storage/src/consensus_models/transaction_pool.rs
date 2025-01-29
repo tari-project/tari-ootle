@@ -823,7 +823,7 @@ impl TransactionPoolRecord {
             };
             let address = SubstateAddress::from_substate_id(substate_id, version);
             // TODO(perf): O(n) queries
-            if tx.foreign_substate_pledges_exists_for_address(self.transaction_id(), address)? {
+            if tx.foreign_substate_pledges_exists_for_transaction_and_address(self.transaction_id(), address)? {
                 continue;
             }
 

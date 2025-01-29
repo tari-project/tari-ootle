@@ -6,7 +6,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use tari_dan_storage::consensus_models::{Decision, SubstateRequirementLockIntent};
+use tari_dan_common_types::SubstateLockType;
+use tari_dan_storage::consensus_models::Decision;
 use tari_engine_types::substate::SubstateId;
 use tari_transaction::{Transaction, TransactionId};
 
@@ -39,6 +40,6 @@ pub struct ExecuteSpec {
     pub transaction: Transaction,
     pub decision: Decision,
     pub fee: u64,
-    pub inputs: Vec<SubstateRequirementLockIntent>,
+    pub input_locks: Vec<(SubstateId, SubstateLockType)>,
     pub new_outputs: Vec<SubstateId>,
 }

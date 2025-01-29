@@ -20,7 +20,7 @@ use tari_dan_common_types::{
 };
 use tari_engine_types::{serde_with, substate::SubstateId};
 
-use crate::consensus_models::{QcId, SubstatePledge};
+use crate::consensus_models::{QcId, RequireLockIntentRef, SubstatePledge};
 
 const LOG_TARGET: &str = "tari::dan::consensus_models::evidence";
 
@@ -402,6 +402,13 @@ impl ShardGroupEvidence {
 
     pub fn inputs(&self) -> &IndexMap<SubstateId, Option<EvidenceInputLockData>> {
         &self.inputs
+    }
+
+    pub fn input_lock_intents(&self) -> impl Iterator<Item = RequireLockIntentRef<'_>> + '_ {
+        self.inputs.iter().filter_map(|(substate_id, e)| {
+            e.as_ref()
+                .map(|lock| RequireLockIntentRef::new(substate_id, lock.version, lock.as_lock_type()))
+        })
     }
 
     pub fn outputs(&self) -> &IndexMap<SubstateId, u32> {

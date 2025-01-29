@@ -233,7 +233,10 @@ where TConsensusSpec: ConsensusSpec
 
             let atom = cmd.transaction().expect("Command must be a transaction");
 
-            let Some(mut pool_tx) = change_set.get_transaction(tx, &locked_block, &leaf, atom.id())? else {
+            let Some(mut pool_tx) = change_set
+                .get_transaction(tx, &locked_block, &leaf, atom.id())
+                .optional()?
+            else {
                 return Err(HotStuffError::InvariantError(format!(
                     "Transaction {} in newly justified block {} not found in the pool",
                     atom.id(),
@@ -435,6 +438,7 @@ where TConsensusSpec: ConsensusSpec
                         fp_atom,
                         local_committee_info,
                         fp_atom.shard_group,
+                        &mut substate_store,
                         proposed_block_change_set,
                     )? {
                         proposed_block_change_set.no_vote(reason);
@@ -587,8 +591,9 @@ where TConsensusSpec: ConsensusSpec
         total_leader_fee: &mut u64,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::info(LOG_TARGET, "Evaluate LocalOnly command");
-        let Some(mut tx_rec) =
-            proposed_block_change_set.get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())?
+        let Some(mut tx_rec) = proposed_block_change_set
+            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
+            .optional()?
         else {
             warn!(
                 target: LOG_TARGET,
@@ -616,13 +621,7 @@ where TConsensusSpec: ConsensusSpec
         // TODO(perf): proposer shouldn't have to do this twice, esp. executing the transaction and locking
         let prepared = self
             .transaction_manager
-            .prepare(
-                substate_store,
-                local_committee_info,
-                block.epoch(),
-                *atom.id(),
-                block.id(),
-            )
+            .prepare(substate_store, local_committee_info, block.epoch(), &tx_rec, block.id())
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         match prepared {
@@ -762,8 +761,9 @@ where TConsensusSpec: ConsensusSpec
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::info(LOG_TARGET, "Evaluate Prepare command");
-        let Some(mut tx_rec) =
-            proposed_block_change_set.get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())?
+        let Some(mut tx_rec) = proposed_block_change_set
+            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
+            .optional()?
         else {
             warn!(
                 target: LOG_TARGET,
@@ -797,13 +797,7 @@ where TConsensusSpec: ConsensusSpec
 
         let prepared = self
             .transaction_manager
-            .prepare(
-                substate_store,
-                local_committee_info,
-                block.epoch(),
-                *atom.id(),
-                block.id(),
-            )
+            .prepare(substate_store, local_committee_info, block.epoch(), &tx_rec, block.id())
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         match prepared {
@@ -931,7 +925,7 @@ where TConsensusSpec: ConsensusSpec
                     Decision::Abort(reason) => {
                         let initial_evidence = multishard.to_initial_evidence(local_committee_info);
                         // CASE: The transaction was ABORTed due to a lock conflict
-                        warn!(target: LOG_TARGET, "⚠️ Multi-shard prepared transaction aborted: {reason:?}");
+                        warn!(target: LOG_TARGET, "⚠️ Multi-shard prepared transaction aborted: {reason}");
                         let execution = multishard.into_execution().expect("Abort should have execution");
                         tx_rec.update_from_execution(
                             local_committee_info.num_preshards(),
@@ -960,8 +954,9 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
-        let Some(mut tx_rec) =
-            proposed_block_change_set.get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())?
+        let Some(mut tx_rec) = proposed_block_change_set
+            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
+            .optional()?
         else {
             warn!(
                 target: LOG_TARGET,
@@ -1050,8 +1045,9 @@ where TConsensusSpec: ConsensusSpec
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::info(LOG_TARGET, "Evaluate AllPrepare command (execute)");
-        let Some(mut tx_rec) =
-            proposed_block_change_set.get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())?
+        let Some(mut tx_rec) = proposed_block_change_set
+            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
+            .optional()?
         else {
             warn!(
                 target: LOG_TARGET,
@@ -1280,8 +1276,9 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
-        let Some(mut tx_rec) =
-            proposed_block_change_set.get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())?
+        let Some(mut tx_rec) = proposed_block_change_set
+            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
+            .optional()?
         else {
             warn!(
                 target: LOG_TARGET,
@@ -1340,6 +1337,7 @@ where TConsensusSpec: ConsensusSpec
         Ok(None)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn evaluate_local_accept_command(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
@@ -1349,8 +1347,9 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
-        let Some(mut tx_rec) =
-            proposed_block_change_set.get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())?
+        let Some(mut tx_rec) = proposed_block_change_set
+            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
+            .optional()?
         else {
             warn!(
                 target: LOG_TARGET,
@@ -1493,8 +1492,9 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
-        let Some(mut tx_rec) =
-            proposed_block_change_set.get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())?
+        let Some(mut tx_rec) = proposed_block_change_set
+            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
+            .optional()?
         else {
             warn!(
                 target: LOG_TARGET,
@@ -1669,8 +1669,9 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
-        let Some(mut tx_rec) =
-            proposed_block_change_set.get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())?
+        let Some(mut tx_rec) = proposed_block_change_set
+            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
+            .optional()?
         else {
             warn!(
                 target: LOG_TARGET,
@@ -1737,6 +1738,7 @@ where TConsensusSpec: ConsensusSpec
         fp_atom: &ForeignProposalAtom,
         local_committee_info: &CommitteeInfo,
         foreign_shard_group: ShardGroup,
+        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         if proposed_block_change_set
@@ -1779,6 +1781,7 @@ where TConsensusSpec: ConsensusSpec
             locked_block,
             &fp,
             local_committee_info,
+            substate_store,
             proposed_block_change_set,
         ) {
             // TODO: split validation errors from HotStuff errors so that we can selectively crash or not vote
@@ -1904,7 +1907,7 @@ where TConsensusSpec: ConsensusSpec
         );
 
         // Release all locks for SomePrepare transactions since these can never be committed
-        SubstateRecord::unlock_all(tx, new_locked_block.all_some_prepare().map(|t| &t.id).peekable())?;
+        SubstateRecord::unlock_all(tx, new_locked_block.all_some_prepare().map(|t| &t.id))?;
 
         // Remove the chains that are no longer in this block's chain
         // This will also release any locks for blocks that no longer apply
@@ -1972,7 +1975,7 @@ where TConsensusSpec: ConsensusSpec
 
         if !finalized_transactions.is_empty() {
             // Remove locks for finalized transactions
-            SubstateRecord::unlock_all(tx, finalized_transactions.iter().map(|t| t.transaction_id()).peekable())?;
+            SubstateRecord::unlock_all(tx, finalized_transactions.iter().map(|t| t.transaction_id()))?;
             TransactionRecord::finalize_all(tx, *block.id(), &finalized_transactions)?;
 
             debug!(

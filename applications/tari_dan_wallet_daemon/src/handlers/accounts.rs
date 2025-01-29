@@ -690,7 +690,7 @@ async fn finish_claiming<T: WalletStore>(
     });
     let transaction = transaction_builder(context)
         .with_fee_instructions(instructions)
-        .with_inputs(inputs)
+        .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
     let is_first_account = accounts_api.count()? == 0;
     let mut events = context.notifier().subscribe();

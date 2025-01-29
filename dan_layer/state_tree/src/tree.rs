@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{iter::Peekable, marker::PhantomData};
+use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
@@ -214,9 +214,8 @@ impl<P> From<TreeUpdateBatch<P>> for StateHashTreeDiff<P> {
     }
 }
 
-pub fn compute_merkle_root_for_hashes<I: Iterator<Item = TreeHash>>(
-    mut hashes: Peekable<I>,
-) -> Result<TreeHash, StateTreeError> {
+pub fn compute_merkle_root_for_hashes<I: Iterator<Item = TreeHash>>(hashes: I) -> Result<TreeHash, StateTreeError> {
+    let mut hashes = hashes.peekable();
     if hashes.peek().is_none() {
         return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
     }

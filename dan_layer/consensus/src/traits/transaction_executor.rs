@@ -4,7 +4,11 @@
 use std::collections::HashMap;
 
 use tari_dan_common_types::{optional::IsNotFoundError, Epoch, SubstateRequirement};
-use tari_dan_storage::{consensus_models::ExecutedTransaction, StateStore, StorageError};
+use tari_dan_storage::{
+    consensus_models::{ExecutedTransaction, TransactionPoolError},
+    StateStore,
+    StorageError,
+};
 use tari_engine_types::substate::Substate;
 use tari_transaction::Transaction;
 
@@ -22,6 +26,8 @@ pub enum BlockTransactionExecutorError {
     SubstateStoreError(#[from] SubstateStoreError),
     #[error("Transaction validation error: {0}")]
     TransactionValidationError(String),
+    #[error("Transaction pool error: {0}")]
+    TransactionPoolError(#[from] TransactionPoolError),
     #[error("BUG: Invariant error: {0}")]
     InvariantError(String),
 }

@@ -21,7 +21,7 @@ use tari_dan_storage::{
         ExecutedTransaction,
         SubstateRequirementLockIntent,
         TransactionExecution,
-        TransactionRecord,
+        TransactionPoolRecord,
     },
     StateStore,
 };
@@ -133,16 +133,28 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             transaction.id(),
         );
         // Might have been executed already in on propose
-        if let Some(execution) =
-            BlockTransactionExecution::get_pending_for_block(store.read_transaction(), transaction.id(), block_id)
-                .optional()?
-        {
-            return Ok(execution.into_transaction_execution());
+        if let Some(execution) = self.fetch_execution(store, transaction.id(), block_id)? {
+            return Ok(execution);
         }
 
         let executed = self.executor.execute(transaction, current_epoch, resolved_inputs)?;
 
         Ok(executed.into_execution())
+    }
+
+    pub fn fetch_execution(
+        &self,
+        store: &PendingSubstateStore<TStateStore>,
+        transaction_id: &TransactionId,
+        block_id: &BlockId,
+    ) -> Result<Option<TransactionExecution>, BlockTransactionExecutorError> {
+        if let Some(execution) =
+            BlockTransactionExecution::get_pending_for_block(store.read_transaction(), transaction_id, block_id)
+                .optional()?
+        {
+            return Ok(Some(execution.into_transaction_execution()));
+        }
+        Ok(None)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -151,11 +163,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         store: &mut PendingSubstateStore<TStateStore>,
         local_committee_info: &CommitteeInfo,
         current_epoch: Epoch,
-        transaction_id: TransactionId,
+        tx_rec: &TransactionPoolRecord,
         block_id: &BlockId,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let _timer = TraceTimer::info(LOG_TARGET, "prepare");
-        let mut transaction = TransactionRecord::get(store.read_transaction(), &transaction_id)?;
+        let mut transaction = tx_rec.get_transaction(store.read_transaction())?;
+        let transaction_id = *transaction.id();
         let mut outputs = IndexSet::new();
         outputs.insert(VersionedSubstateId::new(
             TransactionReceiptAddress::from(transaction_id),
@@ -182,7 +195,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 );
                 // Currently this message will differ depending on which involved shard is asked.
                 // e.g. local nodes will say "failed to lock inputs", foreign nodes will say "foreign shard abort"
-                transaction.set_abort_reason(RejectReason::OneOrMoreInputsNotFound(err.to_string()));
+                transaction.abort(RejectReason::OneOrMoreInputsNotFound(err.to_string()));
                 if is_local_only {
                     warn!(target: LOG_TARGET, "⚠️ PREPARE: transaction {} only contains local inputs. Will abort locally", transaction_id);
                     return Ok(PreparedTransaction::new_local_early_abort(
@@ -217,13 +230,25 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             // CASE: All inputs are local and we can execute the transaction.
             //       Outputs may or may not be local
             let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.clone(), *v)))?;
-            let mut execution = self.execute_or_fetch(
-                store,
-                transaction.into_transaction(),
-                current_epoch,
-                &local_inputs,
-                block_id,
-            )?;
+            if let Some(reason) = tx_rec.current_decision().abort_reason() {
+                // CASE: Multishard transaction, but all inputs are local, and we're aborting
+                // All outputs are local, and we're aborting, so this is a local-only transaction since no
+                // outputs need to be created
+                warn!(target: LOG_TARGET, "⚠️ PREPARE: Transaction {transaction_id} is ABORTED before prepare: {reason}");
+                let execution = transaction.into_execution();
+                return Ok(PreparedTransaction::new_multishard(
+                    execution,
+                    local_versions,
+                    non_local_inputs,
+                    IndexSet::new(),
+                    LockStatus::default(),
+                ));
+            }
+
+            let (transaction, maybe_execution) = transaction.into_transaction_and_execution();
+            let mut execution = maybe_execution
+                .map(Ok)
+                .unwrap_or_else(|| self.execute_or_fetch(store, transaction, current_epoch, &local_inputs, block_id))?;
 
             // local-only transaction can be determined if we've executed the transaction
             let is_local_only = local_committee_info
@@ -235,6 +260,11 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     transaction_id,
                     execution.decision()
                 );
+
+                if let Some(reason) = execution.decision().abort_reason() {
+                    warn!(target: LOG_TARGET, "⚠️ PREPARE: LocalOnly Aborted: {reason}");
+                    return Ok(PreparedTransaction::new_local_early_abort(execution));
+                }
 
                 let requested_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
                 let lock_status = store.try_lock_all(transaction_id, requested_locks, true)?;
@@ -280,9 +310,25 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 }
             }
         } else {
-            let execution = if local_versions.is_empty() {
+            // // Multishard involving cross-shard inputs
+            // if let Some(reason) = tx_rec.current_decision().abort_reason() {
+            //     // CASE: Multishard transaction, but all inputs are local, and we're aborting
+            //     // All outputs are local, and we're aborting, so this is a local-only transaction since no
+            //     // outputs need to be created
+            //     warn!(target: LOG_TARGET, "⚠️ PREPARE: Transaction {transaction_id} is ABORTED before prepare:
+            // {reason}");     transaction.abort(reason);
+            //     let execution = transaction.into_execution();
+            //     return Ok(PreparedTransaction::new_multishard(
+            //         execution,
+            //         local_versions,
+            //         non_local_inputs,
+            //         IndexSet::new(),
+            //         LockStatus::default(),
+            //     ));
+            // }
+
+            let mut execution = if local_versions.is_empty() {
                 // We're output-only
-                // let local_pledges = transaction.get_local_pledges(store.read_transaction())?;
                 let foreign_pledges = transaction.get_foreign_pledges(store.read_transaction())?;
 
                 let resolved_inputs = foreign_pledges
@@ -314,25 +360,31 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
                 Some(execution)
             } else {
-                None
+                self.fetch_execution(store, &transaction_id, block_id)?
             };
 
-            // TODO: We do not know if the inputs locks required are Read/Write. Either we allow the user to
-            //       specify this or we can correct the locks after execution. Currently, this limitation
-            //       prevents concurrent multi-shard read locks.
             let lock_status = match execution.as_ref() {
                 Some(execution) => {
-                    let requested_locks = execution
-                        .resolved_inputs()
-                        .iter()
-                        .chain(execution.resulting_outputs())
-                        .filter(|o| {
-                            o.substate_id().is_transaction_receipt() ||
-                                local_committee_info.includes_substate_id(o.substate_id())
-                        });
-                    store.try_lock_all(transaction_id, requested_locks, false)?
+                    if let Some(reason) = execution.decision().abort_reason() {
+                        warn!(target: LOG_TARGET, "⚠️ PREPARE: Transaction {transaction_id} is ABORTED before prepare: {reason}");
+                        // No locks
+                        LockStatus::default()
+                    } else {
+                        let requested_locks = execution
+                            .resolved_inputs()
+                            .iter()
+                            .chain(execution.resulting_outputs())
+                            .filter(|o| {
+                                o.substate_id().is_transaction_receipt() ||
+                                    local_committee_info.includes_substate_id(o.substate_id())
+                            });
+                        store.try_lock_all(transaction_id, requested_locks, false)?
+                    }
                 },
                 None => {
+                    // TODO: We do not know if the inputs locks required are Read/Write. Either we allow the user to
+                    //       specify this or we can correct the locks after execution. Currently, this limitation
+                    //       prevents concurrent multi-shard read locks.
                     let requested_locks = local_versions.iter().map(|(substate_id, version)| {
                         // Assume resources are read-only, if the transaction mutates the resource, it will be upgraded
                         // to a write lock
@@ -348,7 +400,12 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
             if let Some(err) = lock_status.hard_conflict() {
                 warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
-                transaction.set_abort_reason(RejectReason::FailedToLockInputs(err.to_string()));
+                transaction.abort(RejectReason::FailedToLockInputs(err.to_string()));
+                execution = Some(
+                    transaction
+                        .into_execution()
+                        .expect("invariant: abort reason is set but into_execution is None"),
+                );
             }
 
             // CASE: Multishard transaction, not executed

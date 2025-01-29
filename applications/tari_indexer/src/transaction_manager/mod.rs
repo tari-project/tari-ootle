@@ -86,6 +86,7 @@ where
         );
         let transaction_substate_address = tx_id.to_substate_address();
 
+        // TODO: no inputs is no longer valid.
         if transaction.all_inputs_iter().next().is_none() {
             self.try_with_committee(iter::once(transaction_substate_address), 2, |mut client| {
                 let transaction = transaction.clone();
@@ -95,7 +96,7 @@ where
         } else {
             let involved = transaction
                 .all_inputs_iter()
-                // If there is no version specified, submit to the validator node with version 0
+                // The version does not affect the shard group
                 .map(|i| i.or_zero_version().to_substate_address());
             self.try_with_committee(involved, 2, |mut client| {
                 let transaction = transaction.clone();
@@ -163,6 +164,9 @@ where
         let epoch = self.epoch_manager.current_epoch().await?;
         // Get all unique members. The hashset already "shuffles" items owing to the random hash function.
         let mut all_members = HashSet::new();
+        // TODO: suggest passing in the shard groups to try_with_committee. We need the NumPreshards and
+        // num_committees from the epoch manager to do so but this will also prevent us loading the same committees
+        // multiple times.
         for substate_address in substate_addresses {
             let committee = self
                 .epoch_manager

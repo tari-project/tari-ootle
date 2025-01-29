@@ -124,6 +124,10 @@ impl BlockPledge {
         self
     }
 
+    pub fn has_pledges_for(&self, transaction_id: &TransactionId) -> bool {
+        self.pledges.contains_key(transaction_id)
+    }
+
     pub fn get_transaction_substate_pledges(&self, transaction_id: &TransactionId) -> Option<SubstatePledges> {
         let pledges = self.pledges.get(transaction_id)?;
         let pledges = pledges

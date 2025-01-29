@@ -136,7 +136,6 @@ impl Runner {
             .sdk
             .accounts_api()
             .get_vault_by_resource(&fee_account.address, &XTR)?;
-        let mut tx_ids = Vec::with_capacity(all_accounts.len());
 
         for accounts in all_accounts.chunks(100) {
             let transaction = self
@@ -173,13 +172,12 @@ impl Runner {
                 ])
                 .build_and_seal(&key.key);
 
-            let tx_id = self.submit_transaction(transaction).await?;
-            tx_ids.push(tx_id);
-            log::debug!("Submitted transaction {} to fund {} accounts", tx_id, accounts.len());
-        }
-
-        for tx_id in tx_ids {
-            let result = self.wait_for_transaction(tx_id).await?;
+            log::debug!(
+                "Submitted transaction {} to fund {} accounts",
+                transaction.id(),
+                accounts.len()
+            );
+            let result = self.submit_transaction_and_wait(transaction).await?;
             let accounts_and_state = result
                 .result
                 .accept()
@@ -216,7 +214,6 @@ impl Runner {
                     )?;
                 }
             }
-
             info!("✅ Funded 100 accounts");
         }
 

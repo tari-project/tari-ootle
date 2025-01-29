@@ -51,10 +51,7 @@ impl EpochCheckpoint {
 
     pub fn compute_state_merkle_root(&self) -> Result<TreeHash, StateTreeError> {
         let shard_group = self.block().shard_group();
-        let hashes = shard_group
-            .shard_iter()
-            .map(|shard| self.get_shard_root(shard))
-            .peekable();
+        let hashes = shard_group.shard_iter().map(|shard| self.get_shard_root(shard));
         compute_merkle_root_for_hashes(hashes)
     }
 }

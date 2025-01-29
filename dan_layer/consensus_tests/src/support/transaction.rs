@@ -22,7 +22,7 @@ use crate::support::{committee_number_to_shard_group, helpers::random_substate_i
 pub fn build_transaction_from(tx: Transaction, decision: Decision) -> TransactionRecord {
     let mut tx = TransactionRecord::new(tx);
     if decision.is_abort() {
-        tx.set_abort_reason(RejectReason::ExecutionFailure("Test aborted".to_string()));
+        tx.abort(RejectReason::ExecutionFailure("Test aborted".to_string()));
     }
     tx
 }
@@ -155,7 +155,7 @@ pub fn build_transaction(decision: Decision, inputs: Vec<SubstateRequirement>) -
         .build_and_seal(&k);
     let mut tx = TransactionRecord::new(tx);
     if decision.is_abort() {
-        tx.set_abort_reason(RejectReason::ExecutionFailure("Test aborted".to_string()));
+        tx.abort(RejectReason::ExecutionFailure("Test aborted".to_string()));
     }
     tx
 }

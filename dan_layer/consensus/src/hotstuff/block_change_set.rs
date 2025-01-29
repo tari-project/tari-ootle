@@ -290,8 +290,9 @@ impl ProposedBlockChangeSet {
         locked_block: &LockedBlock,
         leaf_block: &LeafBlock,
         transaction_id: &TransactionId,
-    ) -> Result<Option<TransactionPoolRecord>, TransactionPoolError> {
-        self.transaction_changes
+    ) -> Result<TransactionPoolRecord, TransactionPoolError> {
+        let rec = self
+            .transaction_changes
             .get(transaction_id)
             .and_then(|change| change.next_update.as_ref().map(|u| u.transaction()))
             .cloned()
@@ -301,7 +302,12 @@ impl ProposedBlockChangeSet {
                     .optional()
                     .transpose()
             })
-            .transpose()
+            .transpose()?
+            .ok_or_else(|| StorageError::NotFound {
+                item: "TransactionPoolRecord",
+                key: transaction_id.to_string(),
+            })?;
+        Ok(rec)
     }
 
     pub fn set_next_transaction_update(

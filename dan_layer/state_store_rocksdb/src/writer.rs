@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -67,6 +67,52 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
             db: db.clone(),
             transaction: Some(RocksDbStateStoreReadTransaction::new(db, tx)),
         }
+    }
+
+    fn parked_blocks_insert(
+        &mut self,
+        block: &Block,
+        foreign_proposals: &[ForeignProposal],
+    ) -> Result<(), StorageError> {
+        let operation = "parked_blocks_insert";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        
+        // check if block exists in blocks model
+        let block_id = block.id();
+        let key = BlockModel::key_from_block_id(block_id);
+        let block_exists = BlockModel::key_exists(tx, operation, &key)?;
+        if block_exists {
+            return Err(StorageError::QueryError {
+                reason: format!("Cannot park block {block_id} that already exists in blocks table"),
+            });
+        }
+
+        // check if block already exists in parked_blocks
+        let key = ParkedBlockModel::key_from_block_id(block_id);
+        let already_parked = ParkedBlockModel::key_exists(tx, operation, &key)?;
+        if already_parked {
+            return Ok(());
+        }
+
+        let parked_block_data = ParkedBlockData {
+            block: block.clone(),
+            foreign_proposals: foreign_proposals.to_vec()
+        };
+        ParkedBlockModel::put(self.db.clone(), tx, operation, &parked_block_data)?;
+
+        Ok(())
+    }
+
+    fn parked_blocks_remove(&mut self, block_id: &str) -> Result<(Block, Vec<ForeignProposal>), StorageError> {
+        let operation = "parked_blocks_remove";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        let key = ParkedBlockModel::key_from_block_id_str(block_id);
+        let data = ParkedBlockModel::get(tx, operation, &key)?;
+
+        ParkedBlockModel::delete(self.db.clone(), tx, operation, &key)?;
+
+        Ok((data.block, data.foreign_proposals))
     }
 }
 

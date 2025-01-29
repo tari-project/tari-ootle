@@ -22,7 +22,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-// import { transactionsGet } from '../../utils/json_rpc';
 import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
 import { Alert, Button, Fade, Grid, Table, TableBody, TableCell, TableContainer, TableRow } from "@mui/material";
 import Typography from "@mui/material/Typography";
@@ -30,7 +29,6 @@ import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
 import PageHeading from "../../Components/PageHeading";
 import Events from "./Events";
 import Logs from "./Logs";
-import FeeInstructions from "./FeeInstructions";
 import Instructions from "./Instructions";
 import Substates from "./Substates";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";

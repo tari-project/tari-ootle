@@ -1378,15 +1378,16 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::TransactionNotInPool));
         };
 
-        #[allow(clippy::nonminimal_bool)]
-        if !tx_rec.current_stage().is_all_prepared() &&
-            !tx_rec.current_stage().is_some_prepared() &&
-            // We allow the transition from LocalPrepared to LocalAccepted if we are output-only
-            !(tx_rec.current_stage().is_prepared() &&
+        let is_applicable_stage = tx_rec.current_stage().is_all_prepared() ||
+            tx_rec.current_stage().is_some_prepared() ||
+            // We allow the transition from Prepared to LocalAccepted if ABORT, or we are output-only
+            (tx_rec.current_stage().is_prepared() &&
+                (tx_rec.current_decision().is_abort() ||
                 tx_rec
                     .evidence()
-                    .is_committee_output_only(local_committee_info.shard_group()))
-        {
+                    .is_committee_output_only(local_committee_info.shard_group())));
+
+        if !is_applicable_stage {
             warn!(
                 target: LOG_TARGET,
                 "{} ❌ Stage disagreement in block {} for transaction {}. Leader proposed LocalAccept, but current stage is {}",
@@ -1435,7 +1436,7 @@ where TConsensusSpec: ConsensusSpec
             let Some(ref leader_fee) = atom.leader_fee else {
                 warn!(
                     target: LOG_TARGET,
-                    "❌ NO VOTE: Leader fee in tx {} not set for AllAccept command in block {}",
+                    "❌ NO VOTE: Leader fee in tx {} not set for LocalAccept command in block {}",
                     atom.id,
                     block,
                 );
@@ -1462,6 +1463,16 @@ where TConsensusSpec: ConsensusSpec
             }
 
             tx_rec.set_leader_fee(calculated_leader_fee);
+        } else if atom.leader_fee.is_some() {
+            warn!(
+                target: LOG_TARGET,
+                "❌ NO VOTE: Leader fee in tx {} is set for LocalAccept ABORT command in block {}",
+                atom.id,
+                block,
+            );
+            return Ok(Some(NoVoteReason::LeaderFeeDisagreement));
+        } else {
+            // Ok
         }
 
         // on_propose does not process foreign proposals, so the QC evidence may not match the evidence here.

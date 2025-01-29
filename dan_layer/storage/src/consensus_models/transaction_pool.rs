@@ -430,8 +430,8 @@ impl TransactionPoolRecord {
             },
             TransactionPoolStage::LocalAccepted => match self.current_decision() {
                 Decision::Commit => self.evidence.all_shard_groups_accepted(),
-                // If we have decided to abort, we can continue if all inputs are justified
-                Decision::Abort(_) => self.evidence.all_shard_groups_prepared(),
+                // If we have decided to abort, we can continue if any foreign shard or locally has prepared
+                Decision::Abort(_) => self.evidence.some_shard_groups_prepared(),
             },
             TransactionPoolStage::AllAccepted |
             TransactionPoolStage::SomeAccepted |
@@ -491,6 +491,9 @@ impl TransactionPoolRecord {
     }
 
     pub fn leader_fee(&self) -> Option<&LeaderFee> {
+        if self.current_decision().is_abort() {
+            return None;
+        }
         self.leader_fee.as_ref()
     }
 
@@ -508,7 +511,7 @@ impl TransactionPoolRecord {
             decision: self.current_decision(),
             evidence: self.evidence.clone(),
             transaction_fee: self.transaction_fee,
-            leader_fee: self.leader_fee.clone(),
+            leader_fee: self.leader_fee().cloned(),
         }
     }
 
@@ -518,7 +521,7 @@ impl TransactionPoolRecord {
             decision: self.current_local_decision(),
             evidence: self.evidence.clone(),
             transaction_fee: self.transaction_fee,
-            leader_fee: self.leader_fee.clone(),
+            leader_fee: self.leader_fee().cloned(),
         }
     }
 
@@ -526,9 +529,9 @@ impl TransactionPoolRecord {
         TransactionAtom {
             id: self.transaction_id,
             decision: self.current_decision(),
+            leader_fee: self.leader_fee().cloned(),
             evidence: self.evidence,
             transaction_fee: self.transaction_fee,
-            leader_fee: self.leader_fee,
         }
     }
 

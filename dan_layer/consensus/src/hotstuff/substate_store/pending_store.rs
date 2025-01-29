@@ -144,18 +144,6 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
 }
 
 impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store, 'tx, TStore> {
-    pub fn exists(&self, id: &VersionedSubstateId) -> Result<bool, SubstateStoreError> {
-        if self.pending.contains_key(&id.to_substate_address()) {
-            return Ok(true);
-        }
-
-        if SubstateRecord::exists(self.read_transaction(), id)? {
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
-
     pub fn get_latest_version(&self, id: &SubstateId) -> Result<LatestSubstateVersion, SubstateStoreError> {
         if let Some(ch) = self.head.get(id).map(|&pos| &self.diff[pos]) {
             // if ch.is_down() {
@@ -662,6 +650,15 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             return Ok(());
         }
 
+        if let Some(change) =
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
+        {
+            if change.is_up() {
+                return Err(SubstateStoreError::ExpectedSubstateDown { id: id.clone() });
+            }
+            return Ok(());
+        }
+
         let address = id.to_substate_address();
         let Some(is_up) = SubstateRecord::substate_is_up(self.read_transaction(), &address).optional()? else {
             debug!(target: LOG_TARGET, "Expected substate {} to be DOWN but it does not exist", address);
@@ -676,6 +673,17 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
 
     fn lock_assert_not_exist(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
         if let Some(change) = self.get_pending(&id.to_substate_address()) {
+            if change.is_up() {
+                return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
+                    id: id.clone(),
+                }));
+            }
+            return Ok(());
+        }
+
+        if let Some(change) =
+            BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
+        {
             if change.is_up() {
                 return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
                     id: id.clone(),

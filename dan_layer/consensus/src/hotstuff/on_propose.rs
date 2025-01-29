@@ -301,6 +301,10 @@ where TConsensusSpec: ConsensusSpec
             ),
             // Leader thinks all local nodes have prepared
             TransactionPoolStage::Prepared => {
+                if tx_rec.current_decision().is_abort() {
+                    let atom = tx_rec.get_current_transaction_atom();
+                    return Ok(Some(Command::LocalAccept(atom)));
+                }
                 if tx_rec
                     .evidence()
                     .is_committee_output_only(local_committee_info.shard_group())

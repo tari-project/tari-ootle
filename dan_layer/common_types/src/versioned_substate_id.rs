@@ -175,6 +175,49 @@ impl Borrow<SubstateId> for SubstateRequirement {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SubstateRequirementRef<'a> {
+    pub substate_id: &'a SubstateId,
+    pub version: Option<u32>,
+}
+
+impl<'a> SubstateRequirementRef<'a> {
+    pub fn new(substate_id: &'a SubstateId, version: Option<u32>) -> Self {
+        Self { substate_id, version }
+    }
+
+    pub fn to_owned(&self) -> SubstateRequirement {
+        SubstateRequirement::new(self.substate_id.clone(), self.version)
+    }
+}
+
+impl<'a> From<&'a VersionedSubstateId> for SubstateRequirementRef<'a> {
+    fn from(value: &'a VersionedSubstateId) -> Self {
+        Self {
+            substate_id: &value.substate_id,
+            version: Some(value.version),
+        }
+    }
+}
+
+impl<'a> From<&'a SubstateRequirement> for SubstateRequirementRef<'a> {
+    fn from(value: &'a SubstateRequirement) -> Self {
+        Self {
+            substate_id: &value.substate_id,
+            version: value.version,
+        }
+    }
+}
+
+impl<'a> From<VersionedSubstateIdRef<'a>> for SubstateRequirementRef<'a> {
+    fn from(value: VersionedSubstateIdRef<'a>) -> Self {
+        Self {
+            substate_id: value.substate_id,
+            version: Some(value.version),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to parse substate requirement {0}")]
 pub struct SubstateRequirementParseError(String);

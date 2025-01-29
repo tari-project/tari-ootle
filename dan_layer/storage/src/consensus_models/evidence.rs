@@ -138,6 +138,12 @@ impl Evidence {
             .all(|e| e.is_prepare_justified() || e.is_accept_justified())
     }
 
+    pub fn some_shard_groups_prepared(&self) -> bool {
+        self.evidence
+            .values()
+            .any(|e| e.is_prepare_justified() || e.is_accept_justified())
+    }
+
     pub fn all_input_shard_groups_prepared(&self) -> bool {
         self.evidence
             .values()

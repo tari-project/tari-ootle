@@ -71,7 +71,7 @@ use tokio::{
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
-    consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor},
+    consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor, ValidationContext},
     dry_run_transaction_processor::DryRunTransactionProcessor,
     file_l1_submitter::FileLayerOneSubmitter,
     p2p::{
@@ -86,11 +86,14 @@ use crate::{
     state_bootstrap::bootstrap_state,
     substate_resolver::TariSubstateResolver,
     transaction_validators::{
+        EpochRangeValidator,
         FeeTransactionValidator,
         HasInputs,
         TemplateExistsValidator,
         TransactionNetworkValidator,
+        TransactionSignatureValidator,
         TransactionValidationError,
+        WithContext,
     },
     validator::Validator,
     validator_registration_file::ValidatorRegistrationFile,
@@ -281,7 +284,7 @@ pub async fn spawn_services(
     );
     let transaction_executor = TariDanBlockTransactionExecutor::new(
         payload_processor.clone(),
-        consensus::create_transaction_validator(template_manager.clone()).boxed(),
+        create_consensus_transaction_validator(config.network, template_manager.clone()).boxed(),
     );
 
     #[cfg(feature = "metrics")]
@@ -489,12 +492,23 @@ async fn spawn_p2p_rpc(
     Ok(())
 }
 
-fn create_mempool_transaction_validator(
+pub fn create_mempool_transaction_validator(
     network: Network,
     template_manager: TemplateManager<PeerAddress>,
 ) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
     TransactionNetworkValidator::new(network)
         .and_then(HasInputs::new())
-        .and_then(TemplateExistsValidator::new(template_manager))
         .and_then(FeeTransactionValidator)
+        .and_then(TransactionSignatureValidator)
+        .and_then(HasInputs::new())
+        .and_then(TemplateExistsValidator::new(template_manager))
+}
+
+pub fn create_consensus_transaction_validator(
+    network: Network,
+    template_manager: TemplateManager<PeerAddress>,
+) -> impl Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError> {
+    WithContext::<ValidationContext, _, _>::new()
+        .map_context(|_| (), create_mempool_transaction_validator(network, template_manager))
+        .map_context(|c| c.current_epoch, EpochRangeValidator::new())
 }

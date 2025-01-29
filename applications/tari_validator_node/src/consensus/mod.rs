@@ -28,15 +28,8 @@ use crate::{
     consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec},
     event_subscription::EventSubscription,
     p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
-    transaction_validators::{
-        EpochRangeValidator,
-        FeeTransactionValidator,
-        HasInputs,
-        TemplateExistsValidator,
-        TransactionSignatureValidator,
-        TransactionValidationError,
-    },
-    validator::{BoxedValidator, Validator},
+    transaction_validators::TransactionValidationError,
+    validator::BoxedValidator,
 };
 
 mod block_transaction_executor;
@@ -53,7 +46,7 @@ pub use signature_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
 use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 
-use crate::{p2p::NopLogger, transaction_validators::WithContext};
+use crate::p2p::NopLogger;
 
 pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Transaction, TransactionValidationError>;
 
@@ -131,18 +124,4 @@ pub async fn spawn(
     );
 
     (join_handle, consensus_handle)
-}
-
-pub fn create_transaction_validator(
-    template_manager: TemplateManager<PeerAddress>,
-) -> impl Validator<Transaction, Context = ValidationContext, Error = TransactionValidationError> {
-    WithContext::<ValidationContext, _, _>::new()
-        .map_context(
-            |_| (),
-            HasInputs::new()
-                .and_then(TransactionSignatureValidator)
-                .and_then(TemplateExistsValidator::new(template_manager)),
-        )
-        .map_context(|c| c.current_epoch, EpochRangeValidator::new())
-        .map_context(|_| (), FeeTransactionValidator)
 }

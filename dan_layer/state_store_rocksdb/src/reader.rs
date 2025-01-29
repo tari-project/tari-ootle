@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1801,20 +1801,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError> {
-        todo!()
-        /*
-        use crate::schema::epoch_checkpoints;
-
-        let checkpoint = epoch_checkpoints::table
-            .filter(epoch_checkpoints::epoch.eq(epoch.as_u64() as i64))
-            .first::<sql_models::EpochCheckpoint>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "epoch_checkpoint_get",
-                source: e,
-            })?;
-
-        checkpoint.try_into()
-        */
+        let operation = "epoch_checkpoint_get";
+        let key = EpochCheckpointModel::key_from_epoch(&epoch);
+        let value = EpochCheckpointModel::get(&self.tx, operation, &key)?;
+        Ok(value)
     }
 
     fn foreign_substate_pledges_exists_for_address<T: ToSubstateAddress>(

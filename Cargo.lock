@@ -9078,6 +9078,7 @@ name = "storage_tests"
 version = "0.7.0"
 dependencies = [
  "bincode 2.0.0-rc.3",
+ "indexmap 2.6.0",
  "rand",
  "serde",
  "tari_bor",

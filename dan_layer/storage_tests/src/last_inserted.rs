@@ -9,9 +9,11 @@ use tari_dan_storage::{
 };
 
 mod last_inserted {
+    use indexmap::IndexMap;
     use tari_common_types::types::PublicKey;
     use tari_dan_common_types::{shard::Shard, NumPreshards, ShardGroup};
-    use tari_dan_storage::consensus_models::{BlockId, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+    use tari_dan_storage::consensus_models::{Block, BlockId, EpochCheckpoint, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumCertificate, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+    use tari_state_tree::TreeHash;
 
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
     
@@ -169,6 +171,18 @@ mod last_inserted {
         tx.foreign_receive_counters_set(&counter).unwrap();
         let res = tx.foreign_receive_counters_get().unwrap();
         assert_eq_debug(&res, &counter);
+
+        // epoch checkpoints
+        let shard_group = ShardGroup::all_shards(NumPreshards::P4);
+        let block = Block::zero_block(Default::default(), NumPreshards::P4);
+        let qc = QuorumCertificate::genesis(Epoch::zero(), shard_group);
+        let mut shard_roots = IndexMap::new();
+        shard_roots.insert(shard_group.start(), TreeHash::zero());
+        let epoch_checkpoint = EpochCheckpoint::new(block.clone(), vec![qc], shard_roots);
+
+        tx.epoch_checkpoint_save(&epoch_checkpoint).unwrap();
+        let res = tx.epoch_checkpoint_get(block.epoch()).unwrap();
+        assert_eq_debug(&res, &epoch_checkpoint);
 
         tx.rollback().unwrap();
     }

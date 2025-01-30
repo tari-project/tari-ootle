@@ -8,11 +8,11 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 
-mod last_inserted {
+mod miscellaneous_operations {
     use indexmap::IndexMap;
     use tari_common_types::types::PublicKey;
     use tari_dan_common_types::{shard::Shard, NumPreshards, ShardGroup};
-    use tari_dan_storage::consensus_models::{Block, BlockId, EpochCheckpoint, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumCertificate, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+    use tari_dan_storage::consensus_models::{Block, BlockId, BlockPledge, EpochCheckpoint, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumCertificate, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
     use tari_state_tree::TreeHash;
 
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
@@ -20,19 +20,19 @@ mod last_inserted {
     use super::*;
 
     #[test]
-    fn last_inserted_sqlite() {
+    fn miscellaneous_sqlite() {
         let db = create_sqlite();
         db.foreign_keys_off().unwrap();
-        last_inserted_operations(db);
+        miscellaneous_operations(db);
     }
 
     #[test]
-    fn last_inserted_rocksdb() {
+    fn miscellaneous_rocksdb() {
         let db = create_rocksdb();
-        last_inserted_operations(db);
+        miscellaneous_operations(db);
     }
 
-    fn last_inserted_operations(db: impl StateStore) {
+    fn miscellaneous_operations(db: impl StateStore) {
         let mut tx = db.create_write_tx().unwrap();
 
         // last voted
@@ -183,6 +183,20 @@ mod last_inserted {
         tx.epoch_checkpoint_save(&epoch_checkpoint).unwrap();
         let res = tx.epoch_checkpoint_get(block.epoch()).unwrap();
         assert_eq_debug(&res, &epoch_checkpoint);
+
+        // foreign parked blocks
+        let justify_qc = QuorumCertificate::genesis(epoch, shard_group);
+        let foreign_parked_block = ForeignParkedProposal::new(
+            ForeignProposal {
+                block: block.clone(),
+                block_pledge: BlockPledge::new(),
+                justify_qc,
+                proposed_by_block: None,
+                status: ForeignProposalStatus::New,
+            });
+        tx.foreign_parked_blocks_insert(&foreign_parked_block).unwrap();
+        let res = tx.foreign_parked_blocks_exists(foreign_parked_block.block().id()).unwrap();
+        assert!(res);
 
         tx.rollback().unwrap();
     }

@@ -1,4 +1,4 @@
-//  Copyright 2024. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,29 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod model;
+use tari_dan_storage::consensus_models::{BlockId, ForeignParkedProposal};
+use crate::model::model::RocksdbModel;
 
-pub mod block;
-pub mod block_diff;
-pub mod block_transaction_execution;
-pub mod epoch_checkpoint;
-pub mod foreign_proposal;
-pub mod high_qc;
-pub mod last_executed;
-pub mod last_proposed;
-pub mod foreign_parked_blocks;
-pub mod foreign_receive_counter;
-pub mod foreign_send_counter;
-pub mod foreign_substate_pledge;
-pub mod last_sent_vote;
-pub mod last_voted;
-pub mod leaf_block;
-pub mod locked_block;
-pub mod parked_block;
-pub mod quorum_certificate;
-pub mod state_transition;
-pub mod state_tree_shard_versions;
-pub mod substate;
-pub mod transaction_pool_state_update;
-pub mod transaction_pool;
-pub mod transaction;
+pub struct ForeignParkedBlockModel {}
+
+impl ForeignParkedBlockModel {
+    pub fn key_from_block_id(block_id: &BlockId) -> String {
+        format!("{}_{}", Self::key_prefix(), block_id)
+    }
+}
+
+impl RocksdbModel for ForeignParkedBlockModel {
+    type Item = ForeignParkedProposal;
+
+    fn key_prefix() -> &'static str {
+        "foreignparkedblocks"
+    }
+
+    fn key(value: &Self::Item) -> String {
+        Self::key_from_block_id(value.block().id())
+    }
+}

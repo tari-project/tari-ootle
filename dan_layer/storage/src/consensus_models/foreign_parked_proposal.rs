@@ -3,6 +3,7 @@
 
 use std::{fmt::Display, ops::Deref};
 
+use serde::{Deserialize, Serialize};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     StorageError,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignParkedProposal {
     proposal: ForeignProposal,
 }

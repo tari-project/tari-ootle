@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use rocksdb::{Transaction, TransactionDB};
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::consensus_models::{BlockId, ForeignProposal, ForeignProposalStatus, QuorumCertificate};
+use tari_dan_storage::consensus_models::{BlockId, ForeignProposal, ForeignProposalStatus};
 use crate::{error::RocksDbStorageError, model::model::RocksdbModel};
 
 use super::model::ModelColumnFamily;

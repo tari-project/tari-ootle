@@ -9,7 +9,7 @@ mod helper;
 #[cfg(test)]
 mod substates;
 #[cfg(test)]
-mod last_inserted;
+mod misc;
 #[cfg(test)]
 mod quorum_certificates;
 #[cfg(test)]

@@ -1675,7 +1675,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             substates::address.eq(serialize_hex(substate.to_substate_address())),
             substates::substate_id.eq(substate.substate_id.to_string()),
             substates::version.eq(substate.version as i32),
-            substates::data.eq(serialize_json(&substate.substate_value)?),
+            substates::data.eq(substate.substate_value.as_ref().map(serialize_json).transpose()?),
             substates::state_hash.eq(serialize_hex(substate.state_hash)),
             substates::created_by_transaction.eq(serialize_hex(substate.created_by_transaction)),
             substates::created_justify.eq(serialize_hex(substate.created_justify)),
@@ -1746,6 +1746,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             substates::destroyed_at_epoch.eq(Some(epoch.as_u64() as i64)),
             substates::destroyed_by_shard.eq(Some(shard.as_u32() as i32)),
             substates::destroyed_justify.eq(Some(serialize_hex(destroyed_qc_id))),
+            substates::data.eq(None::<String>),
         );
 
         let address = versioned_substate_id.to_substate_address();

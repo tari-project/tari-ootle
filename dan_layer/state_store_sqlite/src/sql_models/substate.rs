@@ -14,7 +14,7 @@ pub struct SubstateRecord {
     pub address: String,
     pub substate_id: String,
     pub version: i32,
-    pub data: String,
+    pub data: Option<String>,
     pub state_hash: String,
     pub created_by_transaction: String,
     pub created_justify: String,
@@ -67,7 +67,7 @@ impl TryFrom<SubstateRecord> for consensus_models::SubstateRecord {
         Ok(Self {
             substate_id: parse_from_string(&value.substate_id)?,
             version: value.version as u32,
-            substate_value: deserialize_json(&value.data)?,
+            substate_value: value.data.as_deref().map(deserialize_json).transpose()?,
             state_hash: deserialize_hex_try_from(&value.state_hash)?,
             created_by_transaction: deserialize_hex_try_from(&value.created_by_transaction)?,
             created_justify: deserialize_hex_try_from(&value.created_justify)?,

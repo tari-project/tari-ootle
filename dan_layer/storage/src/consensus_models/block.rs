@@ -306,6 +306,10 @@ impl Block {
         self.commands.iter().filter_map(|d| d.finalising()).map(|t| t.id())
     }
 
+    pub fn all_aborting_transaction_ids(&self) -> impl Iterator<Item = &TransactionId> + '_ {
+        self.commands.iter().filter_map(|d| d.aborting()).map(|t| t.id())
+    }
+
     pub fn all_foreign_proposals(&self) -> impl Iterator<Item = &ForeignProposalAtom> + '_ {
         self.commands.iter().filter_map(|c| c.foreign_proposal())
     }
@@ -836,23 +840,25 @@ impl Block {
                     // 2. The substate was created by this transaction and destroyed in a later transaction
                     // It isn't possible for a substate to be created and destroyed by the same transaction
                     // because the engine can never emit such a substate diff.
-                    if substate.created_by_transaction == transaction.id {
-                        updates.push(SubstateUpdate::Create(SubstateCreatedProof {
-                            // created_qc: substate.get_created_quorum_certificate(tx)?,
-                            substate: substate.into(),
-                        }));
-                    } else {
-                        updates.push(SubstateUpdate::Destroy(SubstateDestroyedProof {
-                            substate_id: substate.substate_id.clone(),
-                            version: substate.version,
-                            // justify: QuorumCertificate::get(tx, &destroyed.justify)?,
-                            destroyed_by_transaction: destroyed.by_transaction,
-                        }));
-                    }
+                    // TODO: This is currently not used - if we need this in future, we can include the state hash en
+                    //       lieu of the actual state which does not exist
+                    // if substate.created_by_transaction == transaction.id
+                    // {     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
+                    //         // created_qc: substate.get_created_quorum_certificate(tx)?,
+                    //         substate: substate.try_into()?,
+                    //     }));
+                    // } else {
+                    updates.push(SubstateUpdate::Destroy(SubstateDestroyedProof {
+                        substate_id: substate.substate_id.clone(),
+                        version: substate.version,
+                        // justify: QuorumCertificate::get(tx, &destroyed.justify)?,
+                        destroyed_by_transaction: destroyed.by_transaction,
+                    }));
+                    // }
                 } else {
                     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,
-                        substate: substate.into(),
+                        substate: substate.try_into()?,
                     }));
                 };
             }

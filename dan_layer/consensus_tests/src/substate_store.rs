@@ -210,7 +210,7 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
             SubstateRecord {
                 substate_id: id.clone(),
                 version,
-                substate_value: value,
+                substate_value: Some(value),
                 state_hash: [seed; 32].into(),
                 created_by_transaction: Default::default(),
                 created_justify: QcId::zero(),

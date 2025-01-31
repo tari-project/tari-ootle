@@ -207,7 +207,10 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 status: SubstateStatus::Up as i32,
                 address: substate.substate_id().to_bytes(),
                 version: substate.version(),
-                substate: substate.substate_value().to_bytes(),
+                substate: substate
+                    .substate_value()
+                    .map(|v| v.to_bytes())
+                    .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
                 created_transaction_hash: substate.created_by_transaction().into_array().to_vec(),
                 destroyed_transaction_hash: vec![],
                 quorum_certificates: vec![(&created_qc).into()],
@@ -278,7 +281,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             .await
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        let start_block_id = Some(req.start_block_id)
+        let start_block_id = Some(req.start_block_id.as_slice())
             .filter(|i| !i.is_empty())
             .map(BlockId::try_from)
             .transpose()
@@ -299,6 +302,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 None => {
                     let epoch = req
                         .epoch
+                        .clone()
                         .map(Epoch::from)
                         .map(|end| end.min(current_epoch))
                         .unwrap_or(current_epoch);
@@ -324,7 +328,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         };
 
         let (sender, receiver) = mpsc::channel(10);
-        task::spawn(BlockSyncTask::new(self.shard_state_store.clone(), start_block_id, None, sender).run());
+        task::spawn(BlockSyncTask::new(self.shard_state_store.clone(), start_block_id, None, sender).run(req));
 
         Ok(Streaming::new(receiver))
     }

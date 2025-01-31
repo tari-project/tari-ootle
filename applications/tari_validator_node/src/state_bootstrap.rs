@@ -171,7 +171,7 @@ where
     SubstateRecord {
         version: id.version(),
         substate_id: id.into_substate_id(),
-        substate_value: value.into(),
+        substate_value: Some(value.into()),
         state_hash: Default::default(),
         created_by_transaction: Default::default(),
         created_justify: *genesis_block.justify().id(),

@@ -255,6 +255,15 @@ impl Command {
             .filter(|t| t.decision.is_commit())
     }
 
+    /// Returns Some if the command **will** result in aborting the transaction, otherwise None.
+    pub fn aborting(&self) -> Option<&TransactionAtom> {
+        self.some_accept()
+            .or_else(|| self.local_prepare())
+            .or_else(|| self.local_accept())
+            .or_else(|| self.local_only())
+            .filter(|t| t.decision.is_abort())
+    }
+
     pub fn is_epoch_end(&self) -> bool {
         matches!(self, Command::EndEpoch)
     }

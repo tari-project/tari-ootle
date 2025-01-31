@@ -91,7 +91,9 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
         if substate.is_destroyed() {
             return Err(SubstateStoreError::SubstateIsDown { id: id.to_owned() });
         }
-        Ok(substate.into_substate())
+        Ok(substate
+            .into_substate()
+            .expect("PendingSubstateStore::get UP substate has no value"))
     }
 }
 
@@ -227,7 +229,9 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             id: VersionedSubstateId::new(id.clone(), substate.version()),
             shard: substate.created_by_shard,
             transaction_id: substate.created_by_transaction,
-            substate: substate.into_substate(),
+            substate: substate
+                .into_substate()
+                .expect("PendingSubstateStore::get_latest_change: UP substate has no value"),
         })
     }
 

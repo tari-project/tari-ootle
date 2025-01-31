@@ -1569,6 +1569,7 @@ async fn multishard_publish_template() {
         .unwrap();
     let binary = template_substate
         .substate_value
+        .unwrap()
         .into_template()
         .expect("Expected template substate")
         .binary;

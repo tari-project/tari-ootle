@@ -1509,6 +1509,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         use crate::schema::quorum_certificates;
 
         let qc_ids: Vec<String> = qc_ids.into_iter().map(serialize_hex).collect();
+        if qc_ids.is_empty() {
+            return Ok(vec![]);
+        }
 
         let qc_json = quorum_certificates::table
             .select(quorum_certificates::json)

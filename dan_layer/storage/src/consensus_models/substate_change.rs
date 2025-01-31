@@ -8,8 +8,6 @@ use tari_engine_types::substate::Substate;
 use tari_state_tree::SubstateTreeChange;
 use tari_transaction::TransactionId;
 
-use crate::consensus_models::SubstateRecord;
-
 #[derive(Debug, Clone)]
 pub enum SubstateChange {
     Up {
@@ -94,25 +92,6 @@ impl SubstateChange {
         match self {
             SubstateChange::Up { .. } => "Up",
             SubstateChange::Down { .. } => "Down",
-        }
-    }
-}
-
-impl From<SubstateRecord> for SubstateChange {
-    fn from(value: SubstateRecord) -> Self {
-        if let Some(destroyed) = value.destroyed() {
-            Self::Down {
-                id: value.to_versioned_substate_id(),
-                shard: destroyed.by_shard,
-                transaction_id: destroyed.by_transaction,
-            }
-        } else {
-            Self::Up {
-                id: value.to_versioned_substate_id(),
-                shard: value.created_by_shard,
-                transaction_id: value.created_by_transaction,
-                substate: value.into_substate(),
-            }
         }
     }
 }

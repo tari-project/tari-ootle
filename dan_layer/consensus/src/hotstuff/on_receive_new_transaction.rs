@@ -4,7 +4,7 @@
 use log::*;
 use tari_dan_common_types::{committee::CommitteeInfo, Epoch};
 use tari_dan_storage::{
-    consensus_models::{LockedSubstateValue, TransactionPool, TransactionRecord},
+    consensus_models::{TransactionPool, TransactionRecord},
     StateStore,
 };
 use tari_engine_types::commit_result::RejectReason;
@@ -134,11 +134,7 @@ where TConsensusSpec: ConsensusSpec
 
         rec.save(tx)?;
 
-        // Check if we're part of the input shard group and no input conflicts exist. If not, only sequence the
-        // transaction (is_ready=true, see foreign_proposal_processor) once we have received the LocalAccept
-        // foreign proposal.
-        let has_some_local_inputs_or_all_foreign_inputs = (rec.is_involved_in_inputs(local_committee_info) &&
-            !self.has_possible_input_conflicts(&**tx, local_committee_info, &rec)?) ||
+        let has_some_local_inputs_or_all_foreign_inputs = rec.is_involved_in_inputs(local_committee_info) ||
             rec.has_all_foreign_input_pledges(&**tx, local_committee_info)?;
 
         if !has_some_local_inputs_or_all_foreign_inputs {
@@ -150,32 +146,6 @@ where TConsensusSpec: ConsensusSpec
         }
 
         Ok(Some((rec, has_some_local_inputs_or_all_foreign_inputs)))
-    }
-
-    fn has_possible_input_conflicts(
-        &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-        local_committee_info: &CommitteeInfo,
-        transaction: &TransactionRecord,
-    ) -> Result<bool, HotStuffError> {
-        let is_inputs_local_only = local_committee_info.includes_all_substate_addresses(
-            transaction
-                .transaction()
-                .all_inputs_iter()
-                .map(|i| i.to_substate_address_zero_version()),
-        );
-
-        let inputs = transaction.transaction().all_inputs_iter().collect::<Vec<_>>();
-
-        let has_write_locks = LockedSubstateValue::get_transaction_id_that_has_any_write_locks_for_substates(
-            tx,
-            inputs.iter().map(|l| l.substate_id()),
-            // If this transaction is local only, we only care about non-local write locks
-            is_inputs_local_only,
-        )?
-        .is_some();
-
-        Ok(has_write_locks)
     }
 
     fn add_to_pool(

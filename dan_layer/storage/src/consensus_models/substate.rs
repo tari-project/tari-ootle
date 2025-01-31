@@ -32,7 +32,7 @@ use crate::{
 pub struct SubstateRecord {
     pub substate_id: SubstateId,
     pub version: u32,
-    pub substate_value: SubstateValue,
+    pub substate_value: Option<SubstateValue>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub state_hash: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -80,7 +80,7 @@ impl SubstateRecord {
             substate_id,
             version,
             state_hash: hash_substate(&substate_value, version),
-            substate_value,
+            substate_value: Some(substate_value),
             created_height,
             created_justify,
             created_by_shard,
@@ -107,20 +107,16 @@ impl SubstateRecord {
         &self.substate_id
     }
 
-    pub fn substate_value(&self) -> &SubstateValue {
-        &self.substate_value
+    pub fn substate_value(&self) -> Option<&SubstateValue> {
+        self.substate_value.as_ref()
     }
 
-    pub fn into_substate_value(self) -> SubstateValue {
+    pub fn into_substate_value(self) -> Option<SubstateValue> {
         self.substate_value
     }
 
-    pub fn to_substate(&self) -> Substate {
-        Substate::new(self.version, self.substate_value.clone())
-    }
-
-    pub fn into_substate(self) -> Substate {
-        Substate::new(self.version, self.substate_value)
+    pub fn into_substate(self) -> Option<Substate> {
+        Some(Substate::new(self.version, self.substate_value?))
     }
 
     pub fn version(&self) -> u32 {
@@ -368,14 +364,21 @@ impl SubstateData {
     }
 }
 
-impl From<SubstateRecord> for SubstateData {
-    fn from(value: SubstateRecord) -> Self {
-        Self {
+impl TryFrom<SubstateRecord> for SubstateData {
+    type Error = StorageError;
+
+    fn try_from(value: SubstateRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            substate_value: value.substate_value.ok_or_else(|| StorageError::DataInconsistency {
+                details: format!(
+                    "Cannot convert substate record {} with null value to SubstateData",
+                    value.substate_id
+                ),
+            })?,
             substate_id: value.substate_id,
             version: value.version,
-            substate_value: value.substate_value,
             created_by_transaction: value.created_by_transaction,
-        }
+        })
     }
 }
 

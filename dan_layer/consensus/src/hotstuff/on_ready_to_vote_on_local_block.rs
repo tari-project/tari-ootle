@@ -65,6 +65,7 @@ use crate::{
             LocalPreparedTransaction,
             PledgedTransaction,
             PreparedTransaction,
+            TransactionLockConflicts,
         },
         HotstuffConfig,
         ProposalValidationError,
@@ -2001,6 +2002,10 @@ where TConsensusSpec: ConsensusSpec
         let finalized_transactions = self
             .transaction_pool
             .remove_all(tx, block.all_finalising_transactions_ids())?;
+
+        // Whenever we commit a block that will result in an abort for a transaction, we can remove lock conflicts to
+        // allow other "blocked" transactions to be proposed.
+        TransactionLockConflicts::remove_for_transactions(tx, block.all_aborting_transaction_ids())?;
 
         if !finalized_transactions.is_empty() {
             // Remove locks for finalized transactions

@@ -406,7 +406,7 @@ diesel::table! {
         address -> Text,
         substate_id -> Text,
         version -> Integer,
-        data -> Text,
+        data -> Nullable<Text>,
         state_hash -> Text,
         created_by_transaction -> Text,
         created_justify -> Text,

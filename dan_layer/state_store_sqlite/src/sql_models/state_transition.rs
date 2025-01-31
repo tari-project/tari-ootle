@@ -43,9 +43,14 @@ impl StateTransition {
         let update = match self.transition.as_str() {
             "UP" => SubstateUpdate::Create(SubstateCreatedProof {
                 substate: SubstateData {
+                    substate_value: substate.substate_value.ok_or_else(|| StorageError::DataInconsistency {
+                        details: format!(
+                            "StateTransition::try_convert: Up substate {} does not have a value",
+                            self.substate_id
+                        ),
+                    })?,
                     substate_id: substate.substate_id,
                     version: substate.version,
-                    substate_value: substate.substate_value,
                     created_by_transaction: substate.created_by_transaction,
                 },
             }),

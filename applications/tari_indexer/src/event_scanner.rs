@@ -29,7 +29,7 @@ use tari_bor::decode;
 use tari_crypto::tari_utilities::message_format::MessageFormat;
 use tari_dan_common_types::{committee::Committee, Epoch, PeerAddress, ShardGroup};
 use tari_dan_p2p::proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SyncBlocksRequest};
-use tari_dan_storage::consensus_models::{Block, BlockId, Decision, TransactionRecord};
+use tari_dan_storage::consensus_models::{Block, BlockId, Decision};
 use tari_engine_types::{
     commit_result::{ExecuteResult, TransactionResult},
     events::Event,
@@ -37,7 +37,7 @@ use tari_engine_types::{
 };
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_template_lib::models::{EntityId, TemplateAddress};
-use tari_transaction::{Transaction, TransactionId};
+use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
 
 use crate::{
@@ -563,6 +563,10 @@ impl EventScanner {
             .sync_blocks(SyncBlocksRequest {
                 start_block_id: start_block_id.map(|id| id.as_bytes().to_vec()).unwrap_or_default(),
                 epoch: Some(up_to_epoch.into()),
+                // TODO: QC should be validated
+                stream_qcs: false,
+                stream_substates: false,
+                stream_transactions: false,
             })
             .await?;
         while let Some(resp) = stream.next().await {
@@ -572,38 +576,6 @@ impl EventScanner {
                 .into_block()
                 .ok_or_else(|| anyhow::anyhow!("Expected peer to return a newblock"))?;
             let block = Block::try_from(new_block)?;
-
-            let Some(_) = stream.next().await else {
-                anyhow::bail!("Peer closed session before sending QC message")
-            };
-
-            let Some(resp) = stream.next().await else {
-                anyhow::bail!("Peer closed session before sending substate update count message")
-            };
-            let msg = resp?;
-            let num_substates =
-                msg.substate_count()
-                    .ok_or_else(|| anyhow::anyhow!("Expected peer to return substate count"))? as usize;
-
-            for _ in 0..num_substates {
-                let Some(_) = stream.next().await else {
-                    anyhow::bail!("Peer closed session before sending substate updates message")
-                };
-            }
-
-            let Some(resp) = stream.next().await else {
-                anyhow::bail!("Peer closed session before sending transactions message")
-            };
-            let msg = resp?;
-            let transactions = msg
-                .into_transactions()
-                .ok_or_else(|| anyhow::anyhow!("Expected peer to return transactions"))?;
-
-            let _transactions = transactions
-                .into_iter()
-                .map(Transaction::try_from)
-                .map(|r| r.map(TransactionRecord::new))
-                .collect::<Result<Vec<_>, _>>()?;
 
             blocks.push(block);
         }

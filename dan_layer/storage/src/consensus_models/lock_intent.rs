@@ -139,6 +139,7 @@ impl LockIntent for &VersionedSubstateIdLockIntent {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct RequireLockIntentRef<'a> {
     substate_id: &'a SubstateId,
     lock_type: SubstateLockType,

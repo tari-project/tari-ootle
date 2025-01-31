@@ -239,14 +239,14 @@ where TConsensusSpec: ConsensusSpec
                     for_shard_group,
                     block_id,
                 );
-                let Some((block, justify_qc, mut block_pledge)) = store
-                    .with_read_tx(|tx| {
-                        let block = Block::get(tx, &block_id)?;
-                        let justify_qc = QuorumCertificate::get_by_block_id(tx, &block_id)?;
-                        let block_pledge = block.get_block_pledge(tx)?;
-                        Ok::<_, StorageError>((block, justify_qc, block_pledge))
-                    })
-                    .optional()?
+                let Some((block, justify_qc, mut block_pledge)) = store.with_read_tx(|tx| {
+                    let Some(block) = Block::get(tx, &block_id).optional()? else {
+                        return Ok(None);
+                    };
+                    let justify_qc = QuorumCertificate::get_by_block_id(tx, &block_id)?;
+                    let block_pledge = block.get_block_pledge(tx)?;
+                    Ok::<_, StorageError>(Some((block, justify_qc, block_pledge)))
+                })?
                 else {
                     warn!(
                         target: LOG_TARGET,

@@ -36,7 +36,7 @@ use tari_dan_common_types::{
     ShardGroup,
     SubstateAddress,
     SubstateLockType,
-    SubstateRequirement,
+    SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
@@ -1922,9 +1922,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         substate.try_into()
     }
 
-    fn substates_get_any(
+    fn substates_get_any<'a, I: IntoIterator<Item = &'a SubstateRequirementRef<'a>>>(
         &self,
-        substate_ids: &HashSet<SubstateRequirement>,
+        substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
         use crate::schema::substates;
 

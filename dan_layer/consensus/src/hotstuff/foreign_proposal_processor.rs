@@ -506,7 +506,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for ALL_ACCEPT({}, {}) Local Stage: {}, All Justified: {}. Waiting for local proposal.",
+                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for ALL_ACCEPT({}, {}) Local Stage: {}, All Justified: {}. Waiting for local or foreign proposal.",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
@@ -656,8 +656,8 @@ fn add_pledges(
             debug!(
                 target: LOG_TARGET,
                 "Adding {} foreign pledge(s) to transaction {}. Foreign shard group: {}. Pledges: {}",
-                atom.id,
                 pledges.len(),
+                atom.id,
                 foreign_shard_group,
                 pledges.display()
             );

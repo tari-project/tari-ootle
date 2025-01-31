@@ -6,11 +6,13 @@ use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display, iter, ops::Ra
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
+    option::Displayable,
     shard::Shard,
     Epoch,
     NodeHeight,
     SubstateAddress,
     SubstateRequirement,
+    SubstateRequirementRef,
     VersionedSubstateId,
 };
 use tari_engine_types::substate::{hash_substate, Substate, SubstateId, SubstateValue};
@@ -211,17 +213,35 @@ impl SubstateRecord {
         Ok(rec.is_up())
     }
 
-    pub fn get_any<TTx: StateStoreReadTransaction, I: IntoIterator<Item = SubstateRequirement>>(
+    pub fn purge_down_values<TTx: StateStoreWriteTransaction>(tx: &mut TTx) -> Result<(), StorageError> {
+        tx.substates_purge_down_values()
+    }
+
+    pub fn get_any<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = SubstateRequirementRef<'a>>>(
         tx: &TTx,
-        shards: I,
-    ) -> Result<(Vec<SubstateRecord>, HashSet<SubstateRequirement>), StorageError> {
-        let mut substate_ids = shards.into_iter().collect::<HashSet<_>>();
+        requirements: I,
+    ) -> Result<(Vec<SubstateRecord>, HashSet<SubstateRequirementRef<'a>>), StorageError> {
+        let mut substate_ids = requirements.into_iter().collect::<HashSet<_>>();
         let found = tx.substates_get_any(&substate_ids)?;
         for f in &found {
-            substate_ids.remove(&f.to_substate_requirement());
+            substate_ids.remove(f.substate_id());
         }
 
         Ok((found, substate_ids))
+    }
+
+    pub fn get_all<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = SubstateRequirementRef<'a>>>(
+        tx: &TTx,
+        requirements: I,
+    ) -> Result<Vec<SubstateRecord>, StorageError> {
+        let (found, missing) = Self::get_any(tx, requirements)?;
+        if !missing.is_empty() {
+            return Err(StorageError::NotFound {
+                item: "SubstateRecord",
+                key: missing.display().to_string(),
+            });
+        }
+        Ok(found)
     }
 
     pub fn get_any_max_version<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = &'a SubstateId>>(

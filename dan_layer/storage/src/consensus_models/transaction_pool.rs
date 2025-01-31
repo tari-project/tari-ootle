@@ -420,8 +420,8 @@ impl TransactionPoolRecord {
             .unwrap_or_else(|| self.current_local_decision())
     }
 
-    fn can_continue_to(&self, next_stage: TransactionPoolStage) -> bool {
-        match next_stage {
+    fn can_continue_to(&self, stage: TransactionPoolStage) -> bool {
+        match stage {
             TransactionPoolStage::New => self.is_ready,
             TransactionPoolStage::Prepared => true,
             TransactionPoolStage::LocalPrepared => self.evidence.all_input_shard_groups_prepared(),

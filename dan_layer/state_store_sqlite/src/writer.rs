@@ -1740,13 +1740,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::{state_transitions, substates};
 
         let changes = (
-            substates::destroyed_at.eq(diesel::dsl::now),
+            substates::destroyed_at.eq(dsl::now),
             substates::destroyed_by_transaction.eq(Some(serialize_hex(destroyed_transaction_id))),
             substates::destroyed_by_block.eq(Some(destroyed_block_height.as_u64() as i64)),
             substates::destroyed_at_epoch.eq(Some(epoch.as_u64() as i64)),
             substates::destroyed_by_shard.eq(Some(shard.as_u32() as i32)),
             substates::destroyed_justify.eq(Some(serialize_hex(destroyed_qc_id))),
-            substates::data.eq(None::<String>),
         );
 
         let address = versioned_substate_id.to_substate_address();
@@ -1787,6 +1786,22 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "substates_down(insert into state_transitions)",
+                source: e,
+            })?;
+
+        Ok(())
+    }
+
+    fn substates_purge_down_values(&mut self) -> Result<(), StorageError> {
+        use crate::schema::substates;
+
+        diesel::update(substates::table)
+            .filter(substates::destroyed_by_transaction.is_not_null())
+            .filter(substates::data.is_not_null())
+            .set(substates::data.eq(None::<String>))
+            .execute(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "substates_down (update substates)",
                 source: e,
             })?;
 

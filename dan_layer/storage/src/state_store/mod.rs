@@ -17,7 +17,7 @@ use tari_dan_common_types::{
     NodeHeight,
     ShardGroup,
     SubstateAddress,
-    SubstateRequirement,
+    SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
@@ -269,9 +269,9 @@ pub trait StateStoreReadTransaction: Sized {
     fn votes_get_for_block(&self, block_id: &BlockId) -> Result<Vec<Vote>, StorageError>;
     //---------------------------------- Substates --------------------------------------------//
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError>;
-    fn substates_get_any(
+    fn substates_get_any<'a, I: IntoIterator<Item = &'a SubstateRequirementRef<'a>>>(
         &self,
-        substate_ids: &HashSet<SubstateRequirement>,
+        substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError>;
     fn substates_get_any_max_version<'a, I: IntoIterator<Item = &'a SubstateId>>(
         &self,
@@ -554,6 +554,8 @@ pub trait StateStoreWriteTransaction {
         destroyed_transaction_id: &TransactionId,
         destroyed_qc_id: &QcId,
     ) -> Result<(), StorageError>;
+
+    fn substates_purge_down_values(&mut self) -> Result<(), StorageError>;
 
     // -------------------------------- Foreign pledges -------------------------------- //
 

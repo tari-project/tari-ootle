@@ -27,6 +27,8 @@ use tari_dan_common_types::{
     NumPreshards,
     ShardGroup,
     SubstateAddress,
+    SubstateRequirementRef,
+    VersionedSubstateId,
 };
 use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash};
 use tari_transaction::TransactionId;
@@ -42,7 +44,6 @@ use super::{
     ForeignProposalAtom,
     ForeignSendCounters,
     HighQc,
-    LockedSubstateValue,
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
     QuorumCertificate,
@@ -53,6 +54,7 @@ use super::{
     TransactionAtom,
     ValidatorSchnorrSignature,
     ValidatorStatsUpdate,
+    VersionedSubstateIdLockIntent,
 };
 use crate::{
     consensus_models::{
@@ -1013,62 +1015,47 @@ impl Block {
                 })?;
 
             // TODO(perf): O(n) queries
-            let locked_values = LockedSubstateValue::get_all_input_locks_for_transaction(tx, &atom.id)?;
-
-            let num_locked = locked_values.len();
-            // CASE: We're retrieving pledges for the LocalPrepared and LocalAccept commands. If all other pledges were
-            // provided already, we may have progressed to AllPrepared, executed the transaction and locked
-            // local outputs. However, these are not provided in the original LocalPrepare evidence for this
-            // atom, so we need to exclude them.
-            let locks = locked_values.into_iter().filter(|lock| {
-                // It is possible that evidence has "downgraded" a write lock to a read lock. However, we do not
-                // downgrade the actual lock so we only discern between inputs and outputs, not read/write locks.
-                // TODO: this is because we Write lock inputs initially (before execution) due to lack of information
-                if evidence.contains_pledge(
-                    lock.substate_id(),
-                    lock.lock.version(),
-                    lock.lock.lock_type().is_input(),
-                ) {
-                    true
-                } else {
-                    debug!(
-                        target: LOG_TARGET,
-                        "get_block_pledge: Skipping locked value {} for atom {} in block {} because it was not originally pledged",
-                        lock.lock,
-                        atom.id,
-                        self
-                    );
-                    false
-                }
+            let pledged = evidence
+                .inputs()
+                .iter()
+                .filter_map(|(substate_id, ev)| Some((substate_id, ev.as_ref()?)));
+            let substates = SubstateRecord::get_all(
+                tx,
+                pledged
+                    .clone()
+                    .map(|(substate_id, ev)| SubstateRequirementRef::new(substate_id, Some(ev.version))),
+            )?;
+            let num_locked = substates.len();
+            let locked_values = substates.into_iter().zip(pledged.map(|(_, e)| e)).map(|(s, e)| {
+                let id = VersionedSubstateId::new(s.substate_id, s.version);
+                (
+                    VersionedSubstateIdLockIntent::new(id, e.as_lock_type(), true),
+                    s.substate_value,
+                )
             });
 
-            let count = locks.clone().count();
             debug!(
                 target: LOG_TARGET,
-                "get_block_pledge: {} out of {} locked for atom {} in block {}",
-                count, num_locked, atom.id, self
+                "get_block_pledge: {} locked for atom {} in block {}",
+                num_locked, atom.id, self
             );
 
             let self_as_leaf = self.as_leaf_block();
-            for locked_value in locks {
-                let lock_intent = locked_value.to_substate_lock_intent();
-                let LockedSubstateValue {
-                    substate_id,
-                    lock,
-                    value,
-                    ..
-                } = locked_value;
-
-                let pledge =
-                    SubstatePledge::try_create(lock_intent, value).ok_or_else(|| StorageError::DataInconsistency {
-                        details: format!("{substate_id} has no value however {lock} requires a value",),
-                    })?;
+            for (lock_intent, maybe_value) in locked_values {
+                let pledge = SubstatePledge::try_create(&lock_intent, maybe_value).ok_or_else(|| {
+                    StorageError::DataInconsistency {
+                        details: format!(
+                            "Pledge {} has no substate value however a value is required",
+                            lock_intent,
+                        ),
+                    }
+                })?;
                 debug!(
                     target: LOG_TARGET,
                     "get_block_pledge: Adding pledge {} for atom {} in block {}",
                     pledge, atom.id, self_as_leaf
                 );
-                pledges.add_substate_pledge(*locked_value.lock.transaction_id(), pledge);
+                pledges.add_substate_pledge(atom.id, pledge);
             }
         }
         Ok(pledges)

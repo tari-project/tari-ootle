@@ -204,10 +204,7 @@ impl BlockPledge {
                         .pledges
                         .iter()
                         .filter(|(tx_id, _)| *tx_id != transaction_id)
-                        .any(|(_, v)| {
-                            v.iter()
-                                .any(|p| p.version() == pledge.version() && p.substate_id() == pledge.substate_id())
-                        })
+                        .any(|(_, v)| v.iter().any(|p| p.substate_id() == pledge.substate_id()))
                     {
                         continue;
                     }
@@ -267,15 +264,15 @@ pub enum SubstatePledge {
 impl SubstatePledge {
     /// Returns a new SubstatePledge if it is valid, otherwise returns None
     /// A SubstatePledge is invalid if the lock type is either Write or Read and no substate value is provided.
-    pub fn try_create(lock_intent: VersionedSubstateIdLockIntent, substate: Option<SubstateValue>) -> Option<Self> {
+    pub fn try_create<L: LockIntent>(lock_intent: L, substate: Option<SubstateValue>) -> Option<Self> {
         match lock_intent.lock_type() {
             SubstateLockType::Write | SubstateLockType::Read => Some(Self::Input {
                 is_write: lock_intent.lock_type().is_write(),
-                substate_id: lock_intent.into_versioned_substate_id(),
+                substate_id: lock_intent.to_versioned_substate_id(),
                 substate: substate?,
             }),
             SubstateLockType::Output => Some(Self::Output {
-                substate_id: lock_intent.into_versioned_substate_id(),
+                substate_id: lock_intent.to_versioned_substate_id(),
             }),
         }
     }

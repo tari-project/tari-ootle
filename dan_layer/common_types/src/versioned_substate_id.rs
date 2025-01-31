@@ -7,7 +7,7 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 
-use crate::{shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
+use crate::{option::Displayable, shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
@@ -189,6 +189,14 @@ impl<'a> SubstateRequirementRef<'a> {
     pub fn to_owned(&self) -> SubstateRequirement {
         SubstateRequirement::new(self.substate_id.clone(), self.version)
     }
+
+    pub fn version(&self) -> Option<u32> {
+        self.version
+    }
+
+    pub fn substate_id(&self) -> &SubstateId {
+        self.substate_id
+    }
 }
 
 impl<'a> From<&'a VersionedSubstateId> for SubstateRequirementRef<'a> {
@@ -215,6 +223,40 @@ impl<'a> From<VersionedSubstateIdRef<'a>> for SubstateRequirementRef<'a> {
             substate_id: value.substate_id,
             version: Some(value.version),
         }
+    }
+}
+
+impl Borrow<SubstateId> for SubstateRequirementRef<'_> {
+    fn borrow(&self) -> &SubstateId {
+        self.substate_id
+    }
+}
+
+impl PartialEq for SubstateRequirementRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.substate_id == other.substate_id
+    }
+}
+
+impl PartialEq<SubstateId> for SubstateRequirementRef<'_> {
+    fn eq(&self, other: &SubstateId) -> bool {
+        self.substate_id == other
+    }
+}
+
+impl Eq for SubstateRequirementRef<'_> {}
+
+// Only consider the substate id in maps. This means that duplicates found if the substate id is the same regardless of
+// the version.
+impl std::hash::Hash for SubstateRequirementRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.substate_id.hash(state);
+    }
+}
+
+impl Display for SubstateRequirementRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.substate_id, self.version.display())
     }
 }
 

@@ -392,9 +392,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     //       specify this or we can correct the locks after execution. Currently, this limitation
                     //       prevents concurrent multi-shard read locks.
                     let requested_locks = local_versions.iter().map(|(substate_id, version)| {
-                        // Assume resources are read-only, if the transaction mutates the resource, it will be upgraded
-                        // to a write lock
-                        if substate_id.substate_id().is_resource() || substate_id.substate_id().is_read_only() {
+                        if substate_id.substate_id().is_read_only() {
                             SubstateRequirementLockIntent::read(substate_id.clone(), *version)
                         } else {
                             SubstateRequirementLockIntent::write(substate_id.clone(), *version)

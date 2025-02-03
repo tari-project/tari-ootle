@@ -227,6 +227,7 @@ pub trait RocksdbModel {
 
     fn count(tx: &Transaction<'_, TransactionDB>, key_prefix: Option<&str>) -> Result<u64, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
+        // TODO: Should default to the model's key prefix instead of empty string?
         let key_prefix = key_prefix.unwrap_or_default();
         options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
         let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
@@ -254,6 +255,23 @@ pub trait RocksdbModel {
         .collect();
 
         Ok(values)
+    }
+
+    fn delete_all(tx: &Transaction<'_, TransactionDB>, operation: &'static str) -> Result<(), RocksDbStorageError> {
+        let mut options = rocksdb::ReadOptions::default();
+        options.set_iterate_range(rocksdb::PrefixRange(Self::key_prefix().as_bytes()));
+        let iterator = tx.iterator_opt(rocksdb::IteratorMode::Start, options);
+
+        for value in iterator {
+            let (key, _) = value.unwrap();
+            tx.delete(key)
+                .map_err(|e| RocksDbStorageError::RocksDbError {
+                    operation,
+                    source: e,
+                })?;
+        }
+
+        Ok(())
     }
 
     fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<(), RocksDbStorageError> {

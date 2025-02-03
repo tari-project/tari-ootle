@@ -1,15 +1,17 @@
-use tari_common_types::types::FixedHash;
+use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
-use tari_dan_storage::consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionAtom};
+use tari_dan_storage::consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionAtom, ValidatorSignature};
 use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress}, prelude::AccessRules};
 use tari_template_lib::prelude::ComponentAccessRules;
 use tempfile::tempdir;
-
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_transaction::TransactionId;
+use tari_crypto::{
+    keys::PublicKey as _, signatures::SchnorrSignature
+};
 
 pub fn create_rocksdb() -> RocksDbStateStore<String> {
     let temp_dir = tempdir().unwrap();
@@ -95,6 +97,20 @@ pub fn assert_eq_debug<T>(a: &T, b: &T)
 }
 
 pub fn create_random_block_id() -> BlockId {
+    BlockId::new(create_random_hash())
+}
+
+pub fn create_random_hash() -> FixedHash {
     let rand_bytes = OsRng.gen::<[u8; FixedHash::byte_size()]>();
-    BlockId::new(FixedHash::new(rand_bytes))
+    FixedHash::new(rand_bytes)
+}
+
+pub fn create_random_vn_signature() -> ValidatorSignature {
+    let message = OsRng.gen::<[u8; FixedHash::byte_size()]>();
+    let (secret_key, public_key) = PublicKey::random_keypair(&mut OsRng);
+    let signature = SchnorrSignature::sign(&secret_key, message, &mut OsRng).unwrap();
+    ValidatorSignature {
+        public_key,
+        signature,
+    }
 }

@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1376,56 +1376,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         block_id: &BlockId,
         sender_leaf_hash: &FixedHash,
     ) -> Result<Vote, StorageError> {
-        todo!()
-        /*
-        use crate::schema::votes;
-
-        let vote = votes::table
-            .filter(votes::block_id.eq(serialize_hex(block_id)))
-            .filter(votes::sender_leaf_hash.eq(serialize_hex(sender_leaf_hash)))
-            .first::<sql_models::Vote>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "votes_get",
-                source: e,
-            })?;
-
-        Vote::try_from(vote)
-        */
+        let key = VoteModel::key_from_block_and_sender(block_id, Some(sender_leaf_hash));
+        let vote = VoteModel::get(&self.tx, "votes_get_by_block_and_sender", &key)?;
+        Ok(vote)
     }
 
     fn votes_count_for_block(&self, block_id: &BlockId) -> Result<u64, StorageError> {
-        todo!()
-        /*
-        use crate::schema::votes;
-
-        let count = votes::table
-            .filter(votes::block_id.eq(serialize_hex(block_id)))
-            .count()
-            .first::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "votes_count_for_block",
-                source: e,
-            })?;
-
-        Ok(count as u64)
-        */
+        let key_prefix = VoteModel::key_from_block_and_sender(block_id, None);
+        let count = VoteModel::count(&self.tx, Some(&key_prefix))?;
+        Ok(count)
     }
 
     fn votes_get_for_block(&self, block_id: &BlockId) -> Result<Vec<Vote>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::votes;
-
-        let votes = votes::table
-            .filter(votes::block_id.eq(serialize_hex(block_id)))
-            .get_results::<sql_models::Vote>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "votes_get_for_block",
-                source: e,
-            })?;
-
-        votes.into_iter().map(Vote::try_from).collect()
-        */
+        let key_prefix = VoteModel::key_from_block_and_sender(block_id, None);
+        let votes = VoteModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
+        Ok(votes)
     }
 
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError> {

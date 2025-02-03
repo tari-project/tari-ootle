@@ -13,7 +13,7 @@ mod miscellaneous_operations {
     use tari_common_types::types::PublicKey;
     use tari_dan_common_types::{shard::Shard, NumPreshards, ShardGroup};
     use tari_dan_storage::consensus_models::{Block, BlockId, BlockPledge, EpochCheckpoint, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumCertificate, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
-    use tari_state_tree::TreeHash;
+    use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeHash};
 
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
     
@@ -197,6 +197,18 @@ mod miscellaneous_operations {
         tx.foreign_parked_blocks_insert(&foreign_parked_block).unwrap();
         let res = tx.foreign_parked_blocks_exists(foreign_parked_block.block().id()).unwrap();
         assert!(res);
+
+        // state_tree
+        let node = Node::Null;
+        let node_key = NodeKey::new_empty_path(0);
+        tx.state_tree_nodes_insert(shard, node_key.clone(), node.clone()).unwrap();
+        let res = tx.state_tree_nodes_get(shard, &node_key).unwrap();
+        assert_eq_debug(&res, &node);
+
+        let stale_node = StaleTreeNode::Node(node_key.clone());
+        tx.state_tree_nodes_record_stale_tree_node(shard, stale_node).unwrap();
+        let res = tx.state_tree_nodes_get(shard, &node_key);
+        assert!(res.is_err());   
 
         tx.rollback().unwrap();
     }

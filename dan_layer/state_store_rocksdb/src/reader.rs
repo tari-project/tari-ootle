@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1766,26 +1766,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<Version>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::state_tree;
+        let operation = "state_tree_nodes_get";
+        let key = StateTreeModel::key_from_shard_and_node(&shard, key);
+        let value = StateTreeModel::get(&self.tx, operation, &key)?;
 
-        let node = state_tree::table
-            .select(state_tree::node)
-            .filter(state_tree::shard.eq(shard.as_u32() as i32))
-            .filter(state_tree::key.eq(key.to_string()))
-            .first::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "state_tree_nodes_get",
-                source: e,
-            })?;
-
-        let node = serde_json::from_str::<TreeNode<Version>>(&node).map_err(|e| StorageError::DataInconsistency {
-            details: format!("Failed to deserialize state tree node: {}", e),
-        })?;
-
-        Ok(node.into_node())
-        */
+        Ok(value.node)
     }
 
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError> {

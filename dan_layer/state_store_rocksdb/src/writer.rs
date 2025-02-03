@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -1384,30 +1384,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn state_tree_nodes_insert(&mut self, shard: Shard, key: NodeKey, node: Node<Version>) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::state_tree;
+        let operation = "state_tree_nodes_insert";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        
+        let value = StateTreeModelData {
+            shard,
+            key,
+            node,
+        };
 
-        let node = TreeNode::new_latest(node);
-        let node = serde_json::to_string(&node).map_err(|e| StorageError::QueryError {
-            reason: format!("Failed to serialize node: {}", e),
-        })?;
-
-        let values = (
-            state_tree::shard.eq(shard.as_u32() as i32),
-            state_tree::key.eq(key.to_string()),
-            state_tree::node.eq(&node),
-        );
-        diesel::insert_into(state_tree::table)
-            .values(&values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "state_tree_nodes_insert",
-                source: e,
-            })?;
+        StateTreeModel::put(self.db.clone(), tx, operation, &value)?;
 
         Ok(())
-        */
     }
 
     fn state_tree_nodes_record_stale_tree_node(
@@ -1415,39 +1403,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         shard: Shard,
         node: StaleTreeNode,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::state_tree;
+        let operation = "state_tree_nodes_record_stale_tree_node";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        //   let num_effected = diesel::update(state_tree::table)
-        //             .filter(state_tree::shard.eq(shard.as_u32() as i32))
-        //             .filter(state_tree::key.eq(key.to_string()))
-        //             .set(state_tree::is_stale.eq(true))
-        //             .execute(self.connection())
-        //             .map_err(|e| SqliteStorageError::DieselError {
-        //                 operation: "state_tree_nodes_mark_stale_tree_node",
-        //                 source: e,
-        //             })?;
-
-        let key = node.as_node_key();
-        let num_effected = diesel::delete(state_tree::table)
-            .filter(state_tree::shard.eq(shard.as_u32() as i32))
-            .filter(state_tree::key.eq(key.to_string()))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "state_tree_nodes_mark_stale_tree_node",
-                source: e,
-            })?;
-
-        if num_effected == 0 {
-            return Err(StorageError::NotFound {
-                item: "state_tree_node".to_string(),
-                key: key.to_string(),
-            });
-        }
+        let key = StateTreeModel::key_from_shard_and_node(&shard, node.as_node_key());
+        StateTreeModel::delete(self.db.clone(), tx, operation, &key)?;
 
         Ok(())
-        */
     }
 
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {    

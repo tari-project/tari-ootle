@@ -63,6 +63,7 @@ tokio = { workspace = true, features = [
 tower-http = { workspace = true, features = ["cors", "trace"] }
 url = { workspace = true }
 webrtc = { workspace = true }
+webauthn-rs = { version = "0.5.1", features = ["default"] }
 
 [dev-dependencies]
 tari_utilities = { workspace = true }

@@ -47,6 +47,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_lib::models::Amount;
 use tokio::task;
 
+use crate::handlers::auth::get_authenticator;
 use crate::{
     config::ApplicationConfig,
     handlers::HandlerContext,
@@ -79,12 +80,14 @@ pub async fn run_tari_dan_wallet_daemon(
 
     let jrpc_address = config.dan_wallet_daemon.json_rpc_address.unwrap();
     let signaling_server_address = config.dan_wallet_daemon.signaling_server_address.unwrap();
+    let authenticator = get_authenticator(&config.dan_wallet_daemon.authentication);
     let handlers = HandlerContext::new(
         wallet_sdk.clone(),
         notify,
         services.transaction_service_handle.clone(),
         services.account_monitor_handle.clone(),
         config.dan_wallet_daemon.clone(),
+        authenticator,
     );
     let (jrpc_address, listen_fut) =
         jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers, shutdown_signal)?;

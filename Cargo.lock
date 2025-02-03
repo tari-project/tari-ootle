@@ -864,6 +864,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
+name = "base64urlsafedata"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f0ad38ce7fbed55985ad5b2197f05cff8324ee6eb6638304e78f0108fae56c"
+dependencies = [
+ "base64 0.21.7",
+ "paste",
+ "serde",
+]
+
+[[package]]
 name = "basic-cookies"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1543,6 +1554,23 @@ dependencies = [
  "is-terminal",
  "lazy_static",
  "winapi",
+]
+
+[[package]]
+name = "compact_jwt"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12bbab6445446e8d0b07468a01d0bfdae15879de5c440c5e47ae4ae0e18a1fba"
+dependencies = [
+ "base64 0.21.7",
+ "base64urlsafedata",
+ "hex",
+ "openssl",
+ "serde",
+ "serde_json",
+ "tracing",
+ "url",
+ "uuid 1.11.0",
 ]
 
 [[package]]
@@ -8485,6 +8513,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_cbor_2"
+version = "0.12.0-dev"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b46d75f449e01f1eddbe9b00f432d616fbbd899b809c837d0fbc380496a0dd55"
+dependencies = [
+ "half",
+ "serde",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.214"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9885,6 +9923,7 @@ dependencies = [
  "tokio",
  "tower-http",
  "url",
+ "webauthn-rs",
  "webrtc",
 ]
 
@@ -9918,6 +9957,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.68",
  "ts-rs",
+ "webauthn-rs",
 ]
 
 [[package]]
@@ -9941,6 +9981,7 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction",
  "tari_utilities",
+ "webauthn-rs",
 ]
 
 [[package]]
@@ -11782,6 +11823,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8c5f0a0af699448548ad1a2fbf920fb4bee257eae39953ba95cb84891a0446a"
 dependencies = [
  "getrandom",
+ "serde",
 ]
 
 [[package]]
@@ -12160,6 +12202,73 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webauthn-attestation-ca"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29e77e8859ecb93b00e4a8e56ae45f8a8dd69b1539e3d32cf4cce1db9a3a0b99"
+dependencies = [
+ "base64urlsafedata",
+ "openssl",
+ "serde",
+ "tracing",
+ "uuid 1.11.0",
+]
+
+[[package]]
+name = "webauthn-rs"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b44347ee0d66f222043663a6aaf5ec78022b9b11c3a9ed488c21f2bd5680856"
+dependencies = [
+ "base64urlsafedata",
+ "serde",
+ "tracing",
+ "url",
+ "uuid 1.11.0",
+ "webauthn-rs-core",
+]
+
+[[package]]
+name = "webauthn-rs-core"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ef48f07ed8f3dfe304d6c48e85317feba0439675f31a13063b2936c9b4eaf0d"
+dependencies = [
+ "base64 0.21.7",
+ "base64urlsafedata",
+ "compact_jwt",
+ "der-parser 9.0.0",
+ "hex",
+ "nom",
+ "openssl",
+ "rand",
+ "rand_chacha",
+ "serde",
+ "serde_cbor_2",
+ "serde_json",
+ "thiserror 1.0.68",
+ "tracing",
+ "url",
+ "uuid 1.11.0",
+ "webauthn-attestation-ca",
+ "webauthn-rs-proto",
+ "x509-parser 0.16.0",
+]
+
+[[package]]
+name = "webauthn-rs-proto"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14e1367f70e7dc7b83afc971ce8a54d578f4fdf488ea093021180e073744a69f"
+dependencies = [
+ "base64 0.21.7",
+ "base64urlsafedata",
+ "serde",
+ "serde_json",
+ "url",
 ]
 
 [[package]]

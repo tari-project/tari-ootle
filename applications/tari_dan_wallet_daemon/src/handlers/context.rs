@@ -1,9 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::sync::Arc;
 use tari_dan_wallet_sdk::DanWalletSdk;
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 
+use crate::handlers::auth::Authenticator;
 use crate::{
     config::WalletDaemonConfig,
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
@@ -18,6 +20,7 @@ pub struct HandlerContext {
     transaction_service: TransactionServiceHandle,
     account_monitor: AccountMonitorHandle,
     config: WalletDaemonConfig,
+    authenticator: Arc<dyn Authenticator>,
 }
 
 impl HandlerContext {
@@ -27,6 +30,7 @@ impl HandlerContext {
         transaction_service: TransactionServiceHandle,
         account_monitor: AccountMonitorHandle,
         config: WalletDaemonConfig,
+        authenticator: Arc<dyn Authenticator>,
     ) -> Self {
         Self {
             wallet_sdk,
@@ -34,6 +38,7 @@ impl HandlerContext {
             transaction_service,
             account_monitor,
             config,
+            authenticator,
         }
     }
 
@@ -55,5 +60,9 @@ impl HandlerContext {
 
     pub fn config(&self) -> &WalletDaemonConfig {
         &self.config
+    }
+
+    pub fn authenticator(&self) -> Arc<dyn Authenticator> {
+        self.authenticator.clone()
     }
 }

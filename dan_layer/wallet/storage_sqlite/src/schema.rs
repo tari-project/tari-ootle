@@ -23,6 +23,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    webauthn_registrations (id) {
+        id -> Integer,
+        username -> Text,
+        passkey -> Binary,
+    }
+}
+
+diesel::table! {
     config (id) {
         id -> Integer,
         key -> Text,

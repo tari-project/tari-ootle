@@ -49,12 +49,21 @@ impl ApplicationConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum WalletDaemonAuth {
+    None,
+    WebAuthn,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct WalletDaemonConfig {
     override_from: Option<String>,
     /// Network that is used to send transactions.
     pub network: Network,
+    /// Authentication method.
+    pub authentication: WalletDaemonAuth,
     /// The wallet daemon listening address
     pub json_rpc_address: Option<SocketAddr>,
     /// The jrpc address where the UI should connect (it can be the same as the json_rpc_addr, but doesn't have to be),
@@ -84,6 +93,7 @@ impl Default for WalletDaemonConfig {
         Self {
             override_from: None,
             network: Default::default(),
+            authentication: WalletDaemonAuth::None,
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
             ui_connect_address: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),

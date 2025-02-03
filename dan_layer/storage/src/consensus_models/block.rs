@@ -27,9 +27,11 @@ use tari_dan_common_types::{
     NumPreshards,
     ShardGroup,
     SubstateAddress,
+    SubstateRequirement,
     SubstateRequirementRef,
     VersionedSubstateId,
 };
+use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
 use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
@@ -867,6 +869,34 @@ impl Block {
         }
 
         Ok(updates)
+    }
+
+    pub fn get_transaction_receipts<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+    ) -> Result<Vec<SubstateCreatedProof>, StorageError> {
+        let committed = self
+            .commands()
+            .iter()
+            .filter_map(|c| c.committing())
+            .filter(|t| t.decision.is_commit());
+
+        let receipt_ids = committed
+            .map(|atom| TransactionReceiptAddress::from_array(atom.id.into_array()))
+            .map(|id| SubstateRequirement::versioned(id, 0))
+            .collect::<Vec<_>>();
+
+        let receipts = SubstateRecord::get_all(tx, receipt_ids.iter().map(Into::into))?;
+        let receipts = receipts
+            .into_iter()
+            .map(|receipt| {
+                Ok::<_, StorageError>(SubstateCreatedProof {
+                    substate: receipt.try_into()?,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(receipts)
     }
 
     pub fn update_nodes<TTx, TFnOnLock, TFnOnCommit, E>(

@@ -429,9 +429,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let tx_hash = self.entity_id_provider.transaction_hash();
         let template_address = self.tracker.get_template_address()?;
 
-        let event = Event::new(substate_id, template_address, tx_hash, topic, payload);
-        log::log!(target: "tari::dan::engine::runtime", log::Level::Debug, "{}", event.to_string());
-        self.tracker.add_event(event);
+        self.tracker
+            .add_event(Event::new(substate_id, template_address, tx_hash, topic, payload));
         Ok(())
     }
 

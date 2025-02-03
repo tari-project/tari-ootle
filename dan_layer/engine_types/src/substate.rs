@@ -169,6 +169,13 @@ impl SubstateId {
         }
     }
 
+    pub fn as_transaction_receipt_address(&self) -> Option<TransactionReceiptAddress> {
+        match self {
+            Self::TransactionReceipt(address) => Some(*address),
+            _ => None,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(self).unwrap()
     }

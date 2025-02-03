@@ -32,6 +32,7 @@ mod dry_run;
 pub mod graphql;
 mod http_ui;
 
+mod block_data;
 mod event_data;
 mod event_manager;
 mod event_scanner;

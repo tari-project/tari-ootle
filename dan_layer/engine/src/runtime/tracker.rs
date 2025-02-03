@@ -98,6 +98,7 @@ impl StateTracker {
     }
 
     pub fn add_event(&self, event: Event) {
+        debug!(target: LOG_TARGET, "Emit: {event}");
         self.write_with(|state| state.push_event(event));
     }
 

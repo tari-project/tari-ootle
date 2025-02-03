@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_dan_app_utilities::substate_file_cache::SubstateFileCache;
 use tari_dan_common_types::{substate_type::SubstateType, PeerAddress};
-use tari_engine_types::substate::{Substate, SubstateId};
+use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
@@ -44,7 +44,7 @@ use crate::substate_storage_sqlite::sqlite_substate_store_factory::{
 pub struct SubstateResponse {
     pub address: SubstateId,
     pub version: u32,
-    pub substate: Substate,
+    pub substate: SubstateValue,
     pub created_by_transaction: TransactionId,
 }
 
@@ -123,7 +123,7 @@ impl SubstateManager {
             } => Ok(Some(SubstateResponse {
                 address: id,
                 version: substate.version(),
-                substate,
+                substate: substate.into_substate_value(),
                 created_by_transaction: created_by_tx,
             })),
             _ => Ok(None),

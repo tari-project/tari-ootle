@@ -10,7 +10,7 @@ use tari_dan_p2p::{
     proto::rpc::{sync_blocks_response::SyncData, QuorumCertificates, SyncBlocksResponse},
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, QuorumCertificate, SubstateUpdate, TransactionRecord},
+    consensus_models::{Block, BlockId, QuorumCertificate, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -27,6 +27,7 @@ struct BlockData {
     qcs: Vec<QuorumCertificate>,
     substates: Vec<SubstateUpdate>,
     transactions: Vec<TransactionRecord>,
+    transaction_receipts: Vec<SubstateCreatedProof>,
 }
 type BlockBuffer = Vec<BlockData>;
 
@@ -151,7 +152,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                 }
 
                 last_block_id = current_block_id;
-                let all_qcs = req
+                let certificates = req
                     .stream_qcs
                     .then(|| {
                         child
@@ -161,13 +162,28 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                             .flat_map(|transaction| transaction.evidence.qc_ids_iter())
                             .collect::<HashSet<_>>()
                     })
+                    .map(|all_qcs| QuorumCertificate::get_all(tx, all_qcs))
+                    .transpose()?
                     .unwrap_or_default();
-                let certificates = QuorumCertificate::get_all(tx, all_qcs)?;
-                let updates = req
-                    .stream_substates
+                let substates_selection =
+                    proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).map_err(|e| {
+                        StorageError::General {
+                            details: format!("{} is not a valid StreamSubstateSelection: {}", req.stream_substates, e),
+                        }
+                    })?;
+
+                let updates = matches!(substates_selection, proto::rpc::StreamSubstateSelection::All)
                     .then(|| child.get_substate_updates(tx))
                     .transpose()?
                     .unwrap_or_default();
+                let transaction_receipts = matches!(
+                    substates_selection,
+                    proto::rpc::StreamSubstateSelection::TransactionReceiptsOnly
+                )
+                .then(|| child.get_transaction_receipts(tx))
+                .transpose()?
+                .unwrap_or_default();
+
                 let transactions = req
                     .stream_transactions
                     .then(|| child.get_transactions(tx))
@@ -179,6 +195,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                     qcs: certificates,
                     substates: updates,
                     transactions,
+                    transaction_receipts,
                 });
                 if buffer.len() == buffer.capacity() {
                     break;
@@ -258,6 +275,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
             qcs,
             substates: updates,
             transactions,
+            transaction_receipts,
         } = data;
         self.send(Ok(SyncBlocksResponse {
             sync_data: Some(SyncData::Block((&block).into())),
@@ -272,26 +290,51 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
             }))
             .await?;
         }
-        if req.stream_substates {
-            match u32::try_from(updates.len()) {
-                Ok(count) => {
+
+        match proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).map_err(|_| ())? {
+            proto::rpc::StreamSubstateSelection::No => {},
+            proto::rpc::StreamSubstateSelection::All => {
+                match u32::try_from(updates.len()) {
+                    Ok(count) => {
+                        self.send(Ok(SyncBlocksResponse {
+                            sync_data: Some(SyncData::SubstateCount(count)),
+                        }))
+                        .await?;
+                    },
+                    Err(_) => {
+                        self.send(Err(RpcStatus::general("number of substates exceeds u32")))
+                            .await?;
+                        return Err(());
+                    },
+                }
+                for update in updates {
                     self.send(Ok(SyncBlocksResponse {
-                        sync_data: Some(SyncData::SubstateCount(count)),
+                        sync_data: Some(SyncData::SubstateUpdate(update.into())),
                     }))
                     .await?;
-                },
-                Err(_) => {
-                    self.send(Err(RpcStatus::general("number of substates exceeds u32")))
+                }
+            },
+            proto::rpc::StreamSubstateSelection::TransactionReceiptsOnly => {
+                match u32::try_from(transaction_receipts.len()) {
+                    Ok(count) => {
+                        self.send(Ok(SyncBlocksResponse {
+                            sync_data: Some(SyncData::TransactionReceiptCount(count)),
+                        }))
                         .await?;
-                    return Err(());
-                },
-            }
-            for update in updates {
-                self.send(Ok(SyncBlocksResponse {
-                    sync_data: Some(SyncData::SubstateUpdate(update.into())),
-                }))
-                .await?;
-            }
+                    },
+                    Err(_) => {
+                        self.send(Err(RpcStatus::general("number of substates exceeds u32")))
+                            .await?;
+                        return Err(());
+                    },
+                }
+                for receipt in transaction_receipts {
+                    self.send(Ok(SyncBlocksResponse {
+                        sync_data: Some(SyncData::TransactionReceipt(receipt.into())),
+                    }))
+                    .await?;
+                }
+            },
         }
 
         if req.stream_transactions {

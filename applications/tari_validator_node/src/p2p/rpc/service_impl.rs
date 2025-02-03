@@ -275,6 +275,11 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
     ) -> Result<Streaming<SyncBlocksResponse>, RpcStatus> {
         let req = request.into_message();
         let store = self.shard_state_store.clone();
+
+        if proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).is_err() {
+            return Err(RpcStatus::bad_request("StreamSubstateSelection is invalid"));
+        }
+
         let current_epoch = self
             .epoch_manager
             .current_epoch()

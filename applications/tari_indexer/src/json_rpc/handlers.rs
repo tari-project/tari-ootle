@@ -353,7 +353,7 @@ impl JsonRpcHandlers {
                         } => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                             address: id,
                             version: substate.version(),
-                            substate,
+                            substate: substate.into_substate_value(),
                             created_by_transaction: created_by_tx,
                         })),
                         SubstateResult::Down { version, .. } => Err(JsonRpcResponse::error(

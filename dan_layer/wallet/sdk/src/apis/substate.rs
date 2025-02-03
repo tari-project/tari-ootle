@@ -218,7 +218,7 @@ where
         Ok(ValidatorScanResult {
             address: VersionedSubstateId::new(address.clone(), resp.version),
             created_by_tx: resp.created_by_transaction,
-            substate: resp.substate.into_substate_value(),
+            substate: resp.substate,
         })
     }
 

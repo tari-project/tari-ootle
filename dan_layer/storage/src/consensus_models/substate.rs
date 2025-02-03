@@ -416,6 +416,31 @@ impl SubstateUpdate {
     pub fn is_destroy(&self) -> bool {
         matches!(self, Self::Destroy { .. })
     }
+
+    pub fn substate_id(&self) -> &SubstateId {
+        match self {
+            Self::Create(create) => &create.substate.substate_id,
+            Self::Destroy(destroyed) => &destroyed.substate_id,
+        }
+    }
+
+    pub fn version(&self) -> u32 {
+        match self {
+            Self::Create(create) => create.substate.version,
+            Self::Destroy(destroyed) => destroyed.version,
+        }
+    }
+
+    pub fn to_versioned_substate_id(&self) -> VersionedSubstateId {
+        VersionedSubstateId::new(self.substate_id().clone(), self.version())
+    }
+
+    pub fn as_create(&self) -> Option<&SubstateCreatedProof> {
+        match self {
+            Self::Create(create) => Some(create),
+            _ => None,
+        }
+    }
 }
 
 impl From<SubstateCreatedProof> for SubstateUpdate {

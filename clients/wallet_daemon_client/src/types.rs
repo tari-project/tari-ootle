@@ -41,7 +41,7 @@ use tari_engine_types::{
     instruction::Instruction,
     instruction_result::InstructionResult,
     serde_with,
-    substate::{Substate, SubstateId},
+    substate::{SubstateId, SubstateValue},
     vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
 };
@@ -1225,7 +1225,7 @@ pub struct SubstatesGetRequest {
 )]
 pub struct SubstatesGetResponse {
     pub record: WalletSubstateRecord,
-    pub value: Substate,
+    pub value: SubstateValue,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

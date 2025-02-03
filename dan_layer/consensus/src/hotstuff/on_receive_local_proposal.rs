@@ -17,7 +17,6 @@ use tari_dan_storage::{
         HighQc,
         LastSentVote,
         QuorumDecision,
-        SubstateRecord,
         TransactionPool,
         ValidBlock,
         Vote,
@@ -369,7 +368,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 self.store.with_write_tx(|tx| {
                     // Generate checkpoint
                     create_epoch_checkpoint(tx, epoch, local_committee_info.shard_group())?;
-                    SubstateRecord::purge_down_values(tx)?;
+                    // Clean the DOWNed values
+                    // TODO: we do this only after epoch end because during catch up sync we need to provide
+                    // SubstateRecord::purge_down_values(tx)?;
 
                     // Create the next genesis
                     let mut genesis = Block::genesis(

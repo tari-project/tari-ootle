@@ -186,10 +186,17 @@ message SyncBlocksRequest {
   tari.dan.common.Epoch epoch = 2;
   // If true, QCs will be streamed.
   bool stream_qcs = 3;
-  // If true, substates will be streamed.
-  bool stream_substates = 4;
+  // Weather to stream all substates, only transaction receipts or do not stream any substates
+  StreamSubstateSelection stream_substates = 4;
   // If true, transactions in the block will be streamed
   bool stream_transactions = 5;
+}
+
+// Clippy complains about too many bools and prefers an enum
+enum StreamSubstateSelection {
+  No = 0;
+  All = 1;
+  TransactionReceiptsOnly = 2;
 }
 
 message SyncBlocksResponse {
@@ -200,6 +207,8 @@ message SyncBlocksResponse {
     SubstateUpdate substate_update = 4;
     uint32 transaction_count = 5;
     tari.dan.transaction.Transaction transaction = 6;
+    uint32 transaction_receipt_count = 7;
+    SubstateCreatedProof transaction_receipt = 8;
   }
 }
 

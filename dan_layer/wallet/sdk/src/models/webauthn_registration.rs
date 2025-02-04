@@ -5,6 +5,11 @@ use webauthn_rs::prelude::Passkey;
 
 #[derive(Debug, Clone)]
 pub struct WebauthnRegistrationModel {
+    pub id: u32,
     pub username: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebauthnRegistrationPasskeyModel {
     pub passkey: Passkey,
 }

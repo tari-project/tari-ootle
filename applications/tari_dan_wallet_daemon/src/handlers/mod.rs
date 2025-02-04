@@ -16,6 +16,7 @@ pub mod transaction;
 pub mod validator;
 pub mod webrtc;
 pub mod auth;
+pub mod webauthn;
 
 use std::future::Future;
 

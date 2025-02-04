@@ -8,6 +8,9 @@ mod account_monitor;
 pub use account_monitor::AccountMonitorHandle;
 
 mod transaction_service;
+mod webauthn_registration_store;
+pub use webauthn_registration_store::*;
+
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;
 use futures::{future, future::BoxFuture, FutureExt};

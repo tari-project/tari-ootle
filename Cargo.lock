@@ -9924,6 +9924,7 @@ dependencies = [
  "tower-http",
  "url",
  "webauthn-rs",
+ "webauthn-rs-proto",
  "webrtc",
 ]
 
@@ -10818,6 +10819,7 @@ dependencies = [
 name = "tari_wallet_daemon_client"
 version = "0.8.0"
 dependencies = [
+ "base64urlsafedata",
  "chrono",
  "reqwest",
  "serde",
@@ -10831,6 +10833,7 @@ dependencies = [
  "tari_transaction",
  "thiserror 1.0.68",
  "ts-rs",
+ "webauthn-rs-proto",
 ]
 
 [[package]]

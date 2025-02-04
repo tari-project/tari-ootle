@@ -26,7 +26,7 @@ use tari_shutdown::ShutdownSignal;
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-use super::handlers::{substates, templates, HandlerContext};
+use super::handlers::{substates, templates, webauthn, HandlerContext};
 use crate::handlers::{
     accounts,
     confidential,
@@ -107,6 +107,11 @@ async fn handler(
             "deny" => call_handler(context, value, token, rpc::handle_login_deny).await,
             "revoke" => call_handler(context, value, token, rpc::handle_revoke).await,
             "get_all_jwt" => call_handler(context, value, token, rpc::handle_get_all_jwt).await,
+            "method" => call_handler(context, value, token, rpc::handle_get_all_jwt).await,
+            _ => Ok(value.method_not_found(&value.method)),
+        },
+        Some(("webauthn", method)) => match method {
+            "reg_start" => call_handler(context, value, token, webauthn::handle_start_registration).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("settings", method)) => match method {

@@ -2,19 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_wallet_sdk::apis::jwt::JrpcPermission;
-use tari_wallet_daemon_client::types::{
-    AuthGetAllJwtRequest,
-    AuthGetAllJwtResponse,
-    AuthLoginAcceptRequest,
-    AuthLoginAcceptResponse,
-    AuthLoginDenyRequest,
-    AuthLoginDenyResponse,
-    AuthLoginRequest,
-    AuthLoginResponse,
-    AuthRevokeTokenRequest,
-    AuthRevokeTokenResponse,
-};
+use tari_wallet_daemon_client::types::{AuthGetAllJwtRequest, AuthGetAllJwtResponse, AuthGetMethodRequest, AuthGetMethodResponse, AuthLoginAcceptRequest, AuthLoginAcceptResponse, AuthLoginDenyRequest, AuthLoginDenyResponse, AuthLoginRequest, AuthLoginResponse, AuthMethod, AuthRevokeTokenRequest, AuthRevokeTokenResponse};
 
+use crate::config::WalletDaemonAuth;
 use crate::{handlers::HandlerContext, services::AuthLoginRequestEvent};
 
 pub async fn handle_discover(
@@ -81,4 +71,17 @@ pub async fn handle_get_all_jwt(
     jwt.check_auth(token, &[JrpcPermission::Admin])?;
     let tokens = jwt.get_tokens()?;
     Ok(AuthGetAllJwtResponse { jwt: tokens })
+}
+
+pub async fn handle_get_auth_method(
+    context: &HandlerContext,
+    _token: Option<String>,
+    _request: AuthGetMethodRequest,
+) -> Result<AuthGetMethodResponse, anyhow::Error> {
+    Ok(AuthGetMethodResponse {
+        method: match context.config().authentication {
+            WalletDaemonAuth::None => AuthMethod::None,
+            WalletDaemonAuth::WebAuthn => AuthMethod::Webauthn,
+        }
+    })
 }

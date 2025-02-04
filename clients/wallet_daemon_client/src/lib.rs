@@ -24,6 +24,7 @@ pub use component_address::*;
 pub mod error;
 pub mod serialize;
 pub mod types;
+pub mod webauthn_types;
 
 use std::borrow::Borrow;
 

@@ -23,6 +23,8 @@ serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
+webauthn-rs-proto = {workspace = true}
+base64urlsafedata = "0.5.1"
 
 [features]
 ts = ["ts-rs"]

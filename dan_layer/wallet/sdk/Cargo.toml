@@ -34,7 +34,7 @@ serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
-webauthn-rs = { version = "0.5.1", features = ["default"] }
+webauthn-rs = { workspace = true }
 
 [dev-dependencies]
 tari_dan_wallet_storage_sqlite = { workspace = true }

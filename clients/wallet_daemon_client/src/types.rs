@@ -22,6 +22,11 @@
 
 use std::{collections::HashMap, time::Duration};
 
+use crate::webauthn_types::PublicKeyCredentialCreationOptions;
+use crate::{
+    serialize::{opt_string_or_struct, string_or_struct},
+    ComponentAddressOrName,
+};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
@@ -55,11 +60,6 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
-
-use crate::{
-    serialize::{opt_string_or_struct, string_or_struct},
-    ComponentAddressOrName,
-};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
@@ -1265,3 +1265,55 @@ pub struct TemplatesGetRequest {
 pub struct TemplatesGetResponse {
     pub template_definition: TemplateDef,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct AuthGetMethodRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMethod {
+    None,
+    Webauthn
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct AuthGetMethodResponse {
+    pub method: AuthMethod,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnStartRegisterRequest {
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnStartRegisterResponse {
+    pub public_key: PublicKeyCredentialCreationOptions,
+}
+
+

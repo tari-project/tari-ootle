@@ -12,8 +12,8 @@ use tari_dan_common_types::{
     NodeHeight,
     SubstateAddress,
     SubstateRequirement,
-    SubstateRequirementRef,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_engine_types::substate::{hash_substate, Substate, SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
@@ -213,14 +213,10 @@ impl SubstateRecord {
         Ok(rec.is_up())
     }
 
-    pub fn purge_down_values<TTx: StateStoreWriteTransaction>(tx: &mut TTx) -> Result<(), StorageError> {
-        tx.substates_purge_down_values()
-    }
-
-    pub fn get_any<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = SubstateRequirementRef<'a>>>(
+    pub fn get_any<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = VersionedSubstateIdRef<'a>>>(
         tx: &TTx,
         requirements: I,
-    ) -> Result<(Vec<SubstateRecord>, HashSet<SubstateRequirementRef<'a>>), StorageError> {
+    ) -> Result<(Vec<SubstateRecord>, HashSet<VersionedSubstateIdRef<'a>>), StorageError> {
         let mut substate_ids = requirements.into_iter().collect::<HashSet<_>>();
         let found = tx.substates_get_any(&substate_ids)?;
         for f in &found {
@@ -230,7 +226,7 @@ impl SubstateRecord {
         Ok((found, substate_ids))
     }
 
-    pub fn get_all<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = SubstateRequirementRef<'a>>>(
+    pub fn get_all<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = VersionedSubstateIdRef<'a>>>(
         tx: &TTx,
         requirements: I,
     ) -> Result<Vec<SubstateRecord>, StorageError> {

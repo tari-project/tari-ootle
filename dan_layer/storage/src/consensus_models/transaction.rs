@@ -164,6 +164,13 @@ impl TransactionRecord {
 
     pub fn abort(&mut self, reason: RejectReason) -> &mut Self {
         self.abort_reason = Some(reason);
+        let receipt = self.id().into_receipt_address();
+        let id = VersionedSubstateId::for_tx_receipt(receipt);
+        self.resulting_outputs = Some(vec![VersionedSubstateIdLockIntent::new(
+            id,
+            SubstateLockType::Output,
+            true,
+        )]);
         self
     }
 

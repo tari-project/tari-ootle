@@ -973,6 +973,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             })
             .collect::<Result<Vec<_>, StorageError>>()?;
 
+        if insert.is_empty() {
+            return Ok(());
+        }
+
         diesel::insert_or_ignore_into(transactions::table)
             .values(insert)
             .execute(self.connection())
@@ -1207,6 +1211,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::{transaction_pool, transaction_pool_state_updates};
 
         let transaction_ids = transaction_ids.into_iter().map(serialize_hex).collect::<Vec<_>>();
+        if transaction_ids.is_empty() {
+            return Ok(vec![]);
+        }
 
         let txs = diesel::delete(transaction_pool::table)
             .filter(transaction_pool::transaction_id.eq_any(&transaction_ids))
@@ -1354,6 +1361,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 )
             })
             .collect::<Vec<_>>();
+        if values.is_empty() {
+            return Ok(());
+        }
 
         diesel::insert_into(missing_transactions::table)
             .values(values)
@@ -1466,6 +1476,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 )
             })
             .collect::<Vec<_>>();
+        if values.is_empty() {
+            return Ok(());
+        }
 
         diesel::insert_into(foreign_missing_transactions::table)
             .values(values)
@@ -1793,22 +1806,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn substates_purge_down_values(&mut self) -> Result<(), StorageError> {
-        use crate::schema::substates;
-
-        diesel::update(substates::table)
-            .filter(substates::destroyed_by_transaction.is_not_null())
-            .filter(substates::data.is_not_null())
-            .set(substates::data.eq(None::<String>))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_down (update substates)",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
     fn foreign_substate_pledges_save(
         &mut self,
         transaction_id: &TransactionId,
@@ -1871,8 +1868,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
     ) -> Result<(), StorageError> {
         use crate::schema::foreign_substate_pledges;
 
+        let mut transaction_ids = transaction_ids.into_iter().peekable();
+        if transaction_ids.peek().is_none() {
+            return Ok(());
+        }
+
         let num_deleted = diesel::delete(foreign_substate_pledges::table)
-            .filter(foreign_substate_pledges::transaction_id.eq_any(transaction_ids.into_iter().map(serialize_hex)))
+            .filter(foreign_substate_pledges::transaction_id.eq_any(transaction_ids.map(serialize_hex)))
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "foreign_substate_pledges_remove_many",
@@ -2183,6 +2185,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 })
             })
             .collect::<Vec<_>>();
+        if values.is_empty() {
+            return Ok(());
+        }
 
         diesel::insert_into(lock_conflicts::table)
             .values(values)
@@ -2202,6 +2207,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::lock_conflicts;
 
         let tx_ids = transaction_ids.into_iter().map(serialize_hex).collect::<Vec<_>>();
+        if tx_ids.is_empty() {
+            return Ok(());
+        }
         let num_deleted = diesel::delete(lock_conflicts::table)
             .filter(
                 lock_conflicts::depends_on_tx

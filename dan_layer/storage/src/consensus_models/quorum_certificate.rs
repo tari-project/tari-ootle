@@ -199,10 +199,12 @@ impl QuorumCertificate {
         tx.quorum_certificates_get(qc_id)
     }
 
-    pub fn get_all<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = &'a QcId>>(
-        tx: &TTx,
-        qc_ids: I,
-    ) -> Result<Vec<Self>, StorageError> {
+    pub fn get_all<'a, TTx, I>(tx: &TTx, qc_ids: I) -> Result<Vec<Self>, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        I: IntoIterator<Item = &'a QcId>,
+        I::IntoIter: ExactSizeIterator,
+    {
         tx.quorum_certificates_get_all(qc_ids)
     }
 

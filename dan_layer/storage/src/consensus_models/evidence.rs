@@ -13,6 +13,7 @@ use tari_dan_common_types::{
     LockIntent,
     NumPreshards,
     ShardGroup,
+    SubstateAddress,
     SubstateLockType,
     SubstateRequirement,
     ToSubstateAddress,
@@ -56,7 +57,9 @@ impl Evidence {
             // Version does not affect the shard group
             let substate_address = obj.to_substate_address_zero_version();
             let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence.add_shard_group(sg).insert_empty_input(obj.into_substate_id());
+            evidence
+                .add_shard_group(sg)
+                .insert_unpledged_input(obj.into_substate_id());
         }
 
         for obj in outputs {
@@ -80,28 +83,59 @@ impl Evidence {
         resulting_outputs: O,
     ) -> Self
     where
-        L1: LockIntent,
+        L1: LockIntent + Clone,
         I: IntoIterator<Item = L1>,
-        L2: LockIntent,
+        L2: LockIntent + Clone,
         O: IntoIterator<Item = L2>,
     {
         let mut evidence = Self::empty();
 
         for obj in resolved_inputs {
-            let substate_address = obj.to_substate_address();
-            let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence.add_shard_group(sg).insert_from_lock_intent(obj);
+            evidence.insert_from_lock_intent(num_preshards, num_committees, obj);
         }
 
         for obj in resulting_outputs {
-            let substate_address = obj.to_substate_address();
-            let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence.add_shard_group(sg).insert_from_lock_intent(obj);
+            evidence.insert_from_lock_intent(num_preshards, num_committees, obj);
         }
 
-        evidence.evidence.sort_keys();
-
         evidence
+    }
+
+    pub fn insert_from_lock_intent<L: LockIntent + Clone>(
+        &mut self,
+        num_preshards: NumPreshards,
+        num_committees: u32,
+        lock: L,
+    ) -> &mut Self {
+        if lock.substate_id().is_global() {
+            for sg in num_preshards.all_shard_groups_iter(num_committees) {
+                self.add_shard_group(sg).insert_from_lock_intent(lock.clone());
+            }
+        } else {
+            let substate_address = lock.to_substate_address();
+            let sg = substate_address.to_shard_group(num_preshards, num_committees);
+            self.add_shard_group(sg).insert_from_lock_intent(lock);
+        }
+        self.evidence.sort_keys();
+        self
+    }
+
+    pub fn insert_unpledged_from_substate_id(
+        &mut self,
+        num_preshards: NumPreshards,
+        num_committees: u32,
+        substate_id: SubstateId,
+    ) -> &mut Self {
+        if substate_id.is_global() {
+            for sg in num_preshards.all_shard_groups_iter(num_committees) {
+                self.add_shard_group(sg).insert_unpledged_input(substate_id.clone());
+            }
+        } else {
+            let substate_address = SubstateAddress::from_substate_id(&substate_id, 0);
+            let sg = substate_address.to_shard_group(num_preshards, num_committees);
+            self.add_shard_group(sg).insert_unpledged_input(substate_id);
+        }
+        self
     }
 
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = (&ShardGroup, &SubstateId, &Option<EvidenceInputLockData>)> {
@@ -184,8 +218,19 @@ impl Evidence {
         self.evidence.get_mut(shard_group)
     }
 
+    pub fn abort(&mut self) -> &mut Self {
+        for (_, ev_mut) in &mut self.evidence {
+            ev_mut.abort();
+        }
+        self
+    }
+
     pub fn has(&self, shard_group: &ShardGroup) -> bool {
         self.evidence.contains_key(shard_group)
+    }
+
+    pub fn has_inputs(&self, shard_group: ShardGroup) -> bool {
+        self.evidence.get(&shard_group).is_some_and(|e| !e.inputs.is_empty())
     }
 
     pub fn has_and_not_empty(&self, shard_group: &ShardGroup) -> bool {
@@ -209,7 +254,11 @@ impl Evidence {
     }
 
     pub fn add_shard_group(&mut self, shard_group: ShardGroup) -> &mut ShardGroupEvidence {
-        self.evidence.entry(shard_group).or_default()
+        if !self.evidence.contains_key(&shard_group) {
+            // We cannot use entry() because we want to insert sorted
+            self.evidence.insert_sorted(shard_group, ShardGroupEvidence::default());
+        }
+        self.evidence.get_mut(&shard_group).expect("added above")
     }
 
     pub fn shard_groups_iter(&self) -> impl Iterator<Item = &ShardGroup> {
@@ -369,22 +418,25 @@ pub struct ShardGroupEvidence {
 
 impl ShardGroupEvidence {
     pub fn insert_from_lock_intent<T: LockIntent>(&mut self, lock: T) -> &mut Self {
-        if lock.lock_type().is_input() {
+        self.insert(lock.substate_id().clone(), lock.version_to_lock(), lock.lock_type())
+    }
+
+    pub fn insert(&mut self, substate_id: SubstateId, version_to_lock: u32, lock_type: SubstateLockType) -> &mut Self {
+        if lock_type.is_input() {
             self.inputs.insert_sorted(
-                lock.substate_id().clone(),
+                substate_id,
                 Some(EvidenceInputLockData {
-                    is_write: lock.lock_type().is_write(),
-                    version: lock.version_to_lock(),
+                    is_write: lock_type.is_write(),
+                    version: version_to_lock,
                 }),
             );
         } else {
-            self.outputs
-                .insert_sorted(lock.substate_id().clone(), lock.version_to_lock());
+            self.outputs.insert_sorted(substate_id, version_to_lock);
         }
         self
     }
 
-    pub fn insert_empty_input(&mut self, substate_id: SubstateId) -> &mut Self {
+    pub fn insert_unpledged_input(&mut self, substate_id: SubstateId) -> &mut Self {
         self.inputs.insert_sorted(substate_id, None);
         self
     }
@@ -410,6 +462,10 @@ impl ShardGroupEvidence {
         &self.inputs
     }
 
+    pub fn all_pledged_inputs_iter(&self) -> impl Iterator<Item = (&SubstateId, &EvidenceInputLockData)> {
+        self.inputs.iter().filter_map(|(id, ev)| Some((id, ev.as_ref()?)))
+    }
+
     pub fn input_lock_intents(&self) -> impl Iterator<Item = RequireLockIntentRef<'_>> + '_ {
         self.inputs.iter().filter_map(|(substate_id, e)| {
             e.as_ref()
@@ -421,12 +477,21 @@ impl ShardGroupEvidence {
         &self.outputs
     }
 
-    pub fn to_output_pledge_iter(&self) -> impl Iterator<Item = SubstatePledge> + '_ {
+    pub fn output_pledge_iter(&self) -> impl Iterator<Item = SubstatePledge> + '_ {
         self.outputs
             .iter()
             .map(|(substate_id, version)| SubstatePledge::Output {
                 substate_id: VersionedSubstateId::new(substate_id.clone(), *version),
             })
+    }
+
+    pub fn abort(&mut self) -> &mut Self {
+        for (_, input) in &mut self.inputs {
+            *input = None;
+        }
+
+        self.outputs.clear();
+        self
     }
 
     fn sort_substates(&mut self) {

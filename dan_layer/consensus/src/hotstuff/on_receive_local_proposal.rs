@@ -364,14 +364,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     .shard_key
                     .to_shard_group(self.config.consensus_constants.num_preshards, num_committees);
                 registered_shard_group = Some(next_shard_group);
-                let timer = TraceTimer::info(LOG_TARGET, "New Epoch");
                 self.store.with_write_tx(|tx| {
                     // Generate checkpoint
                     create_epoch_checkpoint(tx, epoch, local_committee_info.shard_group())?;
-                    // Clean the DOWNed values
-                    // TODO: we do this only after epoch end because during catch up sync we need to provide
-                    // SubstateRecord::purge_down_values(tx)?;
-
                     // Create the next genesis
                     let mut genesis = Block::genesis(
                         self.config.network,
@@ -395,7 +390,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
                     Ok::<_, HotStuffError>(())
                 })?;
-                timer.done();
 
                 // TODO: We should exit consensus to sync for the epoch - when this is implemented, we will not
                 // need to create the genesis, set the pacemaker, etc.

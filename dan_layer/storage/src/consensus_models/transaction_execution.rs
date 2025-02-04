@@ -3,11 +3,12 @@
 
 use std::{fmt::Display, time::Duration};
 
+use tari_dan_common_types::{NumPreshards, ShardGroup, ToSubstateAddress};
 use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
 use tari_transaction::TransactionId;
 
 use crate::{
-    consensus_models::{AbortReason, BlockId, Decision, VersionedSubstateIdLockIntent},
+    consensus_models::{AbortReason, BlockId, Decision, Evidence, VersionedSubstateIdLockIntent},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
@@ -82,6 +83,26 @@ impl TransactionExecution {
     pub fn set_abort_reason(&mut self, abort_reason: RejectReason) -> &mut Self {
         self.abort_reason = Some(abort_reason);
         self
+    }
+
+    pub fn to_evidence(&self, num_preshards: NumPreshards, num_committees: u32) -> Evidence {
+        let mut evidence = Evidence::from_inputs_and_outputs(
+            num_preshards,
+            num_committees,
+            self.resolved_inputs(),
+            self.resulting_outputs(),
+        );
+        if self.decision().is_abort() {
+            evidence.abort();
+        }
+        evidence
+    }
+
+    pub fn is_involved(&self, num_preshards: NumPreshards, num_committees: u32, shard_group: ShardGroup) -> bool {
+        self.resolved_inputs()
+            .iter()
+            .chain(self.resulting_outputs())
+            .any(|obj| obj.to_substate_address().to_shard_group(num_preshards, num_committees) == shard_group)
     }
 
     pub fn for_block(self, block_id: BlockId) -> BlockTransactionExecution {

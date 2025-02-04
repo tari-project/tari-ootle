@@ -27,9 +27,8 @@ use tari_dan_common_types::{
     NumPreshards,
     ShardGroup,
     SubstateAddress,
-    SubstateRequirement,
-    SubstateRequirementRef,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
 use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash};
@@ -51,12 +50,10 @@ use super::{
     QuorumCertificate,
     SubstateChange,
     SubstateDestroyedProof,
-    SubstatePledge,
     SubstateRecord,
     TransactionAtom,
     ValidatorSchnorrSignature,
     ValidatorStatsUpdate,
-    VersionedSubstateIdLockIntent,
 };
 use crate::{
     consensus_models::{
@@ -883,7 +880,7 @@ impl Block {
 
         let receipt_ids = committed
             .map(|atom| TransactionReceiptAddress::from_array(atom.id.into_array()))
-            .map(|id| SubstateRequirement::versioned(id, 0))
+            .map(VersionedSubstateId::for_tx_receipt)
             .collect::<Vec<_>>();
 
         let receipts = SubstateRecord::get_all(tx, receipt_ids.iter().map(Into::into))?;
@@ -897,6 +894,11 @@ impl Block {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(receipts)
+    }
+
+    /// Returns the QC that justifies this block
+    pub fn get_justify_qc<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<QuorumCertificate, StorageError> {
+        tx.quorum_certificates_get_by_block_id(self.id())
     }
 
     pub fn update_nodes<TTx, TFnOnLock, TFnOnCommit, E>(
@@ -1019,24 +1021,49 @@ impl Block {
         Ok(())
     }
 
-    pub fn get_block_pledge<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<BlockPledge, StorageError> {
+    pub fn get_block_pledge<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        for_shard_group: ShardGroup,
+    ) -> Result<BlockPledge, StorageError> {
         if self.is_committed() {
+            // TODO: this is only a problem if we do not preserve DOWN substates "for some reasonable time".
             warn!(
                 target: LOG_TARGET,
-                "get_block_pledge: Block {} is already committed. Locks likely would already be released and therefore no pledges will be provided", self.as_leaf_block()
+                "get_block_pledge: Block {} is already committed. Some substates may be DOWN and therefore these pledges will not be provided", self.as_leaf_block()
             );
         }
-        let mut pledges = BlockPledge::new();
-        for atom in self.commands().iter().filter_map(|cmd| {
-            cmd.local_prepare()
-                .filter(|atom| !atom.evidence.is_committee_output_only(self.shard_group()))
-                .or_else(|| cmd.local_accept())
-        }) {
-            // No pledges for aborted transactions
-            if atom.decision.is_abort() {
-                continue;
-            }
 
+        let log_bool = |context: &str, atom: &TransactionAtom, val: bool| {
+            if !val {
+                debug!(
+                    target: LOG_TARGET,
+                    "get_block_pledge: Excluding {atom} because {context}"
+                );
+            }
+            val
+        };
+
+        let applicable_transactions = self
+            .commands()
+            .iter()
+            .filter_map(|c| {
+                c.local_prepare()
+                    // No need to broadcast LocalPrepare if the committee is output only (TODO: this no longer applies as output only skips LocalPrepare, so do we need this?)
+                    .filter(|atom| log_bool("LocalPrepare, local output-only", atom, !atom.evidence.is_committee_output_only(self.shard_group())))
+                    .or_else(|| {
+                        // Avoid pledging twice - for input-involved SGs we have already sent pledges in LocalPrepare phase. For output-only, we need to pledge in the LocalAccept phase
+                        c.local_accept()
+                            .filter(|atom| log_bool("LocalAccept, foreign input-involved", atom, atom.evidence.is_committee_output_only(for_shard_group)))
+                    })
+            })
+            .filter(|atom| log_bool("Is ABORT", atom, atom.decision.is_commit()))
+            .filter(|atom| log_bool("Foreign SG not involved", atom, atom.evidence.has(&for_shard_group)));
+
+        let mut num_applicable = 0;
+        let mut pledges = BlockPledge::new();
+        for atom in applicable_transactions {
+            num_applicable += 1;
             let evidence = atom
                 .evidence
                 .get(&self.shard_group())
@@ -1045,49 +1072,44 @@ impl Block {
                 })?;
 
             // TODO(perf): O(n) queries
-            let pledged = evidence
-                .inputs()
-                .iter()
-                .filter_map(|(substate_id, ev)| Some((substate_id, ev.as_ref()?)));
             let substates = SubstateRecord::get_all(
                 tx,
-                pledged
-                    .clone()
-                    .map(|(substate_id, ev)| SubstateRequirementRef::new(substate_id, Some(ev.version))),
+                evidence
+                    .all_pledged_inputs_iter()
+                    .map(|(substate_id, ev)| VersionedSubstateIdRef::new(substate_id, ev.version)),
             )?;
-            let num_locked = substates.len();
-            let locked_values = substates.into_iter().zip(pledged.map(|(_, e)| e)).map(|(s, e)| {
-                let id = VersionedSubstateId::new(s.substate_id, s.version);
-                (
-                    VersionedSubstateIdLockIntent::new(id, e.as_lock_type(), true),
-                    s.substate_value,
-                )
-            });
 
             debug!(
                 target: LOG_TARGET,
                 "get_block_pledge: {} locked for atom {} in block {}",
-                num_locked, atom.id, self
+                substates.len(), atom.id, self
             );
 
             let self_as_leaf = self.as_leaf_block();
-            for (lock_intent, maybe_value) in locked_values {
-                let pledge = SubstatePledge::try_create(&lock_intent, maybe_value).ok_or_else(|| {
-                    StorageError::DataInconsistency {
-                        details: format!(
-                            "Pledge {} has no substate value however a value is required",
-                            lock_intent,
-                        ),
-                    }
+            for substate in substates {
+                let version = substate.version();
+                let id = substate.substate_id;
+                let value = substate.substate_value.ok_or_else(|| StorageError::DataInconsistency {
+                    details: format!(
+                        "Pledge {}:{} has no substate value however a value is required",
+                        id, version
+                    ),
                 })?;
+
                 debug!(
                     target: LOG_TARGET,
-                    "get_block_pledge: Adding pledge {} for atom {} in block {}",
-                    pledge, atom.id, self_as_leaf
+                    "get_block_pledge: Adding pledge {}:{} for atom {} in block {}",
+                    id, version, atom.id, self_as_leaf
                 );
-                pledges.add_substate_pledge(atom.id, pledge);
+                pledges.add_substate_pledge(id, version, value);
             }
         }
+
+        debug!(
+            target: LOG_TARGET,
+            "get_block_pledge: {num_applicable} pledge(s) for shard group {for_shard_group}"
+        );
+
         Ok(pledges)
     }
 

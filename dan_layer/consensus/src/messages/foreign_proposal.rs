@@ -62,7 +62,7 @@ impl Display for ForeignProposalMessage {
             "ForeignProposalMessage({}, {}, {} pledged substate(s))",
             self.block,
             self.justify_qc,
-            self.block_pledge.num_substates_pledged()
+            self.block_pledge.len()
         )
     }
 }

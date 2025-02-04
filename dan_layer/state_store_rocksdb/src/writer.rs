@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -1276,85 +1276,65 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         shard: Shard,
         diff: &VersionedStateHashTreeDiff,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::{blocks, pending_state_tree_diffs};
+        let operation = "pending_state_tree_diffs_insert";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let insert = (
-            pending_state_tree_diffs::block_id.eq(serialize_hex(block_id)),
-            pending_state_tree_diffs::shard.eq(shard.as_u32() as i32),
-            pending_state_tree_diffs::block_height.eq(blocks::table
-                .select(blocks::height)
-                .filter(blocks::block_id.eq(serialize_hex(block_id)))
-                .single_value()
-                .assume_not_null()),
-            pending_state_tree_diffs::version.eq(diff.version as i64),
-            pending_state_tree_diffs::diff_json.eq(serialize_json(&diff.diff)?),
-        );
+        // Get the corresponding block height
+        let block_key = BlockModel::key_from_block_id(&block_id);
+        let block = BlockModel::get(tx, operation, &block_key)?;
+        let block_height = block.height();
 
-        diesel::insert_into(pending_state_tree_diffs::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "pending_state_tree_diffs_insert",
-                source: e,
-            })?;
+        let value = PendingStateTreeDiffData {
+            block_id,
+            block_height,
+            shard,
+            diff: diff.clone(),
+        };
+        PendingStateTreeDiffModel::put(self.db.clone(), tx, operation, &value)?;
 
         Ok(())
-        */
     }
 
     fn pending_state_tree_diffs_remove_by_block(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::pending_state_tree_diffs;
+        let operation = "pending_state_tree_diffs_remove_by_block";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::delete(pending_state_tree_diffs::table)
-            .filter(pending_state_tree_diffs::block_id.eq(serialize_hex(block_id)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "pending_state_tree_diffs_remove_by_block",
-                source: e,
-            })?;
+        let key_prefix = PendingStateTreeDiffModel::key_from_block_and_height(block_id, None);
+        let values = PendingStateTreeDiffModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?;
+        for value in values {
+            let key = PendingStateTreeDiffModel::key(&value);
+            PendingStateTreeDiffModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
 
         Ok(())
-        */
     }
 
     fn pending_state_tree_diffs_remove_and_return_by_block(
         &mut self,
         block_id: &BlockId,
     ) -> Result<IndexMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::pending_state_tree_diffs;
+        let operation = "pending_state_tree_diffs_remove_and_return_by_block";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let diff_recs = pending_state_tree_diffs::table
-            .filter(pending_state_tree_diffs::block_id.eq(serialize_hex(block_id)))
-            .order_by(pending_state_tree_diffs::block_height.asc())
-            .get_results::<sql_models::PendingStateTreeDiff>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "pending_state_tree_diffs_remove_by_block",
-                source: e,
-            })?;
+        // get all diff records from database
+        let key_prefix = PendingStateTreeDiffModel::key_from_block_and_height(block_id, None);
+        let diff_recs = PendingStateTreeDiffModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?;
 
-        diesel::delete(pending_state_tree_diffs::table)
-            .filter(pending_state_tree_diffs::id.eq_any(diff_recs.iter().map(|d| d.id)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "pending_state_tree_diffs_remove_by_block",
-                source: e,
-            })?;
+        // delete all of them from database
+        for diff in &diff_recs {
+            let key = PendingStateTreeDiffModel::key(&diff);
+            PendingStateTreeDiffModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
 
+        // create and return an indexmap with all the diff recors
         let mut diffs = IndexMap::new();
         for diff in diff_recs {
-            let shard = Shard::from(diff.shard as u32);
-            let diff = PendingShardStateTreeDiff::try_from(diff)?;
-            diffs.entry(shard).or_insert_with(Vec::new).push(diff);
+            let key = diff.shard;
+            let value = PendingShardStateTreeDiff::from(diff);
+            diffs.entry(key).or_insert_with(Vec::new).push(value);
         }
 
         Ok(diffs)
-        */
     }
 
     fn state_tree_nodes_insert(&mut self, shard: Shard, key: NodeKey, node: Node<Version>) -> Result<(), StorageError> {

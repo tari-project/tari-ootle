@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -215,9 +215,9 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         let mut block_ids = vec![];
 
         let mut block_id = *end_block;
-        while block_id != *start_block || block_id != BlockId::genesis() {
+        while block_id != *start_block && block_id != BlockId::genesis() {
             let key: String = BlockModel::key_from_block_id(&block_id);
-            let block = BlockModel::get(&self.tx, "blocks_parent_id", &key)?;
+            let block = BlockModel::get(&self.tx, "get_block_ids_between", &key)?;
             block_ids.push(block.id().to_string());
             block_id = *block.parent();
         }
@@ -1625,20 +1625,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         block_id: &BlockId,
     ) -> Result<HashMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::pending_state_tree_diffs;
-
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::NotFound {
-                item: "pending_state_tree_diffs_get_all_up_to_commit_block: Block".to_string(),
+                item: "pending_state_tree_diffs_get_all_up_to_commit_block: Block",
                 key: block_id.to_string(),
             });
         }
-
+        
         // Get the last committed block
         let committed_block_id = self.get_commit_block_id()?;
-
+        
         // Block may modify state with zero commands because the justify a block that changes state
         let block_ids = self.get_block_ids_between(&committed_block_id, block_id)?;
 
@@ -1646,19 +1642,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             return Ok(HashMap::new());
         }
 
-        let diff_recs = pending_state_tree_diffs::table
-            .filter(pending_state_tree_diffs::block_id.eq_any(block_ids))
-            .order_by(pending_state_tree_diffs::block_height.asc())
-            .get_results::<sql_models::PendingStateTreeDiff>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "pending_state_tree_diffs_get_all_pending",
-                source: e,
-            })?;
+        let mut diff_recs = vec![];
+        for block_id in block_ids {
+            let key_prefix = PendingStateTreeDiffModel::key_from_block_str_and_height(&block_id, None);
+            let diffs = PendingStateTreeDiffModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?;
+            diff_recs.extend(diffs);
+        }
 
         let mut diffs = HashMap::new();
         for diff in diff_recs {
-            let shard = Shard::from(diff.shard as u32);
-            let diff = PendingShardStateTreeDiff::try_from(diff)?;
+            let shard = diff.shard;
+            let diff = PendingShardStateTreeDiff::from(diff);
             diffs
                 .entry(shard)
                 .or_insert_with(Vec::new) //PendingStateTreeDiff::default)
@@ -1666,7 +1660,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         Ok(diffs)
-        */
     }
 
     fn state_transitions_get_n_after(

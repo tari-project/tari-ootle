@@ -12,6 +12,8 @@ mod substates;
 #[cfg(test)]
 mod misc;
 #[cfg(test)]
+mod pending_state_tree_diff;
+#[cfg(test)]
 mod quorum_certificates;
 #[cfg(test)]
 mod foreign_proposals;

@@ -1,11 +1,12 @@
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
-use tari_dan_storage::consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionAtom, ValidatorSignature};
+use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, ExtraFieldKey, NodeHeight, NumPreshards, ShardGroup};
+use tari_dan_storage::consensus_models::{Block, BlockId, Command, Decision, QcId, SubstateRecord, TransactionAtom, ValidatorSignature};
 use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress}, prelude::AccessRules};
 use tari_template_lib::prelude::ComponentAccessRules;
+use tari_utilities::epoch_time::EpochTime;
 use tempfile::tempdir;
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_transaction::TransactionId;
@@ -113,4 +114,41 @@ pub fn create_random_vn_signature() -> ValidatorSignature {
         public_key,
         signature,
     }
+}
+
+pub fn create_block(parent: Option<&Block>) -> Block {
+    let network = Default::default();
+    let num_preshards = NumPreshards::P64;
+
+    let Some(parent) = parent else {
+        return Block::zero_block(network, NumPreshards::P64);
+    };
+
+    let atom1 = create_tx_atom();
+
+    // This prevents all blocks to have the same hash/id
+    let random_merkle_root = create_random_hash();
+    eprintln!("*** random_merkle: {}", random_merkle_root);
+
+    Block::create(
+        network,
+        *parent.id(),
+        parent.justify().clone(),
+        NodeHeight(1),
+        Epoch(0),
+        ShardGroup::all_shards(num_preshards),
+        Default::default(),
+        // Need to have a command in, otherwise this block will not be included internally in the query because it
+        // cannot cause a state change without any commands
+        [Command::Prepare(atom1.clone())].into_iter().collect(),
+        random_merkle_root,
+        Default::default(),
+        Default::default(),
+        None,
+        EpochTime::now().as_u64(),
+        0,
+        FixedHash::zero(),
+        ExtraData::default(),
+    )
+    .unwrap()
 }

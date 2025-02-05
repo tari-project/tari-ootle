@@ -151,17 +151,6 @@ enum PayloadResultStatus {
   Finalized = 1;
 }
 
-message GetVirtualSubstateRequest {
-  bytes address = 1;
-}
-
-message GetVirtualSubstateResponse {
-  // Encoded Substate
-  bytes substate = 1;
-  repeated tari.dan.consensus.QuorumCertificate quorum_certificates = 2;
-}
-
-
 // Minimal substate data
 message SubstateData {
   bytes substate_id = 1;
@@ -169,8 +158,6 @@ message SubstateData {
   bytes substate_value = 3;
   bytes created_transaction = 7;
 }
-
-
 
 message SubstateUpdate {
   oneof update {
@@ -197,6 +184,19 @@ message SyncBlocksRequest {
   // Optional - If start_block_id is provided, this is ignored. Must be provided if start_block_id is not provided. 
   // In which case, start block is implicitly the first block of the epoch.
   tari.dan.common.Epoch epoch = 2;
+  // If true, QCs will be streamed.
+  bool stream_qcs = 3;
+  // Weather to stream all substates, only transaction receipts or do not stream any substates
+  StreamSubstateSelection stream_substates = 4;
+  // If true, transactions in the block will be streamed
+  bool stream_transactions = 5;
+}
+
+// Clippy complains about too many bools and prefers an enum
+enum StreamSubstateSelection {
+  No = 0;
+  All = 1;
+  TransactionReceiptsOnly = 2;
 }
 
 message SyncBlocksResponse {
@@ -205,16 +205,15 @@ message SyncBlocksResponse {
     QuorumCertificates quorum_certificates = 2;
     uint32 substate_count = 3;
     SubstateUpdate substate_update = 4;
-    Transactions transactions = 5;
+    uint32 transaction_count = 5;
+    tari.dan.transaction.Transaction transaction = 6;
+    uint32 transaction_receipt_count = 7;
+    SubstateCreatedProof transaction_receipt = 8;
   }
 }
 
 message QuorumCertificates {
   repeated tari.dan.consensus.QuorumCertificate quorum_certificates = 1;
-}
-
-message Transactions {
-  repeated tari.dan.transaction.Transaction transactions = 1;
 }
 
 message GetHighQcRequest {}

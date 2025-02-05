@@ -19,8 +19,8 @@ pub enum SubstateType {
     UnclaimedConfidentialOutput,
     NonFungible,
     TransactionReceipt,
-    FeeClaim,
     NonFungibleIndex,
+    ValidatorFeePool,
     Template,
 }
 
@@ -33,8 +33,8 @@ impl SubstateType {
             SubstateType::UnclaimedConfidentialOutput => "commitment",
             SubstateType::NonFungible => "nft",
             SubstateType::TransactionReceipt => "txreceipt",
-            SubstateType::FeeClaim => "feeclaim",
             SubstateType::NonFungibleIndex => "nftindex",
+            SubstateType::ValidatorFeePool => "vnfp",
             SubstateType::Template => "template",
         }
     }
@@ -49,9 +49,9 @@ impl From<&SubstateValue> for SubstateType {
             SubstateValue::UnclaimedConfidentialOutput(_) => SubstateType::UnclaimedConfidentialOutput,
             SubstateValue::NonFungible(_) => SubstateType::NonFungible,
             SubstateValue::TransactionReceipt(_) => SubstateType::TransactionReceipt,
-            SubstateValue::FeeClaim(_) => SubstateType::FeeClaim,
             SubstateValue::NonFungibleIndex(_) => SubstateType::NonFungibleIndex,
             SubstateValue::Template(_) => SubstateType::Template,
+            SubstateValue::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
         }
     }
 }

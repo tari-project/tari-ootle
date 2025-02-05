@@ -217,11 +217,11 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                 }),
             },
             InstructionType::ClaimValidatorFees => Instruction::ClaimValidatorFees {
-                epoch: request.claim_validator_fees_epoch,
-                validator_public_key: PublicKey::from_canonical_bytes(
-                    &request.claim_validator_fees_validator_public_key,
-                )
-                .map_err(|e| anyhow!("claim_validator_fees_validator_public_key: {}", e))?,
+                address: request
+                    .claim_validator_fees_address
+                    .as_slice()
+                    .try_into()
+                    .map_err(|e| anyhow!("claim_validator_fees_address: {e}"))?,
             },
             InstructionType::DropAllProofsInWorkspace => Instruction::DropAllProofsInWorkspace,
             InstructionType::AssertBucketContains => {
@@ -295,13 +295,9 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.claim_burn_public_key = claim.public_key.to_vec();
                 result.claim_burn_withdraw_proof = claim.withdraw_proof.map(Into::into);
             },
-            Instruction::ClaimValidatorFees {
-                epoch,
-                validator_public_key,
-            } => {
+            Instruction::ClaimValidatorFees { address } => {
                 result.instruction_type = InstructionType::ClaimValidatorFees as i32;
-                result.claim_validator_fees_epoch = epoch;
-                result.claim_validator_fees_validator_public_key = validator_public_key.to_vec();
+                result.claim_validator_fees_address = address.as_slice().to_vec();
             },
             Instruction::DropAllProofsInWorkspace => {
                 result.instruction_type = InstructionType::DropAllProofsInWorkspace as i32;

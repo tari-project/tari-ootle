@@ -31,7 +31,6 @@ use tari_dan_common_types::{Epoch, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    instruction::Instruction,
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
@@ -61,8 +60,6 @@ pub struct DryRunTransactionProcessor<TSubstateCache> {
     transaction_autofiller:
         TransactionAutofiller<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, TSubstateCache>,
     template_manager: TemplateManager<PeerAddress>,
-    substate_scanner:
-        Arc<SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, TSubstateCache>>,
 }
 
 impl<TSubstateCache> DryRunTransactionProcessor<TSubstateCache>
@@ -77,7 +74,7 @@ where TSubstateCache: SubstateCache + 'static
         >,
         template_manager: TemplateManager<PeerAddress>,
     ) -> Self {
-        let transaction_autofiller = TransactionAutofiller::new(substate_scanner.clone());
+        let transaction_autofiller = TransactionAutofiller::new(substate_scanner);
 
         Self {
             config,
@@ -85,7 +82,6 @@ where TSubstateCache: SubstateCache + 'static
             client_provider,
             transaction_autofiller,
             template_manager,
-            substate_scanner,
         }
     }
 
@@ -229,7 +225,7 @@ where TSubstateCache: SubstateCache + 'static
 
     async fn get_virtual_substates(
         &self,
-        transaction: &Transaction,
+        _transaction: &Transaction,
         epoch: Epoch,
     ) -> Result<VirtualSubstates, DryRunTransactionProcessorError> {
         let mut virtual_substates = VirtualSubstates::new();
@@ -238,40 +234,6 @@ where TSubstateCache: SubstateCache + 'static
             VirtualSubstateId::CurrentEpoch,
             VirtualSubstate::CurrentEpoch(epoch.as_u64()),
         );
-
-        let claim_instructions = transaction
-            .instructions()
-            .iter()
-            .chain(transaction.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::ClaimValidatorFees {
-                    epoch,
-                    validator_public_key,
-                } = instruction
-                {
-                    Some((Epoch(*epoch), validator_public_key.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        if !claim_instructions.is_empty() {
-            for (epoch, public_key) in claim_instructions {
-                let vn = self
-                    .epoch_manager
-                    .get_validator_node_by_public_key(epoch, public_key.clone())
-                    .await?;
-                let address = VirtualSubstateId::UnclaimedValidatorFee {
-                    epoch: epoch.as_u64(),
-                    address: public_key,
-                };
-                let virtual_substate = self
-                    .substate_scanner
-                    .get_virtual_substate_from_committee(address.clone(), vn.shard_key)
-                    .await?;
-                virtual_substates.insert(address, virtual_substate);
-            }
-        }
 
         Ok(virtual_substates)
     }

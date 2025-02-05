@@ -14,6 +14,7 @@ use crate::{serialization::deserialize_hex_try_from, sql_models::SubstateRecord}
 pub struct SubstateLock {
     #[allow(dead_code)]
     pub id: i32,
+    #[allow(dead_code)]
     pub block_id: String,
     pub transaction_id: String,
     pub substate_id: String,
@@ -56,10 +57,9 @@ impl SubstateLock {
             ),
         })?;
         Ok(consensus_models::LockedSubstateValue {
-            locked_by_block: deserialize_hex_try_from(&self.block_id)?,
             substate_id: id,
             lock: self.try_into_substate_lock()?,
-            value: substate_rec.map(|r| r.into_substate_value()),
+            value: substate_rec.and_then(|r| r.into_substate_value()),
         })
     }
 }

@@ -231,9 +231,22 @@ impl JsonRpcHandlers {
 
         let tx = self.state_store.create_read_tx().unwrap();
         match SubstateRecord::get(&tx, &request.address).optional() {
-            Ok(Some(state)) => Ok(JsonRpcResponse::success(answer_id, GetStateResponse {
-                data: state.into_substate().to_bytes(),
-            })),
+            Ok(Some(state)) => {
+                let Some(substate) = state.into_substate() else {
+                    return Err(JsonRpcResponse::error(
+                        answer_id,
+                        JsonRpcError::new(
+                            JsonRpcErrorReason::ApplicationError(100),
+                            format!("Substate {} is DOWN", request.address),
+                            json::Value::Null,
+                        ),
+                    ));
+                };
+
+                Ok(JsonRpcResponse::success(answer_id, GetStateResponse {
+                    data: substate.to_bytes(),
+                }))
+            },
             Ok(None) => Err(JsonRpcResponse::error(
                 answer_id,
                 JsonRpcError::new(
@@ -372,7 +385,7 @@ impl JsonRpcHandlers {
             Some(substate) => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::Up,
                 created_by_tx: Some(substate.created_by_transaction),
-                value: Some(substate.into_substate_value()),
+                value: substate.into_substate_value(),
             })),
             None => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::DoesNotExist,

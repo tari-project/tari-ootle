@@ -7,7 +7,6 @@ pub mod commit_result;
 pub mod component;
 pub mod confidential;
 pub mod events;
-pub mod fee_claim;
 pub mod fees;
 pub mod hashing;
 pub mod indexed_value;
@@ -35,6 +34,7 @@ pub mod id_provider;
 mod argument_parser;
 pub mod published_template;
 mod substate_serde;
+pub mod vn_fee_pool;
 
 pub use argument_parser::parse_arg;
 

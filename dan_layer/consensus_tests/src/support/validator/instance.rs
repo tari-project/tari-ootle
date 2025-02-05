@@ -67,7 +67,7 @@ impl Validator {
 
     pub fn get_transaction_pool_count(&self) -> usize {
         self.state_store
-            .with_read_tx(|tx| tx.transaction_pool_count(None, None, None))
+            .with_read_tx(|tx| tx.transaction_pool_count(None, None, None, false))
             .unwrap()
     }
 

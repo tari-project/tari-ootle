@@ -44,7 +44,7 @@ use tari_dan_storage::{
 use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_transaction::TransactionId;
 
-use crate::tracing::TraceTimer;
+use crate::{hotstuff::transaction_manager::TransactionLockConflicts, tracing::TraceTimer};
 
 const LOG_TARGET: &str = "tari::dan::consensus::block_change_set";
 
@@ -391,6 +391,10 @@ impl ProposedBlockChangeSet {
 
             // Save any transaction pool updates
             if let Some(ref update) = change.next_update {
+                if update.decision().is_abort() {
+                    // Remove lock conflicts for this transaction. This allows other transactions to be proposed.
+                    TransactionLockConflicts::remove_for_transactions(tx, Some(update.transaction_id()))?;
+                }
                 update.insert_for_block(tx, self.block.block_id())?;
             }
 

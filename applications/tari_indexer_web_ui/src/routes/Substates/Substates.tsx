@@ -51,7 +51,7 @@ import { shortenSubstateId, substateIdToString } from "@tari-project/typescript-
 import { listSubstates, getSubstate } from "../../utils/json_rpc";
 
 const PAGE_SIZE = 10;
-const SUBSTATE_TYPES = ["Component", "Resource", "Vault", "UnclaimedConfidentialOutput", "NonFungible", "TransactionReceipt", "FeeClaim"] as const;
+const SUBSTATE_TYPES = ["Component", "Resource", "Vault", "UnclaimedConfidentialOutput", "NonFungible", "TransactionReceipt", "ValidatorFeePool"] as const;
 
 function SubstatesLayout() {
   const [substates, setSubstates] = useState<any []>([]);

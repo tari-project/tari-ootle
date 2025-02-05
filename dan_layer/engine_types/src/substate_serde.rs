@@ -2,7 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 //! This module provides the serialization and deserialization of the SubstateId enum.
-//! The implementation is the same as the derive trait implementation, except in the human readable case where the
+//! The implementation is the same as the derive trait implementation, except in the human-readable case where the
 //! substate id is (de)serialized as a string.
 //! This allows SubstateId to be a key for a map when serializing as JSON (string key required)
 
@@ -18,10 +18,10 @@ use tari_template_lib::models::{
 };
 
 use crate::{
-    fee_claim::FeeClaimAddress,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
+    vn_fee_pool::ValidatorFeePoolAddress,
 };
 
 impl serde::Serialize for SubstateId {
@@ -65,11 +65,11 @@ impl serde::Serialize for SubstateId {
                 "TransactionReceipt",
                 __field0,
             ),
-            SubstateId::FeeClaim(ref __field0) => {
-                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 7u32, "FeeClaim", __field0)
-            },
             SubstateId::Template(ref __field0) => {
-                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 8u32, "Template", __field0)
+                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 7u32, "Template", __field0)
+            },
+            SubstateId::ValidatorFeePool(ref addr) => {
+                serde::Serializer::serialize_newtype_variant(serializer, "SubstateId", 8u32, "ValidatorFeePool", addr)
             },
         }
     }
@@ -130,8 +130,8 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     "NonFungible" => Ok(__Field::__field4),
                     "NonFungibleIndex" => Ok(__Field::__field5),
                     "TransactionReceipt" => Ok(__Field::__field6),
-                    "FeeClaim" => Ok(__Field::__field7),
-                    "Template" => Ok(__Field::__field8),
+                    "Template" => Ok(__Field::__field7),
+                    "ValidatorFeePool" => Ok(__Field::__field8),
                     _ => Err(serde::de::Error::unknown_variant(__value, VARIANTS)),
                 }
             }
@@ -146,8 +146,8 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                     b"NonFungible" => Ok(__Field::__field4),
                     b"NonFungibleIndex" => Ok(__Field::__field5),
                     b"TransactionReceipt" => Ok(__Field::__field6),
-                    b"FeeClaim" => Ok(__Field::__field7),
-                    b"Template" => Ok(__Field::__field8),
+                    b"Template" => Ok(__Field::__field7),
+                    b"ValidatorFeePool" => Ok(__Field::__field8),
                     _ => {
                         let __value = &String::from_utf8_lossy(__value);
                         Err(serde::de::Error::unknown_variant(__value, VARIANTS))
@@ -206,12 +206,12 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
                         SubstateId::TransactionReceipt,
                     ),
                     (__Field::__field7, __variant) => Result::map(
-                        serde::de::VariantAccess::newtype_variant::<FeeClaimAddress>(__variant),
-                        SubstateId::FeeClaim,
-                    ),
-                    (__Field::__field8, __variant) => Result::map(
                         serde::de::VariantAccess::newtype_variant::<PublishedTemplateAddress>(__variant),
                         SubstateId::Template,
+                    ),
+                    (__Field::__field8, __variant) => Result::map(
+                        serde::de::VariantAccess::newtype_variant::<ValidatorFeePoolAddress>(__variant),
+                        SubstateId::ValidatorFeePool,
                     ),
                 }
             }
@@ -225,8 +225,8 @@ impl<'de> serde::Deserialize<'de> for SubstateId {
             "NonFungible",
             "NonFungibleIndex",
             "TransactionReceipt",
-            "FeeClaim",
             "Template",
+            "ValidatorFeePool",
         ];
         if deserializer.is_human_readable() {
             let s = String::deserialize(deserializer)?;

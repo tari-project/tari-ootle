@@ -6,7 +6,7 @@ use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Duration};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tari_bor::{decode, decode_exact, encode};
+use tari_bor::decode;
 use tari_dan_common_types::{NodeAddressable, PeerAddress, SubstateRequirement};
 use tari_dan_p2p::{
     proto,
@@ -17,7 +17,6 @@ use tari_dan_storage::consensus_models::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
-    virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_networking::{MessageSpec, NetworkingHandle};
 use tari_transaction::{Transaction, TransactionId};
@@ -44,7 +43,6 @@ pub trait ValidatorNodeRpcClient: Send + Sync {
     ) -> Result<TransactionResultStatus, Self::Error>;
 
     async fn get_substate(&mut self, substate_req: &SubstateRequirement) -> Result<SubstateResult, Self::Error>;
-    async fn get_virtual_substate(&mut self, address: VirtualSubstateId) -> Result<VirtualSubstate, Self::Error>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -185,23 +183,6 @@ impl<TMsg: MessageSpec> ValidatorNodeRpcClient for TariValidatorNodeRpcClient<TM
             },
             SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
         }
-    }
-
-    async fn get_virtual_substate(&mut self, address: VirtualSubstateId) -> Result<VirtualSubstate, Self::Error> {
-        let mut client = self.client_connection().await?;
-
-        let request = proto::rpc::GetVirtualSubstateRequest {
-            address: encode(&address)?,
-        };
-
-        let resp = client.get_virtual_substate(request).await?;
-
-        // TODO: verify the quorum certificates
-        // for qc in resp.quorum_certificates {
-        //     let qc = QuorumCertificate::try_from(&qc)?;
-        // }
-
-        decode_exact(&resp.substate).map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))
     }
 
     async fn get_finalized_transaction_result(

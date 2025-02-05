@@ -5,9 +5,9 @@ use std::{borrow::Borrow, fmt::Display, str::FromStr};
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
 
-use crate::{shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
+use crate::{option::Displayable, shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
@@ -35,7 +35,7 @@ impl SubstateRequirement {
         }
     }
 
-    pub fn with_version<T: Into<SubstateId>>(id: T, version: u32) -> Self {
+    pub fn versioned<T: Into<SubstateId>>(id: T, version: u32) -> Self {
         Self {
             substate_id: id.into(),
             version: Some(version),
@@ -56,6 +56,10 @@ impl SubstateRequirement {
 
     pub fn version(&self) -> Option<u32> {
         self.version
+    }
+
+    pub fn with_version(self, version: u32) -> VersionedSubstateId {
+        VersionedSubstateId::new(self.substate_id, version)
     }
 
     pub fn to_substate_address(&self) -> Option<SubstateAddress> {
@@ -133,7 +137,7 @@ impl Display for SubstateRequirement {
 
 impl From<VersionedSubstateId> for SubstateRequirement {
     fn from(value: VersionedSubstateId) -> Self {
-        Self::with_version(value.substate_id, value.version)
+        Self::versioned(value.substate_id, value.version)
     }
 }
 
@@ -171,6 +175,91 @@ impl Borrow<SubstateId> for SubstateRequirement {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SubstateRequirementRef<'a> {
+    pub substate_id: &'a SubstateId,
+    pub version: Option<u32>,
+}
+
+impl<'a> SubstateRequirementRef<'a> {
+    pub fn new(substate_id: &'a SubstateId, version: Option<u32>) -> Self {
+        Self { substate_id, version }
+    }
+
+    pub fn to_owned(&self) -> SubstateRequirement {
+        SubstateRequirement::new(self.substate_id.clone(), self.version)
+    }
+
+    pub fn version(&self) -> Option<u32> {
+        self.version
+    }
+
+    pub fn substate_id(&self) -> &SubstateId {
+        self.substate_id
+    }
+}
+
+impl<'a> From<&'a VersionedSubstateId> for SubstateRequirementRef<'a> {
+    fn from(value: &'a VersionedSubstateId) -> Self {
+        Self {
+            substate_id: &value.substate_id,
+            version: Some(value.version),
+        }
+    }
+}
+
+impl<'a> From<&'a SubstateRequirement> for SubstateRequirementRef<'a> {
+    fn from(value: &'a SubstateRequirement) -> Self {
+        Self {
+            substate_id: &value.substate_id,
+            version: value.version,
+        }
+    }
+}
+
+impl<'a> From<VersionedSubstateIdRef<'a>> for SubstateRequirementRef<'a> {
+    fn from(value: VersionedSubstateIdRef<'a>) -> Self {
+        Self {
+            substate_id: value.substate_id,
+            version: Some(value.version),
+        }
+    }
+}
+
+impl Borrow<SubstateId> for SubstateRequirementRef<'_> {
+    fn borrow(&self) -> &SubstateId {
+        self.substate_id
+    }
+}
+
+impl PartialEq for SubstateRequirementRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.substate_id == other.substate_id
+    }
+}
+
+impl PartialEq<SubstateId> for SubstateRequirementRef<'_> {
+    fn eq(&self, other: &SubstateId) -> bool {
+        self.substate_id == other
+    }
+}
+
+impl Eq for SubstateRequirementRef<'_> {}
+
+// Only consider the substate id in maps. This means that duplicates found if the substate id is the same regardless of
+// the version.
+impl std::hash::Hash for SubstateRequirementRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.substate_id.hash(state);
+    }
+}
+
+impl Display for SubstateRequirementRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.substate_id, self.version.display())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to parse substate requirement {0}")]
 pub struct SubstateRequirementParseError(String);
@@ -192,6 +281,10 @@ impl VersionedSubstateId {
             substate_id: substate_id.into(),
             version,
         }
+    }
+
+    pub fn for_tx_receipt(id: TransactionReceiptAddress) -> Self {
+        Self::new(id, 0)
     }
 
     pub fn substate_id(&self) -> &SubstateId {
@@ -302,6 +395,14 @@ impl<'a> VersionedSubstateIdRef<'a> {
         Self { substate_id, version }
     }
 
+    pub fn substate_id(&self) -> &SubstateId {
+        self.substate_id
+    }
+
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
     pub fn to_owned(&self) -> VersionedSubstateId {
         VersionedSubstateId::new(self.substate_id.clone(), self.version)
     }
@@ -319,6 +420,40 @@ impl<'a> From<&'a VersionedSubstateId> for VersionedSubstateIdRef<'a> {
             substate_id: &value.substate_id,
             version: value.version,
         }
+    }
+}
+
+impl Borrow<SubstateId> for VersionedSubstateIdRef<'_> {
+    fn borrow(&self) -> &SubstateId {
+        self.substate_id
+    }
+}
+
+impl PartialEq for VersionedSubstateIdRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.substate_id == other.substate_id
+    }
+}
+
+impl PartialEq<SubstateId> for VersionedSubstateIdRef<'_> {
+    fn eq(&self, other: &SubstateId) -> bool {
+        self.substate_id == other
+    }
+}
+
+impl Eq for VersionedSubstateIdRef<'_> {}
+
+// Only consider the substate id in maps. This means that duplicates found if the substate id is the same regardless of
+// the version.
+impl std::hash::Hash for VersionedSubstateIdRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.substate_id.hash(state);
+    }
+}
+
+impl Display for VersionedSubstateIdRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.substate_id, self.version)
     }
 }
 

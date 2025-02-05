@@ -22,7 +22,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-// import { transactionsGet } from '../../utils/json_rpc';
 import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
 import { Alert, Button, Fade, Grid, Table, TableBody, TableCell, TableContainer, TableRow } from "@mui/material";
 import Typography from "@mui/material/Typography";
@@ -30,7 +29,6 @@ import { DataTableCell, StyledPaper } from "../../Components/StyledComponents";
 import PageHeading from "../../Components/PageHeading";
 import Events from "./Events";
 import Logs from "./Logs";
-import FeeInstructions from "./FeeInstructions";
 import Instructions from "./Instructions";
 import Substates from "./Substates";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
@@ -74,29 +72,29 @@ export default function TransactionDetails() {
         setDownSubstate(downSubstates["substates"]);
         setEvents(
           upSubstates["substates"].reduce(
-            (acc: Event[], cur: SubstateRecord) =>
-              "TransactionReceipt" in cur?.substate_value && cur?.substate_value?.TransactionReceipt?.events
-                ? acc.concat(cur?.substate_value?.TransactionReceipt?.events)
+            (acc: Event[], { substate_value }: SubstateRecord) =>
+              substate_value && "TransactionReceipt" in substate_value && substate_value?.TransactionReceipt?.events
+                ? acc.concat(substate_value?.TransactionReceipt?.events)
                 : acc,
             [],
           ),
         );
         setLogs(
           upSubstates["substates"].reduce(
-            (acc: LogEntry[], cur: SubstateRecord) =>
-              "TransactionReceipt" in cur?.substate_value && cur?.substate_value?.TransactionReceipt?.events
-                ? acc.concat(cur?.substate_value?.TransactionReceipt?.logs)
+            (acc: LogEntry[], { substate_value }: SubstateRecord) =>
+              substate_value && "TransactionReceipt" in substate_value && substate_value?.TransactionReceipt?.events
+                ? acc.concat(substate_value?.TransactionReceipt?.logs)
                 : acc,
             [],
           ),
         );
         setFee(
           upSubstates["substates"].reduce(
-            (acc: number, cur: SubstateRecord) =>
+            (acc: number, { substate_value }: SubstateRecord) =>
               acc +
               Number(
-                ("TransactionReceipt" in cur?.substate_value &&
-                  cur?.substate_value?.TransactionReceipt?.fee_receipt?.total_fees_paid) ||
+                (substate_value && "TransactionReceipt" in substate_value &&
+                  substate_value?.TransactionReceipt?.fee_receipt?.total_fees_paid) ||
                 0,
               ),
             0,
@@ -249,28 +247,27 @@ export default function TransactionDetails() {
                     </div>
                   </>
                 )}
-                {transaction?.fee_instructions && (
-                  <Accordion expanded={expandedPanels.includes("panel1")}
-                             onChange={handleChange("panel1")}>
-                    <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
-                      <Typography>Fee Instructions</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <FeeInstructions data={transaction.fee_instructions} />
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-                {transaction?.instructions && (
-                  <Accordion expanded={expandedPanels.includes("panel2")}
-                             onChange={handleChange("panel2")}>
-                    <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
-                      <Typography>Instructions</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
+                <Accordion expanded={expandedPanels.includes("panel1")}
+                           onChange={handleChange("panel1")}>
+                  <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
+                    <Typography>Fee Instructions</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {transaction?.fee_instructions?.length ?
+                      <Instructions data={transaction.fee_instructions} /> : "Empty"}
+                  </AccordionDetails>
+                </Accordion>
+                <Accordion expanded={expandedPanels.includes("panel2")}
+                           onChange={handleChange("panel2")}>
+                  <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
+                    <Typography>Instructions</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {transaction?.instructions?.length ? (
                       <Instructions data={transaction.instructions} />
-                    </AccordionDetails>
-                  </Accordion>
-                )}
+                    ) : "Empty"}
+                  </AccordionDetails>
+                </Accordion>
                 {result && events && (
                   <Accordion expanded={expandedPanels.includes("panel3")}
                              onChange={handleChange("panel3")}>

@@ -13,7 +13,7 @@ use tari_dan_storage::consensus_models::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     serde_with as serde_tools,
-    substate::{Substate, SubstateId},
+    substate::{Substate, SubstateId, SubstateValue},
     TemplateAddress,
 };
 use tari_template_abi::TemplateDef;
@@ -92,7 +92,7 @@ pub struct GetSubstateRequest {
 pub struct GetSubstateResponse {
     pub address: SubstateId,
     pub version: u32,
-    pub substate: Substate,
+    pub substate: SubstateValue,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_by_transaction: TransactionId,
 }
@@ -117,7 +117,7 @@ pub struct InspectSubstateRequest {
 pub struct InspectSubstateResponse {
     pub address: SubstateId,
     pub version: u32,
-    pub substate: Substate,
+    pub substate: SubstateValue,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_by_transaction: TransactionId,
 }

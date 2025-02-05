@@ -909,7 +909,10 @@ impl TryFrom<proto::consensus::Substate> for SubstateRecord {
         Ok(Self {
             substate_id: SubstateId::from_bytes(&value.substate_id)?,
             version: value.version,
-            substate_value: SubstateValue::from_bytes(&value.substate)?,
+            substate_value: Some(value.substate.as_slice())
+                .filter(|d| !d.is_empty())
+                .map(SubstateValue::from_bytes)
+                .transpose()?,
             // TODO: Should we add this to the proto?
             state_hash: Default::default(),
 
@@ -930,7 +933,7 @@ impl From<SubstateRecord> for proto::consensus::Substate {
         Self {
             substate_id: value.substate_id.to_bytes(),
             version: value.version,
-            substate: value.substate_value.to_bytes(),
+            substate: value.substate_value.as_ref().map(|s| s.to_bytes()).unwrap_or_default(),
 
             created_transaction: value.created_by_transaction.as_bytes().to_vec(),
             created_justify: value.created_justify.as_bytes().to_vec(),

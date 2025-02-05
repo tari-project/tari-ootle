@@ -626,7 +626,7 @@ impl TemplateTest {
 
     pub fn print_state(&self) {
         for (k, v) in self.state_store.iter() {
-            eprintln!("[{}]: {}", k, v.substate_value());
+            eprintln!("[{}]: {:?}", k, v.substate_value());
         }
     }
 }

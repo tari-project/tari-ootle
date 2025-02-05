@@ -1,11 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-    hash::Hash,
-};
+use std::{collections::HashMap, fmt::Display, hash::Hash};
 
 use log::*;
 use serde::{Deserialize, Serialize};
@@ -17,25 +13,22 @@ use tari_dan_common_types::{
     ToSubstateAddress,
     VersionedSubstateId,
 };
-use tari_engine_types::substate::{SubstateId, SubstateValue};
-use tari_transaction::TransactionId;
+use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 
-use crate::consensus_models::VersionedSubstateIdLockIntent;
+use crate::consensus_models::ShardGroupEvidence;
 pub type SubstatePledges = Vec<SubstatePledge>;
 
 const LOG_TARGET: &str = "tari::dan::storage::consensus_models::block_pledges";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BlockPledge {
-    pledges: HashMap<TransactionId, Vec<VersionedSubstateIdLockIntent>>,
-    substates: HashMap<SubstateAddress, SubstateValue>,
+    pledges: HashMap<SubstateId, Substate>,
 }
 
 impl BlockPledge {
     pub fn new() -> Self {
         Self {
             pledges: HashMap::new(),
-            substates: HashMap::new(),
         }
     }
 
@@ -47,206 +40,66 @@ impl BlockPledge {
         self.pledges.is_empty()
     }
 
-    pub fn contains(&self, transaction_id: &TransactionId) -> bool {
-        self.pledges.contains_key(transaction_id)
+    pub fn contains(&self, id: &SubstateId) -> bool {
+        self.pledges.contains_key(id)
     }
 
-    pub fn has_all_input_substate_values_for(&self, transaction_id: &TransactionId) -> bool {
-        self.pledges.get(transaction_id).is_some_and(|pledges| {
-            pledges.iter().all(|pledge| {
-                if pledge.lock_type().is_output() {
-                    return true;
-                }
-
-                let address = pledge.to_substate_address();
-                if !self.substates.contains_key(&address) {
-                    warn!(
-                        target: LOG_TARGET,
-                        "Substate not found for {} pledge: {}",
-                        pledge.lock_type(),
-                        pledge.versioned_substate_id()
-                    );
-                    return false;
-                }
-
-                true
-            })
-        })
-    }
-
-    pub fn has_some_write_input_pledge_values_for(&self, tx_id: &TransactionId) -> bool {
-        self.pledges.get(tx_id).is_some_and(|pledges| {
-            pledges.iter().any(|pledge| {
-                if pledge.lock_type().is_output() {
-                    return false;
-                }
-
-                if pledge.lock_type().is_read() {
-                    return false;
-                }
-
-                let address = pledge.to_substate_address();
-                self.substates.contains_key(&address)
-            })
-        })
-    }
-
-    pub(crate) fn add_substate_pledge(&mut self, transaction_id: TransactionId, pledge: SubstatePledge) -> &mut Self {
-        match pledge {
-            SubstatePledge::Input {
-                substate_id,
-                is_write,
-                substate,
-            } => {
-                self.substates.insert(substate_id.to_substate_address(), substate);
-
-                let lock_type = if is_write {
-                    SubstateLockType::Write
-                } else {
-                    SubstateLockType::Read
-                };
-                self.pledges
-                    .entry(transaction_id)
-                    .or_default()
-                    .push(VersionedSubstateIdLockIntent::new(substate_id, lock_type, true));
-            },
-            SubstatePledge::Output { substate_id } => {
-                self.pledges
-                    .entry(transaction_id)
-                    .or_default()
-                    .push(VersionedSubstateIdLockIntent::new(
-                        substate_id,
-                        SubstateLockType::Output,
-                        true,
-                    ));
-            },
+    pub fn get_all_pledges_for_evidence(&self, evidence: &ShardGroupEvidence) -> Option<Vec<SubstatePledge>> {
+        let mut pledges = Vec::with_capacity(evidence.inputs().len());
+        for (substate_id, ev) in evidence.all_pledged_inputs_iter() {
+            // If any are missing return None
+            let substate = self.pledges.get(substate_id)?;
+            pledges.push(SubstatePledge::Input {
+                substate_id: VersionedSubstateId::new(substate_id.clone(), substate.version()),
+                is_write: ev.is_write,
+                substate: substate.substate_value().clone(),
+            });
         }
-        self
-    }
-
-    pub fn has_pledges_for(&self, transaction_id: &TransactionId) -> bool {
-        self.pledges.contains_key(transaction_id)
-    }
-
-    pub fn get_transaction_substate_pledges(&self, transaction_id: &TransactionId) -> Option<SubstatePledges> {
-        let pledges = self.pledges.get(transaction_id)?;
-        let pledges = pledges
-            .iter()
-            .filter_map(|intent| match intent.lock_type() {
-                SubstateLockType::Read | SubstateLockType::Write => {
-                    let is_write = intent.lock_type().is_write();
-                    let substate_id = intent.versioned_substate_id().clone();
-                    let address = substate_id.to_substate_address();
-                    let substate = match self.substates.get(&address) {
-                        Some(substate) => substate,
-                        None => {
-                            // CASE: the remote VN could have omitted the substate value for various reasons including
-                            // it was already pledged previously, so this is not necessarily an error.
-                            debug!(
-                                target: LOG_TARGET,
-                                "Substate value not found for INPUT pledge: {}",
-                                substate_id
-                            );
-                            return None;
-                        },
-                    };
-                    Some(SubstatePledge::Input {
-                        substate_id,
-                        is_write,
-                        substate: substate.clone(),
-                    })
-                },
-                SubstateLockType::Output => {
-                    let substate_id = intent.versioned_substate_id().clone();
-                    Some(SubstatePledge::Output { substate_id })
-                },
-            })
-            .collect();
         Some(pledges)
     }
 
-    pub fn get_transaction_pledges(&self, transaction_id: &TransactionId) -> Option<&[VersionedSubstateIdLockIntent]> {
-        self.pledges.get(transaction_id).map(|v| v.as_slice())
-    }
-
-    pub fn num_substates_pledged(&self) -> usize {
-        self.pledges.values().map(|s| s.len()).sum()
-    }
-
-    pub fn num_substate_values(&self) -> usize {
-        self.substates.len()
-    }
-
-    pub fn retain_transactions(&mut self, transaction_ids: &HashSet<TransactionId>) -> &mut Self {
-        self.pledges.retain(|tx, _| transaction_ids.contains(tx));
-        self
-    }
-
-    pub fn trim_input_values_for(&mut self, transaction_id: &TransactionId) -> &mut Self {
-        if let Some(pledges) = self.pledges.get(transaction_id) {
-            for pledge in pledges {
-                if pledge.lock_type().is_output() {
-                    continue;
-                }
-                if pledge.lock_type().is_write() {
-                    // Write should only be pledged to a single transaction, so we can remove the substate value
-                    let address = pledge.to_substate_address();
-                    debug!(
-                        target: LOG_TARGET,
-                        "trim_input_values_for: Removing substate value for {} pledge: {}",
-                        pledge.lock_type(),
-                        pledge.versioned_substate_id()
-                    );
-                    self.substates.remove(&address);
-                } else {
-                    // Read - check if it's pledged to any other transaction (This is worst case O(n*m))
-                    if self
-                        .pledges
-                        .iter()
-                        .filter(|(tx_id, _)| *tx_id != transaction_id)
-                        .any(|(_, v)| {
-                            v.iter()
-                                .any(|p| p.version() == pledge.version() && p.substate_id() == pledge.substate_id())
-                        })
-                    {
-                        continue;
-                    }
-                    debug!(
-                        target: LOG_TARGET,
-                        "trim_input_values_for: Removing substate value for {} pledge: {}",
-                        pledge.lock_type(),
-                        pledge.versioned_substate_id()
-                    );
-                    // No further pledges to this substate, so we can remove the substate value
-                    let address = pledge.to_substate_address();
-                    self.substates.remove(&address);
-                }
-            }
+    pub fn has_all_input_substate_values_for(&self, evidence: &ShardGroupEvidence) -> bool {
+        if let Some((id, ev)) = evidence.all_pledged_inputs_iter().find(|(substate_id, ev)| {
+            self.pledges
+                .get(substate_id)
+                .map_or(true, |value| value.version() != ev.version)
+        }) {
+            warn!(
+                target: LOG_TARGET,
+                "Substate not included for {} pledge: {} v{}",
+                ev.as_lock_type(),
+                id,
+                ev.version,
+            );
+            return false;
         }
+
+        true
+    }
+
+    pub fn has_some_input_substate_values_for(&self, evidence: &ShardGroupEvidence) -> bool {
+        evidence.all_pledged_inputs_iter().any(|(substate_id, ev)| {
+            self.pledges
+                .get(substate_id)
+                .is_some_and(|value| value.version() == ev.version)
+        })
+    }
+
+    pub(crate) fn add_substate_pledge(
+        &mut self,
+        substate_id: SubstateId,
+        version: u32,
+        substate_value: SubstateValue,
+    ) -> &mut Self {
+        self.pledges.insert(substate_id, Substate::new(version, substate_value));
         self
-    }
-
-    /// Returns an iterator over the pledges in the block. The pledges are randomly ordered.
-    pub fn randomly_ordered_pledges_iter(
-        &self,
-    ) -> impl Iterator<Item = (&TransactionId, &Vec<VersionedSubstateIdLockIntent>)> {
-        self.pledges.iter()
-    }
-
-    /// Returns an iterator over the substates in the block. The substates are randomly ordered.
-    pub fn randomly_ordered_substates_iter(&self) -> impl Iterator<Item = (&SubstateAddress, &SubstateValue)> {
-        self.substates.iter()
     }
 }
 
 impl Display for BlockPledge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (tx_id, pledges) in &self.pledges {
-            write!(f, "{tx_id}:[")?;
-            for pledge in pledges {
-                write!(f, "{pledge}, ")?;
-            }
-            write!(f, "],")?;
+        for (id, value) in &self.pledges {
+            write!(f, "{}:{},", id, value.version())?;
         }
         Ok(())
     }
@@ -267,15 +120,15 @@ pub enum SubstatePledge {
 impl SubstatePledge {
     /// Returns a new SubstatePledge if it is valid, otherwise returns None
     /// A SubstatePledge is invalid if the lock type is either Write or Read and no substate value is provided.
-    pub fn try_create(lock_intent: VersionedSubstateIdLockIntent, substate: Option<SubstateValue>) -> Option<Self> {
+    pub fn try_create<L: LockIntent>(lock_intent: L, substate: Option<SubstateValue>) -> Option<Self> {
         match lock_intent.lock_type() {
             SubstateLockType::Write | SubstateLockType::Read => Some(Self::Input {
                 is_write: lock_intent.lock_type().is_write(),
-                substate_id: lock_intent.into_versioned_substate_id(),
+                substate_id: lock_intent.to_versioned_substate_id(),
                 substate: substate?,
             }),
             SubstateLockType::Output => Some(Self::Output {
-                substate_id: lock_intent.into_versioned_substate_id(),
+                substate_id: lock_intent.to_versioned_substate_id(),
             }),
         }
     }
@@ -390,6 +243,7 @@ impl Display for SubstatePledge {
 
 #[cfg(test)]
 mod tests {
+
     use tari_engine_types::component::{ComponentBody, ComponentHeader};
     use tari_template_lib::{
         auth::ComponentAccessRules,
@@ -402,28 +256,44 @@ mod tests {
         VersionedSubstateId::new(SubstateId::Component(ComponentAddress::from_array([seed; 32])), 0)
     }
 
-    #[test]
-    fn basic() {
-        let mut pledge = BlockPledge::new();
-        let tx_id = TransactionId::default();
-        let substate_value = SubstateValue::Component(ComponentHeader {
+    fn substate_value(seed: u8) -> SubstateValue {
+        SubstateValue::Component(ComponentHeader {
             template_address: Default::default(),
             module_name: "".to_string(),
             owner_key: None,
             owner_rule: Default::default(),
             access_rules: ComponentAccessRules::allow_all(),
-            entity_id: EntityId::from_array([1u8; 20]),
+            entity_id: EntityId::from_array([seed; 20]),
             body: ComponentBody::empty(),
-        });
-        let substate_id = create_substate_id(0);
-        let pledge = pledge.add_substate_pledge(tx_id, SubstatePledge::Input {
-            substate_id: substate_id.clone(),
-            is_write: true,
-            substate: substate_value.clone(),
-        });
-        assert_eq!(pledge.len(), 1);
-        assert_eq!(pledge.num_substates_pledged(), 1);
-        assert!(pledge.contains(&tx_id));
-        assert_eq!(pledge.get_transaction_pledges(&tx_id).unwrap().len(), 1);
+        })
+    }
+
+    #[test]
+    fn basic() {
+        let mut pledge = BlockPledge::new();
+        let substate1 = substate_value(1);
+        let id1 = create_substate_id(1);
+        let pledge = pledge.add_substate_pledge(id1.substate_id().clone(), id1.version(), substate1.clone());
+
+        let substate2 = substate_value(2);
+        let id2 = create_substate_id(2);
+        let pledge = pledge.add_substate_pledge(id2.substate_id().clone(), id2.version(), substate2);
+
+        let id3 = create_substate_id(3);
+
+        assert_eq!(pledge.len(), 2);
+        assert!(pledge.contains(id1.substate_id()));
+        assert!(pledge.contains(id2.substate_id()));
+
+        let mut evidence = ShardGroupEvidence::default();
+        evidence.insert(id1.substate_id().clone(), id1.version(), SubstateLockType::Write);
+        evidence.insert(id2.substate_id().clone(), id2.version(), SubstateLockType::Write);
+        // Outputs are not applicable and are ignored
+        evidence.insert(id3.substate_id().clone(), id3.version(), SubstateLockType::Output);
+
+        assert!(pledge.has_all_input_substate_values_for(&evidence));
+
+        evidence.insert(id3.substate_id().clone(), id3.version(), SubstateLockType::Write);
+        assert!(!pledge.has_all_input_substate_values_for(&evidence));
     }
 }

@@ -72,6 +72,8 @@ mod confirm_all_transitions {
         )
         .unwrap();
         block1.insert(&mut tx).unwrap();
+        block1.as_locked_block().set(&mut tx).unwrap();
+        block1.as_leaf_block().set(&mut tx).unwrap();
 
         tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false)
             .unwrap();

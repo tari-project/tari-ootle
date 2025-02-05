@@ -385,10 +385,10 @@ fn print_substate_diff(diff: &SubstateDiff) {
                 let referenced_address = SubstateId::from(index.referenced_address().clone());
                 println!("      ▶ NFT index {} referencing {}", address, referenced_address);
             },
-            SubstateValue::FeeClaim(fee_claim) => {
-                println!("      ▶ fee_claim: {}", address);
-                println!("        ▶ amount: {}", fee_claim.amount);
-                println!("        ▶ recipient: {}", fee_claim.validator_public_key);
+            SubstateValue::ValidatorFeePool(fee_pool) => {
+                println!("      ▶ fee_pool: {}", address);
+                println!("        ▶ amount: {}", fee_pool.amount);
+                println!("        ▶ recipient: {}", fee_pool.claim_public_key);
             },
             SubstateValue::Template(_) => {
                 println!("      ▶ Template: {}", address);
@@ -719,8 +719,8 @@ impl CliArg {
                 SubstateId::NonFungible(v) => arg!(v),
                 SubstateId::NonFungibleIndex(v) => arg!(v),
                 SubstateId::TransactionReceipt(v) => arg!(v),
-                SubstateId::FeeClaim(v) => arg!(v),
                 SubstateId::Template(v) => arg!(v),
+                SubstateId::ValidatorFeePool(v) => arg!(v),
             },
             CliArg::TemplateAddress(v) => arg!(v),
             CliArg::NonFungibleId(v) => arg!(v),

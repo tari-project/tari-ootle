@@ -50,6 +50,10 @@ impl ProcessDefinition for ValidatorNode {
             base_node_grpc_url
         );
 
+        if let Some(claim_public_key) = context.get_setting("claim_public_key") {
+            command.arg(format!("-pvalidator_node.fee_claim_public_key={claim_public_key}"));
+        }
+
         command
             .envs(context.environment())
             .arg("-b")

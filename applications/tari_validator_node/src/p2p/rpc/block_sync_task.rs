@@ -5,9 +5,12 @@ use std::collections::HashSet;
 
 use log::*;
 use tari_dan_common_types::{optional::Optional, Epoch};
-use tari_dan_p2p::proto::rpc::{sync_blocks_response::SyncData, QuorumCertificates, SyncBlocksResponse, Transactions};
+use tari_dan_p2p::{
+    proto,
+    proto::rpc::{sync_blocks_response::SyncData, QuorumCertificates, SyncBlocksResponse},
+};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, QuorumCertificate, SubstateUpdate, TransactionRecord},
+    consensus_models::{Block, BlockId, QuorumCertificate, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -19,12 +22,13 @@ const LOG_TARGET: &str = "tari::dan::rpc::sync_task";
 
 const BLOCK_BUFFER_SIZE: usize = 15;
 
-type BlockData = (
-    Block,
-    Vec<QuorumCertificate>,
-    Vec<SubstateUpdate>,
-    Vec<TransactionRecord>,
-);
+struct BlockData {
+    block: Block,
+    qcs: Vec<QuorumCertificate>,
+    substates: Vec<SubstateUpdate>,
+    transactions: Vec<TransactionRecord>,
+    transaction_receipts: Vec<SubstateCreatedProof>,
+}
 type BlockBuffer = Vec<BlockData>;
 
 pub struct BlockSyncTask<TStateStore: StateStore> {
@@ -49,12 +53,12 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
         }
     }
 
-    pub async fn run(mut self) -> Result<(), ()> {
+    pub async fn run(mut self, req: proto::rpc::SyncBlocksRequest) -> Result<(), ()> {
         let mut buffer = Vec::with_capacity(BLOCK_BUFFER_SIZE);
         let mut current_block_id = self.start_block_id;
         let mut counter = 0;
         loop {
-            match self.fetch_next_batch(&mut buffer, &current_block_id) {
+            match self.fetch_next_batch(&mut buffer, &current_block_id, &req) {
                 Ok(last_block) => {
                     current_block_id = last_block;
                 },
@@ -74,7 +78,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
 
             counter += buffer.len();
             for data in buffer.drain(..) {
-                self.send_block_data(data).await?;
+                self.send_block_data(&req, data).await?;
             }
 
             // If we didn't fill up the buffer, send the final blocks
@@ -99,13 +103,18 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
         );
 
         for data in buffer.drain(..) {
-            self.send_block_data(data).await?;
+            self.send_block_data(&req, data).await?;
         }
 
         Ok(())
     }
 
-    fn fetch_next_batch(&self, buffer: &mut BlockBuffer, current_block_id: &BlockId) -> Result<BlockId, StorageError> {
+    fn fetch_next_batch(
+        &self,
+        buffer: &mut BlockBuffer,
+        current_block_id: &BlockId,
+        req: &proto::rpc::SyncBlocksRequest,
+    ) -> Result<BlockId, StorageError> {
         self.store.with_read_tx(|tx| {
             let mut current_block_id = *current_block_id;
             let mut last_block_id = current_block_id;
@@ -143,17 +152,51 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                 }
 
                 last_block_id = current_block_id;
-                let all_qcs = child
-                    .commands()
-                    .iter()
-                    .filter_map(|cmd| cmd.transaction())
-                    .flat_map(|transaction| transaction.evidence.qc_ids_iter())
-                    .collect::<HashSet<_>>();
-                let certificates = QuorumCertificate::get_all(tx, all_qcs)?;
-                let updates = child.get_substate_updates(tx)?;
-                let transactions = child.get_transactions(tx)?;
+                let certificates = req
+                    .stream_qcs
+                    .then(|| {
+                        child
+                            .commands()
+                            .iter()
+                            .filter_map(|cmd| cmd.transaction())
+                            .flat_map(|transaction| transaction.evidence.qc_ids_iter())
+                            .collect::<HashSet<_>>()
+                    })
+                    .map(|all_qcs| QuorumCertificate::get_all(tx, all_qcs))
+                    .transpose()?
+                    .unwrap_or_default();
+                let substates_selection =
+                    proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).map_err(|e| {
+                        StorageError::General {
+                            details: format!("{} is not a valid StreamSubstateSelection: {}", req.stream_substates, e),
+                        }
+                    })?;
 
-                buffer.push((child, certificates, updates, transactions));
+                let updates = matches!(substates_selection, proto::rpc::StreamSubstateSelection::All)
+                    .then(|| child.get_substate_updates(tx))
+                    .transpose()?
+                    .unwrap_or_default();
+                let transaction_receipts = matches!(
+                    substates_selection,
+                    proto::rpc::StreamSubstateSelection::TransactionReceiptsOnly
+                )
+                .then(|| child.get_transaction_receipts(tx))
+                .transpose()?
+                .unwrap_or_default();
+
+                let transactions = req
+                    .stream_transactions
+                    .then(|| child.get_transactions(tx))
+                    .transpose()?
+                    .unwrap_or_default();
+
+                buffer.push(BlockData {
+                    block: child,
+                    qcs: certificates,
+                    substates: updates,
+                    transactions,
+                    transaction_receipts,
+                });
                 if buffer.len() == buffer.capacity() {
                     break;
                 }
@@ -226,43 +269,95 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
         Ok(())
     }
 
-    async fn send_block_data(&mut self, (block, qcs, updates, transactions): BlockData) -> Result<(), ()> {
+    async fn send_block_data(&mut self, req: &proto::rpc::SyncBlocksRequest, data: BlockData) -> Result<(), ()> {
+        let BlockData {
+            block,
+            qcs,
+            substates: updates,
+            transactions,
+            transaction_receipts,
+        } = data;
         self.send(Ok(SyncBlocksResponse {
             sync_data: Some(SyncData::Block((&block).into())),
         }))
         .await?;
-        self.send(Ok(SyncBlocksResponse {
-            sync_data: Some(SyncData::QuorumCertificates(QuorumCertificates {
-                quorum_certificates: qcs.iter().map(Into::into).collect(),
-            })),
-        }))
-        .await?;
-        match u32::try_from(updates.len()) {
-            Ok(count) => {
-                self.send(Ok(SyncBlocksResponse {
-                    sync_data: Some(SyncData::SubstateCount(count)),
-                }))
-                .await?;
-            },
-            Err(_) => {
-                self.send(Err(RpcStatus::general("number of substates exceeds u32")))
-                    .await?;
-                return Err(());
-            },
-        }
-        for update in updates {
+
+        if req.stream_qcs {
             self.send(Ok(SyncBlocksResponse {
-                sync_data: Some(SyncData::SubstateUpdate(update.into())),
+                sync_data: Some(SyncData::QuorumCertificates(QuorumCertificates {
+                    quorum_certificates: qcs.iter().map(Into::into).collect(),
+                })),
             }))
             .await?;
         }
 
-        self.send(Ok(SyncBlocksResponse {
-            sync_data: Some(SyncData::Transactions(Transactions {
-                transactions: transactions.iter().map(|t| &t.transaction).map(Into::into).collect(),
-            })),
-        }))
-        .await?;
+        match proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).map_err(|_| ())? {
+            proto::rpc::StreamSubstateSelection::No => {},
+            proto::rpc::StreamSubstateSelection::All => {
+                match u32::try_from(updates.len()) {
+                    Ok(count) => {
+                        self.send(Ok(SyncBlocksResponse {
+                            sync_data: Some(SyncData::SubstateCount(count)),
+                        }))
+                        .await?;
+                    },
+                    Err(_) => {
+                        self.send(Err(RpcStatus::general("number of substates exceeds u32")))
+                            .await?;
+                        return Err(());
+                    },
+                }
+                for update in updates {
+                    self.send(Ok(SyncBlocksResponse {
+                        sync_data: Some(SyncData::SubstateUpdate(update.into())),
+                    }))
+                    .await?;
+                }
+            },
+            proto::rpc::StreamSubstateSelection::TransactionReceiptsOnly => {
+                match u32::try_from(transaction_receipts.len()) {
+                    Ok(count) => {
+                        self.send(Ok(SyncBlocksResponse {
+                            sync_data: Some(SyncData::TransactionReceiptCount(count)),
+                        }))
+                        .await?;
+                    },
+                    Err(_) => {
+                        self.send(Err(RpcStatus::general("number of substates exceeds u32")))
+                            .await?;
+                        return Err(());
+                    },
+                }
+                for receipt in transaction_receipts {
+                    self.send(Ok(SyncBlocksResponse {
+                        sync_data: Some(SyncData::TransactionReceipt(receipt.into())),
+                    }))
+                    .await?;
+                }
+            },
+        }
+
+        if req.stream_transactions {
+            match u32::try_from(transactions.len()) {
+                Ok(count) => {
+                    self.send(Ok(SyncBlocksResponse {
+                        sync_data: Some(SyncData::TransactionCount(count)),
+                    }))
+                    .await?;
+                },
+                Err(_) => {
+                    self.send(Err(RpcStatus::general("number of substates exceeds u32")))
+                        .await?;
+                    return Err(());
+                },
+            }
+            for transaction in transactions {
+                self.send(Ok(SyncBlocksResponse {
+                    sync_data: Some(SyncData::Transaction(transaction.transaction().into())),
+                }))
+                .await?;
+            }
+        }
 
         Ok(())
     }

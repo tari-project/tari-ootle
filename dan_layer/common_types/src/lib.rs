@@ -56,4 +56,6 @@ pub mod borsh;
 mod lock_intent;
 
 pub use lock_intent::*;
+mod fee_pool;
+pub use fee_pool::*;
 pub mod layer_one_transaction;

@@ -83,6 +83,7 @@ import type {
   WebRtcStartResponse,
 } from "@tari-project/wallet_jrpc_client";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
+import { GetValidatorFeesRequest, GetValidatorFeesResponse } from "@tari-project/typescript-bindings";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -221,6 +222,8 @@ export const nftList = (request: ListAccountNftRequest): Promise<ListAccountNftR
 
 export const validatorsClaimFees = (request: ClaimValidatorFeesRequest): Promise<ClaimValidatorFeesResponse> =>
   client().then((c) => c.validatorsClaimFees(request));
+export const validatorsGetFees = (request: GetValidatorFeesRequest): Promise<GetValidatorFeesResponse> =>
+  client().then((c) => c.validatorsGetFees(request));
 
 // substates
 export const substatesGet = (request: SubstatesGetRequest): Promise<SubstatesGetResponse> =>

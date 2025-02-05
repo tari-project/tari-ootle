@@ -154,7 +154,7 @@ impl EventManager {
             }
             let network_version_events = self
                 .substate_scanner
-                .get_events_for_substate_and_version(&SubstateRequirement::with_version(substate_id.clone(), v))
+                .get_events_for_substate_and_version(&SubstateRequirement::versioned(substate_id.clone(), v))
                 .await?;
             events.extend(network_version_events);
         }

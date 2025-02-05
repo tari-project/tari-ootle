@@ -115,18 +115,24 @@ pub async fn claim_fees(
     wallet_daemon_name: String,
     account_name: String,
     validator_name: String,
-    epoch: u64,
     dry_run: bool,
 ) -> Result<ClaimValidatorFeesResponse, WalletDaemonClientError> {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let vn = world.get_validator_node(&validator_name);
 
+    let mut vn_client = vn.create_client();
+    let stats = vn_client.get_epoch_manager_stats().await.unwrap();
+
     let request = ClaimValidatorFeesRequest {
         account: Some(ComponentAddressOrName::Name(account_name)),
+        claim_key_index: None,
         max_fee: None,
-        validator_public_key: vn.public_key.clone(),
-        epoch: Epoch(epoch),
+        shards: vec![stats
+            .committee_info
+            .expect("claim_fees: committee_info is None")
+            .shard_group()
+            .start()],
         dry_run,
     };
 

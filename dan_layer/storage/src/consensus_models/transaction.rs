@@ -164,6 +164,13 @@ impl TransactionRecord {
 
     pub fn abort(&mut self, reason: RejectReason) -> &mut Self {
         self.abort_reason = Some(reason);
+        let receipt = self.id().into_receipt_address();
+        let id = VersionedSubstateId::for_tx_receipt(receipt);
+        self.resulting_outputs = Some(vec![VersionedSubstateIdLockIntent::new(
+            id,
+            SubstateLockType::Output,
+            true,
+        )]);
         self
     }
 
@@ -378,9 +385,10 @@ impl TransactionRecord {
         locked_values
             .into_iter()
             .filter(|lock| !lock.lock.is_output())
-            .map(|lock| {
+            .map(|mut lock| {
+                let maybe_value = lock.take_value();
                 let lock_intent = lock.to_substate_lock_intent();
-                SubstatePledge::try_create(lock_intent, lock.value).ok_or_else(|| StorageError::DataInconsistency {
+                SubstatePledge::try_create(lock_intent, maybe_value).ok_or_else(|| StorageError::DataInconsistency {
                     details: format!("Invalid substate lock: {} ({})", lock.substate_id, lock.lock),
                 })
             })

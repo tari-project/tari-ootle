@@ -4,11 +4,8 @@
 use std::{collections::HashSet, future::Future};
 
 use indexmap::IndexMap;
-use tari_dan_common_types::{Epoch, SubstateRequirement};
-use tari_engine_types::{
-    substate::{Substate, SubstateId},
-    virtual_substate::VirtualSubstates,
-};
+use tari_dan_common_types::SubstateRequirement;
+use tari_engine_types::substate::{Substate, SubstateId};
 use tari_transaction::Transaction;
 
 pub struct ResolvedSubstates {
@@ -25,10 +22,4 @@ pub trait SubstateResolver {
         &self,
         requested_substates: &HashSet<SubstateRequirement>,
     ) -> impl Future<Output = Result<IndexMap<SubstateId, Substate>, Self::Error>> + Send;
-
-    fn resolve_virtual_substates(
-        &self,
-        transaction: &Transaction,
-        current_epoch: Epoch,
-    ) -> impl Future<Output = Result<VirtualSubstates, Self::Error>> + Send;
 }

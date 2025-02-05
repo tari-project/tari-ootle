@@ -9,14 +9,11 @@ use std::{
 
 use indexmap::IndexMap;
 use log::*;
-use tari_common_types::types::PublicKey;
-use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_engine_types::{
     bucket::Bucket,
     component::ComponentHeader,
     events::Event,
-    fee_claim::{FeeClaim, FeeClaimAddress},
     fees::FeeReceipt,
     id_provider::{IdProvider, ObjectIds},
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
@@ -30,6 +27,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceipt,
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+    vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
 };
 use tari_template_lib::{
@@ -59,6 +57,7 @@ use crate::{
         state_store::WorkingStateStore,
         tracker_auth::Authorization,
         ActionIdent,
+        NativeAction,
         RuntimeError,
         TransactionCommitError,
     },
@@ -266,6 +265,11 @@ impl WorkingState {
         Ok(substate)
     }
 
+    pub fn get_locked_substate_mut(&mut self, lock: &LockedSubstate) -> Result<&mut SubstateValue, RuntimeError> {
+        let (_, substate) = self.store.get_locked_substate_mut(lock.lock_id())?;
+        Ok(substate)
+    }
+
     pub fn get_vault(&self, locked: &LockedSubstate) -> Result<&Vault, RuntimeError> {
         let (addr, substate) = self.store.get_locked_substate(locked.lock_id())?;
 
@@ -314,9 +318,7 @@ impl WorkingState {
                 .ok_or_else(|| RuntimeError::VirtualSubstateNotFound {
                     address: address.clone(),
                 })?;
-        let VirtualSubstate::CurrentEpoch(epoch) = current_epoch else {
-            return Err(RuntimeError::VirtualSubstateNotFound { address });
-        };
+        let VirtualSubstate::CurrentEpoch(epoch) = current_epoch;
         Ok(Epoch(*epoch))
     }
 
@@ -740,52 +742,32 @@ impl WorkingState {
         Ok(())
     }
 
-    pub fn take_fee_claim(&mut self, epoch: Epoch, validator_public_key: PublicKey) -> Result<FeeClaim, RuntimeError> {
-        let substate = self
-            .virtual_substates
-            .remove(&VirtualSubstateId::UnclaimedValidatorFee {
-                epoch: epoch.as_u64(),
-                address: validator_public_key.clone(),
-            })
-            .ok_or(RuntimeError::FeeClaimNotPermitted {
-                epoch,
-                address: validator_public_key.clone(),
+    pub fn withdraw_all_fees_from_pool(
+        &mut self,
+        address: ValidatorFeePoolAddress,
+    ) -> Result<ResourceContainer, RuntimeError> {
+        let locked_substate = self.lock_substate(&SubstateId::ValidatorFeePool(address), LockFlag::Write)?;
+        let fee_pool = self
+            .get_locked_substate(&locked_substate)?
+            .as_validator_fee_pool()
+            .ok_or_else(|| RuntimeError::InvariantError {
+                function: "StateTracker::claim_fee",
+                details: format!("Expected substate at address {address} to be an ValidatorFeePool",),
             })?;
 
-        let VirtualSubstate::UnclaimedValidatorFee(fee_claim) = substate else {
-            return Err(RuntimeError::FeeClaimNotPermitted {
-                epoch,
-                address: validator_public_key,
-            });
-        };
+        self.authorization()
+            .require_ownership(NativeAction::WithdrawValidatorFunds, fee_pool.as_ownership())?;
 
-        Ok(fee_claim)
-    }
+        let pool_mut = self
+            .get_locked_substate_mut(&locked_substate)?
+            .as_validator_fee_pool_mut()
+            .ok_or_else(|| RuntimeError::InvariantError {
+                function: "StateTracker::claim_fee",
+                details: format!("Expected substate at address {address} to be an ValidatorFeePool",),
+            })?;
 
-    pub fn claim_fee(
-        &mut self,
-        epoch: Epoch,
-        validator_public_key: PublicKey,
-    ) -> Result<ResourceContainer, RuntimeError> {
-        let fee_claim_addr = FeeClaimAddress::from_addr(epoch.as_u64(), validator_public_key.as_bytes());
-        let claim = self.take_fee_claim(epoch, validator_public_key.clone())?;
-        let amount = claim.amount;
-        self.store.insert(fee_claim_addr.into(), claim.into()).map_err(|err| {
-            if matches!(err, RuntimeError::DuplicateSubstate { .. }) {
-                // Specific error for double fee claim
-                RuntimeError::DoubleClaimedFee {
-                    address: validator_public_key,
-                    epoch,
-                }
-            } else {
-                err
-            }
-        })?;
-        Ok(ResourceContainer::confidential(
-            CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-            None,
-            amount,
-        ))
+        let resource_container = pool_mut.withdraw_all()?;
+        Ok(resource_container)
     }
 
     pub fn validate_component_state(
@@ -1145,6 +1127,10 @@ impl WorkingState {
             let new_substate = match self.store.get_unmodified_substate(&address).optional()? {
                 Some(existing_state) => {
                     substate_diff.down(address.clone(), existing_state.version());
+                    if substate.as_validator_fee_pool().is_some_and(|fee| fee.amount.is_zero()) {
+                        // If there are no fees left, do not up the fee pool
+                        continue;
+                    }
                     Substate::new(existing_state.version() + 1, substate)
                 },
                 None => Substate::new(0, substate),

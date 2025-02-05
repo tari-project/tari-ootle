@@ -22,12 +22,11 @@
 
 use log::*;
 use rand::{prelude::*, rngs::OsRng};
-use tari_dan_common_types::{option::Displayable, NodeAddressable, SubstateAddress, SubstateRequirement};
+use tari_dan_common_types::{option::Displayable, NodeAddressable, SubstateRequirement};
 use tari_dan_storage::consensus_models::BlockId;
 use tari_engine_types::{
     events::Event,
     substate::{SubstateId, SubstateValue},
-    virtual_substate::{VirtualSubstate, VirtualSubstateId},
 };
 use tari_epoch_manager::EpochManagerReader;
 use tari_template_lib::{models::NonFungibleIndexAddress, prelude::ResourceAddress};
@@ -179,7 +178,7 @@ where
         substate_id: SubstateId,
         version: u32,
     ) -> Result<SubstateResult, IndexerError> {
-        let substate_req = SubstateRequirement::with_version(substate_id, version);
+        let substate_req = SubstateRequirement::versioned(substate_id, version);
         debug!(target: LOG_TARGET, "get_specific_substate_from_committee: {substate_req}");
         self.get_substate_from_committee_by_requirement(&substate_req).await
     }
@@ -237,47 +236,6 @@ where
             return Err(e);
         }
         Ok(SubstateResult::DoesNotExist)
-    }
-
-    pub async fn get_virtual_substate_from_committee(
-        &self,
-        address: VirtualSubstateId,
-        shard_location: SubstateAddress,
-    ) -> Result<VirtualSubstate, IndexerError> {
-        let epoch = self.committee_provider.current_epoch().await?;
-        let mut committee = self
-            .committee_provider
-            .get_committee_for_substate(epoch, shard_location)
-            .await?;
-
-        committee.shuffle();
-
-        let mut last_error = None;
-        for vn_addr in committee.addresses() {
-            // TODO: we cannot request data from ourselves via p2p rpc - so we should exclude ourselves from requests
-            // Gets a substate directly from querying a VN
-            let mut client = self.validator_node_client_factory.create_client(vn_addr);
-            let result = client.get_virtual_substate(address.clone()).await;
-
-            match result {
-                Ok(substate) => return Ok(substate),
-                Err(e) => {
-                    last_error = Some(e);
-                },
-            }
-        }
-
-        warn!(
-            target: LOG_TARGET,
-            "Could not get virtual substate {} from any of the validator nodes", address,
-        );
-
-        if let Some(e) = last_error {
-            return Err(IndexerError::ValidatorNodeClientError(e.to_string()));
-        }
-        Err(IndexerError::AllRequestsFailed {
-            num_requested: committee.members.len(),
-        })
     }
 
     /// Gets a substate directly from querying a VN
@@ -400,7 +358,7 @@ where
         let mut version = version.unwrap_or_default();
 
         loop {
-            let substate_req = SubstateRequirement::with_version(substate_id.clone(), version);
+            let substate_req = SubstateRequirement::versioned(substate_id.clone(), version);
             match self.get_events_for_substate_and_version(&substate_req).await {
                 Ok(component_tx_events) => events.extend(component_tx_events),
                 Err(IndexerError::NotFoundTransaction(..)) => return Ok(events),

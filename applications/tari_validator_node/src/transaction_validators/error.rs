@@ -8,14 +8,10 @@ use tari_dan_storage::{consensus_models::TransactionPoolError, StorageError};
 use tari_networking::NetworkingError;
 use tari_transaction::TransactionId;
 
-use crate::virtual_substate::VirtualSubstateError;
-
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionValidationError {
     #[error("Storage Error: {0}")]
     StorageError(#[from] StorageError),
-    #[error("Virtual substate error: {0}")]
-    VirtualSubstateError(#[from] VirtualSubstateError),
     #[error("Transaction pool error: {0}")]
     TransactionPoolError(#[from] TransactionPoolError),
 

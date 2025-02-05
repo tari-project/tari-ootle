@@ -7,6 +7,7 @@ import type { PublishedTemplateAddress } from "./PublishedTemplateAddress";
 import type { ResourceAddress } from "./ResourceAddress";
 import type { TransactionReceiptAddress } from "./TransactionReceiptAddress";
 import type { UnclaimedConfidentialOutputAddress } from "./UnclaimedConfidentialOutputAddress";
+import type { ValidatorFeePoolAddress } from "./ValidatorFeePoolAddress";
 import type { VaultId } from "./VaultId";
 export interface IndexedWellKnownTypes {
     bucket_ids: Array<BucketId>;
@@ -19,4 +20,5 @@ export interface IndexedWellKnownTypes {
     metadata: Array<Metadata>;
     unclaimed_confidential_output_address: Array<UnclaimedConfidentialOutputAddress>;
     published_template_addresses: Array<PublishedTemplateAddress>;
+    validator_node_fee_pools: Array<ValidatorFeePoolAddress>;
 }

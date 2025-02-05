@@ -177,7 +177,7 @@ async fn handler(
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("validators", method)) => match method {
-            "get_fee_summary" => call_handler(context, value, token, validator::handle_get_validator_fees).await,
+            "get_fees" => call_handler(context, value, token, validator::handle_get_validator_fees).await,
             "claim_fees" => call_handler(context, value, token, validator::handle_claim_validator_fees).await,
             _ => Ok(value.method_not_found(&value.method)),
         },

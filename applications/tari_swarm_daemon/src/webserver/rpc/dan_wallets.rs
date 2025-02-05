@@ -18,6 +18,7 @@ pub struct ListDanWalletsResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DanWalletInfo {
+    pub instance_id: InstanceId,
     pub name: String,
     pub web: String,
     pub jrpc: String,
@@ -43,6 +44,7 @@ pub async fn list(
             let jrpc = format!("http://{public_ip}:{json_rpc_port}");
 
             Ok(DanWalletInfo {
+                instance_id: instance.id,
                 name: instance.name,
                 web,
                 jrpc,

@@ -139,6 +139,7 @@ impl LockIntent for &VersionedSubstateIdLockIntent {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct RequireLockIntentRef<'a> {
     substate_id: &'a SubstateId,
     lock_type: SubstateLockType,
@@ -201,9 +202,13 @@ pub struct SubstateRequirementLockIntent {
 }
 
 impl SubstateRequirementLockIntent {
-    pub fn new<T: Into<SubstateRequirement>>(substate_id: T, version_to_lock: u32, lock: SubstateLockType) -> Self {
+    pub fn new<T: Into<SubstateRequirement>>(
+        substate_requirement: T,
+        version_to_lock: u32,
+        lock: SubstateLockType,
+    ) -> Self {
         Self {
-            substate_requirement: substate_id.into(),
+            substate_requirement: substate_requirement.into(),
             version_to_lock,
             lock_type: lock,
         }

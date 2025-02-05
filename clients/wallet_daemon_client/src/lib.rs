@@ -19,16 +19,13 @@
 //   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+mod component_address;
+pub use component_address::*;
 pub mod error;
 pub mod serialize;
 pub mod types;
 
-use std::{
-    borrow::Borrow,
-    convert::Infallible,
-    fmt::{Display, Formatter},
-    str::FromStr,
-};
+use std::borrow::Borrow;
 
 use json::Value;
 use reqwest::{
@@ -36,12 +33,9 @@ use reqwest::{
     IntoUrl,
     Url,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json as json;
 use serde_json::json;
-use tari_template_lib::models::ComponentAddress;
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 use types::{
     AccountsCreateFreeTestCoinsRequest,
     AccountsCreateFreeTestCoinsResponse,
@@ -127,66 +121,6 @@ use crate::{
         TransactionWaitResultResponse,
     },
 };
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
-pub enum ComponentAddressOrName {
-    ComponentAddress(ComponentAddress),
-    Name(String),
-}
-
-impl ComponentAddressOrName {
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            Self::ComponentAddress(_) => None,
-            Self::Name(name) => Some(name),
-        }
-    }
-
-    pub fn component_address(&self) -> Option<&ComponentAddress> {
-        match self {
-            Self::ComponentAddress(address) => Some(address),
-            Self::Name(_) => None,
-        }
-    }
-}
-
-impl Display for ComponentAddressOrName {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ComponentAddress(address) => write!(f, "{}", address),
-            Self::Name(name) => write!(f, "{}", name),
-        }
-    }
-}
-
-impl FromStr for ComponentAddressOrName {
-    type Err = Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(address) = ComponentAddress::from_str(s) {
-            Ok(Self::ComponentAddress(address))
-        } else {
-            Ok(Self::Name(s.to_string()))
-        }
-    }
-}
-
-impl From<ComponentAddress> for ComponentAddressOrName {
-    fn from(address: ComponentAddress) -> Self {
-        Self::ComponentAddress(address)
-    }
-}
-
-impl From<String> for ComponentAddressOrName {
-    fn from(name: String) -> Self {
-        Self::Name(name)
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct WalletDaemonClient {
@@ -315,11 +249,11 @@ impl WalletDaemonClient {
         self.send_request("accounts.get_balances", request.borrow()).await
     }
 
-    pub async fn get_validator_fee_summary<T: Borrow<GetValidatorFeesRequest>>(
+    pub async fn get_validator_fees<T: Borrow<GetValidatorFeesRequest>>(
         &mut self,
         request: T,
     ) -> Result<GetValidatorFeesResponse, WalletDaemonClientError> {
-        self.send_request("validators.get_fee_summary", request.borrow()).await
+        self.send_request("validators.get_fees", request.borrow()).await
     }
 
     pub async fn claim_validator_fees<T: Borrow<ClaimValidatorFeesRequest>>(

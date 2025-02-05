@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
@@ -33,21 +33,38 @@ import { useTheme } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
 import { FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
 import { useKeysList } from "../../../api/hooks/useKeys";
-import { validatorsClaimFees } from "../../../utils/json_rpc";
-import type { AccountInfo } from "@tari-project/typescript-bindings";
+import { validatorsClaimFees, validatorsGetFees } from "../../../utils/json_rpc";
+import { AccountInfo, GetValidatorFeesResponse, substateIdToString } from "@tari-project/typescript-bindings";
+import { FileContent } from "use-file-picker/types";
+import { toHexString } from "../../../utils/helpers";
+
+interface FormState {
+  account: string | null;
+  fee: number | null;
+  shards: Array<number>;
+  keyIndex: number | null;
+}
+
+const INITIAL_VALUES = {
+  account: null,
+  fee: null,
+  shards: [],
+  keyIndex: null,
+};
+
+const INITIAL_VALIDITY = {
+  key: false,
+  shard: false,
+};
 
 export default function ClaimFees() {
   const [open, setOpen] = useState(false);
   const [disabled, setDisabled] = useState(false);
-  const [estimatedFee, setEstimatedFee] = useState(0);
-  const [claimFeesFormState, setClaimFeesFormState] = useState({
-    account: "",
-    fee: "",
-    validatorNodePublicKey: "",
-    epoch: "",
-    key_index: -1,
-  });
-
+  const [isValid, setIsValid] = useState(false);
+  const [formState, setFormState] = useState<FormState>(INITIAL_VALUES);
+  const [scannedFees, setScannedFees] = useState<GetValidatorFeesResponse | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [validity, setValidity] = useState<{ [key: string]: boolean }>(INITIAL_VALIDITY);
   const { data: dataAccountsList } = useAccountsList(0, 10);
   const { data: dataKeysList } = useKeysList();
   const { setPopup } = useAccountStore();
@@ -55,98 +72,83 @@ export default function ClaimFees() {
   const theme = useTheme();
 
   const isFormFilled = () => {
-    if (claimFeesFormState.validatorNodePublicKey.length !== 64) {
-      return false;
-    }
-    return (
-      claimFeesFormState.account !== "" &&
-      claimFeesFormState.validatorNodePublicKey !== "" &&
-      claimFeesFormState.epoch !== ""
-    );
+    return validity.key && validity.shard;
   };
 
-  const is_filled = isFormFilled();
+  useEffect(() => {
+    setIsValid(!isFormFilled());
+  }, [validity]);
 
   const onClaimFeesKeyChange = (e: SelectChangeEvent<number>) => {
     if (!dataKeysList) {
       return;
     }
-    let key_index = +e.target.value;
-    let account = claimFeesFormState.account;
-    let selected_account = dataAccountsList?.accounts.find(
-      (account: AccountInfo) => account.account.key_index === key_index,
+    const keyIndex = +e.target.value;
+    if (keyIndex === formState.keyIndex) {
+      return;
+    }
+    const selected_account = dataAccountsList?.accounts.find(
+      (account: AccountInfo) => account.account.key_index === keyIndex,
     );
-    let new_account_name;
-    account = selected_account?.account.name || "";
-    new_account_name = false;
-    setClaimFeesFormState({
-      ...claimFeesFormState,
-      key_index: key_index,
-      account: account,
+    const account = selected_account?.account.address ? substateIdToString(selected_account!.account.address) : null;
+    setScannedFees(null);
+    setFormState({
+      ...formState,
+      keyIndex,
+      account,
     });
   };
 
-  const onEpochChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (/^[0-9]*$/.test(e.target.value)) {
-      setEstimatedFee(0);
-      setClaimFeesFormState({
-        ...claimFeesFormState,
-        [e.target.name]: e.target.value,
-      });
-    }
-  };
-
-  const onClaimBurnAccountNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setEstimatedFee(0);
-    setClaimFeesFormState({
-      ...claimFeesFormState,
+  function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
+    setFormState({
+      ...formState,
       [e.target.name]: e.target.value,
     });
-  };
-
-  const onPublicKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (/^[0-9a-fA-F]*$/.test(e.target.value)) {
-      setClaimFeesFormState({
-        ...claimFeesFormState,
-        [e.target.name]: e.target.value,
+    if (validity[e.target.name as keyof object] !== undefined && "validity" in e.target) {
+      setValidity({
+        ...validity,
+        [e.target.name]: e.target.validity.valid,
       });
     }
-    setEstimatedFee(0);
-  };
+  }
 
-  const onClaim = async () => {
-    if (claimFeesFormState.account) {
-      setDisabled(true);
-      validatorsClaimFees({
-        account: { Name: claimFeesFormState.account },
-        max_fee: 3000,
-        validator_public_key: claimFeesFormState.validatorNodePublicKey,
-        epoch: parseInt(claimFeesFormState.epoch),
-        dry_run: estimatedFee == 0,
-      })
-        .then((resp) => {
-          if (estimatedFee == 0) {
-            setEstimatedFee(resp.fee);
-          } else {
-            setEstimatedFee(0);
-            setOpen(false);
-            setPopup({ title: "Claim successful", error: false });
-            setClaimFeesFormState({
-              account: "",
-              fee: "",
-              validatorNodePublicKey: "",
-              epoch: "",
-              key_index: -1,
-            });
-          }
-        })
-        .catch((e) => {
-          setPopup({ title: "Claim failed", error: true, message: e.message });
-        })
-        .finally(() => {
-          setDisabled(false);
-        });
+  const onClaim = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (formState.keyIndex === null) {
+      console.warn("Claim key is not selected");
+      return;
     }
+    if (!formState.shards.length) {
+      console.warn("No shards selected");
+      return;
+    }
+
+    const isFeeSet = Boolean(formState.fee) && !isNaN(formState.fee || 0);
+    setDisabled(true);
+    validatorsClaimFees({
+      account: formState.account ? { ComponentAddress: formState.account } : null,
+      claim_key_index: formState.keyIndex,
+      max_fee: 3000,
+      shards: formState.shards,
+      dry_run: !isFeeSet,
+    })
+      .then((resp) => {
+        if (isFeeSet) {
+          setFormState(INITIAL_VALUES);
+          setValidity(INITIAL_VALIDITY);
+          setOpen(false);
+          setPopup({ title: "Claim successful", error: false });
+        } else {
+          setFormState({ ...formState, fee: resp.fee });
+        }
+      })
+      .catch((e) => {
+        setPopup({ title: "Claim failed", error: true, message: e.message });
+      })
+      .finally(() => {
+        // Previous value of disabled
+        setDisabled(disabled);
+      });
   };
 
   const handleClickOpen = () => {
@@ -154,18 +156,37 @@ export default function ClaimFees() {
   };
 
   const handleClose = () => {
+    setScannedFees(null);
     setOpen(false);
   };
 
-  const formattedKey = (key: [number, string, boolean]) => {
-    let account = dataAccountsList?.accounts.find((account: AccountInfo) => account.account.key_index === +key[0]);
-    if (account === undefined) {
-      return null;
+  const handleScanForFees = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (formState.keyIndex === null) {
+      console.warn("Claim key is not selected");
+      return;
     }
+    setIsLoading(true);
+    try {
+      const fees = await validatorsGetFees({
+        account_or_key: { KeyIndex: formState.keyIndex },
+        shard_group: null,
+      });
+      setScannedFees(fees);
+      setFormState({ ...formState, shards: Object.entries(fees.fees).map(([shard, _info]) => +shard) });
+    } catch (e: any) {
+      setPopup({ title: "Scan failed", error: true, message: e.message });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const formatKey = ([index, publicKey, _isActive]: [number, string, boolean]) => {
+    let account = dataAccountsList?.accounts.find((account: AccountInfo) => account.account.key_index === +index);
     return (
       <div>
-        <b>{key[0]}</b> {key[1]}
-        <br></br>Account <i>{account.account.name}</i>
+        <b>{index}</b> {publicKey}
+        <br></br>Account <i>{account?.account.name || "<None>"}</i>
       </div>
     );
   };
@@ -183,59 +204,46 @@ export default function ClaimFees() {
               <InputLabel id="key">Key</InputLabel>
               <Select
                 labelId="key"
-                name="key"
-                label="Key"
-                value={claimFeesFormState.key_index >= 0 ? claimFeesFormState.key_index : ""}
+                name="keyIndex"
+                label="key"
+                value={formState.keyIndex !== null ? formState.keyIndex : ""}
                 onChange={onClaimFeesKeyChange}
                 style={{ flexGrow: 1, minWidth: "200px" }}
                 disabled={disabled}
               >
-                {dataKeysList?.keys
-                  ?.filter(
-                    (key: [number, string, boolean]) =>
-                      dataAccountsList?.accounts.find(
-                        (account: AccountInfo) => account.account.key_index === +key[0],
-                      ) !== undefined,
-                  )
-                  .map((key: [number, string, boolean]) => (
-                    <MenuItem key={key[0]} value={key[0]}>
-                      {formattedKey(key)}
-                    </MenuItem>
-                  ))}
+                {dataKeysList?.keys.map((account: [number, string, boolean]) => (
+                  <MenuItem key={account[0]} value={account[0]}>
+                    {formatKey(account)}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
-            <TextField
-              name="account"
-              label="Account Name"
-              value={claimFeesFormState.account}
-              onChange={onClaimBurnAccountNameChange}
-              style={{ flexGrow: 1 }}
-              disabled={true}
-            ></TextField>
+            <Button
+              variant="outlined"
+              onClick={handleScanForFees}
+              disabled={disabled || formState.keyIndex === null || isLoading}
+            >
+              {isLoading ? "Scanning..." : "Scan for Fees"}
+            </Button>
+            {scannedFees?.fees ? (
+              <Box>
+                Found fees in {Object.entries(scannedFees.fees).length} shards. Total:{" "}
+                {Object.entries(scannedFees.fees)
+                  .map(([_shard, info]) => info.amount)
+                  .reduce((acc, amt) => acc + amt, 0)}{" "}
+                XTR
+              </Box>
+            ) : null}
             <TextField
               name="fee"
-              label="Fee"
-              value={estimatedFee || "Press fee estimate to calculate"}
-              style={{ flexGrow: 1 }}
-              InputProps={{ readOnly: true }}
-              disabled={disabled}
-            />
-            <TextField
-              name="validatorNodePublicKey"
-              label="Validator Node Public Key"
-              value={claimFeesFormState.validatorNodePublicKey}
-              onChange={onPublicKeyChange}
+              label="Max Transaction Fee"
+              placeholder="Press Estimate Fee to calculate"
+              value={formState.fee === null ? "" : formState.fee}
+              onChange={setFormValue}
               style={{ flexGrow: 1 }}
               disabled={disabled}
             />
-            <TextField
-              name="epoch"
-              label="Epoch"
-              value={claimFeesFormState.epoch}
-              style={{ flexGrow: 1 }}
-              onChange={onEpochChange}
-              disabled={disabled}
-            />
+
             <Box
               className="flex-container"
               style={{
@@ -245,8 +253,8 @@ export default function ClaimFees() {
               <Button variant="outlined" onClick={handleClose} disabled={disabled}>
                 Cancel
               </Button>
-              <Button variant="contained" type="submit" disabled={disabled || !is_filled}>
-                {estimatedFee ? "Claim" : "Estimate fee"}
+              <Button variant="contained" type="submit" disabled={disabled || !isValid}>
+                {formState.fee ? "Claim" : "Estimate fee"}
               </Button>
             </Box>
           </Form>

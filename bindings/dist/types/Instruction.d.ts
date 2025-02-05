@@ -40,8 +40,7 @@ export type Instruction = {
     };
 } | {
     ClaimValidatorFees: {
-        epoch: number;
-        validator_public_key: string;
+        address: string;
     };
 } | "DropAllProofsInWorkspace" | {
     AssertBucketContains: {

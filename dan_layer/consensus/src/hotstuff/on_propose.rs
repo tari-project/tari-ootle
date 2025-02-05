@@ -22,7 +22,6 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::{
     consensus_models::{
-        AbortReason,
         Block,
         BlockHeader,
         BlockId,
@@ -58,13 +57,16 @@ use tokio::task;
 
 use crate::{
     hotstuff::{
+        apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
         error::HotStuffError,
         filter_diff_for_committee,
         substate_store::PendingSubstateStore,
+        to_public_key_bytes,
         transaction_manager::{
             ConsensusTransactionManager,
+            EvidenceOrExecution,
             LocalPreparedTransaction,
             PledgedTransaction,
             PreparedTransaction,
@@ -130,6 +132,7 @@ where TConsensusSpec: ConsensusSpec
         next_height: NodeHeight,
         local_committee: &Committee<TConsensusSpec::Addr>,
         local_committee_info: CommitteeInfo,
+        local_claim_public_key: &PublicKey,
         leaf_block: LeafBlock,
         propose_epoch_end: bool,
     ) -> Result<(), HotStuffError> {
@@ -155,6 +158,8 @@ where TConsensusSpec: ConsensusSpec
         let base_layer_block_height = current_base_layer_block_height;
 
         let on_propose = self.clone();
+        let local_claim_public_key = to_public_key_bytes(local_claim_public_key);
+
         let (next_block, foreign_proposals) = task::spawn_blocking(move || {
             on_propose.store.with_write_tx(|tx| {
                 let high_qc = HighQc::get(&**tx, epoch)?;
@@ -174,6 +179,7 @@ where TConsensusSpec: ConsensusSpec
                     leaf_block,
                     high_qc_cert,
                     &local_committee_info,
+                    local_claim_public_key,
                     false,
                     base_layer_block_height,
                     base_layer_block_hash,
@@ -294,6 +300,10 @@ where TConsensusSpec: ConsensusSpec
             ),
             // Leader thinks all local nodes have prepared
             TransactionPoolStage::Prepared => {
+                if tx_rec.current_decision().is_abort() {
+                    let atom = tx_rec.get_current_transaction_atom();
+                    return Ok(Some(Command::LocalAccept(atom)));
+                }
                 if tx_rec
                     .evidence()
                     .is_committee_output_only(local_committee_info.shard_group())
@@ -435,6 +445,7 @@ where TConsensusSpec: ConsensusSpec
         parent_block: LeafBlock,
         high_qc_certificate: QuorumCertificate,
         local_committee_info: &CommitteeInfo,
+        local_claim_public_key_bytes: [u8; 32],
         dont_propose_transactions: bool,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
@@ -564,7 +575,7 @@ where TConsensusSpec: ConsensusSpec
                     .unwrap_or(0);
                 // TODO: a BTreeSet changes the order from the original batch. Uncertain if this is a problem since the
                 // proposer also processes transactions in the completed block order, however on_propose does perform
-                // some operations (e.g. prepare, execute) in batch order. To ensure safety, we should process
+                // some operations (e.g. prepare, execute) in batch order. To ensure correctness, we should process
                 // on_propose in canonical order.
                 commands.insert(command);
             }
@@ -596,6 +607,24 @@ where TConsensusSpec: ConsensusSpec
 
         let pending_tree_diffs =
             PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, start_of_chain_block.block_id())?;
+
+        // Add proposer fee substate
+        if total_leader_fee > 0 {
+            let total_leader_fee_amt = total_leader_fee.try_into().map_err(|e| {
+                HotStuffError::InvariantError(format!(
+                    "Total leader fee ({total_leader_fee}) under/overflowed the Amount type: {e}"
+                ))
+            })?;
+
+            // Apply leader fee to substate store before we calculate the state root
+            apply_leader_fee_to_substate_store(
+                &mut substate_store,
+                local_claim_public_key_bytes,
+                local_committee_info.shard_group().start(),
+                local_committee_info.num_preshards(),
+                total_leader_fee_amt,
+            )?;
+        }
 
         let (state_root, _) = calculate_state_merkle_root(
             tx,
@@ -762,6 +791,17 @@ where TConsensusSpec: ConsensusSpec
             )
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
+        if !prepared.is_involved(local_committee_info) {
+            // CASE: execution was aborted and we're output-only
+            warn!(
+                target: LOG_TARGET,
+                "❓️ Not involved in prepared transaction {}", tx_rec.transaction_id(),
+            );
+            // TODO: We may be the output for the transaction receipt, however we assume no outputs if aborting.
+            //
+            // return Ok(None);
+        }
+
         if prepared.lock_status().is_any_failed() && !prepared.lock_status().is_hard_conflict() {
             warn!(
                 target: LOG_TARGET,
@@ -777,89 +817,93 @@ where TConsensusSpec: ConsensusSpec
         }
 
         let command = match prepared {
-            PreparedTransaction::LocalOnly(LocalPreparedTransaction::Accept { execution, .. }) => {
-                // Update the decision so that we can propose it
-                tx_rec.update_from_execution(
-                    local_committee_info.num_preshards(),
-                    local_committee_info.num_committees(),
-                    &execution,
-                );
+            PreparedTransaction::LocalOnly(local) => match *local {
+                LocalPreparedTransaction::Accept { execution, .. } => {
+                    tx_rec
+                        .set_local_decision(execution.decision())
+                        .set_transaction_fee(execution.transaction_fee())
+                        .set_evidence(execution.to_evidence(
+                            local_committee_info.num_preshards(),
+                            local_committee_info.num_committees(),
+                        ));
 
-                info!(
-                    target: LOG_TARGET,
-                    "🏠️ Transaction {} is local only, proposing LocalOnly",
-                    tx_rec.transaction_id(),
-                );
+                    info!(
+                        target: LOG_TARGET,
+                        "🏠️ Transaction {} is local only, proposing LocalOnly",
+                        tx_rec.transaction_id(),
+                    );
 
-                if tx_rec.current_decision().is_commit() {
-                    let involved = NonZeroU64::new(1).expect("1 > 0");
-                    let leader_fee =
-                        tx_rec.calculate_leader_fee(involved, self.config.consensus_constants.fee_exhaust_divisor);
-                    tx_rec.set_leader_fee(leader_fee);
-                    let diff = execution.result().finalize.result.accept().ok_or_else(|| {
-                        HotStuffError::InvariantError(format!(
-                            "prepare_transaction: Transaction {} has COMMIT decision but execution failed when \
-                             proposing",
-                            tx_rec.transaction_id(),
-                        ))
-                    })?;
+                    if tx_rec.current_decision().is_commit() {
+                        let involved = NonZeroU64::new(1).expect("1 > 0");
+                        let leader_fee =
+                            tx_rec.calculate_leader_fee(involved, self.config.consensus_constants.fee_exhaust_divisor);
+                        tx_rec.set_leader_fee(leader_fee);
+                        let diff = execution.result().finalize.result.accept().ok_or_else(|| {
+                            HotStuffError::InvariantError(format!(
+                                "prepare_transaction: Transaction {} has COMMIT decision but execution failed when \
+                                 proposing",
+                                tx_rec.transaction_id(),
+                            ))
+                        })?;
 
-                    if let Err(err) = substate_store.put_diff(*tx_rec.transaction_id(), diff) {
-                        error!(
-                            target: LOG_TARGET,
-                            "🔒 Failed to write to temporary state store for transaction {} for LocalOnly: {}. Skipping proposing this transaction...",
-                            tx_rec.transaction_id(),
-                            err,
-                        );
-                        // Only error if it is not related to lock errors
-                        let _err = err.ok_lock_failed()?;
-                        return Ok(None);
+                        if let Err(err) = substate_store.put_diff(*tx_rec.transaction_id(), diff) {
+                            error!(
+                                target: LOG_TARGET,
+                                "🔒 Failed to write to temporary state store for transaction {} for LocalOnly: {}. Skipping proposing this transaction...",
+                                tx_rec.transaction_id(),
+                                err,
+                            );
+                            // Only error if it is not related to lock errors
+                            let _err = err.ok_lock_failed()?;
+                            return Ok(None);
+                        }
                     }
-                }
 
-                executed_transactions.insert(*tx_rec.transaction_id(), execution);
+                    executed_transactions.insert(*tx_rec.transaction_id(), execution);
 
-                let atom = tx_rec.get_current_transaction_atom();
-                Command::LocalOnly(atom)
-            },
-            PreparedTransaction::LocalOnly(LocalPreparedTransaction::EarlyAbort { execution }) => {
-                info!(
-                    target: LOG_TARGET,
-                    "⚠️ Transaction is LOCAL-ONLY EARLY ABORT, proposing LocalOnly({}, ABORT)",
-                    tx_rec.transaction_id(),
-                );
-                tx_rec.set_local_decision(Decision::Abort(AbortReason::EarlyAbort));
-
-                info!(
-                    target: LOG_TARGET,
-                    "⚠️ Transaction is LOCAL-ONLY EARLY ABORT, proposing LocalOnly({}, ABORT)",
-                    tx_rec.transaction_id(),
-                );
-
-                tx_rec.update_from_execution(
-                    local_committee_info.num_preshards(),
-                    local_committee_info.num_committees(),
-                    &execution,
-                );
-                executed_transactions.insert(*tx_rec.transaction_id(), execution);
-                let atom = tx_rec.get_current_transaction_atom();
-                Command::LocalOnly(atom)
+                    let atom = tx_rec.get_current_transaction_atom();
+                    Command::LocalOnly(atom)
+                },
+                LocalPreparedTransaction::EarlyAbort { execution } => {
+                    info!(
+                        target: LOG_TARGET,
+                        "⚠️ Transaction is LOCAL-ONLY EARLY ABORT, proposing LocalOnly({}, ABORT)",
+                        tx_rec.transaction_id(),
+                    );
+                    tx_rec
+                        .set_local_decision(execution.decision())
+                        .set_transaction_fee(execution.transaction_fee())
+                        .set_evidence(execution.to_evidence(
+                            local_committee_info.num_preshards(),
+                            local_committee_info.num_committees(),
+                        ));
+                    executed_transactions.insert(*tx_rec.transaction_id(), execution);
+                    let atom = tx_rec.get_current_transaction_atom();
+                    Command::LocalOnly(atom)
+                },
             },
 
             PreparedTransaction::MultiShard(multishard) => {
-                match multishard.current_decision() {
-                    Decision::Commit => {
-                        if multishard.is_executed() {
-                            let involves_inputs = multishard.involve_any_inputs();
+                match multishard.into_evidence_or_execution() {
+                    EvidenceOrExecution::Execution(execution) => {
+                        // CASE: All inputs are local and outputs are foreign (i.e. the transaction is
+                        // executed), or all inputs are foreign and this shard
+                        // group is output only and, we've already received all pledges.
+                        tx_rec.update_from_execution(
+                            local_committee_info.num_preshards(),
+                            local_committee_info.num_committees(),
+                            &execution,
+                        );
 
-                            // CASE: All inputs are local and outputs are foreign (i.e. the transaction is executed), or
-                            // all inputs are foreign and this shard group is output only.
-                            let execution = multishard.into_execution().expect("Abort should have execution");
-                            tx_rec.update_from_execution(
-                                local_committee_info.num_preshards(),
-                                local_committee_info.num_committees(),
-                                &execution,
-                            );
+                        // TODO: this is kinda hacky - we may not be involved in the transaction after ABORT execution,
+                        // but this would be invalid so we ensure that we are added to evidence. Ideally, we wouldn't
+                        // sequence this transaction at all - investigate.
+                        tx_rec
+                            .evidence_mut()
+                            .add_shard_group(local_committee_info.shard_group());
+
+                        if tx_rec.current_decision().is_commit() {
+                            let involves_inputs = tx_rec.evidence().has_inputs(local_committee_info.shard_group());
                             if !involves_inputs {
                                 let num_involved_shard_groups = tx_rec.evidence().num_shard_groups();
                                 let involved = NonZeroU64::new(num_involved_shard_groups as u64).ok_or_else(|| {
@@ -871,30 +915,16 @@ where TConsensusSpec: ConsensusSpec
                                 );
                                 tx_rec.set_leader_fee(leader_fee);
                             }
-
-                            executed_transactions.insert(*tx_rec.transaction_id(), execution);
-                        } else {
-                            // CASE: All local inputs were resolved. We need to continue with consensus to get the
-                            // foreign inputs/outputs.
-                            tx_rec.set_local_decision(Decision::Commit);
-                            // Set partial evidence using local inputs and known outputs.
-                            tx_rec
-                                .evidence_mut()
-                                .update(&multishard.to_initial_evidence(local_committee_info));
                         }
+
+                        executed_transactions.insert(*tx_rec.transaction_id(), *execution);
                     },
-                    Decision::Abort(reason) => {
-                        warn!(target: LOG_TARGET, "Prepare transaction abort: {reason:?}");
-                        let initial_evidence = multishard.to_initial_evidence(local_committee_info);
-                        // CASE: The transaction was ABORTed due to a lock conflict
-                        let execution = multishard.into_execution().expect("Abort must have execution");
-                        tx_rec.update_from_execution(
-                            local_committee_info.num_preshards(),
-                            local_committee_info.num_committees(),
-                            &execution,
-                        );
-                        tx_rec.evidence_mut().update(&initial_evidence);
-                        executed_transactions.insert(*tx_rec.transaction_id(), execution);
+                    EvidenceOrExecution::Evidence { evidence, .. } => {
+                        // CASE: All local inputs were resolved. We need to continue with consensus to get the
+                        // foreign inputs/outputs.
+                        tx_rec.set_local_decision(Decision::Commit);
+                        // Set partial evidence using local inputs and known outputs.
+                        tx_rec.set_evidence(evidence);
                     },
                 }
 
@@ -944,9 +974,10 @@ where TConsensusSpec: ConsensusSpec
         let mut execution = self.execute_transaction(tx, &parent_block.block_id, parent_block.epoch, transaction)?;
 
         // Try to lock all local outputs
-        let local_outputs = execution.resulting_outputs().iter().filter(|o| {
-            o.substate_id().is_transaction_receipt() || local_committee_info.includes_substate_id(o.substate_id())
-        });
+        let local_outputs = execution
+            .resulting_outputs()
+            .iter()
+            .filter(|o| local_committee_info.includes_substate_id(o.substate_id()));
         let lock_status = substate_store.try_lock_all(*tx_rec.transaction_id(), local_outputs, false)?;
         if let Some(err) = lock_status.failures().first() {
             warn!(
@@ -974,8 +1005,8 @@ where TConsensusSpec: ConsensusSpec
         );
 
         executed_transactions.insert(*tx_rec.transaction_id(), execution);
-        // If we locally decided to ABORT, we are still saying that we think all prepared. When we enter the acceptance
-        // phase, we will propose SomeAccept for this case.
+        // If we locally decided to ABORT, we are still saying that we think all prepared and, after execution decide to
+        // ABORT. When we enter the acceptance phase, we will propose SomeAccept for this case.
         Ok(Some(Command::AllPrepare(tx_rec.get_current_transaction_atom())))
     }
 

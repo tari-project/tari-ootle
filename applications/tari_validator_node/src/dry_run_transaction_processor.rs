@@ -29,7 +29,10 @@ use tari_dan_app_utilities::{
 use tari_dan_common_types::PeerAddress;
 use tari_dan_engine::state_store::{new_memory_store, StateStoreError};
 use tari_dan_storage::StorageError;
-use tari_engine_types::commit_result::ExecuteResult;
+use tari_engine_types::{
+    commit_result::ExecuteResult,
+    virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+};
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::RpcStatus;
 use tari_state_store_sqlite::SqliteStateStore;
@@ -42,7 +45,6 @@ use tokio::task;
 use crate::{
     p2p::services::mempool::{ResolvedSubstates, SubstateResolver},
     substate_resolver::{SubstateResolverError, TariSubstateResolver},
-    virtual_substate::VirtualSubstateError,
 };
 
 const LOG_TARGET: &str = "tari::dan::validator_node::dry_run_transaction_processor";
@@ -63,8 +65,6 @@ pub enum DryRunTransactionProcessorError {
     StateStoreError(#[from] StateStoreError),
     #[error("Substate resolver error: {0}")]
     SubstateResoverError(#[from] SubstateResolverError),
-    #[error("Virtual substate error: {0}")]
-    VirtualSubstateError(#[from] VirtualSubstateError),
     #[error("Execution thread failed: {0}")]
     ExecutionThreadFailed(#[from] task::JoinError),
 }
@@ -106,11 +106,13 @@ impl DryRunTransactionProcessor {
         // Resolve all local and foreign substates
         let mut temp_state_store = new_memory_store();
 
+        // TODO: the current epoch should come from consensus
         let current_epoch = self.epoch_manager.current_epoch().await?;
-        let virtual_substates = self
-            .substate_resolver
-            .resolve_virtual_substates(&transaction, current_epoch)
-            .await?;
+        let mut virtual_substates = VirtualSubstates::new();
+        virtual_substates.insert(
+            VirtualSubstateId::CurrentEpoch,
+            VirtualSubstate::CurrentEpoch(current_epoch.as_u64()),
+        );
 
         let ResolvedSubstates {
             local: inputs,

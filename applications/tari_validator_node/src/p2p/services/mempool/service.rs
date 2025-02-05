@@ -238,18 +238,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
             return Err(e.into());
         }
 
-        // Get the shards involved in claim fees.
-        let fee_claims = transaction.fee_claims().collect::<Vec<_>>();
-
-        let claim_shards = if fee_claims.is_empty() {
-            HashSet::new()
-        } else {
-            #[allow(clippy::mutable_key_type)]
-            let validator_nodes = self.epoch_manager.get_many_validator_nodes(fee_claims).await?;
-            validator_nodes.values().map(|vn| vn.shard_key).collect::<HashSet<_>>()
-        };
-
-        if transaction.num_unique_inputs() == 0 && claim_shards.is_empty() {
+        if transaction.num_unique_inputs() == 0 {
             warn!(target: LOG_TARGET, "⚠ No involved shards for payload");
         }
 
@@ -262,7 +251,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
             local_committee_shard.includes_any_address(
                 // Known output shards
                 // This is to allow for the txreceipt output and indicates shard involvement.
-                iter::once(&tx_substate_address).chain(claim_shards.iter()),
+                iter::once(&tx_substate_address),
             );
 
         if is_input_shard || is_output_shard {

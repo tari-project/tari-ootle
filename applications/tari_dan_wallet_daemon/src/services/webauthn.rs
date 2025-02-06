@@ -3,7 +3,7 @@
 
 use crate::services::{SessionData, SessionStore, SessionStoreError};
 use std::time::{Duration, Instant};
-use tari_dan_wallet_sdk::storage::{WalletStorageError, WalletStore};
+use tari_dan_wallet_sdk::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
 use thiserror::Error;
 use webauthn_rs::prelude::{Passkey, PasskeyRegistration};
 
@@ -77,15 +77,14 @@ where TStore: WalletStore, {
     pub fn new(wallet_store: TStore, session_ttl: Duration) -> Self {
         Self {
             wallet_store,
-            registration_sessions: SessionStore::new(session_ttl.clone()),
+            registration_sessions: SessionStore::new(session_ttl),
             auth_sessions: SessionStore::new(session_ttl),
         }
     }
-    
-    pub async fn registration_count(&self) -> Result<usize, WebauthnServiceError> {
-        let tx = self.wallet_store.create_read_tx()?;
-        // TODO: read registration count from DB
-        Ok(0)
+
+    pub async fn registration_count(&self) -> Result<u64, WebauthnServiceError> {
+        let mut tx = self.wallet_store.create_read_tx()?;
+        Ok(tx.webauthn_reg_count()?)
     }
 
     /// Start registration by creating a new session and save the temporary [`PasskeyRegistration`].
@@ -102,13 +101,13 @@ where TStore: WalletStore, {
         Ok(session.passkey_reg.clone())
     }
 
-    /// Finalizing registration, remove session from store and
+    /// Finalizing registration, remove session from store and save passkey (public key of credential) to DB
     pub async fn finish_registration(&self, session_id: String, passkey: Passkey) -> Result<(), WebauthnServiceError> {
         let username = self.registration_sessions.remove(session_id.as_str()).await
             .ok_or(WebauthnServiceError::SessionStore(SessionStoreError::SessionNotFound {session_id}))?
             .username;
-        let tx = self.wallet_store.create_write_tx()?;
-        // TODO: save to DB
+        let mut tx = self.wallet_store.create_write_tx()?;
+        tx.webauthn_reg_insert(username, passkey)?;
         Ok(())
     }
 }

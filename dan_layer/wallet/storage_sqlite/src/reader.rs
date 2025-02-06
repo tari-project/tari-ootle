@@ -832,6 +832,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
             details: e.to_string(),
         })
     }
+
+    fn webauthn_reg_count(&mut self) -> Result<u64, WalletStorageError> {
+        use crate::schema::webauthn_registrations;
+        let count: i64 = webauthn_registrations::table.count().get_result(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_count", e))?;
+        Ok(count as u64)
+    }
 }
 
 impl Drop for ReadTransaction<'_> {

@@ -9,7 +9,14 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    diesel::ExpressionMethods,
+    models::{self},
+    reader::ReadTransaction,
+    serialization::serialize_json,
+};
 use chrono::NaiveDateTime;
+use diesel::dsl::count;
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::*;
 use serde::Serialize;
@@ -34,13 +41,7 @@ use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId, Tem
 use tari_template_lib::models::{Amount, EncryptedData};
 use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;
-
-use crate::{
-    diesel::ExpressionMethods,
-    models::{self},
-    reader::ReadTransaction,
-    serialization::serialize_json,
-};
+use webauthn_rs::prelude::Passkey;
 
 const LOG_TARGET: &str = "auth::tari::dan::wallet_sdk::storage_sqlite::writer";
 
@@ -926,6 +927,38 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             target: LOG_TARGET,
             "Inserted successfully new non fungible token with id = {}", non_fungible_token.nft_id
         );
+        Ok(())
+    }
+
+    fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError> {
+        use crate::schema::{webauthn_registration_passkeys, webauthn_registrations};
+        diesel::insert_into(webauthn_registrations::table)
+            .values(
+                webauthn_registrations::username.eq(username)
+            ).execute(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_insert", e))?;
+
+        let registration_id: i32 =
+            diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>("last_insert_rowid()"))
+                .get_result(self.connection())
+                .unwrap();
+
+        let passkey_json = serde_json::to_string(&passkey).map_err(|e| {
+            WalletStorageError::DecodingError {
+                operation: "webauthn_reg_insert",
+                item: "passkey",
+                details: e.to_string(),
+            }
+        })?;
+
+        diesel::insert_into(webauthn_registration_passkeys::table)
+            .values((
+                webauthn_registration_passkeys::registration_id.eq(registration_id),
+                webauthn_registration_passkeys::passkey.eq(passkey_json.as_bytes()),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_passkeys_insert", e))?;
+
         Ok(())
     }
 }

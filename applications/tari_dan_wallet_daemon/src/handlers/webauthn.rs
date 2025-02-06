@@ -48,12 +48,12 @@ pub async fn handle_finish_registration(
 ) -> Result<WebauthnFinishRegisterResponse, anyhow::Error> {
     let webauthn = webauthn(context).await?;
     let webauthn_service = context.webauthn_service();
-    let passkey_reg = webauthn_service.registration_passkey(request.session_id).await?;
+    let passkey_reg = webauthn_service.registration_passkey(request.session_id.clone()).await?;
     let passkey = webauthn.finish_passkey_registration(
         &request.credential()?,
         &passkey_reg
     )?;
-    webauthn_service.finish_registration()
+    webauthn_service.finish_registration(request.session_id, passkey).await?;
     Ok(WebauthnFinishRegisterResponse::new(true))
 }
 

@@ -151,4 +151,10 @@ pub enum EpochManagerRequest<TAddr> {
         proof: Box<EvictionProof>,
         reply: Reply<()>,
     },
+    GetRandomCommitteeMemberFromShardGroup {
+        epoch: Epoch,
+        shard_group: Option<ShardGroup>,
+        excluding: Vec<TAddr>,
+        reply: Reply<ValidatorNode<TAddr>>,
+    },
 }

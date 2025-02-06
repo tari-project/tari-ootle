@@ -22,7 +22,7 @@
 
 use log::*;
 use rand::{prelude::*, rngs::OsRng};
-use tari_dan_common_types::{option::Displayable, NodeAddressable, SubstateRequirement};
+use tari_dan_common_types::{displayable::Displayable, NodeAddressable, SubstateRequirement};
 use tari_dan_storage::consensus_models::BlockId;
 use tari_engine_types::{
     events::Event,
@@ -52,7 +52,7 @@ impl<TEpochManager, TVnClient, TAddr, TSubstateCache> SubstateScanner<TEpochMana
 where
     TAddr: NodeAddressable,
     TEpochManager: EpochManagerReader<Addr = TAddr>,
-    TVnClient: ValidatorNodeClientFactory<Addr = TAddr>,
+    TVnClient: ValidatorNodeClientFactory<TAddr>,
     TSubstateCache: SubstateCache,
 {
     pub fn new(

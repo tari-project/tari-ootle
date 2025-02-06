@@ -41,7 +41,7 @@ pub struct TransactionAutofiller<TEpochManager, TVnClient, TSubstateCache> {
 impl<TEpochManager, TVnClient, TAddr, TSubstateCache> TransactionAutofiller<TEpochManager, TVnClient, TSubstateCache>
 where
     TEpochManager: EpochManagerReader<Addr = TAddr> + 'static,
-    TVnClient: ValidatorNodeClientFactory<Addr = TAddr> + 'static,
+    TVnClient: ValidatorNodeClientFactory<TAddr> + 'static,
     TAddr: NodeAddressable + 'static,
     TSubstateCache: SubstateCache + 'static,
 {
@@ -151,7 +151,7 @@ pub async fn get_substate_requirement<TEpochManager, TVnClient, TAddr, TSubstate
 ) -> Result<Option<(SubstateId, Substate)>, IndexerError>
 where
     TEpochManager: EpochManagerReader<Addr = TAddr>,
-    TVnClient: ValidatorNodeClientFactory<Addr = TAddr>,
+    TVnClient: ValidatorNodeClientFactory<TAddr>,
     TAddr: NodeAddressable,
     TSubstateCache: SubstateCache,
 {
@@ -199,7 +199,7 @@ pub(crate) async fn get_substate<TEpochManager, TVnClient, TAddr, TSubstateCache
 ) -> Result<SubstateResult, IndexerError>
 where
     TEpochManager: EpochManagerReader<Addr = TAddr>,
-    TVnClient: ValidatorNodeClientFactory<Addr = TAddr>,
+    TVnClient: ValidatorNodeClientFactory<TAddr>,
     TAddr: NodeAddressable,
     TSubstateCache: SubstateCache,
 {

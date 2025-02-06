@@ -859,7 +859,7 @@ impl Block {
                 } else {
                     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,
-                        substate: substate.try_into()?,
+                        substate: substate.into(),
                     }));
                 };
             }
@@ -888,7 +888,7 @@ impl Block {
             .into_iter()
             .map(|receipt| {
                 Ok::<_, StorageError>(SubstateCreatedProof {
-                    substate: receipt.try_into()?,
+                    substate: receipt.into(),
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

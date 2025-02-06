@@ -13,7 +13,7 @@ use log::*;
 use serde::Serialize;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    option::Displayable,
+    displayable::Displayable,
     optional::{IsNotFoundError, Optional},
     NumPreshards,
     SubstateAddress,

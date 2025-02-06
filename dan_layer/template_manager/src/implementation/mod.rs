@@ -20,10 +20,29 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-mod error;
-mod handle;
-mod types;
+mod downloader;
 
-pub use error::TemplateManagerError;
-pub use handle::TemplateManagerHandle;
-pub use types::{SyncTemplatesResult, Template, TemplateExecutable, TemplateManagerRequest, TemplateMetadata};
+mod initializer;
+pub use initializer::spawn;
+
+mod manager;
+pub use manager::TemplateManager;
+use tari_dan_p2p::proto::rpc::TemplateType;
+use tari_dan_storage::global::DbTemplateType;
+
+mod service;
+
+mod cmap_semaphore;
+mod sync_worker;
+mod template_config;
+mod template_sync_task;
+
+pub use template_config::TemplateConfig;
+
+fn convert_to_db_template_type(template_type: TemplateType) -> DbTemplateType {
+    match template_type {
+        TemplateType::Wasm => DbTemplateType::Wasm,
+        TemplateType::Manifest => DbTemplateType::Manifest,
+        TemplateType::Flow => DbTemplateType::Flow,
+    }
+}

@@ -38,6 +38,7 @@ members = [
     "dan_layer/template_builtin",
     "dan_layer/template_lib",
     "dan_layer/template_macros",
+    "dan_layer/template_manager",
     "dan_layer/template_test_tooling",
     "dan_layer/transaction_manifest",
     "dan_layer/transaction",
@@ -100,6 +101,7 @@ tari_template_abi = { version = "0.8", path = "dan_layer/template_abi" }
 tari_template_builtin = { path = "dan_layer/template_builtin" }
 tari_template_lib = { path = "dan_layer/template_lib" }
 tari_template_macros = { version = "0.8", path = "dan_layer/template_macros" }
+tari_template_manager = { version = "0.8", path = "dan_layer/template_manager" }
 tari_template_test_tooling = { path = "dan_layer/template_test_tooling" }
 tari_transaction = { path = "dan_layer/transaction" }
 tari_transaction_manifest = { path = "dan_layer/transaction_manifest" }
@@ -151,7 +153,7 @@ bincode = "2.0.0-rc.3"
 bitflags = "2.4"
 blake2 = "0.10.6"
 borsh = "1.5"
-bytes = "1.5"
+bytes = "1.10.0"
 cacache = "12.0.0"
 cargo_metadata = "0.15.3"
 cargo_toml = "0.20.5"

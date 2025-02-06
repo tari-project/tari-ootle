@@ -20,12 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, convert::TryFrom, fs, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    fs,
+    sync::Arc,
+};
 
 use chrono::Utc;
 use log::*;
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
     optional::Optional,
     services::template_provider::TemplateProvider,
@@ -38,21 +42,22 @@ use tari_dan_engine::{
     template::{LoadedTemplate, TemplateModuleLoader},
     wasm::WasmModule,
 };
+use tari_dan_p2p::proto::rpc::TemplateType;
 use tari_dan_storage::global::{DbTemplate, DbTemplateType, DbTemplateUpdate, GlobalDb, TemplateStatus};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_engine_types::{calculate_template_binary_hash, hashing::template_hasher32};
+use tari_engine_types::{calculate_template_binary_hash, hashing::hash_template_code};
 use tari_template_builtin::{
     get_template_builtin,
     ACCOUNT_NFT_TEMPLATE_ADDRESS,
     ACCOUNT_TEMPLATE_ADDRESS,
     FAUCET_TEMPLATE_ADDRESS,
 };
-use tari_template_lib::{models::TemplateAddress, Hash};
+use tari_template_lib::models::TemplateAddress;
 
-use super::TemplateConfig;
-use crate::template_manager::{
+use super::{convert_to_db_template_type, TemplateConfig};
+use crate::{
     implementation::cmap_semaphore,
-    interface::{Template, TemplateExecutable, TemplateManagerError, TemplateMetadata},
+    interface::{Template, TemplateExecutable, TemplateManagerError, TemplateMetadata, TemplateQueryResult},
 };
 
 const LOG_TARGET: &str = "tari::validator_node::template_manager";
@@ -140,56 +145,63 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             return Ok(true);
         }
         let mut tx = self.global_db.create_transaction()?;
-        self.global_db
-            .templates(&mut tx)
-            .template_exists(address, status)
-            .map_err(|_| TemplateManagerError::TemplateNotFound { address: *address })
+        let exists = self.global_db.templates(&mut tx).template_exists(address, status)?;
+        Ok(exists)
     }
 
     /// Deletes a template if exists.
-    pub fn delete_template(&self, address: &TemplateAddress) -> Result<(), TemplateManagerError> {
-        if !self.template_exists(address, None)? {
-            return Ok(());
-        }
-
+    pub fn deprecate_template(&self, address: &TemplateAddress) -> Result<(), TemplateManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         self.global_db
             .templates(&mut tx)
-            .delete_template(address)
-            .map_err(|_| TemplateManagerError::TemplateDeleteFailed { address: *address })
+            .set_status(address, TemplateStatus::Deprecated)?;
+        Ok(())
     }
 
     /// Fetching all templates by addresses.
     pub fn fetch_templates_by_addresses(
         &self,
-        mut addresses: Vec<TemplateAddress>,
-    ) -> Result<Vec<Template>, TemplateManagerError> {
-        let mut result = Vec::with_capacity(addresses.len());
+        addresses: Vec<TemplateAddress>,
+    ) -> Result<Vec<TemplateQueryResult>, TemplateManagerError> {
+        let mut results = Vec::with_capacity(addresses.len());
 
+        let mut unique_addrs = addresses.iter().collect::<HashSet<_>>();
         // check in built-in templates first
-        let mut found_template_indexes = vec![];
-        for (i, address) in addresses.iter().enumerate() {
+        for address in &addresses {
             if let Some(template) = self.builtin_templates.get(address) {
-                result.push(template.clone());
-                found_template_indexes.push(i);
+                unique_addrs.remove(address);
+                results.push(TemplateQueryResult::Found {
+                    template: template.clone(),
+                });
             }
         }
-        found_template_indexes.iter().for_each(|i| {
-            addresses.remove(*i);
-        });
 
         // check the rest in DB
         let mut tx = self.global_db.create_transaction()?;
-        self.global_db
+        let templates = self
+            .global_db
             .templates(&mut tx)
-            .get_templates_by_addresses(addresses.iter().map(|addr| addr.as_ref()).collect())
-            .map_err(|_| TemplateManagerError::TemplatesNotFound { addresses })?
-            .iter()
-            .for_each(|template| {
-                result.push(Template::from(template.clone()));
-            });
+            .get_templates_by_addresses(unique_addrs.iter().map(|addr| addr.as_ref()).collect())?;
 
-        Ok(result)
+        for template in templates {
+            unique_addrs.remove(&template.template_address);
+            if template.status.is_active() || template.status.is_deprecated() {
+                results.push(TemplateQueryResult::Found {
+                    template: template.try_into()?,
+                });
+            } else {
+                results.push(TemplateQueryResult::NotAvailable {
+                    address: template.template_address,
+                    status: template.status,
+                });
+            }
+        }
+
+        for address in unique_addrs {
+            results.push(TemplateQueryResult::NotFound { address: *address })
+        }
+
+        Ok(results)
     }
 
     pub fn fetch_template(&self, address: &TemplateAddress) -> Result<Template, TemplateManagerError> {
@@ -206,12 +218,14 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             .ok_or(TemplateManagerError::TemplateNotFound { address: *address })?;
 
         if !matches!(template.status, TemplateStatus::Active | TemplateStatus::Deprecated) {
-            return Err(TemplateManagerError::TemplateUnavailable);
+            return Err(TemplateManagerError::TemplateUnavailable {
+                status: Some(template.status),
+            });
         }
 
         // first check debug
         if let Some(dbg_replacement) = self.config.debug_replacements().get(address) {
-            let mut result: Template = template.into();
+            let mut result: Template = template.try_into()?;
             match &mut result.executable {
                 TemplateExecutable::CompiledWasm(wasm) => {
                     let binary = fs::read(dbg_replacement).expect("Could not read debug file");
@@ -220,12 +234,12 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 TemplateExecutable::Flow(_) => {
                     todo!("debug replacements for flow templates not implemented");
                 },
-                _ => return Err(TemplateManagerError::TemplateUnavailable),
+                _ => return Err(TemplateManagerError::TemplateUnavailable { status: None }),
             }
 
             Ok(result)
         } else {
-            Ok(template.into())
+            Ok(template.try_into()?)
         }
     }
 
@@ -243,19 +257,44 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
 
     pub fn add_pending_template(
         &self,
-        template_address: tari_engine_types::TemplateAddress,
+        template_name: String,
+        template_address: TemplateAddress,
+        author_public_key: PublicKey,
+        binary_hash: FixedHash,
         epoch: Epoch,
+        template_type: TemplateType,
     ) -> Result<(), TemplateManagerError> {
-        let template = DbTemplate::empty_pending(template_address, epoch);
-
         let mut tx = self.global_db.create_transaction()?;
         let mut templates_db = self.global_db.templates(&mut tx);
-        match templates_db.get_template(&template.template_address)? {
-            Some(_) => templates_db.update_template(
-                &template.template_address,
-                DbTemplateUpdate::status(TemplateStatus::Pending),
-            )?,
-            None => templates_db.insert_template(template)?,
+        if let Some(template) = templates_db.get_template(&template_address)? {
+            if template.status.is_active() || template.status.is_deprecated() {
+                return Err(TemplateManagerError::TemplateUnavailable {
+                    status: Some(template.status),
+                });
+            }
+            templates_db.update_template(&template.template_address, DbTemplateUpdate {
+                author_public_key: Some(author_public_key),
+                expected_hash: Some(binary_hash),
+                template_type: Some(convert_to_db_template_type(template_type)),
+                template_name: Some(template_name),
+                status: Some(TemplateStatus::Pending),
+                epoch: Some(epoch),
+                ..Default::default()
+            })?;
+        } else {
+            let template = DbTemplate {
+                author_public_key,
+                template_address,
+                template_name,
+                expected_hash: binary_hash,
+                template_type: convert_to_db_template_type(template_type),
+                code: None,
+                url: None,
+                status: TemplateStatus::Pending,
+                epoch,
+                added_at: Default::default(),
+            };
+            templates_db.insert_template(template)?
         }
 
         tx.commit()?;
@@ -272,63 +311,51 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         template_status: Option<TemplateStatus>,
         epoch: Epoch,
     ) -> Result<(), TemplateManagerError> {
-        enum TemplateHash {
-            Hash(Hash),
-            FixedHash(FixedHash),
-        }
-
-        let mut compiled_code = None;
-        let mut flow_json = None;
-        let mut manifest = None;
+        let mut code = None;
         let mut template_type = DbTemplateType::Wasm;
-        let template_hash: TemplateHash;
+        let template_hash;
         let mut template_name = template_name.unwrap_or(String::from("default"));
         let mut template_url = None;
         match template {
             TemplateExecutable::CompiledWasm(binary) => {
                 let loaded_template = WasmModule::load_template_from_code(binary.as_slice())?;
-                template_hash = TemplateHash::Hash(template_hasher32().chain(binary.as_slice()).result());
-                compiled_code = Some(binary);
+                template_hash = hash_template_code(binary.as_slice()).into_array().into();
+                code = Some(binary);
                 template_name = loaded_template.template_name().to_string();
             },
             TemplateExecutable::Manifest(curr_manifest) => {
-                template_hash = TemplateHash::Hash(template_hasher32().chain(curr_manifest.as_str()).result());
-                manifest = Some(curr_manifest);
+                template_hash = hash_template_code(curr_manifest.as_bytes()).into_array().into();
+                code = Some(curr_manifest.into_bytes());
                 template_type = DbTemplateType::Manifest;
             },
             TemplateExecutable::Flow(curr_flow_json) => {
-                template_hash = TemplateHash::Hash(template_hasher32().chain(curr_flow_json.as_str()).result());
-                flow_json = Some(curr_flow_json);
+                template_hash = hash_template_code(curr_flow_json.as_bytes()).into_array().into();
+                code = Some(curr_flow_json.into_bytes());
                 template_type = DbTemplateType::Flow;
             },
             TemplateExecutable::DownloadableWasm(url, hash) => {
                 template_url = Some(url.to_string());
                 template_type = DbTemplateType::Wasm;
-                template_hash = TemplateHash::FixedHash(hash);
+                template_hash = hash;
             },
         }
 
         let template = DbTemplate {
-            author_public_key: FixedHash::try_from(author_public_key.to_vec().as_slice())?,
+            author_public_key,
             template_name,
             template_address,
-            expected_hash: match template_hash {
-                TemplateHash::Hash(hash) => FixedHash::from(hash.into_array()),
-                TemplateHash::FixedHash(hash) => hash,
-            },
+            expected_hash: template_hash,
             status: template_status.unwrap_or(TemplateStatus::New),
-            compiled_code,
+            code,
             added_at: Utc::now().naive_utc(),
             template_type,
-            flow_json,
-            manifest,
             url: template_url,
             epoch,
         };
 
         let mut tx = self.global_db.create_transaction()?;
         let mut templates_db = self.global_db.templates(&mut tx);
-        if templates_db.get_template(&template.template_address)?.is_some() {
+        if templates_db.template_exists(&template.template_address, None)? {
             return Ok(());
         }
         templates_db.insert_template(template)?;

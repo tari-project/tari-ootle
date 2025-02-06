@@ -6,7 +6,7 @@ use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display, iter, ops::Ra
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
-    option::Displayable,
+    displayable::Displayable,
     shard::Shard,
     Epoch,
     NodeHeight,
@@ -67,10 +67,10 @@ pub struct SubstateDestroyed {
 }
 
 impl SubstateRecord {
-    pub fn new(
+    pub fn new<V: Into<SubstateValueOrHash>>(
         substate_id: SubstateId,
         version: u32,
-        substate_value: SubstateValue,
+        value: V,
         created_by_shard: Shard,
         created_at_epoch: Epoch,
         created_height: NodeHeight,
@@ -78,11 +78,12 @@ impl SubstateRecord {
         created_by_transaction: TransactionId,
         created_justify: QcId,
     ) -> Self {
+        let value = value.into();
         Self {
             substate_id,
             version,
-            state_hash: hash_substate(&substate_value, version),
-            substate_value: Some(substate_value),
+            state_hash: value.to_value_hash(version),
+            substate_value: value.into_value(),
             created_height,
             created_justify,
             created_by_shard,
@@ -363,38 +364,86 @@ impl SubstateDestroyedProof {
 }
 
 #[derive(Debug, Clone)]
+pub enum SubstateValueOrHash {
+    Value(SubstateValue),
+    Hash(FixedHash),
+}
+
+impl SubstateValueOrHash {
+    pub fn value(&self) -> Option<&SubstateValue> {
+        match self {
+            SubstateValueOrHash::Value(value) => Some(value),
+            SubstateValueOrHash::Hash(_) => None,
+        }
+    }
+
+    pub fn into_value(self) -> Option<SubstateValue> {
+        match self {
+            SubstateValueOrHash::Value(value) => Some(value),
+            SubstateValueOrHash::Hash(_) => None,
+        }
+    }
+
+    pub fn hash(&self) -> Option<&FixedHash> {
+        match self {
+            SubstateValueOrHash::Value(_) => None,
+            SubstateValueOrHash::Hash(hash) => Some(hash),
+        }
+    }
+
+    pub fn to_value_hash(&self, version: u32) -> FixedHash {
+        match &self {
+            SubstateValueOrHash::Value(v) => hash_substate(v, version),
+            SubstateValueOrHash::Hash(hash) => *hash,
+        }
+    }
+}
+
+impl From<SubstateValue> for SubstateValueOrHash {
+    fn from(value: SubstateValue) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl From<FixedHash> for SubstateValueOrHash {
+    fn from(hash: FixedHash) -> Self {
+        Self::Hash(hash)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SubstateData {
     pub substate_id: SubstateId,
     pub version: u32,
-    pub substate_value: SubstateValue,
+    pub value: SubstateValueOrHash,
     pub created_by_transaction: TransactionId,
 }
 
 impl SubstateData {
-    pub fn to_versioned_substate_id(&self) -> VersionedSubstateId {
-        VersionedSubstateId::new(self.substate_id.clone(), self.version)
+    pub fn value(&self) -> &SubstateValueOrHash {
+        &self.value
     }
 
-    pub fn into_substate(self) -> Substate {
-        Substate::new(self.version, self.substate_value)
+    pub fn as_versioned_substate_id_ref(&self) -> VersionedSubstateIdRef<'_> {
+        VersionedSubstateIdRef::new(&self.substate_id, self.version)
+    }
+
+    pub fn to_value_hash(&self) -> FixedHash {
+        self.value.to_value_hash(self.version)
     }
 }
 
-impl TryFrom<SubstateRecord> for SubstateData {
-    type Error = StorageError;
-
-    fn try_from(value: SubstateRecord) -> Result<Self, Self::Error> {
-        Ok(Self {
-            substate_value: value.substate_value.ok_or_else(|| StorageError::DataInconsistency {
-                details: format!(
-                    "Cannot convert substate record {} with null value to SubstateData",
-                    value.substate_id
-                ),
-            })?,
+impl From<SubstateRecord> for SubstateData {
+    fn from(value: SubstateRecord) -> Self {
+        Self {
+            value: value
+                .substate_value
+                .map(Into::into)
+                .unwrap_or_else(|| value.state_hash.into()),
             substate_id: value.substate_id,
             version: value.version,
             created_by_transaction: value.created_by_transaction,
-        })
+        }
     }
 }
 

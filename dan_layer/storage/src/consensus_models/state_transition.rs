@@ -95,10 +95,10 @@ impl Display for StateTransitionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "StateTransition({}, {}, seq = {})",
-            self.epoch(),
+            "state transition ({}, seq = {}, {})",
             self.shard(),
-            self.seq()
+            self.seq(),
+            self.epoch(),
         )
     }
 }

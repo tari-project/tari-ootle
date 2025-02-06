@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tari_bor::decode;
-use tari_dan_common_types::{NodeAddressable, PeerAddress, SubstateRequirement};
+use tari_dan_common_types::{NodeAddressable, SubstateRequirement, ToPeerId};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
@@ -18,22 +18,20 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
 };
-use tari_networking::{MessageSpec, NetworkingHandle};
+use tari_networking::{MessageSpec, NetworkingHandle, PeerId};
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::RwLock;
 
 use crate::{rpc_service, ValidatorNodeRpcClientError};
 
-pub trait ValidatorNodeClientFactory: Send + Sync {
-    type Addr: NodeAddressable;
-    type Client: ValidatorNodeRpcClient<Addr = Self::Addr>;
+pub trait ValidatorNodeClientFactory<TAddr: NodeAddressable>: Send + Sync {
+    type Client: ValidatorNodeRpcClient<TAddr>;
 
-    fn create_client(&self, address: &Self::Addr) -> Self::Client;
+    fn create_client(&self, address: &TAddr) -> Self::Client;
 }
 
 #[async_trait]
-pub trait ValidatorNodeRpcClient: Send + Sync {
-    type Addr: NodeAddressable;
+pub trait ValidatorNodeRpcClient<TAddr: NodeAddressable>: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     async fn submit_transaction(&mut self, transaction: Transaction) -> Result<TransactionId, Self::Error>;
@@ -86,27 +84,29 @@ impl SubstateResult {
     }
 }
 
-pub struct TariValidatorNodeRpcClient<TMsg: MessageSpec> {
-    address: PeerAddress,
-    pool: RpcPool<TMsg>,
+#[derive(Debug, Clone)]
+pub struct TariValidatorNodeRpcClient<TAddr, TMsg: MessageSpec> {
+    address: TAddr,
+    pool: RpcMultiPool<TMsg>,
 }
 
-impl<TMsg: MessageSpec> TariValidatorNodeRpcClient<TMsg> {
-    pub fn address(&self) -> &PeerAddress {
+impl<TAddr: ToPeerId, TMsg: MessageSpec> TariValidatorNodeRpcClient<TAddr, TMsg> {
+    pub fn address(&self) -> &TAddr {
         &self.address
     }
 
     pub async fn client_connection(
         &mut self,
     ) -> Result<rpc_service::ValidatorNodeRpcClient, ValidatorNodeRpcClientError> {
-        let client = self.pool.get_or_connect(&self.address).await?;
+        let client = self.pool.get_or_connect(&self.address.to_peer_id()).await?;
         Ok(client)
     }
 }
 
 #[async_trait]
-impl<TMsg: MessageSpec> ValidatorNodeRpcClient for TariValidatorNodeRpcClient<TMsg> {
-    type Addr = PeerAddress;
+impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClient<TAddr>
+    for TariValidatorNodeRpcClient<TAddr, TMsg>
+{
     type Error = ValidatorNodeRpcClientError;
 
     async fn submit_transaction(
@@ -124,6 +124,55 @@ impl<TMsg: MessageSpec> ValidatorNodeRpcClient for TariValidatorNodeRpcClient<TM
         })?;
 
         Ok(id)
+    }
+
+    async fn get_finalized_transaction_result(
+        &mut self,
+        transaction_id: TransactionId,
+    ) -> Result<TransactionResultStatus, ValidatorNodeRpcClientError> {
+        let mut client = self.client_connection().await?;
+        let request = GetTransactionResultRequest {
+            transaction_id: transaction_id.as_bytes().to_vec(),
+        };
+        let response = client.get_transaction_result(request).await?;
+
+        match PayloadResultStatus::try_from(response.status) {
+            Ok(PayloadResultStatus::Pending) => Ok(TransactionResultStatus::Pending),
+            Ok(PayloadResultStatus::Finalized) => {
+                let proto_decision = response
+                    .final_decision
+                    .ok_or(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                        "Missing decision!"
+                    )))?;
+                let final_decision = proto_decision
+                    .try_into()
+                    .map_err(ValidatorNodeRpcClientError::InvalidResponse)?;
+                let execution_result = Some(response.execution_result)
+                    .filter(|r| !r.is_empty())
+                    .map(|r| decode(&r))
+                    .transpose()
+                    .map_err(|_| {
+                        ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                            "Node returned an invalid or empty execution result"
+                        ))
+                    })?;
+
+                let execution_time = Duration::from_millis(response.execution_time_ms);
+                let finalized_time = Duration::from_millis(response.finalized_time_ms);
+
+                Ok(TransactionResultStatus::Finalized(Box::new(FinalizedResult {
+                    execute_result: execution_result,
+                    final_decision,
+                    execution_time,
+                    finalized_time,
+                    abort_details: Some(response.abort_details).filter(|s| s.is_empty()),
+                })))
+            },
+            Err(_) => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                "Node returned invalid payload status {}",
+                response.status
+            ))),
+        }
     }
 
     async fn get_substate(&mut self, substate_req: &SubstateRequirement) -> Result<SubstateResult, Self::Error> {
@@ -184,89 +233,40 @@ impl<TMsg: MessageSpec> ValidatorNodeRpcClient for TariValidatorNodeRpcClient<TM
             SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
         }
     }
-
-    async fn get_finalized_transaction_result(
-        &mut self,
-        transaction_id: TransactionId,
-    ) -> Result<TransactionResultStatus, ValidatorNodeRpcClientError> {
-        let mut client = self.client_connection().await?;
-        let request = GetTransactionResultRequest {
-            transaction_id: transaction_id.as_bytes().to_vec(),
-        };
-        let response = client.get_transaction_result(request).await?;
-
-        match PayloadResultStatus::try_from(response.status) {
-            Ok(PayloadResultStatus::Pending) => Ok(TransactionResultStatus::Pending),
-            Ok(PayloadResultStatus::Finalized) => {
-                let proto_decision = response
-                    .final_decision
-                    .ok_or(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                        "Missing decision!"
-                    )))?;
-                let final_decision = proto_decision
-                    .try_into()
-                    .map_err(ValidatorNodeRpcClientError::InvalidResponse)?;
-                let execution_result = Some(response.execution_result)
-                    .filter(|r| !r.is_empty())
-                    .map(|r| decode(&r))
-                    .transpose()
-                    .map_err(|_| {
-                        ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                            "Node returned an invalid or empty execution result"
-                        ))
-                    })?;
-
-                let execution_time = Duration::from_millis(response.execution_time_ms);
-                let finalized_time = Duration::from_millis(response.finalized_time_ms);
-
-                Ok(TransactionResultStatus::Finalized(Box::new(FinalizedResult {
-                    execute_result: execution_result,
-                    final_decision,
-                    execution_time,
-                    finalized_time,
-                    abort_details: Some(response.abort_details).filter(|s| s.is_empty()),
-                })))
-            },
-            Err(_) => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                "Node returned invalid payload status {}",
-                response.status
-            ))),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
 pub struct TariValidatorNodeRpcClientFactory {
-    pool: RpcPool<TariMessagingSpec>,
+    pool: RpcMultiPool<TariMessagingSpec>,
 }
 
 impl TariValidatorNodeRpcClientFactory {
     pub fn new(networking: NetworkingHandle<TariMessagingSpec>) -> Self {
         Self {
-            pool: RpcPool::new(networking),
+            pool: RpcMultiPool::new(networking),
         }
     }
 }
 
-impl ValidatorNodeClientFactory for TariValidatorNodeRpcClientFactory {
-    type Addr = PeerAddress;
-    type Client = TariValidatorNodeRpcClient<TariMessagingSpec>;
+impl<TAddr: NodeAddressable + ToPeerId> ValidatorNodeClientFactory<TAddr> for TariValidatorNodeRpcClientFactory {
+    type Client = TariValidatorNodeRpcClient<TAddr, TariMessagingSpec>;
 
-    fn create_client(&self, address: &Self::Addr) -> Self::Client {
+    fn create_client(&self, address: &TAddr) -> Self::Client {
         TariValidatorNodeRpcClient {
-            address: *address,
+            address: address.clone(),
             pool: self.pool.clone(),
         }
     }
 }
 
+/// An RPC pool that holds a session for multiple validator nodes
 #[derive(Debug, Clone)]
-pub struct RpcPool<TMsg: MessageSpec> {
-    sessions: Arc<RwLock<HashMap<PeerAddress, rpc_service::ValidatorNodeRpcClient>>>,
+pub struct RpcMultiPool<TMsg: MessageSpec> {
+    sessions: Arc<RwLock<HashMap<PeerId, rpc_service::ValidatorNodeRpcClient>>>,
     networking: NetworkingHandle<TMsg>,
 }
 
-impl<TMsg: MessageSpec> RpcPool<TMsg> {
+impl<TMsg: MessageSpec> RpcMultiPool<TMsg> {
     pub fn new(networking: NetworkingHandle<TMsg>) -> Self {
         Self {
             sessions: Default::default(),
@@ -276,7 +276,7 @@ impl<TMsg: MessageSpec> RpcPool<TMsg> {
 
     async fn get_or_connect(
         &mut self,
-        addr: &PeerAddress,
+        addr: &PeerId,
     ) -> Result<rpc_service::ValidatorNodeRpcClient, ValidatorNodeRpcClientError> {
         let mut sessions = self.sessions.write().await;
         if let Some(client) = sessions.get(addr) {
@@ -287,7 +287,7 @@ impl<TMsg: MessageSpec> RpcPool<TMsg> {
             }
         }
 
-        let client: rpc_service::ValidatorNodeRpcClient = self.networking.connect_rpc(addr.as_peer_id()).await?;
+        let client: rpc_service::ValidatorNodeRpcClient = self.networking.connect_rpc(*addr).await?;
         sessions.insert(*addr, client.clone());
 
         Ok(client)

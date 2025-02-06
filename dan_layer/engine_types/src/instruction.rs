@@ -75,6 +75,13 @@ impl Instruction {
             _ => None,
         }
     }
+
+    pub fn referenced_template(&self) -> Option<&TemplateAddress> {
+        if let Self::CallFunction { template_address, .. } = self {
+            return Some(template_address);
+        }
+        None
+    }
 }
 
 impl Display for Instruction {

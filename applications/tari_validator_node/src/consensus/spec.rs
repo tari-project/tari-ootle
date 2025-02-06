@@ -4,14 +4,12 @@
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_consensus::traits::ConsensusSpec;
-use tari_dan_app_utilities::{
-    template_manager::implementation::TemplateManager,
-    transaction_executor::TariDanTransactionProcessor,
-};
+use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
 use tari_dan_common_types::PeerAddress;
 use tari_epoch_manager::base_layer::EpochManagerHandle;
-use tari_rpc_state_sync::RpcStateSyncManager;
+use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::implementation::TemplateManager;
 
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
@@ -43,7 +41,7 @@ impl ConsensusSpec for TariConsensusSpec {
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
     type SignatureService = TariSignatureService;
     type StateStore = SqliteStateStore<Self::Addr>;
-    type SyncManager = RpcStateSyncManager<Self, Self::Addr>;
+    type SyncManager = RpcStateSyncClientProtocol<Self>;
     type TransactionExecutor = TariDanBlockTransactionExecutor<
         TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
         ConsensusTransactionValidator,

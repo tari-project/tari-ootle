@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use log::*;
 use tari_dan_common_types::{
-    option::Displayable,
+    displayable::Displayable,
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
     SubstateRequirement,

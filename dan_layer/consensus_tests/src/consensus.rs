@@ -31,6 +31,7 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{
     commit_result::RejectReason,
+    hashing::hash_template_code,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
@@ -1532,7 +1533,9 @@ async fn multishard_publish_template() {
 
     test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
         .await;
-    let template_id = PublishedTemplateAddress::from_author_and_code(&pk, &wasm);
+
+    let binary_hash = hash_template_code(&wasm);
+    let template_id = PublishedTemplateAddress::from_author_and_binary_hash(&pk, &binary_hash);
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx.transaction().clone(),
         decision: Decision::Commit,

@@ -24,9 +24,9 @@ use std::string::FromUtf8Error;
 
 use serde_json;
 use tari_common_types::types::FixedHashSizeError;
-use tari_dan_common_types::optional::IsNotFoundError;
+use tari_dan_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_dan_engine::template::TemplateLoaderError;
-use tari_dan_storage::StorageError;
+use tari_dan_storage::{global::TemplateStatus, StorageError};
 use tari_dan_storage_sqlite::error::SqliteStorageError;
 use tari_epoch_manager::EpochManagerError;
 use tari_template_lib::models::TemplateAddress;
@@ -47,10 +47,8 @@ pub enum TemplateManagerError {
     TemplateNotFound { address: TemplateAddress },
     #[error("Templates not found: {addresses:?}")]
     TemplatesNotFound { addresses: Vec<TemplateAddress> },
-    #[error("Template failed to delete: {address}")]
-    TemplateDeleteFailed { address: TemplateAddress },
-    #[error("The template is unavailable for use")]
-    TemplateUnavailable,
+    #[error("The template is unavailable for use (status={})", .status.display())]
+    TemplateUnavailable { status: Option<TemplateStatus> },
     #[error(transparent)]
     TemplateLoaderError(#[from] TemplateLoaderError),
     #[error("Unsupported template type")]
@@ -71,6 +69,11 @@ pub enum TemplateManagerError {
 
 impl IsNotFoundError for TemplateManagerError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, Self::TemplateNotFound { .. })
+        match self {
+            TemplateManagerError::TemplateNotFound { .. } => true,
+            TemplateManagerError::SqliteStorageError(e) => e.is_not_found_error(),
+            TemplateManagerError::StorageError(e) => e.is_not_found_error(),
+            _ => false,
+        }
     }
 }

@@ -179,7 +179,6 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError>;
     fn pop_call_frame(&self) -> Result<(), RuntimeError>;
-
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError>;
 }
 

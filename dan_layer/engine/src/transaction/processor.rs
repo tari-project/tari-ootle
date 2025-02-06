@@ -375,7 +375,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         // validate binary
         WasmModule::load_template_from_code(binary.as_slice())?;
-
         // creating new substate
         runtime.interface().publish_template(binary)?;
 

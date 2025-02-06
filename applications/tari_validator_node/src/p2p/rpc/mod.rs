@@ -26,10 +26,10 @@ mod state_sync_task;
 mod template_sync_task;
 
 pub use service_impl::ValidatorNodeRpcServiceImpl;
-use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 use tari_dan_common_types::PeerAddress;
 use tari_epoch_manager::base_layer::EpochManagerHandle;
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcServer;
 
 use crate::{consensus::ConsensusHandle, p2p::services::mempool::MempoolHandle};

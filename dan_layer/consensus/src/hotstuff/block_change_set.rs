@@ -10,7 +10,7 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{option::Displayable, optional::Optional, shard::Shard, Epoch, ShardGroup};
+use tari_dan_common_types::{displayable::Displayable, optional::Optional, shard::Shard, Epoch, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,

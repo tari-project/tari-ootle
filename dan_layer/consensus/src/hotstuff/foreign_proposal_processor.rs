@@ -4,7 +4,7 @@
 use log::*;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    option::Displayable,
+    displayable::Displayable,
     optional::Optional,
     ShardGroup,
     SubstateAddress,

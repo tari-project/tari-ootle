@@ -1,0 +1,39 @@
+[package]
+name = "tari_template_manager"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+
+[dependencies]
+tari_common_types = { workspace = true }
+tari_dan_common_types = { workspace = true }
+tari_dan_engine = { workspace = true }
+tari_dan_p2p = { workspace = true }
+tari_dan_storage = { workspace = true }
+tari_dan_storage_sqlite = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_epoch_manager = { workspace = true, features = ["base_layer"] }
+tari_rpc_framework = { workspace = true }
+tari_shutdown = { workspace = true }
+tari_template_builtin = { workspace = true }
+tari_template_lib = { workspace = true }
+tari_validator_node_client = { workspace = true }
+tari_validator_node_rpc = { workspace = true }
+
+anyhow = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+mini-moka = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+std-semaphore = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }

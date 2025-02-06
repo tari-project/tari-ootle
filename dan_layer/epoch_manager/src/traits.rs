@@ -162,11 +162,6 @@ pub trait EpochManagerReader: Send + Sync {
         self.get_committee_for_substate(current_epoch, shard).await
     }
 
-    async fn get_local_threshold_for_epoch(&self, epoch: Epoch) -> Result<usize, EpochManagerError> {
-        let committee = self.get_local_committee_info(epoch).await?;
-        Ok(committee.quorum_threshold() as usize)
-    }
-
     async fn is_this_validator_registered_for_epoch(&self, epoch: Epoch) -> Result<bool, EpochManagerError> {
         if !self.is_epoch_active(epoch).await? {
             return Ok(false);

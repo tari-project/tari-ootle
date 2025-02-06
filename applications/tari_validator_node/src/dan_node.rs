@@ -22,11 +22,11 @@
 
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_dan_app_utilities::template_manager::interface::TemplateExecutable;
 use tari_dan_storage::{consensus_models::Block, StateStore};
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
+use tari_template_manager::interface::TemplateExecutable;
 
 use crate::Services;
 

@@ -638,6 +638,18 @@ where
         Ok(committees)
     }
 
+    pub(crate) fn get_random_committee_member_from_shard_group(
+        &self,
+        epoch: Epoch,
+        shard_group: Option<ShardGroup>,
+        excluding: Vec<TAddr>,
+    ) -> Result<ValidatorNode<TAddr>, EpochManagerError> {
+        let mut tx = self.global_db.create_transaction()?;
+        let mut validator_node_db = self.global_db.validator_nodes(&mut tx);
+        let vn = validator_node_db.get_random_committee_member_from_shard_group(epoch, shard_group, excluding)?;
+        Ok(vn)
+    }
+
     pub fn get_fee_claim_public_key(&self) -> Result<Option<PublicKey>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut metadata = self.global_db.metadata(&mut tx);

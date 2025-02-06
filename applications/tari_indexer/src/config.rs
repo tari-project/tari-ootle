@@ -35,10 +35,8 @@ use tari_common::{
     SubConfigPath,
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_app_utilities::{
-    p2p_config::{P2pConfig, PeerSeedsConfig},
-    template_manager::implementation::TemplateConfig,
-};
+use tari_dan_app_utilities::p2p_config::{P2pConfig, PeerSeedsConfig};
+use tari_template_manager::implementation::TemplateConfig;
 use url::Url;
 
 #[derive(Debug, Clone)]

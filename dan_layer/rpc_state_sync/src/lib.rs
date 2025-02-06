@@ -4,8 +4,8 @@
 //! # P2P RPC State Sync Protocol
 
 mod error;
-mod manager;
+mod state_sync;
 // mod manager_old;
 
 pub use error::*;
-pub use manager::*;
+pub use state_sync::*;

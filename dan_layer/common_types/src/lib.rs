@@ -16,9 +16,9 @@ mod extra_data;
 pub use extra_data::{ExtraData, ExtraFieldKey};
 
 pub mod committee;
+pub mod displayable;
 pub mod hasher;
 pub mod hashing;
-pub mod option;
 pub mod optional;
 
 mod node_height;

@@ -1,18 +1,17 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use async_trait::async_trait;
+use std::future::Future;
 
-#[async_trait]
 pub trait SyncManager {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn check_sync(&self) -> Result<SyncStatus, Self::Error>;
+    fn check_sync(&self) -> impl Future<Output = Result<SyncStatus, Self::Error>> + Send;
 
-    async fn sync(&mut self) -> Result<(), Self::Error>;
+    fn sync(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncStatus {
     UpToDate,
     Behind,

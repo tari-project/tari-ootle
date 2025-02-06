@@ -15,7 +15,7 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_engine_types::{
-    hashing::{hasher32, EngineHashDomainLabel},
+    hashing::{hash_template_code, hasher32, EngineHashDomainLabel},
     indexed_value::{IndexedValue, IndexedValueError},
     instruction::Instruction,
     published_template::PublishedTemplateAddress,
@@ -174,7 +174,11 @@ impl TransactionV1 {
             .chain(self.fee_instructions())
             .filter_map(|instruction| {
                 if let Instruction::PublishTemplate { binary } = instruction {
-                    Some(PublishedTemplateAddress::from_author_and_code(sealed_pk, binary))
+                    let binary_hash = hash_template_code(binary);
+                    Some(PublishedTemplateAddress::from_author_and_binary_hash(
+                        sealed_pk,
+                        &binary_hash,
+                    ))
                 } else {
                     None
                 }

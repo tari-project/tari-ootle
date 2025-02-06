@@ -14,6 +14,6 @@ impl From<BaseNodeClientError> for EpochManagerError {
 
 impl From<SqliteStorageError> for EpochManagerError {
     fn from(e: SqliteStorageError) -> Self {
-        Self::SqlLiteStorageError(anyhow::Error::from(e))
+        Self::StorageError(e.into())
     }
 }

@@ -33,6 +33,7 @@ tari_template_lib = { workspace = true }
 tari_transaction = { workspace = true }
 tari_validator_node_client = { workspace = true }
 tari_base_node_client = { workspace = true }
+tari_template_manager = { workspace = true }
 tari_epoch_manager = { workspace = true, features = ["base_layer"] }
 tari_indexer_lib = { workspace = true }
 tari_rpc_state_sync = { workspace = true }

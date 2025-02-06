@@ -6,7 +6,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Display};
 use indexmap::IndexMap;
 use log::*;
 use tari_dan_common_types::{
-    option::Displayable,
+    displayable::Displayable,
     optional::Optional,
     LockIntent,
     NumPreshards,
@@ -104,11 +104,9 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
                 if let Some(v) = id.to_previous_version() {
                     self.assert_is_down(&v)?;
                 }
-                // self.assert_has_lock(id, SubstateLockFlag::Output)?;
             },
             SubstateChange::Down { id, .. } => {
                 self.assert_is_up(id)?;
-                // self.assert_has_lock(id, SubstateLockFlag::Write)?;
             },
         }
 

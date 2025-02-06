@@ -692,13 +692,6 @@ impl SubstateValue {
         }
     }
 
-    pub fn as_transaction_receipt_mut(&mut self) -> Option<&mut TransactionReceipt> {
-        match self {
-            SubstateValue::TransactionReceipt(tx_receipt) => Some(tx_receipt),
-            _ => None,
-        }
-    }
-
     pub fn as_resource(&self) -> Option<&Resource> {
         match self {
             SubstateValue::Resource(resource) => Some(resource),
@@ -758,6 +751,13 @@ impl SubstateValue {
     pub fn as_validator_fee_pool_mut(&mut self) -> Option<&mut ValidatorFeePool> {
         match self {
             SubstateValue::ValidatorFeePool(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_template(&self) -> Option<&PublishedTemplate> {
+        match self {
+            SubstateValue::Template(template) => Some(template),
             _ => None,
         }
     }

@@ -20,39 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::time::Duration;
+mod error;
+mod handle;
+mod types;
 
-use tari_dan_common_types::{NodeAddressable, PeerAddress};
-use tari_epoch_manager::base_layer::EpochManagerHandle;
-use tari_shutdown::ShutdownSignal;
-use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
-use tokio::{sync::mpsc, task::JoinHandle};
-
-use super::{downloader::TemplateDownloadWorker, service::TemplateManagerService, TemplateManager};
-use crate::template_manager::interface::TemplateManagerHandle;
-
-pub fn spawn<TAddr: NodeAddressable + 'static>(
-    manager: TemplateManager<TAddr>,
-    epoch_manager: EpochManagerHandle<PeerAddress>,
-    client_factory: TariValidatorNodeRpcClientFactory,
-    shutdown: ShutdownSignal,
-) -> (TemplateManagerHandle, JoinHandle<anyhow::Result<()>>) {
-    let (tx_request, rx_request) = mpsc::channel(1);
-    let handle = TemplateManagerHandle::new(tx_request);
-
-    let (tx_download_queue, rx_download_queue) = mpsc::channel(1);
-    let (tx_completed_downloads, rx_completed_downloads) = mpsc::channel(1);
-
-    let join_handle = TemplateManagerService::spawn(
-        rx_request,
-        manager,
-        epoch_manager,
-        tx_download_queue,
-        rx_completed_downloads,
-        client_factory,
-        Duration::from_secs(60),
-        shutdown,
-    );
-    TemplateDownloadWorker::new(rx_download_queue, tx_completed_downloads).spawn();
-    (handle, join_handle)
-}
+pub use error::*;
+pub use handle::*;
+pub use types::*;

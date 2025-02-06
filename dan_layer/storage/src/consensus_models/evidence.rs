@@ -9,7 +9,7 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
     borsh::indexmap as indexmap_borsh,
-    option::Displayable,
+    displayable::Displayable,
     LockIntent,
     NumPreshards,
     ShardGroup,

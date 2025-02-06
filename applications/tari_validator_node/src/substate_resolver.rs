@@ -29,7 +29,7 @@ impl<TStateStore, TEpochManager, TValidatorNodeClientFactory, TSubstateCache>
 where
     TStateStore: StateStore,
     TEpochManager: EpochManagerReader<Addr = TStateStore::Addr>,
-    TValidatorNodeClientFactory: ValidatorNodeClientFactory<Addr = TStateStore::Addr>,
+    TValidatorNodeClientFactory: ValidatorNodeClientFactory<TStateStore::Addr>,
     TSubstateCache: SubstateCache,
 {
     pub fn new(
@@ -182,7 +182,7 @@ impl<TStateStore, TEpochManager, TValidatorNodeClientFactory, TSubstateCache> Su
 where
     TStateStore: StateStore + Sync + Send,
     TEpochManager: EpochManagerReader<Addr = TStateStore::Addr>,
-    TValidatorNodeClientFactory: ValidatorNodeClientFactory<Addr = TStateStore::Addr>,
+    TValidatorNodeClientFactory: ValidatorNodeClientFactory<TStateStore::Addr>,
     TSubstateCache: SubstateCache,
 {
     type Error = SubstateResolverError;

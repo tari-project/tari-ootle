@@ -43,8 +43,6 @@ use tari_dan_app_utilities::{
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
     substate_file_cache::SubstateFileCache,
-    template_manager,
-    template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle},
     transaction_executor::TariDanTransactionProcessor,
 };
 use tari_dan_common_types::PeerAddress;
@@ -61,6 +59,7 @@ use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, Relay
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
@@ -228,7 +227,7 @@ pub async fn spawn_services(
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.validator_node.templates.clone())?;
-    let (template_manager_service, join_handle) = template_manager::implementation::spawn(
+    let (template_manager_service, join_handle) = tari_template_manager::implementation::spawn(
         template_manager.clone(),
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
@@ -308,7 +307,6 @@ pub async fn spawn_services(
         transaction_executor,
         tx_hotstuff_events,
         consensus_constants.clone(),
-        template_manager.clone(),
         template_manager_service.clone(),
     )
     .await;

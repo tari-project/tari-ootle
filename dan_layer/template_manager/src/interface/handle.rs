@@ -25,12 +25,17 @@ use tari_dan_common_types::Epoch;
 use tari_dan_storage::global::TemplateStatus;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
-};
+use tokio::sync::{mpsc, oneshot};
 
-use super::{types::TemplateManagerRequest, Template, TemplateExecutable, TemplateManagerError, TemplateMetadata};
+use super::{
+    types::TemplateManagerRequest,
+    Template,
+    TemplateExecutable,
+    TemplateManagerError,
+    TemplateMetadata,
+    TemplateQueryResult,
+};
+use crate::interface::types::TemplateChange;
 
 #[derive(Debug, Clone)]
 pub struct TemplateManagerHandle {
@@ -72,7 +77,7 @@ impl TemplateManagerHandle {
     pub async fn get_templates_by_addresses(
         &self,
         addresses: Vec<TemplateAddress>,
-    ) -> Result<Vec<Template>, TemplateManagerError> {
+    ) -> Result<Vec<TemplateQueryResult>, TemplateManagerError> {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(TemplateManagerRequest::GetTemplatesByAddresses { addresses, reply: tx })
@@ -81,13 +86,20 @@ impl TemplateManagerHandle {
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
     }
 
-    pub async fn sync_templates(
+    pub async fn enqueue_template_changes(
         &self,
-        addresses: Vec<TemplateAddress>,
-    ) -> Result<JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>, TemplateManagerError> {
+        template_changes: Vec<TemplateChange>,
+    ) -> Result<(), TemplateManagerError> {
+        if template_changes.is_empty() {
+            return Ok(());
+        }
+
         let (tx, rx) = oneshot::channel();
         self.request_tx
-            .send(TemplateManagerRequest::SyncTemplates { addresses, reply: tx })
+            .send(TemplateManagerRequest::EnqueueTemplateChanges {
+                template_changes,
+                reply: tx,
+            })
             .await
             .map_err(|_| TemplateManagerError::ChannelClosed)?;
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?

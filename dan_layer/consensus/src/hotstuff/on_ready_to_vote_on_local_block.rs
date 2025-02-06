@@ -7,7 +7,7 @@ use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    option::Displayable,
+    displayable::Displayable,
     optional::Optional,
     shard::Shard,
     Epoch,

@@ -33,6 +33,7 @@ use tari_engine_types::{
     confidential::{get_commitment_factory, get_range_proof_service, ConfidentialClaim, ConfidentialOutput},
     entity_id_provider::EntityIdProvider,
     events::Event,
+    hashing::hash_template_code,
     indexed_value::IndexedValue,
     instruction_result::InstructionResult,
     lock::LockFlag,
@@ -2330,12 +2331,22 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state| {
-            let template_address =
-                PublishedTemplateAddress::from_author_and_code(&self.transaction_signer_public_key, &template);
+            let binary_hash = hash_template_code(&template);
+            let template_address = PublishedTemplateAddress::from_author_and_binary_hash(
+                &self.transaction_signer_public_key,
+                &binary_hash,
+            );
             state.new_substate(
                 template_address,
-                SubstateValue::Template(PublishedTemplate { binary: template }),
+                SubstateValue::Template(PublishedTemplate {
+                    // TODO: remove actual binary
+                    binary: template,
+                    // We essentially store the pre-image of the template address in the substate
+                    binary_hash,
+                    author: self.transaction_signer_public_key.clone(),
+                }),
             )?;
             // Mark template substate as owned by current call stack
             let scope_mut = state.current_call_scope_mut()?;

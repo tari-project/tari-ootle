@@ -7,7 +7,7 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
 
-use crate::{option::Displayable, shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
+use crate::{displayable::Displayable, shard::Shard, NumPreshards, ShardGroup, SubstateAddress, ToSubstateAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(

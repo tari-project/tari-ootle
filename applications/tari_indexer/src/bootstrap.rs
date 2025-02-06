@@ -38,7 +38,6 @@ use tari_dan_app_utilities::{
     common::verify_correct_network,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
-    template_manager::{self, implementation::TemplateManager},
 };
 use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
 use tari_dan_p2p::TariMessagingSpec;
@@ -51,6 +50,7 @@ use tari_epoch_manager::{
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::implementation::TemplateManager;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{substate_storage_sqlite::sqlite_substate_store_factory::SqliteSubstateStore, ApplicationConfig};
@@ -144,7 +144,7 @@ pub async fn spawn_services(
 
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
-    let (template_manager_service, _) = template_manager::implementation::spawn(
+    let (template_manager_service, _) = tari_template_manager::implementation::spawn(
         template_manager.clone(),
         epoch_manager.clone(),
         validator_node_client_factory.clone(),

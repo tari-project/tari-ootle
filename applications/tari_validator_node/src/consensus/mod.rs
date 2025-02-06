@@ -7,16 +7,14 @@ use tari_consensus::{
     traits::ConsensusSpec,
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_app_utilities::{
-    template_manager::implementation::TemplateManager,
-    transaction_executor::TariDanTransactionProcessor,
-};
+use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
 use tari_dan_common_types::PeerAddress;
 use tari_dan_storage::consensus_models::TransactionPool;
 use tari_epoch_manager::base_layer::EpochManagerHandle;
-use tari_rpc_state_sync::RpcStateSyncManager;
+use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
@@ -44,7 +42,7 @@ pub use block_transaction_executor::*;
 pub use handle::*;
 pub use signature_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
-use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
+use tari_template_manager::interface::TemplateManagerHandle;
 
 use crate::p2p::NopLogger;
 
@@ -68,8 +66,7 @@ pub async fn spawn(
     >,
     tx_hotstuff_events: broadcast::Sender<HotstuffEvent>,
     consensus_constants: ConsensusConstants,
-    template_manager: TemplateManager<PeerAddress>,
-    template_manager_handle: TemplateManagerHandle,
+    template_manager: TemplateManagerHandle,
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
@@ -104,13 +101,7 @@ pub async fn spawn(
     let context = ConsensusWorkerContext {
         epoch_manager: epoch_manager.clone(),
         hotstuff: hotstuff_worker,
-        state_sync: RpcStateSyncManager::new(
-            epoch_manager,
-            store,
-            client_factory,
-            template_manager,
-            template_manager_handle,
-        ),
+        state_sync: RpcStateSyncClientProtocol::new(epoch_manager, store, client_factory, template_manager),
         tx_current_state,
     };
 

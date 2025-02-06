@@ -161,6 +161,7 @@ impl FromIterator<PeerId> for MulticastDestination {
     }
 }
 
+// TODO: refactor scope the TMsg generic to the necessary methods
 #[derive(Debug)]
 pub struct NetworkingHandle<TMsg: MessageSpec> {
     tx_request: mpsc::Sender<NetworkingRequest<TMsg>>,

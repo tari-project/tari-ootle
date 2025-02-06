@@ -21,11 +21,12 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use chrono::NaiveDateTime;
-use tari_common_types::types::{FixedHash, FixedHashSizeError};
+use tari_common_types::types::{FixedHashSizeError, PublicKey};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::global::DbTemplate;
 use tari_engine_types::TemplateAddress;
 use tari_template_lib::HashParseError;
+use tari_utilities::ByteArray;
 use thiserror::Error;
 
 use crate::global::schema::*;
@@ -41,10 +42,8 @@ pub struct TemplateModel {
     pub epoch: i64,
     pub template_type: String,
     pub author_public_key: Vec<u8>,
-    pub compiled_code: Option<Vec<u8>>,
-    pub flow_json: Option<String>,
+    pub code: Option<Vec<u8>>,
     pub status: String,
-    pub manifest: Option<String>,
     pub added_at: NaiveDateTime,
 }
 
@@ -54,6 +53,8 @@ pub enum TemplateConversionError {
     FixedHashSize(#[from] FixedHashSizeError),
     #[error("Hash parse error: {0}")]
     HashParse(#[from] HashParseError),
+    #[error("Invalid public key bytes")]
+    InvalidPublicKeyBytes,
 }
 
 impl TryInto<DbTemplate> for TemplateModel {
@@ -61,14 +62,13 @@ impl TryInto<DbTemplate> for TemplateModel {
 
     fn try_into(self) -> Result<DbTemplate, Self::Error> {
         Ok(DbTemplate {
-            author_public_key: FixedHash::try_from(self.author_public_key.as_slice())?,
+            author_public_key: PublicKey::from_canonical_bytes(&self.author_public_key)
+                .map_err(|_| TemplateConversionError::InvalidPublicKeyBytes)?,
             template_name: self.template_name,
             expected_hash: self.expected_hash.try_into()?,
             template_address: TemplateAddress::try_from_vec(self.template_address)?,
             template_type: self.template_type.parse().expect("DB template type corrupted"),
-            compiled_code: self.compiled_code,
-            flow_json: self.flow_json,
-            manifest: self.manifest,
+            code: self.code,
             url: self.url,
             status: self.status.parse().expect("DB status corrupted"),
             added_at: self.added_at,
@@ -85,11 +85,9 @@ pub struct NewTemplateModel {
     pub template_name: String,
     pub expected_hash: Vec<u8>,
     pub template_type: String,
-    pub compiled_code: Option<Vec<u8>>,
+    pub code: Option<Vec<u8>>,
     pub epoch: i64,
-    pub flow_json: Option<String>,
     pub status: String,
-    pub manifest: Option<String>,
 }
 
 #[derive(Debug, AsChangeset)]
@@ -99,8 +97,7 @@ pub struct TemplateUpdateModel {
     pub expected_hash: Option<Vec<u8>>,
     pub template_type: Option<String>,
     pub template_name: Option<String>,
-    pub compiled_code: Option<Vec<u8>>,
-    pub flow_json: Option<String>,
-    pub manifest: Option<String>,
+    pub epoch: Option<i64>,
     pub status: Option<String>,
+    pub code: Option<Option<Vec<u8>>>,
 }

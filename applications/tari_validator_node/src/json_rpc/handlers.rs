@@ -30,7 +30,7 @@ use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::*;
 use serde_json::{self as json, json};
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
-use tari_dan_app_utilities::{keypair::RistrettoKeypair, template_manager::interface::TemplateManagerHandle};
+use tari_dan_app_utilities::keypair::RistrettoKeypair;
 use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateAddress};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
@@ -42,6 +42,7 @@ use tari_dan_storage::{
 use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_client::types::{
     self,
     AddPeerRequest,

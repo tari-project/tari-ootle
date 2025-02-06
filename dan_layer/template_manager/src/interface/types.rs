@@ -23,7 +23,11 @@
 use reqwest::Url;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::global::{DbTemplate, DbTemplateType, TemplateStatus};
+use tari_dan_storage::{
+    global::{DbTemplate, DbTemplateType, TemplateStatus},
+    StorageError,
+};
+use tari_engine_types::published_template::PublishedTemplateAddress;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -31,12 +35,25 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use super::TemplateManagerError;
 
 #[derive(Debug, Clone)]
+pub enum TemplateChange {
+    Add {
+        template_address: PublishedTemplateAddress,
+        author_public_key: PublicKey,
+        binary_hash: FixedHash,
+        epoch: Epoch,
+    },
+    Deprecate {
+        template_address: PublishedTemplateAddress,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct TemplateMetadata {
     pub name: String,
     pub address: TemplateAddress,
     /// SHA hash of binary
     pub binary_sha: FixedHash,
-    pub author_public_key: FixedHash,
+    pub author_public_key: PublicKey,
 }
 
 // TODO: Allow fetching of just the template metadata without the compiled code
@@ -62,34 +79,82 @@ pub enum TemplateExecutable {
 }
 
 #[derive(Debug, Clone)]
+pub enum TemplateQueryResult {
+    Found {
+        template: Template,
+    },
+    NotAvailable {
+        address: TemplateAddress,
+        status: TemplateStatus,
+    },
+    NotFound {
+        address: TemplateAddress,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct Template {
     pub metadata: TemplateMetadata,
     pub executable: TemplateExecutable,
 }
 
 // we encapsulate the db row format to not expose it to the caller
-impl From<DbTemplate> for Template {
-    fn from(record: DbTemplate) -> Self {
-        Template {
+impl TryFrom<DbTemplate> for Template {
+    type Error = StorageError;
+
+    fn try_from(record: DbTemplate) -> Result<Self, Self::Error> {
+        Ok(Template {
             metadata: TemplateMetadata {
                 name: record.template_name,
-                // TODO: this will change when common engine types are moved around
                 address: record.template_address,
-                // TODO: add field to db
-                binary_sha: FixedHash::zero(),
+                binary_sha: record.expected_hash,
                 author_public_key: record.author_public_key,
             },
             executable: match record.template_type {
-                DbTemplateType::Wasm => TemplateExecutable::CompiledWasm(record.compiled_code.unwrap()),
-                DbTemplateType::Flow => TemplateExecutable::Flow(record.flow_json.unwrap()),
-                DbTemplateType::Manifest => TemplateExecutable::Manifest(record.manifest.unwrap()),
+                DbTemplateType::Wasm => {
+                    TemplateExecutable::CompiledWasm(record.code.ok_or_else(|| StorageError::DataInconsistency {
+                        details: format!(
+                            "Template type {} does not have the required binary data",
+                            record.template_type
+                        ),
+                    })?)
+                },
+                DbTemplateType::Flow => {
+                    let s = String::from_utf8(record.code.ok_or_else(|| StorageError::DataInconsistency {
+                        details: format!(
+                            "Template type {} does not have the required binary data",
+                            record.template_type
+                        ),
+                    })?)
+                    .map_err(|e| StorageError::DataInconsistency {
+                        details: format!("flow to UTF8 string: {}", e),
+                    })?;
+                    // TODO: we don't represent flow as any particular type, so any UTF-8 bytes are valid. Unsure if
+                    // "flow" will be further developed.
+                    TemplateExecutable::Flow(s)
+                },
+                DbTemplateType::Manifest => {
+                    let s = String::from_utf8(record.code.ok_or_else(|| StorageError::DataInconsistency {
+                        details: format!(
+                            "Template type {} does not have the required binary data",
+                            record.template_type
+                        ),
+                    })?)
+                    .map_err(|e| StorageError::DataInconsistency {
+                        details: format!("manifest to UTF8 string: {}", e),
+                    })?;
+                    // TODO: we don't represent manifest as any particular type, so any UTF-8 bytes are valid. Unsure if
+                    // "manifest" will be further developed.
+                    TemplateExecutable::Manifest(s)
+                },
             },
-        }
+        })
     }
 }
 
-pub type SyncTemplatesResult =
-    Result<JoinHandle<Result<Option<Vec<TemplateAddress>>, TemplateManagerError>>, TemplateManagerError>;
+pub type SyncTemplatesResult = JoinHandle<Result<Vec<TemplateAddress>, TemplateManagerError>>;
+
+pub type Reply<T> = oneshot::Sender<Result<T, TemplateManagerError>>;
 
 #[derive(Debug)]
 pub enum TemplateManagerRequest {
@@ -99,31 +164,31 @@ pub enum TemplateManagerRequest {
         template: TemplateExecutable,
         template_name: Option<String>,
         epoch: Epoch,
-        reply: oneshot::Sender<Result<(), TemplateManagerError>>,
+        reply: Reply<()>,
     },
     GetTemplate {
         address: TemplateAddress,
-        reply: oneshot::Sender<Result<Template, TemplateManagerError>>,
+        reply: Reply<Template>,
     },
     GetTemplates {
         limit: usize,
-        reply: oneshot::Sender<Result<Vec<TemplateMetadata>, TemplateManagerError>>,
+        reply: Reply<Vec<TemplateMetadata>>,
     },
     GetTemplatesByAddresses {
         addresses: Vec<TemplateAddress>,
-        reply: oneshot::Sender<Result<Vec<Template>, TemplateManagerError>>,
+        reply: Reply<Vec<TemplateQueryResult>>,
     },
     LoadTemplateAbi {
         address: TemplateAddress,
-        reply: oneshot::Sender<Result<TemplateAbi, TemplateManagerError>>,
+        reply: Reply<TemplateAbi>,
     },
     TemplateExists {
         address: TemplateAddress,
         status: Option<TemplateStatus>,
-        reply: oneshot::Sender<Result<bool, TemplateManagerError>>,
+        reply: Reply<bool>,
     },
-    SyncTemplates {
-        addresses: Vec<TemplateAddress>,
-        reply: oneshot::Sender<SyncTemplatesResult>,
+    EnqueueTemplateChanges {
+        template_changes: Vec<TemplateChange>,
+        reply: Reply<()>,
     },
 }

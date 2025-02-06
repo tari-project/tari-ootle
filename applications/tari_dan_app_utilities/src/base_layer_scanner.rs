@@ -48,7 +48,13 @@ use tari_crypto::{
     ristretto::RistrettoPublicKey,
     tari_utilities::{ByteArray, ByteArrayError},
 };
-use tari_dan_common_types::{option::Displayable, optional::Optional, Epoch, NodeAddressable, VersionedSubstateId};
+use tari_dan_common_types::{
+    displayable::Displayable,
+    optional::Optional,
+    Epoch,
+    NodeAddressable,
+    VersionedSubstateId,
+};
 use tari_dan_storage::{
     consensus_models::{BurntUtxo, SubstateRecord},
     global::{GlobalDb, MetadataKey},
@@ -61,10 +67,9 @@ use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, Epoc
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::models::{EncryptedData, UnclaimedConfidentialOutputAddress};
+use tari_template_manager::interface::{TemplateExecutable, TemplateManagerError, TemplateManagerHandle};
 use tokio::{task, task::JoinHandle, time};
 use url::ParseError;
-
-use crate::template_manager::interface::{TemplateExecutable, TemplateManagerError, TemplateManagerHandle};
 
 const LOG_TARGET: &str = "tari::dan::base_layer_scanner";
 

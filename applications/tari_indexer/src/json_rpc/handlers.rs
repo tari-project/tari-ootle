@@ -37,7 +37,6 @@ use tari_dan_app_utilities::{
     json_encoding::{encode_finalize_result_into_json, encode_finalized_result_into_json},
     keypair::RistrettoKeypair,
     substate_file_cache::SubstateFileCache,
-    template_manager::{implementation::TemplateManager, interface::TemplateExecutable},
 };
 use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
@@ -81,6 +80,7 @@ use tari_indexer_client::types::{
     TemplateMetadata,
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
+use tari_template_manager::{implementation::TemplateManager, interface::TemplateExecutable};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory, TransactionResultStatus};
 
 use crate::{

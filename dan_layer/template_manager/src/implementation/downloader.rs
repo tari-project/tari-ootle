@@ -25,7 +25,6 @@
 
 use bytes::Bytes;
 use futures::{future::BoxFuture, stream::FuturesUnordered};
-use prost::bytes;
 use tari_common_types::types::FixedHash;
 use tari_dan_storage::global::DbTemplateType;
 use tari_template_lib::models::TemplateAddress;

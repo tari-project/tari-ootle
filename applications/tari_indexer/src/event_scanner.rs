@@ -145,6 +145,7 @@ impl EventScanner {
     }
 
     async fn scan_events_of_epoch(&self, epoch: Epoch) -> Result<usize, anyhow::Error> {
+        // TODO(perf): This call can become expensive. Lazily load a committee member from all shard groups
         let committees = self.epoch_manager.get_committees(epoch).await?;
 
         let mut event_count = 0;
@@ -172,7 +173,7 @@ impl EventScanner {
                     .diff
                     .iter()
                     .filter_map(|r| r.as_create())
-                    .filter_map(|create| create.substate.substate_value.as_transaction_receipt())
+                    .filter_map(|create| create.substate.value.value().and_then(|v| v.as_transaction_receipt()))
                     .flat_map(|receipt| receipt.events.as_slice());
                 event_count += events.clone().count();
 
@@ -285,12 +286,22 @@ impl EventScanner {
         let mut tx = self.substate_store.create_write_tx()?;
         // store/update up substates if any
         for create in updates.iter().filter_map(|up| up.as_create()) {
-            let template_address = Self::extract_template_address_from_substate(&create.substate.substate_value);
-            let module_name = Self::extract_module_name_from_substate(&create.substate.substate_value);
+            let maybe_substate_value = create.substate.value.value();
+            if maybe_substate_value.is_none() {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ Received UP substate {} without value. This indicates that the substate has been pruned. Some event data is not available.", create.substate.as_versioned_substate_id_ref(),
+                );
+            }
+            let template_address = maybe_substate_value.and_then(Self::extract_template_address_from_substate);
+            let module_name = maybe_substate_value.and_then(Self::extract_module_name_from_substate);
             let substate_row = NewSubstate {
                 address: create.substate.substate_id.to_string(),
                 version: i64::from(create.substate.version),
-                data: Self::encode_substate(&create.substate.substate_value)?,
+                data: maybe_substate_value
+                    .map(Self::encode_substate)
+                    .transpose()?
+                    .unwrap_or_default(),
                 tx_hash: create.substate.created_by_transaction.to_string(),
                 template_address: template_address.map(|s| s.to_string()),
                 module_name,

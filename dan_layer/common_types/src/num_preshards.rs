@@ -28,7 +28,7 @@ pub enum NumPreshards {
 impl NumPreshards {
     pub const MAX: Self = Self::P256;
 
-    pub fn as_u32(self) -> u32 {
+    pub const fn as_u32(self) -> u32 {
         self as u32
     }
 
@@ -37,7 +37,7 @@ impl NumPreshards {
     }
 
     pub fn all_shards_iter(&self) -> impl Iterator<Item = Shard> {
-        (0..self.as_u32()).map(Shard::from)
+        (1..=self.as_u32()).map(Shard::from)
     }
 
     pub fn all_shard_groups_iter(&self, num_committees: u32) -> impl Iterator<Item = ShardGroup> {
@@ -54,7 +54,7 @@ impl NumPreshards {
                 end += 1;
                 remainder -= 1;
             }
-            let group = ShardGroup::new(start, end);
+            let group = ShardGroup::new(start + 1, end + 1);
             start = end + 1;
             end = start + num_shards_per_committee - 1;
             Some(group)
@@ -114,11 +114,11 @@ mod tests {
         let num_committees = 3;
         let groups: Vec<_> = num_preshards.all_shard_groups_iter(num_committees).collect();
         assert_eq!(groups.len(), 3);
-        assert_eq!(groups[0], ShardGroup::new(0, 85));
+        assert_eq!(groups[0], ShardGroup::new(1, 86));
         assert_eq!(groups[0].len(), 86);
-        assert_eq!(groups[1], ShardGroup::new(86, 170));
+        assert_eq!(groups[1], ShardGroup::new(87, 171));
         assert_eq!(groups[1].len(), 85);
-        assert_eq!(groups[2], ShardGroup::new(171, 255));
+        assert_eq!(groups[2], ShardGroup::new(172, 256));
         assert_eq!(groups[2].len(), 85);
     }
 

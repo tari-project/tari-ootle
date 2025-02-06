@@ -4,20 +4,17 @@
 use std::cmp;
 
 use anyhow::anyhow;
-use async_trait::async_trait;
 use futures::StreamExt;
 use log::*;
 use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
     traits::{ConsensusSpec, SyncManager, SyncStatus},
 };
-use tari_dan_app_utilities::template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_dan_common_types::{
     committee::Committee,
     optional::Optional,
     shard::Shard,
     Epoch,
-    NodeAddressable,
     NodeHeight,
     PeerAddress,
     ShardGroup,
@@ -36,19 +33,15 @@ use tari_dan_storage::{
         SubstateRecord,
         SubstateUpdate,
     },
-    global::models::ValidatorNode,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::{
-    substate::{hash_substate, SubstateId},
-    TemplateAddress,
-};
 use tari_epoch_manager::EpochManagerReader;
 use tari_rpc_framework::RpcError;
 use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service::ValidatorNodeRpcClient,
@@ -59,32 +52,27 @@ use crate::error::CommsRpcConsensusSyncError;
 const BATCH_SIZE: usize = 100;
 const LOG_TARGET: &str = "tari::dan::comms_rpc_state_sync";
 
-pub struct RpcStateSyncManager<TConsensusSpec: ConsensusSpec, TAddr: NodeAddressable + 'static> {
+pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
     epoch_manager: TConsensusSpec::EpochManager,
     state_store: TConsensusSpec::StateStore,
     client_factory: TariValidatorNodeRpcClientFactory,
-    template_manager: TemplateManager<TAddr>,
-    template_manager_service: TemplateManagerHandle,
+    template_manager: TemplateManagerHandle,
 }
 
-impl<TConsensusSpec, TAddr> RpcStateSyncManager<TConsensusSpec, TAddr>
-where
-    TConsensusSpec: ConsensusSpec<Addr = PeerAddress>,
-    TAddr: NodeAddressable + 'static,
+impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
+where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 {
     pub fn new(
         epoch_manager: TConsensusSpec::EpochManager,
         state_store: TConsensusSpec::StateStore,
         client_factory: TariValidatorNodeRpcClientFactory,
-        template_manager: TemplateManager<TAddr>,
-        template_manager_service: TemplateManagerHandle,
+        template_manager: TemplateManagerHandle,
     ) -> Self {
         Self {
             epoch_manager,
             state_store,
             client_factory,
             template_manager,
-            template_manager_service,
         }
     }
 
@@ -127,7 +115,14 @@ where
         client: &mut ValidatorNodeRpcClient,
         shard: Shard,
         checkpoint: &EpochCheckpoint,
+        template_changes_mut: &mut Vec<TemplateChange>,
     ) -> Result<Option<Version>, CommsRpcConsensusSyncError> {
+        let checkpoint_state_root = checkpoint.get_shard_root(shard);
+        if checkpoint_state_root == SPARSE_MERKLE_PLACEHOLDER_HASH {
+            info!(target: LOG_TARGET, "Checkpoint state root indicates no state changes. Nothing to sync for {shard}");
+            return Ok(None);
+        }
+
         let current_epoch = self.epoch_manager.current_epoch().await?;
 
         let last_state_transition_id = self
@@ -149,7 +144,7 @@ where
 
         info!(
             target: LOG_TARGET,
-            "🛜Syncing from v{} to state transition {last_state_transition_id:?}",
+            "🛜Syncing from v{} to state transition {last_state_transition_id}",
             current_version.unwrap_or(0),
         );
 
@@ -163,8 +158,6 @@ where
             .await?;
 
         let mut tree_changes = vec![];
-
-        let mut missing_templates = vec![];
 
         // syncing states
         while let Some(result) = state_stream.next().await {
@@ -222,13 +215,50 @@ where
                     }
 
                     let change = match &transition.update {
-                        SubstateUpdate::Create(create) => SubstateTreeChange::Up {
-                            id: create.substate.to_versioned_substate_id(),
-                            value_hash: hash_substate(&create.substate.substate_value, create.substate.version),
-                        },
-                        SubstateUpdate::Destroy(destroy) => SubstateTreeChange::Down {
-                            id: destroy.to_versioned_substate_id()
-                        },
+                        SubstateUpdate::Create(create) => {
+                            let id = create.substate.as_versioned_substate_id_ref();
+                            if let Some(template_address) = create.substate.substate_id.as_template() {
+                                match create
+                                    .substate
+                                    .value
+                                    .value() {
+                                    Some(value) => {
+                                        let template = value.as_template()
+                                            .ok_or_else(|| CommsRpcConsensusSyncError::InvalidResponse(
+                                                anyhow!("Validator returned a template address {} but substate value was not a template", id.substate_id())
+                                            ))?;
+
+                                        info!(target: LOG_TARGET, "🛜 Add template {id}");
+                                        template_changes_mut.push(TemplateChange::Add {
+                                            template_address,
+                                            author_public_key: template.author.clone(),
+                                            binary_hash: template.binary_hash.into_array().into(),
+                                            epoch: transition.id.epoch(),
+                                        });
+                                    }
+                                    None => {
+                                        // TODO: currently you cannot DOWN a template. If we were to allow deprecations, it would likely be marking the template as deprecated rather than DOWNing it, and not permitting any template (non-component) calls to the template.
+                                        // We could still handle this case by requesting the template by address and verifying the template address hash i.e. peers send author and binary.
+                                        warn!(target: LOG_TARGET, "❗️ NEVER HAPPEN: Validator sent us a template {} that has no value, indicating it will be DOWNed later. We are not able to sync it", id);
+                                    }
+                                };
+                            }
+
+                            SubstateTreeChange::Up {
+                                id: id.to_owned(),
+                                value_hash: create.substate.to_value_hash(),
+                            }
+                        }
+                        SubstateUpdate::Destroy(destroy) => {
+                            if let Some(template_address) = destroy.substate_id.as_template() {
+                                info!(target: LOG_TARGET, "🛜 Deprecate template {}", template_address);
+                                template_changes_mut.push(TemplateChange::Deprecate { template_address });
+                            }
+
+                            SubstateTreeChange::Down {
+                                id: destroy.to_versioned_substate_id()
+                            }
+                        }
                     };
 
                     if tree_changes.len() + 1 == BATCH_SIZE {
@@ -237,34 +267,14 @@ where
                         let next_version = current_version.unwrap_or(0) + 1;
                         state_tree.put_substate_changes(current_version, next_version, tree_changes.drain(..))?;
                         current_version = Some(next_version);
+                        store.set_version(next_version)?;
                     }
 
-                    info!(target: LOG_TARGET, "🛜 Applying state update {transition} v{}", current_version.unwrap_or(0));
-
-                    // handle templates if there are any in substates
-                    match &change {
-                        SubstateTreeChange::Up { id, value_hash: _value_hash } => {
-                            if let SubstateId::Template(template_addr) = id.substate_id() {
-                                if let Ok(false) = self.template_manager.template_exists(&template_addr.as_hash(), None) {
-                                    info!(target: LOG_TARGET, "🛜 New template found in substates: {}", template_addr.as_hash());
-                                    self.template_manager.add_pending_template(template_addr.as_hash(), current_epoch)?;
-                                    missing_templates.push(template_addr.as_hash());
-                                }
-                            }
-                        }
-                        SubstateTreeChange::Down { id } => {
-                            if let SubstateId::Template(template_addr) = id.substate_id() {
-                                info!(target: LOG_TARGET, "🛜 Deleting DOWN-ed substate: {}", template_addr.as_hash());
-                                if let Err(error) = self.template_manager.delete_template(&template_addr.as_hash()) {
-                                    error!(target: LOG_TARGET, "Failed to delete template from template manager: {error:?}");
-                                }
-                            }
-                        }
-                    }
-
-                    tree_changes.push(change);
+                    info!(target: LOG_TARGET, "🛜 Applying state update (v{}) {}", current_version.unwrap_or(0), transition);
 
                     self.commit_update(store.transaction(), checkpoint, transition)?;
+
+                    tree_changes.push(change);
                 }
 
                 if !tree_changes.is_empty() {
@@ -276,52 +286,35 @@ where
                     store.set_version(next_version)?;
                 }
 
+
+                let local_state_root = self.get_state_root_for_shard(&**tx, shard, current_version)?;
+                if local_state_root != checkpoint_state_root {
+                    error!(
+                        target: LOG_TARGET,
+                        "❌State root mismatch for {shard}. Checkpoint {expected} but got {actual}. Rolling back.",
+                        expected = checkpoint_state_root,
+                        actual = local_state_root,
+                    );
+
+                    // Rollback
+                    return Err(CommsRpcConsensusSyncError::StateRootMismatch {
+                        expected: checkpoint_state_root,
+                        actual: local_state_root,
+                    });
+                }
+
+                info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {local_state_root}", current_version.unwrap_or(0));
+
                 Ok::<_, CommsRpcConsensusSyncError>(())
             })?;
         }
 
-        self.sync_templates(missing_templates, Some(20)).await?;
-
         Ok(current_version)
-    }
-
-    /// Triggers syncing of the passed templates (by address) and wait for the result.
-    /// If any of the templates were not synced, keep retries to sync those again until everything is synced.
-    async fn sync_templates(
-        &self,
-        templates: Vec<TemplateAddress>,
-        max_sync_tries: Option<u64>,
-    ) -> Result<(), CommsRpcConsensusSyncError> {
-        let mut sync_tries = 0;
-        let handle = self.template_manager_service.sync_templates(templates).await?;
-        if let Some(mut missing_templates) = handle
-            .await
-            .map_err(|error| CommsRpcConsensusSyncError::TaskJoin(error.to_string()))??
-        {
-            sync_tries += 1;
-            warn!(target: LOG_TARGET, "⚠️ Some templates were not synchronized ({} of them), retry the rest (tried to sync {} times already)!", missing_templates.len(), sync_tries);
-            while let Some(current_missing_templates) = self
-                .template_manager_service
-                .sync_templates(missing_templates.clone())
-                .await?
-                .await
-                .map_err(|error| CommsRpcConsensusSyncError::TaskJoin(error.to_string()))??
-            {
-                if let Some(max_sync_tries) = max_sync_tries {
-                    if sync_tries >= max_sync_tries {
-                        return Err(CommsRpcConsensusSyncError::TemplateSyncFailure);
-                    }
-                }
-                missing_templates = current_missing_templates;
-                sync_tries += 1;
-                warn!(target: LOG_TARGET, "⚠️ Some templates were not synchronized ({} of them), retry the rest (tried to sync {} times already)!", missing_templates.len(), sync_tries);
-            }
-        }
-        Ok(())
     }
 
     fn get_state_root_for_shard(
         &self,
+        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         shard: Shard,
         version: Option<Version>,
     ) -> Result<TreeHash, CommsRpcConsensusSyncError> {
@@ -329,12 +322,10 @@ where
             return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
         };
 
-        self.state_store.with_read_tx(|tx| {
-            let mut store = ShardScopedTreeStoreReader::new(tx, shard);
-            let state_tree = SpreadPrefixStateTree::new(&mut store);
-            let root_hash = state_tree.get_root_hash(version)?;
-            Ok(root_hash)
-        })
+        let mut store = ShardScopedTreeStoreReader::new(tx, shard);
+        let state_tree = SpreadPrefixStateTree::new(&mut store);
+        let root_hash = state_tree.get_root_hash(version)?;
+        Ok(root_hash)
     }
 
     pub fn commit_update<TTx: StateStoreWriteTransaction>(
@@ -348,7 +339,7 @@ where
                 SubstateRecord::new(
                     substate.substate_id,
                     substate.version,
-                    substate.substate_value,
+                    substate.value,
                     transition.id.shard(),
                     transition.id.epoch(),
                     NodeHeight(0),
@@ -397,10 +388,14 @@ where
             .get_committees_overlapping_shard_group(prev_epoch, local_info.shard_group())
             .await?;
 
-        // TODO: not strictly necessary to sort by shard but easier on the eyes in logs
+        if committees.is_empty() {
+            return Err(CommsRpcConsensusSyncError::NoCommittees(prev_epoch));
+        }
+
+        // not strictly necessary to sort by shard but easier on the eyes in logs
         let mut committees = committees.into_iter().collect::<Vec<_>>();
         committees.sort_by_key(|(k, _)| *k);
-        info!(target: LOG_TARGET, "🛜 Querying {} shard group(s) from epoch {}", committees.len(), prev_epoch);
+        info!(target: LOG_TARGET, "🛜 Querying {} committee(s) from epoch {}", committees.len(), prev_epoch);
         Ok(committees)
     }
 
@@ -434,14 +429,14 @@ where
         shard: Shard,
         current_epoch: Epoch,
         committee: &Committee<PeerAddress>,
-        our_vn: &ValidatorNode<PeerAddress>,
+        our_vn_addr: &PeerAddress,
     ) -> Result<(), CommsRpcConsensusSyncError> {
         let mut remaining_members = committee.len();
 
         info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", current_epoch.saturating_sub(Epoch(1)));
-        for (addr, public_key) in committee {
+        for addr in committee.addresses() {
             remaining_members = remaining_members.saturating_sub(1);
-            if our_vn.public_key == *public_key {
+            if our_vn_addr == addr {
                 continue;
             }
             let mut client = match self.establish_rpc_session(addr).await {
@@ -487,31 +482,15 @@ where
 
             self.validate_checkpoint(&checkpoint)?;
             self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
+            let mut template_changes = vec![];
 
-            match self.start_state_sync(&mut client, shard, &checkpoint).await {
-                Ok(current_version) => {
-                    let state_root = self.get_state_root_for_shard(shard, current_version)?;
-
-                    if state_root != checkpoint.get_shard_root(shard) {
-                        error!(
-                            target: LOG_TARGET,
-                            "❌State root mismatch for {shard}. Expected {expected} but got {actual}",
-                            expected = checkpoint.get_shard_root(shard),
-                            actual = state_root,
-                        );
-
-                        // TODO: rollback state
-                        if remaining_members == 0 {
-                            return Err(CommsRpcConsensusSyncError::StateRootMismatch {
-                                expected: TreeHash::from(checkpoint.block().state_merkle_root().into_array()),
-                                actual: state_root,
-                            });
-                        }
-
-                        continue;
-                    }
-
-                    info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {state_root}", current_version.unwrap_or(0));
+            match self
+                .start_state_sync(&mut client, shard, &checkpoint, &mut template_changes)
+                .await
+            {
+                Ok(_) => {
+                    // We only enqueue these if state sync succeeds and the state root matches
+                    self.template_manager.enqueue_template_changes(template_changes).await?;
                 },
                 Err(err) => {
                     warn!(
@@ -531,13 +510,37 @@ where
 
         Ok(())
     }
+
+    async fn sync_global_shard(
+        &mut self,
+        current_epoch: Epoch,
+        committees: &[(ShardGroup, Committee<PeerAddress>)],
+        our_vn_address: &PeerAddress,
+    ) -> Result<(), CommsRpcConsensusSyncError> {
+        let mut last_error = None;
+
+        for (sg, committee) in committees {
+            if let Err(err) = self
+                .sync_shard(Shard::global(), current_epoch, committee, our_vn_address)
+                .await
+            {
+                warn!(target: LOG_TARGET, "⚠️ Failed to sync global shard from {sg}: {err}. Attempting another committee if available");
+                last_error = Some(err);
+                continue;
+            }
+            break;
+        }
+
+        if let Some(err) = last_error {
+            return Err(err);
+        }
+
+        Ok(())
+    }
 }
 
-#[async_trait]
-impl<TConsensusSpec, TAddr> SyncManager for RpcStateSyncManager<TConsensusSpec, TAddr>
-where
-    TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static,
-    TAddr: NodeAddressable + 'static,
+impl<TConsensusSpec> SyncManager for RpcStateSyncClientProtocol<TConsensusSpec>
+where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 {
     type Error = CommsRpcConsensusSyncError;
 
@@ -565,24 +568,19 @@ where
 
     async fn sync(&mut self) -> Result<(), Self::Error> {
         let current_epoch = self.epoch_manager.current_epoch().await?;
-        let prev_epoch_committees = self.get_sync_committees(current_epoch).await?;
         let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
+        let prev_epoch_committees = self.get_sync_committees(current_epoch).await?;
 
-        // sync global shard
-        if let Ok((_, first_committee)) = prev_epoch_committees
-            .first()
-            .ok_or(Self::Error::NoCommittees(current_epoch))
-        {
-            self.sync_shard(Shard::global(), current_epoch, first_committee, &our_vn)
-                .await?;
-        }
+        self.sync_global_shard(current_epoch, &prev_epoch_committees, &our_vn.address)
+            .await?;
 
         // Sync data from each committee in range of the committee we're joining.
         // NOTE: we don't have to worry about substates in address range because shard boundaries are fixed.
         for (shard_group, mut committee) in prev_epoch_committees {
             committee.shuffle();
             for shard in shard_group.shard_iter() {
-                self.sync_shard(shard, current_epoch, &committee, &our_vn).await?;
+                self.sync_shard(shard, current_epoch, &committee, &our_vn.address)
+                    .await?;
             }
         }
 

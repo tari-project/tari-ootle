@@ -181,6 +181,26 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
 
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
+
+    pub async fn get_random_committee_member(
+        &self,
+        epoch: Epoch,
+        shard_group: Option<ShardGroup>,
+        excluding: Vec<TAddr>,
+    ) -> Result<ValidatorNode<TAddr>, EpochManagerError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(EpochManagerRequest::GetRandomCommitteeMemberFromShardGroup {
+                epoch,
+                shard_group,
+                excluding,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| EpochManagerError::SendError)?;
+
+        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    }
 }
 
 #[async_trait]

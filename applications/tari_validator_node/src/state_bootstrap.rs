@@ -177,7 +177,7 @@ where
         created_justify: *genesis_block.justify().id(),
         created_block: BlockId::zero(),
         created_height: NodeHeight(0),
-        created_by_shard: Shard::zero(),
+        created_by_shard: Shard::first(),
         created_at_epoch: Epoch(0),
         destroyed: None,
     }

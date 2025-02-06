@@ -28,6 +28,7 @@ use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
+    optional::Optional,
     shard::Shard,
     Epoch,
     NodeAddressable,
@@ -1636,22 +1637,25 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 source: e,
             })?;
 
-        let locked = self.get_current_locked_block()?;
-        let leaf_block = leaf_blocks::table
-            .select(leaf_blocks::block_id)
-            .order_by(leaf_blocks::id.desc())
-            .first::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "leaf_block_get",
-                source: e,
-            })?;
-        let block_id = deserialize_hex_try_from(&leaf_block)?;
+        // There may be no locked block, in which case we assume there are no updates either
+        let mut updates = IndexMap::new();
+        if let Some(locked) = self.get_current_locked_block().optional()? {
+            let leaf_block = leaf_blocks::table
+                .select(leaf_blocks::block_id)
+                .order_by(leaf_blocks::id.desc())
+                .first::<String>(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "leaf_block_get",
+                    source: e,
+                })?;
+            let block_id = deserialize_hex_try_from(&leaf_block)?;
 
-        let mut updates = self.get_transaction_atom_state_updates_between_blocks(
-            &locked.block_id,
-            &block_id,
-            txs.iter().map(|s| s.transaction_id.as_str()),
-        )?;
+            updates = self.get_transaction_atom_state_updates_between_blocks(
+                &locked.block_id,
+                &block_id,
+                txs.iter().map(|s| s.transaction_id.as_str()),
+            )?;
+        }
 
         txs.into_iter()
             .map(|tx| {

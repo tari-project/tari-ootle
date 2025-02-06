@@ -77,6 +77,7 @@ pub async fn handle_get_validator_fees(
 
     let mut fees = HashMap::new();
 
+    // TODO(perf); bulk scan
     for (shard, address) in addresses {
         let Some(result) = context
             .wallet_sdk()
@@ -93,7 +94,9 @@ pub async fn handle_get_validator_fees(
             continue;
         };
 
-        fees.insert(shard, FeePoolDetails { amount, address });
+        if !amount.is_zero() {
+            fees.insert(shard, FeePoolDetails { amount, address });
+        }
     }
 
     Ok(GetValidatorFeesResponse { fees })

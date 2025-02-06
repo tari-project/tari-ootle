@@ -113,7 +113,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
             let mut state_tree = SpreadPrefixStateTree::new(&mut store);
             debug!(target: LOG_TARGET, "v{next_version} contains {} tree change(s) for shard {shard}", changes.len());
             let shard_state_hash = state_tree.put_substate_changes(current_version, next_version, changes)?;
-            shard_state_roots.insert(shard, TreeHash::from(shard_state_hash.into_array()));
+            shard_state_roots.insert(shard, shard_state_hash);
             self.shard_tree_diffs
                 .insert(shard, VersionedStateHashTreeDiff::new(next_version, store.into_diff()));
         }

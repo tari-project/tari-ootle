@@ -20,10 +20,13 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::str::FromStr;
+use std::{
+    fmt::{Display, Formatter},
+    str::FromStr,
+};
 
 use chrono::{NaiveDateTime, Utc};
-use tari_common_types::types::FixedHash;
+use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::Epoch;
 use tari_engine_types::TemplateAddress;
 
@@ -74,40 +77,36 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
         self.backend.template_exists(self.tx, key, status)
     }
 
-    pub fn delete_template(&mut self, key: &[u8]) -> Result<(), TGlobalDbAdapter::Error> {
-        self.backend.delete_template(self.tx, key)
+    pub fn set_status(&mut self, key: &TemplateAddress, status: TemplateStatus) -> Result<(), TGlobalDbAdapter::Error> {
+        self.backend.set_status(self.tx, key, status)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct DbTemplate {
-    pub author_public_key: FixedHash,
+    pub author_public_key: PublicKey,
     pub template_address: TemplateAddress,
     pub template_name: String,
     pub expected_hash: FixedHash,
     pub epoch: Epoch,
     pub template_type: DbTemplateType,
-    pub compiled_code: Option<Vec<u8>>,
-    pub flow_json: Option<String>,
-    pub manifest: Option<String>,
+    pub code: Option<Vec<u8>>,
     pub url: Option<String>,
     pub status: TemplateStatus,
     pub added_at: NaiveDateTime,
 }
 
 impl DbTemplate {
-    pub fn empty_pending(template_address: TemplateAddress, epoch: Epoch) -> Self {
+    pub fn empty_pending(template_address: TemplateAddress, author_public_key: PublicKey, epoch: Epoch) -> Self {
         Self {
-            author_public_key: FixedHash::zero(),
+            author_public_key,
             template_name: String::new(),
             template_address,
             expected_hash: FixedHash::zero(),
             status: TemplateStatus::Pending,
-            compiled_code: None,
+            code: None,
             added_at: Utc::now().naive_utc(),
             template_type: DbTemplateType::Wasm,
-            flow_json: None,
-            manifest: None,
             url: None,
             epoch,
         }
@@ -116,50 +115,13 @@ impl DbTemplate {
 
 #[derive(Debug, Clone, Default)]
 pub struct DbTemplateUpdate {
-    pub author_public_key: Option<FixedHash>,
+    pub author_public_key: Option<PublicKey>,
     pub expected_hash: Option<FixedHash>,
     pub template_name: Option<String>,
     pub template_type: Option<DbTemplateType>,
-    pub compiled_code: Option<Vec<u8>>,
-    pub flow_json: Option<String>,
-    pub manifest: Option<String>,
     pub status: Option<TemplateStatus>,
-}
-
-impl DbTemplateUpdate {
-    pub fn status(status: TemplateStatus) -> Self {
-        Self {
-            author_public_key: None,
-            expected_hash: None,
-            template_name: None,
-            template_type: None,
-            compiled_code: None,
-            flow_json: None,
-            manifest: None,
-            status: Some(status),
-        }
-    }
-
-    pub fn template(
-        author_public_key: FixedHash,
-        expected_hash: Option<FixedHash>,
-        template_name: String,
-        template_type: DbTemplateType,
-        compiled_code: Option<Vec<u8>>,
-        flow_json: Option<String>,
-        manifest: Option<String>,
-    ) -> Self {
-        Self {
-            author_public_key: Some(author_public_key),
-            expected_hash,
-            template_name: Some(template_name),
-            template_type: Some(template_type),
-            compiled_code,
-            flow_json,
-            manifest,
-            status: Some(TemplateStatus::Active),
-        }
-    }
+    pub epoch: Option<Epoch>,
+    pub code: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +155,12 @@ impl DbTemplateType {
     }
 }
 
+impl Display for DbTemplateType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TemplateStatus {
     /// Template has been registered but has not completed
@@ -208,6 +176,16 @@ pub enum TemplateStatus {
     DownloadFailed,
     /// Template has been deprecated
     Deprecated,
+}
+
+impl TemplateStatus {
+    pub fn is_active(&self) -> bool {
+        matches!(self, TemplateStatus::Active)
+    }
+
+    pub fn is_deprecated(&self) -> bool {
+        matches!(self, TemplateStatus::Deprecated)
+    }
 }
 
 impl FromStr for TemplateStatus {
@@ -237,5 +215,11 @@ impl TemplateStatus {
             TemplateStatus::DownloadFailed => "DownloadFailed",
             TemplateStatus::Deprecated => "Deprecated",
         }
+    }
+}
+
+impl Display for TemplateStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.as_str())
     }
 }

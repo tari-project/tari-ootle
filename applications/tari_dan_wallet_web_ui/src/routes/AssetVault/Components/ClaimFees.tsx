@@ -34,7 +34,13 @@ import useAccountStore from "../../../store/accountStore";
 import { FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
 import { useKeysList } from "../../../api/hooks/useKeys";
 import { validatorsClaimFees, validatorsGetFees } from "../../../utils/json_rpc";
-import { AccountInfo, GetValidatorFeesResponse, substateIdToString } from "@tari-project/typescript-bindings";
+import {
+  AccountInfo,
+  getRejectReasonFromTransactionResult,
+  GetValidatorFeesResponse,
+  rejectReasonToString,
+  substateIdToString,
+} from "@tari-project/typescript-bindings";
 import { FileContent } from "use-file-picker/types";
 import { toHexString } from "../../../utils/helpers";
 
@@ -133,13 +139,21 @@ export default function ClaimFees() {
       dry_run: !isFeeSet,
     })
       .then((resp) => {
-        if (isFeeSet) {
-          setFormState(INITIAL_VALUES);
-          setValidity(INITIAL_VALIDITY);
-          setOpen(false);
-          setPopup({ title: "Claim successful", error: false });
+        if ("Accept" in resp.result.result) {
+          if (isFeeSet) {
+            setFormState(INITIAL_VALUES);
+            setValidity(INITIAL_VALIDITY);
+            setOpen(false);
+            setPopup({ title: "Claim successful", error: false });
+          } else {
+            setFormState({ ...formState, fee: resp.fee });
+          }
         } else {
-          setFormState({ ...formState, fee: resp.fee });
+          setPopup({
+            title: "Claim failed",
+            error: true,
+            message: rejectReasonToString(getRejectReasonFromTransactionResult(resp.result.result)),
+          });
         }
       })
       .catch((e) => {

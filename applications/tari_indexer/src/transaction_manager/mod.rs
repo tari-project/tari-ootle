@@ -61,8 +61,8 @@ impl<TEpochManager, TClientFactory, TAddr, TSubstateCache>
 where
     TAddr: NodeAddressable + 'static,
     TEpochManager: EpochManagerReader<Addr = TAddr> + 'static,
-    TClientFactory: ValidatorNodeClientFactory<Addr = TAddr> + 'static,
-    <TClientFactory::Client as ValidatorNodeRpcClient>::Error: IsNotFoundError + 'static,
+    TClientFactory: ValidatorNodeClientFactory<TAddr> + 'static,
+    <TClientFactory::Client as ValidatorNodeRpcClient<TAddr>>::Error: IsNotFoundError + 'static,
     TSubstateCache: SubstateCache + 'static,
 {
     pub fn new(

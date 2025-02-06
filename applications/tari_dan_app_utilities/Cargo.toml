@@ -48,6 +48,5 @@ tokio = { workspace = true, features = [
     "sync",
     "rt-multi-thread",
 ] }
-tokio-stream = { workspace = true, features = ["sync"] }
 config = { workspace = true }
 url = { workspace = true }

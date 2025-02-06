@@ -9648,7 +9648,6 @@ dependencies = [
  "tari_validator_node_rpc",
  "thiserror 1.0.68",
  "tokio",
- "tokio-stream",
  "url",
 ]
 

@@ -22,13 +22,12 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use crate::webauthn_types::PublicKeyCredentialCreationOptions;
 use crate::{
     serialize::{opt_string_or_struct, string_or_struct},
     ComponentAddressOrName,
 };
 use chrono::NaiveDateTime;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{
     shard::Shard,
@@ -60,6 +59,7 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
+use webauthn_rs_proto::{PublicKeyCredentialCreationOptions, RegisterPublicKeyCredential};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
@@ -1313,7 +1313,58 @@ pub struct WebauthnStartRegisterRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct WebauthnStartRegisterResponse {
-    pub public_key: PublicKeyCredentialCreationOptions,
+    /// Unique ID of the current registration Session.
+    pub session_id: String,
+    /// [`PublicKeyCredentialCreationOptions`] serialized as JSON
+    pub public_key: String,
 }
+
+impl WebauthnStartRegisterResponse {
+    pub fn new(session_id: String, public_key: PublicKeyCredentialCreationOptions) -> Result<Self, serde_json::Error> {
+        let public_key = serde_json::to_string(&public_key)?;
+        Ok(
+            Self {
+                session_id,
+                public_key,
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnFinishRegisterRequest {
+    /// Session ID received from [`WebauthnStartRegisterResponse`].
+    pub session_id: String,
+    /// [`RegisterPublicKeyCredential`] serialized as JSON.
+    credential: String,
+}
+
+impl WebauthnFinishRegisterRequest {
+    pub fn credential(&self) -> Result<RegisterPublicKeyCredential, serde_json::Error> {
+        serde_json::from_str(&self.credential)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnFinishRegisterResponse {
+    pub success: bool,
+}
+
+impl WebauthnFinishRegisterResponse {
+    pub fn new(success: bool) -> Self {
+        Self { success }
+    }
+}
+
 
 

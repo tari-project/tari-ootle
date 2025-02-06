@@ -112,6 +112,7 @@ async fn handler(
         },
         Some(("webauthn", method)) => match method {
             "reg_start" => call_handler(context, value, token, webauthn::handle_start_registration).await,
+            "reg_finish" => call_handler(context, value, token, webauthn::handle_finish_registration).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("settings", method)) => match method {

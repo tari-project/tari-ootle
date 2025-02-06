@@ -8,8 +8,11 @@ mod account_monitor;
 pub use account_monitor::AccountMonitorHandle;
 
 mod transaction_service;
-mod webauthn_registration_store;
-pub use webauthn_registration_store::*;
+mod webauthn;
+pub use webauthn::*;
+
+mod session_store;
+pub use session_store::*;
 
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;

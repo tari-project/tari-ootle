@@ -105,12 +105,12 @@ impl ShardGroup {
         }
 
         let shard_size = U256::MAX >> num_shards.as_u32().trailing_zeros();
-        let start = if self.start.is_global() {
+        let start = if self.start.is_first() {
             U256::ZERO
         } else {
             shard_size * U256::from(self.start.as_u32()) + U256::from(self.start.as_u32() - 1)
         };
-        if self.end_inclusive == num_shards.as_u32() - 1 {
+        if self.end_inclusive == num_shards.as_u32() {
             return SubstateAddress::from_u256_zero_version(start)..=SubstateAddress::max();
         }
 
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn to_substate_address_range() {
-        let sg = ShardGroup::new(0, 63);
+        let sg = ShardGroup::new(1, 64);
         let range = sg.to_substate_address_range(NumPreshards::P64);
         assert_eq!(*range.start(), SubstateAddress::zero());
         assert_eq!(*range.end(), SubstateAddress::max());

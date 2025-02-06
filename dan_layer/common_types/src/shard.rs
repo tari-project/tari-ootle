@@ -34,6 +34,10 @@ impl Shard {
         self.0 == 0
     }
 
+    pub const fn is_first(&self) -> bool {
+        self.0 == 1
+    }
+
     pub const fn as_u32(self) -> u32 {
         self.0
     }

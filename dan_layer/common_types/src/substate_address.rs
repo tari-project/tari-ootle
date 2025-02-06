@@ -706,17 +706,17 @@ mod tests {
 
         #[test]
         fn it_works() {
-            let range = ShardGroup::new(0, 9).to_substate_address_range(NumPreshards::P16);
+            let range = ShardGroup::new(1, 9).to_substate_address_range(NumPreshards::P16);
             assert_range(range, SubstateAddress::zero()..address_at(10, 16));
 
-            let range = ShardGroup::new(1, 15).to_substate_address_range(NumPreshards::P16);
+            let range = ShardGroup::new(1, 16).to_substate_address_range(NumPreshards::P16);
             // Last shard always includes SubstateAddress::max
-            assert_range(range, address_at(1, 16)..=address_at(16, 16));
+            assert_range(range, address_at(0, 16)..=address_at(16, 16));
 
             let range = ShardGroup::new(1, 8).to_substate_address_range(NumPreshards::P16);
-            assert_range(range, address_at(1, 16)..address_at(9, 16));
+            assert_range(range, address_at(0, 16)..address_at(9, 16));
 
-            let range = ShardGroup::new(8, 15).to_substate_address_range(NumPreshards::P16);
+            let range = ShardGroup::new(8, 16).to_substate_address_range(NumPreshards::P16);
             assert_range(range, address_at(8, 16)..=address_at(16, 16));
         }
     }

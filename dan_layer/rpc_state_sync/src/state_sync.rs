@@ -261,7 +261,13 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         }
                     };
 
-                    if tree_changes.len() + 1 == BATCH_SIZE {
+
+
+                    info!(target: LOG_TARGET, "🛜 Applying state update (v{}) {}", current_version.unwrap_or(0), transition);
+                    self.commit_update(store.transaction(), checkpoint, transition)?;
+
+                    tree_changes.push(change);
+                    if tree_changes.len() == BATCH_SIZE {
                         let mut state_tree = SpreadPrefixStateTree::new(&mut store);
                         info!(target: LOG_TARGET, "🛜 Committing {} state tree changes v{} to v{}", tree_changes.len(), current_version.unwrap_or(0), current_version.unwrap_or(0) + 1);
                         let next_version = current_version.unwrap_or(0) + 1;
@@ -269,12 +275,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         current_version = Some(next_version);
                         store.set_version(next_version)?;
                     }
-
-                    info!(target: LOG_TARGET, "🛜 Applying state update (v{}) {}", current_version.unwrap_or(0), transition);
-
-                    self.commit_update(store.transaction(), checkpoint, transition)?;
-
-                    tree_changes.push(change);
                 }
 
                 if !tree_changes.is_empty() {
@@ -286,28 +286,29 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     store.set_version(next_version)?;
                 }
 
-
-                let local_state_root = self.get_state_root_for_shard(&**tx, shard, current_version)?;
-                if local_state_root != checkpoint_state_root {
-                    error!(
-                        target: LOG_TARGET,
-                        "❌State root mismatch for {shard}. Checkpoint {expected} but got {actual}. Rolling back.",
-                        expected = checkpoint_state_root,
-                        actual = local_state_root,
-                    );
-
-                    // Rollback
-                    return Err(CommsRpcConsensusSyncError::StateRootMismatch {
-                        expected: checkpoint_state_root,
-                        actual: local_state_root,
-                    });
-                }
-
-                info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {local_state_root}", current_version.unwrap_or(0));
-
                 Ok::<_, CommsRpcConsensusSyncError>(())
             })?;
         }
+
+        let local_state_root = self
+            .state_store
+            .with_read_tx(|tx| self.get_state_root_for_shard(tx, shard, current_version))?;
+        if local_state_root != checkpoint_state_root {
+            error!(
+                target: LOG_TARGET,
+                "❌State root mismatch for {shard}. Checkpoint {expected} but got {actual}. Rolling back.",
+                expected = checkpoint_state_root,
+                actual = local_state_root,
+            );
+
+            // TODO: rollback
+            return Err(CommsRpcConsensusSyncError::StateRootMismatch {
+                expected: checkpoint_state_root,
+                actual: local_state_root,
+            });
+        }
+
+        info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {local_state_root}", current_version.unwrap_or(0));
 
         Ok(current_version)
     }

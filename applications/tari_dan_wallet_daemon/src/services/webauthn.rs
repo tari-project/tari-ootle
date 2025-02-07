@@ -5,7 +5,7 @@ use crate::services::{SessionData, SessionStore, SessionStoreError};
 use std::time::{Duration, Instant};
 use tari_dan_wallet_sdk::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
 use thiserror::Error;
-use webauthn_rs::prelude::{Passkey, PasskeyRegistration};
+use webauthn_rs::prelude::{Passkey, PasskeyAuthentication, PasskeyRegistration};
 
 #[derive(Debug, Error)]
 pub enum WebauthnServiceError {
@@ -42,14 +42,14 @@ impl SessionData for RegistrationSessionData {
 /// Authentication session data
 #[derive(Debug, Clone)]
 struct AuthSessionData {
-    passkey: PasskeyRegistration,
+    passkey_auth: PasskeyAuthentication,
     created_at: Instant,
 }
 
 impl AuthSessionData {
-    pub fn new(passkey: PasskeyRegistration) -> Self {
+    pub fn new(passkey_auth: PasskeyAuthentication) -> Self {
         Self {
-            passkey,
+            passkey_auth,
             created_at: Instant::now(),
         }
     }
@@ -109,5 +109,30 @@ where TStore: WalletStore, {
         let mut tx = self.wallet_store.create_write_tx()?;
         tx.webauthn_reg_insert(username, passkey)?;
         Ok(())
+    }
+
+    /// Fetch passkeys for a username.
+    pub fn passkeys(&self, username: String) -> Result<Vec<Passkey>, WebauthnServiceError> {
+        let mut tx = self.wallet_store.create_read_tx()?;
+        Ok(
+            tx.webauthn_reg_fetch_passkeys(username)?
+        )
+    }
+
+    pub async fn start_authentication(&self, passkey_auth: PasskeyAuthentication)
+                                    -> Result<String, WebauthnServiceError> {
+        Ok(
+            self.auth_sessions.add(AuthSessionData::new(passkey_auth)).await?
+        )
+    }
+
+    pub async fn auth_passkey(&self, session_id: &str) -> Result<PasskeyAuthentication, WebauthnServiceError> {
+        Ok(
+            self.auth_sessions.get(session_id).await?.passkey_auth.clone()
+        )
+    }
+
+    pub async fn finish_authentication(&self, session_id: &str) {
+        self.auth_sessions.remove(session_id).await;
     }
 }

@@ -59,7 +59,7 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
-use webauthn_rs_proto::{PublicKeyCredentialCreationOptions, RegisterPublicKeyCredential};
+use webauthn_rs_proto::{PublicKeyCredential, PublicKeyCredentialCreationOptions, RegisterPublicKeyCredential, RequestChallengeResponse};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
@@ -915,6 +915,7 @@ pub struct AuthLoginRequest {
     pub permissions: Vec<String>,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub duration: Option<Duration>,
+    pub webauthn_finish_auth_request: Option<WebauthnFinishAuthRequest>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1366,5 +1367,58 @@ impl WebauthnFinishRegisterResponse {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnStartAuthRequest {
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnStartAuthResponse {
+    /// Session ID.
+    pub session_id: String,
+    /// [`RequestChallengeResponse`] serialized as JSON string.
+    pub challenge: String,
+}
+
+impl WebauthnStartAuthResponse {
+    pub fn new(session_id: String, challenge: RequestChallengeResponse) -> Result<Self, serde_json::Error> {
+        let challenge = serde_json::to_string(&challenge)?;
+        Ok(
+            Self {
+                session_id,
+                challenge,
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnFinishAuthRequest {
+    /// Session ID received from [`WebauthnStartAuthResponse`].
+    pub session_id: String,
+    /// [`PublicKeyCredential`] serialized as JSON.
+    credential: String,
+}
+
+impl WebauthnFinishAuthRequest {
+    pub fn credential(&self) -> Result<PublicKeyCredential, serde_json::Error> {
+        serde_json::from_str(&self.credential)
+    }
+}
 
 

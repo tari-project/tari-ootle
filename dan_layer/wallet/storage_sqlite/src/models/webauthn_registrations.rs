@@ -7,7 +7,7 @@ use chrono::NaiveDateTime;
 use tari_dan_wallet_sdk::models::{WebauthnRegistrationModel, WebauthnRegistrationPasskeyModel};
 use webauthn_rs::prelude::Passkey;
 
-#[derive(Debug, Clone, Queryable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Identifiable, Selectable)]
 #[diesel(table_name = webauthn_registrations)]
 pub struct WebauthnRegistration {
     pub id: i32,
@@ -26,7 +26,7 @@ impl From<WebauthnRegistration> for WebauthnRegistrationModel {
     }
 }
 
-#[derive(Debug, Clone, Queryable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Identifiable, Selectable)]
 #[diesel(table_name = webauthn_registration_passkeys)]
 pub struct WebauthnRegistrationPasskey {
     pub id: i32,
@@ -36,10 +36,10 @@ pub struct WebauthnRegistrationPasskey {
     pub updated_at: NaiveDateTime,
 }
 
-impl TryFrom<WebauthnRegistrationPasskey> for WebauthnRegistrationPasskeyModel {
+impl TryFrom<&WebauthnRegistrationPasskey> for WebauthnRegistrationPasskeyModel {
     type Error = serde_json::Error;
 
-    fn try_from(value: WebauthnRegistrationPasskey) -> Result<Self, Self::Error> {
+    fn try_from(value: &WebauthnRegistrationPasskey) -> Result<Self, Self::Error> {
         let passkey: Passkey = serde_json::from_slice(&value.passkey)?;
         Ok(WebauthnRegistrationPasskeyModel{
             passkey,

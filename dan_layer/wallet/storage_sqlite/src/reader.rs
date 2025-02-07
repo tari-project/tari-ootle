@@ -1,24 +1,22 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, str::FromStr, sync::MutexGuard};
-
-use bigdecimal::{BigDecimal, ToPrimitive};
-use diesel::{
-    dsl::sum,
-    sql_query,
-    BoolExpressionMethods,
-    JoinOnDsl,
-    OptionalExtension,
-    QueryDsl,
-    RunQueryDsl,
-    SqliteConnection,
-    TextExpressionMethods,
+use crate::models::WebauthnRegistrationPasskey;
+use crate::schema::webauthn_registrations::dsl::webauthn_registrations;
+use crate::{
+    diesel::{ExpressionMethods, NullableExpressionMethods},
+    models,
+    serialization::deserialize_json,
 };
+use bigdecimal::{BigDecimal, ToPrimitive};
+use diesel::{dsl::sum, sql_query, BoolExpressionMethods, JoinOnDsl, OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper, SqliteConnection, TextExpressionMethods};
 use log::error;
 use serde::de::DeserializeOwned;
+use std::convert::Infallible;
+use std::{collections::HashMap, str::FromStr, sync::MutexGuard};
 use tari_common_types::types::Commitment;
 use tari_dan_common_types::substate_type::SubstateType;
+use tari_dan_wallet_sdk::models::{WebauthnRegistrationModel, WebauthnRegistrationPasskeyModel};
 use tari_dan_wallet_sdk::{
     models::{
         Account,
@@ -44,12 +42,7 @@ use tari_template_lib::{
 };
 use tari_transaction::TransactionId;
 use tari_utilities::hex::Hex;
-
-use crate::{
-    diesel::{ExpressionMethods, NullableExpressionMethods},
-    models,
-    serialization::deserialize_json,
-};
+use webauthn_rs::prelude::Passkey;
 
 const LOG_TARGET: &str = "tari::dan::wallet_sdk::storage_sqlite::reader";
 
@@ -838,6 +831,26 @@ impl WalletStoreReader for ReadTransaction<'_> {
         let count: i64 = webauthn_registrations::table.count().get_result(self.connection())
             .map_err(|e| WalletStorageError::general("webauthn_reg_count", e))?;
         Ok(count as u64)
+    }
+
+    fn webauthn_reg_fetch_passkeys(&mut self, username: String) -> Result<Vec<Passkey>, WalletStorageError> {
+        use crate::schema::{webauthn_registration_passkeys, webauthn_registrations};
+        Ok(
+            webauthn_registration_passkeys::table
+            .inner_join(webauthn_registrations::table)
+            .filter(webauthn_registrations::username.eq(username))
+            .select(WebauthnRegistrationPasskey::as_select())
+            .load::<WebauthnRegistrationPasskey>(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_fetch", e))?
+            .iter()
+            .filter_map(|model| {
+                match WebauthnRegistrationPasskeyModel::try_from(model) {
+                    Ok(value) => Some(value.passkey),
+                    Err(_) => None,
+                }
+            })
+            .collect::<Vec<Passkey>>()
+        )
     }
 }
 

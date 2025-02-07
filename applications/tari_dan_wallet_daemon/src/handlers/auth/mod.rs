@@ -4,10 +4,13 @@
 use crate::config::WalletDaemonAuth;
 use crate::handlers::auth::anonym::AnonymAuth;
 use crate::handlers::auth::webauthn::WebAuthnAuth;
+use crate::services::WebauthnService;
 use axum::async_trait;
 use std::fmt::Debug;
 use std::sync::Arc;
+use tari_dan_wallet_sdk::storage::WalletStore;
 use tari_wallet_daemon_client::types::AuthLoginRequest;
+use webauthn_rs::Webauthn;
 
 pub mod anonym;
 pub mod webauthn;
@@ -17,13 +20,20 @@ pub trait Authenticator: Debug + Sync + Send {
     async fn authenticate(&self, request: &AuthLoginRequest) -> Result<(), anyhow::Error>;
 }
 
-pub fn get_authenticator(auth: &WalletDaemonAuth) -> Arc<dyn Authenticator> {
+pub fn get_authenticator<TStore: WalletStore + Debug + Send + Sync + 'static>(
+    auth: WalletDaemonAuth,
+    webauthn: Webauthn,
+    webauthn_service: Arc<WebauthnService<TStore>>,
+) -> Arc<dyn Authenticator> {
     match auth {
         WalletDaemonAuth::None => {
             Arc::new(AnonymAuth::new())
         }
         WalletDaemonAuth::WebAuthn => {
-            Arc::new(WebAuthnAuth::new())
+            Arc::new(WebAuthnAuth::new(
+                webauthn,
+                webauthn_service,
+            ))
         }
     }
 }

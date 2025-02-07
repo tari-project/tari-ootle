@@ -30,6 +30,7 @@ mod notify;
 mod services;
 mod webrtc;
 
+use crate::config::WalletDaemonConfig;
 use crate::handlers::auth::get_authenticator;
 use crate::services::WebauthnService;
 use crate::{
@@ -86,21 +87,29 @@ pub async fn run_tari_dan_wallet_daemon(
 
     let jrpc_address = config.dan_wallet_daemon.json_rpc_address.unwrap();
     let signaling_server_address = config.dan_wallet_daemon.signaling_server_address.unwrap();
-    let authenticator = get_authenticator(&config.dan_wallet_daemon.authentication);
     let webauthn_service = Arc::new(WebauthnService::new(wallet_store, Duration::from_secs(60 * 60)));
 
     // webauthn
-    let webauthn = match config.dan_wallet_daemon.http_ui_address {
+    let rp_origin = match config.dan_wallet_daemon.http_ui_address {
         Some(ui_address) => {
             let host = ui_address.ip().to_string();
-            Some(
-                WebauthnBuilder::new("localhost", &Url::parse(format!("http://{host}:{}", ui_address.port()).as_str())?)?
-                .rp_name("Tari Ootle") // TODO: get from config
-                .build()?
-            )
-        }
-        None => None,
+            Url::parse(format!("http://{host}:{}", ui_address.port()).as_str())?
+        },
+        None => {
+            let ui_address = WalletDaemonConfig::default().http_ui_address.unwrap();
+            let host = ui_address.ip().to_string();
+            Url::parse(format!("http://{host}:{}", ui_address.port()).as_str())?
+        },
     };
+    let webauthn = WebauthnBuilder::new("localhost", &rp_origin)?
+        .rp_name("Tari Ootle") // TODO: get from config
+        .build()?;
+
+    let authenticator = get_authenticator(
+        config.dan_wallet_daemon.authentication.clone(),
+        webauthn.clone(),
+        webauthn_service.clone(),
+    );
 
     let handlers = HandlerContext::new(
         wallet_sdk.clone(),

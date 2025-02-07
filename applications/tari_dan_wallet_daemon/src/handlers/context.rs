@@ -21,8 +21,8 @@ pub struct HandlerContext {
     transaction_service: TransactionServiceHandle,
     account_monitor: AccountMonitorHandle,
     config: WalletDaemonConfig,
-    webauthn: Option<Webauthn>,
     authenticator: Arc<dyn Authenticator>,
+    webauthn: Webauthn,
     webauthn_service: Arc<WebauthnService<SqliteWalletStore>>,
 }
 
@@ -35,7 +35,7 @@ impl HandlerContext {
         config: WalletDaemonConfig,
         authenticator: Arc<dyn Authenticator>,
         webauthn_service: Arc<WebauthnService<SqliteWalletStore>>,
-        webauthn: Option<Webauthn>,
+        webauthn: Webauthn,
     ) -> Self {
         Self {
             wallet_sdk,
@@ -43,8 +43,8 @@ impl HandlerContext {
             transaction_service,
             account_monitor,
             config,
-            webauthn,
             authenticator,
+            webauthn,
             webauthn_service,
         }
     }
@@ -77,7 +77,7 @@ impl HandlerContext {
         self.webauthn_service.clone()
     }
 
-    pub fn webauthn(&self) -> Option<&Webauthn> {
-        self.webauthn.as_ref()
+    pub fn webauthn(&self) -> &Webauthn {
+        &self.webauthn
     }
 }

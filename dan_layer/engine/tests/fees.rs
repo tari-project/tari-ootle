@@ -199,13 +199,12 @@ fn fail_partial_paid_fees() {
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
     let orig_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
-    println!("{:?}", orig_balance);
     test.enable_fees();
 
     let result = test.execute_expect_commit(
         Transaction::builder()
                 // Pay less fees than the cost of the main transaction
-                .fee_transaction_pay_from_component(account, Amount(10))
+                .fee_transaction_pay_from_component(account, Amount(50))
                 // These instructions should not be applied
                 .call_method(account2, "withdraw", args![
                     CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -220,13 +219,16 @@ fn fail_partial_paid_fees() {
     test.disable_fees();
 
     let reason = result.expect_transaction_failure();
-    assert!(matches!(reason, RejectReason::FeesNotPaid(_)));
+    assert!(
+        matches!(reason, RejectReason::InsufficientFeesPaid(_)),
+        "actual reason: {reason}"
+    );
 
     // Check that the fee paid was deducted
     let payment = result.finalize.fee_receipt;
     assert!(!payment.is_paid_in_full());
     let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
-    assert_eq!(new_balance, orig_balance - Amount(10));
+    assert_eq!(new_balance, orig_balance - Amount(50));
 }
 
 #[test]
@@ -276,7 +278,7 @@ fn fail_pay_less_fees_than_fee_transaction() {
     test.disable_fees();
 
     let (diff, reason) = result.expect_fee_accept_transaction_reject();
-    assert_reject_reason(reason, RejectReason::FeesNotPaid(String::new()));
+    assert_reject_reason(reason, RejectReason::InsufficientFeesPaid(String::new()));
 
     let (_, s) = diff.up_iter().find(|(id, _)| id.is_vault()).expect("Account not found");
     assert_eq!(s.substate_value().as_vault().unwrap().balance(), orig_balance - 100);
@@ -302,21 +304,27 @@ fn fail_pay_too_little_no_fee_instruction() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder()
-                // These instructions should not be applied
-                .call_method(account2, "withdraw", args![
-                    CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-                    Amount(500)
-                ])
-                .put_last_instruction_output_on_workspace("bucket")
-                .call_method(account, "deposit", args![Workspace("bucket")])
-                .call_method(account,"pay_fee",  args![Amount(10)])
-                .build_and_seal(&private_key),
+            .with_fee_instructions_builder(|builder| {
+                builder
+                    // These instructions should not be applied
+                    .call_method(account2, "withdraw", args![
+                        CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+                        Amount(500)
+                    ])
+                    .put_last_instruction_output_on_workspace("bucket")
+                    .call_method(account, "deposit", args![Workspace("bucket")])
+                    .call_method(account, "pay_fee", args![Amount(10)])
+            })
+            .build_and_seal(&private_key),
         vec![owner_token, owner_token2],
     );
 
     test.disable_fees();
 
-    assert!(matches!(reason, RejectReason::FeesNotPaid(_)));
+    assert!(
+        matches!(reason, RejectReason::InsufficientFeesPaid(_)),
+        "actual reason: {reason}"
+    );
 
     // Fee was not deducted
     let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
@@ -335,13 +343,16 @@ fn success_pay_fee_in_main_instructions() {
 
     let result = test.execute_expect_success(
         Transaction::builder()
-            .call_method(account2, "withdraw", args![
-                CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-                Amount(500)
-            ])
-            .put_last_instruction_output_on_workspace("bucket")
-            .call_method(account, "deposit", args![Workspace("bucket")])
-            .call_method(account, "pay_fee", args![Amount(1000)])
+            .with_fee_instructions_builder(|builder| {
+                builder
+                    .call_method(account2, "withdraw", args![
+                        CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+                        Amount(500)
+                    ])
+                    .put_last_instruction_output_on_workspace("bucket")
+                    .call_method(account, "deposit", args![Workspace("bucket")])
+                    .call_method(account, "pay_fee", args![Amount(1000)])
+            })
             .build_and_seal(&private_key),
         vec![owner_token, owner_token2],
     );

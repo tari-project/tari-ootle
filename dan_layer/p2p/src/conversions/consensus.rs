@@ -763,7 +763,7 @@ impl From<AbortReason> for proto::consensus::AbortReason {
             AbortReason::OneOrMoreInputsNotFound => Self::OneOrMoreInputsNotFound,
             AbortReason::ForeignShardGroupDecidedToAbort => Self::ForeignShardGroupDecidedToAbort,
             AbortReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
-            AbortReason::FeesNotPaid => Self::FeesNotPaid,
+            AbortReason::InsufficientFeesPaid => Self::InsufficientFeesPaid,
             AbortReason::EarlyAbort => Self::EarlyAbort,
         }
     }
@@ -784,7 +784,7 @@ impl From<proto::consensus::AbortReason> for AbortReason {
             proto::consensus::AbortReason::OneOrMoreInputsNotFound => Self::OneOrMoreInputsNotFound,
             proto::consensus::AbortReason::ForeignShardGroupDecidedToAbort => Self::ForeignShardGroupDecidedToAbort,
             proto::consensus::AbortReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
-            proto::consensus::AbortReason::FeesNotPaid => Self::FeesNotPaid,
+            proto::consensus::AbortReason::InsufficientFeesPaid => Self::InsufficientFeesPaid,
             proto::consensus::AbortReason::EarlyAbort => Self::EarlyAbort,
         }
     }

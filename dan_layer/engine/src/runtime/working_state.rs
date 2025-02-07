@@ -1033,9 +1033,9 @@ impl WorkingState {
     }
 
     pub fn check_all_substates_known(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
-        for addr in value.referenced_substates() {
-            if !self.substate_exists(&addr)? {
-                return Err(RuntimeError::ReferencedSubstateNotFound { address: addr.clone() });
+        for id in value.referenced_substates() {
+            if !self.substate_exists(&id)? {
+                return Err(RuntimeError::ReferencedSubstateNotFound { id: id.clone() });
             }
         }
         for bucket_id in value.bucket_ids() {
@@ -1055,17 +1055,17 @@ impl WorkingState {
     pub fn check_all_substates_in_scope(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {
         let scope = self.current_call_scope()?;
 
-        for addr in value.referenced_substates() {
+        for id in value.referenced_substates() {
             // You are allowed to reference existing root substates
-            if addr.is_root() {
-                if !self.substate_exists(&addr)? {
-                    return Err(RuntimeError::RootSubstateNotFound { address: addr.clone() });
+            if id.is_root() {
+                if !self.substate_exists(&id)? {
+                    return Err(RuntimeError::RootSubstateNotFound { id: id.clone() });
                 }
-            } else if !scope.is_substate_in_scope(&addr) {
-                if !self.substate_exists(&addr)? {
-                    return Err(RuntimeError::ReferencedSubstateNotFound { address: addr.clone() });
+            } else if !scope.is_substate_in_scope(&id) {
+                if !self.substate_exists(&id)? {
+                    return Err(RuntimeError::ReferencedSubstateNotFound { id: id.clone() });
                 }
-                return Err(RuntimeError::SubstateOutOfScope { address: addr.clone() });
+                return Err(RuntimeError::SubstateOutOfScope { id: id.clone() });
             } else {
                 // OK
             }
@@ -1180,7 +1180,7 @@ impl WorkingState {
                 address
             );
             return Err(RuntimeError::SubstateNotOwned {
-                address: address.clone(),
+                id: address.clone(),
                 requested_owner: Box::new(component_lock.address().clone()),
             });
         }

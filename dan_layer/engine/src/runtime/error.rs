@@ -27,6 +27,7 @@ use tari_bor::BorError;
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{optional::IsNotFoundError, Epoch};
 use tari_engine_types::{
+    commit_result::RejectReason,
     entity_id_provider::EntityIdProviderError,
     id_provider::IdProviderError,
     indexed_value::IndexedValueError,
@@ -69,17 +70,17 @@ pub enum RuntimeError {
     WorkspaceError(#[from] WorkspaceError),
     #[error("Substate '{id}' not found")]
     SubstateNotFound { id: SubstateId },
-    #[error("Root substate not found with address '{address}'")]
-    RootSubstateNotFound { address: SubstateId },
-    #[error("Referenced substate not found with address '{address}'")]
-    ReferencedSubstateNotFound { address: SubstateId },
-    #[error("Non-existent substate returned from call with address '{address}'")]
-    NonExistentSubstateReturned { address: SubstateId },
-    #[error("Substate not in scope with address '{address}'")]
-    SubstateOutOfScope { address: SubstateId },
-    #[error("Substate {address} is not owned by {requested_owner}")]
+    #[error("Root substate '{id}' not found")]
+    RootSubstateNotFound { id: SubstateId },
+    #[error("Referenced substate '{id}' not found")]
+    ReferencedSubstateNotFound { id: SubstateId },
+    #[error("Non-existent substate '{id}' returned from call")]
+    NonExistentSubstateReturned { id: SubstateId },
+    #[error("Substate '{id}' not in scope")]
+    SubstateOutOfScope { id: SubstateId },
+    #[error("Substate {id} is not owned by {requested_owner}")]
     SubstateNotOwned {
-        address: SubstateId,
+        id: SubstateId,
         // To reduce the size of this variant, we box one of the fields
         requested_owner: Box<SubstateId>,
     },
@@ -89,10 +90,10 @@ pub enum RuntimeError {
         expected_type: &'static str,
         address: SubstateId,
     },
-    #[error("Component {component} referenced an unknown substate {address}")]
+    #[error("Component {component} referenced an unknown substate {id}")]
     ComponentReferencedUnknownSubstate {
         component: ComponentAddress,
-        address: SubstateId,
+        id: SubstateId,
     },
     #[error("Encountered unknown or out of scope bucket {bucket_id}")]
     ValidationFailedBucketNotInScope { bucket_id: BucketId },
@@ -241,8 +242,8 @@ pub enum RuntimeError {
 
     #[error("Address allocation not found with id {id}")]
     AddressAllocationNotFound { id: u32 },
-    #[error("Address allocation type mismatch: {address}")]
-    AddressAllocationTypeMismatch { address: SubstateId },
+    #[error("Address allocation type mismatch: got {id}, expected: {expected}")]
+    AddressAllocationTypeMismatch { id: SubstateId, expected: &'static str },
 
     #[error("Invalid event topic '{topic}': 'std' prefix is reserved for built-in events")]
     InvalidEventTopicStdPrefix { topic: String },
@@ -259,6 +260,25 @@ pub enum RuntimeError {
 impl RuntimeError {
     pub fn state_db_error<T: Display>(err: T) -> Self {
         RuntimeError::StateDbError(anyhow!("{}", err))
+    }
+
+    pub fn to_reject_reason(&self) -> RejectReason {
+        match self {
+            Self::SubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!("Substate {id} not found",)),
+            Self::RootSubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!(
+                "Template referenced root substate but it was not found: {id}"
+            )),
+            Self::ReferencedSubstateNotFound { id } => RejectReason::OneOrMoreInputsNotFound(format!(
+                "Template referenced substate but it was not found: {id}"
+            )),
+            Self::InsufficientFeesPaid {
+                fees_paid,
+                required_fee,
+            } => RejectReason::InsufficientFeesPaid(format!(
+                "Insufficient fees paid: {fees_paid}, required fees: {required_fee}"
+            )),
+            err => RejectReason::ExecutionFailure(err.to_string()),
+        }
     }
 }
 

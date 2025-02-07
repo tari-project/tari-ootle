@@ -106,7 +106,7 @@ fn it_rejects_unknown_substate_addresses() {
     );
 
     assert_reject_reason(reason, RuntimeError::ReferencedSubstateNotFound {
-        address: ResourceAddress::from_hex("abababababababababababababababababababababababababababababababab")
+        id: ResourceAddress::from_hex("abababababababababababababababababababababababababababababababab")
             .unwrap()
             .into(),
     })
@@ -189,7 +189,7 @@ fn it_prevents_access_to_vault_id_in_component_context() {
 
     // take_bucket_zero fails because the component didnt create the vault
     assert_reject_reason(reason, RuntimeError::SubstateNotOwned {
-        address: vault_id.into(),
+        id: vault_id.into(),
         requested_owner: Box::new(shenanigans.into()),
     });
 }
@@ -277,9 +277,7 @@ fn it_disallows_vault_access_if_vault_is_not_owned() {
 
     // fails because the function called withdraw on a vault that wasnt in scope. We then check if the vault is owned by
     // the component, but we're not in a component context.
-    assert_reject_reason(reason, RuntimeError::SubstateOutOfScope {
-        address: vault_id.into(),
-    });
+    assert_reject_reason(reason, RuntimeError::SubstateOutOfScope { id: vault_id.into() });
 }
 
 #[test]

@@ -108,8 +108,8 @@ export function rejectReasonToString(reason: RejectReason | null): string {
   if ("ShardRejected" in reason) {
     return `ShardRejected(${reason.ShardRejected})`;
   }
-  if ("FeesNotPaid" in reason) {
-    return `FeesNotPaid(${reason.FeesNotPaid})`;
+  if ("InsufficientFeesPaid" in reason) {
+    return `InsufficientFeesPaid(${reason.InsufficientFeesPaid})`;
   }
   if ("ForeignShardGroupDecidedToAbort" in reason) {
     const r = reason.ForeignShardGroupDecidedToAbort;

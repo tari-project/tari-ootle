@@ -29,7 +29,7 @@ use indexmap::IndexMap;
 use log::*;
 use tari_dan_common_types::Epoch;
 use tari_engine_types::{
-    commit_result::{FinalizeResult, RejectReason, TransactionResult},
+    commit_result::{FinalizeResult, TransactionResult},
     component::{ComponentBody, ComponentHeader},
     confidential::UnclaimedConfidentialOutput,
     events::Event,
@@ -174,7 +174,8 @@ impl StateTracker {
                     let addr = state.take_allocated_address(address_allocation.id())?;
                     addr.try_into().map_err(|error: InvalidSubstateIdVariant| {
                         RuntimeError::AddressAllocationTypeMismatch {
-                            address: error.substate_id,
+                            id: error.substate_id,
+                            expected: error.expected,
                         }
                     })?
                 },
@@ -305,7 +306,7 @@ impl StateTracker {
 
         let result = match result {
             Ok(substate_diff) => TransactionResult::Accept(substate_diff),
-            Err(err) => TransactionResult::Reject(RejectReason::ExecutionFailure(err.to_string())),
+            Err(err) => TransactionResult::Reject(err.to_reject_reason()),
         };
 
         let finalized = FinalizeResult::new(

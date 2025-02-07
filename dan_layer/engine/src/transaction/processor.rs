@@ -205,8 +205,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 // Checkpoint the tracker state after the fee instructions have been executed in case of transaction
                 // failure.
                 if let Err(err) = runtime.interface().set_fee_checkpoint() {
-                    let mut finalize =
-                        FinalizeResult::new_rejected(transaction_hash, RejectReason::ExecutionFailure(err.to_string()));
+                    let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason());
                     finalize.execution_results = execution_results;
                     return Ok(ExecuteResult {
                         finalize,

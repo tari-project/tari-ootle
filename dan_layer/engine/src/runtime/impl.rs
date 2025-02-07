@@ -203,14 +203,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let _ignore = state.get_proof(*proof_id)?;
             }
 
-            for address in value.referenced_substates() {
-                if !state.substate_exists(&address)? {
+            for id in value.referenced_substates() {
+                if !state.substate_exists(&id)? {
                     debug!(
                         target: LOG_TARGET,
-                        "Returned substate {address} does not exist",
+                        "Returned substate {id} does not exist",
                     );
 
-                    return Err(RuntimeError::NonExistentSubstateReturned { address });
+                    return Err(RuntimeError::NonExistentSubstateReturned { id });
                 }
             }
 
@@ -2275,7 +2275,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let mut finalized = self.tracker.finalize(substates_to_persist)?;
 
         if !finalized.fee_receipt.is_paid_in_full() {
-            let reason = RejectReason::FeesNotPaid(format!(
+            let reason = RejectReason::InsufficientFeesPaid(format!(
                 "Required fees {} but {} paid",
                 finalized.fee_receipt.total_fees_charged(),
                 finalized.fee_receipt.total_fees_paid()

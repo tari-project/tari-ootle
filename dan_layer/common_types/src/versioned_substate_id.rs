@@ -190,6 +190,15 @@ impl<'a> SubstateRequirementRef<'a> {
         SubstateRequirement::new(self.substate_id.clone(), self.version)
     }
 
+    pub fn with_version(self, version: u32) -> VersionedSubstateIdRef<'a> {
+        VersionedSubstateIdRef::new(self.substate_id, version)
+    }
+
+    pub fn or_zero_version(self) -> VersionedSubstateIdRef<'a> {
+        let v = self.version.unwrap_or(0);
+        self.with_version(v)
+    }
+
     pub fn version(&self) -> Option<u32> {
         self.version
     }

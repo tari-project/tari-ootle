@@ -84,26 +84,19 @@ where
             target: LOG_TARGET,
             "Submitting transaction {} to the validator node", tx_id
         );
-        let transaction_substate_address = tx_id.to_substate_address();
 
-        // TODO: no inputs is no longer valid.
-        if transaction.all_inputs_iter().next().is_none() {
-            self.try_with_committee(iter::once(transaction_substate_address), 2, |mut client| {
-                let transaction = transaction.clone();
-                async move { client.submit_transaction(transaction).await }
-            })
-            .await
-        } else {
-            let involved = transaction
-                .all_inputs_iter()
-                // The version does not affect the shard group
-                .map(|i| i.or_zero_version().to_substate_address());
-            self.try_with_committee(involved, 2, |mut client| {
-                let transaction = transaction.clone();
-                async move { client.submit_transaction(transaction).await }
-            })
-            .await
-        }
+        let involved = transaction
+            .all_inputs_iter()
+            // The version does not affect the shard group
+            .map(|i| i.or_zero_version().to_substate_address())
+            // NOTE: if I don't collect here, we get lifetime issues in the JSON-RPC handlers (Send impl not general enough).
+            // For uniqueness, it seems like a good idea to collect to a HashSet anyway.
+            .collect::<HashSet<_>>();
+        self.try_with_committee(involved, 2, |mut client| {
+            let transaction = transaction.clone();
+            async move { client.submit_transaction(transaction).await }
+        })
+        .await
     }
 
     pub async fn autofill_transaction(
@@ -155,8 +148,8 @@ where
     ) -> Result<T, TransactionManagerError>
     where
         F: FnMut(TClientFactory::Client) -> TFut,
-        TClientFactory::Client: 'a,
         TFut: Future<Output = Result<T, E>> + 'a,
+        TClientFactory::Client: 'a,
         T: 'static,
         E: Display,
         IShard: IntoIterator<Item = SubstateAddress>,

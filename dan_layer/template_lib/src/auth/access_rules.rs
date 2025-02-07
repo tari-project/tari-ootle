@@ -139,6 +139,11 @@ impl ComponentAccessRules {
         self
     }
 
+    /// Returns the number of custom access rules
+    pub fn num_access_rules(&self) -> usize {
+        self.method_access.len()
+    }
+
     /// Set up the default access rule for all methods that do not have a specific rule
     pub fn default(mut self, rule: AccessRule) -> Self {
         self.default = rule;

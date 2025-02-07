@@ -9,7 +9,7 @@ use tari_dan_common_types::{
     LockIntent,
     SubstateAddress,
     SubstateLockType,
-    SubstateRequirement,
+    SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
 };
@@ -178,7 +178,8 @@ impl SubstatePledge {
         self.versioned_substate_id().to_substate_address()
     }
 
-    pub fn satisfies_requirement(&self, req: &SubstateRequirement) -> bool {
+    pub fn satisfies_requirement<'a, T: Into<SubstateRequirementRef<'a>>>(&self, req: T) -> bool {
+        let req = req.into();
         // Check if a requirement is met by this pledge. If the requirement does not specify a version, then the version
         // requirement is, by definition, met.
         req.version

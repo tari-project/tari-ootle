@@ -2341,8 +2341,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             state.new_substate(
                 template_address,
                 SubstateValue::Template(PublishedTemplate {
-                    // TODO: remove actual binary
-                    binary: template,
                     // We essentially store the pre-image of the template address in the substate
                     binary_hash,
                     author: self.transaction_signer_public_key.clone(),

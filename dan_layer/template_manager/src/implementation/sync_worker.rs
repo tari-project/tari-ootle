@@ -120,6 +120,8 @@ impl<TAddr: NodeAddressable + ToPeerId + 'static> TemplateSyncWorker<TAddr> {
         }
     }
 
+    /// Returns events for the sync worker. This must be polled to make progress on syncing.
+    /// The future returned from this method is cancel-safe (can be used in a tokio::select! branch)
     pub async fn next(&mut self) -> SyncWorkerEvent {
         poll_fn(|cx| self.poll_next(cx)).await
     }

@@ -238,6 +238,7 @@ pub async fn spawn_services(
     info!(target: LOG_TARGET, "Payload processor initializing");
     // Payload processor
     let fee_table = FeeTable {
+        per_transaction_weight_cost: 1,
         per_module_call_cost: 1,
         per_byte_storage_cost: 1,
         per_event_cost: 1,

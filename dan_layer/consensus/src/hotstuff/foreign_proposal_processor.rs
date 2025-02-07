@@ -101,18 +101,30 @@ pub fn process_foreign_block<TStore: StateStore>(
                 else {
                     // CASE: the transaction was already aborted by this node when locking outputs (LocalAccept) and
                     // the transaction was finalized and therefore not in the pool.
-                    if TransactionRecord::exists(tx, &atom.id)? {
-                        info!(
-                            target: LOG_TARGET,
-                            "❓️Foreign proposal {} received for transaction {} but this transaction is already (presumably) finalized.",
-                            block.id(),
-                            atom.id
-                        );
+                    if let Some(transaction) = TransactionRecord::get(tx, &atom.id).optional()? {
+                        if transaction.is_finalized() {
+                            info!(
+                                target: LOG_TARGET,
+                                "❓️Foreign proposal {} received for transaction {} but this transaction is already finalized.",
+                                block.id(),
+                                atom.id
+                            );
+                        } else {
+                            // Not finalized but also not in the pool??
+                            // Might be a bug in the foreign missing transaction handling as this should have sequenced
+                            // the transaction
+                            error!(
+                                target: LOG_TARGET,
+                                "❌ NEVER HAPPEN: Foreign proposal {} received for transaction {} but this transaction is not in the pool and not finalized.",
+                                block.id(),
+                                atom.id
+                            );
+                        }
                     } else {
                         // Might be a bug in the foreign missing transaction handling
-                        warn!(
+                        error!(
                             target: LOG_TARGET,
-                            "⚠️ NEVER HAPPEN: Foreign proposal {} received for transaction {} but this transaction is not in the pool.",
+                            "❌ NEVER HAPPEN: Foreign proposal {} received for transaction {} but this transaction is not in the pool.",
                             block.id(),
                             atom.id
                         );

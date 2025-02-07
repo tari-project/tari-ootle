@@ -518,7 +518,6 @@ impl JsonRpcHandlers {
                     e => Self::internal_error(answer_id, e),
                 })?
         };
-
         let transaction_id = self
             .transaction_manager
             .submit_transaction(transaction)

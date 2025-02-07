@@ -123,6 +123,7 @@ where TSubstateCache: SubstateCache + 'static
         let fee_table = if Self::transaction_includes_fees(transaction) {
             // TODO: should match the VN fee table, should the fee table values be a consensus constant?
             FeeTable {
+                per_transaction_weight_cost: 1,
                 per_module_call_cost: 1,
                 per_byte_storage_cost: 1,
                 per_event_cost: 1,

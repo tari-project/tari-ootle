@@ -157,7 +157,7 @@ where
 {
     if transaction
         .all_inputs_iter()
-        .any(|s| s.version.is_some() && s.substate_id == *req.substate_id())
+        .any(|s| s.version.is_some() && s.substate_id() == req.substate_id())
     {
         // Input for this substate has a specified version, so we do not autofill it
         return Ok(None);

@@ -15,7 +15,7 @@ use tari_dan_common_types::{
     ShardGroup,
     SubstateAddress,
     SubstateLockType,
-    SubstateRequirement,
+    SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
 };
@@ -46,20 +46,25 @@ impl Evidence {
         }
     }
 
-    pub fn from_initial_substates<I, O>(num_preshards: NumPreshards, num_committees: u32, inputs: I, outputs: O) -> Self
+    pub fn from_initial_substates<'a, I, O>(
+        num_preshards: NumPreshards,
+        num_committees: u32,
+        inputs: I,
+        outputs: O,
+    ) -> Self
     where
-        I: IntoIterator<Item = SubstateRequirement>,
+        I: IntoIterator<Item = SubstateRequirementRef<'a>>,
         O: IntoIterator<Item = VersionedSubstateId>,
     {
         let mut evidence = Self::empty();
 
         for obj in inputs {
             // Version does not affect the shard group
-            let substate_address = obj.to_substate_address_zero_version();
+            let substate_address = obj.or_zero_version().to_substate_address();
             let sg = substate_address.to_shard_group(num_preshards, num_committees);
             evidence
                 .add_shard_group(sg)
-                .insert_unpledged_input(obj.into_substate_id());
+                .insert_unpledged_input(obj.substate_id().clone());
         }
 
         for obj in outputs {

@@ -72,6 +72,7 @@ pub enum FeeSource {
     Storage,
     Events,
     Logs,
+    TransactionWeight,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

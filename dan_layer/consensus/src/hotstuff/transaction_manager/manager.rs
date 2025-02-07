@@ -11,6 +11,7 @@ use tari_dan_common_types::{
     Epoch,
     LockIntent,
     SubstateRequirement,
+    SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
 };
@@ -60,39 +61,39 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         }
     }
 
-    fn resolve_local_versions(
+    fn resolve_local_versions<'a>(
         &self,
         store: &PendingSubstateStore<TStateStore>,
         local_committee_info: &CommitteeInfo,
-        transaction: &Transaction,
-    ) -> Result<(IndexMap<SubstateRequirement, u32>, IndexSet<SubstateRequirement>), BlockTransactionExecutorError>
+        transaction: &'a Transaction,
+    ) -> Result<(IndexMap<SubstateRequirement, u32>, IndexSet<SubstateRequirementRef<'a>>), BlockTransactionExecutorError>
     {
         let mut resolved_substates = IndexMap::with_capacity(transaction.num_unique_inputs());
 
         let mut non_local_inputs = IndexSet::new();
         for input in transaction.all_inputs_iter() {
-            if !local_committee_info.includes_substate_id(&input.substate_id) {
+            if !local_committee_info.includes_substate_id(input.substate_id()) {
                 non_local_inputs.insert(input);
                 continue;
             }
 
             match input.version() {
                 Some(version) => {
-                    let id = VersionedSubstateId::new(input.substate_id, version);
+                    let id = input.with_version(version).to_owned();
                     store.lock_assert_is_up(&id)?;
                     info!(target: LOG_TARGET, "Resolved LOCAL substate: {id}");
                     resolved_substates.insert(id.into(), version);
                 },
                 None => {
-                    let latest = store.get_latest_version(&input.substate_id)?;
+                    let latest = store.get_latest_version(input.substate_id())?;
                     if latest.is_down() {
                         return Err(SubstateStoreError::SubstateIsDown {
-                            id: input.with_version(latest.version()),
+                            id: input.with_version(latest.version()).to_owned(),
                         }
                         .into());
                     }
                     info!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input} to version {}",latest.version());
-                    resolved_substates.insert(input, latest.version());
+                    resolved_substates.insert(input.to_owned(), latest.version());
                 },
             }
         }
@@ -397,7 +398,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         evidence.insert_unpledged_from_substate_id(
                             local_committee_info.num_preshards(),
                             local_committee_info.num_committees(),
-                            input.into_substate_id(),
+                            input.substate_id().clone(),
                         );
                     }
                     let lock_status = store.try_lock_all(transaction_id, requested_locks, false)?;

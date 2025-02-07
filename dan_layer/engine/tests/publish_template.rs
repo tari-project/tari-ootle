@@ -42,7 +42,7 @@ fn publish_template_success() {
     if let TransactionResult::Accept(diff) = result.finalize.result {
         diff.up_iter().for_each(|(substate_id, substate)| {
             if let SubstateValue::Template(curr_template) = substate.substate_value() {
-                if curr_template.binary.as_slice() == template.code() {
+                if curr_template.binary_hash == expected_binary_hash {
                     template_found = true;
                     assert!(matches!(substate_id, SubstateId::Template(_)));
                     if let SubstateId::Template(curr_template_addr) = substate_id {

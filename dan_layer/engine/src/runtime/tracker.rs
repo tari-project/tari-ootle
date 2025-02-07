@@ -47,6 +47,7 @@ use tari_template_lib::{
     models::{AddressAllocation, Amount, BucketId, ComponentAddress, Metadata, UnclaimedConfidentialOutputAddress},
     Hash,
 };
+use tari_transaction::TransactionWeight;
 
 use crate::{
     runtime::{
@@ -65,6 +66,7 @@ const LOG_TARGET: &str = "tari::dan::engine::runtime::state_tracker";
 pub struct StateTracker {
     working_state: Arc<RwLock<WorkingState>>,
     fee_checkpoint: Arc<Mutex<Option<WorkingState>>>,
+    transaction_weight: TransactionWeight,
 }
 
 impl StateTracker {
@@ -73,6 +75,7 @@ impl StateTracker {
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
         transaction_hash: Hash,
+        transaction_weight: TransactionWeight,
     ) -> Self {
         Self {
             working_state: Arc::new(RwLock::new(WorkingState::new(
@@ -82,7 +85,12 @@ impl StateTracker {
                 transaction_hash,
             ))),
             fee_checkpoint: Arc::new(Mutex::new(None)),
+            transaction_weight,
         }
+    }
+
+    pub fn get_transaction_weight(&self) -> TransactionWeight {
+        self.transaction_weight
     }
 
     pub fn get_current_epoch(&self) -> Result<Epoch, RuntimeError> {

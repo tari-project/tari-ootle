@@ -89,8 +89,6 @@ impl borsh::BorshSerialize for PublishedTemplateAddress {
 pub struct PublishedTemplate {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub author: PublicKey,
-    // TODO: remove
-    pub binary: Vec<u8>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub binary_hash: Hash,
 }

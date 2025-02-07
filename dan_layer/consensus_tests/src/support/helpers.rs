@@ -6,12 +6,7 @@ use std::ops::RangeBounds;
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_common_types::types::{PrivateKey, PublicKey};
 use tari_crypto::keys::{PublicKey as _, SecretKey};
-use tari_dan_common_types::{
-    uint::{U256, U256_ZERO},
-    NumPreshards,
-    ShardGroup,
-    SubstateAddress,
-};
+use tari_dan_common_types::{NumPreshards, ShardGroup, SubstateAddress};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{SubstateId, SubstateValue},
@@ -22,8 +17,10 @@ use crate::support::TestAddress;
 
 pub(crate) fn random_substate_in_shard_group(shard_group: ShardGroup, num_shards: NumPreshards) -> SubstateId {
     let range = shard_group.to_substate_address_range(num_shards);
-    let middlish = random_substate_address_range(range);
-    let entity_id = EntityId::new(copy_fixed(&middlish.to_u256().to_be_bytes()[0..EntityId::LENGTH]));
+    let random_in_range = random_substate_address_range(range);
+    let entity_id = EntityId::new(copy_fixed(
+        &random_in_range.to_u256().to_be_bytes()[0..EntityId::LENGTH],
+    ));
     let rand_bytes = OsRng.gen::<[u8; ComponentKey::LENGTH]>();
     let component_key = ComponentKey::new(copy_fixed(&rand_bytes));
     SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
@@ -31,19 +28,15 @@ pub(crate) fn random_substate_in_shard_group(shard_group: ShardGroup, num_shards
 
 fn random_substate_address_range<R: RangeBounds<SubstateAddress>>(range: R) -> SubstateAddress {
     let start = match range.start_bound() {
-        std::ops::Bound::Included(addr) => addr.to_u256(),
-        std::ops::Bound::Excluded(addr) => addr.to_u256() + 1,
-        std::ops::Bound::Unbounded => U256_ZERO,
+        std::ops::Bound::Included(addr) => *addr,
+        std::ops::Bound::Excluded(addr) => *addr,
+        std::ops::Bound::Unbounded => SubstateAddress::zero(),
     };
-    let end = match range.end_bound() {
-        std::ops::Bound::Included(addr) => addr.to_u256(),
-        std::ops::Bound::Excluded(addr) => addr.to_u256() - 1,
-        std::ops::Bound::Unbounded => U256::MAX,
-    };
-    let mut bytes = [0u8; 32];
+    let mut bytes = [0u8; 16];
     OsRng.fill_bytes(&mut bytes);
-    let rand = U256::from_le_bytes(bytes);
-    SubstateAddress::from_u256_zero_version(start + (rand % (end - start)))
+    let mut start = start.into_array();
+    start[16..32].copy_from_slice(&bytes);
+    SubstateAddress::from_bytes(&start).unwrap()
 }
 
 fn copy_fixed<const SZ: usize>(bytes: &[u8]) -> [u8; SZ] {
@@ -72,4 +65,42 @@ pub fn make_test_component(entity_id: EntityId) -> SubstateValue {
             state: tari_bor::Value::Null,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_dan_common_types::{ToSubstateAddress, VersionedSubstateId};
+
+    use super::*;
+
+    mod random_substate_address_range {
+        use super::*;
+
+        #[test]
+        fn it_generates_a_random_address_in_shard_group() {
+            const NUM_PRESHARDS: NumPreshards = NumPreshards::P64;
+            for _ in 0..100 {
+                let sg = ShardGroup::new(1, 16);
+                let substate = random_substate_in_shard_group(sg, NUM_PRESHARDS);
+                let actual_sg = VersionedSubstateId::new(substate, 0)
+                    .to_substate_address()
+                    .to_shard_group(NUM_PRESHARDS, 4);
+                assert_eq!(sg, actual_sg);
+
+                let sg = ShardGroup::new(2 * 16 + 1, 3 * 16);
+                let substate = random_substate_in_shard_group(sg, NUM_PRESHARDS);
+                let actual_sg = VersionedSubstateId::new(substate, 0)
+                    .to_substate_address()
+                    .to_shard_group(NUM_PRESHARDS, 4);
+                assert_eq!(sg, actual_sg);
+
+                let sg = ShardGroup::new(3 * 16 + 1, 4 * 16);
+                let substate = random_substate_in_shard_group(sg, NUM_PRESHARDS);
+                let actual_sg = VersionedSubstateId::new(substate, 0)
+                    .to_substate_address()
+                    .to_shard_group(NUM_PRESHARDS, 4);
+                assert_eq!(sg, actual_sg);
+            }
+        }
+    }
 }

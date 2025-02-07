@@ -1570,13 +1570,13 @@ async fn multishard_publish_template() {
         .state_store
         .with_read_tx(|tx| SubstateRecord::get(tx, &VersionedSubstateId::new(template_id, 0).to_substate_address()))
         .unwrap();
-    let binary = template_substate
+    let binary_hash = template_substate
         .substate_value
         .unwrap()
         .into_template()
         .expect("Expected template substate")
-        .binary;
-    assert_eq!(binary, wasm, "Template binary does not match");
+        .binary_hash;
+    assert_eq!(binary_hash, hash_template_code(&wasm), "Template binary does not match");
 
     test.assert_clean_shutdown().await;
 }

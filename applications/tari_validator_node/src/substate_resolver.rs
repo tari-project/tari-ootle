@@ -68,13 +68,13 @@ where
                         Some(substate) => {
                             if substate.version() < requested_version {
                                 return Err(SubstateResolverError::InputSubstateDoesNotExist {
-                                    substate_requirement: requested_input,
+                                    substate_requirement: requested_input.to_owned(),
                                 });
                             }
 
                             if substate.is_destroyed() || substate.version() > requested_version {
                                 return Err(SubstateResolverError::InputSubstateDowned {
-                                    id: requested_input.into_substate_id(),
+                                    id: requested_input.substate_id().clone(),
                                     version: requested_version,
                                 });
                             }
@@ -85,7 +85,7 @@ where
                         // because we checked missing_substate_ids
                         None => {
                             return Err(SubstateResolverError::InputSubstateDoesNotExist {
-                                substate_requirement: requested_input,
+                                substate_requirement: requested_input.to_owned(),
                             });
                         },
                     }
@@ -102,13 +102,13 @@ where
                                 "🐞 BUG: Requested substate {} was not missing but was also not found",
                                 requested_input.substate_id()
                             );
-                            SubstateResolverError::InputSubstateDoesNotExist { substate_requirement: requested_input.clone() }
+                            SubstateResolverError::InputSubstateDoesNotExist { substate_requirement: requested_input.to_owned() }
                         })?;
 
                     // Latest version is DOWN
                     if substate.is_destroyed() {
                         return Err(SubstateResolverError::InputSubstateDowned {
-                            id: requested_input.into_substate_id(),
+                            id: requested_input.substate_id().clone(),
                             version: substate.version(),
                         });
                     }
@@ -136,7 +136,7 @@ where
 
         Ok(ResolvedSubstates {
             local: substates,
-            unresolved_foreign: missing_substates,
+            unresolved_foreign: missing_substates.into_iter().map(|s| s.to_owned()).collect(),
         })
     }
 

@@ -83,6 +83,7 @@ impl AuthSubcommand {
                         .auth_request(AuthLoginRequest {
                             permissions: args.permissions.0.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
                             duration: args.validity_in_seconds.map(Duration::from_secs),
+                            webauthn_finish_auth_request: None,
                         })
                         .await?;
                     println!("Auth token {}", resp.auth_token);

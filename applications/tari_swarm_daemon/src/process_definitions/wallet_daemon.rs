@@ -53,7 +53,8 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("--json-rpc-address={json_rpc_address}"))
             .arg(format!("--indexer-url={indexer_url}"))
             .arg(format!("--ui-connect-address={json_rpc_public_address}"))
-            .arg(format!("-pdan_wallet_daemon.http_ui_address={web_ui_address}"));
+            .arg(format!("-pdan_wallet_daemon.http_ui_address={web_ui_address}"))
+            .arg(format!("-pdan_wallet_daemon.authentication=webauthn")); // TODO: get from config
 
         // A signaling server is not required for startup of the wallet daemon,
         // but if it is available we want to set it up

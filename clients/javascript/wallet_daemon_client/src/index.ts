@@ -7,20 +7,24 @@ import {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
-  AccountSetDefaultRequest,
-  AccountSetDefaultResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountSetDefaultRequest,
+  AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
   AccountsListResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  Arg,
+  ArgDef,
   AuthGetAllJwtRequest,
   AuthGetAllJwtResponse,
+  AuthGetMethodRequest,
+  AuthGetMethodResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -32,6 +36,11 @@ import {
   ConfidentialTransferResponse,
   ConfidentialViewVaultBalanceRequest,
   ConfidentialViewVaultBalanceResponse,
+  FinalizeResult,
+  FunctionDef,
+  GetValidatorFeesRequest,
+  GetValidatorFeesResponse,
+  Instruction,
   KeyBranch,
   KeysCreateRequest,
   KeysCreateResponse,
@@ -43,15 +52,21 @@ import {
   ListAccountNftResponse,
   PublishTemplateRequest,
   PublishTemplateResponse,
+  rejectReasonToString,
   RevealFundsRequest,
   RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
+  stringToSubstateId,
+  SubstateId,
+  substateIdToString,
   SubstatesGetRequest,
   SubstatesGetResponse,
   SubstatesListRequest,
   SubstatesListResponse,
+  SubstateType,
+  TemplateDef,
   TemplatesGetRequest,
   TemplatesGetResponse,
   TransactionGetAllRequest,
@@ -60,33 +75,24 @@ import {
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
+  TransactionStatus,
   TransactionSubmitRequest,
   TransactionSubmitResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
+  Type,
   WebRtcStartRequest,
   WebRtcStartResponse,
-  Arg,
-  FinalizeResult,
-  TemplateDef,
-  FunctionDef,
-  Type,
-  ArgDef,
-  Instruction,
-  SubstateType,
-  TransactionStatus,
-  SubstateId,
-  substateIdToString,
-  stringToSubstateId,
-  rejectReasonToString, GetValidatorFeesRequest, GetValidatorFeesResponse,
 } from "@tari-project/typescript-bindings";
-import { FetchRpcTransport, RpcTransport } from "./transports";
+import {FetchRpcTransport, RpcTransport} from "./transports";
 
 export * as transports from "./transports";
 
 export { substateIdToString, stringToSubstateId, rejectReasonToString };
 
 export type {
+  AuthGetMethodRequest,
+  AuthGetMethodResponse,
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
@@ -190,6 +196,10 @@ export class WalletDaemonClient {
 
   public setToken(token: string) {
     this.token = token;
+  }
+
+  public authGetMethod(): Promise<AuthGetMethodResponse> {
+    return this.__invokeRpc("auth.method", {});
   }
 
   public authGetAllJwt(params: AuthGetAllJwtRequest): Promise<AuthGetAllJwtResponse> {

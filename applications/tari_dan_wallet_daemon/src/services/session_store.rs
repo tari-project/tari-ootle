@@ -12,8 +12,6 @@ use uuid::Uuid;
 pub enum SessionStoreError{
     #[error("Session not found: {session_id}")]
     SessionNotFound{session_id: String},
-    #[error("Session already exists: {session_id}")]
-    SessionAlreadyExists{session_id: String},
 }
 
 /// A trait the every session data must implement.

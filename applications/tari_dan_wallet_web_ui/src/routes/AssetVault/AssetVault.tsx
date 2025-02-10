@@ -20,18 +20,21 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault, useAccountsList } from "../../api/hooks/useAccounts";
+import {useAccountsGetDefault} from "../../api/hooks/useAccounts";
 import useAccountStore from "../../store/accountStore";
 import Onboarding from "../Onboarding/Onboarding";
 import MyAssets from "./Components/MyAssets";
-import { substateIdToString } from "@tari-project/typescript-bindings";
-import { useEffect, useState } from "react";
+import {useEffect, useState} from "react";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import { ApiError } from "../../api/helpers/types";
+import {useAuthMethod} from "../../api/hooks/useAuth";
+import Loading from "../../Components/Loading";
+import WebauthnRegistration from "../WebauthnRegistration/WebauthnRegistration";
 
 function AssetVault() {
   const { account, setAccount, setPublicKey } = useAccountStore();
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
+  const { data: authMethod } = useAuthMethod();
+  const [ currAuthMethod, setCurrAuthMethod ] = useState('');
 
   useEffect(() => {
     if (!isError && defaultAccount) {
@@ -42,11 +45,29 @@ function AssetVault() {
     if (error) {
       console.info(error);
     }
-  }, [defaultAccount, isError]);
+
+    if (authMethod) {
+      setCurrAuthMethod(authMethod.method);
+    }
+  }, [defaultAccount, isError, authMethod, setCurrAuthMethod]);
+
+  const onboarding = (() => {
+    switch(currAuthMethod) {
+      case 'none': {
+        return <Onboarding />;
+      }
+      case 'webauthn': {
+        return <WebauthnRegistration />;
+      }
+      default: {
+        return <Loading />;
+      }
+    }
+  });
 
   return (
     <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : <Onboarding />}
+      {account ? <MyAssets /> : onboarding()}
     </FetchStatusCheck>
   );
 }

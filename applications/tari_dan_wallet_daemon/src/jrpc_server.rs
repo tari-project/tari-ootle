@@ -107,7 +107,7 @@ async fn handler(
             "deny" => call_handler(context, value, token, rpc::handle_login_deny).await,
             "revoke" => call_handler(context, value, token, rpc::handle_revoke).await,
             "get_all_jwt" => call_handler(context, value, token, rpc::handle_get_all_jwt).await,
-            "method" => call_handler(context, value, token, rpc::handle_get_all_jwt).await,
+            "method" => call_handler(context, value, token, rpc::handle_get_auth_method).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("webauthn", method)) => match method {

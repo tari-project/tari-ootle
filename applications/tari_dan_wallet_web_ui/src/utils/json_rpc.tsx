@@ -24,12 +24,12 @@ import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
-  AccountSetDefaultRequest,
-  AccountSetDefaultResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountSetDefaultRequest,
+  AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
@@ -38,6 +38,7 @@ import type {
   AccountsTransferResponse,
   AuthGetAllJwtRequest,
   AuthGetAllJwtResponse,
+  AuthGetMethodResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -82,8 +83,8 @@ import type {
   WebRtcStartRequest,
   WebRtcStartResponse,
 } from "@tari-project/wallet_jrpc_client";
-import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
-import { GetValidatorFeesRequest, GetValidatorFeesResponse } from "@tari-project/typescript-bindings";
+import {WalletDaemonClient} from "@tari-project/wallet_jrpc_client";
+import {GetValidatorFeesRequest, GetValidatorFeesResponse} from "@tari-project/typescript-bindings";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -141,6 +142,9 @@ async function authenticateClient(client: WalletDaemonClient) {
   const auth_token = await client.authRequest(["Admin"]);
   await client.authAccept(auth_token, auth_token);
 }
+
+export const authGetMethod = (): Promise<AuthGetMethodResponse> =>
+    client().then((c) => c.authGetMethod());
 
 export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> =>
   client().then((c) => c.authRevoke(request));

@@ -81,6 +81,12 @@ import {
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
   Type,
+  WebauthnAlreadyRegisteredResponse,
+  WebauthnFinishRegisterRequest,
+  WebauthnFinishRegisterResponse,
+  WebauthnStartAuthRequest,
+  WebauthnStartRegisterRequest,
+  WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
 } from "@tari-project/typescript-bindings";
@@ -346,6 +352,22 @@ export class WalletDaemonClient {
 
   public settingsSet(params: SettingsSetRequest): Promise<SettingsSetResponse> {
     return this.__invokeRpc("settings.set", params);
+  }
+
+  public webauthnAlreadyRegistered(): Promise<WebauthnAlreadyRegisteredResponse> {
+    return this.__invokeRpc("webauthn.already_registered", {});
+  }
+
+  public webauthnStartRegistration(request: WebauthnStartRegisterRequest): Promise<WebauthnStartRegisterResponse> {
+    return this.__invokeRpc("webauthn.reg_start", request);
+  }
+
+  public webauthnFinishRegistration(request: WebauthnFinishRegisterRequest): Promise<WebauthnFinishRegisterResponse> {
+    return this.__invokeRpc("webauthn.reg_finish", request);
+  }
+
+  public webauthnAuthStart(request: WebauthnStartAuthRequest): Promise<WebauthnAlreadyRegisteredResponse> {
+    return this.__invokeRpc("webauthn.auth_start", request);
   }
 
   async __invokeRpc(method: string, params: object = null) {

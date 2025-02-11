@@ -7,14 +7,12 @@ import {ApiError} from "../helpers/types";
 
 export const useAuthMethod = () => {
     return useQuery({
-        queryKey: ["keys_list"],
+        queryKey: ["auth_method"],
         queryFn: () => {
             return authGetMethod();
         },
         onError: (error: ApiError) => {
             error;
         },
-        refetchInterval: 1000,
-        retry: true,
     });
 };

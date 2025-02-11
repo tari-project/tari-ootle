@@ -111,6 +111,7 @@ async fn handler(
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("webauthn", method)) => match method {
+            "already_registered" => call_handler(context, value, token, webauthn::handle_already_registered).await,
             "reg_start" => call_handler(context, value, token, webauthn::handle_start_registration).await,
             "reg_finish" => call_handler(context, value, token, webauthn::handle_finish_registration).await,
             "auth_start" => call_handler(context, value, token, webauthn::handle_start_auth).await,

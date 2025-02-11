@@ -84,10 +84,19 @@ import type {
   WebRtcStartResponse,
 } from "@tari-project/wallet_jrpc_client";
 import {WalletDaemonClient} from "@tari-project/wallet_jrpc_client";
-import {GetValidatorFeesRequest, GetValidatorFeesResponse} from "@tari-project/typescript-bindings";
+import {
+  GetValidatorFeesRequest,
+  GetValidatorFeesResponse,
+  WebauthnAlreadyRegisteredResponse,
+  WebauthnFinishRegisterRequest,
+  WebauthnFinishRegisterResponse,
+  WebauthnStartRegisterRequest,
+  WebauthnStartRegisterResponse
+} from "@tari-project/typescript-bindings";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
+let unAuthenticatedClient: Promise<WalletDaemonClient> | null = null;
 let outerAddress: URL | null = null;
 const DEFAULT_WALLET_ADDRESS = new URL(
   import.meta.env.VITE_DAEMON_JRPC_ADDRESS ||
@@ -138,13 +147,34 @@ async function client() {
   return pendingClientInstance;
 }
 
+async function unauthenticated_client() {
+  const getAddress = !outerAddress ? getClientAddress() : Promise.resolve(DEFAULT_WALLET_ADDRESS);
+  unAuthenticatedClient = getAddress.then(async (addr) => {
+    const client = WalletDaemonClient.usingFetchTransport(addr.toString());
+    outerAddress = addr;
+    clientInstance = client;
+    unAuthenticatedClient = null;
+    return client;
+  });
+  return unAuthenticatedClient;
+}
+
 async function authenticateClient(client: WalletDaemonClient) {
   const auth_token = await client.authRequest(["Admin"]);
   await client.authAccept(auth_token, auth_token);
 }
 
 export const authGetMethod = (): Promise<AuthGetMethodResponse> =>
-    client().then((c) => c.authGetMethod());
+    unauthenticated_client().then((c) => c.authGetMethod());
+
+export const webauthnAlreadyRegistered = (): Promise<WebauthnAlreadyRegisteredResponse> =>
+    unauthenticated_client().then((c) => c.webauthnAlreadyRegistered());
+
+export const webauthnStartRegistration = (request: WebauthnStartRegisterRequest): Promise<WebauthnStartRegisterResponse> =>
+    unauthenticated_client().then((c) => c.webauthnStartRegistration(request));
+
+export const webauthnFinishRegistration = (request: WebauthnFinishRegisterRequest): Promise<WebauthnFinishRegisterResponse> =>
+    unauthenticated_client().then((c) => c.webauthnFinishRegistration(request));
 
 export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> =>
   client().then((c) => c.authRevoke(request));

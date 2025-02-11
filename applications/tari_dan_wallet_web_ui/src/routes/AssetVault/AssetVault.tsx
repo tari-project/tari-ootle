@@ -24,17 +24,12 @@ import {useAccountsGetDefault} from "../../api/hooks/useAccounts";
 import useAccountStore from "../../store/accountStore";
 import Onboarding from "../Onboarding/Onboarding";
 import MyAssets from "./Components/MyAssets";
-import {useEffect, useState} from "react";
+import {useEffect} from "react";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import {useAuthMethod} from "../../api/hooks/useAuth";
-import Loading from "../../Components/Loading";
-import WebauthnRegistration from "../WebauthnRegistration/WebauthnRegistration";
 
 function AssetVault() {
   const { account, setAccount, setPublicKey } = useAccountStore();
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
-  const { data: authMethod } = useAuthMethod();
-  const [ currAuthMethod, setCurrAuthMethod ] = useState('');
 
   useEffect(() => {
     if (!isError && defaultAccount) {
@@ -43,31 +38,13 @@ function AssetVault() {
     }
 
     if (error) {
-      console.info(error);
+      console.error(error);
     }
-
-    if (authMethod) {
-      setCurrAuthMethod(authMethod.method);
-    }
-  }, [defaultAccount, isError, authMethod, setCurrAuthMethod]);
-
-  const onboarding = (() => {
-    switch(currAuthMethod) {
-      case 'none': {
-        return <Onboarding />;
-      }
-      case 'webauthn': {
-        return <WebauthnRegistration />;
-      }
-      default: {
-        return <Loading />;
-      }
-    }
-  });
+  }, [defaultAccount, isError]);
 
   return (
     <FetchStatusCheck errorMessage={""} isError={false} isLoading={isLoading}>
-      {account ? <MyAssets /> : onboarding()}
+      {account ? <MyAssets /> : <Onboarding />}
     </FetchStatusCheck>
   );
 }

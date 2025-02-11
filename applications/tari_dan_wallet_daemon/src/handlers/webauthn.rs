@@ -4,7 +4,7 @@
 use crate::config::WalletDaemonAuth;
 use crate::handlers::HandlerContext;
 use anyhow::anyhow;
-use tari_wallet_daemon_client::types::{WebauthnFinishRegisterRequest, WebauthnFinishRegisterResponse, WebauthnStartAuthRequest, WebauthnStartAuthResponse, WebauthnStartRegisterRequest, WebauthnStartRegisterResponse};
+use tari_wallet_daemon_client::types::{WebauthnAlreadyRegisteredRequest, WebauthnAlreadyRegisteredResponse, WebauthnFinishRegisterRequest, WebauthnFinishRegisterResponse, WebauthnStartAuthRequest, WebauthnStartAuthResponse, WebauthnStartRegisterRequest, WebauthnStartRegisterResponse};
 use uuid::Uuid;
 use webauthn_rs::Webauthn;
 
@@ -28,6 +28,19 @@ pub async fn webauthn(context: &HandlerContext) -> Result<&Webauthn, anyhow::Err
     }
 
     Err(anyhow!("Webauthn is disabled for this wallet"))
+}
+
+pub async fn handle_already_registered(
+    context: &HandlerContext,
+    _token: Option<String>,
+    _request: WebauthnAlreadyRegisteredRequest,
+) -> Result<WebauthnAlreadyRegisteredResponse, anyhow::Error> {
+    webauthn(context).await?;
+    if check_registration_count(context).await.is_err() {
+        return Ok(WebauthnAlreadyRegisteredResponse{ registered: true });
+    }
+
+    Ok(WebauthnAlreadyRegisteredResponse{ registered: false })
 }
 
 pub async fn handle_start_registration(

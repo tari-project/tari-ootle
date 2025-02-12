@@ -1,18 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use crate::handlers::auth::Authenticator;
-use crate::services::WebauthnService;
-use crate::{
-    config::WalletDaemonConfig,
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
-    notify::Notify,
-    services::{AccountMonitorHandle, TransactionServiceHandle, WalletEvent},
-};
 use std::sync::Arc;
+
 use tari_dan_wallet_sdk::DanWalletSdk;
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use webauthn_rs::Webauthn;
+
+use crate::{
+    config::WalletDaemonConfig,
+    handlers::auth::Authenticator,
+    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
+    notify::Notify,
+    services::{AccountMonitorHandle, TransactionServiceHandle, WalletEvent, WebauthnService},
+};
 
 #[derive(Debug, Clone)]
 pub struct HandlerContext {

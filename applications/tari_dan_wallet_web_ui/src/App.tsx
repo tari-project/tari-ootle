@@ -34,7 +34,6 @@ import AssetVault from "./routes/AssetVault/AssetVault";
 import SettingsPage from "./routes/Settings/Settings";
 import Auth from "./routes/Auth/Auth";
 import Webauthn from "./routes/WebauthnRegistration/Webauthn";
-import {useState} from "react";
 import useAuthStore from "./store/authStore";
 
 export const breadcrumbRoutes = [
@@ -95,18 +94,16 @@ export const breadcrumbRoutes = [
   },
 ];
 
-const GuardedRoute = ({ component: Component, redirect = "/auth", auth, ...rest }) => (
-        auth === true
+// @ts-ignore
+const GuardedRoute = ({ component: Component, redirect = "/auth", auth = false, ...rest }) => (
+        auth
             ? <Component {...rest} />
             : <Navigate replace to={redirect} />
 )
 
 function App() {
-  const [auth, setAuth] = useState(false);
   const {authToken} = useAuthStore();
-  if (authToken) {
-    setAuth(true);
-  }
+  let auth = !!authToken;
 
   return (
     <div>
@@ -115,6 +112,7 @@ function App() {
           <Route index element={<GuardedRoute component={AssetVault} auth={auth} />} />
           <Route path="auth" element={<Auth />} />
           <Route path="auth/webauthn" element={<Webauthn />} />
+          <Route path="access-token" element={<GuardedRoute auth={auth} component={Accounts} />} />
           <Route path="accounts" element={<GuardedRoute auth={auth} component={Accounts} />} />
           <Route path="accounts/:id" element={<GuardedRoute auth={auth} component={AccountDetails} />} />
           <Route path="keys" element={<GuardedRoute auth={auth} component={Keys} />} />

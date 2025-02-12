@@ -1,11 +1,13 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::services::{SessionData, SessionStore, SessionStoreError};
 use std::time::{Duration, Instant};
+
 use tari_dan_wallet_sdk::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
 use thiserror::Error;
 use webauthn_rs::prelude::{Passkey, PasskeyAuthentication, PasskeyRegistration};
+
+use crate::services::{SessionData, SessionStore, SessionStoreError};
 
 #[derive(Debug, Error)]
 pub enum WebauthnServiceError {
@@ -65,7 +67,7 @@ impl SessionData for AuthSessionData {
 /// and save the result in DB when finished.
 #[derive(Debug, Clone)]
 pub struct WebauthnService<TStore>
-where TStore: WalletStore,
+where TStore: WalletStore
 {
     wallet_store: TStore,
     registration_sessions: SessionStore<RegistrationSessionData>,
@@ -73,7 +75,8 @@ where TStore: WalletStore,
 }
 
 impl<TStore> WebauthnService<TStore>
-where TStore: WalletStore, {
+where TStore: WalletStore
+{
     pub fn new(wallet_store: TStore, session_ttl: Duration) -> Self {
         Self {
             wallet_store,
@@ -88,11 +91,15 @@ where TStore: WalletStore, {
     }
 
     /// Start registration by creating a new session and save the temporary [`PasskeyRegistration`].
-    pub async fn start_registration(&self, username: String, passkey_reg: PasskeyRegistration)
-        -> Result<String, WebauthnServiceError> {
-        Ok(
-            self.registration_sessions.add(RegistrationSessionData::new(username, passkey_reg)).await?
-        )
+    pub async fn start_registration(
+        &self,
+        username: String,
+        passkey_reg: PasskeyRegistration,
+    ) -> Result<String, WebauthnServiceError> {
+        Ok(self
+            .registration_sessions
+            .add(RegistrationSessionData::new(username, passkey_reg))
+            .await?)
     }
 
     /// Retrieve [`PasskeyRegistration`] by session ID.
@@ -103,33 +110,35 @@ where TStore: WalletStore, {
 
     /// Finalizing registration, remove session from store and save passkey (public key of credential) to DB
     pub async fn finish_registration(&self, session_id: String, passkey: Passkey) -> Result<(), WebauthnServiceError> {
-        let username = self.registration_sessions.remove(session_id.as_str()).await
-            .ok_or(WebauthnServiceError::SessionStore(SessionStoreError::SessionNotFound {session_id}))?
+        let username = self
+            .registration_sessions
+            .remove(session_id.as_str())
+            .await
+            .ok_or(WebauthnServiceError::SessionStore(SessionStoreError::SessionNotFound {
+                session_id,
+            }))?
             .username;
         let mut tx = self.wallet_store.create_write_tx()?;
         tx.webauthn_reg_insert(username, passkey)?;
+        tx.commit()?;
         Ok(())
     }
 
     /// Fetch passkeys for a username.
     pub fn passkeys(&self, username: String) -> Result<Vec<Passkey>, WebauthnServiceError> {
         let mut tx = self.wallet_store.create_read_tx()?;
-        Ok(
-            tx.webauthn_reg_fetch_passkeys(username)?
-        )
+        Ok(tx.webauthn_reg_fetch_passkeys(username)?)
     }
 
-    pub async fn start_authentication(&self, passkey_auth: PasskeyAuthentication)
-                                    -> Result<String, WebauthnServiceError> {
-        Ok(
-            self.auth_sessions.add(AuthSessionData::new(passkey_auth)).await?
-        )
+    pub async fn start_authentication(
+        &self,
+        passkey_auth: PasskeyAuthentication,
+    ) -> Result<String, WebauthnServiceError> {
+        Ok(self.auth_sessions.add(AuthSessionData::new(passkey_auth)).await?)
     }
 
     pub async fn auth_passkey(&self, session_id: &str) -> Result<PasskeyAuthentication, WebauthnServiceError> {
-        Ok(
-            self.auth_sessions.get(session_id).await?.passkey_auth.clone()
-        )
+        Ok(self.auth_sessions.get(session_id).await?.passkey_auth.clone())
     }
 
     pub async fn finish_authentication(&self, session_id: &str) {

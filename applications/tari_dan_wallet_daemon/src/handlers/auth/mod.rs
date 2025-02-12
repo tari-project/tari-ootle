@@ -1,16 +1,18 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::config::WalletDaemonAuth;
-use crate::handlers::auth::anonym::AnonymAuth;
-use crate::handlers::auth::webauthn::WebAuthnAuth;
-use crate::services::WebauthnService;
+use std::{fmt::Debug, sync::Arc};
+
 use axum::async_trait;
-use std::fmt::Debug;
-use std::sync::Arc;
 use tari_dan_wallet_sdk::storage::WalletStore;
 use tari_wallet_daemon_client::types::AuthLoginRequest;
 use webauthn_rs::Webauthn;
+
+use crate::{
+    config::WalletDaemonAuth,
+    handlers::auth::{anonym::AnonymAuth, webauthn::WebAuthnAuth},
+    services::WebauthnService,
+};
 
 pub mod anonym;
 pub mod webauthn;
@@ -26,14 +28,7 @@ pub fn get_authenticator<TStore: WalletStore + Debug + Send + Sync + 'static>(
     webauthn_service: Arc<WebauthnService<TStore>>,
 ) -> Arc<dyn Authenticator> {
     match auth {
-        WalletDaemonAuth::None => {
-            Arc::new(AnonymAuth::new())
-        }
-        WalletDaemonAuth::WebAuthn => {
-            Arc::new(WebAuthnAuth::new(
-                webauthn,
-                webauthn_service,
-            ))
-        }
+        WalletDaemonAuth::None => Arc::new(AnonymAuth::new()),
+        WalletDaemonAuth::WebAuthn => Arc::new(WebAuthnAuth::new(webauthn, webauthn_service)),
     }
 }

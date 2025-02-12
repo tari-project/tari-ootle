@@ -12,11 +12,10 @@ mod webauthn;
 pub use webauthn::*;
 
 mod session_store;
-pub use session_store::*;
-
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;
 use futures::{future, future::BoxFuture, FutureExt};
+pub use session_store::*;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_wallet_sdk::{network::WalletNetworkInterface, storage::WalletStore, DanWalletSdk};
 use tari_shutdown::ShutdownSignal;

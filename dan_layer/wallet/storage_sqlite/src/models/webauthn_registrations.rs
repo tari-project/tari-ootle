@@ -1,11 +1,11 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::schema::webauthn_registration_passkeys;
-use crate::schema::webauthn_registrations;
 use chrono::NaiveDateTime;
 use tari_dan_wallet_sdk::models::{WebauthnRegistrationModel, WebauthnRegistrationPasskeyModel};
 use webauthn_rs::prelude::Passkey;
+
+use crate::schema::{webauthn_registration_passkeys, webauthn_registrations};
 
 #[derive(Debug, Clone, Queryable, Identifiable, Selectable)]
 #[diesel(table_name = webauthn_registrations)]
@@ -17,7 +17,6 @@ pub struct WebauthnRegistration {
 }
 
 impl From<WebauthnRegistration> for WebauthnRegistrationModel {
-
     fn from(reg: WebauthnRegistration) -> Self {
         Self {
             id: reg.id as u32,
@@ -41,8 +40,6 @@ impl TryFrom<&WebauthnRegistrationPasskey> for WebauthnRegistrationPasskeyModel 
 
     fn try_from(value: &WebauthnRegistrationPasskey) -> Result<Self, Self::Error> {
         let passkey: Passkey = serde_json::from_slice(&value.passkey)?;
-        Ok(WebauthnRegistrationPasskeyModel{
-            passkey,
-        })
+        Ok(WebauthnRegistrationPasskeyModel { passkey })
     }
 }

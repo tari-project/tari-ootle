@@ -25,7 +25,6 @@ pub use non_fungible_tokens::NonFungibleToken;
 
 mod proof;
 mod webauthn_registrations;
-pub use webauthn_registrations::*;
-
 // Currently only used internally
 pub(crate) use proof::Proof;
+pub use webauthn_registrations::*;

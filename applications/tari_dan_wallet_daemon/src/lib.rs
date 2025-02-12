@@ -30,22 +30,9 @@ mod notify;
 mod services;
 mod webrtc;
 
-use crate::config::WalletDaemonConfig;
-use crate::handlers::auth::get_authenticator;
-use crate::services::WebauthnService;
-use crate::{
-    config::ApplicationConfig,
-    handlers::HandlerContext,
-    http_ui::server::run_http_ui_server,
-    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
-    notify::Notify,
-    services::spawn_services,
-};
+use std::{fs, net::SocketAddr, panic, process, sync::Arc, time::Duration};
+
 use log::*;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
-use std::{fs, panic, process};
 use tari_dan_common_types::{optional::Optional, NumPreshards};
 use tari_dan_wallet_sdk::{
     apis::{
@@ -61,6 +48,15 @@ use tari_template_lib::models::Amount;
 use tokio::task;
 use url::Url;
 use webauthn_rs::WebauthnBuilder;
+
+use crate::{
+    config::{ApplicationConfig, WalletDaemonConfig},
+    handlers::{auth::get_authenticator, HandlerContext},
+    http_ui::server::run_http_ui_server,
+    indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
+    notify::Notify,
+    services::{spawn_services, WebauthnService},
+};
 
 const LOG_TARGET: &str = "tari::dan::wallet_daemon";
 
@@ -90,18 +86,15 @@ pub async fn run_tari_dan_wallet_daemon(
     let webauthn_service = Arc::new(WebauthnService::new(wallet_store, Duration::from_secs(60 * 60)));
 
     // webauthn
-    // TODO: get domain from config
     let rp_origin = match config.dan_wallet_daemon.http_ui_address {
-        Some(ui_address) => {
-            Url::parse(format!("http://localhost:{}", ui_address.port()).as_str())?
-        },
+        Some(ui_address) => Url::parse(format!("http://localhost:{}", ui_address.port()).as_str())?,
         None => {
             let ui_address = WalletDaemonConfig::default().http_ui_address.unwrap();
             Url::parse(format!("http://localhost:{}", ui_address.port()).as_str())?
         },
     };
     let webauthn = WebauthnBuilder::new("localhost", &rp_origin)?
-        .rp_name("Tari Ootle") // TODO: get from config
+        .rp_name("Tari Ootle")
         .build()?;
 
     let authenticator = get_authenticator(

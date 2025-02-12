@@ -22,10 +22,6 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use crate::{
-    serialize::{opt_string_or_struct, string_or_struct},
-    ComponentAddressOrName,
-};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tari_common_types::types::PublicKey;
@@ -59,7 +55,17 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
-use webauthn_rs_proto::{PublicKeyCredential, PublicKeyCredentialCreationOptions, RegisterPublicKeyCredential, RequestChallengeResponse};
+use webauthn_rs_proto::{
+    PublicKeyCredential,
+    PublicKeyCredentialCreationOptions,
+    RegisterPublicKeyCredential,
+    RequestChallengeResponse,
+};
+
+use crate::{
+    serialize::{opt_string_or_struct, string_or_struct},
+    ComponentAddressOrName,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
@@ -1284,7 +1290,7 @@ pub struct AuthGetMethodRequest {}
 #[serde(rename_all = "lowercase")]
 pub enum AuthMethod {
     None,
-    Webauthn
+    Webauthn,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1303,8 +1309,7 @@ pub struct AuthGetMethodResponse {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
-pub struct WebauthnAlreadyRegisteredRequest {
-}
+pub struct WebauthnAlreadyRegisteredRequest {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
@@ -1342,12 +1347,7 @@ pub struct WebauthnStartRegisterResponse {
 impl WebauthnStartRegisterResponse {
     pub fn new(session_id: String, public_key: PublicKeyCredentialCreationOptions) -> Result<Self, serde_json::Error> {
         let public_key = serde_json::to_string(&public_key)?;
-        Ok(
-            Self {
-                session_id,
-                public_key,
-            }
-        )
+        Ok(Self { session_id, public_key })
     }
 }
 
@@ -1412,12 +1412,7 @@ pub struct WebauthnStartAuthResponse {
 impl WebauthnStartAuthResponse {
     pub fn new(session_id: String, challenge: RequestChallengeResponse) -> Result<Self, serde_json::Error> {
         let challenge = serde_json::to_string(&challenge)?;
-        Ok(
-            Self {
-                session_id,
-                challenge,
-            }
-        )
+        Ok(Self { session_id, challenge })
     }
 }
 
@@ -1439,5 +1434,3 @@ impl WebauthnFinishAuthRequest {
         serde_json::from_str(&self.credential)
     }
 }
-
-

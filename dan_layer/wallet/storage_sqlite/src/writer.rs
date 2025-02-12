@@ -9,15 +9,8 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    diesel::ExpressionMethods,
-    models::{self},
-    reader::ReadTransaction,
-    serialization::serialize_json,
-};
 use chrono::NaiveDateTime;
-use diesel::dsl::count;
-use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
+use diesel::{dsl::count, OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
@@ -42,6 +35,13 @@ use tari_template_lib::models::{Amount, EncryptedData};
 use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;
 use webauthn_rs::prelude::Passkey;
+
+use crate::{
+    diesel::ExpressionMethods,
+    models::{self},
+    reader::ReadTransaction,
+    serialization::serialize_json,
+};
 
 const LOG_TARGET: &str = "auth::tari::dan::wallet_sdk::storage_sqlite::writer";
 
@@ -933,9 +933,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError> {
         use crate::schema::{webauthn_registration_passkeys, webauthn_registrations};
         diesel::insert_into(webauthn_registrations::table)
-            .values(
-                webauthn_registrations::username.eq(username)
-            ).execute(self.connection())
+            .values(webauthn_registrations::username.eq(username))
+            .execute(self.connection())
             .map_err(|e| WalletStorageError::general("webauthn_reg_insert", e))?;
 
         let registration_id: i32 =
@@ -943,12 +942,10 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 .get_result(self.connection())
                 .unwrap();
 
-        let passkey_json = serde_json::to_string(&passkey).map_err(|e| {
-            WalletStorageError::DecodingError {
-                operation: "webauthn_reg_insert",
-                item: "passkey",
-                details: e.to_string(),
-            }
+        let passkey_json = serde_json::to_string(&passkey).map_err(|e| WalletStorageError::DecodingError {
+            operation: "webauthn_reg_insert",
+            item: "passkey",
+            details: e.to_string(),
         })?;
 
         diesel::insert_into(webauthn_registration_passkeys::table)

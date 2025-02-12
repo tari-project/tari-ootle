@@ -25,6 +25,7 @@ import {
   AuthGetAllJwtResponse,
   AuthGetMethodRequest,
   AuthGetMethodResponse,
+  AuthLoginRequest,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -82,9 +83,11 @@ import {
   TransactionWaitResultResponse,
   Type,
   WebauthnAlreadyRegisteredResponse,
+  WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
   WebauthnFinishRegisterResponse,
   WebauthnStartAuthRequest,
+  WebauthnStartAuthResponse,
   WebauthnStartRegisterRequest,
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
@@ -212,9 +215,10 @@ export class WalletDaemonClient {
     return this.__invokeRpc("auth.get_all_jwt", params);
   }
 
-  public async authRequest(permissions: string[]): Promise<string> {
+  public async authRequest(permissions: string[], webauthnFinishAuthRequest?: WebauthnFinishAuthRequest): Promise<string> {
     // TODO: Exchange some secret credentials for a JWT
-    let resp = await this.__invokeRpc("auth.request", { permissions });
+    let request: AuthLoginRequest = {permissions: permissions, duration: null, webauthn_finish_auth_request: webauthnFinishAuthRequest};
+    let resp = await this.__invokeRpc("auth.request", request);
     return resp.auth_token;
   }
 
@@ -366,7 +370,7 @@ export class WalletDaemonClient {
     return this.__invokeRpc("webauthn.reg_finish", request);
   }
 
-  public webauthnAuthStart(request: WebauthnStartAuthRequest): Promise<WebauthnAlreadyRegisteredResponse> {
+  public webauthnAuthStart(request: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> {
     return this.__invokeRpc("webauthn.auth_start", request);
   }
 

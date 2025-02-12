@@ -203,7 +203,7 @@ pub trait WalletStoreReader {
         &mut self,
         nft_id: NonFungibleId,
     ) -> Result<ResourceAddress, WalletStorageError>;
-    
+
     // Webauthn registration
     fn webauthn_reg_count(&mut self) -> Result<u64, WalletStorageError>;
     fn webauthn_reg_fetch_passkeys(&mut self, username: String) -> Result<Vec<Passkey>, WalletStorageError>;

@@ -27,7 +27,13 @@ use serde_json::json;
 use tari_common::initialize_logging;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_app_utilities::configuration::load_configuration;
-use tari_dan_wallet_daemon::{cli::{Cli, Subcommand}, config::ApplicationConfig, init_wallet_store, initialize_wallet_sdk, run_tari_dan_wallet_daemon};
+use tari_dan_wallet_daemon::{
+    cli::{Cli, Subcommand},
+    config::ApplicationConfig,
+    init_wallet_store,
+    initialize_wallet_sdk,
+    run_tari_dan_wallet_daemon,
+};
 use tari_dan_wallet_sdk::apis::key_manager;
 use tari_shutdown::Shutdown;
 

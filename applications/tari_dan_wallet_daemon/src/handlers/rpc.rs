@@ -2,10 +2,23 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_wallet_sdk::apis::jwt::JrpcPermission;
-use tari_wallet_daemon_client::types::{AuthGetAllJwtRequest, AuthGetAllJwtResponse, AuthGetMethodRequest, AuthGetMethodResponse, AuthLoginAcceptRequest, AuthLoginAcceptResponse, AuthLoginDenyRequest, AuthLoginDenyResponse, AuthLoginRequest, AuthLoginResponse, AuthMethod, AuthRevokeTokenRequest, AuthRevokeTokenResponse};
+use tari_wallet_daemon_client::types::{
+    AuthGetAllJwtRequest,
+    AuthGetAllJwtResponse,
+    AuthGetMethodRequest,
+    AuthGetMethodResponse,
+    AuthLoginAcceptRequest,
+    AuthLoginAcceptResponse,
+    AuthLoginDenyRequest,
+    AuthLoginDenyResponse,
+    AuthLoginRequest,
+    AuthLoginResponse,
+    AuthMethod,
+    AuthRevokeTokenRequest,
+    AuthRevokeTokenResponse,
+};
 
-use crate::config::WalletDaemonAuth;
-use crate::{handlers::HandlerContext, services::AuthLoginRequestEvent};
+use crate::{config::WalletDaemonAuth, handlers::HandlerContext, services::AuthLoginRequestEvent};
 
 pub async fn handle_discover(
     _context: &HandlerContext,
@@ -82,6 +95,6 @@ pub async fn handle_get_auth_method(
         method: match context.config().authentication {
             WalletDaemonAuth::None => AuthMethod::None,
             WalletDaemonAuth::WebAuthn => AuthMethod::Webauthn,
-        }
+        },
     })
 }

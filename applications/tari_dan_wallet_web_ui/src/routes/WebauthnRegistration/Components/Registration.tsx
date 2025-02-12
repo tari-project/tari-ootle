@@ -3,16 +3,15 @@
 
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import {Form} from "react-router-dom";
+import {Form, useNavigate} from "react-router-dom";
 import TextField from "@mui/material/TextField/TextField";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import {useTheme} from "@mui/material/styles";
 import {FormEvent, useState} from "react";
-import {webauthnStartRegistration} from "../../../utils/json_rpc";
+import {webauthnFinishRegistration, webauthnStartRegistration} from "../../../utils/json_rpc";
 import {Buffer} from "buffer";
 import Loading from "../../../Components/Loading";
-import useAuthStore from "../../../store/authStore";
 
 const createCredential = async (rpOptions: {rpId: string, rpName: string}, username: string, challenge: Buffer) => {
     const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
@@ -55,7 +54,7 @@ function WebauthnRegistration() {
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const {authToken, setAuthToken} = useAuthStore();
+    const navigate = useNavigate();
 
     const onUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setRegistrationFormState({
@@ -87,8 +86,6 @@ function WebauthnRegistration() {
         const challenge = Buffer.from(JSON.parse(startRegisterResponse.public_key).challenge, 'base64');
         const regSessionId = startRegisterResponse.session_id;
 
-        console.log("Session ID:", regSessionId, "Challenge:", challenge);
-
         // get credential
         const credential = await createCredential(
             {
@@ -107,22 +104,20 @@ function WebauthnRegistration() {
             return;
         }
 
-        console.log(credential);
+        const finishRegisterResponse = await webauthnFinishRegistration({credential: JSON.stringify(credential), session_id: regSessionId})
+            .catch(reason => {
+                setLoading(false);
+                setError(reason);
+                console.error(reason);
+        });
 
-        setAuthToken("something");
+        if (!finishRegisterResponse) {
+            return;
+        }
 
-        // const finishRegisterResponse = await webauthnFinishRegistration({credential: JSON.stringify(credential), session_id: regSessionId})
-        //     .catch(reason => {
-        //         setLoading(false);
-        //         setError(reason);
-        //         console.error(reason);
-        // });
-        //
-        // if (!finishRegisterResponse) {
-        //     return;
-        // }
-        //
-        // console.log(finishRegisterResponse);
+        if (finishRegisterResponse.success) {
+            navigate("/auth");
+        }
     };
 
     const errorMessage = (error) ? (

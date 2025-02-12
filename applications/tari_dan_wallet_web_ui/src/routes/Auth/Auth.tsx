@@ -4,11 +4,18 @@
 import {useAuthMethod} from "../../api/hooks/useAuth";
 import {useEffect, useState} from "react";
 import Loading from "../../Components/Loading";
-import {Navigate} from "react-router-dom";
+import {Navigate, useNavigate} from "react-router-dom";
+import useAuthStore from "../../store/authStore";
 
 function Auth() {
     const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
     const [ currAuthMethod, setCurrAuthMethod ] = useState('');
+    const {authToken} = useAuthStore();
+    const navigate = useNavigate();
+
+    if (authToken) {
+        navigate("/");
+    }
 
     useEffect(() => {
         if (!authMethodsIsError && authMethod) {

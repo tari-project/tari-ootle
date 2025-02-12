@@ -6,10 +6,18 @@ import WebauthnLogin from "./Components/Login";
 import {useWebauthnAlreadyRegistered} from "../../api/hooks/useWebauthn";
 import Loading from "../../Components/Loading";
 import WebauthnRegistration from "./Components/Registration";
+import useAuthStore from "../../store/authStore";
+import {useNavigate} from "react-router-dom";
 
 function Webauthn() {
     const [registered, setRegistered] = useState(false);
     const { data: alreadyRegisteredResponse, isLoading: alreadyRegisteredIsLoading, isError: alreadyRegisteredIsError, error: alreadyRegisteredError } = useWebauthnAlreadyRegistered();
+    const {authToken} = useAuthStore();
+    const navigate = useNavigate();
+
+    if (authToken) {
+        navigate("/");
+    }
 
     useEffect(() => {
         if (!alreadyRegisteredIsError && alreadyRegisteredResponse) {

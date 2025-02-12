@@ -1,6 +1,6 @@
 import {useQuery} from "@tanstack/react-query";
-import {webauthnAlreadyRegistered} from "../../utils/json_rpc";
 import {ApiError} from "../helpers/types";
+import {webauthnAlreadyRegistered} from "../../utils/json_rpc";
 
 export const useWebauthnAlreadyRegistered = () => {
     return useQuery({

@@ -42,15 +42,15 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import IconButton from "@mui/material/IconButton";
-import { useState } from "react";
-import { IoCloseCircleOutline } from "react-icons/io5";
+import {useState} from "react";
+import {IoCloseCircleOutline} from "react-icons/io5";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import { AccordionIconButton, CodeBlock, DataTableCell } from "../../../Components/StyledComponents";
-import { useAuthRevokeToken, useGetAllTokens } from "../../../api/hooks/useTokens";
-import { shortenString } from "../../../utils/helpers";
-import type { Claims, JrpcPermission, JrpcPermissions } from "@tari-project/typescript-bindings";
-import { jrpcPermissionToString } from "@tari-project/typescript-bindings";
+import {AccordionIconButton, CodeBlock, DataTableCell} from "../../../Components/StyledComponents";
+import {useAuthRevokeToken, useGetAllTokens} from "../../../api/hooks/useTokens";
+import {shortenString} from "../../../utils/helpers";
+import type {Claims, JrpcPermission, JrpcPermissions} from "@tari-project/typescript-bindings";
+import {jrpcPermissionToString} from "@tari-project/typescript-bindings";
 
 function AlertDialog({ fn, row }: any) {
   const [open, setOpen] = useState(false);

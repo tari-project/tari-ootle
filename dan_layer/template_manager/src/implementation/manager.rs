@@ -142,6 +142,10 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         status: Option<TemplateStatus>,
     ) -> Result<bool, TemplateManagerError> {
         if self.builtin_templates.contains_key(address) {
+            if status.is_some_and(|s| !s.is_active()) {
+                return Ok(false);
+            }
+
             return Ok(true);
         }
         let mut tx = self.global_db.create_transaction()?;

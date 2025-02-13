@@ -41,7 +41,7 @@ import { Core } from '@walletconnect/core'
 import { Web3Wallet } from '@walletconnect/web3wallet'
 import { accountsCreateFreeTestCoins, accountsGetBalances, accountsGetDefault, confidentialViewVaultBalance, keysCreate, substatesGet, substatesList, templatesGet, transactionsGetResult, transactionsSubmit } from "../../utils/json_rpc";
 
-const projectId: string | null = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || null;
+const projectId: string = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || "78f3485d08b9640a087cbcea000e1f8b";
 
 const ConnectorDialog = () => {
   const [page, setPage] = useState(1);
@@ -63,9 +63,6 @@ const ConnectorDialog = () => {
   const optionalPermissions: TariPermission[] = [];
 
   async function createWallet(): Promise<any| null> {
-    if (!projectId)
-      return null;
-
     const core = new Core({ projectId });
     const wallet = await Web3Wallet.init({
       core: core,

@@ -25,10 +25,11 @@ impl ProcessDefinition for Indexer {
         let jrpc_port = context.get_free_port("jrpc").await?;
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
+        let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
 
-        let json_rpc_public_address = format!("{listen_ip}:{jrpc_port}");
-        let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
-        let web_ui_address = format!("{listen_ip}:{web_ui_port}");
+        let json_rpc_public_address = format!("{public_ip}:{jrpc_port}");
+        let json_rpc_listener_address = format!("{listen_ip}:{jrpc_port}");
+        let web_ui_listener_address = format!("{listen_ip}:{web_ui_port}");
 
         let base_node = context
             .minotari_nodes()
@@ -49,8 +50,8 @@ impl ProcessDefinition for Indexer {
             .arg("--network")
             .arg(context.network().to_string())
             .arg(format!("-pindexer.base_node_grpc_url={base_node_grpc_url}"))
-            .arg(format!("-pindexer.json_rpc_address={json_rpc_address}"))
-            .arg(format!("-pindexer.http_ui_address={web_ui_address}"))
+            .arg(format!("-pindexer.json_rpc_address={json_rpc_listener_address}"))
+            .arg(format!("-pindexer.web_ui_address={web_ui_listener_address}"))
             .arg(format!("-pindexer.ui_connect_address={json_rpc_public_address}"))
             .arg("-pindexer.base_layer_scanning_interval=1");
 

@@ -48,7 +48,7 @@ import type {
 } from "@tari-project/typescript-bindings";
 
 const DEFAULT_WALLET_ADDRESS = new URL(
-  import.meta.env.VITE_DAEMON_JRPC_ADDRESS ||
+  import.meta.env.VITE_INDEXER_JRPC_ADDRESS ||
   import.meta.env.VITE_JSON_RPC_ADDRESS ||
   import.meta.env.VITE_JRPC_ADDRESS ||
   "http://localhost:9000",

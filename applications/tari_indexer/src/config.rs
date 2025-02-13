@@ -83,7 +83,7 @@ pub struct IndexerConfig {
     /// GraphQL port of the indexer application
     pub graphql_address: Option<SocketAddr>,
     /// The address of the HTTP UI
-    pub http_ui_address: Option<SocketAddr>,
+    pub web_ui_address: Option<SocketAddr>,
     /// The jrpc address where the UI should connect (it can be the same as the json_rpc_address, but doesn't have to
     /// be), if this will be None, then the listen_addr will be used.
     pub ui_connect_address: Option<String>,
@@ -132,7 +132,7 @@ impl Default for IndexerConfig {
             p2p: P2pConfig::default(),
             json_rpc_address: Some("127.0.0.1:18300".parse().unwrap()),
             graphql_address: Some("127.0.0.1:18301".parse().unwrap()),
-            http_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
+            web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
             ui_connect_address: None,
             dan_layer_scanning_internal: Duration::from_secs(10),
             templates: TemplateConfig::default(),

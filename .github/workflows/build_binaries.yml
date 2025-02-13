@@ -510,6 +510,15 @@ jobs:
           name: "${{ env.TS_FILENAME }}_windows_installer"
           path: "${{ github.workspace }}/buildtools/Output/*"
 
+      - name: Audit tree and feedback for binaries
+        # if: ${{ ( ! matrix.builds.cross ) }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          cd "${{ env.MTS_SOURCE }}"
+          echo "Audit binaries ..."
+          cargo audit bin *tari*
+
       - name: Archive and Checksum Binaries
         shell: bash
         run: |
@@ -703,15 +712,6 @@ jobs:
         with:
           name: ${{ env.TS_FILENAME }}-macos-universal-${{ env.TARI_VERSION }}.pkg
           path: "${{ env.distDirPKG }}/${{ env.TS_FILENAME }}-macos-universal-${{ env.TARI_VERSION }}*.pkg*"
-
-      - name: Audit tree and feedback for binaries
-        # if: ${{ ( ! matrix.builds.cross ) }}
-        continue-on-error: true
-        shell: bash
-        run: |
-          cd "${{ env.MTS_SOURCE }}"
-          echo "Audit binaries ..."
-          cargo audit bin *tari*
 
       - name: Archive and Checksum macOS universal Binaries
         shell: bash

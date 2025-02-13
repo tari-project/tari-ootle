@@ -83,7 +83,7 @@ impl Default for WalletDaemonConfig {
     fn default() -> Self {
         Self {
             override_from: None,
-            network: Default::default(),
+            network: Network::Igor,
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
             ui_connect_address: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),

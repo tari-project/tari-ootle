@@ -6,11 +6,13 @@ use std::{str::FromStr, sync::Arc};
 use anyhow::Context;
 use axum::{
     handler::HandlerWithoutStateExt,
+    headers::{authorization::Basic, Authorization},
     http::{HeaderValue, Response, Uri},
     response::IntoResponse,
     routing::post,
     Extension,
     Router,
+    TypedHeader,
 };
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
@@ -79,7 +81,23 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
 
 static WEB_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/webui/dist");
 
-async fn handler(uri: Uri) -> impl IntoResponse {
+async fn handler(
+    uri: Uri,
+    Extension(context): Extension<Arc<HandlerContext>>,
+    auth: Option<TypedHeader<Authorization<Basic>>>,
+) -> impl IntoResponse {
+    if let Some(ref basic_auth) = context.config().webserver.base_auth {
+        // NOTE: this does not have to be secure (timing attacks etc), this is to prevent easy access to the Web UI
+        if auth.map_or(true, |a| {
+            a.username() != basic_auth.username || a.password() != basic_auth.password
+        }) {
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header("WWW-Authenticate", "Basic realm=\"tari-swarm\"")
+                .body("Not authorized".to_string())
+                .unwrap();
+        }
+    }
     let path = uri.path();
 
     // If path starts with /, strip it.
@@ -101,13 +119,14 @@ async fn handler(uri: Uri) -> impl IntoResponse {
     log::warn!(target: LOG_TARGET, "Not found {:?}", path);
     Response::builder()
         .status(StatusCode::NOT_FOUND)
-        .body("".to_string())
+        .body(String::new())
         .unwrap()
 }
 
 async fn json_rpc_handler(Extension(context): Extension<Arc<HandlerContext>>, value: JsonRpcExtractor) -> JrpcResult {
     info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
     debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
+
     match value.method.as_str() {
         "ping" => Ok(JsonRpcResponse::success(value.get_answer_id(), "pong")),
         "vns" => call_handler(context, value, rpc::validator_nodes::list).await,

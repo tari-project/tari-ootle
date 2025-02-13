@@ -106,9 +106,6 @@ where TSpec: EpochManagerSpec
             // no need to update the epoch
             return Ok(());
         }
-        // When epoch is changing we store the last block of current epoch for the EpochEvents
-        // TODO: this is the hash of the first block of the current epoch (in the base layer case)
-        self.update_current_epoch_hash(epoch_hash)?;
 
         if self.is_initial_epoch_sync_complete {
             info!(target: LOG_TARGET, "🌟 A new epoch {} is upon us", epoch);
@@ -116,9 +113,9 @@ where TSpec: EpochManagerSpec
             debug!(target: LOG_TARGET, "🌟 A new epoch {} is upon us", epoch);
         }
 
+        // In the base layer case, the epoch_hash is the first block of the epoch
         // persist the epoch data including the validator node set
-        // TODO: remove validator node mr from epoch db
-        self.insert_current_epoch(epoch, FixedHash::zero())?;
+        self.insert_current_epoch(epoch, epoch_hash)?;
         self.assign_validators_for_epoch(epoch)?;
         Ok(())
     }
@@ -196,33 +193,25 @@ where TSpec: EpochManagerSpec
         Ok(())
     }
 
-    fn insert_current_epoch(&mut self, epoch: Epoch, validator_node_mr: FixedHash) -> Result<(), EpochManagerError> {
+    fn insert_current_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
         let epoch_height = epoch.0;
         let db_epoch = DbEpoch {
             epoch: epoch_height,
-            validator_node_mr: validator_node_mr.as_slice().to_vec(),
+            // TODO: remove validator node mr from epoch db
+            validator_node_mr: FixedHash::default().as_slice().to_vec(),
         };
 
         let mut tx = self.global_db.create_transaction()?;
 
         self.global_db.epochs(&mut tx).insert_epoch(db_epoch)?;
-        self.global_db
-            .metadata(&mut tx)
-            .set_metadata(MetadataKey::EpochManagerCurrentEpoch.as_key_bytes(), &epoch)?;
+        let mut metadata = self.global_db.metadata(&mut tx);
+        metadata.set_metadata(MetadataKey::EpochManagerCurrentEpoch.as_key_bytes(), &epoch)?;
+        metadata.set_metadata(MetadataKey::EpochManagerLastEpochHash.as_key_bytes(), &epoch_hash)?;
 
         tx.commit()?;
         self.current_epoch = epoch;
         self.has_epoch_changed = true;
-        Ok(())
-    }
-
-    fn update_current_epoch_hash(&mut self, block_hash: FixedHash) -> Result<(), EpochManagerError> {
-        let mut tx = self.global_db.create_transaction()?;
-        self.global_db
-            .metadata(&mut tx)
-            .set_metadata(MetadataKey::EpochManagerLastEpochHash.as_key_bytes(), &block_hash)?;
-        tx.commit()?;
-        self.current_epoch_hash = block_hash;
+        self.current_epoch_hash = epoch_hash;
         Ok(())
     }
 

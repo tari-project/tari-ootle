@@ -9643,6 +9643,7 @@ dependencies = [
  "tari_validator_node_rpc",
  "thiserror 1.0.68",
  "tokio",
+ "toml 0.8.19",
  "url",
 ]
 
@@ -9964,6 +9965,7 @@ dependencies = [
  "tari_dan_storage",
  "tari_dan_storage_sqlite",
  "tari_engine_types",
+ "tari_shutdown",
  "tari_sidechain",
  "thiserror 1.0.68",
  "tokio",
@@ -9972,7 +9974,7 @@ dependencies = [
 
 [[package]]
 name = "tari_epoch_oracles"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "log",
@@ -9985,7 +9987,6 @@ dependencies = [
  "tari_dan_storage_sqlite",
  "tari_engine_types",
  "tari_epoch_manager",
- "tari_shutdown",
  "tari_template_lib",
  "tari_utilities",
  "thiserror 1.0.68",

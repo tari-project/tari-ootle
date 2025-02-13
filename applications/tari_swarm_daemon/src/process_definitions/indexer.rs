@@ -49,11 +49,13 @@ impl ProcessDefinition for Indexer {
             .arg(context.base_path())
             .arg("--network")
             .arg(context.network().to_string())
-            .arg(format!("-pindexer.base_node_grpc_url={base_node_grpc_url}"))
+            .arg(format!(
+                "-pepoch_oracle.base_layer.base_node_grpc_url={base_node_grpc_url}"
+            ))
             .arg(format!("-pindexer.json_rpc_address={json_rpc_listener_address}"))
             .arg(format!("-pindexer.web_ui_address={web_ui_listener_address}"))
             .arg(format!("-pindexer.ui_connect_address={json_rpc_public_address}"))
-            .arg("-pindexer.base_layer_scanning_interval=1");
+            .arg("-pepoch_oracle.base_layer.scanning_interval=1");
 
         Ok(command)
     }

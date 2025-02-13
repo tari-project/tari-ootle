@@ -33,7 +33,7 @@ impl TestEpochManager {
             inner: Default::default(),
             our_validator_node: None,
             tx_epoch_events,
-            current_epoch: Epoch(0),
+            current_epoch: Epoch(1),
         }
     }
 
@@ -41,6 +41,7 @@ impl TestEpochManager {
         self.current_epoch = current_epoch;
         {
             let mut lock = self.inner.lock().await;
+            log::error!("Current epoch {} -> {}", lock.current_epoch, current_epoch);
             lock.current_epoch = current_epoch;
         }
 
@@ -364,7 +365,7 @@ pub struct TestEpochManagerState {
 impl Default for TestEpochManagerState {
     fn default() -> Self {
         Self {
-            current_epoch: Epoch(0),
+            current_epoch: Epoch(1),
             last_epoch_hash: FixedHash::default(),
             validator_nodes: HashMap::new(),
             committees: HashMap::new(),

@@ -215,17 +215,15 @@ pub async fn spawn_services(
                 global_db.clone(),
                 base_node_client,
                 consensus_constants.base_layer_confirmations,
-                config.epoch_oracle.base_layer.base_layer_scanning_interval,
+                config.epoch_oracle.base_layer.scanning_interval,
                 config.validator_node.validator_node_sidechain_id.clone(),
                 config.validator_node.burnt_utxo_sidechain_id.clone(),
                 config.validator_node.template_sidechain_id.clone(),
-                shutdown.clone(),
             ))
         },
         EpochOracleType::Configured => EpochOracle::Configured(ConfiguredEpochOracle::new(
-            config.epoch_oracle.configured.clone(),
+            config.epoch_oracle.configured.load().await?,
             global_db.clone(),
-            shutdown.clone(),
         )),
     };
 
@@ -241,6 +239,7 @@ pub async fn spawn_services(
             StateUtxoStore::new(state_store.clone()),
             template_queue_sender,
             FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path()),
+            shutdown.clone(),
         );
 
     // Create registration file

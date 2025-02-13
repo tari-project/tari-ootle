@@ -12,7 +12,6 @@ use log::*;
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{displayable::Displayable, Epoch};
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
-use tari_shutdown::ShutdownSignal;
 use tokio::{time, time::Sleep};
 
 use super::config::Config;
@@ -31,11 +30,10 @@ pub struct ConfiguredEpochOracle<TStore> {
     queued_validators: HashMap<Epoch, Vec<Validator>>,
     is_initialized: bool,
     is_done: bool,
-    shutdown: ShutdownSignal,
 }
 
 impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore> {
-    pub fn new(config: Config, store: TStore, shutdown: ShutdownSignal) -> Self {
+    pub fn new(config: Config, store: TStore) -> Self {
         Self {
             config,
             store,
@@ -44,7 +42,6 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore> {
             queued_validators: HashMap::new(),
             sleep: None,
             is_done: false,
-            shutdown,
         }
     }
 
@@ -139,7 +136,7 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore> {
             // Emit these one epoch before a VN becomes active
             self.pending_events
                 .extend(vns.iter().map(|vn| EpochEvent::NewValidatorRegistered {
-                    epoch,
+                    epoch: next_epoch,
                     claim_public_key: vn.claim_key.clone(),
                     validator_node_public_key: vn.public_key.clone(),
                 }))
@@ -191,11 +188,6 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore> {
         }
 
         loop {
-            if self.shutdown.is_triggered() {
-                self.is_done = true;
-                return Poll::Ready(None);
-            }
-
             if let Some(event) = self.pending_events.pop_front() {
                 return Poll::Ready(Some(event));
             }

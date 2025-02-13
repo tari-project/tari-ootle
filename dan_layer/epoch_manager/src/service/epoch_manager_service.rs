@@ -25,6 +25,7 @@ use tari_common_types::types::PublicKey;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_shutdown::ShutdownSignal;
 use tokio::{
     sync::{broadcast, mpsc, oneshot},
     task::JoinHandle,
@@ -38,7 +39,7 @@ use crate::{
     EpochManagerEvent,
 };
 
-const LOG_TARGET: &str = "tari::validator_node::epoch_manager";
+const LOG_TARGET: &str = "tari::dan::epoch_manager";
 
 pub struct EpochManagerService<TSpec: EpochManagerSpec> {
     rx_request: mpsc::Receiver<EpochManagerRequest<TSpec::Addr>>,
@@ -46,6 +47,7 @@ pub struct EpochManagerService<TSpec: EpochManagerSpec> {
     epoch_events: TSpec::EpochEventOracle,
     template_downloader: TSpec::TemplateDownloader,
     utxo_store: TSpec::UtxoStore,
+    shutdown: ShutdownSignal,
 }
 
 impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
@@ -59,6 +61,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         template_downloader: TSpec::TemplateDownloader,
         layer_one_transaction_submitter: TSpec::LayerOneSubmitter,
         node_public_key: PublicKey,
+        shutdown: ShutdownSignal,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {
             Self {
@@ -73,6 +76,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 epoch_events,
                 template_downloader,
                 utxo_store,
+                shutdown,
             }
             .run()
             .await?;
@@ -90,12 +94,12 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 maybe_event = self.epoch_events.next_epoch_event() => {
                     match maybe_event {
                         Some(event) => {
-                            if let Err(err) = self.handle_event(event).await {
+                            if let Err(err) = self.handle_epoch_event(event).await {
                                 error!(target: LOG_TARGET, "🚨 Epoch event error: {err}");
                             }
                         }
                         None => {
-                            dbg!("Shutting down epoch manager");
+                            warn!(target: LOG_TARGET, "💤 Shutting down epoch manager (no further epoch events)");
                             break;
                         }
                     }
@@ -110,12 +114,17 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                         }
                     }
                 },
+
+                _ = self.shutdown.wait() => {
+                    info!(target: LOG_TARGET, "💤 Shutting down epoch manager (shutdown signal)");
+                    break;
+                }
             }
         }
         Ok(())
     }
 
-    async fn handle_event(&mut self, event: EpochEvent) -> anyhow::Result<()> {
+    async fn handle_epoch_event(&mut self, event: EpochEvent) -> anyhow::Result<()> {
         match event {
             EpochEvent::Error(err) => return Err(err),
             EpochEvent::ActiveValidatorNodeSetChanged { epoch, node_changes } => {
@@ -160,9 +169,17 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     }
                 }
             },
-            EpochEvent::NewValidatorRegistered { .. } => {
+            EpochEvent::NewValidatorRegistered {
+                epoch,
+                validator_node_public_key,
+                ..
+            } => {
                 // TODO: This occurs when a registration is detected, before the VN is activated and could be a good
                 // time to start state sync
+                info!(
+                    target: LOG_TARGET,
+                    "🖥️ New validator registered in {epoch} with public key {validator_node_public_key}",
+                );
             },
             EpochEvent::NewCodeTemplateDownload {
                 epoch,
@@ -194,7 +211,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                 self.utxo_store.add_unclaimed_utxo(epoch, substate)?;
             },
             EpochEvent::DoneForNow { epoch } => {
-                debug!(target: LOG_TARGET, "Epoch event scanner done for now at {epoch}");
+                debug!(target: LOG_TARGET, "Epoch event scanner done for now at {epoch}. Current epoch: {}", self.inner.current_epoch());
                 self.inner.on_scanning_complete().await?;
             },
         }

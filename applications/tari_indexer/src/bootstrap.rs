@@ -125,17 +125,15 @@ pub async fn spawn_services(
                 global_db.clone(),
                 base_node_client,
                 consensus_constants.base_layer_confirmations,
-                config.epoch_oracle.base_layer.base_layer_scanning_interval,
+                config.epoch_oracle.base_layer.scanning_interval,
                 config.indexer.sidechain_id.clone(),
                 config.indexer.burnt_utxo_sidechain_id.clone(),
                 config.indexer.sidechain_id.clone(),
-                shutdown.clone(),
             ))
         },
         EpochOracleType::Configured => EpochOracle::Configured(ConfiguredEpochOracle::new(
-            config.epoch_oracle.configured.clone(),
+            config.epoch_oracle.configured.load().await?,
             global_db.clone(),
-            shutdown.clone(),
         )),
     };
 
@@ -158,6 +156,7 @@ pub async fn spawn_services(
         Noop,
         template_queue_sender,
         Noop,
+        shutdown.clone(),
     );
 
     // Template manager

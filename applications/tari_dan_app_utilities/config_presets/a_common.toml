@@ -43,13 +43,16 @@ oracle = "BaseLayer"
 #base_node_grpc_url = "http://127.0.0.1:18142"
 
 # How often do we want to scan the base layer for changes in seconds. (default = 10)
-#base_layer_scanning_interval = 10
+#scanning_interval = 10
 
 [epoch_oracle.configured]
-epoch_interval = 720 # 12 minutes
-initial_epoch = 1
-#[[[epoch_oracle.configured.validators]]
-#public_key = "7056240dedac879422d9d319704eddd699b1b5b4ab82a2b49324a1dae591dd78"
-#claim_key = "7056240dedac879422d9d319704eddd699b1b5b4ab82a2b49324a1dae591dd78"
-#registration_epoch = 5
-#shard_group = { start = 1, end_inclusive = 256 }
+# Absolute or relative (to current working dir) path to the oracle config file.
+# Example toml:
+#  epoch_time = 720 # 12 minutes
+#  initial_epoch = 1
+#  [[[epoch_oracle.configured.validators]]
+#  public_key = "7056240dedac879422d9d319704eddd699b1b5b4ab82a2b49324a1dae591dd78"
+#  claim_key = "7056240dedac879422d9d319704eddd699b1b5b4ab82a2b49324a1dae591dd78"
+#  registration_epoch = 5
+#  shard_group = { start = 1, end_inclusive = 256 }
+#config_file = "/path/to/oracle/config.toml"

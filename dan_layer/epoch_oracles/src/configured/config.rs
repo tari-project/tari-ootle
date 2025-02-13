@@ -16,6 +16,7 @@ pub struct Config {
     #[serde(with = "serde_with::duration::optional_seconds")]
     pub epoch_time: Option<Duration>,
     pub initial_epoch: Epoch,
+    #[serde(default)]
     pub validators: Vec<Validator>,
 }
 

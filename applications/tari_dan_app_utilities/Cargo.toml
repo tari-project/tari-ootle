@@ -36,6 +36,7 @@ rand = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread"] }
-url = { workspace = true }
+tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread", "fs"] }
+url = { workspace = true, features = ["serde"] }
+toml = { workspace = true }
 config = { workspace = true }

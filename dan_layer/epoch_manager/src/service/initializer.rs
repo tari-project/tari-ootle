@@ -23,6 +23,7 @@
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_shutdown::ShutdownSignal;
 use tokio::{
     sync::{broadcast, mpsc},
     task::JoinHandle,
@@ -41,6 +42,7 @@ pub fn spawn_service<TSpec: EpochManagerSpec>(
     utxo_store: TSpec::UtxoStore,
     template_downloader: TSpec::TemplateDownloader,
     layer_one_submitter: TSpec::LayerOneSubmitter,
+    shutdown_signal: ShutdownSignal,
 ) -> (EpochManagerHandle<TSpec::Addr>, JoinHandle<anyhow::Result<()>>) {
     let (tx_request, rx_request) = mpsc::channel(10);
     let (events, _) = broadcast::channel(100);
@@ -55,6 +57,7 @@ pub fn spawn_service<TSpec: EpochManagerSpec>(
         template_downloader,
         layer_one_submitter,
         node_public_key,
+        shutdown_signal,
     );
     (epoch_manager, handle)
 }

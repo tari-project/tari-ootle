@@ -132,7 +132,7 @@ pub async fn run_validator_node(
         &metrics_registry,
     )
     .await?;
-    let info = services.networking.get_local_peer_info().await.unwrap();
+    let info = services.networking.get_local_peer_info().await?;
     info!(target: LOG_TARGET, "🚀 Node started: {}", info);
 
     // Run the JSON-RPC API

@@ -24,7 +24,6 @@ use tari_core::{
 use tari_dan_common_types::{displayable::Displayable, optional::Optional, Epoch, SubstateAddress};
 use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
-use tari_shutdown::ShutdownSignal;
 use tari_template_lib::models::EncryptedData;
 use tokio::time;
 use url::Url;
@@ -37,12 +36,12 @@ type TaskOutput<TStore> = (Result<(), BaseLayerOracleError>, BaseLayerOracleInne
 
 pub struct BaseLayerOracle<TStore> {
     inner: Option<BaseLayerOracleInner<TStore>>,
-    base_layer_scanning_interval: Duration,
+    scanning_interval: Duration,
     is_initialized: bool,
+    is_done: bool,
     sleep_or_shutdown: bool,
     task: Option<Pin<Box<dyn Future<Output = TaskOutput<TStore>> + Send>>>,
     sleep_task: Option<Pin<Box<time::Sleep>>>,
-    shutdown: ShutdownSignal,
 }
 
 struct BaseLayerOracleInner<TStore> {
@@ -67,11 +66,10 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
         store: TStore,
         base_node_client: GrpcBaseNodeClient,
         height_lag: u64,
-        base_layer_scanning_interval: Duration,
+        scanning_interval: Duration,
         validator_node_sidechain_id: Option<PublicKey>,
         burnt_utxo_sidechain_id: Option<PublicKey>,
         template_sidechain_id: Option<PublicKey>,
-        shutdown: ShutdownSignal,
     ) -> Self {
         Self {
             inner: Some(BaseLayerOracleInner {
@@ -90,12 +88,12 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
                 template_sidechain_id,
                 pending_events: VecDeque::new(),
             }),
-            base_layer_scanning_interval,
+            scanning_interval,
             is_initialized: false,
+            is_done: false,
             sleep_or_shutdown: false,
             task: None,
             sleep_task: None,
-            shutdown,
         }
     }
 }
@@ -534,6 +532,10 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
 
 impl<TStore: EpochOracleStore + Send + 'static> BaseLayerOracle<TStore> {
     fn poll_next_event(&mut self, cx: &mut Context) -> Poll<Option<EpochEvent>> {
+        if self.is_done {
+            return Poll::Ready(None);
+        }
+
         if !self.is_initialized {
             match self
                 .inner
@@ -546,6 +548,7 @@ impl<TStore: EpochOracleStore + Send + 'static> BaseLayerOracle<TStore> {
                     self.is_initialized = true;
                 },
                 Err(err) => {
+                    self.is_done = true;
                     return Poll::Ready(Some(EpochEvent::error(err)));
                 },
             }
@@ -558,10 +561,6 @@ impl<TStore: EpochOracleStore + Send + 'static> BaseLayerOracle<TStore> {
                     return Poll::Ready(Some(event));
                 }
                 inner_mut.shrink_events();
-            }
-
-            if self.shutdown.is_triggered() {
-                return Poll::Ready(None);
             }
 
             if let Some(mut task) = self.task.take() {
@@ -585,7 +584,7 @@ impl<TStore: EpochOracleStore + Send + 'static> BaseLayerOracle<TStore> {
 
             // On the first call of this method, sleep_or_shutdown is false and scanning will immediately begin
             if self.sleep_or_shutdown && self.sleep_task.is_none() {
-                self.sleep_task = Some(Box::pin(time::sleep(self.base_layer_scanning_interval)));
+                self.sleep_task = Some(Box::pin(time::sleep(self.scanning_interval)));
             }
 
             if let Some(sleep) = self.sleep_task.as_mut() {

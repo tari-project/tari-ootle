@@ -4,7 +4,7 @@
 @claim_fees
 Feature: Claim Fees
 
-  @serial @fixed @doit
+  @serial @fixed
   Scenario: Claim validator fees
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE

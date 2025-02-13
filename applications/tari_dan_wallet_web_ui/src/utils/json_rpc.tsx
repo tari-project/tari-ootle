@@ -133,6 +133,7 @@ function getAuthToken() {
   return (authToken && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) ? authToken : null;
 }
 
+// TODO: fix bug that changes the URL for client to the default one
 async function client() {
   const authToken = getAuthToken();
 

@@ -40,8 +40,8 @@ pub struct Cli {
     /// Bind address for JSON-rpc server
     #[clap(long, alias = "json-rpc-address")]
     pub json_rpc_listener_address: Option<SocketAddr>,
-    #[clap(long, env = "TARI_VN_HTTP_UI_LISTENER_ADDRESS", alias = "http-ui-address")]
-    pub http_ui_listener_address: Option<SocketAddr>,
+    #[clap(long, env = "TARI_VN_WEB_UI_LISTENER_ADDRESS", alias = "http-ui-address")]
+    pub web_ui_listener_address: Option<SocketAddr>,
     #[clap(long, env = "TARI_VN_JSON_RPC_PUBLIC_ADDRESS")]
     pub json_rpc_public_address: Option<String>,
     #[clap(long, alias = "node-grpc", short = 'g', env = "TARI_VN_MINOTARI_NODE_GRPC_URL")]
@@ -80,10 +80,10 @@ impl ConfigOverrideProvider for Cli {
                 ui_connect_address.to_string(),
             ));
         }
-        if let Some(ref http_ui_address) = self.http_ui_listener_address {
+        if let Some(ref web_ui_address) = self.web_ui_listener_address {
             overrides.push((
-                "validator_node.http_ui_listener_address".to_string(),
-                http_ui_address.to_string(),
+                "validator_node.web_ui_listener_address".to_string(),
+                web_ui_address.to_string(),
             ));
         }
         if !self.peer_seeds.is_empty() {

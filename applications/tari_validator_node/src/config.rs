@@ -101,7 +101,7 @@ pub struct ValidatorNodeConfig {
     /// be), if this will be None, then the listen_addr will be used.
     pub json_rpc_public_address: Option<String>,
     /// The address of the HTTP UI
-    pub http_ui_listener_address: Option<SocketAddr>,
+    pub web_ui_listener_address: Option<SocketAddr>,
     /// Template config
     pub templates: TemplateConfig,
     /// Fee claim public key
@@ -151,7 +151,7 @@ impl Default for ValidatorNodeConfig {
             grpc_address: Some("/ip4/127.0.0.1/tcp/18144".parse().unwrap()),
             json_rpc_listener_address: Some("127.0.0.1:18200".parse().unwrap()),
             json_rpc_public_address: None,
-            http_ui_listener_address: Some("127.0.0.1:5001".parse().unwrap()),
+            web_ui_listener_address: Some("127.0.0.1:5001".parse().unwrap()),
             templates: TemplateConfig::default(),
             // Burn your fees
             fee_claim_public_key: RistrettoPublicKey::default(),

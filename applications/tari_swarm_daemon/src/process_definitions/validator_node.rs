@@ -63,7 +63,7 @@ impl ProcessDefinition for ValidatorNode {
             .arg(format!("--json-rpc-public-address={json_rpc_public_address}"))
             .arg(format!("-pvalidator_node.base_node_grpc_url={base_node_grpc_url}"))
             .arg(format!("-pvalidator_node.json_rpc_listener_address={json_rpc_address}"))
-            .arg(format!("-pvalidator_node.http_ui_listener_address={web_ui_address}"))
+            .arg(format!("-pvalidator_node.web_ui_listener_address={web_ui_address}"))
             .arg("-pvalidator_node.base_layer_scanning_interval=1");
 
         Ok(command)

@@ -153,7 +153,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         );
         let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
         // Run the http ui
-        if let Some(address) = config.indexer.http_ui_address {
+        if let Some(address) = config.indexer.web_ui_address {
             let mut public_jrpc_address = config
                 .indexer
                 .ui_connect_address

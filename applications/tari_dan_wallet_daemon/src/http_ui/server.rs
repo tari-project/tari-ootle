@@ -33,7 +33,7 @@ use log::{error, info};
 use reqwest::{header, StatusCode};
 use url::Url;
 
-const LOG_TARGET: &str = "tari::dan::wallet_daemon::http_ui::server";
+const LOG_TARGET: &str = "tari::dan::wallet_daemon::web_ui::server";
 
 pub async fn run_http_ui_server(address: SocketAddr, json_rpc_address: Url) -> Result<(), anyhow::Error> {
     let json_rpc_address = Arc::new(json_rpc_address);

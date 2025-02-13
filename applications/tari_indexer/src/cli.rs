@@ -56,6 +56,7 @@ pub struct Cli {
     pub reachability: Option<ReachabilityMode>,
     #[clap(long)]
     pub disable_mdns: bool,
+    /// Public address of the Web UI
     #[clap(long, env = "TARI_INDEXER_UI_CONNECT_ADDRESS")]
     pub ui_connect_address: Option<String>,
 }

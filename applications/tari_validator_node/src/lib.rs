@@ -148,7 +148,7 @@ pub async fn run_validator_node(
             metrics_registry,
         )?;
         // Run the http ui
-        if let Some(address) = config.validator_node.http_ui_listener_address {
+        if let Some(address) = config.validator_node.web_ui_listener_address {
             task::spawn(run_http_ui_server(
                 address,
                 config

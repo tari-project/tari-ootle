@@ -67,6 +67,13 @@ loggers:
       - stdout
     additive: false
 
+  tari::wallet_daemon:
+    level: debug
+    appenders:
+      - dan_layer
+      - stdout
+    additive: false
+
   tari::dan:
     level: debug
     appenders:

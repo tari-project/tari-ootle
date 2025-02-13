@@ -8,6 +8,7 @@ use clap::Parser;
 use tari_common::configuration::Network;
 
 use crate::config::{Config, InstanceType};
+use crate::process_definitions::{WalletDaemonAuth, WALLET_DAEMON_AUTH_SETTINGS_KEY};
 
 #[derive(Debug, Clone, Parser)]
 pub struct Cli {
@@ -73,6 +74,8 @@ pub struct Overrides {
     pub skip_registration: bool,
     #[clap(long)]
     pub disable_template_auto_register: bool,
+    #[clap(long, value_enum, default_value_t=WalletDaemonAuth::None)]
+    pub wallet_daemon_auth: WalletDaemonAuth,
 }
 
 impl Overrides {
@@ -110,6 +113,16 @@ impl Overrides {
         if self.disable_template_auto_register {
             config.auto_register_previous_templates = false;
         }
+        
+        // add wallet daemon auth method
+        config.processes.instances.iter_mut().for_each(|instance| {
+           if instance.instance_type.is_wallet_daemon() {
+               instance.settings.insert(
+                   WALLET_DAEMON_AUTH_SETTINGS_KEY.to_string(), 
+                   self.wallet_daemon_auth.to_string(),
+               );
+           } 
+        });
 
         Ok(())
     }

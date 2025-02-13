@@ -7,10 +7,12 @@ import Loading from "../../Components/Loading";
 import {Navigate, useNavigate} from "react-router-dom";
 import useAuthStore from "../../store/authStore";
 
+export const AUTH_TOKEN_FOR_NONE_AUTH: string = "auth_none";
+
 function Auth() {
     const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
     const [ currAuthMethod, setCurrAuthMethod ] = useState('');
-    const {authToken} = useAuthStore();
+    const {authToken, setAuthToken} = useAuthStore();
     const navigate = useNavigate();
 
     if (authToken) {
@@ -30,9 +32,13 @@ function Auth() {
     const auth = (() => {
             switch(currAuthMethod) {
                 case 'none': {
+                    setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
                     return <Navigate replace to="/" />;
                 }
                 case 'webauthn': {
+                    if (authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
+                        setAuthToken("");
+                    }
                     return <Navigate replace to="/auth/webauthn" />;
                 }
                 default: {

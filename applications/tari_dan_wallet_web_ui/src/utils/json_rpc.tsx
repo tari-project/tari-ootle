@@ -97,6 +97,7 @@ import {
   WebauthnStartRegisterResponse
 } from "@tari-project/typescript-bindings";
 import useAuthStore from "../store/authStore";
+import {AUTH_TOKEN_FOR_NONE_AUTH} from "../routes/Auth/Auth";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -127,8 +128,13 @@ export async function getClientAddress(): Promise<URL> {
   return DEFAULT_WALLET_ADDRESS;
 }
 
-async function client() {
+function getAuthToken() {
   const authToken = useAuthStore.getState().authToken;
+  return (authToken && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) ? authToken : null;
+}
+
+async function client() {
+  const authToken = getAuthToken();
 
   if (!authToken) {
     pendingClientInstance = null;
@@ -136,10 +142,6 @@ async function client() {
   }
 
   if (pendingClientInstance) {
-    let pendingClient = await pendingClientInstance;
-    if (authToken) {
-      pendingClient.setToken(authToken);
-    }
     return pendingClientInstance;
   }
 
@@ -156,6 +158,7 @@ async function client() {
   const getAddress = !outerAddress ? getClientAddress() : Promise.resolve(DEFAULT_WALLET_ADDRESS);
 
   pendingClientInstance = getAddress.then(async (addr) => {
+    console.log("URL:", addr);
     const client = WalletDaemonClient.usingFetchTransport(addr.toString());
     if (authToken) {
       client.setToken(authToken);

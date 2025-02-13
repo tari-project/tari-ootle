@@ -8,6 +8,7 @@ use tari_common::configuration::Network;
 use tari_shutdown::Shutdown;
 use tokio::fs;
 
+use crate::process_definitions::WALLET_DAEMON_AUTH_SETTINGS_KEY;
 use crate::{
     cli::{Cli, Commands, InitArgs},
     config::{CompileConfig, Config, ExecutableConfig, InstanceConfig, InstanceType, ProcessesConfig, WebserverConfig},
@@ -162,7 +163,8 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
             .with_num_instances(1),
         InstanceConfig::new(InstanceType::TariIndexer).with_name("Indexer"),
         // InstanceConfig::new(InstanceType::TariSignalingServer).with_name("Signaling server"),
-        InstanceConfig::new(InstanceType::TariWalletDaemon).with_name("Wallet Daemon"),
+        InstanceConfig::new(InstanceType::TariWalletDaemon)
+            .with_name("Wallet Daemon"),
     ];
 
     let base_dir = cli

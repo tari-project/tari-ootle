@@ -32,9 +32,11 @@ import Transactions from "./routes/Transactions/TransactionsLayout";
 import TransactionDetails from "./routes/Transactions/TransactionDetails";
 import AssetVault from "./routes/AssetVault/AssetVault";
 import SettingsPage from "./routes/Settings/Settings";
-import Auth from "./routes/Auth/Auth";
+import Auth, {AUTH_TOKEN_FOR_NONE_AUTH} from "./routes/Auth/Auth";
 import Webauthn from "./routes/WebauthnRegistration/Webauthn";
 import useAuthStore from "./store/authStore";
+import {useEffect} from "react";
+import {useAuthMethod} from "./api/hooks/useAuth";
 
 export const breadcrumbRoutes = [
   {
@@ -102,8 +104,25 @@ const GuardedRoute = ({ component: Component, redirect = "/auth", auth = false, 
 )
 
 function App() {
-  const {authToken} = useAuthStore();
+  const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
+  const {authToken, setAuthToken} = useAuthStore();
   let auth = !!authToken;
+
+  useEffect(() => {
+    if (!authMethodsIsError && authMethod) {
+      if (authMethod.method !== 'none' && authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
+        setAuthToken("");
+      }
+
+      if (authMethod.method === 'none') {
+        useAuthStore.getState().setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
+      }
+    }
+
+    if (authMethodsError) {
+      console.error(authMethodsError);
+    }
+  }, [authMethod, authMethodsIsError]);
 
   return (
     <div>

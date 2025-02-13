@@ -1,18 +1,34 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt::Display, path::PathBuf};
-
 use anyhow::anyhow;
 use async_trait::async_trait;
+use clap::ValueEnum;
+use std::str::FromStr;
+use std::{fmt::Display, path::PathBuf};
 use tokio::process::Command;
 
 use crate::process_definitions::{ProcessContext, ProcessDefinition};
 
-#[derive(Debug)]
+pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
+pub const WALLET_DAEMON_AUTH_DEFAULT: WalletDaemonAuth = WalletDaemonAuth::None;
+
+#[derive(Clone, Debug, ValueEnum)]
 pub enum WalletDaemonAuth {
     None,
     Webauthn,
+}
+
+impl FromStr for WalletDaemonAuth {
+    type Err = anyhow::Error;
+
+    fn from_str(auth_str: &str) -> Result<Self, Self::Err> {
+        match auth_str {
+            "none" => Ok(WalletDaemonAuth::None),
+            "webauthn" => Ok(WalletDaemonAuth::Webauthn),
+            _ => Err(anyhow!("Invalid auth option!")),
+        }
+    }
 }
 
 impl Default for WalletDaemonAuth {
@@ -32,13 +48,11 @@ impl Display for WalletDaemonAuth {
 }
 
 #[derive(Debug, Default)]
-pub struct WalletDaemon {
-    authentication: WalletDaemonAuth,
-}
+pub struct WalletDaemon;
 
 impl WalletDaemon {
-    pub fn new(authentication: WalletDaemonAuth) -> Self {
-        Self { authentication }
+    pub fn new() -> Self {
+        Self {  }
     }
 }
 
@@ -68,6 +82,10 @@ impl ProcessDefinition for WalletDaemon {
                 .ok_or_else(|| anyhow!("Indexer jrpc port not found"))?
         );
 
+        let default_auth_str = WALLET_DAEMON_AUTH_DEFAULT.to_string();
+        let auth = context.get_setting(WALLET_DAEMON_AUTH_SETTINGS_KEY)
+            .unwrap_or(default_auth_str.as_str());
+
         command
             .envs(context.environment())
             .arg("-b")
@@ -80,7 +98,7 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("-pdan_wallet_daemon.http_ui_address={web_ui_address}"))
             .arg(format!(
                 "-pdan_wallet_daemon.authentication={}",
-                self.authentication.to_string()
+                auth
             ));
 
         // A signaling server is not required for startup of the wallet daemon,

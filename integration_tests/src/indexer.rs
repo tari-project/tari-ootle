@@ -32,7 +32,7 @@ use tari_common::{
     exit_codes::ExitError,
 };
 use tari_crypto::tari_utilities::{hex::Hex, message_format::MessageFormat};
-use tari_dan_app_utilities::p2p_config::PeerSeedsConfig;
+use tari_dan_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer::{
     config::{ApplicationConfig, EventFilterConfig, IndexerConfig},
@@ -166,6 +166,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         let mut config = ApplicationConfig {
             common: CommonConfig::default(),
             peer_seeds: PeerSeedsConfig::default(),
+            epoch_oracle: EpochOracleConfig::default(),
             network: Network::LocalNet,
             indexer: IndexerConfig::default(),
         };
@@ -176,7 +177,8 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         config.indexer.data_dir = base_dir.to_path_buf();
         config.indexer.identity_file = base_dir.join("indexer_id.json");
         config.indexer.tor_identity_file = base_dir.join("indexer_tor_id.json");
-        config.indexer.base_node_grpc_url = Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
+        config.epoch_oracle.base_layer.base_node_grpc_url =
+            Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
         config.indexer.dan_layer_scanning_internal = Duration::from_secs(5);
         config.indexer.p2p.listener_port = port;
 

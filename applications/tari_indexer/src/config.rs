@@ -35,15 +35,18 @@ use tari_common::{
     SubConfigPath,
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_app_utilities::p2p_config::{P2pConfig, PeerSeedsConfig};
+use tari_dan_app_utilities::{
+    epoch_oracle_config::EpochOracleConfig,
+    p2p_config::{P2pConfig, PeerSeedsConfig},
+};
 use tari_template_manager::implementation::TemplateConfig;
-use url::Url;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
     pub common: CommonConfig,
     pub indexer: IndexerConfig,
     pub peer_seeds: PeerSeedsConfig,
+    pub epoch_oracle: EpochOracleConfig,
     pub network: Network,
 }
 
@@ -53,6 +56,7 @@ impl ApplicationConfig {
             common: CommonConfig::load_from(cfg)?,
             indexer: IndexerConfig::load_from(cfg)?,
             peer_seeds: PeerSeedsConfig::load_from(cfg)?,
+            epoch_oracle: EpochOracleConfig::load_from(cfg)?,
             network: cfg.get("network")?,
         };
         config.indexer.set_base_path(config.common.base_path());
@@ -69,11 +73,6 @@ pub struct IndexerConfig {
     pub identity_file: PathBuf,
     /// A path to the file that stores the tor hidden service private key, if using the tor transport
     pub tor_identity_file: PathBuf,
-    /// The Tari base node's GRPC URL (e.g. http://localhost:18142)
-    pub base_node_grpc_url: Option<Url>,
-    /// How often do we want to scan the base layer for changes
-    #[serde(with = "serializers::seconds")]
-    pub base_layer_scanning_interval: Duration,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
     /// The p2p configuration settings
@@ -126,8 +125,6 @@ impl Default for IndexerConfig {
             override_from: None,
             identity_file: PathBuf::from("indexer_id.json"),
             tor_identity_file: PathBuf::from("indexer_tor_id.json"),
-            base_node_grpc_url: None,
-            base_layer_scanning_interval: Duration::from_secs(10),
             data_dir: PathBuf::from("data/indexer"),
             p2p: P2pConfig::default(),
             json_rpc_address: Some("127.0.0.1:18300".parse().unwrap()),

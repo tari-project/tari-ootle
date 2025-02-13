@@ -60,7 +60,7 @@ const LOG_TARGET: &str = "tari::dan::wallet_daemon";
 
 const DEFAULT_FEE: Amount = Amount::new(1500);
 // TODO: must match the global network value. All testnets currently have 256 pre-shards.
-const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 
 pub async fn run_tari_dan_wallet_daemon(
     config: ApplicationConfig,

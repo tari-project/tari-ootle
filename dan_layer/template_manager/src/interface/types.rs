@@ -159,11 +159,7 @@ pub type Reply<T> = oneshot::Sender<Result<T, TemplateManagerError>>;
 #[derive(Debug)]
 pub enum TemplateManagerRequest {
     AddTemplate {
-        author_public_key: PublicKey,
-        template_address: tari_engine_types::TemplateAddress,
-        template: TemplateExecutable,
-        template_name: Option<String>,
-        epoch: Epoch,
+        request: AddTemplateRequest,
         reply: Reply<()>,
     },
     GetTemplate {
@@ -191,4 +187,13 @@ pub enum TemplateManagerRequest {
         template_changes: Vec<TemplateChange>,
         reply: Reply<()>,
     },
+}
+
+#[derive(Debug)]
+pub struct AddTemplateRequest {
+    pub author_public_key: PublicKey,
+    pub template_address: tari_engine_types::TemplateAddress,
+    pub template: TemplateExecutable,
+    pub template_name: Option<String>,
+    pub epoch: Epoch,
 }

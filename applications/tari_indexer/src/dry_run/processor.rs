@@ -31,7 +31,7 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_indexer_lib::{
     substate_cache::SubstateCache,
     substate_scanner::SubstateScanner,

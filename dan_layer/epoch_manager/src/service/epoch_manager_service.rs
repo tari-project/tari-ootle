@@ -20,77 +20,87 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use log::{error, info, trace};
-use tari_base_node_client::grpc::GrpcBaseNodeClient;
+use log::*;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{optional::IsNotFoundError, DerivableFromPublicKey, NodeAddressable};
+use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_shutdown::ShutdownSignal;
 use tokio::{
-    sync::{broadcast, mpsc::Receiver, oneshot},
+    sync::{broadcast, mpsc, oneshot},
     task::JoinHandle,
 };
 
 use crate::{
-    base_layer::{
-        base_layer_epoch_manager::BaseLayerEpochManager,
-        config::EpochManagerConfig,
-        types::EpochManagerRequest,
-    },
+    epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange},
     error::EpochManagerError,
-    traits::LayerOneTransactionSubmitter,
+    service::{config::EpochManagerConfig, epoch_manager::EpochManager, types::EpochManagerRequest},
+    traits::{EpochManagerSpec, EpochUtxoStore, TemplateDownloader},
     EpochManagerEvent,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::epoch_manager";
 
-pub struct EpochManagerService<TAddr, TGlobalStore, TBaseNodeClient, TLayerOneSubmitter> {
-    rx_request: Receiver<EpochManagerRequest<TAddr>>,
-    inner: BaseLayerEpochManager<TGlobalStore, TBaseNodeClient, TLayerOneSubmitter>,
+pub struct EpochManagerService<TSpec: EpochManagerSpec> {
+    rx_request: mpsc::Receiver<EpochManagerRequest<TSpec::Addr>>,
+    inner: EpochManager<TSpec>,
+    epoch_events: TSpec::EpochEventOracle,
+    template_downloader: TSpec::TemplateDownloader,
+    utxo_store: TSpec::UtxoStore,
 }
 
-impl<TAddr, TLayerOneSubmitter>
-    EpochManagerService<TAddr, SqliteGlobalDbAdapter<TAddr>, GrpcBaseNodeClient, TLayerOneSubmitter>
-where
-    TAddr: NodeAddressable + DerivableFromPublicKey + 'static,
-    TLayerOneSubmitter: LayerOneTransactionSubmitter + Send + Sync + 'static,
-{
+impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
     pub fn spawn(
         config: EpochManagerConfig,
         events: broadcast::Sender<EpochManagerEvent>,
-        rx_request: Receiver<EpochManagerRequest<TAddr>>,
-        shutdown: ShutdownSignal,
-        global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
-        base_node_client: GrpcBaseNodeClient,
-        layer_one_transaction_submitter: TLayerOneSubmitter,
+        rx_request: mpsc::Receiver<EpochManagerRequest<TSpec::Addr>>,
+        global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
+        epoch_events: TSpec::EpochEventOracle,
+        utxo_store: TSpec::UtxoStore,
+        template_downloader: TSpec::TemplateDownloader,
+        layer_one_transaction_submitter: TSpec::LayerOneSubmitter,
         node_public_key: PublicKey,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {
-            EpochManagerService {
+            Self {
                 rx_request,
-                inner: BaseLayerEpochManager::new(
+                inner: EpochManager::new(
                     config,
                     global_db,
-                    base_node_client,
                     layer_one_transaction_submitter,
                     events,
                     node_public_key,
                 ),
+                epoch_events,
+                template_downloader,
+                utxo_store,
             }
-            .run(shutdown)
+            .run()
             .await?;
             Ok(())
         })
     }
 
-    pub async fn run(&mut self, mut shutdown: ShutdownSignal) -> Result<(), EpochManagerError> {
+    pub async fn run(&mut self) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Starting epoch manager");
         // first, load initial state
         self.inner.load_initial_state().await?;
 
         loop {
             tokio::select! {
+                maybe_event = self.epoch_events.next_epoch_event() => {
+                    match maybe_event {
+                        Some(event) => {
+                            if let Err(err) = self.handle_event(event).await {
+                                error!(target: LOG_TARGET, "🚨 Epoch event error: {err}");
+                            }
+                        }
+                        None => {
+                            dbg!("Shutting down epoch manager");
+                            break;
+                        }
+                    }
+                },
+
                 req = self.rx_request.recv() => {
                     match req {
                         Some(req) => self.handle_request(req).await,
@@ -100,29 +110,106 @@ where
                         }
                     }
                 },
-                _ = shutdown.wait() => {
-                    dbg!("Shutting down epoch manager");
-                    break;
-                }
             }
         }
         Ok(())
     }
 
+    async fn handle_event(&mut self, event: EpochEvent) -> anyhow::Result<()> {
+        match event {
+            EpochEvent::Error(err) => return Err(err),
+            EpochEvent::ActiveValidatorNodeSetChanged { epoch, node_changes } => {
+                info!(
+                    target: LOG_TARGET,
+                    "⛓️ {} validator node change(s) for epoch {}", node_changes.len(), epoch,
+                );
+
+                for node_change in node_changes {
+                    match node_change {
+                        ValidatorNodeChange::Add {
+                            claim_public_key,
+                            validator_node_public_key,
+                            activation_epoch,
+                            minimum_value_promise,
+                            shard_key,
+                        } => {
+                            info!(
+                                target: LOG_TARGET,
+                                "⛓️ Validator node {} activated at {}",
+                                validator_node_public_key,
+                                activation_epoch,
+                            );
+
+                            self.inner.add_validator_node_registration(
+                                activation_epoch,
+                                validator_node_public_key,
+                                claim_public_key,
+                                shard_key,
+                                minimum_value_promise,
+                            )?;
+                        },
+                        ValidatorNodeChange::Remove { public_key } => {
+                            info!(
+                                target: LOG_TARGET,
+                                "⛓️ Deactivating validator node registration for {}",
+                                public_key,
+                            );
+
+                            self.inner.deactivate_validator_node(public_key, epoch).await?;
+                        },
+                    }
+                }
+            },
+            EpochEvent::NewValidatorRegistered { .. } => {
+                // TODO: This occurs when a registration is detected, before the VN is activated and could be a good
+                // time to start state sync
+            },
+            EpochEvent::NewCodeTemplateDownload {
+                epoch,
+                name,
+                address,
+                author_public_key,
+                url,
+                binary_hash,
+            } => {
+                info!(
+                    target: LOG_TARGET,
+                    "🌠 new template found with address {address} at {epoch}",
+                );
+                self.template_downloader
+                    .enqueue_download(epoch, name, address, author_public_key, url, binary_hash)
+                    .await?
+            },
+            EpochEvent::NewEvictionProof { epoch, eviction_proof } => {
+                trace!(target: LOG_TARGET, "New Eviction proof for {epoch}: {eviction_proof:?}");
+            },
+            EpochEvent::EpochChanged { epoch, epoch_hash } => {
+                info!(
+                    target: LOG_TARGET,
+                    "🌟 new epoch {epoch} with hash {epoch_hash}",
+                );
+                self.inner.activate_epoch(epoch, epoch_hash).await?;
+            },
+            EpochEvent::NewConfidentialOutput { epoch, substate } => {
+                self.utxo_store.add_unclaimed_utxo(epoch, substate)?;
+            },
+            EpochEvent::DoneForNow { epoch } => {
+                debug!(target: LOG_TARGET, "Epoch event scanner done for now at {epoch}");
+                self.inner.on_scanning_complete().await?;
+            },
+        }
+
+        Ok(())
+    }
+
     #[allow(clippy::too_many_lines)]
-    async fn handle_request(&mut self, req: EpochManagerRequest<TAddr>) {
+    async fn handle_request(&mut self, req: EpochManagerRequest<TSpec::Addr>) {
         trace!(target: LOG_TARGET, "Received request: {:?}", req);
         let context = &format!("{:?}", req);
         match req {
             EpochManagerRequest::CurrentEpoch { reply } => handle(reply, Ok(self.inner.current_epoch()), context),
-            EpochManagerRequest::CurrentBlockInfo { reply } => {
-                handle(reply, Ok(self.inner.current_block_info()), context)
-            },
-            EpochManagerRequest::GetLastBlockOfTheEpoch { reply } => {
-                handle(reply, Ok(self.inner.last_block_of_current_epoch()), context)
-            },
-            EpochManagerRequest::IsLastBlockOfTheEpoch { block_height, reply } => {
-                handle(reply, self.inner.is_last_block_of_epoch(block_height).await, context)
+            EpochManagerRequest::CurrentEpochHash { reply } => {
+                handle(reply, Ok(self.inner.current_epoch_hash()), context)
             },
             EpochManagerRequest::GetValidatorNode { epoch, addr, reply } => handle(
                 reply,
@@ -150,36 +237,12 @@ where
                     }),
                 context,
             ),
-            EpochManagerRequest::GetManyValidatorNodes { query, reply } => {
-                handle(reply, self.inner.get_many_validator_nodes(query), context);
-            },
-            EpochManagerRequest::AddBlockHash {
-                block_height,
-                block_hash,
+            EpochManagerRequest::ActivateEpoch {
+                epoch,
+                epoch_hash,
                 reply,
             } => {
-                handle(
-                    reply,
-                    self.inner.add_base_layer_block_info(block_height, block_hash),
-                    context,
-                );
-            },
-            EpochManagerRequest::UpdateEpoch {
-                block_height,
-                block_hash,
-                reply,
-            } => {
-                handle(reply, self.inner.update_epoch(block_height, block_hash).await, context);
-            },
-            EpochManagerRequest::LastRegistrationEpoch { reply } => {
-                handle(reply, self.inner.last_registration_epoch(), context)
-            },
-
-            EpochManagerRequest::UpdateLastRegistrationEpoch { epoch, reply } => {
-                handle(reply, self.inner.update_last_registration_epoch(epoch), context);
-            },
-            EpochManagerRequest::IsEpochValid { epoch, reply } => {
-                handle(reply, Ok(self.inner.is_epoch_valid(epoch)), context)
+                handle(reply, self.inner.activate_epoch(epoch, epoch_hash).await, context);
             },
             EpochManagerRequest::GetCommittees { epoch, reply } => {
                 handle(reply, self.inner.get_committees(epoch), context);
@@ -205,14 +268,20 @@ where
             },
             EpochManagerRequest::AddValidatorNodeRegistration {
                 activation_epoch,
-                registration,
-                value: _value,
+                validator_public_key,
+                claim_public_key,
+                shard_key,
+                value_of_registration,
                 reply,
             } => handle(
                 reply,
-                self.inner
-                    .add_validator_node_registration(activation_epoch, registration)
-                    .await,
+                self.inner.add_validator_node_registration(
+                    activation_epoch,
+                    validator_public_key,
+                    claim_public_key,
+                    shard_key,
+                    value_of_registration,
+                ),
                 context,
             ),
             EpochManagerRequest::DeactivateValidatorNode {
@@ -226,18 +295,13 @@ where
                     .await,
                 context,
             ),
-            // TODO: This should be rather be a state machine event
             EpochManagerRequest::NotifyScanningComplete { reply } => {
                 handle(reply, self.inner.on_scanning_complete().await, context)
             },
             EpochManagerRequest::WaitForInitialScanningToComplete { reply } => {
                 self.inner.add_notify_on_scanning_complete(reply);
             },
-            EpochManagerRequest::GetBaseLayerConsensusConstants { reply } => handle(
-                reply,
-                self.inner.get_base_layer_consensus_constants().await.cloned(),
-                context,
-            ),
+
             EpochManagerRequest::GetOurValidatorNode { epoch, reply } => {
                 handle(reply, self.inner.get_our_validator_node(epoch), context)
             },
@@ -281,9 +345,6 @@ where
             },
             EpochManagerRequest::SetFeeClaimPublicKey { public_key, reply } => {
                 handle(reply, self.inner.set_fee_claim_public_key(public_key), context)
-            },
-            EpochManagerRequest::GetBaseLayerBlockHeight { hash, reply } => {
-                handle(reply, self.inner.get_base_layer_block_height(hash), context)
             },
             EpochManagerRequest::AddIntentToEvictValidator { proof, reply } => {
                 handle(reply, self.inner.add_intent_to_evict_validator(*proof).await, context)

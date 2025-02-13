@@ -531,7 +531,7 @@ where
                 info,
                 connection_id,
             }) => {
-                info!(target: LOG_TARGET, "👋 Received identify from {} with {} addresses (id={connection_id})", peer_id, info.listen_addrs.len());
+                debug!(target: LOG_TARGET, "👋 Received identify from {} with {} addresses (id={connection_id})", peer_id, info.listen_addrs.len());
                 self.on_peer_identified(connection_id, peer_id, info)?;
             },
             Identify(event) => {

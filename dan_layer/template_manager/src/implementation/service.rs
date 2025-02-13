@@ -27,7 +27,7 @@ use tari_dan_engine::{function_definitions::FlowFunctionDefinition, wasm::WasmMo
 use tari_dan_p2p::proto::rpc::TemplateType;
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_engine_types::calculate_template_binary_hash;
-use tari_epoch_manager::base_layer::EpochManagerHandle;
+use tari_epoch_manager::EpochManagerReader;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::{models::TemplateAddress, Hash};
 use tari_validator_node_client::types::{ArgDef, FunctionDef, TemplateAbi};
@@ -44,6 +44,7 @@ use super::{
 use crate::{
     implementation::sync_worker::{SyncWorkerEvent, TemplateSyncRequest, TemplateSyncWorker},
     interface::{
+        AddTemplateRequest,
         TemplateChange,
         TemplateExecutable,
         TemplateManagerError,
@@ -54,20 +55,26 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::dan::template_manager";
 
-pub struct TemplateManagerService<TAddr> {
+pub struct TemplateManagerService<TAddr, TEpochManager> {
     rx_request: mpsc::Receiver<TemplateManagerRequest>,
     manager: TemplateManager<TAddr>,
     completed_downloads: mpsc::Receiver<DownloadResult>,
     download_queue: mpsc::Sender<DownloadRequest>,
-    sync_worker: TemplateSyncWorker<TAddr>,
+    download_requests: mpsc::UnboundedReceiver<AddTemplateRequest>,
+    sync_worker: TemplateSyncWorker<TEpochManager>,
 }
 
-impl<TAddr: NodeAddressable + ToPeerId + 'static> TemplateManagerService<TAddr> {
+impl<TEpochManager> TemplateManagerService<TEpochManager::Addr, TEpochManager>
+where
+    TEpochManager: EpochManagerReader + Clone + Send + Sync + 'static,
+    TEpochManager::Addr: NodeAddressable + ToPeerId + 'static,
+{
     pub fn spawn(
         rx_request: mpsc::Receiver<TemplateManagerRequest>,
-        manager: TemplateManager<TAddr>,
-        epoch_manager: EpochManagerHandle<TAddr>,
+        manager: TemplateManager<TEpochManager::Addr>,
+        epoch_manager: TEpochManager,
         download_queue: mpsc::Sender<DownloadRequest>,
+        download_requests: mpsc::UnboundedReceiver<AddTemplateRequest>,
         completed_downloads: mpsc::Receiver<DownloadResult>,
         client_factory: TariValidatorNodeRpcClientFactory,
         shutdown: ShutdownSignal,
@@ -77,6 +84,7 @@ impl<TAddr: NodeAddressable + ToPeerId + 'static> TemplateManagerService<TAddr> 
                 rx_request,
                 manager,
                 download_queue,
+                download_requests,
                 completed_downloads,
                 sync_worker: TemplateSyncWorker::new(epoch_manager, client_factory),
             }
@@ -91,6 +99,11 @@ impl<TAddr: NodeAddressable + ToPeerId + 'static> TemplateManagerService<TAddr> 
         loop {
             tokio::select! {
                 Some(req) = self.rx_request.recv() => self.handle_request(req).await,
+                Some(req) = self.download_requests.recv() => {
+                     if let Err(err) = self.handle_add_template(req.author_public_key, req.template_address, req.template, req.template_name, req.epoch) .await {
+                        error!(target: LOG_TARGET, "Error handling download request: {}", err);
+                    }
+                },
                 Some(download) = self.completed_downloads.recv() => {
                     if let Err(err) = self.handle_completed_download(download) {
                         error!(target: LOG_TARGET, "Error handling completed download: {}", err);
@@ -204,11 +217,14 @@ impl<TAddr: NodeAddressable + ToPeerId + 'static> TemplateManagerService<TAddr> 
         use TemplateManagerRequest::*;
         match req {
             AddTemplate {
-                author_public_key,
-                template_address,
-                template,
-                template_name,
-                epoch,
+                request:
+                    AddTemplateRequest {
+                        author_public_key,
+                        template_address,
+                        template,
+                        template_name,
+                        epoch,
+                    },
                 reply,
             } => {
                 handle(

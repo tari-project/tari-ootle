@@ -60,7 +60,6 @@ use tari_dan_storage::{
         DbTemplate,
         DbTemplateUpdate,
         GlobalDbAdapter,
-        MetadataKey,
         TemplateStatus,
     },
     AtomicDb,
@@ -110,10 +109,10 @@ impl<TAddr> SqliteGlobalDbAdapter<TAddr> {
         }
     }
 
-    fn exists(&self, tx: &mut SqliteTransaction<'_>, key: MetadataKey) -> Result<bool, SqliteStorageError> {
+    fn exists(&self, tx: &mut SqliteTransaction<'_>, key: &[u8]) -> Result<bool, SqliteStorageError> {
         use crate::global::schema::metadata;
         let result = metadata::table
-            .filter(metadata::key_name.eq(key.as_key_bytes()))
+            .filter(metadata::key_name.eq(key))
             .count()
             .limit(1)
             .get_result::<i64>(tx.connection())
@@ -147,6 +146,10 @@ impl<TAddr> AtomicDb for SqliteGlobalDbAdapter<TAddr> {
     fn commit(&self, transaction: Self::DbTransaction<'_>) -> Result<(), Self::Error> {
         transaction.commit()
     }
+
+    fn rollback(&self, transaction: Self::DbTransaction<'_>) -> Result<(), Self::Error> {
+        transaction.rollback()
+    }
 }
 
 impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
@@ -155,14 +158,14 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     fn set_metadata<T: Serialize>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: MetadataKey,
+        key: &[u8],
         value: &T,
     ) -> Result<(), Self::Error> {
         use crate::global::schema::metadata;
         let value = serde_json::to_vec(value)?;
         match self.exists(tx, key) {
             Ok(true) => diesel::update(metadata::table)
-                .filter(metadata::key_name.eq(key.as_key_bytes()))
+                .filter(metadata::key_name.eq(key))
                 .set(metadata::value.eq(value))
                 .execute(tx.connection())
                 .map_err(|source| SqliteStorageError::DieselError {
@@ -170,7 +173,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                     operation: "update::metadata".to_string(),
                 })?,
             Ok(false) => diesel::insert_into(metadata::table)
-                .values((metadata::key_name.eq(key.as_key_bytes()), metadata::value.eq(value)))
+                .values((metadata::key_name.eq(key), metadata::value.eq(value)))
                 .execute(tx.connection())
                 .map_err(|source| SqliteStorageError::DieselError {
                     source,
@@ -185,18 +188,19 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     fn get_metadata<T: DeserializeOwned>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: &MetadataKey,
+        key: &[u8],
     ) -> Result<Option<T>, Self::Error> {
         use crate::global::schema::metadata;
 
-        let row: Option<MetadataModel> = metadata::table
-            .find(key.as_key_bytes())
-            .first(tx.connection())
-            .optional()
-            .map_err(|source| SqliteStorageError::DieselError {
-                source,
-                operation: "get::metadata_key".to_string(),
-            })?;
+        let row: Option<MetadataModel> =
+            metadata::table
+                .find(key)
+                .first(tx.connection())
+                .optional()
+                .map_err(|source| SqliteStorageError::DieselError {
+                    source,
+                    operation: "get::metadata_key".to_string(),
+                })?;
 
         let v = row.map(|r| serde_json::from_slice(&r.value)).transpose()?;
         Ok(v)

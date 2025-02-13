@@ -146,11 +146,6 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
 impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store, 'tx, TStore> {
     pub fn get_latest_version(&self, id: &SubstateId) -> Result<LatestSubstateVersion, SubstateStoreError> {
         if let Some(ch) = self.head.get(id).map(|&pos| &self.diff[pos]) {
-            // if ch.is_down() {
-            //     return Err(SubstateStoreError::SubstateIsDown {
-            //         id: ch.versioned_substate_id().clone(),
-            //     });
-            // }
             return Ok(LatestSubstateVersion {
                 version: ch.versioned_substate_id().version(),
                 is_up: ch.is_up(),
@@ -158,12 +153,6 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         }
 
         if let Some(change) = BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, id).optional()? {
-            // if change.is_down() {
-            //     return Err(SubstateStoreError::SubstateIsDown {
-            //         id: change.versioned_substate_id().clone(),
-            //     });
-            // }
-
             let version = change.versioned_substate_id().version();
             return Ok(LatestSubstateVersion {
                 version,
@@ -176,11 +165,6 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             .ok_or_else(|| SubstateStoreError::SubstateNotFound {
                 id: VersionedSubstateId::new(id.clone(), 0),
             })?;
-        // if is_destroyed {
-        //     return Err(SubstateStoreError::SubstateIsDown {
-        //         id: VersionedSubstateId::new(id.clone(), version),
-        //     });
-        // }
 
         Ok(LatestSubstateVersion {
             version,
@@ -202,12 +186,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
     }
 
     pub fn get_latest_change(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
-        if let Some(ch) = self
-            .diff
-            .iter()
-            .rev()
-            .find(|change| change.versioned_substate_id().substate_id() == id)
-        {
+        if let Some(ch) = self.head.get(id).map(|&pos| &self.diff[pos]) {
             return Ok(ch.clone());
         }
 

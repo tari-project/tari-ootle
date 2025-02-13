@@ -218,18 +218,15 @@ pub enum ProposalValidationError {
     },
     #[error("Validator {validator} is not in the expected committee: {details}")]
     ValidatorNotInCommittee { validator: String, details: String },
-    #[error("Base layer block hash for block with height {proposed} too high, current height {current}")]
-    BlockHeightTooHigh { proposed: u64, current: u64 },
-    #[error("Base layer block hash for block with height {proposed} too small, current height {current}")]
-    BlockHeightTooSmall { proposed: u64, current: u64 },
-    #[error("Base layer block hash ({hash}) is not known to the node")]
-    BlockHashNotFound { hash: FixedHash },
-    #[error("Base layer block height {height} does not match the real height {real_height}")]
-    BlockHeightMismatch { height: u64, real_height: u64 },
-    #[error("Base layer block with height {base_layer_block_height} is not the last block of the epoch")]
-    NotLastBlockOfEpoch {
+    #[error(
+        "Invalid epoch hash in block {block_id}. Local hash for epoch {epoch} is {local_epoch_hash}, but remote \
+         provided {invalid_epoch_hash}"
+    )]
+    InvalidEpochHash {
         block_id: BlockId,
-        base_layer_block_height: u64,
+        epoch: Epoch,
+        local_epoch_hash: FixedHash,
+        invalid_epoch_hash: FixedHash,
     },
     #[error("Foreign node in {shard_group} submitted malformed BlockPledge for block {block_id}")]
     ForeignMalformedPledges { block_id: BlockId, shard_group: ShardGroup },

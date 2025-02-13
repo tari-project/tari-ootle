@@ -32,7 +32,7 @@ use tari_engine_types::{
     events::Event,
     substate::{SubstateId, SubstateValue},
 };
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_template_lib::models::{EntityId, TemplateAddress};
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
 

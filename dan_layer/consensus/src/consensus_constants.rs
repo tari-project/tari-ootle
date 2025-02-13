@@ -57,7 +57,7 @@ impl ConsensusConstants {
             committee_size: 7,
             max_base_layer_blocks_ahead: 5,
             max_base_layer_blocks_behind: 5,
-            num_preshards: NumPreshards::P256,
+            num_preshards: NumPreshards::current(),
             pacemaker_block_time: Duration::from_secs(10),
             missed_proposal_suspend_threshold: 5,
             missed_proposal_evict_threshold: 10,

@@ -3566,9 +3566,9 @@ dependencies = [
 
 [[package]]
 name = "hickory-proto"
-version = "0.24.3"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ad3d6d98c648ed628df039541a5577bee1a7c83e9e16fe3dbedeea4cdfeb971"
+checksum = "07698b8420e2f0d6447a436ba999ec85d8fbf2a398bbd737b82cac4a2e96e512"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -3577,7 +3577,7 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
- "idna 1.0.3",
+ "idna 0.4.0",
  "ipnet",
  "once_cell",
  "rand",
@@ -3628,7 +3628,7 @@ checksum = "28757f23aa75c98f254cf0405e6d8c25b831b32921b050a66692427679b1f243"
 dependencies = [
  "cfg-if",
  "futures-util",
- "hickory-proto 0.24.3",
+ "hickory-proto 0.24.1",
  "ipconfig",
  "lru-cache",
  "once_cell",
@@ -4116,6 +4116,16 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
+
+[[package]]
+name = "idna"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d20d6b07bfbc108882d88ed8e37d39636dcc260e15e30c45e6ba089610b917c"
+dependencies = [
+ "unicode-bidi",
+ "unicode-normalization",
+]
 
 [[package]]
 name = "idna"
@@ -5045,7 +5055,7 @@ source = "git+https://github.com/tari-project/rust-libp2p.git?rev=3d918ccbf5ae1c
 dependencies = [
  "data-encoding",
  "futures 0.3.31",
- "hickory-proto 0.24.3",
+ "hickory-proto 0.24.1",
  "if-watch",
  "libp2p-core",
  "libp2p-identity",
@@ -5761,7 +5771,7 @@ dependencies = [
 [[package]]
 name = "minotari_app_grpc"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "argon2",
  "base64 0.13.1",
@@ -5792,7 +5802,7 @@ dependencies = [
 [[package]]
 name = "minotari_app_utilities"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "clap 3.2.25",
  "dialoguer 0.10.4",
@@ -5814,7 +5824,7 @@ dependencies = [
 [[package]]
 name = "minotari_console_wallet"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "blake2",
  "chrono",
@@ -5871,7 +5881,7 @@ dependencies = [
 [[package]]
 name = "minotari_ledger_wallet_common"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "bs58 0.5.1",
 ]
@@ -5879,7 +5889,7 @@ dependencies = [
 [[package]]
 name = "minotari_ledger_wallet_comms"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "borsh",
  "dialoguer 0.11.0",
@@ -5902,7 +5912,7 @@ dependencies = [
 [[package]]
 name = "minotari_node"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5950,7 +5960,7 @@ dependencies = [
 [[package]]
 name = "minotari_node_grpc_client"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "minotari_app_grpc",
 ]
@@ -5958,7 +5968,7 @@ dependencies = [
 [[package]]
 name = "minotari_wallet"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "argon2",
  "async-trait",
@@ -6009,7 +6019,7 @@ dependencies = [
 [[package]]
 name = "minotari_wallet_grpc_client"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "minotari_app_grpc",
  "tari_common_types",
@@ -7362,8 +7372,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes 1.10.0",
- "heck 0.4.1",
- "itertools 0.12.1",
+ "heck 0.5.0",
+ "itertools 0.11.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -7383,8 +7393,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c1318b19085f08681016926435853bbf7858f9c082d0999b80550ff5d9abe15"
 dependencies = [
  "bytes 1.10.0",
- "heck 0.4.1",
- "itertools 0.13.0",
+ "heck 0.5.0",
+ "itertools 0.11.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -7430,7 +7440,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -7443,7 +7453,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9552f850d5f0964a4e4d0bf306459ac29323ddfbae05e35a7c0d35cb0803cc5"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -9298,7 +9308,7 @@ dependencies = [
 [[package]]
 name = "tari_common"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "anyhow",
  "cargo_toml",
@@ -9324,7 +9334,7 @@ dependencies = [
 [[package]]
 name = "tari_common_sqlite"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -9338,7 +9348,7 @@ dependencies = [
 [[package]]
 name = "tari_common_types"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "base64 0.21.7",
  "bitflags 2.6.0",
@@ -9364,7 +9374,7 @@ dependencies = [
 [[package]]
 name = "tari_comms"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9408,7 +9418,7 @@ dependencies = [
 [[package]]
 name = "tari_comms_dht"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "anyhow",
  "bitflags 2.6.0",
@@ -9443,7 +9453,7 @@ dependencies = [
 [[package]]
 name = "tari_comms_rpc_macros"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9476,7 +9486,7 @@ dependencies = [
 [[package]]
 name = "tari_contacts"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "chrono",
  "diesel",
@@ -9509,7 +9519,7 @@ dependencies = [
 [[package]]
 name = "tari_core"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "async-trait",
  "bincode 1.3.3",
@@ -9612,26 +9622,21 @@ dependencies = [
  "log",
  "multiaddr 0.18.1",
  "rand",
- "reqwest",
  "serde",
  "serde_json",
  "tari_base_node_client",
  "tari_bor",
  "tari_common",
  "tari_common_types",
- "tari_consensus",
- "tari_core",
  "tari_crypto",
  "tari_dan_common_types",
  "tari_dan_engine",
  "tari_dan_storage",
- "tari_dan_storage_sqlite",
  "tari_engine_types",
  "tari_epoch_manager",
+ "tari_epoch_oracles",
  "tari_indexer_lib",
  "tari_networking",
- "tari_shutdown",
- "tari_state_store_sqlite",
  "tari_template_lib",
  "tari_template_manager",
  "tari_transaction",
@@ -9952,7 +9957,24 @@ name = "tari_epoch_manager"
 version = "0.8.1"
 dependencies = [
  "anyhow",
- "async-trait",
+ "log",
+ "serde",
+ "tari_common_types",
+ "tari_dan_common_types",
+ "tari_dan_storage",
+ "tari_dan_storage_sqlite",
+ "tari_engine_types",
+ "tari_sidechain",
+ "thiserror 1.0.68",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "tari_epoch_oracles"
+version = "0.8.0"
+dependencies = [
+ "anyhow",
  "log",
  "serde",
  "tari_base_node_client",
@@ -9961,17 +9983,20 @@ dependencies = [
  "tari_dan_common_types",
  "tari_dan_storage",
  "tari_dan_storage_sqlite",
+ "tari_engine_types",
+ "tari_epoch_manager",
  "tari_shutdown",
- "tari_sidechain",
+ "tari_template_lib",
  "tari_utilities",
  "thiserror 1.0.68",
  "tokio",
+ "url",
 ]
 
 [[package]]
 name = "tari_features"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 
 [[package]]
 name = "tari_generate"
@@ -9993,7 +10018,7 @@ dependencies = [
 [[package]]
 name = "tari_hashing"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "blake2",
  "borsh",
@@ -10037,12 +10062,12 @@ dependencies = [
  "tari_dan_storage_sqlite",
  "tari_engine_types",
  "tari_epoch_manager",
+ "tari_epoch_oracles",
  "tari_indexer_client",
  "tari_indexer_lib",
  "tari_networking",
  "tari_rpc_framework",
  "tari_shutdown",
- "tari_state_store_sqlite",
  "tari_template_lib",
  "tari_template_manager",
  "tari_transaction",
@@ -10062,7 +10087,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tari_base_node_client",
  "tari_common_types",
  "tari_dan_common_types",
  "tari_dan_storage",
@@ -10096,7 +10120,7 @@ dependencies = [
 [[package]]
 name = "tari_jellyfish"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "borsh",
  "digest",
@@ -10110,7 +10134,7 @@ dependencies = [
 [[package]]
 name = "tari_key_manager"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "argon2",
  "async-trait",
@@ -10143,7 +10167,7 @@ dependencies = [
 [[package]]
 name = "tari_libtor"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "derivative",
  "libtor",
@@ -10158,7 +10182,7 @@ dependencies = [
 [[package]]
 name = "tari_max_size"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "borsh",
  "serde",
@@ -10169,7 +10193,7 @@ dependencies = [
 [[package]]
 name = "tari_metrics"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "once_cell",
  "prometheus",
@@ -10179,7 +10203,7 @@ dependencies = [
 [[package]]
 name = "tari_mmr"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "borsh",
  "digest",
@@ -10209,7 +10233,7 @@ dependencies = [
 [[package]]
 name = "tari_p2p"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "anyhow",
  "fs2",
@@ -10310,7 +10334,7 @@ dependencies = [
 [[package]]
 name = "tari_script"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "blake2",
  "borsh",
@@ -10328,7 +10352,7 @@ dependencies = [
 [[package]]
 name = "tari_service_framework"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10343,7 +10367,7 @@ dependencies = [
 [[package]]
 name = "tari_shutdown"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "futures 0.3.31",
 ]
@@ -10351,7 +10375,7 @@ dependencies = [
 [[package]]
 name = "tari_sidechain"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "borsh",
  "log",
@@ -10429,7 +10453,7 @@ dependencies = [
 [[package]]
 name = "tari_storage"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "bincode 1.3.3",
  "lmdb-zero",
@@ -10594,7 +10618,7 @@ dependencies = [
 [[package]]
 name = "tari_test_utils"
 version = "1.7.0-pre.3"
-source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#0e72c119054c835481f21d94926163dea0a1f73c"
+source = "git+https://github.com/tari-project/tari.git?branch=feature-dan2#2c16abe22556cafa458b88a0f7546c740ab73fed"
 dependencies = [
  "futures 0.3.31",
  "rand",
@@ -10695,6 +10719,7 @@ dependencies = [
  "tari_dan_storage_sqlite",
  "tari_engine_types",
  "tari_epoch_manager",
+ "tari_epoch_oracles",
  "tari_indexer_lib",
  "tari_networking",
  "tari_rpc_framework",
@@ -10709,10 +10734,8 @@ dependencies = [
  "tari_validator_node_client",
  "tari_validator_node_rpc",
  "thiserror 1.0.68",
- "time",
  "tokio",
  "tower-http",
- "url",
 ]
 
 [[package]]

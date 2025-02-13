@@ -153,7 +153,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         Ok(exists)
     }
 
-    /// Deletes a template if exists.
+    /// Deprecate a template
     pub fn deprecate_template(&self, address: &TemplateAddress) -> Result<(), TemplateManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         self.global_db

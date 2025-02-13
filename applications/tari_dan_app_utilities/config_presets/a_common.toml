@@ -1,4 +1,3 @@
-
 ########################################################################################################################
 #                                                                                                                      #
 #                      Common Configuration Options (CommonConfig, AutoUpdateConfig, MetricsConfig)                    #
@@ -35,3 +34,22 @@ check_interval = 300
 [metrics]
 # server_bind_address = "127.0.0.1:5577"
 # push_endpoint = http://localhost:9091/metrics/job/base-node
+[epoch_oracle]
+oracle = "BaseLayer"
+# Or
+#oracle = "Configured"
+[epoch_oracle.base_layer]
+# The Minotari base node's GRPC url. (default = "http://127.0.0.1:<port>" the <port> value is based on network)
+#base_node_grpc_url = "http://127.0.0.1:18142"
+
+# How often do we want to scan the base layer for changes in seconds. (default = 10)
+#base_layer_scanning_interval = 10
+
+[epoch_oracle.configured]
+epoch_interval = 720 # 12 minutes
+initial_epoch = 1
+#[[[epoch_oracle.configured.validators]]
+#public_key = "7056240dedac879422d9d319704eddd699b1b5b4ab82a2b49324a1dae591dd78"
+#claim_key = "7056240dedac879422d9d319704eddd699b1b5b4ab82a2b49324a1dae591dd78"
+#registration_epoch = 5
+#shard_group = { start = 1, end_inclusive = 256 }

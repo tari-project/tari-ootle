@@ -24,7 +24,7 @@ use libp2p::{gossipsub, PeerId};
 use log::*;
 use tari_dan_common_types::PeerAddress;
 use tari_dan_p2p::TariMessagingSpec;
-use tari_epoch_manager::base_layer::EpochManagerHandle;
+use tari_epoch_manager::service::EpochManagerHandle;
 use tari_networking::NetworkingHandle;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::Transaction;

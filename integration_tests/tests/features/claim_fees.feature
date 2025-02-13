@@ -1,12 +1,10 @@
 # Copyright 2022 The Tari Project
 # SPDX-License-Identifier: BSD-3-Clause
 
-# TODO: This feature is currently ignored because the fee claiming needs to be reworked
-
 @claim_fees
 Feature: Claim Fees
 
-  @serial @fixed
+  @serial @fixed @doit
   Scenario: Claim validator fees
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE

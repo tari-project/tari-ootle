@@ -151,11 +151,9 @@ where TConsensusSpec: ConsensusSpec
             }
         }
 
-        let (current_base_layer_block_height, current_base_layer_block_hash) =
-            self.epoch_manager.current_base_layer_block_info().await?;
-
-        let base_layer_block_hash = current_base_layer_block_hash;
-        let base_layer_block_height = current_base_layer_block_height;
+        let epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
+        // TODO: Remove
+        let base_layer_block_height = 0;
 
         let on_propose = self.clone();
         let local_claim_public_key = to_public_key_bytes(local_claim_public_key);
@@ -182,7 +180,7 @@ where TConsensusSpec: ConsensusSpec
                     local_claim_public_key,
                     false,
                     base_layer_block_height,
-                    base_layer_block_hash,
+                    epoch_hash,
                     propose_epoch_end,
                 )?;
 

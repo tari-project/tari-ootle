@@ -23,7 +23,8 @@
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::Commitment;
-use tari_template_lib::models::EncryptedData;
+use tari_crypto::tari_utilities::ByteArray;
+use tari_template_lib::models::{EncryptedData, UnclaimedConfidentialOutputAddress};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
@@ -34,4 +35,11 @@ pub struct UnclaimedConfidentialOutput {
     pub commitment: Commitment,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub encrypted_data: EncryptedData,
+}
+
+impl UnclaimedConfidentialOutput {
+    pub fn to_address(&self) -> UnclaimedConfidentialOutputAddress {
+        UnclaimedConfidentialOutputAddress::try_from_commitment(self.commitment.as_bytes())
+            .expect("try_from_commitment: Incorrect commitment bytes when using Commitment")
+    }
 }

@@ -268,6 +268,26 @@ mod tests {
     }
 
     #[test]
+    fn can_de_serialize_using_cbor() {
+        let a = Amount(4);
+        let encoded = tari_bor::encode(&a).unwrap();
+        let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+        assert_eq!(a, decoded);
+
+        // Coercion
+        let encoded = tari_bor::encode(&123u32).unwrap();
+        let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+        assert_eq!(decoded, Amount(123));
+        let encoded = tari_bor::encode(&321u64).unwrap();
+        let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+        assert_eq!(decoded, Amount(321));
+
+        let encoded = tari_bor::encode(&a).unwrap();
+        let decoded = tari_bor::decode::<u64>(&encoded).unwrap();
+        assert_eq!(decoded, 4);
+    }
+
+    #[test]
     fn u64_ord() {
         let a = Amount(4);
         let b = 6;

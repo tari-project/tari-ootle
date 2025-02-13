@@ -39,7 +39,6 @@ use crate::{
     atomic::AtomicDb,
     global::{
         base_layer_db::DbLayer1Transaction,
-        metadata_db::MetadataKey,
         models::ValidatorNode,
         template_db::{DbTemplate, DbTemplateUpdate},
     },
@@ -51,12 +50,12 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
     fn get_metadata<T: DeserializeOwned>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: &MetadataKey,
+        key: &[u8],
     ) -> Result<Option<T>, Self::Error>;
     fn set_metadata<T: Serialize>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: MetadataKey,
+        key: &[u8],
         value: &T,
     ) -> Result<(), Self::Error>;
 

@@ -33,7 +33,7 @@ use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{displayable::Displayable, NodeAddressable, ToPeerId};
 use tari_dan_storage::global::DbTemplateType;
 use tari_engine_types::hashing::hash_template_code;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::EpochManagerReader;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
@@ -82,22 +82,26 @@ impl Display for SyncWorkerEvent {
 }
 
 #[derive(Debug, Clone)]
-struct Services<TAddr> {
-    epoch_manager: EpochManagerHandle<TAddr>,
+struct Services<TEpochManager> {
+    epoch_manager: TEpochManager,
     client_factory: TariValidatorNodeRpcClientFactory,
 }
 
 type SyncTaskResult = Result<TemplateBatchSyncResult, (TemplateManagerError, Vec<TemplateSyncRequest>)>;
 
-pub(super) struct TemplateSyncWorker<TAddr> {
+pub(super) struct TemplateSyncWorker<TEpochManager> {
     pending_sync: Option<BoxFuture<'static, SyncTaskResult>>,
     request_queue: Vec<TemplateSyncRequest>,
     waker: Option<Waker>,
-    services: Services<TAddr>,
+    services: Services<TEpochManager>,
 }
 
-impl<TAddr: NodeAddressable + ToPeerId + 'static> TemplateSyncWorker<TAddr> {
-    pub fn new(epoch_manager: EpochManagerHandle<TAddr>, client_factory: TariValidatorNodeRpcClientFactory) -> Self {
+impl<TEpochManager> TemplateSyncWorker<TEpochManager>
+where
+    TEpochManager: EpochManagerReader + Clone + 'static,
+    TEpochManager::Addr: NodeAddressable + ToPeerId + 'static,
+{
+    pub fn new(epoch_manager: TEpochManager, client_factory: TariValidatorNodeRpcClientFactory) -> Self {
         Self {
             pending_sync: None,
             waker: None,
@@ -169,10 +173,11 @@ impl<TAddr: NodeAddressable + ToPeerId + 'static> TemplateSyncWorker<TAddr> {
     }
 }
 
-async fn do_sync<TAddr: NodeAddressable + ToPeerId>(
-    services: Services<TAddr>,
-    requests: Vec<TemplateSyncRequest>,
-) -> SyncTaskResult {
+async fn do_sync<TEpochManager>(services: Services<TEpochManager>, requests: Vec<TemplateSyncRequest>) -> SyncTaskResult
+where
+    TEpochManager: EpochManagerReader,
+    TEpochManager::Addr: NodeAddressable + ToPeerId,
+{
     debug!(target: LOG_TARGET, "Starting next sync batch for {} template(s)", requests.len());
     match services.epoch_manager.current_epoch().await {
         Ok(current_epoch) => {

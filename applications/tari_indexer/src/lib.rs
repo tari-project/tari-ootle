@@ -41,23 +41,31 @@ mod substate_manager;
 mod substate_storage_sqlite;
 mod transaction_manager;
 
-use std::{fs, sync::Arc};
+use std::{convert::Infallible, fs, future, future::Future, sync::Arc};
 
 use event_scanner::{EventFilter, EventScanner};
 use http_ui::server::run_http_ui_server;
 use log::*;
+use serde::Serialize;
 use substate_manager::SubstateManager;
-use tari_base_node_client::grpc::GrpcBaseNodeClient;
-use tari_common::{
-    configuration::bootstrap::{grpc_default_port, ApplicationType},
-    exit_codes::{ExitCode, ExitError},
-};
+use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_dan_app_utilities::{keypair::setup_keypair_prompt, substate_file_cache::SubstateFileCache};
+use tari_dan_app_utilities::{
+    keypair::setup_keypair_prompt,
+    substate_file_cache::SubstateFileCache,
+    template_download_queue::TemplateDownloadQueue,
+};
+use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, PeerAddress};
 use tari_dan_engine::transaction::TransactionProcessorConfig;
-use tari_dan_storage::global::DbFactory;
-use tari_dan_storage_sqlite::SqliteDbFactory;
-use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
+use tari_dan_storage::global::{DbFactory, GlobalDb};
+use tari_dan_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
+use tari_engine_types::confidential::UnclaimedConfidentialOutput;
+use tari_epoch_manager::{
+    traits::{EpochManagerSpec, EpochUtxoStore, LayerOneTransactionSubmitter},
+    EpochManagerEvent,
+    EpochManagerReader,
+};
+use tari_epoch_oracles::EpochOracle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
@@ -89,7 +97,6 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         .map_err(|e| ExitError::new(ExitCode::DatabaseError, e))?;
 
     let consensus_constants = ConsensusConstants::from(config.network);
-    let base_node_client = create_base_layer_clients(&config).await?;
     let services: Services = spawn_services(
         &config,
         shutdown_signal.clone(),
@@ -137,17 +144,11 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
     let jrpc_address = config.indexer.json_rpc_address;
     if let Some(jrpc_address) = jrpc_address {
         info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
-        let consensus_constants = services
-            .epoch_manager
-            .get_base_layer_consensus_constants()
-            .await
-            .map_err(|e| ExitError::new(ExitCode::UnknownError, e))?;
         let handlers = JsonRpcHandlers::new(
-            consensus_constants,
             &services,
-            base_node_client,
             substate_manager.clone(),
             transaction_manager,
+            services.global_db.clone(),
             services.template_manager.clone(),
             dry_run_transaction_processor,
         );
@@ -240,14 +241,33 @@ async fn handle_epoch_manager_event(services: &Services, event: EpochManagerEven
     Ok(())
 }
 
-async fn create_base_layer_clients(config: &ApplicationConfig) -> Result<GrpcBaseNodeClient, ExitError> {
-    let url = config.indexer.base_node_grpc_url.clone().unwrap_or_else(|| {
-        let port = grpc_default_port(ApplicationType::BaseNode, config.network);
-        format!("http://127.0.0.1:{port}")
-            .parse()
-            .expect("Default base node GRPC URL is malformed")
-    });
-    GrpcBaseNodeClient::connect(url)
-        .await
-        .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Could not connect to base node {}", err)))
+pub struct IndexerEpochManagerSpec;
+
+impl EpochManagerSpec for IndexerEpochManagerSpec {
+    type Addr = PeerAddress;
+    type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
+    type LayerOneSubmitter = Noop;
+    type TemplateDownloader = TemplateDownloadQueue;
+    type UtxoStore = Noop;
+}
+
+pub struct Noop;
+
+impl EpochUtxoStore for Noop {
+    type Error = Infallible;
+
+    fn add_unclaimed_utxo(&mut self, _epoch: Epoch, _substate: UnclaimedConfidentialOutput) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl LayerOneTransactionSubmitter for Noop {
+    type Error = Infallible;
+
+    fn submit_transaction<T: Serialize + Send>(
+        &self,
+        _proof: LayerOneTransactionDef<T>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        future::ready(Ok(()))
+    }
 }

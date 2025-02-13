@@ -20,44 +20,39 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{DerivableFromPublicKey, NodeAddressable};
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_shutdown::ShutdownSignal;
 use tokio::{
     sync::{broadcast, mpsc},
     task::JoinHandle,
 };
 
 use crate::{
-    base_layer::{config::EpochManagerConfig, epoch_manager_service::EpochManagerService, EpochManagerHandle},
-    traits::LayerOneTransactionSubmitter,
+    service::{config::EpochManagerConfig, epoch_manager_service::EpochManagerService, EpochManagerHandle},
+    traits::EpochManagerSpec,
 };
 
-pub fn spawn_service<TAddr, TLayerOneSubmitter>(
+pub fn spawn_service<TSpec: EpochManagerSpec>(
     config: EpochManagerConfig,
-    global_db: GlobalDb<SqliteGlobalDbAdapter<TAddr>>,
-    base_node_client: GrpcBaseNodeClient,
+    global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
     node_public_key: PublicKey,
-    layer_one_submitter: TLayerOneSubmitter,
-    shutdown: ShutdownSignal,
-) -> (EpochManagerHandle<TAddr>, JoinHandle<anyhow::Result<()>>)
-where
-    TAddr: NodeAddressable + DerivableFromPublicKey + 'static,
-    TLayerOneSubmitter: LayerOneTransactionSubmitter + Send + Sync + 'static,
-{
+    epoch_events: TSpec::EpochEventOracle,
+    utxo_store: TSpec::UtxoStore,
+    template_downloader: TSpec::TemplateDownloader,
+    layer_one_submitter: TSpec::LayerOneSubmitter,
+) -> (EpochManagerHandle<TSpec::Addr>, JoinHandle<anyhow::Result<()>>) {
     let (tx_request, rx_request) = mpsc::channel(10);
     let (events, _) = broadcast::channel(100);
     let epoch_manager = EpochManagerHandle::new(tx_request, events.clone());
-    let handle = EpochManagerService::spawn(
+    let handle = EpochManagerService::<TSpec>::spawn(
         config,
         events,
         rx_request,
-        shutdown,
         global_db,
-        base_node_client,
+        epoch_events,
+        utxo_store,
+        template_downloader,
         layer_one_submitter,
         node_public_key,
     );

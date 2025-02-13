@@ -60,6 +60,10 @@ impl NumPreshards {
             Some(group)
         })
     }
+
+    pub const fn current() -> Self {
+        Self::P256
+    }
 }
 
 impl TryFrom<u32> for NumPreshards {

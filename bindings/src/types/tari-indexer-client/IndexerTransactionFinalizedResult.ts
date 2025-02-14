@@ -11,6 +11,5 @@ export type IndexerTransactionFinalizedResult =
         execution_time: { secs: number; nanos: number };
         finalized_time: { secs: number; nanos: number };
         abort_details: string | null;
-        json_results: Array<string>;
       };
     };

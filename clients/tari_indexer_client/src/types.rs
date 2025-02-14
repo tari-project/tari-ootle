@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{substate_type::SubstateType, Epoch, SubstateRequirement};
@@ -234,8 +233,6 @@ pub enum IndexerTransactionFinalizedResult {
         #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number}"))]
         finalized_time: Duration,
         abort_details: Option<String>,
-        #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
-        json_results: Vec<JsonValue>,
     },
 }
 

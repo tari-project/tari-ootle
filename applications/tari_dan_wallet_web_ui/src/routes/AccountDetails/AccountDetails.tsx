@@ -31,19 +31,17 @@ import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
 import { useParams } from "react-router-dom";
 import { useAccountsGetBalances, useAccountsGet, useAccountNFTsList } from "../../api/hooks/useAccounts";
-import { shortenString } from "../../utils/helpers";
 import { DataTableCell } from "../../Components/StyledComponents";
-import CopyToClipboard from "../../Components/CopyToClipboard";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import { substateIdToString, BalanceEntry } from "@tari-project/typescript-bindings";
+import { BalanceEntry } from "@tari-project/typescript-bindings";
 import NFTList from "../../Components/NFTList";
+import CopyAddress from "../../Components/CopyAddress";
 
 function BalanceRow(props: BalanceEntry) {
   return (
     <TableRow key={props.resource_address}>
       <DataTableCell>
-        {shortenString(props.token_symbol || props.resource_address)}
-        <CopyToClipboard copy={props.token_symbol || props.resource_address} />
+        <CopyAddress address={props.resource_address} display={props.token_symbol || props.resource_address} />
       </DataTableCell>
       <DataTableCell>{props.resource_type}</DataTableCell>
       <DataTableCell>{props.balance}</DataTableCell>
@@ -101,12 +99,10 @@ function AccountDetailsLayout() {
                     <TableRow>
                       <DataTableCell>{accountsData.account.name}</DataTableCell>
                       <DataTableCell>
-                        {shortenString(substateIdToString(accountsData.account.address))}
-                        <CopyToClipboard copy={substateIdToString(accountsData.account.address)} />
+                        <CopyAddress address={accountsData.account.address} />
                       </DataTableCell>
                       <DataTableCell>
-                        {shortenString(accountsData.public_key)}
-                        <CopyToClipboard copy={accountsData.public_key} />
+                        <CopyAddress address={accountsData.public_key} />
                       </DataTableCell>
                     </TableRow>
                   )}

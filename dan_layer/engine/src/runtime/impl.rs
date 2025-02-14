@@ -33,6 +33,7 @@ use tari_engine_types::{
     confidential::{get_commitment_factory, get_range_proof_service, ConfidentialClaim, ConfidentialOutput},
     entity_id_provider::EntityIdProvider,
     events::Event,
+    hashing::hash_template_code,
     indexed_value::IndexedValue,
     instruction_result::InstructionResult,
     lock::LockFlag,
@@ -202,14 +203,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let _ignore = state.get_proof(*proof_id)?;
             }
 
-            for address in value.referenced_substates() {
-                if !state.substate_exists(&address)? {
+            for id in value.referenced_substates() {
+                if !state.substate_exists(&id)? {
                     debug!(
                         target: LOG_TARGET,
-                        "Returned substate {address} does not exist",
+                        "Returned substate {id} does not exist",
                     );
 
-                    return Err(RuntimeError::NonExistentSubstateReturned { address });
+                    return Err(RuntimeError::NonExistentSubstateReturned { id });
                 }
             }
 
@@ -429,9 +430,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let tx_hash = self.entity_id_provider.transaction_hash();
         let template_address = self.tracker.get_template_address()?;
 
-        let event = Event::new(substate_id, template_address, tx_hash, topic, payload);
-        log::log!(target: "tari::dan::engine::runtime", log::Level::Debug, "{}", event.to_string());
-        self.tracker.add_event(event);
+        self.tracker
+            .add_event(Event::new(substate_id, template_address, tx_hash, topic, payload));
         Ok(())
     }
 
@@ -2275,7 +2275,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let mut finalized = self.tracker.finalize(substates_to_persist)?;
 
         if !finalized.fee_receipt.is_paid_in_full() {
-            let reason = RejectReason::FeesNotPaid(format!(
+            let reason = RejectReason::InsufficientFeesPaid(format!(
                 "Required fees {} but {} paid",
                 finalized.fee_receipt.total_fees_charged(),
                 finalized.fee_receipt.total_fees_paid()
@@ -2331,12 +2331,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state| {
-            let template_address =
-                PublishedTemplateAddress::from_author_and_code(&self.transaction_signer_public_key, &template);
+            let binary_hash = hash_template_code(&template);
+            let template_address = PublishedTemplateAddress::from_author_and_binary_hash(
+                &self.transaction_signer_public_key,
+                &binary_hash,
+            );
             state.new_substate(
                 template_address,
-                SubstateValue::Template(PublishedTemplate { binary: template }),
+                SubstateValue::Template(PublishedTemplate {
+                    // We essentially store the pre-image of the template address in the substate
+                    binary_hash,
+                    author: self.transaction_signer_public_key.clone(),
+                }),
             )?;
             // Mark template substate as owned by current call stack
             let scope_mut = state.current_call_scope_mut()?;

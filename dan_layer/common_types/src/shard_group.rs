@@ -26,6 +26,8 @@ pub struct ShardGroup {
 }
 
 impl ShardGroup {
+    const MAX_ENCODED_VALUE: u32 = (NumPreshards::MAX.as_u32() << 16) + NumPreshards::MAX.as_u32();
+
     pub fn new<T: Into<Shard> + Copy>(start: T, end_inclusive: T) -> Self {
         let start = start.into();
         let end_inclusive = end_inclusive.into();
@@ -37,7 +39,7 @@ impl ShardGroup {
     }
 
     pub fn all_shards(num_preshards: NumPreshards) -> Self {
-        Self::new(Shard::zero(), Shard::from(num_preshards.as_u32() - 1))
+        Self::new(Shard::first(), Shard::from(num_preshards.as_u32() - 1))
     }
 
     pub const fn len(&self) -> usize {
@@ -49,26 +51,21 @@ impl ShardGroup {
         false
     }
 
-    /// Encodes the shard group as a u32. Little endian layout: (0)(0)(start)(end).
+    /// Encodes the shard group as a u32. Big endian layout: (start_msb)(start_lsb)(end_msb)(end_lsb).
+    /// The maximum shard number is 256 (0x100), so in practise start_msb and end_msb are either 1 or 0.
     pub fn encode_as_u32(&self) -> u32 {
-        // ShardGroup fits into a u16 because even for max NumPreshards (NumPreshards::TwoFiftySix), the maximum
-        // possible shard is 255 (the first shard is 0) We therefore encode it into the last two (LS)
-        // bytes of the u32. The first two (MS) bytes of the u32 are always 0.
-        //
-        // A u32 is used because there is no reason not to, and it may give some wiggle room for potential future data
-        // to be encoded without any performance difference on most architectures.
-        let mut n = self.start.as_u32() << 8;
+        let mut n = self.start.as_u32() << 16;
         n |= self.end_inclusive.as_u32();
         n
     }
 
     pub fn decode_from_u32(n: u32) -> Option<Self> {
-        if n > 0xFFFF {
+        if n > Self::MAX_ENCODED_VALUE {
             return None;
         }
 
-        let start = n >> 8;
-        let end = n & 0xFF;
+        let start = n >> 16;
+        let end = n & 0xFFFF;
         Some(Self::new(start, end))
     }
 
@@ -108,12 +105,12 @@ impl ShardGroup {
         }
 
         let shard_size = U256::MAX >> num_shards.as_u32().trailing_zeros();
-        let start = if self.start.is_zero() {
+        let start = if self.start.is_first() {
             U256::ZERO
         } else {
             shard_size * U256::from(self.start.as_u32()) + U256::from(self.start.as_u32() - 1)
         };
-        if self.end_inclusive == num_shards.as_u32() - 1 {
+        if self.end_inclusive == num_shards.as_u32() {
             return SubstateAddress::from_u256_zero_version(start)..=SubstateAddress::max();
         }
 
@@ -160,7 +157,6 @@ pub struct ShardGroupParseError(pub String);
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
@@ -170,14 +166,17 @@ mod tests {
         let sg2 = ShardGroup::decode_from_u32(n).unwrap();
         assert_eq!(sg, sg2);
         assert_eq!(ShardGroup::decode_from_u32(0), Some(ShardGroup::new(0, 0)));
-        assert_eq!(ShardGroup::decode_from_u32(0xFFFF), Some(ShardGroup::new(0xFF, 0xFF)));
-        assert_eq!(ShardGroup::decode_from_u32(0xFFFF + 1), None);
+        assert_eq!(
+            ShardGroup::decode_from_u32(ShardGroup::MAX_ENCODED_VALUE),
+            Some(ShardGroup::new(0x100, 0x100))
+        );
+        assert_eq!(ShardGroup::decode_from_u32(ShardGroup::MAX_ENCODED_VALUE + 1), None);
         assert_eq!(ShardGroup::decode_from_u32(u32::MAX), None);
     }
 
     #[test]
     fn to_substate_address_range() {
-        let sg = ShardGroup::new(0, 63);
+        let sg = ShardGroup::new(1, 64);
         let range = sg.to_substate_address_range(NumPreshards::P64);
         assert_eq!(*range.start(), SubstateAddress::zero());
         assert_eq!(*range.end(), SubstateAddress::max());

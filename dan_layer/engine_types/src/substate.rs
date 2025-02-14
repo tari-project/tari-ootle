@@ -169,6 +169,13 @@ impl SubstateId {
         }
     }
 
+    pub fn as_transaction_receipt_address(&self) -> Option<TransactionReceiptAddress> {
+        match self {
+            Self::TransactionReceipt(address) => Some(*address),
+            _ => None,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(self).unwrap()
     }
@@ -269,12 +276,12 @@ impl SubstateId {
         matches!(self, Self::TransactionReceipt(_))
     }
 
-    pub fn is_published_template(&self) -> bool {
+    pub fn is_template(&self) -> bool {
         matches!(self, Self::Template(_))
     }
 
     pub fn is_global(&self) -> bool {
-        self.is_published_template()
+        self.is_template()
     }
 
     pub fn is_read_only(&self) -> bool {
@@ -685,13 +692,6 @@ impl SubstateValue {
         }
     }
 
-    pub fn as_transaction_receipt_mut(&mut self) -> Option<&mut TransactionReceipt> {
-        match self {
-            SubstateValue::TransactionReceipt(tx_receipt) => Some(tx_receipt),
-            _ => None,
-        }
-    }
-
     pub fn as_resource(&self) -> Option<&Resource> {
         match self {
             SubstateValue::Resource(resource) => Some(resource),
@@ -751,6 +751,13 @@ impl SubstateValue {
     pub fn as_validator_fee_pool_mut(&mut self) -> Option<&mut ValidatorFeePool> {
         match self {
             SubstateValue::ValidatorFeePool(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_template(&self) -> Option<&PublishedTemplate> {
+        match self {
+            SubstateValue::Template(template) => Some(template),
             _ => None,
         }
     }

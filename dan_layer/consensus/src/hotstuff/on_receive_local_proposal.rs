@@ -251,6 +251,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         proposer_claim_public_key_bytes: [u8; 32],
         valid_block: ValidBlock,
     ) -> Result<bool, HotStuffError> {
+        debug!(target: LOG_TARGET, "RECV-LOCAL-PROPOSAL - [{:?}] Starting processing block: {}", current_epoch, valid_block);
+
         let em_epoch = self.epoch_manager.current_epoch().await?;
         let can_propose_epoch_end = em_epoch > current_epoch;
         let is_epoch_end = valid_block.block().is_epoch_end();
@@ -367,7 +369,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 self.store.with_write_tx(|tx| {
                     // Generate checkpoint
                     create_epoch_checkpoint(tx, epoch, local_committee_info.shard_group())?;
-
                     // Create the next genesis
                     let mut genesis = Block::genesis(
                         self.config.network,

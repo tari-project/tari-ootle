@@ -48,7 +48,7 @@ import type {
 } from "@tari-project/typescript-bindings";
 
 const DEFAULT_WALLET_ADDRESS = new URL(
-  import.meta.env.VITE_DAEMON_JRPC_ADDRESS ||
+  import.meta.env.VITE_INDEXER_JRPC_ADDRESS ||
   import.meta.env.VITE_JSON_RPC_ADDRESS ||
   import.meta.env.VITE_JRPC_ADDRESS ||
   "http://localhost:9000",
@@ -97,7 +97,6 @@ async function jsonRpc(method: string, params: any = null) {
 
 export const getOpenRpcSchema = (): Promise<string> => jsonRpc("rpc.discover");
 export const getIdentity = (): Promise<IndexerGetIdentityResponse> => jsonRpc("get_identity");
-export const getAllVns = (epoch: number): Promise<IndexerGetAllVnsResponse> => jsonRpc("get_all_vns", { epoch });
 export const addPeer = (request: IndexerAddPeerRequest): Promise<IndexerAddPeerResponse> => jsonRpc("add_peer", request);
 export const getCommsStats = (): Promise<IndexerGetCommsStatsResponse> => jsonRpc("get_comms_stats");
 export const getSubstate = (request: IndexerGetSubstateRequest): Promise<IndexerGetSubstateResponse> =>

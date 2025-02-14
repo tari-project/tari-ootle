@@ -26,6 +26,10 @@ impl FeeModule {
 impl RuntimeModule for FeeModule {
     fn on_initialize(&self, track: &StateTracker) -> Result<(), RuntimeModuleError> {
         track.add_fee_charge(FeeSource::Initial, self.initial_cost);
+        let transaction_weight = track.get_transaction_weight();
+        let transaction_weight_cost = transaction_weight.as_u64() * self.fee_table.per_transaction_weight_cost();
+        track.add_fee_charge(FeeSource::TransactionWeight, transaction_weight_cost);
+
         Ok(())
     }
 

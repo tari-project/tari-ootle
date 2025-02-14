@@ -31,6 +31,7 @@ use tari_common::{
     SubConfigPath,
 };
 use tari_dan_common_types::crypto::create_secret;
+use url::Url;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
@@ -57,7 +58,6 @@ pub enum WalletDaemonAuth {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct WalletDaemonConfig {
     override_from: Option<String>,
     /// Network that is used to send transactions.
@@ -71,15 +71,15 @@ pub struct WalletDaemonConfig {
     pub ui_connect_address: Option<String>,
     /// The signaling server address for the webrtc
     pub signaling_server_address: Option<SocketAddr>,
-    /// The validator nodes jrpc endpoint url
-    pub indexer_node_json_rpc_url: String,
+    /// The indexer JSON-RPC url
+    pub indexer_json_rpc_url: Url,
     /// Expiration duration of the JWT token
     #[serde(with = "humantime_serde::option")]
     pub jwt_expiry: Option<Duration>,
     /// Secret key for the JWT token.
     pub jwt_secret_key: Option<String>,
-    /// The address of the HTTP UI
-    pub http_ui_address: Option<SocketAddr>,
+    /// The address of the Web UI
+    pub web_ui_address: Option<SocketAddr>,
     /// The path to the value lookup table binary file used for brute force value lookups. This setting
     /// is only used when attempting to view confidential balances in confidential resources that use a view key
     /// controlled by this wallet. The binary file can be generated using the generate_ristretto_value_lookup
@@ -92,16 +92,18 @@ impl Default for WalletDaemonConfig {
     fn default() -> Self {
         Self {
             override_from: None,
-            network: Default::default(),
+            network: Network::Igor,
             authentication: WalletDaemonAuth::None,
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
             ui_connect_address: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
-            indexer_node_json_rpc_url: "http://127.0.0.1:18300/json_rpc".to_string(),
+            indexer_json_rpc_url: "http://127.0.0.1:18300/json_rpc"
+                .parse()
+                .expect("failed to parse default indexer_json_rpc_url"),
             // TODO: Come up with a reasonable default value
             jwt_expiry: Some(Duration::from_secs(500 * 60)),
             jwt_secret_key: Some(create_secret()),
-            http_ui_address: Some("127.0.0.1:5100".parse().unwrap()),
+            web_ui_address: Some("127.0.0.1:5100".parse().unwrap()),
             value_lookup_table_file: None,
         }
     }

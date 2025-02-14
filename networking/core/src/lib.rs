@@ -8,7 +8,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use libp2p::{swarm::dial_opts::DialOpts, PeerId};
 use tokio::sync::oneshot;
 
 mod worker;
@@ -34,7 +33,9 @@ pub use message::*;
 pub use spawn::*;
 pub use tari_swarm::{
     config::{Config as SwarmConfig, LimitPerInterval, RelayCircuitLimits, RelayReservationLimits},
+    identity::PeerId,
     is_supported_multiaddr,
+    swarm::{dial_opts::DialOpts, DialError},
 };
 
 #[async_trait]

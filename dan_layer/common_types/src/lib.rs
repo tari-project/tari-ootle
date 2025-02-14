@@ -16,9 +16,9 @@ mod extra_data;
 pub use extra_data::{ExtraData, ExtraFieldKey};
 
 pub mod committee;
+pub mod displayable;
 pub mod hasher;
 pub mod hashing;
-pub mod option;
 pub mod optional;
 
 mod node_height;
@@ -58,4 +58,6 @@ mod lock_intent;
 pub use lock_intent::*;
 mod fee_pool;
 pub use fee_pool::*;
+mod consensus_constants;
 pub mod layer_one_transaction;
+pub use consensus_constants::*;

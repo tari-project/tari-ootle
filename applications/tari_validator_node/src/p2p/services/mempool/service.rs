@@ -29,7 +29,7 @@ use tari_dan_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubst
 use tari_dan_p2p::{DanMessage, NewTransactionMessage, TariMessagingSpec};
 use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 use tari_engine_types::commit_result::RejectReason;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};

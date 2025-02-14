@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus::hotstuff::{HotStuffError, ProposalValidationError};
-use tari_dan_app_utilities::template_manager::interface::TemplateManagerError;
+use tari_dan_common_types::Epoch;
 use tari_dan_storage::{
     consensus_models::{BlockId, TransactionPoolError},
     StorageError,
@@ -10,6 +10,7 @@ use tari_dan_storage::{
 use tari_epoch_manager::EpochManagerError;
 use tari_rpc_framework::{RpcError, RpcStatus};
 use tari_state_tree::{JmtStorageError, TreeHash};
+use tari_template_manager::interface::TemplateManagerError;
 use tari_validator_node_rpc::ValidatorNodeRpcClientError;
 
 #[derive(Debug, thiserror::Error)]
@@ -42,6 +43,8 @@ pub enum CommsRpcConsensusSyncError {
     TaskJoin(String),
     #[error("Failed to sync templates!")]
     TemplateSyncFailure,
+    #[error("No committees found for epoch {0}")]
+    NoCommittees(Epoch),
 }
 
 impl CommsRpcConsensusSyncError {

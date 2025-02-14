@@ -17,7 +17,6 @@ use tari_dan_common_types::{
     NodeHeight,
     ShardGroup,
     SubstateAddress,
-    SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
@@ -225,10 +224,10 @@ pub trait StateStoreReadTransaction: Sized {
 
     // -------------------------------- QuorumCertificate -------------------------------- //
     fn quorum_certificates_get(&self, qc_id: &QcId) -> Result<QuorumCertificate, StorageError>;
-    fn quorum_certificates_get_all<'a, I: IntoIterator<Item = &'a QcId>>(
-        &self,
-        qc_ids: I,
-    ) -> Result<Vec<QuorumCertificate>, StorageError>;
+    fn quorum_certificates_get_all<'a, I>(&self, qc_ids: I) -> Result<Vec<QuorumCertificate>, StorageError>
+    where
+        I: IntoIterator<Item = &'a QcId>,
+        I::IntoIter: ExactSizeIterator;
     fn quorum_certificates_get_by_block_id(&self, block_id: &BlockId) -> Result<QuorumCertificate, StorageError>;
 
     // -------------------------------- Transaction Pools -------------------------------- //
@@ -252,6 +251,7 @@ pub trait StateStoreReadTransaction: Sized {
         stage: Option<TransactionPoolStage>,
         is_ready: Option<bool>,
         confirmed_stage: Option<Option<TransactionPoolConfirmedStage>>,
+        skip_lock_conflicted: bool,
     ) -> Result<usize, StorageError>;
 
     fn transactions_fetch_involved_shards(
@@ -269,14 +269,14 @@ pub trait StateStoreReadTransaction: Sized {
     fn votes_get_for_block(&self, block_id: &BlockId) -> Result<Vec<Vote>, StorageError>;
     //---------------------------------- Substates --------------------------------------------//
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError>;
-    fn substates_get_any(
-        &self,
-        substate_ids: &HashSet<SubstateRequirement>,
-    ) -> Result<Vec<SubstateRecord>, StorageError>;
-    fn substates_get_any_max_version<'a, I: IntoIterator<Item = &'a SubstateId>>(
+    fn substates_get_any<'a, I: IntoIterator<Item = &'a VersionedSubstateIdRef<'a>>>(
         &self,
         substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError>;
+    fn substates_get_any_max_version<'a, I>(&self, substate_ids: I) -> Result<Vec<SubstateRecord>, StorageError>
+    where
+        I: IntoIterator<Item = &'a SubstateId>,
+        I::IntoIter: ExactSizeIterator;
     fn substates_get_max_version_for_substate(&self, substate_id: &SubstateId) -> Result<(u32, bool), StorageError>;
     fn substates_any_exist<I, S>(&self, substates: I) -> Result<bool, StorageError>
     where

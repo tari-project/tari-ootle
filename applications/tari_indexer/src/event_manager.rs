@@ -27,7 +27,7 @@ use tari_crypto::tari_utilities::message_format::MessageFormat;
 use tari_dan_app_utilities::substate_file_cache::SubstateFileCache;
 use tari_dan_common_types::{PeerAddress, SubstateRequirement};
 use tari_engine_types::{events::Event, substate::SubstateId};
-use tari_epoch_manager::base_layer::EpochManagerHandle;
+use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_template_lib::{
     models::{Metadata, TemplateAddress},

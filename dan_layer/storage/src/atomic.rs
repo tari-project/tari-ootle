@@ -27,4 +27,5 @@ pub trait AtomicDb {
     fn create_transaction(&self) -> Result<Self::DbTransaction<'_>, Self::Error>;
 
     fn commit(&self, transaction: Self::DbTransaction<'_>) -> Result<(), Self::Error>;
+    fn rollback(&self, transaction: Self::DbTransaction<'_>) -> Result<(), Self::Error>;
 }

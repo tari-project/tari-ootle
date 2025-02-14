@@ -162,7 +162,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             initial_call_scope.add_substate_to_owned(input.substate_id.clone());
         }
 
-        let tracker = StateTracker::new(state_db, virtual_substates, initial_call_scope, transaction.hash());
+        let transaction_weight = transaction.calculate_transaction_weight();
+        let tracker = StateTracker::new(
+            state_db,
+            virtual_substates,
+            initial_call_scope,
+            transaction.hash(),
+            transaction_weight,
+        );
 
         // TODO: If the seal signer is authorized we use this as the signer public key, if not we use the first
         // signature as the "default" owner. This is due to limitations of the current transaction model.
@@ -198,8 +205,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 // Checkpoint the tracker state after the fee instructions have been executed in case of transaction
                 // failure.
                 if let Err(err) = runtime.interface().set_fee_checkpoint() {
-                    let mut finalize =
-                        FinalizeResult::new_rejected(transaction_hash, RejectReason::ExecutionFailure(err.to_string()));
+                    let mut finalize = FinalizeResult::new_rejected(transaction_hash, err.to_reject_reason());
                     finalize.execution_results = execution_results;
                     return Ok(ExecuteResult {
                         finalize,
@@ -374,8 +380,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         }
 
         // validate binary
-        WasmModule::load_template_from_code(binary.as_slice())?;
-
+        WasmModule::load_template_from_code(&binary)?;
         // creating new substate
         runtime.interface().publish_template(binary)?;
 

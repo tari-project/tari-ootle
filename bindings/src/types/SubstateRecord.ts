@@ -9,7 +9,7 @@ import type { SubstateValue } from "./SubstateValue";
 export interface SubstateRecord {
   substate_id: SubstateId;
   version: number;
-  substate_value: SubstateValue;
+  substate_value: SubstateValue | null;
   state_hash: string;
   created_by_transaction: string;
   created_justify: string;

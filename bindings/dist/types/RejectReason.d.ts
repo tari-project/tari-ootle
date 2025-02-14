@@ -15,5 +15,5 @@ export type RejectReason = {
         abort_reason: string;
     };
 } | {
-    FeesNotPaid: string;
+    InsufficientFeesPaid: string;
 } | "Unknown";

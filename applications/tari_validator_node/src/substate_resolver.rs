@@ -29,7 +29,7 @@ impl<TStateStore, TEpochManager, TValidatorNodeClientFactory, TSubstateCache>
 where
     TStateStore: StateStore,
     TEpochManager: EpochManagerReader<Addr = TStateStore::Addr>,
-    TValidatorNodeClientFactory: ValidatorNodeClientFactory<Addr = TStateStore::Addr>,
+    TValidatorNodeClientFactory: ValidatorNodeClientFactory<TStateStore::Addr>,
     TSubstateCache: SubstateCache,
 {
     pub fn new(
@@ -40,9 +40,8 @@ where
     }
 
     fn resolve_local_substates(&self, transaction: &Transaction) -> Result<ResolvedSubstates, SubstateResolverError> {
-        let mut substates = IndexMap::new();
         let inputs = transaction.all_inputs_substate_ids_iter();
-        let (mut found_local_substates, missing_substate_ids) = self
+        let (found_local_substates, missing_substate_ids) = self
             .store
             .with_read_tx(|tx| SubstateRecord::get_any_max_version(tx, inputs))?;
 
@@ -63,33 +62,39 @@ where
                 Some(requested_version) => {
                     let maybe_match = found_local_substates
                         .iter()
-                        .find(|s| s.version() == requested_version && s.substate_id() == requested_input.substate_id());
+                        .find(|s| s.substate_id() == requested_input.substate_id());
 
                     match maybe_match {
                         Some(substate) => {
-                            if substate.is_destroyed() {
+                            if substate.version() < requested_version {
+                                return Err(SubstateResolverError::InputSubstateDoesNotExist {
+                                    substate_requirement: requested_input.to_owned(),
+                                });
+                            }
+
+                            if substate.is_destroyed() || substate.version() > requested_version {
                                 return Err(SubstateResolverError::InputSubstateDowned {
-                                    id: requested_input.into_substate_id(),
+                                    id: requested_input.substate_id().clone(),
                                     version: requested_version,
                                 });
                             }
+
                             // OK
                         },
                         // Requested substate or version not found. We know that the requested substate is not foreign
                         // because we checked missing_substate_ids
                         None => {
                             return Err(SubstateResolverError::InputSubstateDoesNotExist {
-                                substate_requirement: requested_input,
+                                substate_requirement: requested_input.to_owned(),
                             });
                         },
                     }
                 },
                 // No version specified, so we will use the latest version
                 None => {
-                    let (pos, substate) = found_local_substates
+                    let substate = found_local_substates
                         .iter()
-                        .enumerate()
-                        .find(|(_, s)| s.substate_id() == requested_input.substate_id())
+                        .find(| s| s.substate_id() == requested_input.substate_id())
                         // This is not possible
                         .ok_or_else(|| {
                             error!(
@@ -97,15 +102,15 @@ where
                                 "🐞 BUG: Requested substate {} was not missing but was also not found",
                                 requested_input.substate_id()
                             );
-                            SubstateResolverError::InputSubstateDoesNotExist { substate_requirement: requested_input.clone() }
+                            SubstateResolverError::InputSubstateDoesNotExist { substate_requirement: requested_input.to_owned() }
                         })?;
 
+                    // Latest version is DOWN
                     if substate.is_destroyed() {
-                        // The requested substate is downed locally, it may be available in a foreign shard so we add it
-                        // to missing
-                        let _substate = found_local_substates.remove(pos);
-                        missing_substates.insert(requested_input);
-                        continue;
+                        return Err(SubstateResolverError::InputSubstateDowned {
+                            id: requested_input.substate_id().clone(),
+                            version: substate.version(),
+                        });
                     }
 
                     // User did not specify the version, so we will use the latest version
@@ -121,15 +126,17 @@ where
             missing_substate_ids.len(),
         );
 
-        substates.extend(
-            found_local_substates
-                .into_iter()
-                .map(|s| (s.substate_id.clone(), s.into_substate())),
-        );
+        let mut substates = IndexMap::new();
+        substates.extend(found_local_substates.into_iter().map(|s| {
+            (
+                s.substate_id.clone(),
+                s.into_substate().expect("All substates already checked UP"),
+            )
+        }));
 
         Ok(ResolvedSubstates {
             local: substates,
-            unresolved_foreign: missing_substates,
+            unresolved_foreign: missing_substates.into_iter().map(|s| s.to_owned()).collect(),
         })
     }
 
@@ -175,7 +182,7 @@ impl<TStateStore, TEpochManager, TValidatorNodeClientFactory, TSubstateCache> Su
 where
     TStateStore: StateStore + Sync + Send,
     TEpochManager: EpochManagerReader<Addr = TStateStore::Addr>,
-    TValidatorNodeClientFactory: ValidatorNodeClientFactory<Addr = TStateStore::Addr>,
+    TValidatorNodeClientFactory: ValidatorNodeClientFactory<TStateStore::Addr>,
     TSubstateCache: SubstateCache,
 {
     type Error = SubstateResolverError;

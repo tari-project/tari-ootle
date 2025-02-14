@@ -2,7 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::Committee, option::Displayable, optional::Optional, Epoch, NodeHeight};
+use tari_dan_common_types::{committee::Committee, displayable::Displayable, optional::Optional, Epoch, NodeHeight};
 use tari_dan_storage::{
     consensus_models::{HighQc, LastSentVote, LeafBlock},
     StateStore,

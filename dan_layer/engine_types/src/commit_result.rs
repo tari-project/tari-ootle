@@ -292,7 +292,7 @@ impl Display for TransactionResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub enum RejectReason {
     InvalidTransaction(String),
@@ -306,7 +306,7 @@ pub enum RejectReason {
         end_shard: u32,
         abort_reason: String,
     },
-    FeesNotPaid(String),
+    InsufficientFeesPaid(String),
     Unknown,
 }
 
@@ -331,7 +331,7 @@ impl Display for RejectReason {
                     "Foreign shard group ({start_shard}-{end_shard}) decided to abort: {abort_reason}"
                 )
             },
-            RejectReason::FeesNotPaid(msg) => write!(f, "Fee not paid: {}", msg),
+            RejectReason::InsufficientFeesPaid(msg) => write!(f, "Insufficient fees paid: {}", msg),
             RejectReason::Unknown => write!(f, "<unknown reject reason - this is not valid>"),
         }
     }

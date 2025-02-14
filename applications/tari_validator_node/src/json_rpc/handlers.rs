@@ -29,19 +29,24 @@ use axum_jrpc::{
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::*;
 use serde_json::{self as json, json};
-use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
-use tari_dan_app_utilities::{keypair::RistrettoKeypair, template_manager::interface::TemplateManagerHandle};
+use tari_base_node_client::types::BaseLayerValidatorNode;
+use tari_common_types::types::FixedHash;
+use tari_dan_app_utilities::keypair::RistrettoKeypair;
 use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateAddress};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
     consensus_models::{Block, ExecutedTransaction, LeafBlock, QuorumDecision, SubstateRecord, TransactionRecord},
+    global::GlobalDb,
     Ordering,
     StateStore,
     StateStoreReadTransaction,
 };
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_client::types::{
     self,
     AddPeerRequest,
@@ -50,8 +55,6 @@ use tari_validator_node_client::types::{
     DryRunTransactionFinalizeResult,
     GetAllVnsRequest,
     GetAllVnsResponse,
-    GetBaseLayerEpochChangesRequest,
-    GetBaseLayerEpochChangesResponse,
     GetBlockRequest,
     GetBlockResponse,
     GetBlocksCountResponse,
@@ -108,30 +111,26 @@ pub struct JsonRpcHandlers {
     mempool: MempoolHandle,
     template_manager: TemplateManagerHandle,
     epoch_manager: EpochManagerHandle<PeerAddress>,
+    global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     consensus: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
-    base_node_client: GrpcBaseNodeClient,
     state_store: SqliteStateStore<PeerAddress>,
     dry_run_transaction_processor: DryRunTransactionProcessor,
 }
 
 impl JsonRpcHandlers {
-    pub fn new(base_node_client: GrpcBaseNodeClient, services: &Services) -> Self {
+    pub fn new(services: &Services) -> Self {
         Self {
             keypair: services.keypair.clone(),
             mempool: services.mempool.clone(),
             epoch_manager: services.epoch_manager.clone(),
             consensus: services.consensus_handle.clone(),
+            global_db: services.global_db.clone(),
             template_manager: services.template_manager.clone(),
             networking: services.networking.clone(),
-            base_node_client,
             state_store: services.state_store.clone(),
             dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
         }
-    }
-
-    pub fn base_node_client(&self) -> GrpcBaseNodeClient {
-        self.base_node_client.clone()
     }
 }
 
@@ -231,9 +230,22 @@ impl JsonRpcHandlers {
 
         let tx = self.state_store.create_read_tx().unwrap();
         match SubstateRecord::get(&tx, &request.address).optional() {
-            Ok(Some(state)) => Ok(JsonRpcResponse::success(answer_id, GetStateResponse {
-                data: state.into_substate().to_bytes(),
-            })),
+            Ok(Some(state)) => {
+                let Some(substate) = state.into_substate() else {
+                    return Err(JsonRpcResponse::error(
+                        answer_id,
+                        JsonRpcError::new(
+                            JsonRpcErrorReason::ApplicationError(100),
+                            format!("Substate {} is DOWN", request.address),
+                            json::Value::Null,
+                        ),
+                    ));
+                };
+
+                Ok(JsonRpcResponse::success(answer_id, GetStateResponse {
+                    data: substate.to_bytes(),
+                }))
+            },
             Ok(None) => Err(JsonRpcResponse::error(
                 answer_id,
                 JsonRpcError::new(
@@ -372,7 +384,7 @@ impl JsonRpcHandlers {
             Some(substate) => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::Up,
                 created_by_tx: Some(substate.created_by_transaction),
-                value: Some(substate.into_substate_value()),
+                value: substate.into_substate_value(),
             })),
             None => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::DoesNotExist,
@@ -573,8 +585,31 @@ impl JsonRpcHandlers {
                 ),
             )
         })?;
-        let (current_block_height, current_block_hash) =
-            self.epoch_manager.current_block_info().await.map_err(|e| {
+
+        let (current_block_hash, current_block_height) = self
+            .global_db
+            .create_transaction()
+            .and_then(|mut tx| {
+                // This pokes into the internals of the oracles a bit. And can give incorrect results if we switch
+                // between them.
+                let current_epoch = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<Epoch>(StoreKey::StaticCurrentEpoch.as_key_bytes())?;
+                let block_hash = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<FixedHash>(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes())?
+                    .or_else(|| current_epoch.map(calc_static_epoch_hash));
+                let block_height = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())?
+                    // Just use the epoch here
+                    .or(current_epoch.map(|e| e.as_u64()));
+                Ok::<_, SqliteStorageError>((block_hash.unwrap_or_default(), block_height.unwrap_or_default()))
+            })
+            .map_err(|e| {
                 JsonRpcResponse::error(
                     answer_id,
                     JsonRpcError::new(
@@ -727,58 +762,23 @@ impl JsonRpcHandlers {
     pub async fn get_all_vns(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let GetAllVnsRequest { epoch } = value.parse_params::<GetAllVnsRequest>()?;
-        if let Ok(vns) = self.base_node_client().get_validator_nodes(epoch.as_u64() * 10).await {
-            Ok(JsonRpcResponse::success(answer_id, GetAllVnsResponse { vns }))
-        } else {
-            Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    "Something went wrong".to_string(),
-                    json::Value::Null,
-                ),
-            ))
-        }
-    }
 
-    pub async fn get_base_layer_validator_changes(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let GetBaseLayerEpochChangesRequest { start_epoch, end_epoch } =
-            value.parse_params::<GetBaseLayerEpochChangesRequest>()?;
-        let mut changes = Vec::new();
-        fn convert_change(
-            change: tari_core::base_node::comms_interface::ValidatorNodeChange,
-        ) -> types::ValidatorNodeChange {
-            match change {
-                tari_core::base_node::comms_interface::ValidatorNodeChange::Add {
-                    registration,
-                    activation_epoch,
-                    minimum_value_promise,
-                } => types::ValidatorNodeChange::Add {
-                    public_key: registration.public_key().clone(),
-                    activation_epoch: Epoch(activation_epoch.as_u64()),
-                    minimum_value_promise: minimum_value_promise.as_u64(),
-                },
-                tari_core::base_node::comms_interface::ValidatorNodeChange::Remove { public_key } => {
-                    types::ValidatorNodeChange::Remove {
-                        public_key: public_key.clone(),
-                    }
-                },
-            }
-        }
-        for epoch in start_epoch.as_u64()..=end_epoch.as_u64() {
-            let epoch = Epoch(epoch);
-            let vns = self
-                .base_node_client()
-                .get_validator_node_changes(epoch, None)
-                .await
-                .map_err(internal_error(answer_id))?;
-            changes.push((epoch, vns.into_iter().map(convert_change).collect()));
-        }
+        let vns = self
+            .epoch_manager
+            .get_all_validator_nodes(epoch)
+            .await
+            .map_err(internal_error(answer_id))?;
 
-        Ok(JsonRpcResponse::success(answer_id, GetBaseLayerEpochChangesResponse {
-            changes,
-        }))
+        let vns = vns
+            .into_iter()
+            .map(|vn| BaseLayerValidatorNode {
+                public_key: vn.public_key,
+                shard_key: vn.shard_key,
+                sidechain_id: None,
+            })
+            .collect();
+
+        Ok(JsonRpcResponse::success(answer_id, GetAllVnsResponse { vns }))
     }
 
     pub async fn get_consensus_status(&self, value: JsonRpcExtractor) -> JrpcResult {

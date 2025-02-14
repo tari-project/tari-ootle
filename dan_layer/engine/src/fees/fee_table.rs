@@ -3,6 +3,7 @@
 
 #[derive(Debug, Clone)]
 pub struct FeeTable {
+    pub per_transaction_weight_cost: u64,
     pub per_module_call_cost: u64,
     pub per_byte_storage_cost: u64,
     pub per_event_cost: u64,
@@ -12,11 +13,16 @@ pub struct FeeTable {
 impl FeeTable {
     pub fn zero_rated() -> Self {
         Self {
+            per_transaction_weight_cost: 0,
             per_module_call_cost: 0,
             per_byte_storage_cost: 0,
             per_event_cost: 0,
             per_log_cost: 0,
         }
+    }
+
+    pub fn per_transaction_weight_cost(&self) -> u64 {
+        self.per_transaction_weight_cost
     }
 
     pub fn per_module_call_cost(&self) -> u64 {

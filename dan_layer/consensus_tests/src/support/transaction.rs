@@ -10,6 +10,7 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::{ComponentBody, ComponentHeader},
     fees::{FeeBreakdown, FeeReceipt},
+    hashing::hash_template_code,
     published_template::PublishedTemplate,
     substate::{Substate, SubstateDiff, SubstateId},
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
@@ -74,11 +75,13 @@ pub fn create_execution_result_for_transaction(
                         .instructions()
                         .iter()
                         .find_map(|i| i.published_template_binary())
-                        .expect("No publish template instruction found in transaction")
-                        .to_vec();
+                        .expect("No publish template instruction found in transaction");
                     diff.up(
                         output.versioned_substate_id().substate_id().clone(),
-                        Substate::new(output.versioned_substate_id().version(), PublishedTemplate { binary }),
+                        Substate::new(output.versioned_substate_id().version(), PublishedTemplate {
+                            author: transaction.seal_signature().public_key().clone(),
+                            binary_hash: hash_template_code(binary),
+                        }),
                     );
                 },
                 _ => {

@@ -23,7 +23,6 @@
 use log::info;
 use tari_dan_app_utilities::{
     substate_file_cache::SubstateFileCache,
-    template_manager::implementation::TemplateManager,
     transaction_executor::{TariDanTransactionProcessor, TransactionExecutor, TransactionProcessorError},
 };
 use tari_dan_common_types::PeerAddress;
@@ -33,9 +32,10 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::RpcStatus;
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_client::ValidatorNodeClientError;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;

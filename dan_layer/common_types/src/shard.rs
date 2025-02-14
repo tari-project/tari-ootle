@@ -18,12 +18,24 @@ use crate::{uint::U256, NumPreshards, SubstateAddress};
 pub struct Shard(#[cfg_attr(feature = "ts", ts(type = "number"))] u32);
 
 impl Shard {
-    pub const fn zero() -> Shard {
+    /// Returns the first available shard in the whole range.
+    /// Note: it starts from `1` as `0` is reserved for global substates.
+    pub const fn first() -> Shard {
+        Shard(1)
+    }
+
+    /// Returns global shard number.
+    /// It is a reserved shard for global substates.
+    pub const fn global() -> Shard {
         Shard(0)
     }
 
-    pub const fn is_zero(&self) -> bool {
+    pub const fn is_global(&self) -> bool {
         self.0 == 0
+    }
+
+    pub const fn is_first(&self) -> bool {
+        self.0 == 1
     }
 
     pub const fn as_u32(self) -> u32 {
@@ -31,17 +43,18 @@ impl Shard {
     }
 
     pub fn to_substate_address_range(self, num_shards: NumPreshards) -> RangeInclusive<SubstateAddress> {
-        if num_shards.is_one() {
+        if num_shards.is_one() || self.is_global() {
             return RangeInclusive::new(SubstateAddress::zero(), SubstateAddress::max());
         }
 
         let num_shards = num_shards.as_u32();
 
-        let shard_u256 = U256::from(self.0);
+        let shard_u256 = U256::from(self.0) - 1;
+        let shard_index = self.0 - 1;
 
         // Power of two integer division using bit shifts
         let shard_size = U256::MAX >> num_shards.trailing_zeros();
-        if self.0 == 0 {
+        if shard_index == 0 {
             return RangeInclusive::new(
                 SubstateAddress::zero(),
                 SubstateAddress::from_u256_zero_version(shard_size - 1),
@@ -51,7 +64,7 @@ impl Shard {
         // Add one to each start to account for remainder
         let start = shard_u256 * shard_size;
 
-        if self.0 == num_shards - 1 {
+        if shard_index == num_shards - 1 {
             return RangeInclusive::new(
                 SubstateAddress::from_u256_zero_version(start + shard_u256 - 1),
                 SubstateAddress::max(),
@@ -63,38 +76,6 @@ impl Shard {
             SubstateAddress::from_u256_zero_version(start + shard_u256 - 1),
             SubstateAddress::from_u256_zero_version(end + shard_u256 - 1),
         )
-
-        // let num_shards_next_pow2 = num_shards.next_power_of_two();
-        // // Half the next power of two i.e. num_shards rounded down to previous power of two
-        // let num_shards_prev_pow2 = num_shards_next_pow2 >> 1;
-        // let num_shards_next_pow2 = U256::from(num_shards_next_pow2);
-        // // Power of two division using bit shifts
-        // let half_shard_size = U256::MAX >> num_shards_next_pow2.trailing_zeros();
-        //
-        // if self.0 == 0 {
-        //     return RangeInclusive::new(SubstateAddress::zero(), SubstateAddress::from_u256(half_shard_size));
-        // }
-        //
-        // // Calculate size of shard at previous power of two
-        // let full_shard_size = U256::MAX >> num_shards_prev_pow2.trailing_zeros();
-        // // The "extra" half shards in the space
-        // let num_half_shards = num_shards % num_shards_prev_pow2;
-        //
-        // let start = U256::from(self.0.min(num_half_shards * 2)) * half_shard_size +
-        //     U256::from(self.0.saturating_sub(num_half_shards * 2)) * full_shard_size;
-        //
-        // if self.0 == num_shards - 1 {
-        //     return RangeInclusive::new(SubstateAddress::from_u256(start + shard_u256), SubstateAddress::max());
-        // }
-        //
-        // let next_shard = self.0 + 1;
-        // let end = U256::from(next_shard.min(num_half_shards * 2)) * half_shard_size +
-        //     U256::from(next_shard.saturating_sub(num_half_shards * 2)) * full_shard_size;
-        //
-        // RangeInclusive::new(
-        //     SubstateAddress::from_u256(start + shard_u256),
-        //     SubstateAddress::from_u256(end + shard_u256),
-        // )
     }
 }
 
@@ -139,7 +120,7 @@ mod test {
         for num_of_shards in power_of_twos {
             let mut last_end = U256::ZERO;
             for shard_index in 0..num_of_shards.as_u32() {
-                let shard = Shard::from(shard_index);
+                let shard = Shard::from(shard_index + 1);
                 let range = shard.to_substate_address_range(num_of_shards);
                 if shard_index == 0 {
                     assert_eq!(range.start().to_u256(), U256::ZERO, "First shard should start at 0");

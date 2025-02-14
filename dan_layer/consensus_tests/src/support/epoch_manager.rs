@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use async_trait::async_trait;
+use rand::seq::IteratorRandom;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
@@ -13,7 +13,7 @@ use tari_dan_common_types::{
     ToSubstateAddress,
     VersionedSubstateId,
 };
-use tari_dan_storage::global::models::ValidatorNode;
+use tari_dan_storage::{global::models::ValidatorNode, StorageError};
 use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader};
 use tokio::sync::{broadcast, Mutex, MutexGuard};
 
@@ -33,7 +33,7 @@ impl TestEpochManager {
             inner: Default::default(),
             our_validator_node: None,
             tx_epoch_events,
-            current_epoch: Epoch(0),
+            current_epoch: Epoch(1),
         }
     }
 
@@ -41,8 +41,8 @@ impl TestEpochManager {
         self.current_epoch = current_epoch;
         {
             let mut lock = self.inner.lock().await;
+            log::error!("Current epoch {} -> {}", lock.current_epoch, current_epoch);
             lock.current_epoch = current_epoch;
-            lock.is_epoch_active = true;
         }
 
         let _ = self.tx_epoch_events.send(EpochManagerEvent::EpochChanged {
@@ -125,7 +125,6 @@ impl TestEpochManager {
     }
 }
 
-#[async_trait]
 impl EpochManagerReader for TestEpochManager {
     type Addr = TestAddress;
 
@@ -189,20 +188,8 @@ impl EpochManagerReader for TestEpochManager {
         Ok(self.inner.lock().await.current_epoch)
     }
 
-    async fn current_base_layer_block_info(&self) -> Result<(u64, FixedHash), EpochManagerError> {
-        Ok(self.inner.lock().await.current_block_info)
-    }
-
-    async fn get_last_block_of_current_epoch(&self) -> Result<FixedHash, EpochManagerError> {
-        Ok(self.inner.lock().await.last_block_of_current_epoch)
-    }
-
-    async fn is_last_block_of_epoch(&self, _block_height: u64) -> Result<bool, EpochManagerError> {
-        Ok(false)
-    }
-
-    async fn is_epoch_active(&self, _epoch: Epoch) -> Result<bool, EpochManagerError> {
-        Ok(self.inner.lock().await.is_epoch_active)
+    async fn get_current_epoch_hash(&self) -> Result<FixedHash, EpochManagerError> {
+        Ok(self.inner.lock().await.last_epoch_hash)
     }
 
     async fn get_num_committees(&self, _epoch: Epoch) -> Result<u32, EpochManagerError> {
@@ -318,10 +305,6 @@ impl EpochManagerReader for TestEpochManager {
         })
     }
 
-    async fn get_base_layer_block_height(&self, _hash: FixedHash) -> Result<Option<u64>, EpochManagerError> {
-        Ok(Some(self.inner.lock().await.current_block_info.0))
-    }
-
     async fn wait_for_initial_scanning_to_complete(&self) -> Result<(), EpochManagerError> {
         // Scanning is not relevant to tests
         Ok(())
@@ -335,14 +318,43 @@ impl EpochManagerReader for TestEpochManager {
         state.eviction_proofs.push(proof);
         Ok(())
     }
+
+    async fn get_random_committee_member(
+        &self,
+        _epoch: Epoch,
+        shard_group: Option<ShardGroup>,
+        excluding: Vec<Self::Addr>,
+    ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
+        let state = self.state_lock().await;
+        let vn = match shard_group {
+            Some(shard_group) => state
+                .validator_nodes
+                .values()
+                .filter(|(_, sg)| *sg == shard_group)
+                .map(|(vn, _)| vn)
+                .find(|vn| !excluding.contains(&vn.address))
+                .ok_or_else(|| {
+                    EpochManagerError::StorageError(StorageError::NotFound {
+                        item: "validator_nodes",
+                        key: format!("in shard group {shard_group}"),
+                    })
+                })?,
+            None => state
+                .validator_nodes
+                .values()
+                .choose(&mut rand::thread_rng())
+                .map(|(vn, _)| vn)
+                .expect("No committees?"),
+        };
+
+        Ok(vn.clone())
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct TestEpochManagerState {
     pub current_epoch: Epoch,
-    pub current_block_info: (u64, FixedHash),
-    pub last_block_of_current_epoch: FixedHash,
-    pub is_epoch_active: bool,
+    pub last_epoch_hash: FixedHash,
     #[allow(clippy::type_complexity)]
     pub validator_nodes: HashMap<TestAddress, (ValidatorNode<TestAddress>, ShardGroup)>,
     pub committees: HashMap<ShardGroup, Committee<TestAddress>>,
@@ -353,11 +365,9 @@ pub struct TestEpochManagerState {
 impl Default for TestEpochManagerState {
     fn default() -> Self {
         Self {
-            current_epoch: Epoch(0),
-            current_block_info: (0, FixedHash::default()),
-            last_block_of_current_epoch: FixedHash::default(),
+            current_epoch: Epoch(1),
+            last_epoch_hash: FixedHash::default(),
             validator_nodes: HashMap::new(),
-            is_epoch_active: false,
             committees: HashMap::new(),
             address_shard: HashMap::new(),
             eviction_proofs: Vec::new(),

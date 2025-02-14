@@ -14,6 +14,13 @@ pub enum NoVoteReason {
         expected: TransactionPoolStage,
         stage: TransactionPoolStage,
     },
+    #[error("Stage transaction not applicable. {current}->{next} output-only={is_output_only} decision: {decision}")]
+    StageTransitionNotApplicable {
+        current: TransactionPoolStage,
+        next: TransactionPoolStage,
+        is_output_only: bool,
+        decision: Decision,
+    },
     #[error("The transaction is not in the pool")]
     TransactionNotInPool,
     #[error("Decision disagreement. Local: {local:?}, Remote: {remote:?}")]
@@ -83,6 +90,7 @@ impl NoVoteReason {
         match self {
             Self::AlreadyVotedAtHeight => "ShouldNotVote",
             Self::StageDisagreement { .. } => "StageDisagreement",
+            Self::StageTransitionNotApplicable { .. } => "StageTransitionNotApplicable",
             Self::TransactionNotInPool => "TransactionNotInPool",
             Self::DecisionDisagreement { .. } => "DecisionDisagreement",
             Self::FeeDisagreement => "FeeDisagreement",

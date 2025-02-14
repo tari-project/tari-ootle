@@ -8,7 +8,7 @@ use libp2p::{gossipsub, PeerId};
 use log::*;
 use tari_dan_common_types::{Epoch, PeerAddress, ShardGroup, ToSubstateAddress};
 use tari_dan_p2p::{proto, DanMessage, NewTransactionMessage, TariMessagingSpec};
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::{NetworkingHandle, NetworkingService};
 use tari_swarm::messaging::{prost::ProstCodec, Codec};
 use tokio::sync::mpsc;

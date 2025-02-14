@@ -6,12 +6,14 @@ use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display, iter, ops::Ra
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
+    displayable::Displayable,
     shard::Shard,
     Epoch,
     NodeHeight,
     SubstateAddress,
     SubstateRequirement,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_engine_types::substate::{hash_substate, Substate, SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
@@ -32,7 +34,7 @@ use crate::{
 pub struct SubstateRecord {
     pub substate_id: SubstateId,
     pub version: u32,
-    pub substate_value: SubstateValue,
+    pub substate_value: Option<SubstateValue>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub state_hash: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -65,10 +67,10 @@ pub struct SubstateDestroyed {
 }
 
 impl SubstateRecord {
-    pub fn new(
+    pub fn new<V: Into<SubstateValueOrHash>>(
         substate_id: SubstateId,
         version: u32,
-        substate_value: SubstateValue,
+        value: V,
         created_by_shard: Shard,
         created_at_epoch: Epoch,
         created_height: NodeHeight,
@@ -76,11 +78,12 @@ impl SubstateRecord {
         created_by_transaction: TransactionId,
         created_justify: QcId,
     ) -> Self {
+        let value = value.into();
         Self {
             substate_id,
             version,
-            state_hash: hash_substate(&substate_value, version),
-            substate_value,
+            state_hash: value.to_value_hash(version),
+            substate_value: value.into_value(),
             created_height,
             created_justify,
             created_by_shard,
@@ -107,20 +110,16 @@ impl SubstateRecord {
         &self.substate_id
     }
 
-    pub fn substate_value(&self) -> &SubstateValue {
-        &self.substate_value
+    pub fn substate_value(&self) -> Option<&SubstateValue> {
+        self.substate_value.as_ref()
     }
 
-    pub fn into_substate_value(self) -> SubstateValue {
+    pub fn into_substate_value(self) -> Option<SubstateValue> {
         self.substate_value
     }
 
-    pub fn to_substate(&self) -> Substate {
-        Substate::new(self.version, self.substate_value.clone())
-    }
-
-    pub fn into_substate(self) -> Substate {
-        Substate::new(self.version, self.substate_value)
+    pub fn into_substate(self) -> Option<Substate> {
+        Some(Substate::new(self.version, self.substate_value?))
     }
 
     pub fn version(&self) -> u32 {
@@ -215,17 +214,31 @@ impl SubstateRecord {
         Ok(rec.is_up())
     }
 
-    pub fn get_any<TTx: StateStoreReadTransaction, I: IntoIterator<Item = SubstateRequirement>>(
+    pub fn get_any<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = VersionedSubstateIdRef<'a>>>(
         tx: &TTx,
-        shards: I,
-    ) -> Result<(Vec<SubstateRecord>, HashSet<SubstateRequirement>), StorageError> {
-        let mut substate_ids = shards.into_iter().collect::<HashSet<_>>();
+        requirements: I,
+    ) -> Result<(Vec<SubstateRecord>, HashSet<VersionedSubstateIdRef<'a>>), StorageError> {
+        let mut substate_ids = requirements.into_iter().collect::<HashSet<_>>();
         let found = tx.substates_get_any(&substate_ids)?;
         for f in &found {
-            substate_ids.remove(&f.to_substate_requirement());
+            substate_ids.remove(f.substate_id());
         }
 
         Ok((found, substate_ids))
+    }
+
+    pub fn get_all<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = VersionedSubstateIdRef<'a>>>(
+        tx: &TTx,
+        requirements: I,
+    ) -> Result<Vec<SubstateRecord>, StorageError> {
+        let (found, missing) = Self::get_any(tx, requirements)?;
+        if !missing.is_empty() {
+            return Err(StorageError::NotFound {
+                item: "SubstateRecord",
+                key: missing.display().to_string(),
+            });
+        }
+        Ok(found)
     }
 
     pub fn get_any_max_version<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = &'a SubstateId>>(
@@ -351,29 +364,84 @@ impl SubstateDestroyedProof {
 }
 
 #[derive(Debug, Clone)]
+pub enum SubstateValueOrHash {
+    Value(SubstateValue),
+    Hash(FixedHash),
+}
+
+impl SubstateValueOrHash {
+    pub fn value(&self) -> Option<&SubstateValue> {
+        match self {
+            SubstateValueOrHash::Value(value) => Some(value),
+            SubstateValueOrHash::Hash(_) => None,
+        }
+    }
+
+    pub fn into_value(self) -> Option<SubstateValue> {
+        match self {
+            SubstateValueOrHash::Value(value) => Some(value),
+            SubstateValueOrHash::Hash(_) => None,
+        }
+    }
+
+    pub fn hash(&self) -> Option<&FixedHash> {
+        match self {
+            SubstateValueOrHash::Value(_) => None,
+            SubstateValueOrHash::Hash(hash) => Some(hash),
+        }
+    }
+
+    pub fn to_value_hash(&self, version: u32) -> FixedHash {
+        match &self {
+            SubstateValueOrHash::Value(v) => hash_substate(v, version),
+            SubstateValueOrHash::Hash(hash) => *hash,
+        }
+    }
+}
+
+impl From<SubstateValue> for SubstateValueOrHash {
+    fn from(value: SubstateValue) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl From<FixedHash> for SubstateValueOrHash {
+    fn from(hash: FixedHash) -> Self {
+        Self::Hash(hash)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SubstateData {
     pub substate_id: SubstateId,
     pub version: u32,
-    pub substate_value: SubstateValue,
+    pub value: SubstateValueOrHash,
     pub created_by_transaction: TransactionId,
 }
 
 impl SubstateData {
-    pub fn to_versioned_substate_id(&self) -> VersionedSubstateId {
-        VersionedSubstateId::new(self.substate_id.clone(), self.version)
+    pub fn value(&self) -> &SubstateValueOrHash {
+        &self.value
     }
 
-    pub fn into_substate(self) -> Substate {
-        Substate::new(self.version, self.substate_value)
+    pub fn as_versioned_substate_id_ref(&self) -> VersionedSubstateIdRef<'_> {
+        VersionedSubstateIdRef::new(&self.substate_id, self.version)
+    }
+
+    pub fn to_value_hash(&self) -> FixedHash {
+        self.value.to_value_hash(self.version)
     }
 }
 
 impl From<SubstateRecord> for SubstateData {
     fn from(value: SubstateRecord) -> Self {
         Self {
+            value: value
+                .substate_value
+                .map(Into::into)
+                .unwrap_or_else(|| value.state_hash.into()),
             substate_id: value.substate_id,
             version: value.version,
-            substate_value: value.substate_value,
             created_by_transaction: value.created_by_transaction,
         }
     }
@@ -392,6 +460,31 @@ impl SubstateUpdate {
 
     pub fn is_destroy(&self) -> bool {
         matches!(self, Self::Destroy { .. })
+    }
+
+    pub fn substate_id(&self) -> &SubstateId {
+        match self {
+            Self::Create(create) => &create.substate.substate_id,
+            Self::Destroy(destroyed) => &destroyed.substate_id,
+        }
+    }
+
+    pub fn version(&self) -> u32 {
+        match self {
+            Self::Create(create) => create.substate.version,
+            Self::Destroy(destroyed) => destroyed.version,
+        }
+    }
+
+    pub fn to_versioned_substate_id(&self) -> VersionedSubstateId {
+        VersionedSubstateId::new(self.substate_id().clone(), self.version())
+    }
+
+    pub fn as_create(&self) -> Option<&SubstateCreatedProof> {
+        match self {
+            Self::Create(create) => Some(create),
+            _ => None,
+        }
     }
 }
 

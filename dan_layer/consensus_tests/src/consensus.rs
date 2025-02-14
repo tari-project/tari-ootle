@@ -31,6 +31,7 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{
     commit_result::RejectReason,
+    hashing::hash_template_code,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
@@ -1532,7 +1533,9 @@ async fn multishard_publish_template() {
 
     test.send_transaction_to_destination(TestVnDestination::All, tx.clone())
         .await;
-    let template_id = PublishedTemplateAddress::from_author_and_code(&pk, &wasm);
+
+    let binary_hash = hash_template_code(&wasm);
+    let template_id = PublishedTemplateAddress::from_author_and_binary_hash(&pk, &binary_hash);
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx.transaction().clone(),
         decision: Decision::Commit,
@@ -1567,12 +1570,13 @@ async fn multishard_publish_template() {
         .state_store
         .with_read_tx(|tx| SubstateRecord::get(tx, &VersionedSubstateId::new(template_id, 0).to_substate_address()))
         .unwrap();
-    let binary = template_substate
+    let binary_hash = template_substate
         .substate_value
+        .unwrap()
         .into_template()
         .expect("Expected template substate")
-        .binary;
-    assert_eq!(binary, wasm, "Template binary does not match");
+        .binary_hash;
+    assert_eq!(binary_hash, hash_template_code(&wasm), "Template binary does not match");
 
     test.assert_clean_shutdown().await;
 }

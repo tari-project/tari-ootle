@@ -5,7 +5,13 @@ use std::{collections::HashSet, fmt::Display};
 
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{committee::CommitteeInfo, Epoch, SubstateRequirement, VersionedSubstateId};
+use tari_dan_common_types::{
+    committee::CommitteeInfo,
+    Epoch,
+    SubstateRequirement,
+    SubstateRequirementRef,
+    VersionedSubstateId,
+};
 use tari_engine_types::{
     indexed_value::IndexedValueError,
     instruction::Instruction,
@@ -18,6 +24,7 @@ use crate::{
     builder::TransactionBuilder,
     transaction_id::TransactionId,
     v1::UnsealedTransactionV1,
+    weight::TransactionWeight,
     TransactionSealSignature,
     TransactionSignature,
     TransactionV1,
@@ -57,6 +64,12 @@ impl Transaction {
     pub fn check_id(&self) -> bool {
         match self {
             Self::V1(tx) => tx.check_id(),
+        }
+    }
+
+    pub fn calculate_transaction_weight(&self) -> TransactionWeight {
+        match self {
+            Self::V1(tx) => tx.calculate_transaction_weight(),
         }
     }
 
@@ -127,7 +140,7 @@ impl Transaction {
         }
     }
 
-    pub fn all_published_templates_iter(&self) -> impl Iterator<Item = PublishedTemplateAddress> + '_ {
+    pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
         match self {
             Self::V1(tx) => tx.all_published_templates_iter(),
         }
@@ -145,7 +158,7 @@ impl Transaction {
         }
     }
 
-    pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirement> + '_ {
+    pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
         match self {
             Self::V1(tx) => tx.all_inputs_iter(),
         }

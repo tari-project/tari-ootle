@@ -12,18 +12,26 @@ use tari_dan_common_types::{
     ShardGroup,
     SubstateAddress,
     SubstateRequirement,
+    SubstateRequirementRef,
     VersionedSubstateId,
 };
 use tari_engine_types::{
-    hashing::{hasher32, EngineHashDomainLabel},
+    confidential::ConfidentialClaim,
+    hashing::{hash_template_code, hasher32, EngineHashDomainLabel},
     indexed_value::{IndexedValue, IndexedValueError},
     instruction::Instruction,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_template_lib::{models::ComponentAddress, Hash};
+use tari_template_lib::{args::Arg, models::ComponentAddress, Hash};
 
-use crate::{v1::signature::TransactionSignature, TransactionId, TransactionSealSignature, UnsealedTransactionV1};
+use crate::{
+    v1::signature::TransactionSignature,
+    weight::TransactionWeight,
+    TransactionId,
+    TransactionSealSignature,
+    UnsealedTransactionV1,
+};
 
 const LOG_TARGET: &str = "tari::dan::transaction::transaction";
 
@@ -125,6 +133,18 @@ impl TransactionV1 {
         &self.body
     }
 
+    pub fn calculate_transaction_weight(&self) -> TransactionWeight {
+        let num_inputs = self.inputs().len() as u64;
+        let num_signers = self.signatures().len() as u64;
+        let instruction_weight = self
+            .instructions()
+            .iter()
+            .chain(self.fee_instructions())
+            .map(calc_instruction_weight)
+            .sum::<TransactionWeight>();
+        instruction_weight + num_inputs + num_signers
+    }
+
     pub fn into_unsealed_transaction(self) -> UnsealedTransactionV1 {
         self.body
     }
@@ -139,22 +159,17 @@ impl TransactionV1 {
         (self.body, self.seal_signature, self.filled_inputs)
     }
 
-    pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirement> + '_ {
+    pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
         self.inputs()
             .iter()
             // Filled inputs override other inputs as they are likely filled with versions
             .filter(|i| self.filled_inputs().iter().all(|fi| fi.substate_id() != i.substate_id()))
-            .cloned()
-            .chain(self.filled_inputs().iter().cloned().map(Into::into))
+            .map(Into::into)
+            .chain(self.filled_inputs().iter().map(Into::into))
     }
 
     pub fn all_inputs_substate_ids_iter(&self) -> impl Iterator<Item = &SubstateId> + '_ {
-        self.inputs()
-            .iter()
-            // Filled inputs override other inputs as they are likely filled with versions
-            .filter(|i| self.filled_inputs().iter().all(|fi| fi.substate_id() != i.substate_id()))
-            .map(|i| i.substate_id())
-            .chain(self.filled_inputs().iter().map(|fi| fi.substate_id()))
+        self.all_inputs_iter().map(|i| i.substate_id)
     }
 
     pub fn to_all_involved_shards(&self, num_shards: NumPreshards, num_committees: u32) -> HashSet<ShardGroup> {
@@ -167,14 +182,18 @@ impl TransactionV1 {
             .collect()
     }
 
-    pub fn all_published_templates_iter(&self) -> impl Iterator<Item = PublishedTemplateAddress> + '_ {
+    pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
         let sealed_pk = self.seal_signature.public_key();
         self.instructions()
             .iter()
             .chain(self.fee_instructions())
             .filter_map(|instruction| {
                 if let Instruction::PublishTemplate { binary } = instruction {
-                    Some(PublishedTemplateAddress::from_author_and_code(sealed_pk, binary))
+                    let binary_hash = hash_template_code(binary);
+                    Some((
+                        PublishedTemplateAddress::from_author_and_binary_hash(sealed_pk, &binary_hash),
+                        binary.as_slice(),
+                    ))
                 } else {
                     None
                 }
@@ -264,4 +283,33 @@ impl Display for TransactionV1 {
             self.filled_inputs.len(),
         )
     }
+}
+
+fn calc_instruction_weight(instruction: &Instruction) -> u64 {
+    const BINARY_WEIGHT_DIVISOR: u64 = 3;
+    match instruction {
+        Instruction::CreateAccount {
+            access_rules,
+            workspace_bucket,
+            ..
+        } => {
+            access_rules.as_ref().map(|a| a.num_access_rules() as u64).unwrap_or(0) +
+                workspace_bucket.as_ref().map(|_| 1).unwrap_or(0)
+        },
+        Instruction::CallFunction { args, .. } => calc_args_weight(args),
+        Instruction::CallMethod { args, .. } => calc_args_weight(args),
+        Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
+        Instruction::EmitLog { message, .. } => message.len() as u64 / BINARY_WEIGHT_DIVISOR,
+        Instruction::ClaimBurn { .. } => size_of::<ConfidentialClaim>() as u64,
+        Instruction::ClaimValidatorFees { .. } => 1,
+        Instruction::DropAllProofsInWorkspace => 1,
+        Instruction::AssertBucketContains { .. } => 1,
+        Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
+    }
+}
+
+fn calc_args_weight(args: &[Arg]) -> u64 {
+    args.iter()
+        .map(|a| a.as_literal_bytes().map_or(0, |b| b.len() as u64))
+        .sum()
 }

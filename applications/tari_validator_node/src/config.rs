@@ -23,29 +23,28 @@
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 use config::Config;
-use libp2p::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_common::{
-    configuration::{serializers, CommonConfig, Network},
+    configuration::{CommonConfig, Network},
     ConfigurationError,
     DefaultConfigLoader,
     SubConfigPath,
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::{
+    epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig, RpcConfig},
-    template_manager::implementation::TemplateConfig,
 };
-use url::Url;
+use tari_template_manager::implementation::TemplateConfig;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
     pub common: CommonConfig,
     pub validator_node: ValidatorNodeConfig,
+    pub epoch_oracle: EpochOracleConfig,
     pub peer_seeds: PeerSeedsConfig,
     pub network: Network,
 }
@@ -55,6 +54,7 @@ impl ApplicationConfig {
         let mut config = Self {
             common: CommonConfig::load_from(cfg)?,
             validator_node: ValidatorNodeConfig::load_from(cfg)?,
+            epoch_oracle: EpochOracleConfig::load_from(cfg)?,
             peer_seeds: PeerSeedsConfig::load_from(cfg)?,
             network: cfg.get("network")?,
         };
@@ -80,30 +80,19 @@ pub struct ValidatorNodeConfig {
     pub shard_key_file: PathBuf,
     /// A path to the file that stores your node identity and secret key
     pub identity_file: PathBuf,
-    //// The node's publicly-accessible hostname
-    // pub public_address: Option<Multiaddr>,
-    /// The Tari base node's GRPC URL
-    pub base_node_grpc_url: Option<Url>,
-    /// If set to false, there will be no base layer scanning at all
-    pub scan_base_layer: bool,
-    /// How often do we want to scan the base layer for changes
-    #[serde(with = "serializers::seconds")]
-    pub base_layer_scanning_interval: Duration,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
     /// The p2p configuration settings
     pub p2p: P2pConfig,
     /// P2P RPC configuration
     pub rpc: RpcConfig,
-    /// GRPC address of the validator node  application
-    pub grpc_address: Option<Multiaddr>,
     /// JSON-RPC address of the validator node  application
     pub json_rpc_listener_address: Option<SocketAddr>,
     /// The jrpc address where the UI should connect (it can be the same as the json_rpc_address, but doesn't have to
     /// be), if this will be None, then the listen_addr will be used.
     pub json_rpc_public_address: Option<String>,
     /// The address of the HTTP UI
-    pub http_ui_listener_address: Option<SocketAddr>,
+    pub web_ui_listener_address: Option<SocketAddr>,
     /// Template config
     pub templates: TemplateConfig,
     /// Fee claim public key
@@ -144,16 +133,12 @@ impl Default for ValidatorNodeConfig {
             override_from: None,
             shard_key_file: PathBuf::from("shard_key.json"),
             identity_file: PathBuf::from("validator_node_id.json"),
-            base_node_grpc_url: None,
-            scan_base_layer: true,
-            base_layer_scanning_interval: Duration::from_secs(10),
             data_dir: PathBuf::from("data/validator_node"),
             p2p: P2pConfig::default(),
             rpc: RpcConfig::default(),
-            grpc_address: Some("/ip4/127.0.0.1/tcp/18144".parse().unwrap()),
             json_rpc_listener_address: Some("127.0.0.1:18200".parse().unwrap()),
             json_rpc_public_address: None,
-            http_ui_listener_address: Some("127.0.0.1:5001".parse().unwrap()),
+            web_ui_listener_address: Some("127.0.0.1:5001".parse().unwrap()),
             templates: TemplateConfig::default(),
             // Burn your fees
             fee_claim_public_key: RistrettoPublicKey::default(),

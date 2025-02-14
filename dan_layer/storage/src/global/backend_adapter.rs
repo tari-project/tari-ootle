@@ -32,13 +32,13 @@ use tari_dan_common_types::{
     ShardGroup,
     SubstateAddress,
 };
+use tari_engine_types::TemplateAddress;
 
 use super::{DbBaseLayerBlockInfo, DbEpoch, TemplateStatus};
 use crate::{
     atomic::AtomicDb,
     global::{
         base_layer_db::DbLayer1Transaction,
-        metadata_db::MetadataKey,
         models::ValidatorNode,
         template_db::{DbTemplate, DbTemplateUpdate},
     },
@@ -50,12 +50,12 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
     fn get_metadata<T: DeserializeOwned>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: &MetadataKey,
+        key: &[u8],
     ) -> Result<Option<T>, Self::Error>;
     fn set_metadata<T: Serialize>(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        key: MetadataKey,
+        key: &[u8],
         value: &T,
     ) -> Result<(), Self::Error>;
 
@@ -66,7 +66,12 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         status: Option<TemplateStatus>,
     ) -> Result<bool, Self::Error>;
 
-    fn delete_template(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8]) -> Result<(), Self::Error>;
+    fn set_status(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        key: &TemplateAddress,
+        status: TemplateStatus,
+    ) -> Result<(), Self::Error>;
 
     fn get_template(&self, tx: &mut Self::DbTransaction<'_>, key: &[u8]) -> Result<Option<DbTemplate>, Self::Error>;
     fn get_templates(&self, tx: &mut Self::DbTransaction<'_>, limit: usize) -> Result<Vec<DbTemplate>, Self::Error>;
@@ -162,6 +167,14 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         epoch: Epoch,
         shard_group: ShardGroup,
     ) -> Result<HashMap<ShardGroup, Committee<Self::Addr>>, Self::Error>;
+
+    fn validator_nodes_get_random_committee_member_from_shard_group(
+        &self,
+        tx: &mut Self::DbTransaction<'_>,
+        epoch: Epoch,
+        shard_group: Option<ShardGroup>,
+        excluding: Vec<Self::Addr>,
+    ) -> Result<ValidatorNode<Self::Addr>, Self::Error>;
 
     fn validator_nodes_get_committees_for_epoch(
         &self,

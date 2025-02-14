@@ -12,7 +12,7 @@ use minotari_app_grpc::tari_rpc::{
     WasmInfo,
 };
 use tari_dan_engine::wasm::compile::compile_template;
-use tari_engine_types::{hashing::template_hasher32, TemplateAddress};
+use tari_engine_types::{hashing::hash_template_code, TemplateAddress};
 use tari_template_lib::Hash;
 use tari_wallet_daemon_client::{
     types::{PublishTemplateRequest, TransactionWaitResultRequest},
@@ -133,7 +133,7 @@ pub fn compile_wasm_template(template_name: String) -> Result<Hash, anyhow::Erro
     template_path.push(template_name);
     let wasm_module = compile_template(template_path.as_path(), &[])?;
     let wasm_code = wasm_module.code();
-    Ok(template_hasher32().chain(&wasm_code).result())
+    Ok(hash_template_code(wasm_code))
 }
 
 pub fn get_template_wasm_path(template_name: String) -> PathBuf {
@@ -144,19 +144,6 @@ pub fn get_template_wasm_path(template_name: String) -> PathBuf {
     wasm_path
 }
 
-// pub fn get_all_template_names() -> Vec<String> {
-//     let mut template_path = get_template_root_path();
-//     let mut templates = Vec::new();
-//     for entry in std::fs::read_dir(template_path).unwrap() {
-//         let entry = entry.unwrap();
-//         let path = entry.path();
-//         if path.is_dir() {
-//             templates.push(path.file_name().unwrap().to_str().unwrap().to_string());
-//         }
-//     }
-//     templates
-// }
-//
 fn get_template_root_path() -> PathBuf {
     let mut template_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     template_path.push("src/templates");

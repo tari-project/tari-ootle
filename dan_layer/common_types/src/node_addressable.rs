@@ -6,6 +6,7 @@ use std::{
     hash::Hash,
 };
 
+use libp2p_identity::PeerId;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_common_types::types::PublicKey;
 
@@ -51,3 +52,7 @@ pub trait DerivableFromPublicKey: NodeAddressable {
 }
 
 impl DerivableFromPublicKey for PublicKey {}
+
+pub trait ToPeerId {
+    fn to_peer_id(&self) -> PeerId;
+}

@@ -4,7 +4,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use log::debug;
-use tari_dan_common_types::option::Displayable;
+use tari_dan_common_types::displayable::Displayable;
 use tari_jellyfish::{JmtStorageError, Node, NodeKey, StaleTreeNode, TreeStoreReader, TreeStoreWriter};
 
 use crate::StateHashTreeDiff;

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use log::*;
 use tari_dan_common_types::{
-    option::Displayable,
+    displayable::Displayable,
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
     SubstateRequirement,
@@ -218,7 +218,7 @@ where
         Ok(ValidatorScanResult {
             address: VersionedSubstateId::new(address.clone(), resp.version),
             created_by_tx: resp.created_by_transaction,
-            substate: resp.substate.into_substate_value(),
+            substate: resp.substate,
         })
     }
 

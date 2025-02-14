@@ -52,7 +52,7 @@ pub struct WalletDaemon;
 
 impl WalletDaemon {
     pub fn new() -> Self {
-        Self {}
+        Self
     }
 }
 
@@ -97,6 +97,7 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("--indexer-url={indexer_url}"))
             .arg(format!("--ui-connect-address={json_rpc_public_address}"))
             .arg(format!("-pdan_wallet_daemon.http_ui_address={web_ui_address}"))
+            .arg(format!("-pdan_wallet_daemon.web_ui_address={web_ui_address}"))
             .arg(format!("-pdan_wallet_daemon.authentication={}", auth));
 
         // A signaling server is not required for startup of the wallet daemon,

@@ -199,7 +199,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
 }
 
 async fn start(cli: &Cli) -> anyhow::Result<()> {
-    let mut config = Config::load_with_cli(cli).await.context("load with cli")?;
+    let mut config = Config::load_with_cli(cli).await.context("failed to load config")?;
     if let Commands::Start(ref overrides) = cli.command {
         overrides.apply(&mut config).context("cli overrides")?;
     }

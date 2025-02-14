@@ -24,7 +24,6 @@ use std::convert::{TryFrom, TryInto};
 
 use log::*;
 use tari_bor::encode;
-use tari_dan_app_utilities::template_manager::interface::TemplateManagerHandle;
 use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
 use tari_dan_p2p::{
     proto,
@@ -52,10 +51,11 @@ use tari_dan_storage::{
     StateStore,
 };
 use tari_engine_types::TemplateAddress;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::HashParseError;
+use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
@@ -207,7 +207,10 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 status: SubstateStatus::Up as i32,
                 address: substate.substate_id().to_bytes(),
                 version: substate.version(),
-                substate: substate.substate_value().to_bytes(),
+                substate: substate
+                    .substate_value()
+                    .map(|v| v.to_bytes())
+                    .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
                 created_transaction_hash: substate.created_by_transaction().into_array().to_vec(),
                 destroyed_transaction_hash: vec![],
                 quorum_certificates: vec![(&created_qc).into()],
@@ -272,13 +275,18 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
     ) -> Result<Streaming<SyncBlocksResponse>, RpcStatus> {
         let req = request.into_message();
         let store = self.shard_state_store.clone();
+
+        if proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).is_err() {
+            return Err(RpcStatus::bad_request("StreamSubstateSelection is invalid"));
+        }
+
         let current_epoch = self
             .epoch_manager
             .current_epoch()
             .await
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        let start_block_id = Some(req.start_block_id)
+        let start_block_id = Some(req.start_block_id.as_slice())
             .filter(|i| !i.is_empty())
             .map(BlockId::try_from)
             .transpose()
@@ -299,6 +307,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 None => {
                     let epoch = req
                         .epoch
+                        .clone()
                         .map(Epoch::from)
                         .map(|end| end.min(current_epoch))
                         .unwrap_or(current_epoch);
@@ -324,7 +333,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         };
 
         let (sender, receiver) = mpsc::channel(10);
-        task::spawn(BlockSyncTask::new(self.shard_state_store.clone(), start_block_id, None, sender).run());
+        task::spawn(BlockSyncTask::new(self.shard_state_store.clone(), start_block_id, None, sender).run(req));
 
         Ok(Streaming::new(receiver))
     }
@@ -407,6 +416,18 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         request: Request<SyncTemplatesRequest>,
     ) -> Result<Streaming<SyncTemplatesResponse>, RpcStatus> {
         let req = request.into_message();
+        const MAX_BATCH_SIZE: usize = 20;
+        info!(target: LOG_TARGET, "♻️ peer requesting template sync with {} template(s)", req.addresses.len());
+
+        if req.addresses.is_empty() {
+            return Err(RpcStatus::bad_request("No templates requested"));
+        }
+
+        if req.addresses.len() > MAX_BATCH_SIZE {
+            return Err(RpcStatus::bad_request(format!(
+                "Number of requested templates exceeds max {MAX_BATCH_SIZE}"
+            )));
+        }
 
         let (tx, rx) = mpsc::channel(10);
         let addresses = req
@@ -414,9 +435,9 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             .iter()
             .map(|raw| TemplateAddress::try_from_vec(raw.clone()))
             .collect::<Result<Vec<TemplateAddress>, HashParseError>>()
-            .map_err(|error| RpcStatus::bad_request(format!("Failed to parse address: {:?}", error)))?;
+            .map_err(|error| RpcStatus::bad_request(format!("Failed to parse address: {}", error)))?;
 
-        task::spawn(TemplateSyncTask::new(5, addresses, tx, self.template_manager.clone()).run());
+        task::spawn(TemplateSyncTask::new(MAX_BATCH_SIZE, addresses, tx, self.template_manager.clone()).run());
 
         Ok(Streaming::new(rx))
     }

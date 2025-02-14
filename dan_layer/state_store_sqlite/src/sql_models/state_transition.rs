@@ -43,9 +43,12 @@ impl StateTransition {
         let update = match self.transition.as_str() {
             "UP" => SubstateUpdate::Create(SubstateCreatedProof {
                 substate: SubstateData {
+                    value: substate
+                        .substate_value
+                        .map(Into::into)
+                        .unwrap_or_else(|| substate.state_hash.into()),
                     substate_id: substate.substate_id,
                     version: substate.version,
-                    substate_value: substate.substate_value,
                     created_by_transaction: substate.created_by_transaction,
                 },
             }),

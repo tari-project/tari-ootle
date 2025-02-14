@@ -77,7 +77,7 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
     config.common.base_path.clone_from(&base_dir);
     config.dan_wallet_daemon.json_rpc_address = Some(json_rpc_address);
     config.dan_wallet_daemon.signaling_server_address = Some(signaling_server_addr);
-    config.dan_wallet_daemon.indexer_node_json_rpc_url = indexer_url;
+    config.dan_wallet_daemon.indexer_json_rpc_url = indexer_url.parse().unwrap();
     config.dan_wallet_daemon.network = Network::LocalNet;
 
     let handle = task::spawn(run_tari_dan_wallet_daemon(config, shutdown_signal));

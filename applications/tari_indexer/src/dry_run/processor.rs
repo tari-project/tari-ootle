@@ -23,10 +23,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use log::{debug, info};
-use tari_dan_app_utilities::{
-    template_manager::implementation::TemplateManager,
-    transaction_executor::{TariDanTransactionProcessor, TransactionExecutor as _},
-};
+use tari_dan_app_utilities::transaction_executor::{TariDanTransactionProcessor, TransactionExecutor as _};
 use tari_dan_common_types::{Epoch, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
@@ -34,12 +31,13 @@ use tari_engine_types::{
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_indexer_lib::{
     substate_cache::SubstateCache,
     substate_scanner::SubstateScanner,
     transaction_autofiller::TransactionAutofiller,
 };
+use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::{
     SubstateResult,
@@ -125,6 +123,7 @@ where TSubstateCache: SubstateCache + 'static
         let fee_table = if Self::transaction_includes_fees(transaction) {
             // TODO: should match the VN fee table, should the fee table values be a consensus constant?
             FeeTable {
+                per_transaction_weight_cost: 1,
                 per_module_call_cost: 1,
                 per_byte_storage_cost: 1,
                 per_event_cost: 1,

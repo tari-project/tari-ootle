@@ -5,7 +5,7 @@ use crate::{
     proto,
     proto::{
         consensus::{Block, QuorumCertificate},
-        rpc::{sync_blocks_response::SyncData, QuorumCertificates, SubstateUpdate, Transactions},
+        rpc::{sync_blocks_response::SyncData, QuorumCertificates, SubstateCreatedProof, SubstateUpdate},
         transaction::Transaction,
     },
 };
@@ -32,6 +32,13 @@ impl proto::rpc::SyncBlocksResponse {
         }
     }
 
+    pub fn transaction_count(&self) -> Option<u32> {
+        match self.sync_data {
+            Some(SyncData::TransactionCount(count)) => Some(count),
+            _ => None,
+        }
+    }
+
     pub fn into_substate_update(self) -> Option<SubstateUpdate> {
         match self.sync_data {
             Some(SyncData::SubstateUpdate(update)) => Some(update),
@@ -39,9 +46,23 @@ impl proto::rpc::SyncBlocksResponse {
         }
     }
 
-    pub fn into_transactions(self) -> Option<Vec<Transaction>> {
+    pub fn into_transaction(self) -> Option<Transaction> {
         match self.sync_data {
-            Some(SyncData::Transactions(Transactions { transactions })) => Some(transactions),
+            Some(SyncData::Transaction(transaction)) => Some(transaction),
+            _ => None,
+        }
+    }
+
+    pub fn transaction_receipt_count(&self) -> Option<u32> {
+        match self.sync_data {
+            Some(SyncData::TransactionReceiptCount(count)) => Some(count),
+            _ => None,
+        }
+    }
+
+    pub fn into_transaction_receipt(self) -> Option<SubstateCreatedProof> {
+        match self.sync_data {
+            Some(SyncData::TransactionReceipt(receipt)) => Some(receipt),
             _ => None,
         }
     }

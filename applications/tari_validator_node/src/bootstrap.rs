@@ -29,7 +29,10 @@ use log::*;
 use minotari_app_utilities::identity_management;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{
-    configuration::Network,
+    configuration::{
+        bootstrap::{grpc_default_port, ApplicationType},
+        Network,
+    },
     exit_codes::{ExitCode, ExitError},
 };
 use tari_common_types::epoch::VnEpoch;
@@ -39,13 +42,14 @@ use tari_consensus::traits::hooks::NoopHooks;
 use tari_core::transactions::transaction_components::ValidatorNodeSignature;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_app_utilities::{
-    base_layer_scanner,
+    common::verify_correct_network,
+    epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
     substate_file_cache::SubstateFileCache,
-    template_manager,
-    template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle},
+    template_download_queue::TemplateDownloadQueue,
     transaction_executor::TariDanTransactionProcessor,
+    utxo_store::StateUtxoStore,
 };
 use tari_dan_common_types::PeerAddress;
 use tari_dan_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
@@ -53,14 +57,16 @@ use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{global::GlobalDb, StateStore};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_epoch_manager::{
-    base_layer::{EpochManagerConfig, EpochManagerHandle},
+    service::{EpochManagerConfig, EpochManagerHandle},
     EpochManagerReader,
 };
+use tari_epoch_oracles::{base_layer::BaseLayerOracle, configured::ConfiguredEpochOracle, EpochOracle};
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
@@ -98,6 +104,7 @@ use crate::{
     validator::Validator,
     validator_registration_file::ValidatorRegistrationFile,
     ApplicationConfig,
+    ValidatorNodeEpochManagerSpec,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::bootstrap";
@@ -109,10 +116,9 @@ pub async fn spawn_services(
     keypair: RistrettoKeypair,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     consensus_constants: ConsensusConstants,
-    base_node_client: GrpcBaseNodeClient,
     #[cfg(feature = "metrics")] metrics_registry: &prometheus::Registry,
 ) -> Result<Services, anyhow::Error> {
-    let mut handles = Vec::with_capacity(8);
+    let mut handles = Vec::with_capacity(10);
 
     ensure_directories_exist(config)?;
 
@@ -145,7 +151,6 @@ pub async fn spawn_services(
             p.addresses.into_iter().map(move |a| (peer_id, a))
         })
         .collect();
-
     let (mut networking, join_handle) = tari_networking::spawn(
         identity,
         MessagingMode::Enabled {
@@ -199,15 +204,43 @@ pub async fn spawn_services(
         validator_node_sidechain_id: config.validator_node.validator_node_sidechain_id.clone(),
         num_preshards: consensus_constants.num_preshards,
     };
+
+    // Epoch event scanner
+    let epoch_event_oracle = match config.epoch_oracle.oracle_type {
+        EpochOracleType::BaseLayer => {
+            let mut base_node_client =
+                create_base_layer_client(config.network, &config.epoch_oracle.base_layer).await?;
+            verify_correct_network(&mut base_node_client, config.network).await?;
+            EpochOracle::BaseLayer(BaseLayerOracle::new(
+                global_db.clone(),
+                base_node_client,
+                consensus_constants.base_layer_confirmations,
+                config.epoch_oracle.base_layer.scanning_interval,
+                config.validator_node.validator_node_sidechain_id.clone(),
+                config.validator_node.burnt_utxo_sidechain_id.clone(),
+                config.validator_node.template_sidechain_id.clone(),
+            ))
+        },
+        EpochOracleType::Configured => EpochOracle::Configured(ConfiguredEpochOracle::new(
+            config.epoch_oracle.configured.load().await?,
+            global_db.clone(),
+        )),
+    };
+
+    let (template_queue_sender, template_queue_receiver) = TemplateDownloadQueue::create();
+
     // Epoch manager
-    let (epoch_manager, epoch_manager_join_handle) = tari_epoch_manager::base_layer::spawn_service(
-        epoch_manager_config,
-        global_db.clone(),
-        base_node_client.clone(),
-        keypair.public_key().clone(),
-        FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path()),
-        shutdown.clone(),
-    );
+    let (epoch_manager, epoch_manager_join_handle) =
+        tari_epoch_manager::service::spawn_service::<ValidatorNodeEpochManagerSpec>(
+            epoch_manager_config,
+            global_db.clone(),
+            keypair.public_key().clone(),
+            epoch_event_oracle,
+            StateUtxoStore::new(state_store.clone()),
+            template_queue_sender,
+            FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path()),
+            shutdown.clone(),
+        );
 
     // Create registration file
     if let Err(err) = create_registration_file(config, &epoch_manager, sidechain_id.as_ref(), &keypair).await {
@@ -228,10 +261,11 @@ pub async fn spawn_services(
     info!(target: LOG_TARGET, "Template manager initializing");
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.validator_node.templates.clone())?;
-    let (template_manager_service, join_handle) = template_manager::implementation::spawn(
+    let (template_manager_service, join_handle) = tari_template_manager::implementation::spawn(
         template_manager.clone(),
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
+        template_queue_receiver,
         shutdown.clone(),
     );
     handles.push(join_handle);
@@ -239,6 +273,7 @@ pub async fn spawn_services(
     info!(target: LOG_TARGET, "Payload processor initializing");
     // Payload processor
     let fee_table = FeeTable {
+        per_transaction_weight_cost: 1,
         per_module_call_cost: 1,
         per_byte_storage_cost: 1,
         per_event_cost: 1,
@@ -308,7 +343,6 @@ pub async fn spawn_services(
         transaction_executor,
         tx_hotstuff_events,
         consensus_constants.clone(),
-        template_manager.clone(),
         template_manager_service.clone(),
     )
     .await;
@@ -323,23 +357,6 @@ pub async fn spawn_services(
         rx_transaction_gossip_messages,
         #[cfg(feature = "metrics")]
         metrics_registry,
-    );
-    handles.push(join_handle);
-
-    // Base Node scanner
-    let join_handle = base_layer_scanner::spawn(
-        global_db.clone(),
-        base_node_client.clone(),
-        epoch_manager.clone(),
-        shutdown.clone(),
-        consensus_constants,
-        state_store.clone(),
-        config.validator_node.scan_base_layer,
-        config.validator_node.base_layer_scanning_interval,
-        config.validator_node.validator_node_sidechain_id.clone(),
-        config.validator_node.burnt_utxo_sidechain_id.clone(),
-        template_manager_service.clone(),
-        config.validator_node.template_sidechain_id.clone(),
     );
     handles.push(join_handle);
 
@@ -378,6 +395,7 @@ pub async fn spawn_services(
         networking,
         mempool,
         epoch_manager,
+        global_db,
         template_manager: template_manager_service,
         consensus_handle,
         // global_db,
@@ -450,6 +468,7 @@ pub struct Services {
     // pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     // pub consensus_gossip_service: ConsensusGossipHandle,
     pub state_store: SqliteStateStore<PeerAddress>,
+    pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
 
     pub handles: Vec<JoinHandle<Result<(), anyhow::Error>>>,
 }
@@ -511,4 +530,30 @@ pub fn create_consensus_transaction_validator(
     WithContext::<ValidationContext, _, _>::new()
         .map_context(|_| (), create_mempool_transaction_validator(network, template_manager))
         .map_context(|c| c.current_epoch, EpochRangeValidator::new())
+}
+
+async fn create_base_layer_client(
+    network: Network,
+    config: &BaseLayerOracleConfig,
+) -> Result<GrpcBaseNodeClient, ExitError> {
+    let base_node_address = config.base_node_grpc_url.clone().unwrap_or_else(|| {
+        let port = grpc_default_port(ApplicationType::BaseNode, network);
+        format!("http://127.0.0.1:{port}")
+            .parse()
+            .expect("Default base node GRPC URL is malformed")
+    });
+    info!(target: LOG_TARGET, "Connecting to base node on GRPC at {}", base_node_address);
+    let base_node_client = GrpcBaseNodeClient::connect(base_node_address.clone())
+        .await
+        .map_err(|error| {
+            ExitError::new(
+                ExitCode::ConfigError,
+                format!(
+                    "Could not connect to the Minotari node at address {base_node_address}: {error}. Please ensure \
+                     that the Minotari node is running and configured for GRPC."
+                ),
+            )
+        })?;
+
+    Ok(base_node_client)
 }

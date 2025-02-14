@@ -20,6 +20,7 @@ tari_core = { workspace = true, default-features = false, features = [
     "transactions",
 ] }
 tari_crypto = { workspace = true }
+tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
 tari_validator_node_rpc = { workspace = true }
 tari_dan_app_utilities = { workspace = true }
 tari_dan_common_types = { workspace = true }
@@ -33,7 +34,8 @@ tari_template_lib = { workspace = true }
 tari_transaction = { workspace = true }
 tari_validator_node_client = { workspace = true }
 tari_base_node_client = { workspace = true }
-tari_epoch_manager = { workspace = true, features = ["base_layer"] }
+tari_template_manager = { workspace = true }
+tari_epoch_manager = { workspace = true, features = ["service"] }
 tari_indexer_lib = { workspace = true }
 tari_rpc_state_sync = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
@@ -72,7 +74,6 @@ reqwest = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true }
 tokio = { workspace = true, features = [
     "default",
     "macros",
@@ -82,7 +83,6 @@ tokio = { workspace = true, features = [
     "fs"
 ] }
 tower-http = { workspace = true, features = ["default", "cors"] }
-url = { workspace = true, features = ["serde"] }
 
 [build-dependencies]
 tari_common = { workspace = true, features = ["build"] }

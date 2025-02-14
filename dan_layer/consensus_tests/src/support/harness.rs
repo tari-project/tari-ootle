@@ -173,7 +173,7 @@ impl Test {
                     id.substate_id().clone(),
                     id.version(),
                     value,
-                    Shard::zero(),
+                    Shard::first(),
                     Epoch(0),
                     NodeHeight(0),
                     BlockId::zero(),
@@ -622,7 +622,7 @@ impl TestBuilder {
         failure_nodes: &[TestAddress],
         shutdown_signal: ShutdownSignal,
     ) -> (Vec<ValidatorChannels>, HashMap<TestAddress, Validator>) {
-        let num_committees = epoch_manager.get_num_committees(Epoch(0)).await.unwrap();
+        let num_committees = epoch_manager.get_num_committees(Epoch(1)).await.unwrap();
         epoch_manager
             .all_validators()
             .await
@@ -705,7 +705,7 @@ pub fn committee_number_to_shard_group(num_shards: NumPreshards, target_group: u
     // number of committees can never exceed number of shards
     assert!(num_committees <= num_shards.as_u32());
     if num_committees <= 1 {
-        return ShardGroup::new(Shard::zero(), Shard::from(num_shards.as_u32() - 1));
+        return ShardGroup::new(Shard::first(), Shard::from(num_shards.as_u32()));
     }
 
     let shards_per_committee = num_shards.as_u32() / num_committees;
@@ -730,7 +730,7 @@ pub fn committee_number_to_shard_group(num_shards: NumPreshards, target_group: u
         }
     }
 
-    ShardGroup::new(start, end - 1)
+    ShardGroup::new(start + 1, end)
 }
 
 fn build_committees(committees: HashMap<u32, Committee<TestAddress>>) -> HashMap<ShardGroup, Committee<TestAddress>> {

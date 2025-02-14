@@ -4,16 +4,9 @@
 use std::collections::HashSet;
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, option::Displayable, optional::Optional, Epoch, ShardGroup};
+use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
 use tari_dan_storage::{
-    consensus_models::{
-        Block,
-        BlockId,
-        ForeignProposal,
-        ForeignProposalStatus,
-        ForeignReceiveCounters,
-        QuorumCertificate,
-    },
+    consensus_models::{Block, BlockId, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters},
     StateStore,
     StorageError,
 };
@@ -200,18 +193,14 @@ where TConsensusSpec: ConsensusSpec
         &mut self,
         from: TConsensusSpec::Addr,
         message: ForeignProposalRequestMessage,
-        local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
         let store = self.store.clone();
         let outbound_messaging = self.outbound_messaging.clone();
-        let local_committee_info = *local_committee_info;
 
         // No need for consensus to wait for the task to complete
         task::spawn(async move {
             let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveForeignProposalRequest");
-            if let Err(err) =
-                Self::handle_requested_task(store, outbound_messaging, from, message, &local_committee_info).await
-            {
+            if let Err(err) = Self::handle_requested_task(store, outbound_messaging, from, message).await {
                 error!(target: LOG_TARGET, "Error handling requested foreign proposal: {}", err);
             }
         });
@@ -225,7 +214,6 @@ where TConsensusSpec: ConsensusSpec
         mut outbound_messaging: TConsensusSpec::OutboundMessaging,
         from: TConsensusSpec::Addr,
         message: ForeignProposalRequestMessage,
-        local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
         match message {
             ForeignProposalRequestMessage::ByBlockId {
@@ -239,14 +227,14 @@ where TConsensusSpec: ConsensusSpec
                     for_shard_group,
                     block_id,
                 );
-                let Some((block, justify_qc, mut block_pledge)) = store
-                    .with_read_tx(|tx| {
-                        let block = Block::get(tx, &block_id)?;
-                        let justify_qc = QuorumCertificate::get_by_block_id(tx, &block_id)?;
-                        let block_pledge = block.get_block_pledge(tx)?;
-                        Ok::<_, StorageError>((block, justify_qc, block_pledge))
-                    })
-                    .optional()?
+                let Some((block, justify_qc, block_pledge)) = store.with_read_tx(|tx| {
+                    let Some(block) = Block::get(tx, &block_id).optional()? else {
+                        return Ok(None);
+                    };
+                    let justify_qc = block.get_justify_qc(tx)?;
+                    let block_pledge = block.get_block_pledge(tx, for_shard_group)?;
+                    Ok::<_, StorageError>(Some((block, justify_qc, block_pledge)))
+                })?
                 else {
                     warn!(
                         target: LOG_TARGET,
@@ -256,68 +244,12 @@ where TConsensusSpec: ConsensusSpec
                     return Ok(());
                 };
 
-                let applicable_transactions = block
-                    .commands()
-                    .iter()
-                    .filter_map(|c| {
-                        c.local_prepare()
-                            // No need to broadcast LocalPrepare if the committee is output only (TODO: this no longer applies as output only skips LocalPrepare)
-                            .filter(|atom| !atom.evidence.is_committee_output_only(local_committee_info.shard_group()))
-                            .or_else(|| c.local_accept())
-                    })
-                    .filter(|atom| atom.evidence.has(&for_shard_group))
-                    .map(|atom| atom.id)
-                    .collect::<HashSet<_>>();
-
-                debug!(
-                    target: LOG_TARGET,
-                    "🌐 FOREIGN PROPOSAL: Requested block {} contains {}/{} applicable transaction(s) for {} ({} pledge(s), {} substate value(s))",
-                    block_id,
-                    applicable_transactions.len(),
-                    block_pledge.len(),
-                    for_shard_group,
-                    block_pledge.num_substates_pledged(),
-                    block_pledge.num_substate_values(),
-                );
-
-                if applicable_transactions.is_empty() {
-                    warn!(
-                        target: LOG_TARGET,
-                        "⚠️ FOREIGN PROPOSAL: Requested block {} does not contain any applicable transactions for {}. Ignoring.",
-                        block_id,
-                        for_shard_group,
-                    );
-                    return Ok(());
-                }
-
-                // Only send the pledges for the involved shard group that requested them
-                block_pledge.retain_transactions(&applicable_transactions);
-
-                // LocalAccept: If the foreign shard is NOT output-only, we have already sent the input pledges, so we
-                // exclude them to avoid sending them again.
-                for cmd in block.commands() {
-                    if let Some(atom) = cmd.local_accept() {
-                        if !atom.evidence.is_committee_output_only(for_shard_group) {
-                            debug!(
-                                target: LOG_TARGET,
-                                "🌐 FOREIGN PROPOSAL: Exclude input substate values for {} for {} from block {}",
-                                cmd,
-                                for_shard_group,
-                                block_id,
-                            );
-                            block_pledge.trim_input_values_for(&atom.id);
-                        }
-                    }
-                }
-
                 info!(
                     target: LOG_TARGET,
-                    "🌐 REPLY foreign proposal {} {} pledge(s) {} value(s), and {} tx(s) to {}. justify: {}, parent: {}",
-                    block.as_leaf_block(),
-                    block_pledge.num_substates_pledged(),
-                    block_pledge.num_substate_values(),
-                    block_pledge.len(),
+                    "🌐 FOREIGN PROPOSAL REPLY to {} foreign proposal {} with {} pledge(s). justify: {}, parent: {}",
                     for_shard_group,
+                    block.as_leaf_block(),
+                    block_pledge.len(),
                     justify_qc.as_leaf_block(),
                     block.parent()
                 );
@@ -481,18 +413,10 @@ fn validate_evidence_and_pledges_match(
                 atom.evidence.is_committee_output_only(foreign_shard_group));
         if dont_need_input_pledges {
             // CASE: if we're an input shard group, and we're receiving a local accept, we do not require input pledges
-            if proposal.block_pledge().has_some_write_input_pledge_values_for(&atom.id) {
-                // Just warn that the foreign shard has included input values for which there is no need. Less efficient
-                // but does not break the protocol. Indicates a bug or maliciousness
-                // TODO: ...or Write pledging specific version to more than one transaction? That is unequivocally
-                //       invalid.
-                warn!(
-                    target: LOG_TARGET,
-                    "⚠️ FOREIGN PROPOSAL: foreign {} included input pledges however they are not required (LocalAccept and not output-only). Transaction: {}",
-                    foreign_shard_group,
-                    atom.id,
-                );
-            }
+            debug!(
+                target: LOG_TARGET,
+                "FOREIGN PROPOSAL: Input pledges not required for LocalAccept"
+            );
             continue;
         }
 
@@ -506,23 +430,28 @@ fn validate_evidence_and_pledges_match(
             atom.evidence.is_committee_output_only(local_shard_group),
         );
 
-        let pledges = proposal.block_pledge.get_transaction_pledges(&atom.id).ok_or_else(|| {
-            ProposalValidationError::ForeignInvalidPledge {
-                transaction_id: atom.id,
-                block: proposal.block().as_leaf_block(),
-                shard_group: foreign_shard_group,
-                details: "substate pledges for transaction are missing".to_string(),
-            }
-        })?;
+        let shard_group_evidence =
+            atom.evidence
+                .get(&foreign_shard_group)
+                .ok_or_else(|| ProposalValidationError::ForeignInvalidPledge {
+                    block: proposal.block().as_leaf_block(),
+                    transaction_id: atom.id,
+                    shard_group: proposal.block().shard_group(),
+                    details: "Atom evidence from foreign shard group does not contain evidence for that shard group"
+                        .to_string(),
+                })?;
 
-        if !proposal.block_pledge.has_all_input_substate_values_for(atom.id()) {
+        if !proposal
+            .block_pledge
+            .has_all_input_substate_values_for(shard_group_evidence)
+        {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ FOREIGN PROPOSAL: Invalid proposal: some input pledges for {}({}) are missing. Local Shard Group: {}, All Pledges: {}",
                 if is_local_accept { "LocalAccept" } else { "LocalPrepare" },
                 atom.id,
                 local_shard_group,
-                pledges.display(),
+                proposal.block_pledge,
             );
             return Err(ProposalValidationError::ForeignInvalidPledge {
                 transaction_id: atom.id,
@@ -530,33 +459,6 @@ fn validate_evidence_and_pledges_match(
                 shard_group: foreign_shard_group,
                 details: "input pledges are missing one or more substate values".to_string(),
             });
-        }
-
-        let evidence =
-            atom.evidence
-                .get(&foreign_shard_group)
-                .ok_or_else(|| ProposalValidationError::ForeignInvalidPledge {
-                    transaction_id: atom.id,
-                    block: proposal.block().as_leaf_block(),
-                    shard_group: foreign_shard_group,
-                    details: "evidence for transaction is missing".to_string(),
-                })?;
-
-        for (input, _) in evidence.inputs() {
-            if pledges.iter().all(|p| p.substate_id() != input) {
-                warn!(
-                    target: LOG_TARGET,
-                    "⚠️ FOREIGN PROPOSAL: Invalid proposal: substate pledge for input {} is missing. Pledges: {}",
-                    input,
-                    pledges.display(),
-                );
-                return Err(ProposalValidationError::ForeignInvalidPledge {
-                    transaction_id: atom.id,
-                    block: proposal.block().as_leaf_block(),
-                    shard_group: foreign_shard_group,
-                    details: format!("substate pledge for input {input} is missing"),
-                });
-            }
         }
     }
 

@@ -888,9 +888,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             ),
             HotstuffMessage::ForeignProposalRequest(msg) => log_err(
                 "on_receive_foreign_proposal (request)",
-                self.on_receive_foreign_proposal
-                    .handle_requested(from, msg, local_committee_info)
-                    .await,
+                self.on_receive_foreign_proposal.handle_requested(from, msg).await,
             ),
             HotstuffMessage::Vote(msg) => log_err(
                 "on_receive_vote",

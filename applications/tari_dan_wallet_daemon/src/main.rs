@@ -23,6 +23,7 @@
 use std::{fs, panic, process};
 
 use anyhow::Context;
+use log::*;
 use serde_json::json;
 use tari_common::initialize_logging;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
@@ -36,6 +37,8 @@ use tari_dan_wallet_daemon::{
 };
 use tari_dan_wallet_sdk::apis::key_manager;
 use tari_shutdown::Shutdown;
+
+const LOG_TARGET: &str = "tari::wallet_daemon";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -118,6 +121,13 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
         eprintln!("{}", e);
         return Err(e.into());
     }
+
+    info!(
+        target: LOG_TARGET,
+        "🟢 Starting wallet on {} connected to indexer {}",
+        config.dan_wallet_daemon.network,
+        config.dan_wallet_daemon.indexer_json_rpc_url
+    );
 
     run_tari_dan_wallet_daemon(config, shutdown_signal).await
 }

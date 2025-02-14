@@ -72,29 +72,29 @@ export default function TransactionDetails() {
         setDownSubstate(downSubstates["substates"]);
         setEvents(
           upSubstates["substates"].reduce(
-            (acc: Event[], cur: SubstateRecord) =>
-              "TransactionReceipt" in cur?.substate_value && cur?.substate_value?.TransactionReceipt?.events
-                ? acc.concat(cur?.substate_value?.TransactionReceipt?.events)
+            (acc: Event[], { substate_value }: SubstateRecord) =>
+              substate_value && "TransactionReceipt" in substate_value && substate_value?.TransactionReceipt?.events
+                ? acc.concat(substate_value?.TransactionReceipt?.events)
                 : acc,
             [],
           ),
         );
         setLogs(
           upSubstates["substates"].reduce(
-            (acc: LogEntry[], cur: SubstateRecord) =>
-              "TransactionReceipt" in cur?.substate_value && cur?.substate_value?.TransactionReceipt?.events
-                ? acc.concat(cur?.substate_value?.TransactionReceipt?.logs)
+            (acc: LogEntry[], { substate_value }: SubstateRecord) =>
+              substate_value && "TransactionReceipt" in substate_value && substate_value?.TransactionReceipt?.events
+                ? acc.concat(substate_value?.TransactionReceipt?.logs)
                 : acc,
             [],
           ),
         );
         setFee(
           upSubstates["substates"].reduce(
-            (acc: number, cur: SubstateRecord) =>
+            (acc: number, { substate_value }: SubstateRecord) =>
               acc +
               Number(
-                ("TransactionReceipt" in cur?.substate_value &&
-                  cur?.substate_value?.TransactionReceipt?.fee_receipt?.total_fees_paid) ||
+                (substate_value && "TransactionReceipt" in substate_value &&
+                  substate_value?.TransactionReceipt?.fee_receipt?.total_fees_paid) ||
                 0,
               ),
             0,

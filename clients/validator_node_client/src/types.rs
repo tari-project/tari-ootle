@@ -301,6 +301,7 @@ pub enum ValidatorNodeChange {
         public_key: PublicKey,
         activation_epoch: Epoch,
         minimum_value_promise: u64,
+        shard_key: SubstateAddress,
     },
     Remove {
         #[cfg_attr(feature = "ts", ts(type = "string"))]

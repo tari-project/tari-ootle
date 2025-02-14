@@ -8,5 +8,5 @@ export type RejectReason =
   | { FailedToLockOutputs: string }
   | "ForeignPledgeInputConflict"
   | { ForeignShardGroupDecidedToAbort: { start_shard: number; end_shard: number; abort_reason: string } }
-  | { FeesNotPaid: string }
+  | { InsufficientFeesPaid: string }
   | "Unknown";

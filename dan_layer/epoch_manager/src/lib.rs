@@ -24,11 +24,12 @@ pub mod traits;
 
 pub use traits::EpochManagerReader;
 
-#[cfg(feature = "base_layer")]
-pub mod base_layer;
 mod error;
+#[cfg(feature = "service")]
+pub mod service;
 pub use error::EpochManagerError;
 
+pub mod epoch_event_oracle;
 mod event;
 
 pub use event::*;

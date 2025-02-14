@@ -48,7 +48,7 @@ async fn when_i_claim_burn_via_wallet_daemon(
         proof.clone(),
         reciprocal_claim_public_key.clone(),
         wallet_daemon_name,
-        1000,
+        5000,
     )
     .await
     .unwrap();
@@ -97,7 +97,7 @@ async fn when_i_claim_burn_via_wallet_daemon_it_fails(
         proof.clone(),
         reciprocal_claim_public_key.clone(),
         wallet_daemon_name,
-        1000,
+        5000,
     )
     .await
     .unwrap_err();

@@ -50,8 +50,6 @@ pub struct Event {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     tx_hash: Hash,
     topic: String,
-    // NOTE: We need to use an ordered map here. HashMaps are unordered, so when we pledge this state the hash
-    // resulting hash may differ.
     payload: Metadata,
 }
 

@@ -13,12 +13,11 @@ use log::*;
 use serde::Serialize;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    option::Displayable,
+    displayable::Displayable,
     optional::{IsNotFoundError, Optional},
     NumPreshards,
     SubstateAddress,
     SubstateLockType,
-    ToSubstateAddress,
 };
 use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
 use tari_transaction::TransactionId;
@@ -147,7 +146,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         );
 
         // Check if any transactions are marked as ready to propose
-        let count = tx.transaction_pool_count(None, Some(true), None)?;
+        let count = tx.transaction_pool_count(None, Some(true), None, true)?;
         if count > 0 {
             debug!(
                 target: LOG_TARGET,
@@ -168,7 +167,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         //     return Ok(true);
         // }
 
-        let count = tx.transaction_pool_count(Some(TransactionPoolStage::LocalOnly), None, None)?;
+        let count = tx.transaction_pool_count(Some(TransactionPoolStage::LocalOnly), None, None, true)?;
         if count > 0 {
             debug!(
                 target: LOG_TARGET,
@@ -180,7 +179,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 
         // Check if we have multishard transactions that need to be finalized. These checks apply to transactions that
         // have been locked but not committed.
-        let count = tx.transaction_pool_count(Some(TransactionPoolStage::AllAccepted), None, None)?;
+        let count = tx.transaction_pool_count(Some(TransactionPoolStage::AllAccepted), None, None, true)?;
         if count > 0 {
             debug!(
                 target: LOG_TARGET,
@@ -190,7 +189,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
             return Ok(true);
         }
 
-        let count = tx.transaction_pool_count(Some(TransactionPoolStage::SomeAccepted), None, None)?;
+        let count = tx.transaction_pool_count(Some(TransactionPoolStage::SomeAccepted), None, None, true)?;
         if count > 0 {
             debug!(
                 target: LOG_TARGET,
@@ -209,7 +208,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
     }
 
     pub fn count(&self, tx: &TStateStore::ReadTransaction<'_>) -> Result<usize, TransactionPoolError> {
-        let count = tx.transaction_pool_count(None, None, None)?;
+        let count = tx.transaction_pool_count(None, None, None, false)?;
         Ok(count)
     }
 
@@ -420,14 +419,16 @@ impl TransactionPoolRecord {
             .unwrap_or_else(|| self.current_local_decision())
     }
 
-    fn can_continue_to(&self, next_stage: TransactionPoolStage) -> bool {
-        match next_stage {
+    fn can_continue_to(&self, stage: TransactionPoolStage) -> bool {
+        match stage {
             TransactionPoolStage::New => self.is_ready,
             TransactionPoolStage::Prepared => true,
-            TransactionPoolStage::LocalPrepared => self.evidence.all_input_shard_groups_prepared(),
-            TransactionPoolStage::AllPrepared | TransactionPoolStage::SomePrepared => {
-                self.evidence.all_input_shard_groups_prepared()
+            TransactionPoolStage::LocalPrepared => match self.current_decision() {
+                Decision::Commit => self.evidence.all_input_shard_groups_prepared(),
+                Decision::Abort(_) => self.evidence.some_shard_groups_prepared(),
             },
+            TransactionPoolStage::AllPrepared => self.evidence.all_input_shard_groups_prepared(),
+            TransactionPoolStage::SomePrepared => self.evidence.some_shard_groups_prepared(),
             TransactionPoolStage::LocalAccepted => match self.current_decision() {
                 Decision::Commit => self.evidence.all_shard_groups_accepted(),
                 // If we have decided to abort, we can continue if any foreign shard or locally has prepared
@@ -575,12 +576,20 @@ impl TransactionPoolRecord {
 
     pub fn set_remote_decision(&mut self, decision: Decision) -> &mut Self {
         // Only set remote_decision to ABORT, or COMMIT if it is not already ABORT
-        self.remote_decision = self.remote_decision().map(|d| d.and(decision)).or(Some(decision));
+        let decision = self.remote_decision().map(|d| d.and(decision)).unwrap_or(decision);
+        self.remote_decision = Some(decision);
+        if decision.is_abort() {
+            self.evidence.abort();
+        }
         self
     }
 
     pub fn set_local_decision(&mut self, decision: Decision) -> &mut Self {
         self.local_decision = Some(decision);
+        // Represents that no substates are locked/pledged when ABORT
+        if decision.is_abort() {
+            self.evidence.abort();
+        }
         self
     }
 
@@ -600,28 +609,20 @@ impl TransactionPoolRecord {
         num_committees: u32,
         execution: &TransactionExecution,
     ) -> &mut Self {
-        let involved_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
-
-        for lock in involved_locks {
-            if lock.versioned_substate_id().substate_id().is_global() {
-                // If global, all shard groups have this evidence
-                for shard_group in num_preshards.all_shard_groups_iter(num_committees) {
-                    self.evidence_mut()
-                        .add_shard_group(shard_group)
-                        .insert_from_lock_intent(lock);
-                }
-            } else {
-                let addr = lock.to_substate_address();
-                let shard_group = addr.to_shard_group(num_preshards, num_committees);
-                self.evidence_mut()
-                    .add_shard_group(shard_group)
-                    .insert_from_lock_intent(lock);
-            }
-        }
         // Only change the local decision if we haven't already decided to ABORT
         if self.local_decision().map_or(true, |d| d.is_commit()) {
             self.set_local_decision(execution.decision());
         }
+
+        let involved_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
+        for lock in involved_locks {
+            self.evidence_mut()
+                .insert_from_lock_intent(num_preshards, num_committees, lock);
+        }
+        if self.current_decision().is_abort() {
+            self.evidence.abort();
+        }
+
         self.set_transaction_fee(execution.transaction_fee());
         self
     }

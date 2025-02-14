@@ -32,12 +32,17 @@ interface CopyProps {
 }
 
 const CopyToClipboard = ({ copy, floatright, title }: CopyProps) => {
-  const [open, setOpen] = useState(false);
-  const handleClick = (copyThis: string) => {
-    setOpen(true);
-    navigator.clipboard.writeText(copyThis);
+  const [tooltip, setTooltip] = useState<string | null>(null);
+  const handleClick = async (copyThis: string) => {
+    try {
+      await navigator.clipboard.writeText(copyThis);
+      setTooltip("Copied to clipboard");
+    } catch (err) {
+      setTooltip("Permission denied to copy");
+      console.log(err);
+    }
     setTimeout(() => {
-      setOpen(false);
+      setTooltip(null);
     }, 2000);
   };
 
@@ -53,7 +58,7 @@ const CopyToClipboard = ({ copy, floatright, title }: CopyProps) => {
             : { marginLeft: "10px", marginRight: "10px" }
         }
       >
-        <Tooltip title={!open ? title || copy : "Copied to clipboard"} arrow>
+        <Tooltip title={tooltip ? tooltip : title || copy} arrow>
           <ContentCopyIcon
             color="primary"
             style={{

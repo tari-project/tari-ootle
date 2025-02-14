@@ -30,7 +30,7 @@ use std::{
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
 use tari_dan_common_types::{
-    option::{DisplayContainer, Displayable},
+    displayable::{DisplayContainer, Displayable},
     optional::Optional,
     SubstateAddress,
     SubstateRequirement,

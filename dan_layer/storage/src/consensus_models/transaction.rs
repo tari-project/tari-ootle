@@ -11,9 +11,10 @@ use log::*;
 use serde::Deserialize;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
-    option::Displayable,
+    displayable::Displayable,
     NumPreshards,
     SubstateLockType,
+    ToSubstateAddress,
     VersionedSubstateId,
 };
 use tari_engine_types::{
@@ -164,6 +165,13 @@ impl TransactionRecord {
 
     pub fn abort(&mut self, reason: RejectReason) -> &mut Self {
         self.abort_reason = Some(reason);
+        let receipt = self.id().into_receipt_address();
+        let id = VersionedSubstateId::for_tx_receipt(receipt);
+        self.resulting_outputs = Some(vec![VersionedSubstateIdLockIntent::new(
+            id,
+            SubstateLockType::Output,
+            true,
+        )]);
         self
     }
 
@@ -188,7 +196,7 @@ impl TransactionRecord {
         let resolved_inputs = self.resolved_inputs.take().unwrap_or_else(|| {
             self.transaction
                 .all_inputs_iter()
-                .map(|i| VersionedSubstateIdLockIntent::from_requirement(i, SubstateLockType::Write))
+                .map(|i| VersionedSubstateIdLockIntent::from_requirement(i.to_owned(), SubstateLockType::Write))
                 .collect()
         });
         let resulting_outputs = self.resulting_outputs.take().unwrap_or_default();
@@ -378,9 +386,10 @@ impl TransactionRecord {
         locked_values
             .into_iter()
             .filter(|lock| !lock.lock.is_output())
-            .map(|lock| {
+            .map(|mut lock| {
+                let maybe_value = lock.take_value();
                 let lock_intent = lock.to_substate_lock_intent();
-                SubstatePledge::try_create(lock_intent, lock.value).ok_or_else(|| StorageError::DataInconsistency {
+                SubstatePledge::try_create(lock_intent, maybe_value).ok_or_else(|| StorageError::DataInconsistency {
                     details: format!("Invalid substate lock: {} ({})", lock.substate_id, lock.lock),
                 })
             })
@@ -416,7 +425,7 @@ impl TransactionRecord {
         let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
         for (is_local, input) in inputs {
             if is_local {
-                if locks.iter().all(|i| !i.satisfies_requirements(&input)) {
+                if locks.iter().all(|i| !i.satisfies_requirements(input)) {
                     debug!(
                         target: LOG_TARGET,
                         "Locks: {}",
@@ -432,8 +441,8 @@ impl TransactionRecord {
                     );
                     return Ok(false);
                 }
-            } else if pledges.iter().all(|p| !p.satisfies_requirement(&input)) {
-                let remote_shard_group = input.to_substate_address_zero_version().to_shard_group(
+            } else if pledges.iter().all(|p| !p.satisfies_requirement(input)) {
+                let remote_shard_group = input.or_zero_version().to_substate_address().to_shard_group(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),
                 );
@@ -478,7 +487,7 @@ impl TransactionRecord {
         // TODO(perf): this could be a bespoke DB query
         let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
         for input in foreign_inputs {
-            if pledges.iter().all(|p| !p.satisfies_requirement(&input)) {
+            if pledges.iter().all(|p| !p.satisfies_requirement(input)) {
                 debug!(
                     target: LOG_TARGET,
                     "Transaction {} is missing a pledge for input {} ({} pledge(s) found)",

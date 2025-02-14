@@ -20,13 +20,14 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod base_layer_scanner;
 pub mod common;
 pub mod configuration;
+pub mod epoch_oracle_config;
 pub mod json_encoding;
 pub mod keypair;
 pub mod p2p_config;
 pub mod seed_peer;
 pub mod substate_file_cache;
-pub mod template_manager;
+pub mod template_download_queue;
 pub mod transaction_executor;
+pub mod utxo_store;

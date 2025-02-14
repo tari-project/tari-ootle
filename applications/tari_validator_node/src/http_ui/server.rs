@@ -32,7 +32,7 @@ use include_dir::{include_dir, Dir};
 use log::{error, info};
 use reqwest::{header, header::HeaderValue, StatusCode};
 
-const LOG_TARGET: &str = "tari::validator_node::http_ui::server";
+const LOG_TARGET: &str = "tari::validator_node::web_ui::server";
 
 pub async fn run_http_ui_server(address: SocketAddr, json_rpc_address: String) -> Result<(), anyhow::Error> {
     let json_rpc_address = Arc::new(json_rpc_address);

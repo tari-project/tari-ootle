@@ -283,7 +283,19 @@ where
     let qcs = blocks.into_iter().map(|b| b.into_justify()).collect();
 
     // Fetch the state roots of the shards in the shard group
-    let mut shard_roots = IndexMap::with_capacity(shard_group.len());
+    let mut shard_roots = IndexMap::with_capacity(shard_group.len() + 1);
+
+    // adding global shard first
+    if let Some(version) = tx.state_tree_versions_get_latest(Shard::global())? {
+        let scoped_store = ShardScopedTreeStoreReader::new(&**tx, Shard::global());
+        let jmt = JellyfishMerkleTree::new(&scoped_store);
+        let root_hash = jmt
+            .get_root_hash(version)
+            .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
+
+        shard_roots.insert(Shard::global(), root_hash);
+    }
+
     for shard in shard_group.shard_iter() {
         let Some(version) = tx.state_tree_versions_get_latest(shard)? else {
             // At v0 there have been no state changes
@@ -368,6 +380,7 @@ pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
     let (next_amount, next_version) = if let Some(latest) = store.get_latest_change(&substate_id).optional()? {
         match latest {
             SubstateChange::Up { id, substate, .. } => {
+                debug!(target: LOG_TARGET, "DOWN current fee pool {id}");
                 let version = id.version();
                 store.put(SubstateChange::Down {
                     id,
@@ -384,17 +397,22 @@ pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
                 (pool.amount + total_leader_fee, version + 1)
             },
             // If the latest fee pool is a Down, it was previously claimed
-            SubstateChange::Down { id, .. } => (Amount::zero(), id.version() + 1),
+            SubstateChange::Down { id, .. } => (total_leader_fee, id.version() + 1),
         }
     } else {
         (Amount::zero(), 0)
     };
 
+    let id = VersionedSubstateId::new(fee_substate_id, next_version);
+    debug!(target: LOG_TARGET, "UP new fee pool {id}");
     store.put(SubstateChange::Up {
-        id: VersionedSubstateId::new(fee_substate_id, next_version),
+        id,
         shard,
         transaction_id: Default::default(),
-        substate: Substate::new(0, ValidatorFeePool::new(claim_public_key_bytes.into(), next_amount)),
+        substate: Substate::new(
+            next_version,
+            ValidatorFeePool::new(claim_public_key_bytes.into(), next_amount),
+        ),
     })?;
 
     Ok(())

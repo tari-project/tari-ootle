@@ -27,7 +27,10 @@ use tari_dan_common_types::{
     NumPreshards,
     ShardGroup,
     SubstateAddress,
+    VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
+use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
 use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
@@ -42,13 +45,11 @@ use super::{
     ForeignProposalAtom,
     ForeignSendCounters,
     HighQc,
-    LockedSubstateValue,
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
     QuorumCertificate,
     SubstateChange,
     SubstateDestroyedProof,
-    SubstatePledge,
     SubstateRecord,
     TransactionAtom,
     ValidatorSchnorrSignature,
@@ -304,6 +305,10 @@ impl Block {
 
     pub fn all_finalising_transactions_ids(&self) -> impl Iterator<Item = &TransactionId> + '_ {
         self.commands.iter().filter_map(|d| d.finalising()).map(|t| t.id())
+    }
+
+    pub fn all_aborting_transaction_ids(&self) -> impl Iterator<Item = &TransactionId> + '_ {
+        self.commands.iter().filter_map(|d| d.aborting()).map(|t| t.id())
     }
 
     pub fn all_foreign_proposals(&self) -> impl Iterator<Item = &ForeignProposalAtom> + '_ {
@@ -836,19 +841,21 @@ impl Block {
                     // 2. The substate was created by this transaction and destroyed in a later transaction
                     // It isn't possible for a substate to be created and destroyed by the same transaction
                     // because the engine can never emit such a substate diff.
-                    if substate.created_by_transaction == transaction.id {
-                        updates.push(SubstateUpdate::Create(SubstateCreatedProof {
-                            // created_qc: substate.get_created_quorum_certificate(tx)?,
-                            substate: substate.into(),
-                        }));
-                    } else {
-                        updates.push(SubstateUpdate::Destroy(SubstateDestroyedProof {
-                            substate_id: substate.substate_id.clone(),
-                            version: substate.version,
-                            // justify: QuorumCertificate::get(tx, &destroyed.justify)?,
-                            destroyed_by_transaction: destroyed.by_transaction,
-                        }));
-                    }
+                    // TODO: This is currently not used - if we need this in future, we can include the state hash en
+                    //       lieu of the actual state which does not exist
+                    // if substate.created_by_transaction == transaction.id
+                    // {     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
+                    //         // created_qc: substate.get_created_quorum_certificate(tx)?,
+                    //         substate: substate.try_into()?,
+                    //     }));
+                    // } else {
+                    updates.push(SubstateUpdate::Destroy(SubstateDestroyedProof {
+                        substate_id: substate.substate_id.clone(),
+                        version: substate.version,
+                        // justify: QuorumCertificate::get(tx, &destroyed.justify)?,
+                        destroyed_by_transaction: destroyed.by_transaction,
+                    }));
+                    // }
                 } else {
                     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,
@@ -859,6 +866,39 @@ impl Block {
         }
 
         Ok(updates)
+    }
+
+    pub fn get_transaction_receipts<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+    ) -> Result<Vec<SubstateCreatedProof>, StorageError> {
+        let committed = self
+            .commands()
+            .iter()
+            .filter_map(|c| c.committing())
+            .filter(|t| t.decision.is_commit());
+
+        let receipt_ids = committed
+            .map(|atom| TransactionReceiptAddress::from_array(atom.id.into_array()))
+            .map(VersionedSubstateId::for_tx_receipt)
+            .collect::<Vec<_>>();
+
+        let receipts = SubstateRecord::get_all(tx, receipt_ids.iter().map(Into::into))?;
+        let receipts = receipts
+            .into_iter()
+            .map(|receipt| {
+                Ok::<_, StorageError>(SubstateCreatedProof {
+                    substate: receipt.into(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(receipts)
+    }
+
+    /// Returns the QC that justifies this block
+    pub fn get_justify_qc<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<QuorumCertificate, StorageError> {
+        tx.quorum_certificates_get_by_block_id(self.id())
     }
 
     pub fn update_nodes<TTx, TFnOnLock, TFnOnCommit, E>(
@@ -981,24 +1021,49 @@ impl Block {
         Ok(())
     }
 
-    pub fn get_block_pledge<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<BlockPledge, StorageError> {
+    pub fn get_block_pledge<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+        for_shard_group: ShardGroup,
+    ) -> Result<BlockPledge, StorageError> {
         if self.is_committed() {
+            // TODO: this is only a problem if we do not preserve DOWN substates "for some reasonable time".
             warn!(
                 target: LOG_TARGET,
-                "get_block_pledge: Block {} is already committed. Locks likely would already be released and therefore no pledges will be provided", self.as_leaf_block()
+                "get_block_pledge: Block {} is already committed. Some substates may be DOWN and therefore these pledges will not be provided", self.as_leaf_block()
             );
         }
-        let mut pledges = BlockPledge::new();
-        for atom in self.commands().iter().filter_map(|cmd| {
-            cmd.local_prepare()
-                .filter(|atom| !atom.evidence.is_committee_output_only(self.shard_group()))
-                .or_else(|| cmd.local_accept())
-        }) {
-            // No pledges for aborted transactions
-            if atom.decision.is_abort() {
-                continue;
-            }
 
+        let log_bool = |context: &str, atom: &TransactionAtom, val: bool| {
+            if !val {
+                debug!(
+                    target: LOG_TARGET,
+                    "get_block_pledge: Excluding {atom} because {context}"
+                );
+            }
+            val
+        };
+
+        let applicable_transactions = self
+            .commands()
+            .iter()
+            .filter_map(|c| {
+                c.local_prepare()
+                    // No need to broadcast LocalPrepare if the committee is output only (TODO: this no longer applies as output only skips LocalPrepare, so do we need this?)
+                    .filter(|atom| log_bool("LocalPrepare, local output-only", atom, !atom.evidence.is_committee_output_only(self.shard_group())))
+                    .or_else(|| {
+                        // Avoid pledging twice - for input-involved SGs we have already sent pledges in LocalPrepare phase. For output-only, we need to pledge in the LocalAccept phase
+                        c.local_accept()
+                            .filter(|atom| log_bool("LocalAccept, foreign input-involved", atom, atom.evidence.is_committee_output_only(for_shard_group)))
+                    })
+            })
+            .filter(|atom| log_bool("Is ABORT", atom, atom.decision.is_commit()))
+            .filter(|atom| log_bool("Foreign SG not involved", atom, atom.evidence.has(&for_shard_group)));
+
+        let mut num_applicable = 0;
+        let mut pledges = BlockPledge::new();
+        for atom in applicable_transactions {
+            num_applicable += 1;
             let evidence = atom
                 .evidence
                 .get(&self.shard_group())
@@ -1007,64 +1072,44 @@ impl Block {
                 })?;
 
             // TODO(perf): O(n) queries
-            let locked_values = LockedSubstateValue::get_all_input_locks_for_transaction(tx, &atom.id)?;
+            let substates = SubstateRecord::get_all(
+                tx,
+                evidence
+                    .all_pledged_inputs_iter()
+                    .map(|(substate_id, ev)| VersionedSubstateIdRef::new(substate_id, ev.version)),
+            )?;
 
-            let num_locked = locked_values.len();
-            // CASE: We're retrieving pledges for the LocalPrepared and LocalAccept commands. If all other pledges were
-            // provided already, we may have progressed to AllPrepared, executed the transaction and locked
-            // local outputs. However, these are not provided in the original LocalPrepare evidence for this
-            // atom, so we need to exclude them.
-            let locks = locked_values.into_iter().filter(|lock| {
-                // It is possible that evidence has "downgraded" a write lock to a read lock. However, we do not
-                // downgrade the actual lock so we only discern between inputs and outputs, not read/write locks.
-                // TODO: this is because we Write lock inputs initially (before execution) due to lack of information
-                if evidence.contains_pledge(
-                    lock.substate_id(),
-                    lock.lock.version(),
-                    lock.lock.lock_type().is_input(),
-                ) {
-                    true
-                } else {
-                    debug!(
-                        target: LOG_TARGET,
-                        "get_block_pledge: Skipping locked value {} for atom {} in block {} because it was not originally pledged",
-                        lock.lock,
-                        atom.id,
-                        self
-                    );
-                    false
-                }
-            });
-
-            let count = locks.clone().count();
             debug!(
                 target: LOG_TARGET,
-                "get_block_pledge: {} out of {} locked for atom {} in block {}",
-                count, num_locked, atom.id, self
+                "get_block_pledge: {} locked for atom {} in block {}",
+                substates.len(), atom.id, self
             );
 
             let self_as_leaf = self.as_leaf_block();
-            for locked_value in locks {
-                let lock_intent = locked_value.to_substate_lock_intent();
-                let LockedSubstateValue {
-                    substate_id,
-                    lock,
-                    value,
-                    ..
-                } = locked_value;
+            for substate in substates {
+                let version = substate.version();
+                let id = substate.substate_id;
+                let value = substate.substate_value.ok_or_else(|| StorageError::DataInconsistency {
+                    details: format!(
+                        "Pledge {}:{} has no substate value however a value is required",
+                        id, version
+                    ),
+                })?;
 
-                let pledge =
-                    SubstatePledge::try_create(lock_intent, value).ok_or_else(|| StorageError::DataInconsistency {
-                        details: format!("{substate_id} has no value however {lock} requires a value",),
-                    })?;
                 debug!(
                     target: LOG_TARGET,
-                    "get_block_pledge: Adding pledge {} for atom {} in block {}",
-                    pledge, atom.id, self_as_leaf
+                    "get_block_pledge: Adding pledge {}:{} for atom {} in block {}",
+                    id, version, atom.id, self_as_leaf
                 );
-                pledges.add_substate_pledge(*locked_value.lock.transaction_id(), pledge);
+                pledges.add_substate_pledge(id, version, value);
             }
         }
+
+        debug!(
+            target: LOG_TARGET,
+            "get_block_pledge: {num_applicable} pledge(s) for shard group {for_shard_group}"
+        );
+
         Ok(pledges)
     }
 

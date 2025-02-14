@@ -21,13 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Box from "@mui/material/Box";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { GridHeadCell, GridDataCell } from "../../../Components/StyledComponents";
-import { useAccountsGet } from "../../../api/hooks/useAccounts";
-import { shortenString, shortenSubstateId, substateIdToString } from "../../../utils/helpers";
 import { styled } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
+import CopyAddress from "../../../Components/CopyAddress";
 
 const GridContainer = styled(Box)(({ theme }) => ({
   display: "grid",
@@ -57,12 +54,10 @@ function AccountDetails() {
       <GridHeadCell className="head3">Public Key</GridHeadCell>
       <GridDataCell className="content1">{account.name}</GridDataCell>
       <GridDataCell className="content2">
-        {shortenSubstateId(account.address)}
-        <CopyToClipboard copy={substateIdToString(account.address)} />
+        <CopyAddress address={account.address} />
       </GridDataCell>
       <GridDataCell className="content3">
-        {shortenString(publicKey)}
-        <CopyToClipboard copy={publicKey} />
+        <CopyAddress address={publicKey} />
       </GridDataCell>
     </GridContainer>
   );

@@ -56,7 +56,7 @@ pub enum AbortReason {
     ExecutionFailure,
     OneOrMoreInputsNotFound,
     ForeignShardGroupDecidedToAbort,
-    FeesNotPaid,
+    InsufficientFeesPaid,
     EarlyAbort,
 }
 
@@ -77,7 +77,7 @@ impl From<&RejectReason> for AbortReason {
             RejectReason::FailedToLockInputs(_) => Self::LockInputsFailed,
             RejectReason::FailedToLockOutputs(_) => Self::LockOutputsFailed,
             RejectReason::ForeignShardGroupDecidedToAbort { .. } => Self::ForeignShardGroupDecidedToAbort,
-            RejectReason::FeesNotPaid(_) => Self::FeesNotPaid,
+            RejectReason::InsufficientFeesPaid(_) => Self::InsufficientFeesPaid,
         }
     }
 }

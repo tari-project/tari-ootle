@@ -1,8 +1,8 @@
-import type { Substate } from "../Substate";
 import type { SubstateId } from "../SubstateId";
+import type { SubstateValue } from "../SubstateValue";
 export interface IndexerGetSubstateResponse {
     address: SubstateId;
     version: number;
-    substate: Substate;
+    substate: SubstateValue;
     created_by_transaction: string;
 }

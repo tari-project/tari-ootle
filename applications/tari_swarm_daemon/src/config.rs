@@ -84,12 +84,20 @@ impl Config {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebserverConfig {
     pub bind_address: SocketAddr,
+    pub base_auth: Option<BasicAuthConfig>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BasicAuthConfig {
+    pub username: String,
+    pub password: String,
 }
 
 impl Default for WebserverConfig {
     fn default() -> Self {
         Self {
             bind_address: SocketAddr::from(([127, 0, 0, 1], 8080)),
+            base_auth: None,
         }
     }
 }

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {Navigate, Route, Routes} from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import Accounts from "./routes/Accounts/Accounts";
 import AccountDetails from "./routes/AccountDetails/AccountDetails";
 import Keys from "./routes/Keys/Keys";
@@ -32,11 +32,11 @@ import Transactions from "./routes/Transactions/TransactionsLayout";
 import TransactionDetails from "./routes/Transactions/TransactionDetails";
 import AssetVault from "./routes/AssetVault/AssetVault";
 import SettingsPage from "./routes/Settings/Settings";
-import Auth, {AUTH_TOKEN_FOR_NONE_AUTH} from "./routes/Auth/Auth";
+import Auth, { AUTH_TOKEN_FOR_NONE_AUTH } from "./routes/Auth/Auth";
 import Webauthn from "./routes/WebauthnRegistration/Webauthn";
 import useAuthStore from "./store/authStore";
-import {useEffect} from "react";
-import {useAuthMethod} from "./api/hooks/useAuth";
+import { useEffect } from "react";
+import { useAuthMethod } from "./api/hooks/useAuth";
 
 export const breadcrumbRoutes = [
   {
@@ -97,24 +97,21 @@ export const breadcrumbRoutes = [
 ];
 
 // @ts-ignore
-const GuardedRoute = ({ component: Component, redirect = "/auth", auth = false, ...rest }) => (
-        auth
-            ? <Component {...rest} />
-            : <Navigate replace to={redirect} />
-)
+const GuardedRoute = ({ component: Component, redirect = "/auth", auth = false, ...rest }) =>
+  auth ? <Component {...rest} /> : <Navigate replace to={redirect} />;
 
 function App() {
   const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
-  const {authToken, setAuthToken} = useAuthStore();
+  const { authToken, setAuthToken } = useAuthStore();
   let auth = !!authToken;
 
   useEffect(() => {
     if (!authMethodsIsError && authMethod) {
-      if (authMethod.method !== 'none' && authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
+      if (authMethod.method !== "none" && authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
         setAuthToken("");
       }
 
-      if (authMethod.method === 'none') {
+      if (authMethod.method === "none") {
         useAuthStore.getState().setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
       }
     }
@@ -135,7 +132,7 @@ function App() {
           <Route path="accounts" element={<GuardedRoute auth={auth} component={Accounts} />} />
           <Route path="accounts/:id" element={<GuardedRoute auth={auth} component={AccountDetails} />} />
           <Route path="keys" element={<GuardedRoute auth={auth} component={Keys} />} />
-          <Route path="access-tokens" element={<GuardedRoute auth={auth} component={AccessTokensLayout}/>} />
+          <Route path="access-tokens" element={<GuardedRoute auth={auth} component={AccessTokensLayout} />} />
           <Route path="transactions" element={<GuardedRoute auth={auth} component={Transactions} />} />
           <Route path="wallet" element={<GuardedRoute auth={auth} component={Wallet} />} />
           <Route path="transactions/:id" element={<GuardedRoute auth={auth} component={TransactionDetails} />} />

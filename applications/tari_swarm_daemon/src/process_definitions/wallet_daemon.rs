@@ -96,7 +96,6 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("--json-rpc-address={json_rpc_address}"))
             .arg(format!("--indexer-url={indexer_url}"))
             .arg(format!("--ui-connect-address={json_rpc_public_address}"))
-            .arg(format!("-pdan_wallet_daemon.http_ui_address={web_ui_address}"))
             .arg(format!("-pdan_wallet_daemon.web_ui_address={web_ui_address}"))
             .arg(format!("-pdan_wallet_daemon.authentication={}", auth));
 

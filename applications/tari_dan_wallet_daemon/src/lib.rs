@@ -86,10 +86,10 @@ pub async fn run_tari_dan_wallet_daemon(
     let webauthn_service = Arc::new(WebauthnService::new(wallet_store, Duration::from_secs(60 * 60)));
 
     // webauthn
-    let rp_origin = match config.dan_wallet_daemon.http_ui_address {
+    let rp_origin = match config.dan_wallet_daemon.web_ui_address {
         Some(ui_address) => Url::parse(format!("http://localhost:{}", ui_address.port()).as_str())?,
         None => {
-            let ui_address = WalletDaemonConfig::default().http_ui_address.unwrap();
+            let ui_address = WalletDaemonConfig::default().web_ui_address.unwrap();
             Url::parse(format!("http://localhost:{}", ui_address.port()).as_str())?
         },
     };

@@ -4,7 +4,6 @@
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import {Form, useNavigate} from "react-router-dom";
-import TextField from "@mui/material/TextField/TextField";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import {useTheme} from "@mui/material/styles";
@@ -12,6 +11,8 @@ import {FormEvent, useState} from "react";
 import {webauthnFinishRegistration, webauthnStartRegistration} from "../../../utils/json_rpc";
 import {Buffer} from "buffer";
 import Loading from "../../../Components/Loading";
+
+export const TARI_WALLET_USERNAME: string = "tari-wallet";
 
 const createCredential = async (rpOptions: {rpId: string, rpName: string}, username: string, challenge: Buffer) => {
     const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
@@ -49,30 +50,18 @@ const createCredential = async (rpOptions: {rpId: string, rpName: string}, usern
 
 function WebauthnRegistration() {
     const theme = useTheme();
-    const [registrationFormState, setRegistrationFormState] = useState({
-        username: "",
-    });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const navigate = useNavigate();
-
-    const onUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setRegistrationFormState({
-            ...registrationFormState,
-            [e.target.name]: e.target.value,
-        });
-    };
 
     const handleRegister = async (e: FormEvent) => {
         e.preventDefault();
 
         setLoading(true);
 
-        const username = registrationFormState.username;
-
         // start registration by getting challenge
         const startRegisterResponse = await webauthnStartRegistration({
-            username: registrationFormState.username,
+            username: TARI_WALLET_USERNAME,
         }).catch(reason => {
             setLoading(false);
             setError(reason);
@@ -92,7 +81,7 @@ function WebauthnRegistration() {
                 rpId: 'localhost',
                 rpName: 'Tari Ootle'
             },
-            username,
+            TARI_WALLET_USERNAME,
             challenge,
         ).catch(reason => {
             setLoading(false);
@@ -186,15 +175,6 @@ function WebauthnRegistration() {
                                 marginTop: theme.spacing(3),
                             }}
                         >
-                            <TextField
-                                name="username"
-                                disabled={loading}
-                                label="Wallet Daemon Username"
-                                value={registrationFormState.username}
-                                onChange={onUsernameChange}
-                                style={{ flexGrow: 1 }}
-                                required
-                            />
                             <Button variant="contained" type="submit" disabled={loading}>
                                 Register
                             </Button>

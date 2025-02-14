@@ -23,7 +23,7 @@
 use std::{collections::HashMap, time::Duration};
 
 use chrono::NaiveDateTime;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{
     shard::Shard,

@@ -8,12 +8,12 @@ import Loading from "../../../Components/Loading";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
-import TextField from "@mui/material/TextField/TextField";
 import Button from "@mui/material/Button";
 import {unauthenticated_client, webauthnStartAuth} from "../../../utils/json_rpc";
 import {Buffer} from "buffer";
 import {WebauthnFinishAuthRequest} from "@tari-project/typescript-bindings";
 import useAuthStore from "../../../store/authStore";
+import {TARI_WALLET_USERNAME} from "./Registration";
 
 const getCredential = async (challenge: any, allowCredentials: any) => {
     const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {
@@ -29,29 +29,17 @@ const getCredential = async (challenge: any, allowCredentials: any) => {
 
 function WebauthnLogin() {
     const theme = useTheme();
-    const [loginFormState, setLoginFormState] = useState({
-        username: "",
-    });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const navigate = useNavigate();
     const {setAuthToken} = useAuthStore();
 
-    const onUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setLoginFormState({
-            ...loginFormState,
-            [e.target.name]: e.target.value,
-        });
-    };
-
     const handleLogin = async (e: FormEvent) => {
         e.preventDefault();
         setLoading(true);
 
-        const username = loginFormState.username;
-
         // start authentication by getting challenge
-        const startAuthResponse = await webauthnStartAuth({username: username})
+        const startAuthResponse = await webauthnStartAuth({username: TARI_WALLET_USERNAME})
             .catch(reason => {
                 setLoading(false);
                 setError(reason);
@@ -168,15 +156,6 @@ function WebauthnLogin() {
                                 marginTop: theme.spacing(3),
                             }}
                         >
-                            <TextField
-                                name="username"
-                                disabled={loading}
-                                label="Wallet Daemon Username"
-                                value={loginFormState.username}
-                                onChange={onUsernameChange}
-                                style={{ flexGrow: 1 }}
-                                required
-                            />
                             <Button variant="contained" type="submit" disabled={loading}>
                                 Login
                             </Button>

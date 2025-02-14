@@ -10,7 +10,7 @@ use std::{
 };
 
 use chrono::NaiveDateTime;
-use diesel::{dsl::count, OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
+use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;

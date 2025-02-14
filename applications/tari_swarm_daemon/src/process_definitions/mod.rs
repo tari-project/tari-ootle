@@ -12,11 +12,9 @@ mod validator_node;
 mod wallet_daemon;
 mod wallet_daemon_create_key;
 
-pub use wallet_daemon::WalletDaemonAuth;
-pub use wallet_daemon::WALLET_DAEMON_AUTH_SETTINGS_KEY;
-
 pub use context::*;
 pub use definition::*;
+pub use wallet_daemon::{WalletDaemonAuth, WALLET_DAEMON_AUTH_SETTINGS_KEY};
 
 use crate::config::InstanceType;
 

@@ -133,14 +133,8 @@ function getAuthToken() {
   return (authToken && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) ? authToken : null;
 }
 
-// TODO: fix bug that changes the URL for client to the default one
 async function client() {
   const authToken = getAuthToken();
-
-  if (!authToken) {
-    pendingClientInstance = null;
-    clientInstance = null;
-  }
 
   if (pendingClientInstance) {
     return pendingClientInstance;
@@ -159,7 +153,6 @@ async function client() {
   const getAddress = !outerAddress ? getClientAddress() : Promise.resolve(DEFAULT_WALLET_ADDRESS);
 
   pendingClientInstance = getAddress.then(async (addr) => {
-    console.log("URL:", addr);
     const client = WalletDaemonClient.usingFetchTransport(addr.toString());
     if (authToken) {
       client.setToken(authToken);

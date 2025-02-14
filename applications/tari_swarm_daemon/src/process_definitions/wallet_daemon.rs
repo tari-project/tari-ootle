@@ -1,11 +1,11 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{fmt::Display, path::PathBuf, str::FromStr};
+
 use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::ValueEnum;
-use std::str::FromStr;
-use std::{fmt::Display, path::PathBuf};
 use tokio::process::Command;
 
 use crate::process_definitions::{ProcessContext, ProcessDefinition};
@@ -52,7 +52,7 @@ pub struct WalletDaemon;
 
 impl WalletDaemon {
     pub fn new() -> Self {
-        Self {  }
+        Self {}
     }
 }
 
@@ -83,7 +83,8 @@ impl ProcessDefinition for WalletDaemon {
         );
 
         let default_auth_str = WALLET_DAEMON_AUTH_DEFAULT.to_string();
-        let auth = context.get_setting(WALLET_DAEMON_AUTH_SETTINGS_KEY)
+        let auth = context
+            .get_setting(WALLET_DAEMON_AUTH_SETTINGS_KEY)
             .unwrap_or(default_auth_str.as_str());
 
         command
@@ -96,10 +97,7 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("--indexer-url={indexer_url}"))
             .arg(format!("--ui-connect-address={json_rpc_public_address}"))
             .arg(format!("-pdan_wallet_daemon.http_ui_address={web_ui_address}"))
-            .arg(format!(
-                "-pdan_wallet_daemon.authentication={}",
-                auth
-            ));
+            .arg(format!("-pdan_wallet_daemon.authentication={}", auth));
 
         // A signaling server is not required for startup of the wallet daemon,
         // but if it is available we want to set it up

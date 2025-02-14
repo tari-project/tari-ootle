@@ -67,7 +67,7 @@ impl<T: SessionData> SessionStore<T> {
     /// Gets a new session ID and makes sure that its unique.
     async fn new_session_id(&self) -> String {
         let mut session_id = Uuid::new_v4().to_string();
-        while let Ok(_) = self.session(&session_id).await {
+        while self.session(&session_id).await.is_ok() {
             session_id = Uuid::new_v4().to_string();
         }
         session_id

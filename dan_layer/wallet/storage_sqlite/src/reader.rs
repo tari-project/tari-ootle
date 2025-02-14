@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::Infallible, str::FromStr, sync::MutexGuard};
+use std::{collections::HashMap, str::FromStr, sync::MutexGuard};
 
 use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{
@@ -32,7 +32,6 @@ use tari_dan_wallet_sdk::{
         TransactionStatus,
         VaultModel,
         WalletTransaction,
-        WebauthnRegistrationModel,
         WebauthnRegistrationPasskeyModel,
     },
     storage::{WalletStorageError, WalletStoreReader},
@@ -53,7 +52,6 @@ use crate::{
     diesel::{ExpressionMethods, NullableExpressionMethods},
     models,
     models::WebauthnRegistrationPasskey,
-    schema::webauthn_registrations::dsl::webauthn_registrations,
     serialization::deserialize_json,
 };
 

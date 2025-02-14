@@ -30,7 +30,7 @@ mod notify;
 mod services;
 mod webrtc;
 
-use std::{fs, net::SocketAddr, panic, process, sync::Arc, time::Duration};
+use std::{fs, panic, process, sync::Arc, time::Duration};
 
 use log::*;
 use tari_dan_common_types::{optional::Optional, NumPreshards};

@@ -7,8 +7,10 @@ use anyhow::Context;
 use clap::Parser;
 use tari_common::configuration::Network;
 
-use crate::config::{Config, InstanceType};
-use crate::process_definitions::{WalletDaemonAuth, WALLET_DAEMON_AUTH_SETTINGS_KEY};
+use crate::{
+    config::{Config, InstanceType},
+    process_definitions::{WalletDaemonAuth, WALLET_DAEMON_AUTH_SETTINGS_KEY},
+};
 
 #[derive(Debug, Clone, Parser)]
 pub struct Cli {
@@ -113,15 +115,15 @@ impl Overrides {
         if self.disable_template_auto_register {
             config.auto_register_previous_templates = false;
         }
-        
+
         // add wallet daemon auth method
         config.processes.instances.iter_mut().for_each(|instance| {
-           if instance.instance_type.is_wallet_daemon() {
-               instance.settings.insert(
-                   WALLET_DAEMON_AUTH_SETTINGS_KEY.to_string(), 
-                   self.wallet_daemon_auth.to_string(),
-               );
-           } 
+            if instance.instance_type.is_wallet_daemon() {
+                instance.settings.insert(
+                    WALLET_DAEMON_AUTH_SETTINGS_KEY.to_string(),
+                    self.wallet_daemon_auth.to_string(),
+                );
+            }
         });
 
         Ok(())

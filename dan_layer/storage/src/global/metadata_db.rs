@@ -34,51 +34,34 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> MetadataDb<'a, 'tx, TGlobalDbAd
         Self { backend, tx }
     }
 
-    pub fn set_metadata<T: Serialize>(&mut self, key: MetadataKey, value: &T) -> Result<(), TGlobalDbAdapter::Error> {
+    pub fn set_metadata<T: Serialize>(&mut self, key: &[u8], value: &T) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend.set_metadata(self.tx, key, value)?;
         Ok(())
     }
 
-    pub fn get_metadata<T: DeserializeOwned>(
-        &mut self,
-        key: MetadataKey,
-    ) -> Result<Option<T>, TGlobalDbAdapter::Error> {
-        let data = self.backend.get_metadata(self.tx, &key)?;
+    pub fn get_metadata<T: DeserializeOwned>(&mut self, key: &[u8]) -> Result<Option<T>, TGlobalDbAdapter::Error> {
+        let data = self.backend.get_metadata(self.tx, key)?;
         Ok(data)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum MetadataKey {
-    BaseLayerScannerLastScannedTip,
-    BaseLayerScannerLastScannedBlockHeight,
-    BaseLayerScannerLastScannedBlockHash,
-    BaseLayerScannerNextBlockHash,
-    BaseLayerConsensusConstants,
     EpochManagerCurrentEpoch,
-    EpochManagerCurrentBlockHeight,
     EpochManagerCurrentShardKey,
-    EpochManagerLastEpochRegistration,
+    EpochManagerLastEpochHash,
     EpochManagerLastSyncedEpoch,
     EpochManagerFeeClaimPublicKey,
-    EpochManagerLastBlockOfCurrentEpoch,
 }
 
 impl MetadataKey {
     pub fn as_key_bytes(self) -> &'static [u8] {
         match self {
-            MetadataKey::BaseLayerScannerLastScannedTip => b"base_layer_scanner.last_scanned_tip",
-            MetadataKey::BaseLayerScannerLastScannedBlockHash => b"base_layer_scanner.last_scanned_block_hash",
-            MetadataKey::BaseLayerScannerLastScannedBlockHeight => b"base_layer_scanner.last_scanned_block_height",
-            MetadataKey::BaseLayerScannerNextBlockHash => b"base_layer_scanner.next_block_hash",
-            MetadataKey::BaseLayerConsensusConstants => b"base_layer.consensus_constants",
             MetadataKey::EpochManagerCurrentEpoch => b"epoch_manager.current_epoch",
-            MetadataKey::EpochManagerCurrentBlockHeight => b"epoch_manager.current_block_height",
-            MetadataKey::EpochManagerLastEpochRegistration => b"epoch_manager.last_registered_epoch",
             MetadataKey::EpochManagerCurrentShardKey => b"epoch_manager.current_shard_key",
             MetadataKey::EpochManagerLastSyncedEpoch => b"epoch_manager.last_synced_epoch",
             MetadataKey::EpochManagerFeeClaimPublicKey => b"epoch_manager.fee_claim_public_key",
-            MetadataKey::EpochManagerLastBlockOfCurrentEpoch => b"epoch_manager.last_block_of_current_epoch",
+            MetadataKey::EpochManagerLastEpochHash => b"epoch_manager.last_epoch_hash",
         }
     }
 }

@@ -97,7 +97,6 @@ async function jsonRpc(method: string, params: any = null) {
 
 export const getOpenRpcSchema = (): Promise<string> => jsonRpc("rpc.discover");
 export const getIdentity = (): Promise<IndexerGetIdentityResponse> => jsonRpc("get_identity");
-export const getAllVns = (epoch: number): Promise<IndexerGetAllVnsResponse> => jsonRpc("get_all_vns", { epoch });
 export const addPeer = (request: IndexerAddPeerRequest): Promise<IndexerAddPeerResponse> => jsonRpc("add_peer", request);
 export const getCommsStats = (): Promise<IndexerGetCommsStatsResponse> => jsonRpc("get_comms_stats");
 export const getSubstate = (request: IndexerGetSubstateRequest): Promise<IndexerGetSubstateResponse> =>

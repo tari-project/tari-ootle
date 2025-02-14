@@ -122,7 +122,7 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
 
     info!(
         target: LOG_TARGET,
-        "🟢 Starting Dan-Wallet daemon on {} connected to indexer {}",
+        "🟢 Starting wallet on {} connected to indexer {}",
         config.dan_wallet_daemon.network,
         config.dan_wallet_daemon.indexer_json_rpc_url
     );

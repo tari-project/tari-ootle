@@ -5,6 +5,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
     fmt::{Debug, Display},
+    time::Duration,
 };
 
 /// Implements a method that returns an allocation-free Display impl for container types such as Option<T>, Vec<T>, [T],
@@ -113,7 +114,13 @@ impl<K: Display, V: Display> Display for DisplayContainer<&'_ HashMap<K, V>> {
     }
 }
 
-impl<T: Display> Displayable for Option<T> {
+impl Display for DisplayContainer<&'_ Duration> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.2?}", self.value)
+    }
+}
+
+impl<T> Displayable for Option<T> {
     type Item = Self;
 
     fn display(&self) -> DisplayContainer<&'_ Self> {
@@ -158,5 +165,23 @@ impl<K: Display, V: Display> Displayable for HashMap<K, V> {
 
     fn display(&self) -> DisplayContainer<&'_ Self> {
         DisplayContainer { value: self }
+    }
+}
+
+impl Displayable for Duration {
+    type Item = Self;
+
+    fn display(&self) -> DisplayContainer<&'_ Self::Item> {
+        DisplayContainer { value: self }
+    }
+}
+
+pub struct DisplayDuration {
+    value: Duration,
+}
+
+impl Display for DisplayDuration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.2?}", self.value)
     }
 }

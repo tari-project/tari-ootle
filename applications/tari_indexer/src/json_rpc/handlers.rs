@@ -31,25 +31,25 @@ use axum_jrpc::{
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::{info, warn};
 use serde_json::{self as json, json, Value};
-use tari_base_node_client::{grpc::GrpcBaseNodeClient, types::BaseLayerConsensusConstants, BaseNodeClient};
+use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::hex::to_hex;
 use tari_dan_app_utilities::{
     json_encoding::{encode_finalize_result_into_json, encode_finalized_result_into_json},
     keypair::RistrettoKeypair,
     substate_file_cache::SubstateFileCache,
 };
-use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateRequirement};
+use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 use tari_dan_p2p::TariMessagingSpec;
-use tari_dan_storage::consensus_models::Decision;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_dan_storage::{consensus_models::Decision, global::GlobalDb};
+use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_indexer_client::types::{
     self,
     AddPeerRequest,
     AddPeerResponse,
     ConnectionDirection,
-    GetAllVnsRequest,
-    GetAllVnsResponse,
     GetCommsStatsResponse,
     GetConnectionsResponse,
     GetEpochManagerStatsResponse,
@@ -94,47 +94,40 @@ use crate::{
 const LOG_TARGET: &str = "tari::indexer::json_rpc::handlers";
 
 pub struct JsonRpcHandlers {
-    consensus_constants: BaseLayerConsensusConstants,
     keypair: RistrettoKeypair,
     networking: NetworkingHandle<TariMessagingSpec>,
-    base_node_client: GrpcBaseNodeClient,
     substate_manager: Arc<SubstateManager>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
     template_manager: TemplateManager<PeerAddress>,
+    global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
 }
 
 impl JsonRpcHandlers {
     pub fn new(
-        consensus_constants: BaseLayerConsensusConstants,
         services: &Services,
-        base_node_client: GrpcBaseNodeClient,
         substate_manager: Arc<SubstateManager>,
         transaction_manager: TransactionManager<
             EpochManagerHandle<PeerAddress>,
             TariValidatorNodeRpcClientFactory,
             SubstateFileCache,
         >,
+        global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
         template_manager: TemplateManager<PeerAddress>,
         dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
     ) -> Self {
         Self {
-            consensus_constants,
             keypair: services.keypair.clone(),
             networking: services.networking.clone(),
-            base_node_client,
+            global_db,
             substate_manager,
             epoch_manager: services.epoch_manager.clone(),
             transaction_manager,
             template_manager,
             dry_run_transaction_processor,
         }
-    }
-
-    pub fn base_node_client(&self) -> GrpcBaseNodeClient {
-        self.base_node_client.clone()
     }
 }
 
@@ -165,16 +158,6 @@ impl JsonRpcHandlers {
         };
 
         Ok(JsonRpcResponse::success(answer_id, response))
-    }
-
-    pub async fn get_all_vns(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let GetAllVnsRequest { epoch } = value.parse_params()?;
-        let epoch_blocks = self.consensus_constants.epoch_to_height(epoch);
-        match self.base_node_client().get_validator_nodes(epoch_blocks).await {
-            Ok(vns) => Ok(JsonRpcResponse::success(answer_id, GetAllVnsResponse { vns })),
-            Err(e) => Err(Self::internal_error(answer_id, format!("Failed to get all vns: {}", e))),
-        }
     }
 
     pub async fn add_peer(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -554,8 +537,30 @@ impl JsonRpcHandlers {
                 ),
             )
         })?;
-        let (current_block_height, current_block_hash) =
-            self.epoch_manager.current_block_info().await.map_err(|e| {
+        let (current_block_hash, current_block_height) = self
+            .global_db
+            .create_transaction()
+            .and_then(|mut tx| {
+                // This pokes into the internals of the oracles a bit. And can give incorrect results if we switch
+                // between them.
+                let current_epoch = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<Epoch>(StoreKey::StaticCurrentEpoch.as_key_bytes())?;
+                let block_hash = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<FixedHash>(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes())?
+                    .or_else(|| current_epoch.map(calc_static_epoch_hash));
+                let block_height = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())?
+                    // Just use the epoch here
+                    .or(current_epoch.map(|e| e.as_u64()));
+                Ok::<_, SqliteStorageError>((block_hash.unwrap_or_default(), block_height.unwrap_or_default()))
+            })
+            .map_err(|e| {
                 JsonRpcResponse::error(
                     answer_id,
                     JsonRpcError::new(

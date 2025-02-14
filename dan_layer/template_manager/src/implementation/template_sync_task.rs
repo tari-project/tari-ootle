@@ -10,7 +10,7 @@ use tari_dan_p2p::{
     proto::rpc::{SyncTemplatesRequest, SyncTemplatesResponse, TemplateType},
     TariMessagingSpec,
 };
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError};
+use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::{ClientStreaming, RpcStatus};
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_rpc::{
@@ -47,15 +47,19 @@ pub enum TemplateSyncError {
     EpochManagerError(#[from] EpochManagerError),
 }
 
-pub struct TemplateSyncClientTask<TAddr> {
+pub struct TemplateSyncClientTask<TAddr, TEpochManager> {
     client_factory: TariValidatorNodeRpcClientFactory,
-    epoch_manager: EpochManagerHandle<TAddr>,
+    epoch_manager: TEpochManager,
     rpc_client_cache: HashMap<TAddr, TariValidatorNodeRpcClient<TAddr, TariMessagingSpec>>,
     recently_failed_clients: HashSet<TAddr>,
 }
 
-impl<TAddr: NodeAddressable + ToPeerId> TemplateSyncClientTask<TAddr> {
-    pub fn new(client_factory: TariValidatorNodeRpcClientFactory, epoch_manager: EpochManagerHandle<TAddr>) -> Self {
+impl<TEpochManager> TemplateSyncClientTask<TEpochManager::Addr, TEpochManager>
+where
+    TEpochManager: EpochManagerReader,
+    TEpochManager::Addr: NodeAddressable + ToPeerId,
+{
+    pub fn new(client_factory: TariValidatorNodeRpcClientFactory, epoch_manager: TEpochManager) -> Self {
         Self {
             client_factory,
             epoch_manager,
@@ -152,125 +156,10 @@ impl<TAddr: NodeAddressable + ToPeerId> TemplateSyncClientTask<TAddr> {
         Ok(stream)
     }
 
-    // pub async fn run(&mut self) -> Result<Vec<TemplateAddress>, TemplateManagerError> {
-    //     let address_batches = self.templates_to_sync.chunks(100);
-    //     let current_epoch = self.epoch_manager.current_epoch().await?;
-    //     let network_info = self.epoch_manager.get_network_committee_info(current_epoch).await?;
-    //     let mut failed_addresses = Vec::new();
-    //     for addresses in address_batches {
-    //         for address in addresses {
-    //             let mut sync_successful = false;
-    //             let mut client = match self
-    //                 .try_get_client_for_template_address(address, &network_info, current_epoch)
-    //                 .await?
-    //             {
-    //                 Ok(client) => client,
-    //                 Err(error) => {
-    //                     error!(target: LOG_TARGET, "Failed to get client for template address: {error}");
-    //                     failed_addresses.push(*address);
-    //                     continue;
-    //                 },
-    //             };
-    //
-    //             // syncing current part of batch
-    //             if let Err(err) = self.try_sync_templates(&mut client, addresses).await {
-    //                 error!(target: LOG_TARGET, "Failed to sync templates: {error}");
-    //                 failed_addresses.extend(addresses);
-    //                 continue;
-    //             }
-    //             match client
-    //                 .sync_templates(SyncTemplatesRequest {
-    //                     addresses: addresses.iter().map(|address| address.to_vec()).collect(),
-    //                 })
-    //                 .await
-    //             {
-    //                 Ok(mut stream) => {
-    //                     while let Some(result) = stream.next().await {
-    //                         match result {
-    //                             Ok(resp) => {
-    //                                 // code
-    //                                 let mut compiled_code = None;
-    //                                 let mut flow_json = None;
-    //                                 let mut manifest = None;
-    //                                 let template_type: DbTemplateType;
-    //                                 let bin_hash = FixedHash::from(
-    //                                     template_hasher32().chain(resp.binary.as_slice()).result().into_array(),
-    //                                 );
-    //                                 match resp.template_type() {
-    //                                     TemplateType::Wasm => {
-    //                                         compiled_code = Some(resp.binary);
-    //                                         template_type = DbTemplateType::Wasm;
-    //                                     },
-    //                                     TemplateType::Manifest => {
-    //                                         manifest = Some(String::from_utf8(resp.binary)?);
-    //                                         template_type = DbTemplateType::Manifest;
-    //                                     },
-    //                                     TemplateType::Flow => {
-    //                                         flow_json = Some(String::from_utf8(resp.binary)?);
-    //                                         template_type = DbTemplateType::Flow;
-    //                                     },
-    //                                 }
-    //
-    //                                 // get template address
-    //                                 let template_address_result = TemplateAddress::try_from_vec(resp.address);
-    //                                 if let Err(error) = template_address_result {
-    //                                     error!(target: LOG_TARGET, "Invalid template address: {error:?}");
-    //                                     continue;
-    //                                 }
-    //                                 let template_address = template_address_result.unwrap();
-    //
-    //                                 if let Err(error) = template_manager.update_template(
-    //                                     template_address,
-    //                                     DbTemplateUpdate::template(
-    //                                         FixedHash::try_from(resp.author_public_key.to_vec())?,
-    //                                         Some(bin_hash),
-    //                                         resp.template_name,
-    //                                         template_type,
-    //                                         compiled_code,
-    //                                         flow_json,
-    //                                         manifest,
-    //                                     ),
-    //                                 ) {
-    //                                     error!(target: LOG_TARGET, "Failed to add new template: {error:?}");
-    //                                     continue;
-    //                                 }
-    //
-    //                                 // remove from addresses to be able to send back a list of not
-    //                                 // synced templates (if any)
-    //                                 for (i, addr) in addresses.iter().enumerate() {
-    //                                     if *addr == template_address {
-    //                                         addresses.remove(i);
-    //                                         break;
-    //                                     }
-    //                                 }
-    //
-    //                                 sync_successful = true;
-    //                                 info!(target: LOG_TARGET, "✅ Template synced successfully: {}",
-    // template_address);                                 break;
-    //                             },
-    //                             Err(error) => {
-    //                                 warn!(target: LOG_TARGET, "Can't get stream of templates from VN({addr}):
-    // {error:?}");                             },
-    //                         }
-    //                     }
-    //                 },
-    //                 Err(error) => {
-    //                     warn!(target: LOG_TARGET, "Can't get stream of templates from VN({addr}): {error:?}");
-    //                 },
-    //             }
-    //
-    //             if sync_successful {
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     Ok(addresses)
-    // }
-
     async fn try_get_client(
         &mut self,
         current_epoch: Epoch,
-    ) -> Result<(TAddr, rpc_service::ValidatorNodeRpcClient), TemplateSyncError> {
+    ) -> Result<(TEpochManager::Addr, rpc_service::ValidatorNodeRpcClient), TemplateSyncError> {
         for (peer_address, client) in &self.rpc_client_cache {
             if self.recently_failed_clients.contains(peer_address) {
                 continue;

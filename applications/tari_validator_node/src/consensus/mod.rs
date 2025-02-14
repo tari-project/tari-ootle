@@ -10,7 +10,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
 use tari_dan_common_types::PeerAddress;
 use tari_dan_storage::consensus_models::TransactionPool;
-use tari_epoch_manager::base_layer::EpochManagerHandle;
+use tari_epoch_manager::service::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
 use tari_state_store_sqlite::SqliteStateStore;

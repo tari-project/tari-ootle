@@ -28,7 +28,7 @@ use std::{
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_common_types::types::PublicKey;
-use tari_dan_app_utilities::p2p_config::PeerSeedsConfig;
+use tari_dan_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_p2p::Network;
 use tari_shutdown::Shutdown;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig, ValidatorRegistrationFile};
@@ -129,6 +129,7 @@ pub async fn spawn_validator_node(
         let mut config = ApplicationConfig {
             common: CommonConfig::default(),
             validator_node: ValidatorNodeConfig::default(),
+            epoch_oracle: EpochOracleConfig::default(),
             peer_seeds: PeerSeedsConfig::default(),
             network: Network::LocalNet,
         };
@@ -140,7 +141,7 @@ pub async fn spawn_validator_node(
         config.validator_node.data_dir = temp_dir.to_path_buf();
         config.validator_node.shard_key_file = temp_dir.join("shard_key.json");
         config.validator_node.identity_file = temp_dir.join("validator_node_id.json");
-        config.validator_node.base_node_grpc_url =
+        config.epoch_oracle.base_layer.base_node_grpc_url =
             Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
 
         // config.validator_node.public_address =

@@ -61,10 +61,12 @@ impl ProcessDefinition for ValidatorNode {
             .arg("--network")
             .arg(context.network().to_string())
             .arg(format!("--json-rpc-public-address={json_rpc_public_address}"))
-            .arg(format!("-pvalidator_node.base_node_grpc_url={base_node_grpc_url}"))
+            .arg(format!(
+                "-pepoch_oracle.base_layer.base_node_grpc_url={base_node_grpc_url}"
+            ))
             .arg(format!("-pvalidator_node.json_rpc_listener_address={json_rpc_address}"))
             .arg(format!("-pvalidator_node.web_ui_listener_address={web_ui_address}"))
-            .arg("-pvalidator_node.base_layer_scanning_interval=1");
+            .arg("-pepoch_oracle.base_layer.scanning_interval=1");
 
         Ok(command)
     }

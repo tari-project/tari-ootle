@@ -32,7 +32,7 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::RpcStatus;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::implementation::TemplateManager;

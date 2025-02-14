@@ -85,6 +85,9 @@ where
             "Submitting transaction {} to the validator node", tx_id
         );
 
+        // Ensure initial scanning has completed to ensure an accurate epoch
+        self.epoch_manager.wait_for_initial_scanning_to_complete().await?;
+
         let involved = transaction
             .all_inputs_iter()
             // The version does not affect the shard group

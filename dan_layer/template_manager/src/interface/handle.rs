@@ -20,15 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::PublicKey;
+use reqwest::Url;
+use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::global::TemplateStatus;
+use tari_epoch_manager::traits::TemplateDownloader;
 use tari_template_lib::models::TemplateAddress;
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{
     types::TemplateManagerRequest,
+    AddTemplateRequest,
     Template,
     TemplateExecutable,
     TemplateManagerError,
@@ -116,11 +119,13 @@ impl TemplateManagerHandle {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(TemplateManagerRequest::AddTemplate {
-                author_public_key,
-                template_address,
-                template,
-                template_name,
-                epoch,
+                request: AddTemplateRequest {
+                    author_public_key,
+                    template_address,
+                    template,
+                    template_name,
+                    epoch,
+                },
                 reply: tx,
             })
             .await
@@ -143,5 +148,28 @@ impl TemplateManagerHandle {
             .await
             .map_err(|_| TemplateManagerError::ChannelClosed)?;
         rx.await.map_err(|_| TemplateManagerError::ChannelClosed)?
+    }
+}
+
+impl TemplateDownloader for TemplateManagerHandle {
+    type Error = TemplateManagerError;
+
+    async fn enqueue_download(
+        &mut self,
+        epoch: Epoch,
+        name: String,
+        address: tari_engine_types::TemplateAddress,
+        author_public_key: PublicKey,
+        url: Url,
+        binary_hash: FixedHash,
+    ) -> Result<(), Self::Error> {
+        self.add_template(
+            author_public_key,
+            address,
+            TemplateExecutable::DownloadableWasm(url, binary_hash),
+            Some(name),
+            epoch,
+        )
+        .await
     }
 }

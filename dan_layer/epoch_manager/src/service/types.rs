@@ -3,9 +3,7 @@
 
 use std::collections::HashMap;
 
-use tari_base_node_client::types::BaseLayerConsensusConstants;
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_core::transactions::{tari_amount::MicroMinotari, transaction_components::ValidatorNodeRegistration};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     Epoch,
@@ -25,15 +23,8 @@ pub enum EpochManagerRequest<TAddr> {
     CurrentEpoch {
         reply: Reply<Epoch>,
     },
-    CurrentBlockInfo {
-        reply: Reply<(u64, FixedHash)>,
-    },
-    GetLastBlockOfTheEpoch {
+    CurrentEpochHash {
         reply: Reply<FixedHash>,
-    },
-    IsLastBlockOfTheEpoch {
-        block_height: u64,
-        reply: Reply<bool>,
     },
     GetValidatorNode {
         epoch: Epoch,
@@ -45,14 +36,12 @@ pub enum EpochManagerRequest<TAddr> {
         public_key: PublicKey,
         reply: Reply<ValidatorNode<TAddr>>,
     },
-    GetManyValidatorNodes {
-        query: Vec<(Epoch, PublicKey)>,
-        reply: Reply<HashMap<(Epoch, PublicKey), ValidatorNode<TAddr>>>,
-    },
     AddValidatorNodeRegistration {
         activation_epoch: Epoch,
-        registration: ValidatorNodeRegistration,
-        value: MicroMinotari,
+        validator_public_key: PublicKey,
+        claim_public_key: PublicKey,
+        value_of_registration: u64,
+        shard_key: SubstateAddress,
         reply: Reply<()>,
     },
     DeactivateValidatorNode {
@@ -60,26 +49,10 @@ pub enum EpochManagerRequest<TAddr> {
         deactivation_epoch: Epoch,
         reply: Reply<()>,
     },
-    AddBlockHash {
-        block_height: u64,
-        block_hash: FixedHash,
-        reply: Reply<()>,
-    },
-    UpdateEpoch {
-        block_height: u64,
-        block_hash: FixedHash,
-        reply: Reply<()>,
-    },
-    LastRegistrationEpoch {
-        reply: Reply<Option<Epoch>>,
-    },
-    UpdateLastRegistrationEpoch {
+    ActivateEpoch {
         epoch: Epoch,
+        epoch_hash: FixedHash,
         reply: Reply<()>,
-    },
-    IsEpochValid {
-        epoch: Epoch,
-        reply: Reply<bool>,
     },
     GetCommittees {
         epoch: Epoch,
@@ -104,9 +77,6 @@ pub enum EpochManagerRequest<TAddr> {
     },
     WaitForInitialScanningToComplete {
         reply: Reply<()>,
-    },
-    GetBaseLayerConsensusConstants {
-        reply: Reply<BaseLayerConsensusConstants>,
     },
     GetOurValidatorNode {
         epoch: Epoch,
@@ -135,10 +105,6 @@ pub enum EpochManagerRequest<TAddr> {
         epoch: Epoch,
         shard_group: ShardGroup,
         reply: Reply<HashMap<ShardGroup, Committee<TAddr>>>,
-    },
-    GetBaseLayerBlockHeight {
-        hash: FixedHash,
-        reply: Reply<Option<u64>>,
     },
     GetFeeClaimPublicKey {
         reply: Reply<Option<PublicKey>>,

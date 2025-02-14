@@ -12,6 +12,7 @@ use tari_consensus::{
 };
 use tari_dan_common_types::{
     committee::Committee,
+    displayable::Displayable,
     optional::Optional,
     shard::Shard,
     Epoch,
@@ -381,7 +382,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         // We get the current substate range, and we asks committees from previous epoch in this range to give us
         // data.
         let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
-        let prev_epoch = current_epoch.saturating_sub(Epoch(1));
+        let prev_epoch = current_epoch
+            .checked_sub(Epoch(1))
+            .ok_or_else(|| CommsRpcConsensusSyncError::NoCommittees(Epoch::zero()))?;
         info!(target: LOG_TARGET,"Previous epoch is {}", prev_epoch);
         // We want to get any committees from the previous epoch that overlap with our shard group in this epoch
         let committees = self
@@ -554,13 +557,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 
         // We only sync if we're behind by an epoch. The current epoch is replayed in consensus.
         if current_epoch > leaf_block.map_or(Epoch::zero(), |b| b.epoch()) {
-            info!(target: LOG_TARGET, "🛜Our current leaf block is behind the current epoch. Syncing...");
-            return Ok(SyncStatus::Behind);
-        }
-
-        if leaf_block.is_some_and(|l| l.height.is_zero()) {
-            // We only have the genesis for the epoch, let's assume we're behind in this case
-            info!(target: LOG_TARGET, "🛜Our current leaf block is behind the current epoch. Syncing...");
+            info!(target: LOG_TARGET, "🛜Our current leaf block {} is behind the current epoch {}. Syncing...", leaf_block.display(), current_epoch);
             return Ok(SyncStatus::Behind);
         }
 
@@ -570,7 +567,14 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     async fn sync(&mut self) -> Result<(), Self::Error> {
         let current_epoch = self.epoch_manager.current_epoch().await?;
         let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
-        let prev_epoch_committees = self.get_sync_committees(current_epoch).await?;
+        let prev_epoch_committees = match self.get_sync_committees(current_epoch).await {
+            Ok(committees) => committees,
+            Err(CommsRpcConsensusSyncError::NoCommittees(prev_epoch)) => {
+                info!(target: LOG_TARGET, "No committees for the previous epoch {prev_epoch}. This is the first committee.");
+                return Ok(());
+            },
+            Err(err) => return Err(err),
+        };
 
         self.sync_global_shard(current_epoch, &prev_epoch_committees, &our_vn.address)
             .await?;

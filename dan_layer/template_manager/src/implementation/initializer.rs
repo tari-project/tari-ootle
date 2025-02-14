@@ -21,31 +21,37 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_dan_common_types::{NodeAddressable, ToPeerId};
-use tari_epoch_manager::base_layer::EpochManagerHandle;
+use tari_epoch_manager::EpochManagerReader;
 use tari_shutdown::ShutdownSignal;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use super::{downloader::TemplateDownloadWorker, service::TemplateManagerService, TemplateManager};
-use crate::interface::TemplateManagerHandle;
+use crate::interface::{AddTemplateRequest, TemplateManagerHandle};
 
-pub fn spawn<TAddr: NodeAddressable + ToPeerId + 'static>(
-    manager: TemplateManager<TAddr>,
-    epoch_manager: EpochManagerHandle<TAddr>,
+pub fn spawn<TEpochManager>(
+    manager: TemplateManager<TEpochManager::Addr>,
+    epoch_manager: TEpochManager,
     client_factory: TariValidatorNodeRpcClientFactory,
+    download_requests: mpsc::UnboundedReceiver<AddTemplateRequest>,
     shutdown: ShutdownSignal,
-) -> (TemplateManagerHandle, JoinHandle<anyhow::Result<()>>) {
+) -> (TemplateManagerHandle, JoinHandle<anyhow::Result<()>>)
+where
+    TEpochManager: EpochManagerReader + Clone + Send + Sync + 'static,
+    TEpochManager::Addr: NodeAddressable + ToPeerId + 'static,
+{
     let (tx_request, rx_request) = mpsc::channel(1);
     let handle = TemplateManagerHandle::new(tx_request);
 
-    let (tx_download_queue, rx_download_queue) = mpsc::channel(1);
-    let (tx_completed_downloads, rx_completed_downloads) = mpsc::channel(1);
+    let (tx_download_queue, rx_download_queue) = mpsc::channel(10);
+    let (tx_completed_downloads, rx_completed_downloads) = mpsc::channel(10);
 
     let join_handle = TemplateManagerService::spawn(
         rx_request,
         manager,
         epoch_manager,
         tx_download_queue,
+        download_requests,
         rx_completed_downloads,
         client_factory,
         shutdown,

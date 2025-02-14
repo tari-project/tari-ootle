@@ -51,7 +51,7 @@ use tari_dan_storage::{
     StateStore,
 };
 use tari_engine_types::TemplateAddress;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::HashParseError;

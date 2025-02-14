@@ -622,7 +622,7 @@ impl TestBuilder {
         failure_nodes: &[TestAddress],
         shutdown_signal: ShutdownSignal,
     ) -> (Vec<ValidatorChannels>, HashMap<TestAddress, Validator>) {
-        let num_committees = epoch_manager.get_num_committees(Epoch(0)).await.unwrap();
+        let num_committees = epoch_manager.get_num_committees(Epoch(1)).await.unwrap();
         epoch_manager
             .all_validators()
             .await

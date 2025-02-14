@@ -1,7 +1,7 @@
 //    Copyright 2023 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use std::ops::RangeBounds;
+use std::ops::RangeInclusive;
 
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_common_types::types::{PrivateKey, PublicKey};
@@ -26,12 +26,8 @@ pub(crate) fn random_substate_in_shard_group(shard_group: ShardGroup, num_shards
     SubstateId::Component(ComponentAddress::new(ObjectKey::new(entity_id, component_key)))
 }
 
-fn random_substate_address_range<R: RangeBounds<SubstateAddress>>(range: R) -> SubstateAddress {
-    let start = match range.start_bound() {
-        std::ops::Bound::Included(addr) => *addr,
-        std::ops::Bound::Excluded(addr) => *addr,
-        std::ops::Bound::Unbounded => SubstateAddress::zero(),
-    };
+fn random_substate_address_range(range: RangeInclusive<SubstateAddress>) -> SubstateAddress {
+    let start = range.start();
     let mut bytes = [0u8; 16];
     OsRng.fill_bytes(&mut bytes);
     let mut start = start.into_array();

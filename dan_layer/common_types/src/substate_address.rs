@@ -77,6 +77,10 @@ impl SubstateAddress {
         self.as_bytes().iter().all(|&b| b == 0)
     }
 
+    pub fn from_array(array: [u8; SubstateAddress::LENGTH]) -> Self {
+        Self(array)
+    }
+
     pub const fn into_array(self) -> [u8; SubstateAddress::LENGTH] {
         self.0
     }
@@ -93,12 +97,12 @@ impl SubstateAddress {
         Self([0xffu8; SubstateAddress::LENGTH])
     }
 
-    pub fn from_hash_and_version(hash: FixedHash, version: u32) -> Self {
+    pub fn from_hash_and_version<T: Into<FixedHash>>(hash: T, version: u32) -> Self {
         // This will cause an error at compile-time if ObjectKey::LENGTH != FixedHash::byte_size()
         // If ObjectKey should differ in length, then this function should likely be removed.
         const _: () = [()][1 - (FixedHash::byte_size() == ObjectKey::LENGTH) as usize];
         let mut buf = [0u8; SubstateAddress::LENGTH];
-        buf[..ObjectKey::LENGTH].copy_from_slice(hash.as_bytes());
+        buf[..ObjectKey::LENGTH].copy_from_slice(hash.into().as_bytes());
         buf[ObjectKey::LENGTH..].copy_from_slice(&version.to_be_bytes());
         Self(buf)
     }

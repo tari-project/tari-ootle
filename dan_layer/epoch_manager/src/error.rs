@@ -11,8 +11,6 @@ pub enum EpochManagerError {
     ReceiveError,
     #[error("Could not send to channel")]
     SendError,
-    #[error("Base node errored: {0}")]
-    BaseNodeError(anyhow::Error),
     #[error("No epoch found {0:?}")]
     NoEpochFound(Epoch),
     #[error("No committee found for shard {0:?}")]

@@ -105,7 +105,10 @@ impl ConfigOverrideProvider for Cli {
             overrides.push(("validator_node.p2p.enable_mdns".to_string(), "false".to_string()));
         }
         if let Some(url) = self.minotari_node_grpc_url.as_ref() {
-            overrides.push(("validator_node.base_node_grpc_url".to_string(), url.to_string()));
+            overrides.push((
+                "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
+                url.to_string(),
+            ));
         }
         overrides
     }

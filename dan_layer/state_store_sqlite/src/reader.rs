@@ -1446,7 +1446,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         let commit_block = self.get_commit_block()?;
-        let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
+        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 2000)?;
 
         let diff = block_diffs::table
             .filter(block_diffs::block_id.eq_any(block_ids))

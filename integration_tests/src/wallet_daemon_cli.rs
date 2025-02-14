@@ -145,7 +145,7 @@ pub async fn reveal_burned_funds(world: &mut TariWorld, account_name: String, am
     let request = RevealFundsRequest {
         account: Some(ComponentAddressOrName::Name(account_name)),
         amount_to_reveal: Amount(amount as i64),
-        max_fee: Some(Amount(2000)),
+        max_fee: Some(Amount(5000)),
         pay_fee_from_reveal: true,
     };
 
@@ -211,7 +211,7 @@ pub async fn transfer_confidential(
     let proof_id = transfer_proof_resp.proof_id;
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(source_component_address, Amount(2000))
+        .fee_transaction_pay_from_component(source_component_address, Amount(5000))
         .call_method(source_component_address, "withdraw_confidential", args![
             resource_address,
             withdraw_proof
@@ -470,7 +470,7 @@ pub async fn submit_manifest_with_signing_keys(
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -552,7 +552,7 @@ pub async fn submit_manifest(
     let AccountGetResponse { account, .. } = client.accounts_get_default().await.unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -662,7 +662,7 @@ pub async fn create_component(
         .unwrap();
 
     let transaction = transaction_builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
         .call_function(template_address, &function_call, args)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -865,7 +865,7 @@ pub async fn transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(Amount(2000));
+    let max_fee = Some(Amount(5000));
 
     let request = AccountsTransferRequest {
         account,
@@ -892,7 +892,7 @@ pub async fn confidential_transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(Amount(2000));
+    let max_fee = Some(Amount(5000));
 
     let request = ConfidentialTransferRequest {
         account,

@@ -10863,7 +10863,6 @@ dependencies = [
 name = "tari_wallet_daemon_client"
 version = "0.8.2"
 dependencies = [
- "base64urlsafedata",
  "chrono",
  "reqwest",
  "serde",

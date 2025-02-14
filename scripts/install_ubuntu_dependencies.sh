@@ -3,6 +3,8 @@ apt-get install --no-install-recommends --assume-yes \
   ca-certificates \
   curl \
   gpg \
+  openssl \
+  libssl-dev \
   pkg-config \
   libsqlite3-dev \
   git \
@@ -18,17 +20,3 @@ apt-get install --no-install-recommends --assume-yes \
   libudev-dev \
   libhidapi-dev \
   zip
-
-wget https://github.com/openssl/openssl/releases/download/openssl-3.0.8/openssl-3.0.8.tar.gz
-tar xvf openssl-3.0.8.tar.gz
-cd openssl-3.0*/
-./config
-make
-make install
-ldconfig
-tee /etc/profile.d/openssl.sh<<EOF
-export PATH=/usr/local/openssl/bin:\$PATH
-export LD_LIBRARY_PATH=/usr/local/openssl/lib:\$LD_LIBRARY_PATH
-EOF
-source /etc/profile.d/openssl.sh
-openssl version

@@ -184,7 +184,6 @@ export default function Layout() {
                 <Logo fill={theme.palette.text.primary} />
               </Link>
               <Stack direction="row" spacing={1}>
-                <ConnectorLink />
                 <WalletConnectLink />
               </Stack>
             </Box>

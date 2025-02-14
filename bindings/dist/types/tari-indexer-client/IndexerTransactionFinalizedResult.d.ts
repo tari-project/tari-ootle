@@ -13,6 +13,5 @@ export type IndexerTransactionFinalizedResult = "Pending" | {
             nanos: number;
         };
         abort_details: string | null;
-        json_results: Array<string>;
     };
 };

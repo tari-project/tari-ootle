@@ -23,7 +23,6 @@
 pub mod common;
 pub mod configuration;
 pub mod epoch_oracle_config;
-pub mod json_encoding;
 pub mod keypair;
 pub mod p2p_config;
 pub mod seed_peer;

@@ -31,16 +31,16 @@ import TableRow from "@mui/material/TableRow";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { useState } from "react";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { useAccountNFTsList, useAccountsGetBalances } from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
-import { shortenString, shortenSubstateId, substateIdToString } from "../../../utils/helpers";
+import { shortenSubstateId, substateIdToString } from "../../../utils/helpers";
 import NFTList from "../../../Components/NFTList";
 import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./SendMoney";
 import { ResourceAddress, ResourceType, VaultId, BalanceEntry, Account } from "@tari-project/typescript-bindings";
+import CopyAddress from "../../../Components/CopyAddress";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -65,14 +65,13 @@ function BalanceRow(props: BalanceRowProps) {
   return (
     <TableRow key={token_symbol || resource_address}>
       <DataTableCell>
-        <span title={vault_address}>{shortenSubstateId(vault_address)}</span>
-        <CopyToClipboard copy={substateIdToString(vault_address)} title="Copy vault address" />
+        <CopyAddress address={vault_address} />
       </DataTableCell>
       <DataTableCell>
-        <span title={resource_address}>
-          {token_symbol || shortenSubstateId(resource_address)} {resource_type}
-        </span>
-        <CopyToClipboard copy={resource_address} title="Copy resource address" />
+        <CopyAddress
+          address={resource_address}
+          display={`${token_symbol || shortenSubstateId(resource_address)} ${resource_type}`}
+        />
       </DataTableCell>
       <DataTableCell>{showBalance ? balance : "*************"}</DataTableCell>
       <DataTableCell>

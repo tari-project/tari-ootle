@@ -20,56 +20,26 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
-import IconButton from "@mui/material/IconButton";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import Tooltip from "@mui/material/Tooltip";
+import { SubstateId, shortenString } from "@tari-project/typescript-bindings";
+import { shortenSubstateId, substateIdToString } from "../utils/helpers";
+import CopyToClipboard from "./CopyToClipboard";
 
-interface CopyProps {
-  copy: string;
-  floatright?: boolean;
-  title?: string;
+interface Props {
+  address: SubstateId | string;
+  display?: SubstateId | string;
 }
 
-const CopyToClipboard = ({ copy, floatright, title }: CopyProps) => {
-  const [tooltip, setTooltip] = useState<string | null>(null);
-  const handleClick = async (copyThis: string) => {
-    try {
-      await navigator.clipboard.writeText(copyThis);
-      setTooltip("Copied to clipboard");
-    } catch (err) {
-      setTooltip("Permission denied to copy");
-      console.log(err);
-    }
-    setTimeout(() => {
-      setTooltip(null);
-    }, 2000);
-  };
+export default function CopyAddress({ address, display }: Props) {
+  const [shortAddress, addressString] =
+    typeof address === "object"
+      ? [shortenSubstateId(address), substateIdToString(address)]
+      : [shortenString(address), address];
+  const displayStr = display && (typeof display === "object" ? shortenSubstateId(display) : display);
 
   return (
     <>
-      <IconButton
-        onClick={() => handleClick(copy)}
-        size="small"
-        aria-label="copy to clipboard"
-        style={
-          floatright
-            ? { float: "right", marginLeft: "10px", marginRight: "10px" }
-            : { marginLeft: "10px", marginRight: "10px" }
-        }
-      >
-        <Tooltip title={tooltip ? tooltip : title || copy} arrow>
-          <ContentCopyIcon
-            color="primary"
-            style={{
-              width: "16px",
-              height: "16px",
-            }}
-          />
-        </Tooltip>
-      </IconButton>
+      <span title={addressString}>{displayStr || shortAddress}</span>
+      <CopyToClipboard copy={addressString} />
     </>
   );
-};
-
-export default CopyToClipboard;
+}

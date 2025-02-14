@@ -13,5 +13,5 @@ export type AbortReason =
   | "ExecutionFailure"
   | "OneOrMoreInputsNotFound"
   | "ForeignShardGroupDecidedToAbort"
-  | "FeesNotPaid"
+  | "InsufficientFeesPaid"
   | "EarlyAbort";

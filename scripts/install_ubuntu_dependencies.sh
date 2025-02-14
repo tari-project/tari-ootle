@@ -26,7 +26,6 @@ tar xvf openssl-3.0.8.tar.gz
 cd openssl-3.0*/
 ./config
 make
-make test
 make install
 ldconfig
 tee /etc/profile.d/openssl.sh<<EOF

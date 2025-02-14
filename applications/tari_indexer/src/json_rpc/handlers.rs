@@ -33,11 +33,7 @@ use log::{info, warn};
 use serde_json::{self as json, json, Value};
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, types::BaseLayerConsensusConstants, BaseNodeClient};
 use tari_crypto::tari_utilities::hex::to_hex;
-use tari_dan_app_utilities::{
-    json_encoding::{encode_finalize_result_into_json, encode_finalized_result_into_json},
-    keypair::RistrettoKeypair,
-    substate_file_cache::SubstateFileCache,
-};
+use tari_dan_app_utilities::{keypair::RistrettoKeypair, substate_file_cache::SubstateFileCache};
 use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 use tari_dan_p2p::TariMessagingSpec;
@@ -481,9 +477,6 @@ impl JsonRpcHandlers {
                 .await
                 .map_err(|e| Self::internal_error(answer_id, e))?;
 
-            let json_results = encode_finalize_result_into_json(&exec_result.finalize)
-                .map_err(|e| Self::internal_error(answer_id, e))?;
-
             return Ok(JsonRpcResponse::success(answer_id, SubmitTransactionResponse {
                 result: IndexerTransactionFinalizedResult::Finalized {
                     execution_result: Some(Box::new(exec_result)),
@@ -491,7 +484,6 @@ impl JsonRpcHandlers {
                     abort_details: None,
                     finalized_time: Default::default(),
                     execution_time: Default::default(),
-                    json_results,
                 },
                 transaction_id,
             }));
@@ -642,19 +634,14 @@ impl JsonRpcHandlers {
             TransactionResultStatus::Pending => GetTransactionResultResponse {
                 result: IndexerTransactionFinalizedResult::Pending,
             },
-            TransactionResultStatus::Finalized(finalized) => {
-                let json_results =
-                    encode_finalized_result_into_json(&finalized).map_err(|e| Self::internal_error(answer_id, e))?;
-                GetTransactionResultResponse {
-                    result: IndexerTransactionFinalizedResult::Finalized {
-                        final_decision: finalized.final_decision,
-                        execution_result: finalized.execute_result.map(Box::new),
-                        execution_time: finalized.execution_time,
-                        finalized_time: finalized.finalized_time,
-                        abort_details: finalized.abort_details,
-                        json_results,
-                    },
-                }
+            TransactionResultStatus::Finalized(finalized) => GetTransactionResultResponse {
+                result: IndexerTransactionFinalizedResult::Finalized {
+                    final_decision: finalized.final_decision,
+                    execution_result: finalized.execute_result.map(Box::new),
+                    execution_time: finalized.execution_time,
+                    finalized_time: finalized.finalized_time,
+                    abort_details: finalized.abort_details,
+                },
             },
         };
 
@@ -700,17 +687,12 @@ impl JsonRpcHandlers {
 
             let indexer_transaction_result = match transaction_result {
                 TransactionResultStatus::Pending => IndexerTransactionFinalizedResult::Pending,
-                TransactionResultStatus::Finalized(finalized) => {
-                    let json_results = encode_finalized_result_into_json(&finalized)
-                        .map_err(|e| Self::internal_error(answer_id, e))?;
-                    IndexerTransactionFinalizedResult::Finalized {
-                        final_decision: finalized.final_decision,
-                        execution_result: finalized.execute_result.map(Box::new),
-                        execution_time: finalized.execution_time,
-                        finalized_time: finalized.finalized_time,
-                        abort_details: finalized.abort_details,
-                        json_results,
-                    }
+                TransactionResultStatus::Finalized(finalized) => IndexerTransactionFinalizedResult::Finalized {
+                    final_decision: finalized.final_decision,
+                    execution_result: finalized.execute_result.map(Box::new),
+                    execution_time: finalized.execution_time,
+                    finalized_time: finalized.finalized_time,
+                    abort_details: finalized.abort_details,
                 },
             };
 

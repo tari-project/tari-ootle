@@ -21,9 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState } from "react";
-import { Form, Link, useLocation } from "react-router-dom";
+import { Form, Link } from "react-router-dom";
 import AddIcon from "@mui/icons-material/Add";
-import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button/Button";
 import Fade from "@mui/material/Fade";
 import MenuItem from "@mui/material/MenuItem";
@@ -35,7 +34,6 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField/TextField";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import { ChevronRight } from "@mui/icons-material";
@@ -49,7 +47,8 @@ import {
 } from "../../../api/hooks/useAccounts";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import queryClient from "../../../api/queryClient";
-import { AccountInfo, substateIdToString, shortenString, shortenSubstateId } from "@tari-project/typescript-bindings";
+import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/typescript-bindings";
+import CopyAddress from "../../../Components/CopyAddress";
 
 function Account(account: AccountInfo, index: number) {
   return (
@@ -66,13 +65,11 @@ function Account(account: AccountInfo, index: number) {
         </Link>
       </DataTableCell>
       <DataTableCell>
-        {shortenSubstateId(account.account.address)}
-        <CopyToClipboard copy={substateIdToString(account.account.address)} />
+        <CopyAddress address={account.account.address} />
       </DataTableCell>
       <DataTableCell>{account.account.key_index}</DataTableCell>
       <DataTableCell>
-        {shortenString(account.public_key)}
-        <CopyToClipboard copy={account.public_key} />
+        <CopyAddress address={account.public_key} />
       </DataTableCell>
       <DataTableCell>
         <IconButton component={Link} to={`/accounts/${substateIdToString(account.account.address)}`}>

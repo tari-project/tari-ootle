@@ -40,6 +40,7 @@ import {
   GetValidatorFeesResponse,
   rejectReasonToString,
   substateIdToString,
+  TransactionResult,
 } from "@tari-project/typescript-bindings";
 import { FileContent } from "use-file-picker/types";
 import { toHexString } from "../../../utils/helpers";
@@ -152,7 +153,9 @@ export default function ClaimFees() {
           setPopup({
             title: "Claim failed",
             error: true,
-            message: rejectReasonToString(getRejectReasonFromTransactionResult(resp.result.result)),
+            message: rejectReasonToString(
+              getRejectReasonFromTransactionResult(resp.result.result as TransactionResult),
+            ),
           });
         }
       })

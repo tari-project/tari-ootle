@@ -6,7 +6,6 @@ use anyhow::anyhow;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
-use tari_dan_app_utilities::json_encoding;
 use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
 use tari_template_lib::{args, models::Amount};
@@ -226,12 +225,9 @@ pub async fn handle_submit_dry_run(
         .submit_dry_run_transaction(transaction, autofill_inputs)
         .await?;
 
-    let json_result = json_encoding::encode_finalize_result_into_json(&exec_result.finalize)?;
-
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         result: exec_result,
-        json_result,
     })
 }
 
@@ -296,17 +292,10 @@ pub async fn handle_get_result(
         .optional()?
         .ok_or(HandlerError::NotFound)?;
 
-    let json_result = transaction
-        .finalize
-        .as_ref()
-        .map(json_encoding::encode_finalize_result_into_json)
-        .transpose()?;
-
     Ok(TransactionGetResultResponse {
         transaction_id: req.transaction_id,
         result: transaction.finalize,
         status: transaction.status,
-        json_result,
     })
 }
 
@@ -328,15 +317,12 @@ pub async fn handle_wait_result(
         .ok_or(HandlerError::NotFound)?;
 
     if let Some(result) = transaction.finalize {
-        let json_result = json_encoding::encode_finalize_result_into_json(&result)?;
-
         return Ok(TransactionWaitResultResponse {
             transaction_id: req.transaction_id,
             result: Some(result),
             status: transaction.status,
             final_fee: transaction.final_fee.unwrap_or_default(),
             timed_out: false,
-            json_result: Some(json_result),
         });
     }
 
@@ -359,14 +345,12 @@ pub async fn handle_wait_result(
 
         match evt_or_timeout {
             Some(WalletEvent::TransactionFinalized(event)) if event.transaction_id == req.transaction_id => {
-                let json_result = json_encoding::encode_finalize_result_into_json(&event.finalize)?;
                 return Ok(TransactionWaitResultResponse {
                     transaction_id: req.transaction_id,
                     result: Some(event.finalize),
                     status: event.status,
                     final_fee: event.final_fee,
                     timed_out: false,
-                    json_result: Some(json_result),
                 });
             },
             Some(WalletEvent::TransactionInvalid(event)) if event.transaction_id == req.transaction_id => {
@@ -376,7 +360,6 @@ pub async fn handle_wait_result(
                     status: event.status,
                     final_fee: event.final_fee.unwrap_or_default(),
                     timed_out: false,
-                    json_result: None,
                 });
             },
             Some(_) => continue,
@@ -387,7 +370,6 @@ pub async fn handle_wait_result(
                     status: transaction.status,
                     final_fee: Amount::zero(),
                     timed_out: true,
-                    json_result: None,
                 });
             },
         };

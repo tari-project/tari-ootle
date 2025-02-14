@@ -157,8 +157,6 @@ pub struct TransactionSubmitDryRunResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub result: ExecuteResult,
-    #[cfg_attr(feature = "ts", ts(type = "Array<any>"))]
-    pub json_result: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -260,8 +258,6 @@ pub struct TransactionGetResultResponse {
     pub transaction_id: TransactionId,
     pub status: TransactionStatus,
     pub result: Option<FinalizeResult>,
-    #[cfg_attr(feature = "ts", ts(type = "Array<any> | null"))]
-    pub json_result: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -287,8 +283,6 @@ pub struct TransactionWaitResultResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub transaction_id: TransactionId,
     pub result: Option<FinalizeResult>,
-    #[cfg_attr(feature = "ts", ts(type = "Array<any> | null"))]
-    pub json_result: Option<Vec<serde_json::Value>>,
     pub status: TransactionStatus,
     pub final_fee: Amount,
     pub timed_out: bool,

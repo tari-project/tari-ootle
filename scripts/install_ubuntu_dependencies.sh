@@ -3,8 +3,6 @@ apt-get install --no-install-recommends --assume-yes \
   ca-certificates \
   curl \
   gpg \
-  openssl \
-  libssl-dev \
   pkg-config \
   libsqlite3-dev \
   git \

@@ -9974,7 +9974,7 @@ dependencies = [
 
 [[package]]
 name = "tari_epoch_oracles"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "log",

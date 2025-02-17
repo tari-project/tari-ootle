@@ -9623,7 +9623,6 @@ dependencies = [
  "multiaddr 0.18.1",
  "rand",
  "serde",
- "serde_json",
  "tari_base_node_client",
  "tari_bor",
  "tari_common",

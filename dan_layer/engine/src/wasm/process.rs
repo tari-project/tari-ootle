@@ -59,7 +59,8 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::dan::engine::wasm::process";
-pub const ENGINE_TARI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION: &str = "0.8.0";
 
 pub struct WasmProcess {
     module: LoadedWasmTemplate,
@@ -101,7 +102,7 @@ impl WasmProcess {
         store: &mut S,
         val: &T,
     ) -> Result<AllocPtr, WasmExecutionError> {
-        let len = encoded_len(val).unwrap();
+        let len = encoded_len(val)?;
         let len = u32::try_from(len).map_err(|_| WasmExecutionError::MemoryAllocationTooLarge)?;
 
         let ptr = self.env.alloc(store, len)?;
@@ -109,7 +110,7 @@ impl WasmProcess {
             return Err(WasmExecutionError::MemoryAllocationFailed);
         }
         let mut writer = self.env.memory_writer(store, ptr)?;
-        encode_into_writer(val, &mut writer).unwrap();
+        encode_into_writer(val, &mut writer)?;
 
         Ok(AllocPtr::new(ptr.offset(), len))
     }
@@ -241,12 +242,12 @@ impl WasmProcess {
     fn validate_template_tari_version(module: &LoadedWasmTemplate) -> Result<(), WasmExecutionError> {
         let template_tari_version = module.template_def().tari_version();
 
-        if are_versions_compatible(template_tari_version, ENGINE_TARI_VERSION)? {
+        if are_versions_compatible(template_tari_version, MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION)? {
             log::debug!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is compatible with the one used in the engine", template_tari_version);
         } else {
-            log::error!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, ENGINE_TARI_VERSION);
+            log::error!(target: LOG_TARGET, "The Tari version in the template WASM (\"{}\") is incompatible with the one used in the engine (\"{}\")", template_tari_version, MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION);
             return Err(WasmExecutionError::TemplateVersionMismatch {
-                engine_version: ENGINE_TARI_VERSION.to_owned(),
+                engine_version: MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION.to_owned(),
                 template_version: template_tari_version.to_owned(),
             });
         }

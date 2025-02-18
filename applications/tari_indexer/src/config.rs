@@ -85,7 +85,7 @@ pub struct IndexerConfig {
     pub web_ui_address: Option<SocketAddr>,
     /// The jrpc address where the UI should connect (it can be the same as the json_rpc_address, but doesn't have to
     /// be), if this will be None, then the listen_addr will be used.
-    pub ui_connect_address: Option<String>,
+    pub web_ui_public_json_rpc_url: Option<String>,
     /// How often do we want to scan the second layer for new versions
     #[serde(with = "serializers::seconds")]
     pub dan_layer_scanning_internal: Duration,
@@ -130,7 +130,7 @@ impl Default for IndexerConfig {
             json_rpc_address: Some("127.0.0.1:18300".parse().unwrap()),
             graphql_address: Some("127.0.0.1:18301".parse().unwrap()),
             web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
-            ui_connect_address: None,
+            web_ui_public_json_rpc_url: None,
             dan_layer_scanning_internal: Duration::from_secs(10),
             templates: TemplateConfig::default(),
             sidechain_id: None,

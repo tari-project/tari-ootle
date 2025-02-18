@@ -35,8 +35,8 @@ pub struct Cli {
     pub common: CommonCliArgs,
     #[clap(long, alias = "endpoint", env = "JRPC_ENDPOINT")]
     pub json_rpc_address: Option<SocketAddr>,
-    #[clap(long, env = "TARI_DAN_WALLET_UI_CONNECT_ADDRESS")]
-    pub ui_connect_address: Option<String>,
+    #[clap(long, env = "TARI_WALLET_WEB_UI_JSON_RPC_PUBLIC_URL")]
+    pub web_ui_public_json_rpc_url: Option<String>,
     #[clap(long, env = "SIGNALING_SERVER_ADDRESS")]
     pub signaling_server_address: Option<SocketAddr>,
     #[clap(long, short = 'i', alias = "indexer-url")]
@@ -62,10 +62,10 @@ impl ConfigOverrideProvider for Cli {
                 json_rpc_address.to_string(),
             ));
         }
-        if let Some(ref ui_connect_address) = self.ui_connect_address {
+        if let Some(ref json_rpc_url) = self.web_ui_public_json_rpc_url {
             overrides.push((
-                "dan_wallet_daemon.ui_connect_address".to_string(),
-                ui_connect_address.to_string(),
+                "dan_wallet_daemon.web_ui_public_json_rpc_url".to_string(),
+                json_rpc_url.to_string(),
             ));
         }
         if let Some(ref signaling_server_address) = self.signaling_server_address {

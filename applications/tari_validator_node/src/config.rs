@@ -88,10 +88,9 @@ pub struct ValidatorNodeConfig {
     pub rpc: RpcConfig,
     /// JSON-RPC address of the validator node  application
     pub json_rpc_listener_address: Option<SocketAddr>,
-    /// The jrpc address where the UI should connect (it can be the same as the json_rpc_address, but doesn't have to
-    /// be), if this will be None, then the listen_addr will be used.
-    pub json_rpc_public_address: Option<String>,
-    /// The address of the HTTP UI
+    /// The public JSON-RPC url that the Web UI uses, if specified.
+    pub json_rpc_public_url: Option<String>,
+    /// The address to listen on for the Web UI
     pub web_ui_listener_address: Option<SocketAddr>,
     /// Template config
     pub templates: TemplateConfig,
@@ -137,7 +136,7 @@ impl Default for ValidatorNodeConfig {
             p2p: P2pConfig::default(),
             rpc: RpcConfig::default(),
             json_rpc_listener_address: Some("127.0.0.1:18200".parse().unwrap()),
-            json_rpc_public_address: None,
+            json_rpc_public_url: None,
             web_ui_listener_address: Some("127.0.0.1:5001".parse().unwrap()),
             templates: TemplateConfig::default(),
             // Burn your fees

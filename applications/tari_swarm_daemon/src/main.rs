@@ -182,7 +182,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
     Ok(Config {
         skip_registration: false,
         network: cli.common.network.unwrap_or(Network::LocalNet),
-        settings: Some(HashMap::new()),
+        settings: HashMap::new(),
         start_port: 12000,
         base_dir: base_dir
             .canonicalize()

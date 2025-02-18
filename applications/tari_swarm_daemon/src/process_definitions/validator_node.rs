@@ -26,10 +26,9 @@ impl ProcessDefinition for ValidatorNode {
         let jrpc_port = context.get_free_port("jrpc").await?;
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
-        let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
 
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
-        let json_rpc_public_address = format!("{public_ip}:{jrpc_port}");
+        let json_rpc_public_url = context.get_public_json_rpc_url();
         let web_ui_address = format!("{listen_ip}:{web_ui_port}");
 
         let base_node = context
@@ -60,7 +59,7 @@ impl ProcessDefinition for ValidatorNode {
             .arg(context.base_path())
             .arg("--network")
             .arg(context.network().to_string())
-            .arg(format!("--json-rpc-public-address={json_rpc_public_address}"))
+            .arg(format!("--json-rpc-public-url={json_rpc_public_url}"))
             .arg(format!(
                 "-pepoch_oracle.base_layer.base_node_grpc_url={base_node_grpc_url}"
             ))

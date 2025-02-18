@@ -73,7 +73,7 @@ export async function getClientAddress(): Promise<URL> {
     if (resp.status === 200) {
       let url = await resp.text();
       console.log("Got URL from server:", url);
-      return new URL(`http://${url}`);
+      return new URL(url);
     }
   } catch (e) {
     console.warn(e);

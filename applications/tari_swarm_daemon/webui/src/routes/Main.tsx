@@ -269,7 +269,7 @@ function ShowInfo(params: any) {
   const jrpcInfo = node?.jrpc && (
     <div>
       <b>JRPC</b>
-      <a href={`${node.jrpc}/json_rpc`} target="_blank">{node.jrpc}/json_rpc</a>
+      <a href={`${node.jrpc}`} target="_blank">{node.jrpc}</a>
     </div>
   );
   const grpcInfo = node?.grpc && (

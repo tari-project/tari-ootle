@@ -25,9 +25,8 @@ impl ProcessDefinition for Indexer {
         let jrpc_port = context.get_free_port("jrpc").await?;
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
-        let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
 
-        let json_rpc_public_address = format!("{public_ip}:{jrpc_port}");
+        let json_rpc_public_url = context.get_public_json_rpc_url();
         let json_rpc_listener_address = format!("{listen_ip}:{jrpc_port}");
         let web_ui_listener_address = format!("{listen_ip}:{web_ui_port}");
 
@@ -54,7 +53,7 @@ impl ProcessDefinition for Indexer {
             ))
             .arg(format!("-pindexer.json_rpc_address={json_rpc_listener_address}"))
             .arg(format!("-pindexer.web_ui_address={web_ui_listener_address}"))
-            .arg(format!("-pindexer.ui_connect_address={json_rpc_public_address}"))
+            .arg(format!("-pindexer.web_ui_public_json_rpc_url={json_rpc_public_url}"))
             .arg("-pepoch_oracle.base_layer.scanning_interval=1");
 
         Ok(command)

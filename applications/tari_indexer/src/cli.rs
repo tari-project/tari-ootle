@@ -57,8 +57,8 @@ pub struct Cli {
     #[clap(long)]
     pub disable_mdns: bool,
     /// Public address of the Web UI
-    #[clap(long, env = "TARI_INDEXER_UI_CONNECT_ADDRESS")]
-    pub ui_connect_address: Option<String>,
+    #[clap(long, env = "TARI_INDEXER_WEB_UI_PUBLIC_JSON_RPC_URL")]
+    pub web_ui_public_json_rpc_url: Option<String>,
 }
 
 impl Cli {
@@ -90,8 +90,11 @@ impl ConfigOverrideProvider for Cli {
         if let Some(seconds) = self.dan_layer_scanning_internal {
             overrides.push(("indexer.dan_layer_scanning_interval".to_string(), seconds.to_string()));
         }
-        if let Some(ref ui_connect_address) = self.ui_connect_address {
-            overrides.push(("indexer.ui_connect_address".to_string(), ui_connect_address.to_string()));
+        if let Some(ref json_rpc_url) = self.web_ui_public_json_rpc_url {
+            overrides.push((
+                "indexer.web_ui_public_json_rpc_url".to_string(),
+                json_rpc_url.to_string(),
+            ));
         }
         if let Some(reachability) = self.reachability {
             overrides.push(("indexer.p2p.reachability_mode".to_string(), reachability.to_string()));

@@ -157,14 +157,14 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         if let Some(address) = config.indexer.web_ui_address {
             let mut public_jrpc_address = config
                 .indexer
-                .ui_connect_address
+                .web_ui_public_json_rpc_url
                 .unwrap_or_else(|| jrpc_address.to_string());
             if !public_jrpc_address.starts_with("http://") && !public_jrpc_address.starts_with("https://") {
                 public_jrpc_address = format!("http://{}", public_jrpc_address);
             }
 
             let public_jrpc_address = url::Url::parse(&public_jrpc_address)
-                .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Invalid ui_connect_address: {err}")))?;
+                .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Invalid public JSON-rpc url: {err}")))?;
             task::spawn(run_http_ui_server(address, public_jrpc_address));
         }
     }

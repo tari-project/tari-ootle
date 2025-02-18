@@ -76,7 +76,44 @@ pub struct InstanceInfo {
     pub ports: AllocatedPorts,
     pub base_path: PathBuf,
     pub instance_type: InstanceType,
+    pub settings: HashMap<String, String>,
     pub is_running: bool,
+}
+
+impl InstanceInfo {
+    pub fn get_public_web_url(&self) -> Url {
+        match self.settings.get("public_web_url") {
+            Some(url) => url.parse().expect("Invalid web URL"),
+            None => {
+                let public_ip = self
+                    .settings
+                    .get("public_ip")
+                    .map(|s| s.as_str())
+                    .unwrap_or("127.0.0.1");
+                let web_port = self.ports.get("web").expect("web port not found");
+                format!("http://{public_ip}:{web_port}")
+                    .parse()
+                    .expect("Invalid web URL")
+            },
+        }
+    }
+
+    pub fn get_public_json_rpc_url(&self) -> Url {
+        match self.settings.get("public_json_rpc_url") {
+            Some(url) => url.parse().expect("Invalid JSON RPC URL"),
+            None => {
+                let public_ip = self
+                    .settings
+                    .get("public_ip")
+                    .map(|s| s.as_str())
+                    .unwrap_or("127.0.0.1");
+                let web_port = self.ports.get("jrpc").expect("jrpc port not found");
+                format!("http://{public_ip}:{web_port}/json_rpc")
+                    .parse()
+                    .expect("Invalid web URL")
+            },
+        }
+    }
 }
 
 impl From<&Instance> for InstanceInfo {
@@ -87,6 +124,7 @@ impl From<&Instance> for InstanceInfo {
             ports: instance.allocated_ports().clone(),
             base_path: instance.base_path().clone(),
             instance_type: instance.instance_type(),
+            settings: instance.settings().clone(),
             is_running: instance.is_running(),
         }
     }

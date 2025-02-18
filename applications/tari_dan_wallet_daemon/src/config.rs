@@ -57,9 +57,8 @@ pub struct WalletDaemonConfig {
     pub network: Network,
     /// The wallet daemon listening address
     pub json_rpc_address: Option<SocketAddr>,
-    /// The jrpc address where the UI should connect (it can be the same as the json_rpc_addr, but doesn't have to be),
-    /// if this will be None, then the listen_addr will be used.
-    pub ui_connect_address: Option<String>,
+    /// The public URL to JSON-RPC server used by the web UI. If not specified, the json_rpc_address is used.
+    pub web_ui_public_json_rpc_url: Option<String>,
     /// The signaling server address for the webrtc
     pub signaling_server_address: Option<SocketAddr>,
     /// The indexer JSON-RPC url
@@ -85,7 +84,7 @@ impl Default for WalletDaemonConfig {
             override_from: None,
             network: Network::Igor,
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
-            ui_connect_address: None,
+            web_ui_public_json_rpc_url: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
             indexer_json_rpc_url: "http://127.0.0.1:18300/json_rpc"
                 .parse()

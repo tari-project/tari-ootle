@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::{config::InstanceType, process_manager::InstanceId, webserver::context::HandlerContext};
 
@@ -20,25 +20,19 @@ pub struct ListIndexersResponse {
 pub struct IndexerInfo {
     pub instance_id: InstanceId,
     pub name: String,
-    pub web: String,
-    pub jrpc: String,
+    pub web: Url,
+    pub jrpc: Url,
     pub is_running: bool,
 }
 
 pub async fn list(context: &HandlerContext, _req: ListIndexersRequest) -> Result<ListIndexersResponse, anyhow::Error> {
     let instances = context.process_manager().list_indexers().await?;
-    let public_ip = context.config().get_public_ip();
 
     let nodes = instances
         .into_iter()
         .map(|instance| {
-            let web_port = instance.ports.get("web").ok_or_else(|| anyhow!("web port not found"))?;
-            let json_rpc_port = instance
-                .ports
-                .get("jrpc")
-                .ok_or_else(|| anyhow!("jrpc port not found"))?;
-            let web = format!("http://{public_ip}:{web_port}");
-            let jrpc = format!("http://{public_ip}:{json_rpc_port}");
+            let jrpc = instance.get_public_json_rpc_url();
+            let web = instance.get_public_web_url();
 
             Ok(IndexerInfo {
                 instance_id: instance.id,

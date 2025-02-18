@@ -38,6 +38,7 @@ import useAuthStore from "./store/authStore";
 import {useEffect} from "react";
 import {useAuthMethod} from "./api/hooks/useAuth";
 import AccessToken from "./routes/AccessToken/AccessToken";
+import {jwtDecode} from "jwt-decode";
 
 export const breadcrumbRoutes = [
   {
@@ -102,14 +103,46 @@ export const breadcrumbRoutes = [
   },
 ];
 
+const isTokenExpired = (token: any) => {
+  if (!token) return true;
+  try {
+    const decodedToken = jwtDecode(token);
+    if (!decodedToken.exp) {
+      return true;
+    }
+    const currentTime = Date.now() / 1000;
+    return decodedToken.exp < currentTime;
+  } catch (error) {
+    console.error('Error decoding token:', error);
+    return true;
+  }
+};
+
 // @ts-ignore
-const GuardedRoute = ({ component: Component, redirect = "/", auth = false, ...rest }) =>
-  auth ? <Component {...rest} /> : <Navigate replace to={"/auth?redirect=" + redirect} />;
+const GuardedRoute = ({ component: Component, redirect = "/", auth = false, ...rest }) => {
+  return auth ? <Component {...rest} /> : <Navigate replace to={"/auth?redirect=" + redirect} />;
+}
 
 function App() {
   const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
   const { authToken, setAuthToken } = useAuthStore();
   let auth = !!authToken;
+
+  useEffect(() => {
+    if (isTokenExpired(authToken)) {
+      setAuthToken("");
+    }
+  }, [authToken]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (isTokenExpired(authToken)) {
+        setAuthToken("");
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [authToken]);
 
   useEffect(() => {
     if (!authMethodsIsError && authMethod) {

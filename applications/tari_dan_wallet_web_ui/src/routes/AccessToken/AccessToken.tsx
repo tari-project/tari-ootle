@@ -9,8 +9,10 @@ function AccessToken() {
 
     return (
         <>
-            <Grid item xs={12} md={12} lg={12}>
-                {authToken}
+            <Grid container xs={6} md={6} lg={6}>
+                <Grid item xs={6} md={6} lg={6}>
+                    {authToken}
+                </Grid>
             </Grid>
         </>
     );

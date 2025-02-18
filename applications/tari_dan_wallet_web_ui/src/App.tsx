@@ -135,14 +135,14 @@ function App() {
           <Route path="auth" element={<Auth />} />
           <Route path="auth/webauthn" element={<Webauthn />} />
           <Route path="access-token" element={<GuardedRoute auth={auth} redirect="/access-token" component={AccessToken} />} />
-          <Route path="accounts" element={<GuardedRoute auth={auth} component={Accounts} />} />
-          <Route path="accounts/:id" element={<GuardedRoute auth={auth} component={AccountDetails} />} />
-          <Route path="keys" element={<GuardedRoute auth={auth} component={Keys} />} />
-          <Route path="access-tokens" element={<GuardedRoute auth={auth} component={AccessTokensLayout} />} />
-          <Route path="transactions" element={<GuardedRoute auth={auth} component={Transactions} />} />
-          <Route path="wallet" element={<GuardedRoute auth={auth} component={Wallet} />} />
-          <Route path="transactions/:id" element={<GuardedRoute auth={auth} component={TransactionDetails} />} />
-          <Route path="settings" element={<GuardedRoute auth={auth} component={SettingsPage} />} />
+          <Route path="accounts" element={<GuardedRoute auth={auth} redirect="/accounts" component={Accounts} />} />
+          <Route path="accounts/:id" element={<GuardedRoute auth={auth} redirect="/accounts" component={AccountDetails} />} />
+          <Route path="keys" element={<GuardedRoute auth={auth} redirect="/keys" component={Keys} />} />
+          <Route path="access-tokens" element={<GuardedRoute redirect="/access-tokens" auth={auth} component={AccessTokensLayout} />} />
+          <Route path="transactions" element={<GuardedRoute auth={auth} redirect="/transactions" component={Transactions} />} />
+          <Route path="wallet" element={<GuardedRoute auth={auth} redirect="/wallet" component={Wallet} />} />
+          <Route path="transactions/:id" element={<GuardedRoute auth={auth} redirect="/transactions" component={TransactionDetails} />} />
+          <Route path="settings" element={<GuardedRoute auth={auth} redirect="/settings" component={SettingsPage} />} />
           <Route path="*" element={<ErrorPage />} />
         </Route>
       </Routes>

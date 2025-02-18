@@ -3,7 +3,7 @@
 
 import {useTheme} from "@mui/material/styles";
 import {FormEvent, useState} from "react";
-import {Form, useNavigate} from "react-router-dom";
+import {Form, useNavigate, useSearchParams} from "react-router-dom";
 import Loading from "../../../Components/Loading";
 import Typography from "@mui/material/Typography";
 import Grid from "@mui/material/Grid";
@@ -33,6 +33,9 @@ function WebauthnLogin() {
     const [error, setError] = useState('');
     const navigate = useNavigate();
     const {setAuthToken} = useAuthStore();
+    const [searchParams] = useSearchParams();
+    const redirectQuery = searchParams.get("redirect");
+    const redirect = redirectQuery ? redirectQuery : "/";
 
     const handleLogin = async (e: FormEvent) => {
         e.preventDefault();
@@ -87,7 +90,7 @@ function WebauthnLogin() {
         const acceptToken = await client.authAccept(authToken, authToken);
 
         setAuthToken(acceptToken);
-        navigate("/");
+        navigate(redirect);
     };
 
     const errorMessage = (error) ? (

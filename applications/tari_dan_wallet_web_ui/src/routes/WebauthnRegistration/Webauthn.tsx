@@ -7,16 +7,19 @@ import {useWebauthnAlreadyRegistered} from "../../api/hooks/useWebauthn";
 import Loading from "../../Components/Loading";
 import WebauthnRegistration from "./Components/Registration";
 import useAuthStore from "../../store/authStore";
-import {useNavigate} from "react-router-dom";
+import {useNavigate, useSearchParams} from "react-router-dom";
 
 function Webauthn() {
     const [registered, setRegistered] = useState(false);
     const { data: alreadyRegisteredResponse, isLoading: alreadyRegisteredIsLoading, isError: alreadyRegisteredIsError, error: alreadyRegisteredError } = useWebauthnAlreadyRegistered();
     const {authToken} = useAuthStore();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const redirectQuery = searchParams.get("redirect");
+    const redirect = redirectQuery ? redirectQuery : "/";
 
     if (authToken) {
-        navigate("/");
+        navigate(redirect);
     }
 
     useEffect(() => {

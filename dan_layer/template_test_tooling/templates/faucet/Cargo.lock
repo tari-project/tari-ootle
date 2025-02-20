@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "tari_bor"
-version = "0.8.0"
+version = "0.8.2"
 dependencies = [
  "ciborium",
  "ciborium-io",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_abi"
-version = "0.8.0"
+version = "0.8.2"
 dependencies = [
  "serde",
  "tari_bor",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "tari_template_macros"
-version = "0.8.0"
+version = "0.8.2"
 dependencies = [
  "proc-macro2",
  "quote",

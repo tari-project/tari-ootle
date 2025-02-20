@@ -2333,6 +2333,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {
         self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state| {
+            let template_byte_size = template.len();
             let binary_hash = hash_template_code(&template);
             let template_address = PublishedTemplateAddress::from_author_and_binary_hash(
                 &self.transaction_signer_public_key,
@@ -2349,6 +2350,17 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             // Mark template substate as owned by current call stack
             let scope_mut = state.current_call_scope_mut()?;
             scope_mut.move_node_to_owned(&template_address.into())?;
+            // Publish template event
+            let mut metadata = Metadata::new();
+            metadata.insert("template_byte_size".to_string(), template_byte_size.to_string());
+            state.push_event(Event::std(
+                Some(template_address.into()),
+                template_address.as_hash(),
+                state.transaction_hash(),
+                "template",
+                "publish",
+                metadata,
+            ));
 
             Ok(())
         })

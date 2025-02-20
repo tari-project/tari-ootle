@@ -83,6 +83,7 @@ use crate::{
     bootstrap::Services,
     dry_run::processor::DryRunTransactionProcessor,
     json_rpc::error::internal_error,
+    network_client::NetworkClientError,
     substate_manager::SubstateManager,
     transaction_manager::{error::TransactionManagerError, TransactionManager},
 };
@@ -482,14 +483,16 @@ impl JsonRpcHandlers {
                 .autofill_transaction(request.transaction, request.required_substates)
                 .await
                 .map_err(|e| match e {
-                    TransactionManagerError::AllValidatorsFailed { .. } => JsonRpcResponse::error(
-                        answer_id,
-                        JsonRpcError::new(
-                            JsonRpcErrorReason::ApplicationError(400),
-                            format!("All validators failed: {}", e),
-                            json::Value::Null,
-                        ),
-                    ),
+                    TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) => {
+                        JsonRpcResponse::error(
+                            answer_id,
+                            JsonRpcError::new(
+                                JsonRpcErrorReason::ApplicationError(400),
+                                format!("All validators failed: {}", e),
+                                json::Value::Null,
+                            ),
+                        )
+                    },
                     e => Self::internal_error(answer_id, e),
                 })?
         };
@@ -498,14 +501,16 @@ impl JsonRpcHandlers {
             .submit_transaction(transaction)
             .await
             .map_err(|e| match e {
-                TransactionManagerError::AllValidatorsFailed { .. } => JsonRpcResponse::error(
-                    answer_id,
-                    JsonRpcError::new(
-                        JsonRpcErrorReason::ApplicationError(400),
-                        format!("All validators failed: {}", e),
-                        json::Value::Null,
-                    ),
-                ),
+                TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) => {
+                    JsonRpcResponse::error(
+                        answer_id,
+                        JsonRpcError::new(
+                            JsonRpcErrorReason::ApplicationError(400),
+                            format!("All validators failed: {}", e),
+                            json::Value::Null,
+                        ),
+                    )
+                },
                 e => Self::internal_error(answer_id, e),
             })?;
 
@@ -574,6 +579,7 @@ impl JsonRpcHandlers {
     pub async fn get_template_definition(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let request: GetTemplateDefinitionRequest = value.parse_params()?;
+
         let template = self
             .template_manager
             .fetch_template(&request.template_address)

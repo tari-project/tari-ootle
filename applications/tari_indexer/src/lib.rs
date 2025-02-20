@@ -37,6 +37,7 @@ mod event_data;
 mod event_manager;
 mod event_scanner;
 mod json_rpc;
+mod network_client;
 mod substate_manager;
 mod substate_storage_sqlite;
 mod transaction_manager;
@@ -122,11 +123,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         dan_layer_scanner.clone(),
         services.substate_store.clone(),
     ));
-    let transaction_manager = TransactionManager::new(
-        services.epoch_manager.clone(),
-        services.validator_node_client_factory.clone(),
-        dan_layer_scanner.clone(),
-    );
+    let transaction_manager = TransactionManager::new(services.network_client.clone(), dan_layer_scanner.clone());
 
     // dry run
     let dry_run_transaction_processor = DryRunTransactionProcessor::new(
@@ -187,6 +184,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         services.epoch_manager.clone(),
         services.validator_node_client_factory.clone(),
         services.substate_store.clone(),
+        services.template_manager_service.clone(),
         event_filters,
     );
 

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {Navigate, Route, Routes} from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import Accounts from "./routes/Accounts/Accounts";
 import AccountDetails from "./routes/AccountDetails/AccountDetails";
 import Keys from "./routes/Keys/Keys";
@@ -32,13 +32,13 @@ import Transactions from "./routes/Transactions/TransactionsLayout";
 import TransactionDetails from "./routes/Transactions/TransactionDetails";
 import AssetVault from "./routes/AssetVault/AssetVault";
 import SettingsPage from "./routes/Settings/Settings";
-import Auth, {AUTH_TOKEN_FOR_NONE_AUTH} from "./routes/Auth/Auth";
+import Auth, { AUTH_TOKEN_FOR_NONE_AUTH } from "./routes/Auth/Auth";
 import Webauthn from "./routes/WebauthnRegistration/Webauthn";
 import useAuthStore from "./store/authStore";
-import {useEffect} from "react";
-import {useAuthMethod} from "./api/hooks/useAuth";
+import { useEffect } from "react";
+import { useAuthMethod } from "./api/hooks/useAuth";
 import AccessToken from "./routes/AccessToken/AccessToken";
-import {jwtDecode} from "jwt-decode";
+import { jwtDecode } from "jwt-decode";
 
 export const breadcrumbRoutes = [
   {
@@ -113,7 +113,7 @@ const isTokenExpired = (token: any) => {
     const currentTime = Date.now() / 1000;
     return decodedToken.exp < currentTime;
   } catch (error) {
-    console.error('Error decoding token:', error);
+    console.error("Error decoding token:", error);
     return true;
   }
 };
@@ -121,7 +121,7 @@ const isTokenExpired = (token: any) => {
 // @ts-ignore
 const GuardedRoute = ({ component: Component, redirect = "/", auth = false, ...rest }) => {
   return auth ? <Component {...rest} /> : <Navigate replace to={"/auth?redirect=" + redirect} />;
-}
+};
 
 function App() {
   const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
@@ -167,14 +167,29 @@ function App() {
           <Route index element={<GuardedRoute component={AssetVault} auth={auth} />} />
           <Route path="auth" element={<Auth />} />
           <Route path="auth/webauthn" element={<Webauthn />} />
-          <Route path="access-token" element={<GuardedRoute auth={auth} redirect="/access-token" component={AccessToken} />} />
+          <Route
+            path="access-token"
+            element={<GuardedRoute auth={auth} redirect="/access-token" component={AccessToken} />}
+          />
           <Route path="accounts" element={<GuardedRoute auth={auth} redirect="/accounts" component={Accounts} />} />
-          <Route path="accounts/:id" element={<GuardedRoute auth={auth} redirect="/accounts" component={AccountDetails} />} />
+          <Route
+            path="accounts/:id"
+            element={<GuardedRoute auth={auth} redirect="/accounts" component={AccountDetails} />}
+          />
           <Route path="keys" element={<GuardedRoute auth={auth} redirect="/keys" component={Keys} />} />
-          <Route path="access-tokens" element={<GuardedRoute redirect="/access-tokens" auth={auth} component={AccessTokensLayout} />} />
-          <Route path="transactions" element={<GuardedRoute auth={auth} redirect="/transactions" component={Transactions} />} />
+          <Route
+            path="access-tokens"
+            element={<GuardedRoute redirect="/access-tokens" auth={auth} component={AccessTokensLayout} />}
+          />
+          <Route
+            path="transactions"
+            element={<GuardedRoute auth={auth} redirect="/transactions" component={Transactions} />}
+          />
           <Route path="wallet" element={<GuardedRoute auth={auth} redirect="/wallet" component={Wallet} />} />
-          <Route path="transactions/:id" element={<GuardedRoute auth={auth} redirect="/transactions" component={TransactionDetails} />} />
+          <Route
+            path="transactions/:id"
+            element={<GuardedRoute auth={auth} redirect="/transactions" component={TransactionDetails} />}
+          />
           <Route path="settings" element={<GuardedRoute auth={auth} redirect="/settings" component={SettingsPage} />} />
           <Route path="*" element={<ErrorPage />} />
         </Route>

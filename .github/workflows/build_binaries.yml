@@ -22,7 +22,7 @@ env:
   TS_BUNDLE_ID_BASE: "com.tari.network.pkg"
   TS_SIG_FN: "sha256-unsigned.txt"
   ## Must be a JSon string
-  TS_FILES: '["tari_dan_wallet_cli","tari_dan_wallet_daemon","tari_indexer","tari_validator_node","tari_signaling_server","tari_generate"]'
+  TS_FILES: '["tari_dan_wallet_cli","tari_dan_wallet_daemon","tari_indexer","tari_validator_node","tari_signaling_server","tari_generate","tari_swarm_daemon"]'
   TS_FEATURES: "default"
   TS_LIBRARIES: ""
   # For debug builds
@@ -43,7 +43,7 @@ concurrency:
   group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') || github.ref != 'refs/heads/development' || github.ref != 'refs/heads/nextnet' || github.ref != 'refs/heads/stagenet' }}
 
-permissions: {}
+permissions: { }
 
 jobs:
   matrix-prep:

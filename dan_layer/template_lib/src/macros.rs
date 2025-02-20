@@ -20,10 +20,10 @@ macro_rules! debug {
 #[macro_export]
 macro_rules! log {
     ($lvl:expr, $fmt:expr) => {
-        $crate::engine::engine().emit_log($lvl, $fmt)
+        $crate::engine().emit_log($lvl, format!($fmt))
     };
     ($lvl:expr, $fmt:expr, $($args:tt)*) => {
-        $crate::engine::engine().emit_log($lvl, format!($fmt, $($args)*))
+        $crate::engine().emit_log($lvl, format!($fmt, $($args)*))
     };
 }
 
@@ -31,10 +31,10 @@ macro_rules! log {
 #[macro_export]
 macro_rules! info {
     ($fmt:expr) => {
-        $crate::macros::log!($crate::args::LogLevel::Info, $fmt)
+        $crate::log!($crate::args::LogLevel::Info, $fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::macros::log!($crate::args::LogLevel::Info, $fmt, $($args)*)
+        $crate::log!($crate::args::LogLevel::Info, $fmt, $($args)*)
     };
 }
 
@@ -42,10 +42,10 @@ macro_rules! info {
 #[macro_export]
 macro_rules! warn {
     ($fmt:expr) => {
-        $crate::macros::log!($crate::args::LogLevel::Warn, $fmt)
+        $crate::log!($crate::args::LogLevel::Warn, $fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::macros::log!($crate::args::LogLevel::Warn, $fmt, $($args)*)
+        $crate::log!($crate::args::LogLevel::Warn, $fmt, $($args)*)
     };
 }
 
@@ -53,9 +53,9 @@ macro_rules! warn {
 #[macro_export]
 macro_rules! error {
     ($fmt:expr) => {
-        $crate::macros::log!($crate::args::LogLevel::Error, $fmt)
+        $crate::log!($crate::args::LogLevel::Error, $fmt)
     };
     ($fmt:expr, $($args:tt)*) => {
-        $crate::macros::log!($crate::args::LogLevel::Error, $fmt, $($args)*)
+        $crate::log!($crate::args::LogLevel::Error, $fmt, $($args)*)
     };
 }

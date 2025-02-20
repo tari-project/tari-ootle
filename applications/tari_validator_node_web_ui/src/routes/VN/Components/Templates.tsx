@@ -52,7 +52,9 @@ function Templates() {
   const [lastSort, setLastSort] = useState({ column: "", order: -1 });
 
   useEffect(() => {
-    getTemplates({ limit: 10 }).then((response) => {
+    // TODO: proper pagination with limit+offset. It would require changes in VN backend (and clients) to add the offset parameter
+    //       for now, limit=0 makes the backend return all templates
+    getTemplates({ limit: 0 }).then((response) => {
       setTemplates(response.templates.slice());
     });
   }, []);

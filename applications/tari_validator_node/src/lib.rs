@@ -152,7 +152,7 @@ pub async fn run_validator_node(
                 address,
                 config
                     .validator_node
-                    .json_rpc_public_address
+                    .json_rpc_public_url
                     .clone()
                     .unwrap_or_else(|| jrpc_address.to_string()),
             ));

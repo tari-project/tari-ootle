@@ -24,7 +24,8 @@ pub struct Config {
     pub base_dir: PathBuf,
     pub start_port: u16,
     pub network: Network,
-    pub settings: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub settings: HashMap<String, String>,
     pub webserver: WebserverConfig,
     #[serde(flatten)]
     pub processes: ProcessesConfig,
@@ -62,10 +63,6 @@ impl Config {
         let toml = toml::to_string_pretty(self)?;
         writer.write_all(toml.as_bytes()).await?;
         Ok(())
-    }
-
-    pub fn get_public_ip(&self) -> IpAddr {
-        self.public_ip.unwrap_or_else(|| [127, 0, 0, 1].into())
     }
 
     fn overrides_from_cli(&mut self, cli: &Cli) {

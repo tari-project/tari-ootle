@@ -63,9 +63,8 @@ impl ProcessDefinition for WalletDaemon {
         let jrpc_port = context.get_free_port("jrpc").await?;
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
-        let public_ip = context.get_setting("public_ip").unwrap_or("127.0.0.1");
 
-        let json_rpc_public_address = format!("{public_ip}:{jrpc_port}");
+        let json_rpc_public_url = context.get_public_json_rpc_url();
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
         let web_ui_address = format!("{listen_ip}:{web_ui_port}");
 
@@ -96,6 +95,7 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("--json-rpc-address={json_rpc_address}"))
             .arg(format!("--indexer-url={indexer_url}"))
             .arg(format!("--ui-connect-address={json_rpc_public_address}"))
+            .arg(format!("--web-ui-public-json-rpc-url={json_rpc_public_url}"))
             .arg(format!("-pdan_wallet_daemon.web_ui_address={web_ui_address}"))
             .arg(format!("-pdan_wallet_daemon.authentication={}", auth));
 

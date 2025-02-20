@@ -99,7 +99,7 @@ tari_rpc_macros = { path = "networking/rpc_macros" }
 tari_state_store_sqlite = { path = "dan_layer/state_store_sqlite" }
 tari_state_tree = { path = "dan_layer/state_tree" }
 tari_swarm = { path = "networking/swarm" }
-tari_template_abi = { version = "0.8", path = "dan_layer/template_abi" }
+tari_template_abi = { version = "0.8.2", path = "dan_layer/template_abi" }
 tari_template_builtin = { path = "dan_layer/template_builtin" }
 tari_template_lib = { path = "dan_layer/template_lib" }
 tari_template_macros = { version = "0.8", path = "dan_layer/template_macros" }

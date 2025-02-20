@@ -46,7 +46,7 @@ impl ProcessManager {
     pub fn new(config: &Config, shutdown_signal: ShutdownSignal) -> (Self, ProcessManagerHandle) {
         let (tx_request, rx_request) = mpsc::channel(1);
 
-        let mut global_settings = config.settings.clone().unwrap_or_default();
+        let mut global_settings = config.settings.clone();
         if let Some(public_ip) = config.public_ip {
             global_settings.insert("public_ip".to_string(), public_ip.to_string());
         }

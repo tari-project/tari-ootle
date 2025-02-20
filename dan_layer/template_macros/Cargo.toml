@@ -1,7 +1,8 @@
 [package]
 name = "tari_template_macros"
 description = "Tari template macro"
-version.workspace = true
+# This crate has an independent version from the rest of the crates so that general releases don't always break previous templates.
+version = "0.8.2"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true

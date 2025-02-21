@@ -56,9 +56,12 @@ pub struct Cli {
     pub reachability: Option<ReachabilityMode>,
     #[clap(long)]
     pub disable_mdns: bool,
-    /// Public address of the Web UI
+    /// Public address of the JSON RPC
     #[clap(long, env = "TARI_INDEXER_WEB_UI_PUBLIC_JSON_RPC_URL")]
     pub web_ui_public_json_rpc_url: Option<String>,
+    /// Public address of the GraphQL API
+    #[clap(long, env = "TARI_INDEXER_WEB_UI_PUBLIC_GRAPHQL_URL")]
+    pub web_ui_public_graphql_url: Option<String>,
 }
 
 impl Cli {
@@ -94,6 +97,12 @@ impl ConfigOverrideProvider for Cli {
             overrides.push((
                 "indexer.web_ui_public_json_rpc_url".to_string(),
                 json_rpc_url.to_string(),
+            ));
+        }
+        if let Some(ref graphql_url) = self.web_ui_public_graphql_url {
+            overrides.push((
+                "indexer.web_ui_public_graphql_url".to_string(),
+                graphql_url.to_string(),
             ));
         }
         if let Some(reachability) = self.reachability {

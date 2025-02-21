@@ -32,8 +32,8 @@ import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
+import { getGraphQLAddress } from "../../utils/graphql";
 
-const INDEXER_ADDRESS = "http://localhost:18301";
 const PAGE_SIZE = 10;
 
 function EventsLayout() {
@@ -59,7 +59,10 @@ function EventsLayout() {
       graphql_filters += `substateId:"${filter.substate_id}", `;
     }
 
-    let res = await fetch(INDEXER_ADDRESS, {
+    let indexer_address = (await getGraphQLAddress()).toString();
+    console.log({indexer_address});
+
+    let res = await fetch(indexer_address, {
       method: 'POST',
 
       headers: {

@@ -137,9 +137,22 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         services.template_manager.clone(),
     );
 
+    // Run the event manager
+    let event_manager = Arc::new(EventManager::new(
+        services.substate_store.clone(),
+        dan_layer_scanner.clone(),
+    ));
+
+    // Run the GraphQL API
+    let graphql_address = config.indexer.graphql_address;
+    if let Some(address) = graphql_address {
+        info!(target: LOG_TARGET, "🌐 Started GraphQL server on {}", address);
+        task::spawn(run_graphql(address, substate_manager.clone(), event_manager.clone()));
+    }
+
     // Run the JSON-RPC API
     let jrpc_address = config.indexer.json_rpc_address;
-    if let Some(jrpc_address) = jrpc_address {
+    if let (Some(jrpc_address), Some(graphql_address)) = (jrpc_address, graphql_address) {
         info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
         let handlers = JsonRpcHandlers::new(
             &services,
@@ -152,6 +165,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
         // Run the http ui
         if let Some(address) = config.indexer.web_ui_address {
+            // json rpc
             let mut public_jrpc_address = config
                 .indexer
                 .web_ui_public_json_rpc_url
@@ -159,19 +173,24 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             if !public_jrpc_address.starts_with("http://") && !public_jrpc_address.starts_with("https://") {
                 public_jrpc_address = format!("http://{}", public_jrpc_address);
             }
-
             let public_jrpc_address = url::Url::parse(&public_jrpc_address)
                 .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Invalid public JSON-rpc url: {err}")))?;
-            task::spawn(run_http_ui_server(address, public_jrpc_address));
+
+            // graphql
+            let mut public_graphql_address = config
+                .indexer
+                .web_ui_public_graphql_url
+                .unwrap_or_else(|| graphql_address.to_string());
+            if !public_graphql_address.starts_with("http://") && !public_graphql_address.starts_with("https://") {
+                public_graphql_address = format!("http://{}", public_graphql_address);
+            }
+            let public_graphql_address = url::Url::parse(&public_graphql_address)
+                .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Invalid public GraphQL url: {err}")))?;
+
+            task::spawn(run_http_ui_server(address, public_jrpc_address, public_graphql_address));
         }
     }
-
-    // Run the event manager
-    let event_manager = Arc::new(EventManager::new(
-        services.substate_store.clone(),
-        dan_layer_scanner.clone(),
-    ));
-
+    
     // Run the event scanner
     let event_filters: Vec<EventFilter> = config
         .indexer
@@ -188,12 +207,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         event_filters,
     );
 
-    // Run the GraphQL API
-    let graphql_address = config.indexer.graphql_address;
-    if let Some(address) = graphql_address {
-        info!(target: LOG_TARGET, "🌐 Started GraphQL server on {}", address);
-        task::spawn(run_graphql(address, substate_manager.clone(), event_manager.clone()));
-    }
+    
 
     // Create pid to allow watchers to know that the process has started
     fs::write(config.common.base_path.join("pid"), std::process::id().to_string())

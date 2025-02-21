@@ -114,6 +114,23 @@ impl InstanceInfo {
             },
         }
     }
+
+    pub fn get_public_graphql_url(&self) -> Url {
+        match self.settings.get("public_graphql_url") {
+            Some(url) => url.parse().expect("Invalid JSON RPC URL"),
+            None => {
+                let public_ip = self
+                    .settings
+                    .get("public_ip")
+                    .map(|s| s.as_str())
+                    .unwrap_or("127.0.0.1");
+                let web_port = self.ports.get("jrpc").expect("jrpc port not found");
+                format!("http://{public_ip}:{web_port}/json_rpc")
+                    .parse()
+                    .expect("Invalid web URL")
+            },
+        }
+    }
 }
 
 impl From<&Instance> for InstanceInfo {

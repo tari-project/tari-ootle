@@ -255,10 +255,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         }
 
         if let Some(substate_type) = by_type {
-            let address_like = match substate_type {
-                SubstateType::NonFungible => format!("resource_% {}_%", substate_type.as_prefix_str()),
-                _ => format!("{}_%", substate_type.as_prefix_str()),
-            };
+            let address_like = format!("{}_%", substate_type.as_prefix_str());
             query = query.filter(substates::address.like(address_like));
         }
 

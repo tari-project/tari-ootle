@@ -268,19 +268,6 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     /// Used in tests, therefore not used in consensus and not part of the trait
     pub fn transactions_count(&self) -> Result<u64, RocksDbStorageError> {
         todo!()
-        /*
-        use crate::schema::transactions;
-
-        let count = transactions::table
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_count",
-                source: e,
-            })?;
-
-        Ok(count as u64)
-        */
     }
 
     pub(crate) fn get_commit_block_id(&self) -> Result<BlockId, StorageError> {

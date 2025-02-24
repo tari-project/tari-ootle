@@ -1443,33 +1443,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         */
     }
 
-    fn diagnostics_add_no_vote(&mut self, block_id: BlockId, reason: NoVoteReason) -> Result<(), StorageError> {
+    fn diagnostics_add_no_vote(&mut self, _block_id: BlockId, _reason: NoVoteReason) -> Result<(), StorageError> {
+        // Table not used
         todo!()
-        /*
-        use crate::schema::{blocks, diagnostics_no_votes};
-        let block_id = serialize_hex(block_id);
-
-        let values = (
-            diagnostics_no_votes::block_id.eq(&block_id),
-            diagnostics_no_votes::block_height.eq(blocks::table
-                .select(blocks::height)
-                .filter(blocks::block_id.eq(&block_id))
-                .single_value()
-                .assume_not_null()),
-            diagnostics_no_votes::reason_code.eq(reason.as_code_str()),
-            diagnostics_no_votes::reason_text.eq(reason.to_string()),
-        );
-
-        diesel::insert_into(diagnostics_no_votes::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "diagnostics_add_no_vote",
-                source: e,
-            })?;
-
-        Ok(())
-        */
     }
     
     fn lock_conflicts_remove_by_transaction_ids<'a, I: IntoIterator<Item = &'a TransactionId>>(
@@ -1561,7 +1537,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             node.eviction_commmited_in_epoch = Some(epoch);
             EvictedNodeModel::put(self.db.clone(), tx, operation, node)?;
         }
-        
+
         Ok(())
     }
 }

@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, lock_conflict::{LockConflictData, LockConflictModel}, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -1267,34 +1267,23 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: &BlockId,
         conflicts: I,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::lock_conflicts;
+        let operation = "lock_conflicts_insert_all";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let values = conflicts
-            .into_iter()
-            .flat_map(|(tx_id, conflicts)| {
-                conflicts.iter().map(move |conflict| {
-                    (
-                        lock_conflicts::block_id.eq(serialize_hex(block_id)),
-                        lock_conflicts::transaction_id.eq(serialize_hex(tx_id)),
-                        lock_conflicts::depends_on_tx.eq(serialize_hex(conflict.transaction_id)),
-                        lock_conflicts::lock_type.eq(conflict.requested_lock.to_string()),
-                    )
-                })
-            })
-            .collect::<Vec<_>>();
-
-        diesel::insert_into(lock_conflicts::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "lock_conflicts_insert_all",
-                source: e,
-            })?;
+        for (transaction_id, transaction_conflicts) in conflicts {
+            for conflict in transaction_conflicts {
+                let value = LockConflictData {
+                    block_id: *block_id,
+                    conflict: *conflict,
+                    transaction_id: *transaction_id,
+                    depends_on_tx: conflict.transaction_id,
+                    created_at: RocksdbTimestamp::now(),
+                };
+                LockConflictModel::put(self.db.clone(), tx, operation, &value)?;
+            }
+        }
 
         Ok(())
-        */
     }
 
     fn validator_epoch_stats_add_participation_share(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
@@ -1487,11 +1476,41 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         &mut self,
         transaction_ids: I,
     ) -> Result<(), StorageError> {
-        todo!()
+        let operation = "lock_conflicts_remove_by_transaction_ids";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        let transaction_ids = transaction_ids.into_iter().cloned().collect::<Vec<_>>();
+
+        // TODO: for performance reasons, there should be a better way to iterate over conflicts in RocksDB
+        let conflicts = LockConflictModel::multi_get(tx, None, Ordering::Ascending)?
+            .into_iter()
+            .filter(|c| {
+                transaction_ids.contains(&c.transaction_id) || transaction_ids.contains(&c.depends_on_tx)
+            })
+            .collect::<Vec<_>>();
+
+        for conflict in conflicts {
+            let key = LockConflictModel::key(&conflict);
+            LockConflictModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
+
+        Ok(())
     }
     
     fn lock_conflicts_remove_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
-        todo!()
+        let operation = "lock_conflicts_remove_by_block_id";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        type Cf = crate::model::lock_conflict::BlockIdColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::build_key_prefix_by_block(block_id);
+        let conflicts = LockConflictModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
+
+        for conflict in conflicts {
+            let key = LockConflictModel::key(&conflict);
+            LockConflictModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
+
+        Ok(())
     }
     
     fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError> {

@@ -38,6 +38,7 @@ pub mod foreign_substate_pledge;
 pub mod last_sent_vote;
 pub mod last_voted;
 pub mod leaf_block;
+pub mod lock_conflict;
 pub mod locked_block;
 pub mod missing_transactions;
 pub mod parked_block;

@@ -23,33 +23,38 @@
 use std::sync::Arc;
 
 use rocksdb::{Transaction, TransactionDB};
-use tari_dan_storage::consensus_models::{BlockId, BurntUtxo};
-use tari_engine_types::template_models::UnclaimedConfidentialOutputAddress;
-use crate::{error::RocksDbStorageError, model::model::RocksdbModel};
+use serde::{Deserialize, Serialize};
+use tari_dan_storage::consensus_models::{BlockId, LockConflict};
+use tari_transaction::TransactionId;
+use crate::{error::RocksDbStorageError, model::model::RocksdbModel, utils::RocksdbTimestamp};
 
 use super::model::ModelColumnFamily;
 
-pub struct BurntUtxoModel {}
-
-impl BurntUtxoModel {
-    pub fn key_from_commitment(commitment: &UnclaimedConfidentialOutputAddress,) -> String {
-        format!("{}_{}", Self::key_prefix(), commitment)
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LockConflictData {
+    pub block_id: BlockId,
+    pub conflict: LockConflict,
+    pub transaction_id: TransactionId,
+    pub depends_on_tx: TransactionId,
+    // we need this field to differentiate between conflicts of the same transaction
+    pub created_at: RocksdbTimestamp,
 }
 
-impl RocksdbModel for BurntUtxoModel {
-    type Item = BurntUtxo;
+pub struct LockConflictModel {}
+
+impl RocksdbModel for LockConflictModel {
+    type Item = LockConflictData;
 
     fn key_prefix() -> &'static str {
-        "burntutxos"
+        "lockconflicts"
     }
 
     fn key(value: &Self::Item) -> String {
-        Self::key_from_commitment(&value.commitment)
+        format!("{}_{}_{}", Self::key_prefix(), &value.conflict.transaction_id, value.created_at)
     }
 
     fn column_families() -> Vec<&'static str> {
-        vec![ProposedInColumnFamily::name()]
+        vec![BlockIdColumnFamily::name()]
     }
 
     fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
@@ -57,37 +62,36 @@ impl RocksdbModel for BurntUtxoModel {
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        ProposedInColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        BlockIdColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
 
         Ok(())
     }
     
     fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
-        ProposedInColumnFamily::delete(db.clone(), tx, operation, item)?;
+        BlockIdColumnFamily::delete(db.clone(), tx, operation, item)?;
         Ok(())
     }
 }
 
-pub struct ProposedInColumnFamily {}
+// block id
+pub struct BlockIdColumnFamily {}
 
-impl ProposedInColumnFamily {
-    pub const NAME: &str = "burntutxos_proposed_in";
-    pub const UNPROPOSED_VALUE: &str = "None";
+impl BlockIdColumnFamily {
+    pub const NAME: &str = "lockconflicts_block_id";
 
-    pub fn build_key_prefix(block_id: &BlockId) -> String {
-        format!("{}_{}_", BurntUtxoModel::key_prefix(), block_id)
+    pub fn build_key_prefix_by_block(block_id: &BlockId) -> String {
+        format!("{}_{}_", LockConflictModel::key_prefix(), block_id)
     }
 }
 
-impl ModelColumnFamily for ProposedInColumnFamily {
-    type Item = BurntUtxo;
+impl ModelColumnFamily for BlockIdColumnFamily {
+    type Item = LockConflictData;
 
     fn name() -> &'static str {
         Self::NAME
     }
 
     fn build_key(value: &Self::Item) -> String {
-        let proposed_in = value.proposed_in_block.map(|b| b.to_string()).unwrap_or(Self::UNPROPOSED_VALUE.to_owned());
-        format!("{}_{}_{}", BurntUtxoModel::key_prefix(), proposed_in, value.commitment)
+        format!("{}_{}_{}", LockConflictModel::key_prefix(), value.block_id, value.conflict.transaction_id)
     }
 }

@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, lock_conflict::{LockConflictData, LockConflictModel}, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, evicted_node::{EvictedNodeData, EvictedNodeModel}, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, lock_conflict::{LockConflictData, LockConflictModel}, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -1514,7 +1514,29 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
     
     fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError> {
-        todo!()
+        if !self.blocks_exists(&evicted_in_block)? {
+            return Err(StorageError::QueryError {
+                reason: format!("suspended_nodes_evict: block {evicted_in_block} does not exist"),
+            });
+        }
+
+        let operation = "evicted_nodes_evict";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        let block_key = BlockModel::key_from_block_id(&evicted_in_block);
+        let block = BlockModel::get(tx, operation, &block_key)?;
+        
+        let value = EvictedNodeData {
+            public_key: public_key.clone(),
+            evicted_in_block,
+            evicted_in_block_height: block.height(),
+            epoch: block.epoch(),
+            eviction_commmited_in_epoch: None,
+            created_at: RocksdbTimestamp::now(),
+        };
+        EvictedNodeModel::put(self.db.clone(), tx, operation, &value)?;
+
+        Ok(())
     }
     
     fn evicted_nodes_mark_eviction_as_committed(
@@ -1522,7 +1544,25 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         public_key: &PublicKey,
         epoch: Epoch,
     ) -> Result<(), StorageError> {
-        todo!()
+        let operation = "evicted_nodes_mark_eviction_as_committed";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        let key_prefix = EvictedNodeModel::key_prefix_by_public_key(public_key);
+        let mut nodes = EvictedNodeModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?;
+
+        if nodes.is_empty() {
+            return Err(StorageError::NotFound {
+                item: "suspended_node",
+                key: public_key.to_string(),
+            });
+        }
+
+        for node in &mut nodes {
+            node.eviction_commmited_in_epoch = Some(epoch);
+            EvictedNodeModel::put(self.db.clone(), tx, operation, node)?;
+        }
+        
+        Ok(())
     }
 }
 

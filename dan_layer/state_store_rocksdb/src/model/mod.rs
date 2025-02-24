@@ -27,6 +27,7 @@ pub mod block_diff;
 pub mod block_transaction_execution;
 pub mod burnt_utxo;
 pub mod epoch_checkpoint;
+pub mod evicted_node;
 pub mod foreign_proposal;
 pub mod high_qc;
 pub mod last_executed;

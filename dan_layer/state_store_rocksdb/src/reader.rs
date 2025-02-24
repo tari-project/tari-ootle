@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, model::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, substate_locks::SubstateLockModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, evicted_node::EvictedNodeModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, model::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, substate_locks::SubstateLockModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1864,30 +1864,41 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
     
     fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
-        todo!()
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("block {} not found", block_id),
+            });
+        }
+
+        let operation = "suspended_nodes_is_evicted";
+
+        let commit_block_id = self.get_commit_block_id()?;
+        let block_key = BlockModel::key_from_block_id(&commit_block_id);
+        let commit_block = BlockModel::get(&self.tx, operation, &block_key)?;
+
+        let block_ids = self.get_block_ids_between(&commit_block_id, block_id)?;
+
+        let key_prefix = EvictedNodeModel::key_prefix_by_public_key(public_key);
+        let count =
+            EvictedNodeModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?
+            .into_iter()
+            .filter(|n|
+                !block_ids.contains(&n.evicted_in_block.to_string()) || n.evicted_in_block_height <= commit_block.height()
+            )
+            .count();
+
+        Ok(count > 0)
     }
     
     fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError> {
-        todo!()
+        type Cf = crate::model::evicted_node::EvictionCommittedColumnFamily;
+        let key_prefix = Cf::key_prefix_by_epoch(&epoch);
+        let count = MissingTransactionModel::count_cf(self.db.clone(), &self.tx, Cf::name(), Some(&key_prefix))?;
+
+        Ok(count)
     }
     
     fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError> {
         todo!()
     }
 }
-
-/*
-#[derive(QueryableByName)]
-struct Count {
-    #[diesel(sql_type = diesel::sql_types::BigInt)]
-    pub count: i64,
-}
-*/
-
-/* 
-#[derive(QueryableByName)]
-struct BlockIdSqlValue {
-    #[diesel(sql_type = diesel::sql_types::Text)]
-    pub bid: String,
-}
-*/

@@ -3,6 +3,7 @@
 
 use std::{fmt, fmt::Display};
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
     LockIntent,
     SubstateAddress,
@@ -20,7 +21,7 @@ use crate::{
     StorageError,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SubstateLock {
     lock_type: SubstateLockType,
     transaction_id: TransactionId,

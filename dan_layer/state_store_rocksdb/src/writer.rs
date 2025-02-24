@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -851,39 +851,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         park_block_id: &BlockId,
         missing_transaction_ids: I,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::{foreign_missing_transactions, foreign_parked_blocks};
-
-        let parked_block_id = foreign_parked_blocks::table
-            .select(foreign_parked_blocks::id)
-            .filter(foreign_parked_blocks::block_id.eq(serialize_hex(park_block_id)))
-            .first::<i32>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_parked_blocks_insert_missing_transactions",
-                source: e,
-            })?;
-
-        let values = missing_transaction_ids
-            .into_iter()
-            .map(|tx_id| {
-                (
-                    foreign_missing_transactions::parked_block_id.eq(parked_block_id),
-                    foreign_missing_transactions::transaction_id.eq(serialize_hex(tx_id)),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        diesel::insert_into(foreign_missing_transactions::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_parked_blocks_insert_missing_transactions",
-                source: e,
-            })?;
-
-        Ok(())
-        */
+        todo!()  
     }
 
     fn foreign_parked_blocks_remove_all_by_transaction(
@@ -891,59 +859,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         transaction_id: &TransactionId,
     ) -> Result<Vec<ForeignParkedProposal>, StorageError> {
         todo!()
-        /*
-        use crate::schema::{foreign_missing_transactions, foreign_parked_blocks};
-
-        let transaction_id = serialize_hex(transaction_id);
-
-        let removed_ids = diesel::delete(foreign_missing_transactions::table)
-            .filter(foreign_missing_transactions::transaction_id.eq(&transaction_id))
-            .returning(foreign_missing_transactions::parked_block_id)
-            .get_results::<i32>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_parked_blocks_remove_all_by_transaction",
-                source: e,
-            })?;
-
-        if removed_ids.is_empty() {
-            return Ok(vec![]);
-        }
-        let counts = foreign_parked_blocks::table
-            .select((
-                foreign_parked_blocks::id,
-                foreign_missing_transactions::table
-                    .select(count_star())
-                    .filter(foreign_missing_transactions::parked_block_id.eq(foreign_parked_blocks::id))
-                    .single_value(),
-            ))
-            .filter(foreign_parked_blocks::id.eq_any(&removed_ids))
-            .get_results::<(i32, Option<i64>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_parked_blocks_remove_all_by_transaction",
-                source: e,
-            })?;
-
-        let mut remaining = counts
-            .iter()
-            .filter(|(_, count)| count.map_or(true, |c| c == 0))
-            .map(|(id, _)| *id)
-            .peekable();
-
-        // If there are still missing transactions for ALL parked blocks, then we exit early
-        if remaining.peek().is_none() {
-            return Ok(vec![]);
-        }
-
-        let blocks = diesel::delete(foreign_parked_blocks::table)
-            .filter(foreign_parked_blocks::id.eq_any(remaining))
-            .get_results::<sql_models::ForeignParkedBlock>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_parked_blocks_remove_all_by_transaction",
-                source: e,
-            })?;
-
-        blocks.into_iter().map(TryInto::try_into).collect()
-        */
     }
 
     fn votes_insert(&mut self, vote: &Vote) -> Result<(), StorageError> {
@@ -967,95 +882,67 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: &BlockId,
         locks: I,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::substate_locks;
+        let operation = "substate_locks_insert_all";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let mut iter = locks.into_iter();
-        const CHUNK_SIZE: usize = 100;
-        // We have to break up into multiple queries because we can hit max SQL variable limit
-        loop {
-            let locks = iter
-                .by_ref()
-                .take(CHUNK_SIZE)
-                .flat_map(|(id, locks)| {
-                    let block_id = serialize_hex(block_id);
-                    locks.iter().map(move |lock| {
-                        (
-                            substate_locks::block_id.eq(block_id.clone()),
-                            substate_locks::substate_id.eq(id.to_string()),
-                            substate_locks::version.eq(lock.version() as i32),
-                            substate_locks::transaction_id.eq(serialize_hex(lock.transaction_id())),
-                            substate_locks::lock.eq(lock.substate_lock().to_string()),
-                            substate_locks::is_local_only.eq(lock.is_local_only()),
-                        )
-                    })
-                })
-                .collect::<Vec<_>>();
+        // TODO: better performance if we batch-insert into rocksdb?
+        for (substate_id, locks) in locks {
 
-            let count = locks.len();
-            if count == 0 {
-                break;
-            }
-
-            diesel::insert_into(substate_locks::table)
-                .values(locks)
-                .execute(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "substate_locks_insert_all",
-                    source: e,
-                })?;
-
-            if count < CHUNK_SIZE {
-                break;
+            for lock in locks {
+                let value = SubstateLockData {
+                    substate_id: substate_id.clone(),
+                    block_id: *block_id,
+                    lock: *lock,
+                    created_at: RocksdbTimestamp::now(),
+                };
+                SubstateLockModel::put(self.db.clone(), tx, operation, &value)?;
             }
         }
 
         Ok(())
-        */
     }
 
     fn substate_locks_remove_many_for_transactions<'a, I: Iterator<Item = &'a TransactionId>>(
         &mut self,
         mut transaction_ids: Peekable<I>,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::substate_locks;
-
-        // NOTE: looked at the diesel code and if the iterator is empty, this executes WHERE 0=1 which is fine, but
         // let's check the peekable iterator to save an OP.
         if transaction_ids.peek().is_none() {
             return Ok(());
         }
 
-        diesel::delete(substate_locks::table)
-            .filter(substate_locks::transaction_id.eq_any(transaction_ids.map(serialize_hex)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substate_locks_release_all_by_substates",
-                source: e,
-            })?;
+        let operation = "substate_locks_remove_many_for_transactions";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
+        for transaction_id in transaction_ids {
+            type Cf = crate::model::substate_locks::TransactionIdColumnFamily;
+            let key_prefix = Cf::build_key_prefix_by_transaction(transaction_id);
+            let locks = SubstateLockModel::multi_get_cf(self.db.clone(), tx, Cf::name(), operation, &key_prefix, Ordering::Ascending)?;
+            
+            for lock in locks {
+                let key = SubstateLockModel::key(&lock);
+                SubstateLockModel::delete(self.db.clone(), tx, operation, &key)?;
+            }
+            
+        }
+        
         Ok(())
-        */
     }
 
     fn substate_locks_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::substate_locks;
+        let operation = "substate_locks_remove_any_by_block_id";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::delete(substate_locks::table)
-            .filter(substate_locks::block_id.eq(serialize_hex(block_id)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substate_locks_remove_any_by_block_id",
-                source: e,
-            })?;
-
+        type Cf = crate::model::substate_locks::BlockIdColumnFamily;
+        let key_prefix = Cf::build_key_prefix_by_block(block_id);
+        let locks = SubstateLockModel::multi_get_cf(self.db.clone(), tx, Cf::name(), operation, &key_prefix, Ordering::Ascending)?;
+            
+        for lock in locks {
+            let key = SubstateLockModel::key(&lock);
+            SubstateLockModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
+            
         Ok(())
-        */
     }
 
     fn substates_create(&mut self, substate: &SubstateRecord) -> Result<(), StorageError> {

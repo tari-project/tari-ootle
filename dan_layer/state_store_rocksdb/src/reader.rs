@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, model::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, model::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, substate_locks::SubstateLockModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1572,50 +1572,40 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         transaction_id: &TransactionId,
     ) -> Result<Vec<LockedSubstateValue>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{substate_locks, substates};
+        let operation = "substate_locks_get_locked_substates_for_transaction";
 
-        let recs = substate_locks::table
-            .left_join(
-                substates::table.on(substate_locks::substate_id
-                    .eq(substates::substate_id)
-                    .and(substate_locks::version.eq(substates::version))),
-            )
-            .filter(substate_locks::transaction_id.eq(serialize_hex(transaction_id)))
-            .order_by(substate_locks::id.asc())
-            .get_results::<(sql_models::SubstateLock, Option<sql_models::SubstateRecord>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substate_locks_get_value_for_transaction",
-                source: e,
-            })?;
+        type Cf = crate::model::substate_locks::TransactionIdColumnFamily;
+        let key_prefix = Cf::build_key_prefix_by_transaction(transaction_id);
+        let locks = SubstateLockModel::multi_get_cf(self.db.clone(), &self.tx, Cf::name(), operation, &key_prefix, Ordering::Ascending)?;
+            
+        let mut locked_substates = vec![];
+        for lock in locks {
+            let address = SubstateAddress::from_substate_id(&lock.substate_id, lock.lock.version());
+            let key = SubstateModel::key_from_address(&address);
+            if SubstateModel::key_exists(&self.tx, operation, &key)? {
+                let substate = SubstateModel::get(&self.tx, operation, &key)?;
 
-        recs.into_iter()
-            .map(|(lock, maybe_substate)| lock.try_into_locked_substate_value(maybe_substate))
-            .collect()
-            */
+                let locked_substate = LockedSubstateValue {
+                    locked_by_block: lock.block_id,
+                    substate_id: lock.substate_id,
+                    lock: lock.lock,
+                    value: Some(substate.substate_value),
+                };
+                locked_substates.push(locked_substate);
+            }
+        }
+
+        Ok(locked_substates)
     }
 
     fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError> {
-        todo!()
-        /*
-        use crate::schema::substate_locks;
+        let key_prefix = SubstateLockModel::key_prefix_by_substate_id(substate_id);
 
-        // TODO: this may return an invalid lock if:
-        // 1. the proposer links the parent block to the locked block instead of the previous tip
-        // 2. if there are any inactive locks that were not removed from previous uncommitted blocks.
+        let lock = SubstateLockModel::
+            get_first(&self.tx, "substate_locks_get_latest_for_substate", Some(&key_prefix), Ordering::Descending)?
+            .ok_or_else(|| StorageError::General { details: "No locked substate found".to_string() })?;
 
-        let lock = substate_locks::table
-            .filter(substate_locks::substate_id.eq(substate_id.to_string()))
-            .order_by(substate_locks::id.desc())
-            .first::<sql_models::SubstateLock>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substate_locks_get_latest_for_substate",
-                source: e,
-            })?;
-
-        lock.try_into_substate_lock()
-        */
+        Ok(lock.lock)
     }
 
     fn pending_state_tree_diffs_get_all_up_to_commit_block(

@@ -46,6 +46,7 @@ pub mod state_transition;
 pub mod state_tree;
 pub mod state_tree_shard_versions;
 pub mod substate;
+pub mod substate_locks;
 pub mod transaction_pool_state_update;
 pub mod transaction_pool;
 pub mod transaction;

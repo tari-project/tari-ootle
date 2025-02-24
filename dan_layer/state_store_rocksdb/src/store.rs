@@ -28,9 +28,9 @@ use log::log;
 use rocksdb::{ColumnFamily, SingleThreaded, TransactionDB, TransactionDBOptions};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
-use tari_dan_storage::{consensus_models::{LastVoted, StateTransition}, StateStore, StorageError};
+use tari_dan_storage::{consensus_models::{LastVoted, StateTransition, SubstateLock}, StateStore, StorageError};
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, foreign_proposal::ForeignProposalModel, last_voted::LastVotedModel, missing_transactions::MissingTransactionModel, model::RocksdbModel, quorum_certificate::QuorumCertificateModel, state_transition::StateTransitionModel, substate::SubstateModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, foreign_proposal::ForeignProposalModel, last_voted::LastVotedModel, missing_transactions::MissingTransactionModel, model::RocksdbModel, quorum_certificate::QuorumCertificateModel, state_transition::StateTransitionModel, substate::SubstateModel, substate_locks::SubstateLockModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 
@@ -55,6 +55,7 @@ impl<TAddr> RocksDbStateStore<TAddr> {
             QuorumCertificateModel::column_families(),
             StateTransitionModel::column_families(),
             SubstateModel::column_families(),
+            SubstateLockModel::column_families(),
         ].concat();
 
         let db = TransactionDB::<SingleThreaded>::open_cf(&options, &TransactionDBOptions::default(), path, cf_names.clone())

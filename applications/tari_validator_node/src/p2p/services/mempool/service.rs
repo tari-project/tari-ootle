@@ -105,7 +105,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
                         info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
                         self.gossip.subscribe(shard_group).await?;
                     } else {
-                        info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip");
+                        info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip if necessary");
                         self.gossip.unsubscribe().await?;
                     }
                 },
@@ -227,7 +227,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
             let transaction_id = *transaction.id();
             self.state_store.with_write_tx(|tx| {
                 TransactionRecord::new(transaction)
-                    .abort(RejectReason::InvalidTransaction(format!(
+                    .abort_and_finalize(RejectReason::InvalidTransaction(format!(
                         "Mempool validation failed: {e}"
                     )))
                     .insert(tx)

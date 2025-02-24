@@ -44,6 +44,13 @@ pub struct TransactionPoolStateUpdateModelData {
 pub struct TransactionPoolStateUpdateModel {}
 
 impl TransactionPoolStateUpdateModel {
+    pub fn build_key(block_id: &BlockId, block_height: &NodeHeight, tx_id: &TransactionId) -> String {
+        // the key format allows us to query all updates by block prefix, ordered by height DESC
+        // TODO: is there a cleaner way to implement desc key ordering in RocksDb?
+        let block_height_desc = NodeHeight(u64::MAX) - *block_height;
+        format!("{}_{}_{}_{}", Self::key_prefix(), block_id, block_height_desc, tx_id)
+    }
+
     pub fn key_prefix_by_block_id(block_id: &BlockId) -> String {
         format!("{}_{}_", Self::key_prefix(), block_id)
     }
@@ -61,11 +68,6 @@ impl RocksdbModel for TransactionPoolStateUpdateModel {
     }
 
     fn key(value: &Self::Item) -> String {
-        // the key format allows us to query all updates by block prefix, ordered by height DESC
-        let block_id =  value.block_id.to_string();
-        // TODO: is there a cleaner way to implement desc key ordering in RocksDb?
-        let block_height_desc = NodeHeight(u64::MAX) - value.block_height;
-        let tx_id = value.transaction_id.to_string();
-        format!("{}_{}_{}_{}", Self::key_prefix(), block_id, block_height_desc, tx_id)
+        Self::build_key(&value.block_id, &value.block_height, &value.transaction_id)
     }
 }

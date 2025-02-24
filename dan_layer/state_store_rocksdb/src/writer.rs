@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -657,80 +657,40 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn transaction_pool_remove(&mut self, transaction_id: &TransactionId) -> Result<(), StorageError> {
+    fn transaction_pool_remove(&mut self, _transaction_id: &TransactionId) -> Result<(), StorageError> {
+        // This methdod is not used
         todo!()
-        /*
-        use crate::schema::{transaction_pool, transaction_pool_state_updates};
-
-        let transaction_id = serialize_hex(transaction_id);
-        let num_affected = diesel::delete(transaction_pool::table)
-            .filter(transaction_pool::transaction_id.eq(&transaction_id))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_remove",
-                source: e,
-            })?;
-
-        if num_affected == 0 {
-            return Err(StorageError::NotFound {
-                item: "transaction".to_string(),
-                key: transaction_id,
-            });
-        }
-
-        diesel::delete(transaction_pool_state_updates::table)
-            .filter(transaction_pool_state_updates::transaction_id.eq(transaction_id))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_remove",
-                source: e,
-            })?;
-
-        Ok(())
-        */
     }
 
     fn transaction_pool_remove_all<'a, I: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         transaction_ids: I,
     ) -> Result<Vec<TransactionPoolRecord>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::{transaction_pool, transaction_pool_state_updates};
+        let operation = "transaction_pool_remove_all";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+        let transaction_ids = transaction_ids.into_iter().collect::<Vec<_>>();
 
-        let transaction_ids = transaction_ids.into_iter().map(serialize_hex).collect::<Vec<_>>();
+        let mut transactions = vec![];
+        for transaction_id in &transaction_ids {
+            let key = TransactionPoolModel::key_from_transaction_id(transaction_id);
+            let transaction = TransactionPoolModel::get(tx, operation, &key)?;
+            transactions.push(transaction);
+            TransactionPoolModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
 
-        let txs = diesel::delete(transaction_pool::table)
-            .filter(transaction_pool::transaction_id.eq_any(&transaction_ids))
-            .returning(transaction_pool::all_columns)
-            .get_results::<sql_models::TransactionPoolRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_remove_all",
-                source: e,
-            })?;
-
-        if txs.len() != transaction_ids.len() {
-            return Err(SqliteStorageError::NotAllTransactionsFound {
+        if transactions.len() != transaction_ids.len() {
+            return Err(RocksDbStorageError::NotAllTransactionsFound {
                 operation: "transaction_pool_remove_all",
                 details: format!(
                     "Found {} transactions, but {} were queried",
-                    txs.len(),
+                    transactions.len(),
                     transaction_ids.len()
                 ),
             }
             .into());
         }
-
-        diesel::delete(transaction_pool_state_updates::table)
-            .filter(transaction_pool_state_updates::transaction_id.eq_any(&transaction_ids))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_remove_all",
-                source: e,
-            })?;
-
-        txs.into_iter().map(|tx| tx.try_convert(None)).collect()
-        */
+            
+        Ok(transactions)
     }
 
     fn transaction_pool_confirm_all_transitions(&mut self, new_locked_block: &LockedBlock) -> Result<(), StorageError> {
@@ -793,20 +753,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         &mut self,
         block_id: &BlockId,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::transaction_pool_state_updates;
+        let operation = "transaction_pool_state_updates_remove_any_by_block_id";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        diesel::delete(transaction_pool_state_updates::table)
-            .filter(transaction_pool_state_updates::block_id.eq(serialize_hex(block_id)))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_state_updates_remove_any_by_block_id",
-                source: e,
-            })?;
+        let key_prefix = TransactionPoolStateUpdateModel::key_prefix_by_block_id(block_id);
+        let updates = TransactionPoolStateUpdateModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?;
+
+        for update in updates {
+            let key = TransactionPoolStateUpdateModel::key(&update);
+            TransactionPoolStateUpdateModel::delete(self.db.clone(), tx, operation, &key)?;
+        }
 
         Ok(())
-        */
     }
 
     fn missing_transactions_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(

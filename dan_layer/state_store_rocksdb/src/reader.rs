@@ -91,7 +91,7 @@ use tari_transaction::TransactionId;
 use tari_utilities::{hex::Hex, ByteArray};
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, model::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, substate_locks::SubstateLockModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, model::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, substate_locks::SubstateLockModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -1764,7 +1764,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError> {
-        todo!()
+        let operation = "burnt_utxos_get";
+        let key = BurntUtxoModel::key_from_commitment(commitment);
+        let value = BurntUtxoModel::get(&self.tx, operation, &key)?;
+        Ok(value)
     }
 
     fn burnt_utxos_get_all_unproposed(
@@ -1772,12 +1775,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         leaf_block: &BlockId,
         limit: usize,
     ) -> Result<Vec<BurntUtxo>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::burnt_utxos;
         if !self.blocks_exists(leaf_block)? {
             return Err(StorageError::NotFound {
-                item: "Block".to_string(),
+                item: "Block",
                 key: leaf_block.to_string(),
             });
         }
@@ -1789,40 +1789,26 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let locked_block = self.get_current_locked_block()?;
         let exclude_block_ids = self.get_block_ids_with_commands_between(&locked_block.block_id, leaf_block)?;
 
-        let burnt_utxos = burnt_utxos::table
-            .filter(
-                burnt_utxos::proposed_in_block
-                    .is_null()
-                    .or(burnt_utxos::proposed_in_block
-                        .ne_all(exclude_block_ids)
-                        .and(burnt_utxos::proposed_in_block_height.gt(locked_block.height.as_u64() as i64))),
-            )
-            .limit(limit as i64)
-            .get_results::<sql_models::BurntUtxo>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "burnt_utxos_get_all_unproposed",
-                source: e,
-            })?;
+        // TODO: optimize this query in RocksDB
+        // TODO: implement limit in RocksDB model
+        let utxos = BurntUtxoModel::multi_get( &self.tx, None, Ordering::Ascending)?;
+        Ok(utxos
+            .into_iter()
+            .filter(|u| {
+                let Some(proposed_in_block) = u.proposed_in_block else {
+                    return true;
+                };
 
-        burnt_utxos.into_iter().map(TryInto::try_into).collect()
-        */
+                let is_excluded = exclude_block_ids.contains(&proposed_in_block.to_string());
+
+                !is_excluded
+            })
+            .collect())
     }
 
     fn burnt_utxos_count(&self) -> Result<u64, StorageError> {
-        todo!()
-        /*
-        use crate::schema::burnt_utxos;
-
-        let count = burnt_utxos::table
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "burnt_utxos_count",
-                source: e,
-            })?;
-
-        Ok(count as u64)
-        */
+        let count = BurntUtxoModel::count(&self.tx, None)?;
+        Ok(count)
     }
 
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {

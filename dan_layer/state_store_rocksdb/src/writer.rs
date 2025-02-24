@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -1201,26 +1201,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::burnt_utxos;
+        let operation = "burnt_utxos_insert";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let values = (
-            burnt_utxos::substate_id.eq(burnt_utxo.substate_id.to_string()),
-            burnt_utxos::substate.eq(serialize_json(&burnt_utxo.substate_value)?),
-            burnt_utxos::base_layer_block_height.eq(burnt_utxo.base_layer_block_height as i64),
-        );
-
-        diesel::insert_into(burnt_utxos::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "burnt_utxos_insert",
-                source: e,
-            })?;
-
-        Ok(())
-        */
+        Ok(BurntUtxoModel::put(self.db.clone(), tx, operation, &burnt_utxo)?)
     }
 
     fn burnt_utxos_set_proposed_block(
@@ -1228,33 +1212,54 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         commitment: &UnclaimedConfidentialOutputAddress,
         proposed_in_block: &BlockId,
     ) -> Result<(), StorageError> {
-        todo!()
+        let operation = "burnt_utxos_set_proposed_block";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        let key = BurntUtxoModel::key_from_commitment(commitment);
+        let mut utxo = BurntUtxoModel::get(tx, operation, &key)?;
+
+        // we delete to force deleting the corresponding CFs
+        BurntUtxoModel::delete(self.db.clone(), tx, operation, &key)?;
+
+        // update and save the utxo again
+        utxo.proposed_in_block = Some(*proposed_in_block);
+        BurntUtxoModel::put(self.db.clone(), tx, operation, &utxo)?;
+
+        Ok(())
     }
 
     fn burnt_utxos_clear_proposed_block(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::burnt_utxos;
+        let operation = "burnt_utxos_clear_proposed_block";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let proposed_in_block_hex = serialize_hex(proposed_in_block);
-        diesel::update(burnt_utxos::table)
-            .filter(burnt_utxos::proposed_in_block.eq(&proposed_in_block_hex))
-            .set((
-                burnt_utxos::proposed_in_block.eq(None::<String>),
-                burnt_utxos::proposed_in_block_height.eq(None::<i64>),
-            ))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "burnt_utxos_clear_proposed_block",
-                source: e,
-            })?;
+        // get all the utxos proposed in the block
+        type Cf = crate::model::burnt_utxo::ProposedInColumnFamily;
+        let cf = Cf::name();
+        let key_prefix = Cf::build_key_prefix(&proposed_in_block);
+        let mut utxtos = BurntUtxoModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
 
+        // clear the proposed_in field in all utxos
+        for utxo in &mut utxtos {
+            let key = BurntUtxoModel::key(&utxo);
+
+            // we delete to force deleting the corresponding CFs
+            BurntUtxoModel::delete(self.db.clone(), tx, operation, &key)?;
+
+            // update and save the utxo again
+            utxo.proposed_in_block = None;
+            BurntUtxoModel::put(self.db.clone(), tx, operation, &utxo)?;
+        }
         Ok(())
-        */
     }
 
     fn burnt_utxos_delete(&mut self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<(), StorageError> {
-        todo!()
+        let operation = "burnt_utxos_delete";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
+
+        let key = BurntUtxoModel::key_from_commitment(commitment);
+        BurntUtxoModel::delete(self.db.clone(), tx, operation, &key)?;
+
+        Ok(())
     }
 
     fn lock_conflicts_insert_all<'a, I: IntoIterator<Item = (&'a TransactionId, &'a Vec<LockConflict>)>>(

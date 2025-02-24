@@ -28,9 +28,9 @@ use log::log;
 use rocksdb::{ColumnFamily, SingleThreaded, TransactionDB, TransactionDBOptions};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
-use tari_dan_storage::{consensus_models::{LastVoted, StateTransition, SubstateLock}, StateStore, StorageError};
+use tari_dan_storage::{consensus_models::{BurntUtxo, LastVoted, StateTransition, SubstateLock}, StateStore, StorageError};
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, foreign_proposal::ForeignProposalModel, last_voted::LastVotedModel, missing_transactions::MissingTransactionModel, model::RocksdbModel, quorum_certificate::QuorumCertificateModel, state_transition::StateTransitionModel, substate::SubstateModel, substate_locks::SubstateLockModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, burnt_utxo::BurntUtxoModel, foreign_proposal::ForeignProposalModel, last_voted::LastVotedModel, missing_transactions::MissingTransactionModel, model::RocksdbModel, quorum_certificate::QuorumCertificateModel, state_transition::StateTransitionModel, substate::SubstateModel, substate_locks::SubstateLockModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 
@@ -49,6 +49,7 @@ impl<TAddr> RocksDbStateStore<TAddr> {
         let cf_names = [
             BlockModel::column_families(),
             BlockTransactionExecutionModel::column_families(),
+            BurntUtxoModel::column_families(),
             ForeignProposalModel::column_families(),
             LastVotedModel::column_families(),
             MissingTransactionModel::column_families(),

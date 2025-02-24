@@ -25,6 +25,7 @@ pub mod model;
 pub mod block;
 pub mod block_diff;
 pub mod block_transaction_execution;
+pub mod burnt_utxo;
 pub mod epoch_checkpoint;
 pub mod foreign_proposal;
 pub mod high_qc;

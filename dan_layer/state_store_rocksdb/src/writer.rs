@@ -49,7 +49,7 @@ use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, epoch_checkpoint::EpochCheckpointModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 use bincode;
 
@@ -815,36 +815,23 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         foreign_proposals: &[ForeignProposal],
         missing_transaction_ids: IMissing,
     ) -> Result<(), StorageError> {
-        todo!()
-        /*
-        use crate::schema::missing_transactions;
+        {
+            self.parked_blocks_insert(block, foreign_proposals)?;
+        }
 
-        let missing_transaction_ids = missing_transaction_ids.into_iter().map(serialize_hex);
-        let block_id_hex = serialize_hex(block.id());
+        let operation = "missing_transactions_insert";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        self.parked_blocks_insert(block, foreign_proposals)?;
-
-        let values = missing_transaction_ids
-            .map(|tx_id| {
-                (
-                    missing_transactions::block_id.eq(&block_id_hex),
-                    missing_transactions::block_height.eq(block.height().as_u64() as i64),
-                    missing_transactions::transaction_id.eq(tx_id),
-                    missing_transactions::is_awaiting_execution.eq(false),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        diesel::insert_into(missing_transactions::table)
-            .values(values)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "missing_transactions_insert",
-                source: e,
-            })?;
+        for transaction_id in missing_transaction_ids {
+            let value = MissingTransaction {
+                block_id: *block.id(),
+                block_height: RocksdbSeq(block.height().as_u64()),
+                transaction_id: *transaction_id,
+            };
+            MissingTransactionModel::put(self.db.clone(), tx, operation, &value)?;
+        }
 
         Ok(())
-        */
     }
 
     fn missing_transactions_remove(
@@ -852,56 +839,44 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         current_height: NodeHeight,
         transaction_id: &TransactionId,
     ) -> Result<Option<(Block, Vec<ForeignProposal>)>, StorageError> {
-        todo!()
-        /*
-        use crate::schema::missing_transactions;
+        let operation = "missing_transactions_insert";
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let transaction_id = serialize_hex(transaction_id);
-        let block_id = missing_transactions::table
-            .select(missing_transactions::block_id)
-            .filter(missing_transactions::transaction_id.eq(&transaction_id))
-            .filter(missing_transactions::block_height.eq(current_height.as_u64() as i64))
-            .first::<String>(self.connection())
-            .optional()
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "missing_transactions_remove",
-                source: e,
-            })?;
-        let Some(block_id) = block_id else {
+        // get the block id of the transaction
+        let height = RocksdbSeq(current_height.as_u64());
+        let key = MissingTransactionModel::key_prefix_from_transaction_and_height(&*transaction_id, Some(height));
+        if !MissingTransactionModel::key_exists(tx, operation, &key)? {
             return Ok(None);
-        };
+        }
+        let value = MissingTransactionModel::get(tx, operation, &key)?;
+        let block_id = value.block_id;
 
-        diesel::delete(missing_transactions::table)
-            .filter(missing_transactions::transaction_id.eq(&transaction_id))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "missing_transactions_remove",
-                source: e,
-            })?;
-        let num_remaining = missing_transactions::table
-            .filter(missing_transactions::block_id.eq(&block_id))
-            .count()
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "missing_transactions_remove",
-                source: e,
-            })?;
+        // delete the missing transaction
+        MissingTransactionModel::delete(self.db.clone(), tx, operation, &key)?;
+
+        // if the block has no more missing transactions, delete all missing transactions from previous blocks
+        type BlockIdCf = crate::model::missing_transactions::BlockIdColumnFamily;
+        let key_prefix = BlockIdCf::build_key_prefix_by_block(&block_id);
+        let num_remaining = MissingTransactionModel::count_cf(self.db.clone(), tx, BlockIdCf::name(), Some(&key_prefix))?;
 
         if num_remaining == 0 {
             // delete all entries that are for previous heights
-            diesel::delete(missing_transactions::table)
-                .filter(missing_transactions::block_height.lt(current_height.as_u64() as i64))
-                .execute(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "missing_transactions_remove",
-                    source: e,
-                })?;
-            let block = self.parked_blocks_remove(&block_id)?;
+            type BlockHeightCf = crate::model::missing_transactions::BlockHeightColumnFamily;
+            let key_prefix = MissingTransactionModel::key_prefix();
+            let values = MissingTransactionModel::multi_get_cf(self.db.clone(), tx, operation, BlockHeightCf::name(), &key_prefix, Ordering::Ascending)?;
+            for value in values {
+                if value.block_height.0 < current_height.as_u64() {
+                    let key= MissingTransactionModel::key(&value);
+                    MissingTransactionModel::delete(self.db.clone(), tx, operation, &key)?;
+                } else {
+                    break;
+                }
+            }
+            let block = self.parked_blocks_remove(&block_id.to_string())?;
             return Ok(Some(block));
         }
 
         Ok(None)
-        */
     }
 
     fn foreign_parked_blocks_insert(&mut self, park_block: &ForeignParkedProposal) -> Result<(), StorageError> {

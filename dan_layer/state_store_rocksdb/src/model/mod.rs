@@ -38,6 +38,7 @@ pub mod last_sent_vote;
 pub mod last_voted;
 pub mod leaf_block;
 pub mod locked_block;
+pub mod missing_transactions;
 pub mod parked_block;
 pub mod pending_state_tree_diff;
 pub mod quorum_certificate;

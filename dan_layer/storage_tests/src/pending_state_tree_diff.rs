@@ -7,7 +7,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 
-mod last_inserted {
+mod pending_state_tree_diffs {
     use tari_dan_storage::consensus_models::VersionedStateHashTreeDiff;
     use tari_state_tree::StateHashTreeDiff;
 

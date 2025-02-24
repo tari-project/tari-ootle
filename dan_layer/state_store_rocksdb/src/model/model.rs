@@ -235,6 +235,17 @@ pub trait RocksdbModel {
         Ok(count)
     }
 
+    fn count_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf_name: &str, key_prefix: Option<&str>) -> Result<u64, RocksDbStorageError> {
+        let cf = db.cf_handle(cf_name).unwrap();
+        let mut options = rocksdb::ReadOptions::default();
+        // TODO: Should default to the model's key prefix instead of empty string?
+        let key_prefix = key_prefix.unwrap_or_default();
+        options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
+        let iterator = tx.iterator_cf_opt(cf,options, rocksdb::IteratorMode::Start);
+        let count = iterator.count() as u64;
+        Ok(count)
+    }
+
     fn multi_get(tx: &Transaction<'_, TransactionDB>, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Vec<Self::Item>, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
 

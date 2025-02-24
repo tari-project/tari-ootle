@@ -65,7 +65,7 @@ impl Display for RocksdbTimestamp {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord)]
 pub struct RocksdbSeq(pub u64);
 
 impl Display for RocksdbSeq {

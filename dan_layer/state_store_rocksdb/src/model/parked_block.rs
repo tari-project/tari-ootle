@@ -22,7 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{Block, BlockId, ForeignProposal};
-use crate::model::model::RocksdbModel;
+use crate::model::traits::RocksdbModel;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParkedBlockData {

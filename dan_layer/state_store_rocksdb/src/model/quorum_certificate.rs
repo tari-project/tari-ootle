@@ -24,9 +24,9 @@ use std::sync::Arc;
 
 use rocksdb::{Transaction, TransactionDB};
 use tari_dan_storage::consensus_models::{BlockId, QcId, QuorumCertificate};
-use crate::{error::RocksDbStorageError, model::model::RocksdbModel};
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
 
-use super::model::ModelColumnFamily;
+use super::traits::ModelColumnFamily;
 
 pub struct QuorumCertificateModel {}
 

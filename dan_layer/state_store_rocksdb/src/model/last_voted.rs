@@ -25,9 +25,9 @@ use std::sync::Arc;
 use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::LastVoted;
-use crate::{error::RocksDbStorageError, model::model::RocksdbModel, utils::RocksdbTimestamp};
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
-use super::model::ModelColumnFamily;
+use super::traits::ModelColumnFamily;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LastVotedModelData {

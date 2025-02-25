@@ -38,8 +38,8 @@ pub trait ModelColumnFamily {
     fn build_key(value: &Self::Item) -> String;
 
     fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item, value: &[u8]) -> Result<(), RocksDbStorageError> {
-        let key = Self::build_key(&item);
-        let cf = db.cf_handle(&Self::name()).unwrap();
+        let key = Self::build_key(item);
+        let cf = db.cf_handle(Self::name()).unwrap();
         tx.put_cf(cf, key, value)
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
@@ -50,8 +50,8 @@ pub trait ModelColumnFamily {
     }
 
     fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
-        let key = Self::build_key(&item);
-        let cf = db.cf_handle(&Self::name()).unwrap();
+        let key = Self::build_key(item);
+        let cf = db.cf_handle(Self::name()).unwrap();
         tx.delete_cf(cf, key)
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
@@ -97,7 +97,7 @@ pub trait RocksdbModel {
         })?;
 
         // insert the main key in each of the column families
-        Self::put_in_cfs(db.clone(), tx, operation, &value)?;
+        Self::put_in_cfs(db.clone(), tx, operation, value)?;
 
         Ok(())
     }
@@ -109,7 +109,7 @@ pub trait RocksdbModel {
     }
 
     fn key_exists(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<bool, RocksDbStorageError> {
-        let value = tx.get(&key)
+        let value = tx.get(key)
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
                 source: e,
@@ -118,7 +118,7 @@ pub trait RocksdbModel {
     }
 
     fn get(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<Self::Item, RocksDbStorageError> {
-        let value = tx.get(&key)
+        let value = tx.get(key)
             .map_err(|e| RocksDbStorageError::RocksDbError {
                 operation,
                 source: e,

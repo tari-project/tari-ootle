@@ -7,7 +7,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 
-mod missing_transactions {
+mod missing_transactions_test {
     use tari_common_types::types::FixedHash;
     use tari_dan_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
     use tari_dan_storage::consensus_models::{Block, Command};

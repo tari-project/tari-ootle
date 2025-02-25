@@ -25,9 +25,9 @@ use std::sync::Arc;
 use rocksdb::{Transaction, TransactionDB};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::consensus_models::{BlockId, ForeignProposal, ForeignProposalStatus};
-use crate::{error::RocksDbStorageError, model::model::RocksdbModel};
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
 
-use super::model::ModelColumnFamily;
+use super::traits::ModelColumnFamily;
 
 pub struct ForeignProposalModel {}
 
@@ -89,11 +89,11 @@ impl RocksdbModel for ForeignProposalModel {
 pub struct EpochStatusColumnFamily {}
 
 impl EpochStatusColumnFamily {
-    pub fn key_prefix_from_epoch(epoch: &Epoch) -> String {
+    pub fn key_prefix_from_epoch(epoch: Epoch) -> String {
         format!("{}_{}_", ForeignProposalModel::key_prefix(), epoch)
     }
 
-    pub fn key_prefix_from_epoch_and_status(epoch: &Epoch, status: &ForeignProposalStatus) -> String {
+    pub fn key_prefix_from_epoch_and_status(epoch: Epoch, status: ForeignProposalStatus) -> String {
         format!("{}_{}_{}_", ForeignProposalModel::key_prefix(), epoch, status)
     }
 }
@@ -138,7 +138,7 @@ impl ModelColumnFamily for ProposedColumnFamily {
 pub struct UnconfirmedColumnFamily {}
 
 impl UnconfirmedColumnFamily {
-    pub fn key_prefix_by_epoch(epoch: &Epoch) -> String {
+    pub fn key_prefix_by_epoch(epoch: Epoch) -> String {
         format!("{}_{}_", ForeignProposalModel::key_prefix(), epoch)
     }
 }

@@ -1,11 +1,10 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use rand::{rngs::OsRng, RngCore};
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_dan_storage::{
-    consensus_models::{Block, Command, Decision, TransactionAtom, TransactionPoolStage, TransactionPoolStatusUpdate},
+    consensus_models::{Block, Command},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -84,17 +83,17 @@ mod basic_block_operations {
 
         // set is_justified flag
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
-        assert_eq!(block1_from_db.is_justified(), false);
+        assert!(!block1_from_db.is_justified());
         tx.blocks_set_flags(block1_from_db.id(), None, Some(true)).unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
-        assert_eq!(block1_from_db.is_justified(), true);
+        assert!(block1_from_db.is_justified());
         
         // set is_commited flag
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
-        assert_eq!(block1_from_db.is_committed(), false);
+        assert!(!block1_from_db.is_committed());
         tx.blocks_set_flags(block1_from_db.id(), Some(true), None).unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
-        assert_eq!(block1_from_db.is_committed(), true);
+        assert!(block1_from_db.is_committed());
 
         // delete one of the blocks
         tx.blocks_delete(block1.id()).unwrap();

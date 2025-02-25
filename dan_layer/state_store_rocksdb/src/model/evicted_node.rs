@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_dan_storage::consensus_models::BlockId;
-use crate::{error::RocksDbStorageError, model::model::RocksdbModel, utils::RocksdbTimestamp};
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
-use super::model::ModelColumnFamily;
+use super::traits::ModelColumnFamily;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvictedNodeData {
@@ -88,7 +88,7 @@ impl EvictionCommittedColumnFamily {
     pub const NAME: &str = "evictednodes_eviction_committed";
     pub const UNCOMMITTED_VALUE: &str = "None";
 
-    pub fn key_prefix_by_epoch(epoch: &Epoch) -> String {
+    pub fn key_prefix_by_epoch(epoch: Epoch) -> String {
         format!("{}_{}_", EvictedNodeModel::key_prefix(), epoch)
     }
 }

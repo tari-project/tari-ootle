@@ -32,7 +32,7 @@ use tari_transaction::TransactionId;
 
 use crate::error::RocksDbStorageError;
 
-use super::{super::utils::{bincode_decode, bincode_encode}, model::{ModelColumnFamily, RocksdbModel}};
+use super::{super::utils::{bincode_decode, bincode_encode}, traits::{ModelColumnFamily, RocksdbModel}};
 
 // We need to reimplement the "SubstateRecord" struct because of a incompatiblity between bincode and ciborium Value,
 // which we use for the substate state.
@@ -104,7 +104,7 @@ pub struct SubstateModel {}
 
 impl SubstateModel {
     pub fn key_from_address(address: &SubstateAddress) -> String {
-        format!("{}_{}", Self::key_prefix(), address.to_string())
+        format!("{}_{}", Self::key_prefix(), address)
     }
 }
 

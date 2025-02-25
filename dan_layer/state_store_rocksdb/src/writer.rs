@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{iter::Peekable, ops::Deref, sync::{Arc, Mutex}, time::{SystemTime, UNIX_EPOCH}};
+use std::{ops::Deref, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
 use indexmap::IndexMap;
 use log::*;
@@ -32,26 +32,21 @@ use tari_dan_common_types::{
     NodeAddressable,
     NodeHeight,
     ShardGroup,
-    SubstateLockType,
     ToSubstateAddress,
     VersionedSubstateId,
 };
 use tari_dan_storage::{
     consensus_models::{
-        Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, StateTransition, StateTransitionId, SubstateChange, SubstateCreatedProof, SubstateData, SubstateDestroyed, SubstateDestroyedProof, SubstateLock, SubstatePledge, SubstatePledges, SubstateRecord, SubstateUpdate, TransactionPool, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
+        Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, StateTransition, StateTransitionId, SubstateChange, SubstateDestroyed, SubstateDestroyedProof, SubstateLock, SubstatePledges, SubstateRecord, SubstateUpdate, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
     }, Ordering, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError
 };
 use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeNode, Version};
+use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 use tari_transaction::TransactionId;
-use tari_utilities::ByteArray;
-use time::{OffsetDateTime, PrimitiveDateTime};
 use tari_common_types::types::PublicKey;
 use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, evicted_node::{EvictedNodeData, EvictedNodeModel}, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, lock_conflict::{LockConflictData, LockConflictModel}, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, model::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
-
-use bincode;
+use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, evicted_node::{EvictedNodeData, EvictedNodeModel}, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, lock_conflict::{LockConflictData, LockConflictModel}, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, traits::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::writer";
 
@@ -171,8 +166,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let mut block = BlockModel::get(tx, operation, &key)?;
 
         // set the flags
-        is_committed.map(|value| block.set_is_committed(value));
-        is_justified.map(|value| block.set_is_justified(value));
+        if let Some(value) = is_committed {
+            block.set_is_committed(value)
+        }
+        if let Some(value) = is_justified {
+            block.set_is_justified(value)
+        }
         
         // update the block in rocksDb
         // TODO: is it better to use a RocksDB merge operator?
@@ -216,7 +215,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn quorum_certificates_insert(&mut self, qc: &QuorumCertificate) -> Result<(), StorageError> {
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        Ok(QuorumCertificateModel::put(self.db.clone(), tx, "quorum_certificates_insert", &qc)?)
+        Ok(QuorumCertificateModel::put(self.db.clone(), tx, "quorum_certificates_insert", qc)?)
     }
 
     fn quorum_certificates_set_shares_processed(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
@@ -265,7 +264,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn last_executed_set(&mut self, last_exec: &LastExecuted) -> Result<(), StorageError> {
         let operation = "last_executed_set";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        LastExecutedModel::put(self.db.clone(), tx, operation, &last_exec)?;
+        LastExecutedModel::put(self.db.clone(), tx, operation, last_exec)?;
 
         Ok(())
     }
@@ -323,7 +322,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let key = ForeignProposalModel::key(foreign_proposal);
         let key_exists = ForeignProposalModel::key_exists(tx, operation, &key)?;
         if !key_exists {
-            ForeignProposalModel::put(self.db.clone(), tx, operation, &foreign_proposal)?;
+            ForeignProposalModel::put(self.db.clone(), tx, operation, foreign_proposal)?;
         }
 
         let block = foreign_proposal.block();
@@ -350,7 +349,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // get all the proposals for the epoch
         type Cf = crate::model::foreign_proposal::EpochStatusColumnFamily;
         let cf = Cf::name();
-        let key_prefix = Cf::key_prefix_from_epoch(&epoch);
+        let key_prefix = Cf::key_prefix_from_epoch(epoch);
         let proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
 
         // delete all the epoch proposals in db
@@ -423,7 +422,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // get the proposal based on the "proposed_in_block" field
         type Cf = crate::model::foreign_proposal::ProposedColumnFamily;
         let cf = Cf::name();
-        let key_prefix = Cf::key_prefix_from_proposed_by_block(&proposed_in_block);
+        let key_prefix = Cf::key_prefix_from_proposed_by_block(proposed_in_block);
         let proposal = ForeignProposalModel::get_cf(self.db.clone(), tx, operation, cf, Some(&key_prefix), Ordering::Ascending)?
             .ok_or_else(|| StorageError::NotFound {
                 item: "foreign_proposals",
@@ -474,7 +473,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn transactions_insert(&mut self, tx_rec: &TransactionRecord) -> Result<(), StorageError> {
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        TransactionModel::put(self.db.clone(), tx, "transactions_insert", &tx_rec)?;
+        TransactionModel::put(self.db.clone(), tx, "transactions_insert", tx_rec)?;
         Ok(())
     }
 
@@ -492,7 +491,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // update the transaction in rocksDb
         // TODO: is it better to use a RocksDB merge operator?
-        TransactionModel::put(self.db.clone(), tx, operation, &transaction_rec)?;
+        TransactionModel::put(self.db.clone(), tx, operation, transaction_rec)?;
 
         Ok(())
     }
@@ -568,7 +567,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let value = BlockTransactionExecutionModelData::from(transaction_execution);
         BlockTransactionExecutionModel::put(self.db.clone(), tx, operation, &value)?;
 
-        return Ok(true)
+        Ok(true)
     }
 
     fn transaction_executions_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
@@ -648,7 +647,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // accurate value without querying records in the updates table.
         // TODO: is it better to use a RocksDB merge operator?
         let transaction_id = update.transaction().transaction_id();
-        let key = TransactionPoolModel::key_from_transaction_id(&transaction_id);
+        let key = TransactionPoolModel::key_from_transaction_id(transaction_id);
         let mut transaction_pool_value = TransactionPoolModel::get(tx, operation, &key)?;
         transaction_pool_value.set_is_ready(update.is_ready_now());
         transaction_pool_value.set_pending_stage(Some(update.stage()));
@@ -704,7 +703,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             .into_iter()
             .filter(|u| {
                 u.block_height <= new_locked_block.height() &&
-                u.is_applied == false 
+                !u.is_applied
             })
             .collect();
 
@@ -714,14 +713,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         );
 
         // mark all transaction updates as applied
-        for mut update in &mut updates {
+        for update in &mut updates {
             update.is_applied = true;
-            TransactionPoolStateUpdateModel::put(self.db.clone(), tx, operation, &update)?;
+            TransactionPoolStateUpdateModel::put(self.db.clone(), tx, operation, update)?;
         }
 
         // update the transactions in the transaction pool
         for update in &updates {
-            let confirm_stage = match update.stage {
+            let _confirm_stage = match update.stage {
                 TransactionPoolStage::LocalPrepared => Some(Some(TransactionPoolConfirmedStage::ConfirmedPrepared)),
                 TransactionPoolStage::LocalAccepted => Some(Some(TransactionPoolConfirmedStage::ConfirmedAccepted)),
                 _ => None,
@@ -802,7 +801,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // get the block id of the transaction
         let height = RocksdbSeq(current_height.as_u64());
-        let key = MissingTransactionModel::key_prefix_from_transaction_and_height(&*transaction_id, Some(height));
+        let key = MissingTransactionModel::key_prefix_from_transaction_and_height(transaction_id, Some(height));
         if !MissingTransactionModel::key_exists(tx, operation, &key)? {
             return Ok(None);
         }
@@ -821,7 +820,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             // delete all entries that are for previous heights
             type BlockHeightCf = crate::model::missing_transactions::BlockHeightColumnFamily;
             let key_prefix = MissingTransactionModel::key_prefix();
-            let values = MissingTransactionModel::multi_get_cf(self.db.clone(), tx, operation, BlockHeightCf::name(), &key_prefix, Ordering::Ascending)?;
+            let values = MissingTransactionModel::multi_get_cf(self.db.clone(), tx, operation, BlockHeightCf::name(), key_prefix, Ordering::Ascending)?;
             for value in values {
                 if value.block_height.0 < current_height.as_u64() {
                     let key= MissingTransactionModel::key(&value);
@@ -848,15 +847,15 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn foreign_parked_blocks_insert_missing_transactions<'a, I: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
-        park_block_id: &BlockId,
-        missing_transaction_ids: I,
+        _park_block_id: &BlockId,
+        _missing_transaction_ids: I,
     ) -> Result<(), StorageError> {
         todo!()  
     }
 
     fn foreign_parked_blocks_remove_all_by_transaction(
         &mut self,
-        transaction_id: &TransactionId,
+        _transaction_id: &TransactionId,
     ) -> Result<Vec<ForeignParkedProposal>, StorageError> {
         todo!()
     }
@@ -958,11 +957,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let operation = "substates_create";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        SubstateModel::put(self.db.clone(), tx, operation, &substate)?;
+        SubstateModel::put(self.db.clone(), tx, operation, substate)?;
 
         // Calculate the index ("seq" field) of the state transition for the shard
         type ShardCf = crate::model::state_transition::ShardColumnFamily;
-        let key_prefix = ShardCf::build_key_prefix_by_shard(&substate.created_by_shard);
+        let key_prefix = ShardCf::build_key_prefix_by_shard(substate.created_by_shard);
         // TODO: this could be optimized by a new model function that allows to specify the we only want one key
         let shard_transitions = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, ShardCf::name(), &key_prefix, Ordering::Descending)?;
         let _next_seq = match shard_transitions.first() {
@@ -1004,7 +1003,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // Calculate the index ("seq" field) of the state transition
         type ShardCf = crate::model::state_transition::ShardColumnFamily;
-        let key_prefix = ShardCf::build_key_prefix_by_shard(&substate.created_by_shard);
+        let key_prefix = ShardCf::build_key_prefix_by_shard(substate.created_by_shard);
         // TODO: this could be optimized by a new model function that allows to specify the we only want one key
         let shard_transitions = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, ShardCf::name(), &key_prefix, Ordering::Descending)?;
         let next_seq = match shard_transitions.first() {
@@ -1127,7 +1126,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // delete all of them from database
         for diff in &diff_recs {
-            let key = PendingStateTreeDiffModel::key(&diff);
+            let key = PendingStateTreeDiffModel::key(diff);
             PendingStateTreeDiffModel::delete(self.db.clone(), tx, operation, &key)?;
         }
 
@@ -1165,7 +1164,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let operation = "state_tree_nodes_record_stale_tree_node";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        let key = StateTreeModel::key_from_shard_and_node(&shard, node.as_node_key());
+        let key = StateTreeModel::key_from_shard_and_node(shard, node.as_node_key());
         StateTreeModel::delete(self.db.clone(), tx, operation, &key)?;
 
         Ok(())
@@ -1189,7 +1188,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let operation = "burnt_utxos_insert";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        Ok(BurntUtxoModel::put(self.db.clone(), tx, operation, &burnt_utxo)?)
+        Ok(BurntUtxoModel::put(self.db.clone(), tx, operation, burnt_utxo)?)
     }
 
     fn burnt_utxos_set_proposed_block(
@@ -1220,19 +1219,19 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // get all the utxos proposed in the block
         type Cf = crate::model::burnt_utxo::ProposedInColumnFamily;
         let cf = Cf::name();
-        let key_prefix = Cf::build_key_prefix(&proposed_in_block);
+        let key_prefix = Cf::build_key_prefix(proposed_in_block);
         let mut utxtos = BurntUtxoModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
 
         // clear the proposed_in field in all utxos
         for utxo in &mut utxtos {
-            let key = BurntUtxoModel::key(&utxo);
+            let key = BurntUtxoModel::key(utxo);
 
             // we delete to force deleting the corresponding CFs
             BurntUtxoModel::delete(self.db.clone(), tx, operation, &key)?;
 
             // update and save the utxo again
             utxo.proposed_in_block = None;
-            BurntUtxoModel::put(self.db.clone(), tx, operation, &utxo)?;
+            BurntUtxoModel::put(self.db.clone(), tx, operation, utxo)?;
         }
         Ok(())
     }
@@ -1273,159 +1272,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn validator_epoch_stats_add_participation_share(&mut self, _qc_id: &QcId) -> Result<(), StorageError> {
         todo!()
-        /*
-        use crate::schema::{quorum_certificates, validator_epoch_stats};
-
-        let qc_id = serialize_hex(qc_id);
-        let qc_json = quorum_certificates::table
-            .select(quorum_certificates::json)
-            .filter(quorum_certificates::qc_id.eq(&qc_id))
-            .filter(quorum_certificates::is_shares_processed.eq(false))
-            .first::<String>(self.connection())
-            .optional()
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_add_participation_share",
-                source: e,
-            })?;
-        let Some(qc_json) = qc_json else {
-            return Ok(());
-        };
-
-        let qc = deserialize_json::<QuorumCertificate>(&qc_json)?;
-        let epoch = qc.epoch().as_u64() as i64;
-
-        for sig in qc.signatures() {
-            let values = (
-                validator_epoch_stats::epoch.eq(epoch),
-                validator_epoch_stats::public_key.eq(serialize_hex(sig.public_key().as_bytes())),
-                validator_epoch_stats::participation_shares.eq(1),
-            );
-
-            diesel::insert_into(validator_epoch_stats::table)
-                .values(values)
-                .on_conflict((validator_epoch_stats::epoch, validator_epoch_stats::public_key))
-                .do_update()
-                .set(validator_epoch_stats::participation_shares.eq(validator_epoch_stats::participation_shares + 1))
-                .execute(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "validator_epoch_stats_add_participation_share",
-                    source: e,
-                })?;
-        }
-
-        // Mark QC shares as processed
-        diesel::update(quorum_certificates::table)
-            .filter(quorum_certificates::qc_id.eq(qc_id))
-            .set(quorum_certificates::is_shares_processed.eq(true))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_add_participation_share",
-                source: e,
-            })?;
-
-        Ok(())
-        */
     }
 
     fn validator_epoch_stats_updates<'a, I: IntoIterator<Item = ValidatorStatsUpdate<'a>>>(
         &mut self,
-        epoch: Epoch,
-        updates: I,
+        _epoch: Epoch,
+        _updates: I,
     ) -> Result<(), StorageError> {
         todo!()
-        /*
-        use crate::schema::validator_epoch_stats;
-
-        let epoch = epoch.as_u64() as i64;
-
-        for update in updates {
-            let existing = validator_epoch_stats::table
-                .select((
-                    validator_epoch_stats::participation_shares,
-                    validator_epoch_stats::missed_proposals,
-                ))
-                .filter(validator_epoch_stats::epoch.eq(epoch))
-                .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
-                .first::<(i64, i64)>(self.connection())
-                .optional()
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "validator_epoch_stats_updates",
-                    source: e,
-                })?;
-
-            match existing {
-                Some((participation_shares, missed_proposals)) => match update.missed_proposal_change() {
-                    Some(0) => {
-                        diesel::update(validator_epoch_stats::table)
-                            .filter(validator_epoch_stats::epoch.eq(epoch))
-                            .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
-                            .set((
-                                validator_epoch_stats::participation_shares
-                                    .eq(participation_shares + update.participation_shares_increment() as i64),
-                                validator_epoch_stats::missed_proposals.eq(0),
-                            ))
-                            .execute(self.connection())
-                            .map_err(|e| SqliteStorageError::DieselError {
-                                operation: "validator_epoch_stats_updates",
-                                source: e,
-                            })?;
-                    },
-                    Some(n) => {
-                        let missed_proposal_count = update
-                            .max_total_missed_proposals()
-                            .min(cmp::max(missed_proposals + n, 0));
-                        diesel::update(validator_epoch_stats::table)
-                            .filter(validator_epoch_stats::epoch.eq(epoch))
-                            .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
-                            .set((
-                                validator_epoch_stats::participation_shares
-                                    .eq(participation_shares + update.participation_shares_increment() as i64),
-                                validator_epoch_stats::missed_proposals.eq(missed_proposal_count),
-                            ))
-                            .execute(self.connection())
-                            .map_err(|e| SqliteStorageError::DieselError {
-                                operation: "validator_epoch_stats_updates",
-                                source: e,
-                            })?;
-                    },
-
-                    None => {
-                        diesel::update(validator_epoch_stats::table)
-                            .filter(validator_epoch_stats::epoch.eq(epoch))
-                            .filter(validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())))
-                            .set(
-                                validator_epoch_stats::participation_shares
-                                    .eq(participation_shares + update.participation_shares_increment() as i64),
-                            )
-                            .execute(self.connection())
-                            .map_err(|e| SqliteStorageError::DieselError {
-                                operation: "validator_epoch_stats_updates",
-                                source: e,
-                            })?;
-                    },
-                },
-                None => {
-                    let leader_failure_inc = update.missed_proposal_change().map_or(0i64, |set| set.max(0));
-                    let values = (
-                        validator_epoch_stats::epoch.eq(epoch),
-                        validator_epoch_stats::public_key.eq(serialize_hex(update.public_key().as_bytes())),
-                        validator_epoch_stats::participation_shares.eq(update.participation_shares_increment() as i64),
-                        validator_epoch_stats::missed_proposals.eq(leader_failure_inc),
-                    );
-
-                    diesel::insert_into(validator_epoch_stats::table)
-                        .values(values)
-                        .execute(self.connection())
-                        .map_err(|e| SqliteStorageError::DieselError {
-                            operation: "validator_epoch_stats_updates",
-                            source: e,
-                        })?;
-                },
-            }
-        }
-
-        Ok(())
-        */
     }
 
     fn diagnostics_add_no_vote(&mut self, _block_id: BlockId, _reason: NoVoteReason) -> Result<(), StorageError> {
@@ -1439,7 +1293,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         let operation = "lock_conflicts_remove_by_transaction_ids";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        let transaction_ids = transaction_ids.into_iter().cloned().collect::<Vec<_>>();
+        let transaction_ids = transaction_ids.into_iter().copied().collect::<Vec<_>>();
 
         // TODO: for performance reasons, there should be a better way to iterate over conflicts in RocksDB
         let conflicts = LockConflictModel::multi_get(tx, None, Ordering::Ascending)?
@@ -1544,9 +1398,4 @@ impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
             );
         }
     }
-}
-
-fn now() -> PrimitiveDateTime {
-    let now = time::OffsetDateTime::now_utc();
-    PrimitiveDateTime::new(now.date(), now.time())
 }

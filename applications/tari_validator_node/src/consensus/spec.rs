@@ -8,7 +8,6 @@ use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
 use tari_dan_common_types::PeerAddress;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::implementation::TemplateManager;
 
 #[cfg(feature = "metrics")]

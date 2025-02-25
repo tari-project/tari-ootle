@@ -25,7 +25,7 @@ use tari_dan_common_types::NodeHeight;
 use tari_dan_storage::consensus_models::{BlockId, Decision, Evidence, LeaderFee, TransactionPoolStage};
 use tari_transaction::TransactionId;
 
-use super::model::RocksdbModel;
+use super::traits::RocksdbModel;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionPoolStateUpdateModelData {
     pub block_id: BlockId,
@@ -44,10 +44,10 @@ pub struct TransactionPoolStateUpdateModelData {
 pub struct TransactionPoolStateUpdateModel {}
 
 impl TransactionPoolStateUpdateModel {
-    pub fn build_key(block_id: &BlockId, block_height: &NodeHeight, tx_id: &TransactionId) -> String {
+    pub fn build_key(block_id: &BlockId, block_height: NodeHeight, tx_id: &TransactionId) -> String {
         // the key format allows us to query all updates by block prefix, ordered by height DESC
         // TODO: is there a cleaner way to implement desc key ordering in RocksDb?
-        let block_height_desc = NodeHeight(u64::MAX) - *block_height;
+        let block_height_desc = NodeHeight(u64::MAX) - block_height;
         format!("{}_{}_{}_{}", Self::key_prefix(), block_id, block_height_desc, tx_id)
     }
 
@@ -68,6 +68,6 @@ impl RocksdbModel for TransactionPoolStateUpdateModel {
     }
 
     fn key(value: &Self::Item) -> String {
-        Self::build_key(&value.block_id, &value.block_height, &value.transaction_id)
+        Self::build_key(&value.block_id, value.block_height, &value.transaction_id)
     }
 }

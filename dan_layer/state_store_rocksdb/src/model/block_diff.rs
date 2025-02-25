@@ -23,7 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{self, BlockId, SubstateChange};
 use tari_engine_types::substate::SubstateId;
-use crate::{error::RocksDbStorageError, model::model::RocksdbModel, utils::{bor_decode, bor_encode, RocksdbTimestamp}};
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::{bor_decode, bor_encode, RocksdbTimestamp}};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockDiffData {

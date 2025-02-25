@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_dan_storage::consensus_models::LastExecuted;
-use crate::{model::model::RocksdbModel, utils::RocksdbTimestamp};
+use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 pub struct LastExecutedModel {}
 

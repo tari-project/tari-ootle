@@ -24,7 +24,7 @@ use rocksdb::{Transaction, TransactionDB};
 use tari_dan_storage::consensus_models::TransactionRecord;
 use tari_transaction::TransactionId;
 use crate::error::RocksDbStorageError;
-use super::model::RocksdbModel;
+use super::traits::RocksdbModel;
 
 pub struct TransactionModel {}
 
@@ -48,11 +48,9 @@ impl TransactionModel {
             })?;
 
         let mut res = vec![];
-        for value in values {
-            if let Some(bytes) = value {
-                let rec = Self::decode(bytes)?;
-                res.push(rec);
-            }
+        for value in values.into_iter().flatten() {
+            let rec = Self::decode(value)?;
+            res.push(rec);
         }
 
         Ok(res)

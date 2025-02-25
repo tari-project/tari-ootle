@@ -2,19 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use rand::{rngs::OsRng, RngCore};
-use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
+use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, Command, Decision, QcId, SubstateRecord, TransactionAtom, TransactionPoolStage, TransactionPoolStatusUpdate},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}};
-use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress}, prelude::AccessRules};
-use tari_transaction::TransactionId;
-use tari_utilities::epoch_time::EpochTime;
-use tari_template_lib::prelude::ComponentAccessRules;
+use tari_engine_types::substate::SubstateId;
+use tari_template_lib::models::{ComponentAddress, ComponentKey, EntityId, ObjectKey};
 
 fn random_substate_id() -> SubstateId {
     let rng = &mut OsRng;
@@ -31,10 +26,10 @@ fn random_substate_id() -> SubstateId {
     SubstateId::Component(address)
 }
 
-mod substates {
+mod substates_test {
     use std::collections::HashSet;
 
-    use tari_dan_common_types::{shard::Shard, SubstateRequirement, VersionedSubstateId, VersionedSubstateIdRef};
+    use tari_dan_common_types::{shard::Shard, VersionedSubstateId, VersionedSubstateIdRef};
     use tari_dan_storage::consensus_models::QcId;
     use tari_transaction::TransactionId;
 
@@ -119,7 +114,7 @@ mod substates {
             VersionedSubstateId::new(substate2_id.clone(), 0)
         ];
         let res = tx.substates_any_exist(substate_ids).unwrap();
-        assert_eq!(res, true);
+        assert!(res);
 
         // substates_any_exist (some do not exist)
         let substate_ids = vec![
@@ -127,7 +122,7 @@ mod substates {
             VersionedSubstateId::new(substate2_id.clone(), 0)
         ];
         let res = tx.substates_any_exist(substate_ids).unwrap();
-        assert_eq!(res, true);
+        assert!(res);
 
         // substates_any_exist (none exist)
         let substate_ids = vec![
@@ -135,7 +130,7 @@ mod substates {
             VersionedSubstateId::new(substate2_id, 100) // version should not exist
         ];
         let res = tx.substates_any_exist(substate_ids).unwrap();
-        assert_eq!(res, false);
+        assert!(!res);
 
         // substates_get_many_by_created_transaction
         let tx_id = TransactionId::default();

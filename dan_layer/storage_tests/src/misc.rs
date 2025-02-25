@@ -8,7 +8,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 
-mod miscellaneous_operations {
+mod miscellaneous_operations_test {
     use indexmap::IndexMap;
     use tari_common_types::types::PublicKey;
     use tari_dan_common_types::{shard::Shard, NumPreshards, ShardGroup};
@@ -32,6 +32,7 @@ mod miscellaneous_operations {
         miscellaneous_operations(db);
     }
 
+    #[allow(clippy::too_many_lines)]
     fn miscellaneous_operations(db: impl StateStore) {
         let mut tx = db.create_write_tx().unwrap();
 
@@ -45,7 +46,7 @@ mod miscellaneous_operations {
         let res = tx.last_voted_get().unwrap();
         assert_eq_debug(&res, &last_voted);
 
-        last_voted.epoch = last_voted.epoch + Epoch(1);
+        last_voted.epoch += Epoch(1);
 
         tx.last_voted_set(&last_voted).unwrap();
         let res = tx.last_voted_get().unwrap();
@@ -63,7 +64,7 @@ mod miscellaneous_operations {
         let res = tx.last_sent_vote_get().unwrap();
         assert_eq_debug(&res, &last_sent_vote);
 
-        last_sent_vote.epoch = last_sent_vote.epoch + Epoch(1);
+        last_sent_vote.epoch += Epoch(1);
 
         tx.last_sent_vote_set(&last_sent_vote).unwrap();
         let res = tx.last_sent_vote_get().unwrap();
@@ -79,7 +80,7 @@ mod miscellaneous_operations {
         let res = tx.last_executed_get().unwrap();
         assert_eq_debug(&res, &last_exec);
 
-        last_exec.epoch = last_exec.epoch + Epoch(1);
+        last_exec.epoch += Epoch(1);
 
         tx.last_executed_set(&last_exec).unwrap();
         let res = tx.last_executed_get().unwrap();
@@ -95,7 +96,7 @@ mod miscellaneous_operations {
         let res = tx.last_executed_get().unwrap();
         assert_eq_debug(&res, &last_exec);
 
-        last_exec.epoch = last_exec.epoch + Epoch(1);
+        last_exec.epoch += Epoch(1);
 
         tx.last_executed_set(&last_exec).unwrap();
         let res = tx.last_executed_get().unwrap();
@@ -112,7 +113,7 @@ mod miscellaneous_operations {
         let res = tx.locked_block_get(epoch).unwrap();
         assert_eq_debug(&res, &locked_block);
 
-        locked_block.height = locked_block.height + NodeHeight(1);
+        locked_block.height += NodeHeight(1);
 
         tx.locked_block_set(&locked_block).unwrap();
         let res = tx.locked_block_get(epoch).unwrap();
@@ -129,7 +130,7 @@ mod miscellaneous_operations {
         let res = tx.leaf_block_get(epoch).unwrap();
         assert_eq_debug(&res, &leaf_block);
 
-        leaf_block.height = leaf_block.height + NodeHeight(1);
+        leaf_block.height += NodeHeight(1);
 
         tx.leaf_block_set(&leaf_block).unwrap();
         let res = tx.leaf_block_get(epoch).unwrap();
@@ -147,7 +148,7 @@ mod miscellaneous_operations {
         let res = tx.high_qc_get(epoch).unwrap();
         assert_eq_debug(&res, &high_qc);
 
-        high_qc.block_height = high_qc.block_height + NodeHeight(1);
+        high_qc.block_height += NodeHeight(1);
 
         tx.high_qc_set(&high_qc).unwrap();
         let res = tx.high_qc_get(epoch).unwrap();

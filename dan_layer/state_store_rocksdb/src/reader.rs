@@ -21,15 +21,13 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    borrow::Borrow, cell::UnsafeCell, collections::{HashMap, HashSet}, marker::PhantomData, ops::RangeInclusive, sync::{Arc, Mutex, MutexGuard}, thread::current
+    borrow::Borrow, collections::{HashMap, HashSet}, marker::PhantomData, ops::RangeInclusive, sync::Arc
 };
 
-use bigdecimal::{BigDecimal, ToPrimitive};
 use indexmap::IndexMap;
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
 use serde::{de::DeserializeOwned, Serialize};
-use serde_json::value::Index;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
     shard::Shard,
@@ -49,7 +47,6 @@ use tari_dan_storage::{
         BlockId,
         BlockTransactionExecution,
         BurntUtxo,
-        Command,
         EpochCheckpoint,
         ForeignProposal,
         ForeignProposalAtom,
@@ -71,14 +68,12 @@ use tari_dan_storage::{
         StateTransitionId,
         SubstateChange,
         SubstateLock,
-        SubstatePledge,
         SubstatePledges,
         SubstateRecord,
         TransactionPoolConfirmedStage,
         TransactionPoolRecord,
         TransactionPoolStage,
         TransactionRecord,
-        VersionedSubstateIdLockIntent,
         Vote,
     },
     Ordering,
@@ -86,12 +81,12 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
-use tari_state_tree::{Node, NodeKey, TreeNode, Version};
+use tari_state_tree::{Node, NodeKey, Version};
 use tari_transaction::TransactionId;
-use tari_utilities::{hex::Hex, ByteArray};
+use tari_utilities::hex::Hex;
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, evicted_node::EvictedNodeModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, model::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, substate_locks::SubstateLockModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
+use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, evicted_node::EvictedNodeModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, traits::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, substate_locks::SubstateLockModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
@@ -194,7 +189,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
                     if !transaction_ids.is_empty() && !transaction_ids.contains(&u.transaction_id.to_string()) {
                         return false;
                     }
-                    u.is_applied == false
+                    !u.is_applied
                 })
                 .for_each(|u| {
                     res.insert(u.transaction_id.to_string(), u.clone());
@@ -227,42 +222,10 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
 
     pub(crate) fn get_block_ids_with_commands_between(
         &self,
-        start_block: &BlockId,
-        end_block: &BlockId,
+        _start_block: &BlockId,
+        _end_block: &BlockId,
     ) -> Result<Vec<String>, RocksDbStorageError> {
         todo!()
-        /*
-        let block_ids = sql_query(
-            r#"
-            WITH RECURSIVE tree(bid, parent, is_dummy, command_count) AS (
-                SELECT block_id, parent_block_id, is_dummy, command_count FROM blocks where block_id = ?
-            UNION ALL
-                SELECT block_id, parent_block_id, blocks.is_dummy, blocks.command_count
-                FROM blocks JOIN tree ON
-                    block_id = tree.parent
-                    AND tree.bid != ?
-                    AND tree.parent != '0000000000000000000000000000000000000000000000000000000000000000'
-                LIMIT 1000
-            )
-            SELECT bid FROM tree where is_dummy = 0 AND command_count > 0"#,
-        )
-        .bind::<Text, _>(serialize_hex(end_block))
-        .bind::<Text, _>(serialize_hex(start_block))
-        .load_iter::<BlockIdSqlValue, _>(self.connection())
-        .map_err(|e| SqliteStorageError::DieselError {
-            operation: "get_block_ids_that_change_state_between",
-            source: e,
-        })?;
-
-        block_ids
-            .map(|b| {
-                b.map(|b| b.bid).map_err(|e| SqliteStorageError::DieselError {
-                    operation: "get_block_ids_that_change_state_between",
-                    source: e,
-                })
-            })
-            .collect()
-         */
     }
 
     /// Used in tests, therefore not used in consensus and not part of the trait
@@ -281,36 +244,11 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     pub fn substates_count(&self) -> Result<u64, RocksDbStorageError> {
-        Ok(SubstateModel::count(&self.tx, None)?)
+        SubstateModel::count(&self.tx, None)
     }
 
-    pub fn blocks_get_tip(&self, epoch: Epoch, shard_group: ShardGroup) -> Result<Block, StorageError> {
+    pub fn blocks_get_tip(&self, _epoch: Epoch, _shard_group: ShardGroup) -> Result<Block, StorageError> {
         todo!()
-        /*
-        use crate::schema::{blocks, quorum_certificates};
-
-        let (block, qc) = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::shard_group.eq(shard_group.encode_as_u32() as i32))
-            .order_by(blocks::height.desc())
-            .first::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_tip",
-                source: e,
-            })?;
-
-        let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-            operation: "blocks_get_tip",
-            details: format!(
-                "block {} references non-existent quorum certificate {}",
-                block.block_id, block.qc_id
-            ),
-        })?;
-
-        block.try_convert(qc)
-        */
     }
 
     fn get_current_locked_block(&self) -> Result<LockedBlock, StorageError> {
@@ -408,7 +346,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn foreign_proposals_has_unconfirmed(&self, epoch: Epoch) -> Result<bool, StorageError> {
         type Cf = crate::model::foreign_proposal::UnconfirmedColumnFamily;
         let cf = Cf::name();
-        let key_prefix = Cf::key_prefix_by_epoch(&epoch);
+        let key_prefix = Cf::key_prefix_by_epoch(epoch);
         let res = ForeignProposalModel::get_cf(self.db.clone(), &self.tx, cf, "foreign_proposals_has_unconfirmed", Some(&key_prefix), Ordering::Ascending)?;
         
         Ok(res.is_some())
@@ -417,7 +355,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn foreign_proposals_get_all_new(
         &self,
         block_id: &BlockId,
-        limit: usize,
+        _limit: usize,
     ) -> Result<Vec<ForeignProposal>, StorageError> {
         let operation = "foreign_proposals_get_all_new";
 
@@ -437,22 +375,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let mut proposals = HashMap::new();
 
         // get all proposals with status "New"
-        let key_prefix = Cf::key_prefix_from_epoch_and_status(&locked.epoch, &ForeignProposalStatus::New);
+        let key_prefix = Cf::key_prefix_from_epoch_and_status(locked.epoch, ForeignProposalStatus::New);
         let new_proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, Ordering::Ascending)?;
         proposals.extend(new_proposals
             .into_iter()
-            .map(|f| (f.block.id().clone(), f)));
+            .map(|f| (*f.block.id(), f)));
 
         // get all proposals with status "Proposed"
-        let key_prefix = Cf::key_prefix_from_epoch_and_status(&locked.epoch, &ForeignProposalStatus::Proposed);
+        let key_prefix = Cf::key_prefix_from_epoch_and_status(locked.epoch, ForeignProposalStatus::Proposed);
         let proposed_proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, Ordering::Ascending)?;
         proposals.extend(proposed_proposals
             .into_iter()
-            .map(|f| (f.block.id().clone(), f)));
+            .map(|f| (*f.block.id(), f)));
 
         let proposals: Vec<ForeignProposal> = proposals
             .into_values()
-            .into_iter()
             // we don't want proposals that are proposed in pending blocks 
             .filter(|p| {
                 let Some(proposed_by) = p.proposed_by_block  else {
@@ -682,7 +619,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             }
         }
         // order by descending height 
-        blocks.sort_by(|a, b| b.height().cmp(&a.height()));
+        blocks.sort_by_key(|b| std::cmp::Reverse(b.height()));
         
         let last_n = blocks.into_iter().take(n).collect();
 
@@ -735,7 +672,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             }
         }
         // order by ascending height 
-        blocks.sort_by(|a, b| a.height().cmp(&b.height()));
+        blocks.sort_by_key(|a| a.height());
         
         let first_n = blocks.into_iter().take(limit.try_into().unwrap()).collect();
 
@@ -934,15 +871,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // ordering
         match ordering_index {
             Some(0) => blocks.sort_by(|a, b| a.id().cmp(b.id())),   
-            Some(1) => blocks.sort_by(|a, b| a.epoch().cmp(&b.epoch())),
-            Some(2) => blocks.sort_by(|a, b| (a.epoch(), a.height()).cmp(&(b.epoch(), b.height()))),
-            Some(4) => blocks.sort_by(|a, b| a.command_count().cmp(&b.command_count())),
-            Some(5) => blocks.sort_by(|a, b| a.total_leader_fee().cmp(&b.total_leader_fee())),
-            Some(6) => blocks.sort_by(|a, b| a.block_time().cmp(&b.block_time())),
+            Some(1) => blocks.sort_by_key(|a| a.epoch()),
+            Some(2) => blocks.sort_by_key(|a| (a.epoch(), a.height())),
+            Some(4) => blocks.sort_by_key(|a| a.command_count()),
+            Some(5) => blocks.sort_by_key(|a| a.total_leader_fee()),
+            Some(6) => blocks.sort_by_key(|a| a.block_time()),
             // TODO: This filter is by creation time, but we don't have a created_at field yet in the corresponding RocksDB values
             Some(7) => (),
-            Some(8) => blocks.sort_by(|a, b| a.proposed_by().cmp(&b.proposed_by())),
-            _ => blocks.sort_by(|a, b| (a.epoch(), a.height()).cmp(&(b.epoch(), b.height()))),
+            Some(8) => blocks.sort_by(|a, b| a.proposed_by().cmp(b.proposed_by())),
+            _ => blocks.sort_by_key(|a| (a.epoch(), a.height())),
         }
 
         if let Some(Ordering::Descending) = ordering {
@@ -1118,10 +1055,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             to_block_id,
             transaction_id,
             updates.len(),
-            updates.values().map(|v| v.block_id.clone()).collect::<Vec<_>>(),
+            updates.values().map(|v| v.block_id).collect::<Vec<_>>(),
         );
 
-        let key = TransactionPoolModel::key_from_transaction_id(&transaction_id);
+        let key = TransactionPoolModel::key_from_transaction_id(transaction_id);
         let rec = TransactionPoolModel::get(&self.tx, "transaction_pool_get_for_blocks", &key)?;
         let rec = TransactionPoolModel::try_convert(&rec, updates.swap_remove(&transaction_id.to_string()))?;
 
@@ -1141,191 +1078,27 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn transaction_pool_get_many_ready(
         &self,
-        max_txs: usize,
-        block_id: &BlockId,
+        _max_txs: usize,
+        _block_id: &BlockId,
     ) -> Result<Vec<TransactionPoolRecord>, StorageError> {
         todo!()
-        /*
-        use crate::schema::{lock_conflicts, transaction_pool};
-
-        if !self.blocks_exists(block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("transaction_pool_get_many_ready: block {block_id} does not exist"),
-            });
-        }
-
-        let mut ready_txs = transaction_pool::table
-            // Exclude new transactions
-            .filter(transaction_pool::stage.ne(TransactionPoolStage::New.to_string()))
-            .filter(transaction_pool::is_ready.eq(true))
-            .order_by(transaction_pool::transaction_id.asc())
-            .get_results::<sql_models::TransactionPoolRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_get_many_ready",
-                source: e,
-            })?;
-
-        debug!(
-            target: LOG_TARGET,
-            "🛢️ transaction_pool_get_many_ready: block_id={}, in progress ready_txs={}",
-            block_id,
-            ready_txs.len()
-        );
-
-        let new_limit = max_txs.saturating_sub(ready_txs.len());
-        if new_limit > 0 {
-            let new_txs = transaction_pool::table
-                .filter(transaction_pool::stage.eq(TransactionPoolStage::New.to_string()))
-                .filter(transaction_pool::is_ready.eq(true))
-                // Filter out any transactions that are in lock conflict
-                .filter(transaction_pool::transaction_id.ne_all(lock_conflicts::table.select(lock_conflicts::transaction_id)))
-                .order_by(transaction_pool::transaction_id.asc())
-                .limit(new_limit as i64)
-                .get_results::<sql_models::TransactionPoolRecord>(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "transaction_pool_get_many_ready",
-                    source: e,
-                })?;
-
-            debug!(
-                target: LOG_TARGET,
-                "🛢️ transaction_pool_get_many_ready: block_id={}, new ready_txs={}, total ready_txs={}",
-                block_id,
-                new_txs.len(),
-                ready_txs.len() + new_txs.len()
-            );
-            ready_txs.extend(new_txs);
-        }
-
-        if ready_txs.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Fetch all applicable block ids between the locked block and the given block
-        let locked = self.get_current_locked_block()?;
-
-        let mut updates = self.get_transaction_atom_state_updates_between_blocks(
-            &locked.block_id,
-            block_id,
-            ready_txs.iter().map(|s| s.transaction_id.as_str()),
-        )?;
-
-        debug!(
-            target: LOG_TARGET,
-            "transaction_pool_get_many_ready: locked.block_id={}, leaf.block_id={}, len(ready_txs)={}, updates={}",
-            locked.block_id,
-            block_id,
-            ready_txs.len(),
-            updates.len()
-        );
-
-        ready_txs
-            .into_iter()
-            .map(|rec| {
-                let maybe_update = updates.swap_remove(&rec.transaction_id);
-                rec.try_convert(maybe_update)
-            })
-            // Filter only Ok where is_ready == true (after update) or Err
-            .filter(|result| result.as_ref().map_or(true, |rec| rec.is_ready()))
-            .take(max_txs)
-            .collect()
-            */
     }
 
     fn transaction_pool_count(
         &self,
-        stage: Option<TransactionPoolStage>,
-        is_ready: Option<bool>,
-        confirmed_stage: Option<Option<TransactionPoolConfirmedStage>>,
-        skip_lock_conflicted: bool,
+        _stage: Option<TransactionPoolStage>,
+        _is_ready: Option<bool>,
+        _confirmed_stage: Option<Option<TransactionPoolConfirmedStage>>,
+        _skip_lock_conflicted: bool,
     ) -> Result<usize, StorageError> {
         todo!()
-        /*
-        use crate::schema::transaction_pool;
-
-        let mut query = transaction_pool::table.into_boxed();
-        if let Some(stage) = stage {
-            query = query.filter(
-                transaction_pool::pending_stage
-                    .eq(stage.to_string())
-                    .or(transaction_pool::pending_stage
-                        .is_null()
-                        .and(transaction_pool::stage.eq(stage.to_string()))),
-            );
-        }
-        if let Some(is_ready) = is_ready {
-            query = query.filter(transaction_pool::is_ready.eq(is_ready));
-        }
-
-        match confirmed_stage {
-            Some(Some(stage)) => {
-                query = query.filter(transaction_pool::confirm_stage.eq(stage.to_string()));
-            },
-            Some(None) => {
-                query = query.filter(transaction_pool::confirm_stage.is_null());
-            },
-            None => {},
-        }
-
-        let count =
-            query
-                .count()
-                .get_result::<i64>(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "transaction_pool_count",
-                    source: e,
-                })?;
-
-        Ok(count as usize)
-        */
     }
 
     fn transactions_fetch_involved_shards(
         &self,
-        transaction_ids: HashSet<TransactionId>,
+        _transaction_ids: HashSet<TransactionId>,
     ) -> Result<HashSet<SubstateAddress>, StorageError> {
         todo!()
-        /*
-        use crate::schema::transactions;
-
-        let tx_ids = transaction_ids.into_iter().map(serialize_hex).collect::<Vec<_>>();
-
-        let inputs_per_tx = transactions::table
-            .select(transactions::resolved_inputs)
-            .filter(transactions::transaction_id.eq_any(&tx_ids))
-            .load::<Option<String>>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pools_fetch_involved_shards",
-                source: e,
-            })?;
-
-        if inputs_per_tx.len() != tx_ids.len() {
-            return Err(SqliteStorageError::NotAllItemsFound {
-                items: "Transactions",
-                operation: "transactions_fetch_involved_shards",
-                details: format!(
-                    "transactions_fetch_involved_shards: expected {} transactions, got {}",
-                    tx_ids.len(),
-                    inputs_per_tx.len()
-                ),
-            }
-            .into());
-        }
-
-        let shards = inputs_per_tx
-            .into_iter()
-            .filter_map(|inputs| {
-                // a Result is very inconvenient with flat_map
-                inputs.map(|inputs| {
-                    deserialize_json::<HashSet<SubstateAddress>>(&inputs)
-                        .expect("[transactions_fetch_involved_shards] Failed to deserialize involved shards")
-                })
-            })
-            .flatten()
-            .collect();
-
-        Ok(shards)
-        */
     }
 
     fn votes_get_by_block_and_sender(
@@ -1376,7 +1149,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             }
         }
 
-        return Ok(substates)
+        Ok(substates)
     }
 
     fn substates_get_any_max_version<'a, I: IntoIterator<Item = &'a SubstateId>>(
@@ -1400,7 +1173,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             }
         }
 
-        return Ok(substates)
+        Ok(substates)
     }
 
     fn substates_get_max_version_for_substate(&self, substate_id: &SubstateId) -> Result<(u32, bool), StorageError> {
@@ -1445,24 +1218,24 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             }
         }
 
-        return Ok(false)
+        Ok(false)
     }
 
-    fn substates_exists_for_transaction(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
+    fn substates_exists_for_transaction(&self, _transaction_id: &TransactionId) -> Result<bool, StorageError> {
         // This function is not used anywhere, so we skip implementation
         todo!()
     }
 
-    fn substates_get_n_after(&self, n: usize, after: &SubstateAddress) -> Result<Vec<SubstateRecord>, StorageError> {
+    fn substates_get_n_after(&self, _n: usize, _after: &SubstateAddress) -> Result<Vec<SubstateRecord>, StorageError> {
         // This function is not used anywhere, so we skip implementation
         todo!()
     }
 
     fn substates_get_many_within_range(
         &self,
-        start: &SubstateAddress,
-        end: &SubstateAddress,
-        exclude: &[SubstateAddress],
+        _start: &SubstateAddress,
+        _end: &SubstateAddress,
+        _exclude: &[SubstateAddress],
     ) -> Result<Vec<SubstateRecord>, StorageError> {
         // This function is not used anywhere, so we skip implementation
         todo!()
@@ -1611,68 +1384,20 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn state_transitions_get_n_after(
         &self,
-        n: usize,
-        id: StateTransitionId,
-        end_epoch: Epoch,
+        _n: usize,
+        _id: StateTransitionId,
+        _end_epoch: Epoch,
     ) -> Result<Vec<StateTransition>, StorageError> {
         todo!()
-        /*
-        use crate::schema::{state_transitions, substates};
-
-        debug!(target: LOG_TARGET, "state_transitions_get_n_after: {id}, end_epoch:{end_epoch}");
-
-        let transitions = state_transitions::table
-            .left_join(substates::table.on(state_transitions::substate_address.eq(substates::address)))
-            .select((state_transitions::all_columns, substates::all_columns.nullable()))
-            .filter(state_transitions::seq.gt(id.seq() as i64))
-            .filter(state_transitions::shard.eq(id.shard().as_u32() as i32))
-            .filter(state_transitions::epoch.lt(end_epoch.as_u64() as i64))
-            .limit(n as i64)
-            .get_results::<(sql_models::StateTransition, Option<sql_models::SubstateRecord>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "state_transitions_get_n_after",
-                source: e,
-            })?;
-
-        transitions
-            .into_iter()
-            .map(|(t, s)| {
-                let s = s.ok_or_else(|| StorageError::DataInconsistency {
-                    details: format!("substate entry does not exist for transition {}", t.id),
-                })?;
-
-                t.try_convert(s)
-            })
-            .collect()
-            */
     }
 
-    fn state_transitions_get_last_id(&self, shard: Shard) -> Result<StateTransitionId, StorageError> {
+    fn state_transitions_get_last_id(&self, _shard: Shard) -> Result<StateTransitionId, StorageError> {
         todo!()
-        /*
-        use crate::schema::state_transitions;
-
-        let (seq, epoch) = state_transitions::table
-            .select((state_transitions::seq, state_transitions::epoch))
-            .filter(state_transitions::shard.eq(shard.as_u32() as i32))
-            .order_by(state_transitions::epoch.desc())
-            .then_order_by(state_transitions::seq.desc())
-            .first::<(i64, i64)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "state_transitions_get_last_id",
-                source: e,
-            })?;
-
-        let epoch = Epoch(epoch as u64);
-        let seq = seq as u64;
-
-        Ok(StateTransitionId::new(epoch, shard, seq))
-        */
     }
 
     fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<Version>, StorageError> {
         let operation = "state_tree_nodes_get";
-        let key = StateTreeModel::key_from_shard_and_node(&shard, key);
+        let key = StateTreeModel::key_from_shard_and_node(shard, key);
         let value = StateTreeModel::get(&self.tx, operation, &key)?;
 
         Ok(value.node)
@@ -1680,7 +1405,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError> {
         let operation = "state_tree_versions_get_latest";
-        let key = StateTreeShardVersionModel::key_from_shard(&shard);
+        let key = StateTreeShardVersionModel::key_from_shard(shard);
 
         if !StateTreeShardVersionModel::key_exists(&self.tx, operation, &key)? {
             return Ok(None)
@@ -1692,7 +1417,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError> {
         let operation = "epoch_checkpoint_get";
-        let key = EpochCheckpointModel::key_from_epoch(&epoch);
+        let key = EpochCheckpointModel::key_from_epoch(epoch);
         let value = EpochCheckpointModel::get(&self.tx, operation, &key)?;
         Ok(value)
     }
@@ -1767,46 +1492,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn validator_epoch_stats_get(
         &self,
-        epoch: Epoch,
-        public_key: &PublicKey,
+        _epoch: Epoch,
+        _public_key: &PublicKey,
     ) -> Result<ValidatorConsensusStats, StorageError> {
         todo!()
-        /*
-        use crate::schema::validator_epoch_stats;
-
-        let (participation_shares, missed_proposals) = validator_epoch_stats::table
-            .select((
-                validator_epoch_stats::participation_shares,
-                validator_epoch_stats::missed_proposals,
-            ))
-            .filter(validator_epoch_stats::public_key.eq(public_key.to_hex()))
-            .filter(validator_epoch_stats::epoch.eq(epoch.as_u64() as i64))
-            .get_result::<(i64, i64)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_get",
-                source: e,
-            })?;
-
-        Ok(ValidatorConsensusStats {
-            missed_proposals: missed_proposals
-                .try_into()
-                .map_err(|_| StorageError::DataInconsistency {
-                    details: "validator_epoch_stats_get: missed_proposals is negative".to_string(),
-                })?,
-            participation_shares: participation_shares
-                .try_into()
-                .map_err(|_| StorageError::DataInconsistency {
-                    details: "validator_epoch_stats_get: participation_shares is negative".to_string(),
-                })?,
-        })
-        */
     }
     
     fn validator_epoch_stats_get_nodes_to_evict(
         &self,
-        block_id: &BlockId,
-        threshold: u64,
-        limit: u64,
+        _block_id: &BlockId,
+        _threshold: u64,
+        _limit: u64,
     ) -> Result<Vec<PublicKey>, StorageError> {
         todo!()
     }
@@ -1840,7 +1536,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     
     fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError> {
         type Cf = crate::model::evicted_node::EvictionCommittedColumnFamily;
-        let key_prefix = Cf::key_prefix_by_epoch(&epoch);
+        let key_prefix = Cf::key_prefix_by_epoch(epoch);
         let count = MissingTransactionModel::count_cf(self.db.clone(), &self.tx, Cf::name(), Some(&key_prefix))?;
 
         Ok(count)
@@ -1852,33 +1548,33 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     
     fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
         &self,
-        block_id: &BlockId,
-        substate_id: T,
+        _block_id: &BlockId,
+        _substate_id: T,
     ) -> Result<SubstateChange, StorageError> {
         todo!()
     }
     
     fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
         &self,
-        exclude_transaction_id: Option<&TransactionId>,
-        substate_ids: I,
-        exclude_local_only: bool,
+        _exclude_transaction_id: Option<&TransactionId>,
+        _substate_ids: I,
+        _exclude_local_only: bool,
     ) -> Result<Option<TransactionId>, StorageError> {
         todo!()
     }
     
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
-        transaction_id: &TransactionId,
-        address: T,
+        _transaction_id: &TransactionId,
+        _address: T,
     ) -> Result<bool, StorageError> {
         todo!()
     }
     
     fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I: IntoIterator<Item = &'a SubstateId>>(
         &self,
-        transaction_id: &TransactionId,
-        substate_ids: I,
+        _transaction_id: &TransactionId,
+        _substate_ids: I,
     ) -> Result<SubstatePledges, StorageError> {
         todo!()
     }

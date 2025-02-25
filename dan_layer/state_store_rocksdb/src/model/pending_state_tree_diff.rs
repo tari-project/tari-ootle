@@ -23,7 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, NodeHeight};
 use tari_dan_storage::consensus_models::{self, BlockId, VersionedStateHashTreeDiff};
-use crate::{model::model::RocksdbModel, utils::RocksdbSeq};
+use crate::{model::traits::RocksdbModel, utils::RocksdbSeq};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingStateTreeDiffData {
@@ -35,7 +35,7 @@ pub struct PendingStateTreeDiffData {
 
 impl From<PendingStateTreeDiffData> for consensus_models::PendingShardStateTreeDiff {
     fn from(value: PendingStateTreeDiffData) -> Self {
-        let version = value.diff.version as u64;
+        let version = value.diff.version;
         Self::load(version, value.diff.diff)
     }
 }

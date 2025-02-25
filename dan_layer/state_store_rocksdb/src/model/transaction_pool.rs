@@ -25,7 +25,7 @@ use tari_transaction::TransactionId;
 
 use crate::error::RocksDbStorageError;
 
-use super::{model::RocksdbModel, transaction_pool_state_update::TransactionPoolStateUpdateModelData};
+use super::{traits::RocksdbModel, transaction_pool_state_update::TransactionPoolStateUpdateModelData};
 
 pub struct TransactionPoolModel {}
 
@@ -60,7 +60,7 @@ impl TransactionPoolModel {
             *value.transaction_id(),
             evidence,
             value.is_global(),
-            transaction_fee as u64,
+            transaction_fee,
             leader_fee,
             value.stage(),
             pending_stage,

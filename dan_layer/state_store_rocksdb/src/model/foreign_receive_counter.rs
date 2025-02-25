@@ -22,7 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::ForeignReceiveCounters;
-use crate::{model::model::RocksdbModel, utils::RocksdbTimestamp};
+use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignReceiveCounterData {

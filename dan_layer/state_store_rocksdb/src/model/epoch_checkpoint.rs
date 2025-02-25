@@ -23,12 +23,12 @@
 
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::consensus_models::EpochCheckpoint;
-use crate::model::model::RocksdbModel;
+use crate::model::traits::RocksdbModel;
 
 pub struct EpochCheckpointModel {}
 
 impl EpochCheckpointModel {
-    pub fn key_from_epoch(epoch: &Epoch) -> String {
+    pub fn key_from_epoch(epoch: Epoch) -> String {
         format!("{}_{}", Self::key_prefix(), epoch)
     }
 }
@@ -41,6 +41,6 @@ impl RocksdbModel for EpochCheckpointModel {
     }
 
     fn key(value: &Self::Item) -> String {
-        Self::key_from_epoch(&value.block().epoch())
+        Self::key_from_epoch(value.block().epoch())
     }
 }

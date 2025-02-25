@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::SubstateAddress;
 use tari_dan_storage::consensus_models::SubstatePledge;
 use tari_transaction::TransactionId;
-use crate::{error::RocksDbStorageError, model::model::RocksdbModel, utils::{bor_decode, bor_encode}};
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::{bor_decode, bor_encode}};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignSubstatePledgeData {

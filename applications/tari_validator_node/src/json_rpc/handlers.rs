@@ -45,7 +45,6 @@ use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbA
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_client::types::{
     self,

@@ -59,7 +59,6 @@ use tari_dan_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
 use tari_shutdown::ShutdownSignal;
-use tari_state_store_sqlite::SqliteStateStore;
 use tokio::task;
 pub use validator_registration_file::ValidatorRegistrationFile;
 

@@ -7,7 +7,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 
-mod block_diffs {
+mod block_diffs_test {
     use tari_dan_common_types::{NumPreshards, ShardGroup, VersionedSubstateId};
     use tari_dan_storage::consensus_models::{BlockId, SubstateChange};
     use tari_engine_types::substate::Substate;

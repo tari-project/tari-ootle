@@ -31,7 +31,6 @@ use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 use tari_engine_types::commit_result::RejectReason;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{mpsc, oneshot};
 

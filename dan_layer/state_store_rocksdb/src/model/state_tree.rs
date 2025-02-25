@@ -23,7 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
 use tari_state_tree::{Node, NodeKey, Version};
-use crate::model::model::RocksdbModel;
+use crate::model::traits::RocksdbModel;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateTreeModelData {
@@ -35,7 +35,7 @@ pub struct StateTreeModelData {
 pub struct StateTreeModel {}
 
 impl StateTreeModel {
-    pub fn key_from_shard_and_node(shard: &Shard, node: &NodeKey) -> String {
+    pub fn key_from_shard_and_node(shard: Shard, node: &NodeKey) -> String {
         format!("{}_{}_{}", Self::key_prefix(), shard, node)
     }
 }
@@ -48,6 +48,6 @@ impl RocksdbModel for StateTreeModel {
     }
 
     fn key(value: &Self::Item) -> String {
-        Self::key_from_shard_and_node(&value.shard, &value.key)
+        Self::key_from_shard_and_node(value.shard, &value.key)
     }
 }

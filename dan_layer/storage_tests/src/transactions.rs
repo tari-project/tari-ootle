@@ -259,7 +259,7 @@ mod transaction_operations {
 }
 
 mod transaction_execution_operations {
-    use std::{process::id, time::Duration};
+    use std::time::Duration;
 
     use tari_common_types::types::PrivateKey;
     use tari_dan_common_types::{NumPreshards, SubstateRequirement};

@@ -21,12 +21,12 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, ExtraFieldKey, NodeHeight, NumPreshards, ShardGroup};
+use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_dan_storage::consensus_models::{Block, BlockId, Command, Decision, QcId, SubstateRecord, TransactionAtom, ValidatorSignature};
 use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress}, prelude::AccessRules};
+use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress}};
 use tari_template_lib::prelude::ComponentAccessRules;
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::tempdir;

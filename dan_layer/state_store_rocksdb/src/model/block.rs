@@ -28,7 +28,7 @@ use tari_dan_storage::{consensus_models::{Block, BlockId}, Ordering};
 
 use crate::error::RocksDbStorageError;
 
-use super::model::{ModelColumnFamily, RocksdbModel};
+use super::traits::{ModelColumnFamily, RocksdbModel};
 
 pub struct BlockModel {}
 
@@ -51,8 +51,7 @@ impl BlockModel {
         let values = iterator.map(|item| {
             // TODO: properly handle errors and avoid unwraps
             let (_, value) = item.unwrap();
-            let value = BlockId::try_from(value.to_vec()).unwrap();
-            value
+            BlockId::try_from(value.to_vec()).unwrap()
         })
         .collect();
 
@@ -70,8 +69,7 @@ impl BlockModel {
         let values = iterator.map(|item| {
             // TODO: properly handle errors and avoid unwraps
             let (_, value) = item.unwrap();
-            let value = BlockId::try_from(value.to_vec()).unwrap();
-            value
+            BlockId::try_from(value.to_vec()).unwrap()
         })
         .collect();
 
@@ -217,8 +215,8 @@ impl ModelColumnFamily for IsCommittedColumnFamily {
     }
 
     fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item, _value: &[u8]) -> Result<(), RocksDbStorageError> {
-        let key = Self::build_key(&item);
-        let cf = db.cf_handle(&Self::name()).unwrap();
+        let key = Self::build_key(item);
+        let cf = db.cf_handle(Self::name()).unwrap();
         if item.is_committed() {
             tx.put_cf(cf, key, item.id().as_bytes())
             .map_err(|e| RocksDbStorageError::RocksDbError {

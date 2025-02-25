@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    fmt::{self, Display}, net::SocketAddr, path::{Path, PathBuf}, str::FromStr, time::Duration
+    fmt::{self, Display}, net::SocketAddr, path::{Path, PathBuf}, str::FromStr
 };
 use anyhow::anyhow;
 use config::Config;

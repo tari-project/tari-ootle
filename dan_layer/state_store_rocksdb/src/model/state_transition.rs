@@ -29,7 +29,7 @@ use tari_dan_storage::consensus_models::{StateTransition, StateTransitionId};
 
 use crate::{error::RocksDbStorageError, utils::RocksdbSeq};
 
-use super::{super::utils::bor_encode, model::{ModelColumnFamily, RocksdbModel}};
+use super::{super::utils::bor_encode, traits::{ModelColumnFamily, RocksdbModel}};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,7 +94,7 @@ pub struct ShardColumnFamily {}
 impl ShardColumnFamily {
     pub const NAME: &str = "statetransitions_shard_seq";
 
-    pub fn build_key_prefix_by_shard(shard: &Shard) -> String {
+    pub fn build_key_prefix_by_shard(shard: Shard) -> String {
         format!("{}_{}_", StateTransitionModel::key_prefix(), shard)
     }
 }

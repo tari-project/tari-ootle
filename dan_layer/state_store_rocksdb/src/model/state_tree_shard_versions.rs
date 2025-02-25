@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
 use tari_state_tree::Version;
 
-use super::model::RocksdbModel;
+use super::traits::RocksdbModel;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateTreeShardVersionModelData {
@@ -35,7 +35,7 @@ pub struct StateTreeShardVersionModelData {
 pub struct StateTreeShardVersionModel {}
 
 impl StateTreeShardVersionModel {
-    pub fn key_from_shard(shard: &Shard) -> String {
+    pub fn key_from_shard(shard: Shard) -> String {
         format!("{}_{}", Self::key_prefix(), shard)
     } 
 }
@@ -48,6 +48,6 @@ impl RocksdbModel for StateTreeShardVersionModel {
     }
 
     fn key(item: &Self::Item) -> String {
-        Self::key_from_shard(&item.shard)
+        Self::key_from_shard(item.shard)
     }
 }

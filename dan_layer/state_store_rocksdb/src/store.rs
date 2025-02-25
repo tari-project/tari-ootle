@@ -21,16 +21,16 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    collections::HashMap, fmt, marker::PhantomData, ops::Deref, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::{Duration, Instant}
+    fmt, marker::PhantomData, sync::Arc, time::{Duration, Instant}
 };
 
 use log::log;
-use rocksdb::{ColumnFamily, SingleThreaded, TransactionDB, TransactionDBOptions};
+use rocksdb::{SingleThreaded, TransactionDB, TransactionDBOptions};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
-use tari_dan_storage::{consensus_models::{BurntUtxo, LastVoted, StateTransition, SubstateLock}, StateStore, StorageError};
+use tari_dan_storage::{StateStore, StorageError};
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, burnt_utxo::BurntUtxoModel, evicted_node::EvictedNodeModel, foreign_proposal::ForeignProposalModel, last_voted::LastVotedModel, lock_conflict::LockConflictModel, missing_transactions::MissingTransactionModel, model::RocksdbModel, quorum_certificate::QuorumCertificateModel, state_transition::StateTransitionModel, substate::SubstateModel, substate_locks::SubstateLockModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
+use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, burnt_utxo::BurntUtxoModel, evicted_node::EvictedNodeModel, foreign_proposal::ForeignProposalModel, last_voted::LastVotedModel, lock_conflict::LockConflictModel, missing_transactions::MissingTransactionModel, traits::RocksdbModel, quorum_certificate::QuorumCertificateModel, state_transition::StateTransitionModel, substate::SubstateModel, substate_locks::SubstateLockModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 

@@ -8,7 +8,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 
-mod foreign_proposals {
+mod foreign_proposals_test {
     use tari_dan_common_types::{NumPreshards, ShardGroup};
     use tari_dan_storage::consensus_models::{Block, BlockPledge, ForeignProposal, ForeignProposalStatus, QuorumCertificate};
 

@@ -669,7 +669,7 @@ async fn finish_claiming<T: WalletStore>(
     if new_account_name.is_none() {
         // Add all versioned account child addresses as inputs unless the account is new
         let child_addresses = sdk.substate_api().load_dependent_substates(&[&account_address])?;
-        inputs.extend(child_addresses.into_iter().map(Into::into));
+        inputs.extend(child_addresses);
         instructions.push(Instruction::CallMethod {
             component_address: account_component_address,
             method: "deposit".to_string(),

@@ -109,7 +109,7 @@ async fn check_and_submit_layer_one_transactions(
             trace!("Skipping non-file: {}", file.path().display());
             continue;
         }
-        if file.path().extension().map_or(true, |s| s != "json") {
+        if file.path().extension().is_none_or(|s| s != "json") {
             debug!("Skipping non-JSON file: {}", file.path().display());
             continue;
         }

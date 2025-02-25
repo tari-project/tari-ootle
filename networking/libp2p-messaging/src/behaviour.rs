@@ -413,8 +413,8 @@ impl<TMsg> Connections<TMsg> {
 
     pub(self) fn clear_closed_connections(&mut self) {
         self.connections.retain(|c| {
-            c.message_sink.as_ref().map_or(true, |s| !s.is_closed()) &&
-                c.pending_sink.as_ref().map_or(true, |s| !s.is_closed())
+            c.message_sink.as_ref().is_none_or(|s| !s.is_closed()) &&
+                c.pending_sink.as_ref().is_none_or(|s| !s.is_closed())
         });
     }
 }

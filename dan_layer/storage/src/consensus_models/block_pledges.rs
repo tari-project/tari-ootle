@@ -62,7 +62,7 @@ impl BlockPledge {
         if let Some((id, ev)) = evidence.all_pledged_inputs_iter().find(|(substate_id, ev)| {
             self.pledges
                 .get(substate_id)
-                .map_or(true, |value| value.version() != ev.version)
+                .is_none_or(|value| value.version() != ev.version)
         }) {
             warn!(
                 target: LOG_TARGET,
@@ -182,8 +182,7 @@ impl SubstatePledge {
         let req = req.into();
         // Check if a requirement is met by this pledge. If the requirement does not specify a version, then the version
         // requirement is, by definition, met.
-        req.version
-            .map_or(true, |v| v == self.versioned_substate_id().version()) &&
+        req.version.is_none_or(|v| v == self.versioned_substate_id().version()) &&
             self.substate_id() == req.substate_id()
     }
 

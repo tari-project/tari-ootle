@@ -156,7 +156,7 @@ where
         let substate_result = self.get_substate_from_committee_by_requirement(&requirement).await?;
         debug!(target: LOG_TARGET, "Substate result for {} with version {}: {:?}", substate_id.to_address_string(), specific_version.display(), substate_result);
         if let Some(version) = substate_result.version() {
-            let should_update_cache = cached_version.map_or(true, |v| v < version);
+            let should_update_cache = cached_version.is_none_or(|v| v < version);
             if should_update_cache {
                 debug!(target: LOG_TARGET, "Updating cached substate {} with version {}", substate_id.to_address_string(), version);
                 let entry = SubstateCacheEntry {

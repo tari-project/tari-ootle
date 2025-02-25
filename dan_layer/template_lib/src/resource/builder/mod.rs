@@ -39,7 +39,6 @@ pub const IMAGE_URL: &str = "IMAGE_URL";
 pub struct ResourceBuilder {}
 
 impl ResourceBuilder {
-
     /// Returns a new fungible resource builder
     pub fn fungible() -> FungibleResourceBuilder {
         FungibleResourceBuilder::new()

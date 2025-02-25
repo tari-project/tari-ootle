@@ -20,9 +20,12 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    hash::Hash,
+};
+
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
-use std::hash::Hash;
 use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
@@ -30,20 +33,28 @@ use tari_template_abi::rust::{
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-use crate::{args::Arg, auth::{AuthHook, OwnerRule, ResourceAccessRules}, crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes}, models::{
-    AddressAllocation,
-    Amount,
-    BucketId,
-    ComponentAddress,
-    ConfidentialWithdrawProof,
-    Metadata,
-    NonFungibleAddress,
-    NonFungibleId,
-    ProofId,
-    ResourceAddress,
-    VaultId,
-    VaultRef,
-}, prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress}, resource::ResourceType, template::BuiltinTemplate};
+use crate::{
+    args::Arg,
+    auth::{AuthHook, OwnerRule, ResourceAccessRules},
+    crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes},
+    models::{
+        AddressAllocation,
+        Amount,
+        BucketId,
+        ComponentAddress,
+        ConfidentialWithdrawProof,
+        Metadata,
+        NonFungibleAddress,
+        NonFungibleId,
+        ProofId,
+        ResourceAddress,
+        VaultId,
+        VaultRef,
+    },
+    prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},
+    resource::ResourceType,
+    template::BuiltinTemplate,
+};
 // -------------------------------- LOGS -------------------------------- //
 
 /// Data needed for log emission from templates
@@ -251,6 +262,7 @@ pub struct CreateResourceArg {
     pub mint_arg: Option<MintArg>,
     pub view_key: Option<RistrettoPublicKeyBytes>,
     pub authorize_hook: Option<AuthHook>,
+    pub address_allocation: Option<AddressAllocation<ResourceAddress>>,
 }
 
 /// A resource minting operation argument
@@ -544,7 +556,6 @@ impl AllocateAddressResult {
 pub enum CallerContextAction {
     GetCallerPublicKey,
     GetComponentAddress,
-    AllocateNewComponentAddress,
     AllocateAddress,
 }
 

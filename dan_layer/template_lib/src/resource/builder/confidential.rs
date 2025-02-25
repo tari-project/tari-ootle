@@ -2,12 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use super::{IMAGE_URL, TOKEN_SYMBOL};
-use crate::models::AddressAllocation;
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     crypto::RistrettoPublicKeyBytes,
-    models::{Bucket, ComponentAddress, Metadata, ResourceAddress},
+    models::{AddressAllocation, Bucket, ComponentAddress, Metadata, ResourceAddress},
     prelude::ConfidentialOutputStatement,
     resource::{ResourceManager, ResourceType},
 };

@@ -5,7 +5,7 @@ use tari_engine_types::{
     substate::{InvalidSubstateIdVariant, SubstateId},
     TemplateAddress,
 };
-use tari_template_lib::models::ComponentAddress;
+use tari_template_lib::models::{ComponentAddress, ResourceAddress};
 
 #[derive(Debug, Clone)]
 pub struct AllocatedAddress {
@@ -31,6 +31,14 @@ impl AllocatedAddress {
 }
 
 impl TryFrom<AllocatedAddress> for ComponentAddress {
+    type Error = InvalidSubstateIdVariant;
+
+    fn try_from(value: AllocatedAddress) -> Result<Self, Self::Error> {
+        value.address.try_into()
+    }
+}
+
+impl TryFrom<AllocatedAddress> for ResourceAddress {
     type Error = InvalidSubstateIdVariant;
 
     fn try_from(value: AllocatedAddress) -> Result<Self, Self::Error> {

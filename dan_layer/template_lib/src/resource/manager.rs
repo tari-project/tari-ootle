@@ -26,7 +26,6 @@ use serde::Serialize;
 use tari_bor::to_value;
 use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
 
-use crate::models::AddressAllocation;
 use crate::{
     args::{
         CreateResourceArg,
@@ -44,6 +43,7 @@ use crate::{
     auth::{OwnerRule, ResourceAccessRules},
     crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes},
     models::{
+        AddressAllocation,
         Amount,
         Bucket,
         ConfidentialOutputStatement,
@@ -127,6 +127,7 @@ impl ResourceManager {
                 mint_arg,
                 view_key,
                 authorize_hook,
+                address_allocation,
             }],
         });
 

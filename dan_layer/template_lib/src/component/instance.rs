@@ -4,6 +4,7 @@
 use std::marker::PhantomData;
 
 use crate::{
+    args::SubstateType,
     auth::{ComponentAccessRules, OwnerRule},
     caller_context::CallerContext,
     crypto::RistrettoPublicKeyBytes,
@@ -67,7 +68,7 @@ impl<T: serde::Serialize> ComponentBuilder<T> {
         let address_allocation = self
             .public_key_address
             // Allocate public key address is necessary
-            .map(|pk| CallerContext::allocate_component_address(Some(pk)))
+            .map(|pk| CallerContext::allocate_address(SubstateType::Component, Some(pk)).as_component_address_allocation().unwrap())
             .or(self.address_allocation);
 
         let address = engine().create_component(self.component, self.owner_rule, self.access_rules, address_allocation);

@@ -5,11 +5,10 @@
 
 use tari_template_abi::{call_engine, EngineOp};
 
-use crate::args::{AllocateAddressResult, SubstateType};
 use crate::{
-    args::{CallerContextAction, CallerContextInvokeArg, InvokeResult},
+    args::{AllocateAddressResult, CallerContextAction, CallerContextInvokeArg, InvokeResult, SubstateType},
     crypto::RistrettoPublicKeyBytes,
-    models::{AddressAllocation, ComponentAddress},
+    models::ComponentAddress,
 };
 
 /// Allows a template to access information about the current instruction's caller
@@ -48,19 +47,6 @@ impl CallerContext {
             args: invoke_args![substate_type, public_key_address],
         });
 
-        resp.decode()
-            .expect("Failed to decode AllocateAddressResult")
-    }
-
-    pub fn allocate_component_address(
-        public_key_address: Option<RistrettoPublicKeyBytes>,
-    ) -> AddressAllocation<ComponentAddress> {
-        let resp: InvokeResult = call_engine(EngineOp::CallerContextInvoke, &CallerContextInvokeArg {
-            action: CallerContextAction::AllocateNewComponentAddress,
-            args: invoke_args![public_key_address],
-        });
-
-        resp.decode()
-            .expect("Failed to decode AddressAllocation<ComponentAddress>")
+        resp.decode().expect("Failed to decode AllocateAddressResult")
     }
 }

@@ -5,11 +5,10 @@ use serde::Serialize;
 use tari_bor::to_value;
 
 use super::{IMAGE_URL, TOKEN_SYMBOL};
-use crate::models::AddressAllocation;
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{Bucket, ComponentAddress, Metadata, NonFungibleId, ResourceAddress},
+    models::{AddressAllocation, Bucket, ComponentAddress, Metadata, NonFungibleId, ResourceAddress},
     resource::{ResourceManager, ResourceType},
 };
 

@@ -44,13 +44,12 @@ import DialogTitle from "@mui/material/DialogTitle";
 import IconButton from "@mui/material/IconButton";
 import { useState } from "react";
 import { IoCloseCircleOutline } from "react-icons/io5";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { AccordionIconButton, CodeBlock, DataTableCell } from "../../../Components/StyledComponents";
 import { useAuthRevokeToken, useGetAllTokens } from "../../../api/hooks/useTokens";
-import { shortenString } from "../../../utils/helpers";
 import type { Claims, JrpcPermission, JrpcPermissions } from "@tari-project/typescript-bindings";
 import { jrpcPermissionToString } from "@tari-project/typescript-bindings";
+import CopyAddress from "../../../Components/CopyAddress";
 
 function AlertDialog({ fn, row }: any) {
   const [open, setOpen] = useState(false);
@@ -108,7 +107,7 @@ export default function AccessTokens() {
 
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - (data?.jwt.length || 0)) : 0;
 
-  const handleChangePage = (event: unknown, newPage: number) => {
+  const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
@@ -145,8 +144,7 @@ export default function AccessTokens() {
               borderBottom: "none",
             }}
           >
-            {shortenString(name)}
-            <CopyToClipboard copy={name} />
+            <CopyAddress address={name} />
           </DataTableCell>
           <DataTableCell
             style={{
@@ -215,7 +213,7 @@ export default function AccessTokens() {
               {data?.jwt
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map(({ id, name, permissions, exp }: Claims) => {
-                  const date = new Date(Number(exp * 1000n));
+                  const date = new Date(Number(exp) * 1000);
                   const formattedDate = `${date.toISOString().slice(0, 10)} ${date.toISOString().slice(11, 16)}`;
                   return (
                     <RowData key={id} id={id} name={name} permissions={permissions} formattedDate={formattedDate} />

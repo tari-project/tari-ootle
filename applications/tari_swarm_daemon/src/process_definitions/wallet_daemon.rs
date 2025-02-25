@@ -26,7 +26,7 @@ impl ProcessDefinition for WalletDaemon {
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
 
-        let json_rpc_public_address = format!("{listen_ip}:{jrpc_port}");
+        let json_rpc_public_url = context.get_public_json_rpc_url();
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
         let web_ui_address = format!("{listen_ip}:{web_ui_port}");
 
@@ -35,7 +35,7 @@ impl ProcessDefinition for WalletDaemon {
             .next()
             .ok_or_else(|| anyhow!("Indexer should be started before wallet daemon"))?;
         let indexer_url = format!(
-            "http://{listen_ip}:{}",
+            "http://127.0.0.1:{}",
             indexer
                 .instance()
                 .allocated_ports()
@@ -51,8 +51,8 @@ impl ProcessDefinition for WalletDaemon {
             .arg(context.network().to_string())
             .arg(format!("--json-rpc-address={json_rpc_address}"))
             .arg(format!("--indexer-url={indexer_url}"))
-            .arg(format!("--ui-connect-address={json_rpc_public_address}"))
-            .arg(format!("-pdan_wallet_daemon.http_ui_address={web_ui_address}"));
+            .arg(format!("--web-ui-public-json-rpc-url={json_rpc_public_url}"))
+            .arg(format!("-pdan_wallet_daemon.web_ui_address={web_ui_address}"));
 
         // A signaling server is not required for startup of the wallet daemon,
         // but if it is available we want to set it up

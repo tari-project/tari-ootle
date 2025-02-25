@@ -112,7 +112,7 @@ fn check_ownership(
     scope: &AuthorizationScope,
     ownership: Ownership<'_>,
 ) -> Result<bool, RuntimeError> {
-    match ownership.owner_rule {
+    match ownership.owner_rule.as_ref() {
         OwnerRule::OwnedBySigner => {
             let Some(owner_key) = ownership.owner_key else {
                 return Ok(false);
@@ -127,8 +127,12 @@ fn check_ownership(
                 return Ok(false);
             };
 
+            if key != owner_key {
+                return Ok(false);
+            }
+
             let owner_proof = key.to_non_fungible_address();
-            Ok(key == owner_key && scope.virtual_proofs().contains(&owner_proof))
+            Ok(scope.virtual_proofs().contains(&owner_proof))
         },
     }
 }

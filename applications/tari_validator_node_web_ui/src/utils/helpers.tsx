@@ -21,13 +21,11 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { toHexString } from "../routes/VN/Components/helpers";
-import type { ShardGroup, SubstateId } from "@tari-project/typescript-bindings";
+import { ShardGroup, SubstateId, substateIdToString } from "@tari-project/typescript-bindings";
 
 export const renderJson = (json: any) => {
-  if (!json) {
-    return <span>Null</span>;
-  }
-  if (Array.isArray(json)) {
+
+  if (json && Array.isArray(json)) {
     //eslint-disable-next-line eqeqeq
     if (json.length == 32) {
       return <span className="string">"{toHexString(json)}"</span>;
@@ -43,7 +41,12 @@ export const renderJson = (json: any) => {
         ],
       </>
     );
-  } else if (typeof json === "object") {
+  }
+
+  if (typeof json === "object") {
+    if (!json) {
+      return <span>null</span>;
+    }
     return (
       <>
         {"{"}
@@ -57,10 +60,12 @@ export const renderJson = (json: any) => {
         {"}"}
       </>
     );
-  } else {
-    if (typeof json === "string") return <span className="string">"{json}"</span>;
-    return <span className="other">{json}</span>;
   }
+
+  if (typeof json === "string") return <span className="string">"{json}"</span>;
+  if (typeof json === "number") return <span className="number">"{json}"</span>;
+  if (typeof json === "boolean") return <span className="boolean">{json ? "true" : "false"}</span>;
+  return <span className="other">{json}</span>;
 };
 
 export function fromHexString(hexString: string) {
@@ -69,17 +74,6 @@ export function fromHexString(hexString: string) {
     res.push(Number("0x" + hexString.substring(i, i + 2)));
   }
   return res;
-}
-
-export function substateIdToString(substateId: SubstateId | string | null | undefined) {
-  if (substateId === null || substateId === undefined) {
-    return "";
-  }
-  if (typeof substateId === "string") {
-    return substateId;
-  }
-  const key = Object.keys(substateId)[0] as keyof SubstateId;
-  return substateId[key];
 }
 
 export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 4, end: number = 4) {

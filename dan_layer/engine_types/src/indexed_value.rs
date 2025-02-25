@@ -21,11 +21,11 @@ use tari_template_lib::{
 };
 
 use crate::{
-    fee_claim::FeeClaimAddress,
     published_template::PublishedTemplateAddress,
     serde_with,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
+    vn_fee_pool::ValidatorFeePoolAddress,
 };
 
 const MAX_VISITOR_DEPTH: usize = 50;
@@ -149,6 +149,7 @@ pub struct IndexedWellKnownTypes {
     metadata: Vec<Metadata>,
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
+    validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
 }
 
 impl IndexedWellKnownTypes {
@@ -164,6 +165,7 @@ impl IndexedWellKnownTypes {
             metadata: vec![],
             unclaimed_confidential_output_address: vec![],
             published_template_addresses: vec![],
+            validator_node_fee_pools: vec![],
         }
     }
 
@@ -186,6 +188,7 @@ impl IndexedWellKnownTypes {
             metadata: visitor.metadata,
             unclaimed_confidential_output_address: visitor.unclaimed_confidential_output_addresses,
             published_template_addresses: visitor.published_templates,
+            validator_node_fee_pools: visitor.validator_node_fee_pools,
         })
     }
 
@@ -211,13 +214,13 @@ impl IndexedWellKnownTypes {
                     WellKnownTariValue::VaultId(addr) => {
                         found = *address == addr;
                     },
-                    WellKnownTariValue::FeeClaim(addr) => {
-                        found = *address == addr;
-                    },
                     WellKnownTariValue::UnclaimedConfidentialOutputAddress(addr) => {
                         found = *address == addr;
                     },
                     WellKnownTariValue::PublishedTemplateAddress(addr) => {
+                        found = *address == addr;
+                    },
+                    WellKnownTariValue::ValidatorNodeFeePool(addr) => {
                         found = *address == addr;
                     },
                     WellKnownTariValue::BucketId(_) |
@@ -244,6 +247,7 @@ impl IndexedWellKnownTypes {
             .chain(self.non_fungible_addresses.iter().map(|a| a.clone().into()))
             .chain(self.vault_ids.iter().map(|a| (*a).into()))
             .chain(self.unclaimed_confidential_output_address.iter().map(|a| (*a).into()))
+            .chain(self.validator_node_fee_pools.iter().map(|a| (*a).into()))
     }
 
     pub fn bucket_ids(&self) -> &[BucketId] {
@@ -295,6 +299,7 @@ impl IndexedWellKnownTypes {
                 &self.published_template_addresses,
                 &other.published_template_addresses,
             ),
+            validator_node_fee_pools: diff_vec(&self.validator_node_fee_pools, &other.validator_node_fee_pools),
         }
     }
 }
@@ -333,10 +338,10 @@ pub enum WellKnownTariValue {
     BucketId(BucketId),
     Metadata(Metadata),
     VaultId(VaultId),
-    FeeClaim(FeeClaimAddress),
     ProofId(ProofId),
     UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
     PublishedTemplateAddress(PublishedTemplateAddress),
+    ValidatorNodeFeePool(ValidatorFeePoolAddress),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
@@ -374,10 +379,6 @@ impl FromTagAndValue for WellKnownTariValue {
                 let vault_id: ObjectKey = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::VaultId(vault_id.into()))
             },
-            BinaryTag::FeeClaim => {
-                let value: Hash = value.deserialized().map_err(BorError::from)?;
-                Ok(Self::FeeClaim(value.into()))
-            },
             BinaryTag::ProofId => {
                 let value: u32 = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ProofId(value.into()))
@@ -389,6 +390,10 @@ impl FromTagAndValue for WellKnownTariValue {
             BinaryTag::TemplateAddress => {
                 let value: Hash = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::PublishedTemplateAddress(value.into()))
+            },
+            BinaryTag::ValidatorNodeFeePool => {
+                let value: [u8; 32] = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::ValidatorNodeFeePool(value.into()))
             },
         }
     }
@@ -406,6 +411,7 @@ pub struct IndexedValueVisitor {
     metadata: Vec<Metadata>,
     unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
     published_templates: Vec<PublishedTemplateAddress>,
+    validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
 }
 
 impl IndexedValueVisitor {
@@ -421,6 +427,7 @@ impl IndexedValueVisitor {
             metadata: vec![],
             unclaimed_confidential_output_addresses: vec![],
             published_templates: vec![],
+            validator_node_fee_pools: vec![],
         }
     }
 }
@@ -457,11 +464,11 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             WellKnownTariValue::UnclaimedConfidentialOutputAddress(address) => {
                 self.unclaimed_confidential_output_addresses.push(address);
             },
-            WellKnownTariValue::FeeClaim(_) => {
-                // Do nothing
-            },
             WellKnownTariValue::PublishedTemplateAddress(template) => {
                 self.published_templates.push(template);
+            },
+            WellKnownTariValue::ValidatorNodeFeePool(address) => {
+                self.validator_node_fee_pools.push(address);
             },
         }
         Ok(ControlFlow::Continue(()))

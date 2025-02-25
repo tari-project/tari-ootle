@@ -42,7 +42,7 @@ use super::{super::utils::{bincode_decode, bincode_encode}, model::{ModelColumnF
 struct SubstateModelData {
     pub substate_id: SubstateId,
     pub version: u32,
-    pub substate_value: Vec<u8>,
+    pub substate_value: Option<Vec<u8>>,
     pub state_hash: FixedHash,
     pub created_by_transaction: TransactionId,
     pub created_justify: QcId,
@@ -58,7 +58,7 @@ impl From<SubstateRecord> for SubstateModelData {
         SubstateModelData {
             substate_id: rec.substate_id,
             version: rec.version,
-            substate_value: rec.substate_value.to_bytes(),
+            substate_value: rec.substate_value.map(|v| v.to_bytes()),
             state_hash: rec.state_hash,
             created_by_transaction: rec.created_by_transaction,
             created_justify: rec.created_justify,
@@ -75,8 +75,14 @@ impl TryFrom<SubstateModelData> for SubstateRecord {
     type Error = String;
 
     fn try_from(model: SubstateModelData) -> Result<Self, Self::Error> {
-        let substate_value = SubstateValue::from_bytes(&model.substate_value)
-            .map_err(|err| err.to_string())?;
+        let substate_value = match model.substate_value {
+            Some(value) => {
+                let value = SubstateValue::from_bytes(&value)
+                    .map_err(|err| err.to_string())?;
+                Some(value)
+            },
+            None => None,
+        };
 
         Ok(SubstateRecord {
             substate_id: model.substate_id,

@@ -59,10 +59,8 @@ diesel::table! {
         epoch -> BigInt,
         template_type -> Text,
         author_public_key -> Binary,
-        compiled_code -> Nullable<Binary>,
-        flow_json -> Nullable<Text>,
+        code -> Nullable<Binary>,
         status -> Text,
-        manifest -> Nullable<Text>,
         added_at -> Timestamp,
     }
 }

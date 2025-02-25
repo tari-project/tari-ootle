@@ -248,7 +248,9 @@ impl TestNetworkWorker {
         // Handle transactions that come in from the test. This behaves like a mempool.
         let mut mempool_task = tokio::spawn(async move {
             while let Some((dest, tx_record)) = rx_new_transaction.recv().await {
-                let remaining = rx_new_transaction.len();
+                // We cannot use this as pending because it assumes that all transactions here are for all validators
+                // but this is not necessarily the case
+                // let remaining = rx_new_transaction.len();
                 transaction_store
                     .write()
                     .await
@@ -257,7 +259,7 @@ impl TestNetworkWorker {
                 for (addr, (shard_group, num_committees, tx_new_transaction_to_consensus, _)) in &tx_new_transactions {
                     if dest.is_for(addr, *shard_group, *num_committees) {
                         tx_new_transaction_to_consensus
-                            .send((tx_record.transaction().clone(), remaining))
+                            .send((tx_record.transaction().clone(), 0))
                             .await
                             .unwrap();
                         log::info!("🐞 New transaction {} for vn {}", tx_record.id(), addr);

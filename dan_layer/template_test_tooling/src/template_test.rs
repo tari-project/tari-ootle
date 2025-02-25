@@ -124,6 +124,7 @@ impl TemplateTest {
             virtual_substates,
             enable_fees: false,
             fee_table: FeeTable {
+                per_transaction_weight_cost: 1,
                 per_module_call_cost: 1,
                 per_byte_storage_cost: 1,
                 per_event_cost: 1,
@@ -626,7 +627,7 @@ impl TemplateTest {
 
     pub fn print_state(&self) {
         for (k, v) in self.state_store.iter() {
-            eprintln!("[{}]: {}", k, v.substate_value());
+            eprintln!("[{}]: {:?}", k, v.substate_value());
         }
     }
 }

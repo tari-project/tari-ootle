@@ -99,25 +99,6 @@ impl SubstateChange {
     }
 }
 
-impl From<SubstateRecord> for SubstateChange {
-    fn from(value: SubstateRecord) -> Self {
-        if let Some(destroyed) = value.destroyed() {
-            Self::Down {
-                id: value.to_versioned_substate_id(),
-                shard: destroyed.by_shard,
-                transaction_id: destroyed.by_transaction,
-            }
-        } else {
-            Self::Up {
-                id: value.to_versioned_substate_id(),
-                shard: value.created_by_shard,
-                transaction_id: value.created_by_transaction,
-                substate: value.into_substate(),
-            }
-        }
-    }
-}
-
 impl Display for SubstateChange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

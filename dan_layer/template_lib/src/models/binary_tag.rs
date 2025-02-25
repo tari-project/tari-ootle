@@ -31,10 +31,10 @@ pub enum BinaryTag {
     VaultId = 132,
     BucketId = 133,
     TransactionReceipt = 134,
-    FeeClaim = 135,
-    ProofId = 136,
-    UnclaimedConfidentialOutputAddress = 137,
-    TemplateAddress = 138,
+    ProofId = 135,
+    UnclaimedConfidentialOutputAddress = 136,
+    TemplateAddress = 137,
+    ValidatorNodeFeePool = 138,
 }
 
 impl BinaryTag {
@@ -47,10 +47,10 @@ impl BinaryTag {
             132 => Some(Self::VaultId),
             133 => Some(Self::BucketId),
             134 => Some(Self::TransactionReceipt),
-            135 => Some(Self::FeeClaim),
-            136 => Some(Self::ProofId),
-            137 => Some(Self::UnclaimedConfidentialOutputAddress),
-            138 => Some(Self::TemplateAddress),
+            135 => Some(Self::ProofId),
+            136 => Some(Self::UnclaimedConfidentialOutputAddress),
+            137 => Some(Self::TemplateAddress),
+            138 => Some(Self::ValidatorNodeFeePool),
             _ => None,
         }
     }
@@ -74,10 +74,10 @@ mod tests {
             BinaryTag::VaultId,
             BinaryTag::BucketId,
             BinaryTag::TransactionReceipt,
-            BinaryTag::FeeClaim,
             BinaryTag::ProofId,
             BinaryTag::UnclaimedConfidentialOutputAddress,
             BinaryTag::TemplateAddress,
+            BinaryTag::ValidatorNodeFeePool,
         ];
 
         for case in cases {

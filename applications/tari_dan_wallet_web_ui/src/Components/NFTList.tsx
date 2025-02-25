@@ -23,7 +23,7 @@
 import React from "react";
 import FetchStatusCheck from "./FetchStatusCheck";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
-import type { apiError } from "../api/helpers/types";
+import type { ApiError } from "../api/helpers/types";
 import { DataTableCell } from "./StyledComponents";
 import { renderJson, shortenString, shortenSubstateId, toHexString } from "../utils/helpers";
 import { IoCheckmarkOutline, IoCloseOutline } from "react-icons/io5";
@@ -70,7 +70,7 @@ function displayNftId(nftId: NonFungibleId) {
 export interface NftListProps {
   nftsListIsError: boolean;
   nftsListIsFetching: boolean;
-  nftsListError: apiError | null;
+  nftsListError: ApiError | null;
   nftsListData?: ListAccountNftResponse;
 }
 

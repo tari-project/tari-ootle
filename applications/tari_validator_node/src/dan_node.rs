@@ -22,11 +22,11 @@
 
 use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
-use tari_dan_app_utilities::template_manager::interface::TemplateExecutable;
 use tari_dan_storage::{consensus_models::Block, StateStore};
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
+use tari_template_manager::interface::TemplateExecutable;
 
 use crate::Services;
 
@@ -94,45 +94,35 @@ impl DanNode {
             .services
             .state_store
             .with_read_tx(|tx| block.get_committing_transactions(tx))?;
-        let templates = transactions
-            .into_iter()
-            .filter_map(|record| {
-                let result = record.execution_result?;
-                let diff = result.finalize.result.into_accept()?;
-                let signer_pub_key = record.transaction.seal_signature().public_key().clone();
-                Some((signer_pub_key, diff))
-            })
-            .flat_map(|(signer_pub_key, diff)| {
-                diff.into_up_iter().flat_map(move |(substate_id, substate)| {
-                    let template_address = substate_id.as_template()?;
-                    let template = substate.into_substate_value().into_template()?;
-                    Some((
-                        signer_pub_key.clone(),
-                        template_address.as_hash(),
-                        TemplateExecutable::CompiledWasm(template.binary),
-                    ))
-                })
-            });
 
         let epoch = self.services.consensus_handle.current_epoch();
         // adding templates to template manager
         let mut template_counter = 0;
-        for (author_pub_key, template_address, template) in templates {
-            info!(
-                target: LOG_TARGET,
-                "📰 Adding template {} from block {}",
-                template_address,
-                block
-            );
-            if let Err(err) = self
-                .services
-                .template_manager
-                .add_template(author_pub_key, template_address, template, None, epoch)
-                .await
-            {
-                error!(target: LOG_TARGET, "🚨Failed to add template: {}", err);
+        for transaction in transactions {
+            let author_pk = transaction.transaction().seal_signature().public_key();
+            for (template_address, code) in transaction.transaction().all_published_templates_iter() {
+                info!(
+                    target: LOG_TARGET,
+                    "📰 Adding template {} from block {}",
+                    template_address,
+                    block
+                );
+                if let Err(err) = self
+                    .services
+                    .template_manager
+                    .add_template(
+                        author_pk.clone(),
+                        template_address.as_hash(),
+                        TemplateExecutable::CompiledWasm(code.to_vec()),
+                        None,
+                        epoch,
+                    )
+                    .await
+                {
+                    error!(target: LOG_TARGET, "🚨Failed to add template: {}", err);
+                }
+                template_counter += 1;
             }
-            template_counter += 1;
         }
 
         if template_counter == 0 {

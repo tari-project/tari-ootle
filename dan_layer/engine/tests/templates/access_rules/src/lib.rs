@@ -42,6 +42,7 @@ mod access_rules_template {
                 .initial_supply(1000);
 
             let badges = create_badge_resource(recall_rule);
+            info!("Badges resource address: {}", badges.resource_address());
 
             Component::new(Self {
                 value: 0,
@@ -94,6 +95,8 @@ mod access_rules_template {
             let badges = create_badge_resource(rule!(deny_all));
 
             let address_alloc = CallerContext::allocate_component_address(None);
+            let id = address_alloc.id();
+            info!("Allocated address: {id}");
 
             let tokens = ResourceBuilder::fungible()
                 .with_authorization_hook(
@@ -119,14 +122,22 @@ mod access_rules_template {
 
             let badge_resource = badges.resource_address();
             let tokens = ResourceBuilder::fungible()
-                .mintable(rule!(non_fungible(
-                    NonFungibleAddress::new(badge_resource, NonFungibleId::from_string("mint")))))
-                .burnable(rule!(non_fungible(
-                    NonFungibleAddress::new(badge_resource, NonFungibleId::from_string("burn")))))
-                .withdrawable(rule!(non_fungible(
-                    NonFungibleAddress::new(badge_resource, NonFungibleId::from_string("withdraw")))))
-                .depositable(rule!(non_fungible(
-                    NonFungibleAddress::new(badge_resource, NonFungibleId::from_string("deposit")))))
+                .mintable(rule!(non_fungible(NonFungibleAddress::new(
+                    badge_resource,
+                    NonFungibleId::from_string("mint")
+                ))))
+                .burnable(rule!(non_fungible(NonFungibleAddress::new(
+                    badge_resource,
+                    NonFungibleId::from_string("burn")
+                ))))
+                .withdrawable(rule!(non_fungible(NonFungibleAddress::new(
+                    badge_resource,
+                    NonFungibleId::from_string("withdraw")
+                ))))
+                .depositable(rule!(non_fungible(NonFungibleAddress::new(
+                    badge_resource,
+                    NonFungibleId::from_string("deposit")
+                ))))
                 .initial_supply(1000);
 
             Component::new(Self {

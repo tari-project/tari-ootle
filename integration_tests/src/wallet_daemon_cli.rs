@@ -35,7 +35,7 @@ use tari_dan_wallet_sdk::{
     apis::confidential_transfer::ConfidentialTransferInputSelection,
     models::{Account, NonFungibleToken},
 };
-use tari_engine_types::{instruction::Instruction, substate::SubstateId};
+use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
     args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -43,7 +43,7 @@ use tari_template_lib::{
     prelude::{ComponentAddress, ResourceAddress},
     resource::TOKEN_SYMBOL,
 };
-use tari_transaction::{Transaction, UnsignedTransaction};
+use tari_transaction::UnsignedTransaction;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_validator_node_cli::command::transaction::CliArg;
 use tari_wallet_daemon_client::{
@@ -72,7 +72,12 @@ use tari_wallet_daemon_client::{
 };
 use tokio::{task::JoinSet, time::timeout};
 
-use crate::{helpers::get_address_from_output, validator_node_cli::add_substate_ids, TariWorld};
+use crate::{
+    helpers::get_address_from_output,
+    util::transaction_builder,
+    validator_node_cli::add_substate_ids,
+    TariWorld,
+};
 
 pub async fn claim_burn(
     world: &mut TariWorld,
@@ -110,18 +115,24 @@ pub async fn claim_fees(
     wallet_daemon_name: String,
     account_name: String,
     validator_name: String,
-    epoch: u64,
     dry_run: bool,
 ) -> Result<ClaimValidatorFeesResponse, WalletDaemonClientError> {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let vn = world.get_validator_node(&validator_name);
 
+    let mut vn_client = vn.create_client();
+    let stats = vn_client.get_epoch_manager_stats().await.unwrap();
+
     let request = ClaimValidatorFeesRequest {
         account: Some(ComponentAddressOrName::Name(account_name)),
+        claim_key_index: None,
         max_fee: None,
-        validator_public_key: vn.public_key.clone(),
-        epoch: Epoch(epoch),
+        shards: vec![stats
+            .committee_info
+            .expect("claim_fees: committee_info is None")
+            .shard_group()
+            .start()],
         dry_run,
     };
 
@@ -134,7 +145,7 @@ pub async fn reveal_burned_funds(world: &mut TariWorld, account_name: String, am
     let request = RevealFundsRequest {
         account: Some(ComponentAddressOrName::Name(account_name)),
         amount_to_reveal: Amount(amount as i64),
-        max_fee: Some(Amount(2000)),
+        max_fee: Some(Amount(5000)),
         pay_fee_from_reveal: true,
     };
 
@@ -162,13 +173,6 @@ pub async fn transfer_confidential(
     max_epoch: Option<Epoch>,
 ) -> tari_wallet_daemon_client::types::TransactionSubmitResponse {
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
-
-    let source_account_addr = world
-        .get_account_component_address(&source_account_name)
-        .unwrap_or_else(|| panic!("Source account {} not found", source_account_name));
-    let dest_account_addr = world
-        .get_account_component_address(&dest_account_name)
-        .unwrap_or_else(|| panic!("Destination account {} not found", dest_account_name));
 
     let source_account_name = ComponentAddressOrName::Name(source_account_name);
     let AccountGetResponse { account, .. } = client.accounts_get(source_account_name.clone()).await.unwrap();
@@ -206,8 +210,8 @@ pub async fn transfer_confidential(
     let withdraw_proof = transfer_proof_resp.proof;
     let proof_id = transfer_proof_resp.proof_id;
 
-    let transaction = Transaction::builder()
-        .fee_transaction_pay_from_component(source_component_address, Amount(2000))
+    let transaction = transaction_builder()
+        .fee_transaction_pay_from_component(source_component_address, Amount(5000))
         .call_method(source_component_address, "withdraw_confidential", args![
             resource_address,
             withdraw_proof
@@ -223,8 +227,8 @@ pub async fn transfer_confidential(
         signing_key_index: Some(signing_key_index),
         proof_ids: vec![proof_id],
         detect_inputs: true,
-        detect_inputs_use_unversioned: false,
-        autofill_inputs: vec![source_account_addr, dest_account_addr],
+        detect_inputs_use_unversioned: true,
+        autofill_inputs: vec![],
     };
 
     let submit_resp = client.submit_transaction(submit_req).await.unwrap();
@@ -329,7 +333,7 @@ pub async fn mint_new_nft_on_account(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let metadata = metadata.unwrap_or_else(|| {
-        serde_json::json!({
+        json!({
             TOKEN_SYMBOL: nft_name,
             "name": "TariProject",
             "departure": "Now",
@@ -465,20 +469,21 @@ pub async fn submit_manifest_with_signing_keys(
 
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new()).unwrap();
 
-    let transaction = Transaction::builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
+    let transaction = transaction_builder()
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
+        .with_inputs(inputs.into_iter().map(|i| i.into_unversioned()))
         .build_unsigned_transaction();
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
         signing_key_index: Some(account.key_index),
         detect_inputs: true,
-        detect_inputs_use_unversioned: false,
+        detect_inputs_use_unversioned: true,
         proof_ids: vec![],
-        autofill_inputs: inputs,
+        autofill_inputs: vec![],
     };
 
     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
@@ -536,30 +541,31 @@ pub async fn submit_manifest(
                 .get(s.trim())
                 .unwrap_or_else(|| panic!("No outputs named {}", s.trim()))
         })
-        .map(|(_, addr)| addr.clone())
+        .map(|(_, addr)| addr.clone().into_unversioned())
         .collect::<Vec<_>>();
 
     let instructions = parse_manifest(&manifest_content, globals, HashMap::new())
-        .unwrap_or_else(|_| panic!("Attempted to parse manifest but failed"));
+        .unwrap_or_else(|err| panic!("Attempted to parse manifest but failed: {err}"));
 
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let AccountGetResponse { account, .. } = client.accounts_get_default().await.unwrap();
 
-    let transaction = Transaction::builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
+    let transaction = transaction_builder()
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
         .with_instructions(instructions.instructions)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
+        .with_inputs(inputs)
         .build_unsigned_transaction();
 
     let transaction_submit_req = TransactionSubmitRequest {
         transaction,
         signing_key_index: Some(account.key_index),
         detect_inputs: true,
-        detect_inputs_use_unversioned: false,
+        detect_inputs_use_unversioned: true,
         proof_ids: vec![],
-        autofill_inputs: inputs,
+        autofill_inputs: vec![],
     };
 
     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
@@ -584,47 +590,48 @@ pub async fn submit_manifest(
     );
 }
 
-pub async fn submit_transaction(
-    world: &mut TariWorld,
-    wallet_daemon_name: String,
-    fee_instructions: Vec<Instruction>,
-    instructions: Vec<Instruction>,
-    inputs: Vec<SubstateRequirement>,
-    outputs_name: String,
-    min_epoch: Option<Epoch>,
-    max_epoch: Option<Epoch>,
-) -> TransactionWaitResultResponse {
-    let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
-
-    let transaction = Transaction::builder()
-        .with_fee_instructions(fee_instructions)
-        .with_instructions(instructions)
-        .with_min_epoch(min_epoch)
-        .with_max_epoch(max_epoch)
-        .build_unsigned_transaction();
-
-    let transaction_submit_req = TransactionSubmitRequest {
-        transaction,
-        signing_key_index: None,
-        detect_inputs: true,
-        detect_inputs_use_unversioned: false,
-        autofill_inputs: inputs,
-        proof_ids: vec![],
-    };
-
-    let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
-
-    let wait_req = TransactionWaitResultRequest {
-        transaction_id: resp.transaction_id,
-        timeout_secs: Some(120),
-    };
-    let wait_resp = client.wait_transaction_result(wait_req).await.unwrap();
-
-    if let Some(diff) = wait_resp.result.as_ref().and_then(|r| r.result.accept()) {
-        add_substate_ids(world, outputs_name, diff);
-    }
-    wait_resp
-}
+// pub async fn submit_transaction(
+//     world: &mut TariWorld,
+//     wallet_daemon_name: String,
+//     fee_instructions: Vec<Instruction>,
+//     instructions: Vec<Instruction>,
+//     inputs: Vec<SubstateRequirement>,
+//     outputs_name: String,
+//     min_epoch: Option<Epoch>,
+//     max_epoch: Option<Epoch>,
+// ) -> TransactionWaitResultResponse {
+//     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
+//
+//     let transaction = Transaction::builder()
+//         .with_fee_instructions(fee_instructions)
+//         .with_instructions(instructions)
+//         .with_min_epoch(min_epoch)
+//         .with_max_epoch(max_epoch)
+//         .with_inputs(inputs)
+//         .build_unsigned_transaction();
+//
+//     let transaction_submit_req = TransactionSubmitRequest {
+//         transaction,
+//         signing_key_index: None,
+//         detect_inputs: true,
+//         detect_inputs_use_unversioned: false,
+//         autofill_inputs: inputs,
+//         proof_ids: vec![],
+//     };
+//
+//     let resp = client.submit_transaction(transaction_submit_req).await.unwrap();
+//
+//     let wait_req = TransactionWaitResultRequest {
+//         transaction_id: resp.transaction_id,
+//         timeout_secs: Some(120),
+//     };
+//     let wait_resp = client.wait_transaction_result(wait_req).await.unwrap();
+//
+//     if let Some(diff) = wait_resp.result.as_ref().and_then(|r| r.result.accept()) {
+//         add_substate_ids(world, outputs_name, diff);
+//     }
+//     wait_resp
+// }
 
 pub async fn create_component(
     world: &mut TariWorld,
@@ -654,8 +661,8 @@ pub async fn create_component(
         .await
         .unwrap();
 
-    let transaction = Transaction::builder()
-        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
+    let transaction = transaction_builder()
+        .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(5000))
         .call_function(template_address, &function_call, args)
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -665,7 +672,7 @@ pub async fn create_component(
         transaction,
         signing_key_index: Some(account.key_index),
         detect_inputs: true,
-        detect_inputs_use_unversioned: false,
+        detect_inputs_use_unversioned: true,
         proof_ids: vec![],
         autofill_inputs: vec![],
     };
@@ -759,7 +766,7 @@ pub async fn call_component(
         ]
     };
 
-    let tx = Transaction::builder()
+    let tx = transaction_builder()
         .fee_transaction_pay_from_component(account_component_address, Amount(1000))
         .call_method(source_component_address, &function_call, vec![])
         .with_inputs(inputs)
@@ -815,7 +822,7 @@ pub async fn concurrent_call_component(
     for _ in 0..times {
         let acc = account.clone();
         let clt = client.clone();
-        let tx = Transaction::builder()
+        let tx = transaction_builder()
             .fee_transaction_pay_from_component(account_component_address, Amount(1000))
             .call_method(source_component_address, &function_call, vec![])
             .build_unsigned_transaction();
@@ -858,7 +865,7 @@ pub async fn transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(Amount(2000));
+    let max_fee = Some(Amount(5000));
 
     let request = AccountsTransferRequest {
         account,
@@ -885,7 +892,7 @@ pub async fn confidential_transfer(
     let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
 
     let account = Some(ComponentAddressOrName::Name(account_name));
-    let max_fee = Some(Amount(2000));
+    let max_fee = Some(Amount(5000));
 
     let request = ConfidentialTransferRequest {
         account,

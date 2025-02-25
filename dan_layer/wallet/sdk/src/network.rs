@@ -5,12 +5,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tari_dan_common_types::{substate_type::SubstateType, SubstateRequirement};
 use tari_dan_storage::consensus_models::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    substate::{Substate, SubstateId},
+    substate::{SubstateId, SubstateValue},
 };
 use tari_template_abi::TemplateDef;
 use tari_template_lib::prelude::TemplateAddress;
@@ -59,7 +58,7 @@ pub trait WalletNetworkInterface {
 pub struct SubstateQueryResult {
     pub address: SubstateId,
     pub version: u32,
-    pub substate: Substate,
+    pub substate: SubstateValue,
     pub created_by_transaction: TransactionId,
 }
 
@@ -92,7 +91,6 @@ pub enum TransactionFinalizedResult {
         execution_time: Duration,
         finalized_time: Duration,
         abort_details: Option<String>,
-        json_results: Vec<Value>,
     },
 }
 

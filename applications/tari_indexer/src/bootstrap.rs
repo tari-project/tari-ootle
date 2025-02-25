@@ -20,12 +20,11 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{convert::Infallible, fs, io, str::FromStr};
+use std::{fs, io, str::FromStr};
 
 use anyhow::Context;
 use libp2p::identity;
 use minotari_app_utilities::identity_management;
-use serde::Serialize;
 use tari_base_node_client::grpc::GrpcBaseNodeClient;
 use tari_common::{
     configuration::bootstrap::{grpc_default_port, ApplicationType},
@@ -34,29 +33,34 @@ use tari_common::{
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_app_utilities::{
-    base_layer_scanner,
     common::verify_correct_network,
+    epoch_oracle_config::EpochOracleType,
     keypair::RistrettoKeypair,
     seed_peer::SeedPeer,
-    template_manager::{self, implementation::TemplateManager},
+    template_download_queue::TemplateDownloadQueue,
 };
-use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, PeerAddress};
+use tari_dan_common_types::PeerAddress;
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_epoch_manager::{
-    base_layer::{EpochManagerConfig, EpochManagerHandle},
-    traits::LayerOneTransactionSubmitter,
-};
+use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
+use tari_epoch_oracles::{base_layer::BaseLayerOracle, configured::ConfiguredEpochOracle, EpochOracle};
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_shutdown::ShutdownSignal;
-use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
-use crate::{substate_storage_sqlite::sqlite_substate_store_factory::SqliteSubstateStore, ApplicationConfig};
+use crate::{
+    network_client::TariNetworkClient,
+    substate_storage_sqlite::sqlite_substate_store_factory::SqliteSubstateStore,
+    ApplicationConfig,
+    IndexerEpochManagerSpec,
+    Noop,
+};
 
 const _LOG_TARGET: &str = "tari_indexer::bootstrap";
 
+#[allow(clippy::too_many_lines)]
 pub async fn spawn_services(
     config: &ApplicationConfig,
     shutdown: ShutdownSignal,
@@ -65,17 +69,6 @@ pub async fn spawn_services(
     consensus_constants: ConsensusConstants,
 ) -> Result<Services, anyhow::Error> {
     ensure_directories_exist(config)?;
-
-    // GRPC client connection to base node
-    let mut base_node_client =
-        GrpcBaseNodeClient::new(config.indexer.base_node_grpc_url.clone().unwrap_or_else(|| {
-            let port = grpc_default_port(ApplicationType::BaseNode, config.network);
-            format!("http://127.0.0.1:{port}")
-                .parse()
-                .expect("Default base node GRPC URL is malformed")
-        }));
-
-    verify_correct_network(&mut base_node_client, config.network).await?;
 
     // Initialize networking
     let identity = identity::Keypair::sr25519_from_bytes(keypair.secret_key().as_bytes().to_vec()).map_err(|e| {
@@ -122,9 +115,31 @@ pub async fn spawn_services(
     // Connect to substate db
     let substate_store = SqliteSubstateStore::try_create(config.indexer.state_db_path())?;
 
+    // Epoch event oracle
+    let epoch_event_oracle = match config.epoch_oracle.oracle_type {
+        EpochOracleType::BaseLayer => {
+            let mut base_node_client = create_base_layer_client(config).await?;
+            verify_correct_network(&mut base_node_client, config.network).await?;
+            EpochOracle::BaseLayer(BaseLayerOracle::new(
+                global_db.clone(),
+                base_node_client,
+                consensus_constants.base_layer_confirmations,
+                config.epoch_oracle.base_layer.scanning_interval,
+                config.indexer.sidechain_id.clone(),
+                config.indexer.burnt_utxo_sidechain_id.clone(),
+                config.indexer.sidechain_id.clone(),
+            ))
+        },
+        EpochOracleType::Configured => EpochOracle::Configured(ConfiguredEpochOracle::new(
+            config.epoch_oracle.configured.load().await?,
+            global_db.clone(),
+        )),
+    };
+
+    let (template_queue_sender, template_queue_receiver) = TemplateDownloadQueue::create();
+
     // Epoch manager
-    let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
-    let (epoch_manager, _) = tari_epoch_manager::base_layer::spawn_service(
+    let (epoch_manager, _) = tari_epoch_manager::service::spawn_service::<IndexerEpochManagerSpec>(
         EpochManagerConfig {
             num_preshards: consensus_constants.num_preshards,
             base_layer_confirmations: consensus_constants.base_layer_confirmations,
@@ -135,35 +150,26 @@ pub async fn spawn_services(
             validator_node_sidechain_id: config.indexer.sidechain_id.clone(),
         },
         global_db.clone(),
-        base_node_client.clone(),
         keypair.public_key().clone(),
-        NoopL1Submitter,
+        epoch_event_oracle,
+        Noop,
+        template_queue_sender,
+        Noop,
         shutdown.clone(),
     );
 
+    // Client factory
+    let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
+    let network_client = TariNetworkClient::new(epoch_manager.clone(), validator_node_client_factory.clone());
+
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
-    let (template_manager_service, _) =
-        template_manager::implementation::spawn(template_manager.clone(), shutdown.clone());
-
-    // Base Node scanner
-    base_layer_scanner::spawn(
-        global_db,
-        base_node_client.clone(),
+    let (template_manager_service, _) = tari_template_manager::implementation::spawn(
+        template_manager.clone(),
         epoch_manager.clone(),
+        validator_node_client_factory.clone(),
+        template_queue_receiver,
         shutdown.clone(),
-        consensus_constants,
-        // TODO: Remove coupling between scanner and shard store
-        SqliteStateStore::<PeerAddress>::connect(&format!(
-            "sqlite://{}",
-            config.indexer.data_dir.join("unused-shard-store.sqlite").display()
-        ))?,
-        true,
-        config.indexer.base_layer_scanning_interval,
-        config.indexer.sidechain_id.clone(),
-        config.indexer.burnt_utxo_sidechain_id.clone(),
-        template_manager_service,
-        config.indexer.templates_sidechain_id.clone(),
     );
 
     // Save final node identity after comms has initialized. This is required because the public_address can be
@@ -174,8 +180,11 @@ pub async fn spawn_services(
         networking,
         epoch_manager,
         validator_node_client_factory,
+        network_client,
         substate_store,
+        global_db,
         template_manager,
+        template_manager_service,
     })
 }
 
@@ -185,7 +194,10 @@ pub struct Services {
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
     pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     pub substate_store: SqliteSubstateStore,
+    pub network_client: TariNetworkClient<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
+    pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub template_manager: TemplateManager<PeerAddress>,
+    pub template_manager_service: TemplateManagerHandle,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {
@@ -200,15 +212,19 @@ fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> R
     Ok(())
 }
 
-struct NoopL1Submitter;
-
-impl LayerOneTransactionSubmitter for NoopL1Submitter {
-    type Error = Infallible;
-
-    async fn submit_transaction<T: Serialize + Send>(
-        &self,
-        _proof: LayerOneTransactionDef<T>,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
+async fn create_base_layer_client(config: &ApplicationConfig) -> Result<GrpcBaseNodeClient, ExitError> {
+    let url = config
+        .epoch_oracle
+        .base_layer
+        .base_node_grpc_url
+        .clone()
+        .unwrap_or_else(|| {
+            let port = grpc_default_port(ApplicationType::BaseNode, config.network);
+            format!("http://127.0.0.1:{port}")
+                .parse()
+                .expect("Default base node GRPC URL is malformed")
+        });
+    GrpcBaseNodeClient::connect(url)
+        .await
+        .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Could not connect to base node {}", err)))
 }

@@ -9,7 +9,14 @@ use std::{
 
 use log::*;
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{committee::CommitteeInfo, NumPreshards, SubstateLockType, VersionedSubstateId};
+use tari_dan_common_types::{
+    committee::CommitteeInfo,
+    displayable::Displayable,
+    NumPreshards,
+    SubstateLockType,
+    ToSubstateAddress,
+    VersionedSubstateId,
+};
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason},
     transaction_receipt::TransactionReceiptAddress,
@@ -156,12 +163,34 @@ impl TransactionRecord {
         self.abort_reason.as_ref()
     }
 
-    pub fn set_abort_reason(&mut self, reason: RejectReason) -> &mut Self {
+    pub fn abort(&mut self, reason: RejectReason) -> &mut Self {
         self.abort_reason = Some(reason);
+        let receipt = self.id().into_receipt_address();
+        let id = VersionedSubstateId::for_tx_receipt(receipt);
+        self.resulting_outputs = Some(vec![VersionedSubstateIdLockIntent::new(
+            id,
+            SubstateLockType::Output,
+            true,
+        )]);
         self
     }
 
-    pub fn has_any_local_inputs(&self, local_committee_info: &CommitteeInfo) -> bool {
+    pub fn abort_and_finalize(&mut self, reason: RejectReason) -> &mut Self {
+        self.abort(reason.clone());
+        let exec_result = self.execution_result.as_ref().filter(|r| r.finalize.result.is_reject());
+        let execution_time = exec_result.as_ref().map(|r| r.execution_time).unwrap_or_default();
+        self.final_decision = Some(Decision::Abort(AbortReason::from(&reason)));
+        self.finalized_time = Some(execution_time);
+        self.execution_result = Some(ExecuteResult {
+            finalize: exec_result
+                .map(|r| r.finalize.clone())
+                .unwrap_or_else(|| FinalizeResult::new_rejected(self.transaction.id().into_array().into(), reason)),
+            execution_time,
+        });
+        self
+    }
+
+    pub fn is_involved_in_inputs(&self, local_committee_info: &CommitteeInfo) -> bool {
         self.transaction
             .all_inputs_iter()
             .any(|i| local_committee_info.includes_substate_id(i.substate_id()))
@@ -172,13 +201,17 @@ impl TransactionRecord {
     }
 
     pub fn into_execution(mut self) -> Option<TransactionExecution> {
+        self.take_execution()
+    }
+
+    fn take_execution(&mut self) -> Option<TransactionExecution> {
         // TODO: This is hacky. We're using this as a way to finalize the transaction which always expects some
         // execution result.
         let transaction_id = *self.transaction.id();
         let resolved_inputs = self.resolved_inputs.take().unwrap_or_else(|| {
             self.transaction
                 .all_inputs_iter()
-                .map(|i| VersionedSubstateIdLockIntent::from_requirement(i, SubstateLockType::Write))
+                .map(|i| VersionedSubstateIdLockIntent::from_requirement(i.to_owned(), SubstateLockType::Write))
                 .collect()
         });
         let resulting_outputs = self.resulting_outputs.take().unwrap_or_default();
@@ -195,16 +228,21 @@ impl TransactionRecord {
             }
         } else {
             // If there's no abort reason or execution result, return None here
-            self.execution_result?
+            self.execution_result.take()?
         };
 
         Some(TransactionExecution {
             transaction_id,
             result,
-            abort_reason: self.abort_reason,
+            abort_reason: self.abort_reason.take(),
             resolved_inputs,
             resulting_outputs,
         })
+    }
+
+    pub fn into_transaction_and_execution(mut self) -> (Transaction, Option<TransactionExecution>) {
+        let maybe_execution = self.take_execution();
+        (self.transaction, maybe_execution)
     }
 
     pub fn into_final_result(self) -> Option<ExecuteResult> {
@@ -363,9 +401,10 @@ impl TransactionRecord {
         locked_values
             .into_iter()
             .filter(|lock| !lock.lock.is_output())
-            .map(|lock| {
+            .map(|mut lock| {
+                let maybe_value = lock.take_value();
                 let lock_intent = lock.to_substate_lock_intent();
-                SubstatePledge::try_create(lock_intent, lock.value).ok_or_else(|| StorageError::DataInconsistency {
+                SubstatePledge::try_create(lock_intent, maybe_value).ok_or_else(|| StorageError::DataInconsistency {
                     details: format!("Invalid substate lock: {} ({})", lock.substate_id, lock.lock),
                 })
             })
@@ -401,7 +440,12 @@ impl TransactionRecord {
         let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
         for (is_local, input) in inputs {
             if is_local {
-                if locks.iter().all(|i| !i.satisfies_requirements(&input)) {
+                if locks.iter().all(|i| !i.satisfies_requirements(input)) {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Locks: {}",
+                        locks.display(),
+                    );
                     debug!(
                         target: LOG_TARGET,
                         "{} Transaction {} is missing a local lock for input {} ({} lock(s) found)",
@@ -412,10 +456,15 @@ impl TransactionRecord {
                     );
                     return Ok(false);
                 }
-            } else if pledges.iter().all(|p| !p.satisfies_requirement(&input)) {
-                let remote_shard_group = input.to_substate_address_zero_version().to_shard_group(
+            } else if pledges.iter().all(|p| !p.satisfies_requirement(input)) {
+                let remote_shard_group = input.or_zero_version().to_substate_address().to_shard_group(
                     local_committee_info.num_preshards(),
                     local_committee_info.num_committees(),
+                );
+                debug!(
+                    target: LOG_TARGET,
+                    "Pledges: {}",
+                    pledges.display(),
                 );
                 debug!(
                     target: LOG_TARGET,
@@ -439,14 +488,21 @@ impl TransactionRecord {
         tx: &TTx,
         local_committee_info: &CommitteeInfo,
     ) -> Result<bool, StorageError> {
-        let foreign_inputs = self
+        let mut foreign_inputs = self
             .transaction()
             .all_inputs_iter()
-            .filter(|i| !local_committee_info.includes_substate_id(i.substate_id()));
+            .filter(|i| !local_committee_info.includes_substate_id(i.substate_id()))
+            .peekable();
+
+        if foreign_inputs.peek().is_none() {
+            // Avoid query for pledges for no reason
+            return Ok(true);
+        }
+
         // TODO(perf): this could be a bespoke DB query
         let pledges = tx.foreign_substate_pledges_get_all_by_transaction_id(self.id())?;
         for input in foreign_inputs {
-            if pledges.iter().all(|p| !p.satisfies_requirement(&input)) {
+            if pledges.iter().all(|p| !p.satisfies_requirement(input)) {
                 debug!(
                     target: LOG_TARGET,
                     "Transaction {} is missing a pledge for input {} ({} pledge(s) found)",

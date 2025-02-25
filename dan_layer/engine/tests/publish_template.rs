@@ -7,7 +7,7 @@ use rand::random;
 use tari_dan_engine::wasm::compile::compile_template;
 use tari_engine_types::{
     commit_result::{RejectReason, TransactionResult},
-    hashing::{hasher32, template_hasher32, EngineHashDomainLabel},
+    hashing::{hash_template_code, hasher32, EngineHashDomainLabel},
     published_template::PublishedTemplateAddress,
     substate::{SubstateId, SubstateValue},
 };
@@ -20,7 +20,7 @@ fn publish_template_success() {
     let mut test = TemplateTest::new(Vec::<String>::new());
     let (account_address, owner_proof, account_key, public_key) = test.create_custom_funded_account(Amount(250_000));
     let template = compile_template("tests/templates/hello_world", &[]).unwrap();
-    let expected_binary_hash = template_hasher32().chain(template.code()).result();
+    let expected_binary_hash = hash_template_code(template.code());
     let expected_template_address = PublishedTemplateAddress::from_hash(
         hasher32(EngineHashDomainLabel::TemplateAddress)
             .chain(&public_key)
@@ -42,7 +42,7 @@ fn publish_template_success() {
     if let TransactionResult::Accept(diff) = result.finalize.result {
         diff.up_iter().for_each(|(substate_id, substate)| {
             if let SubstateValue::Template(curr_template) = substate.substate_value() {
-                if curr_template.binary.as_slice() == template.code() {
+                if curr_template.binary_hash == expected_binary_hash {
                     template_found = true;
                     assert!(matches!(substate_id, SubstateId::Template(_)));
                     if let SubstateId::Template(curr_template_addr) = substate_id {

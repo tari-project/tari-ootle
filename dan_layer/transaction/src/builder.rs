@@ -3,7 +3,12 @@
 
 use tari_common_types::types::{PrivateKey, PublicKey};
 use tari_dan_common_types::{Epoch, SubstateRequirement};
-use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, TemplateAddress};
+use tari_engine_types::{
+    confidential::ConfidentialClaim,
+    instruction::Instruction,
+    vn_fee_pool::ValidatorFeePoolAddress,
+    TemplateAddress,
+};
 use tari_template_lib::{
     args,
     args::Arg,
@@ -156,6 +161,10 @@ impl TransactionBuilder {
 
     pub fn claim_burn(self, claim: ConfidentialClaim) -> Self {
         self.add_instruction(Instruction::ClaimBurn { claim: Box::new(claim) })
+    }
+
+    pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {
+        self.add_instruction(Instruction::ClaimValidatorFees { address })
     }
 
     pub fn create_proof(self, account: ComponentAddress, resource_addr: ResourceAddress) -> Self {

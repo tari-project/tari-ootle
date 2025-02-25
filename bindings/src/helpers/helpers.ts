@@ -7,12 +7,15 @@ import { SubstateDiff } from "../types/SubstateDiff";
 import { SubstateId } from "../types/SubstateId";
 import { TransactionResult } from "../types/TransactionResult";
 
-export function substateIdToString(substateId: SubstateId | string | null): string {
-  if (substateId === null) {
+export function substateIdToString(substateId: SubstateId | string | null | undefined): string {
+  if (substateId === null || substateId === undefined) {
     return "";
   }
   if (typeof substateId === "string") {
     return substateId;
+  }
+  if (typeof substateId !== "object") {
+    throw new Error(`Cannot convert: ${JSON.stringify(substateId)} to string`);
   }
   if ("Component" in substateId) {
     return substateId.Component;
@@ -35,8 +38,8 @@ export function substateIdToString(substateId: SubstateId | string | null): stri
   if ("TransactionReceipt" in substateId) {
     return substateId.TransactionReceipt;
   }
-  if ("FeeClaim" in substateId) {
-    return substateId.FeeClaim;
+  if ("ValidatorFeePool" in substateId) {
+    return substateId.ValidatorFeePool;
   }
   console.error("Unknown substate id", substateId);
   return "Unknown";
@@ -63,11 +66,27 @@ export function stringToSubstateId(substateId: string): SubstateId {
       return { UnclaimedConfidentialOutput: parts[1] };
     case "txreceipt":
       return { TransactionReceipt: parts[1] };
-    case "feeclaim":
-      return { FeeClaim: parts[1] };
+    case "vnfp":
+      return { ValidatorFeePool: parts[1] };
     default:
       throw new Error(`Unknown substate id: ${substateId}`);
   }
+}
+
+export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 4, end: number = 4) {
+  if (substateId === null || substateId === undefined) {
+    return "";
+  }
+  const string = substateIdToString(substateId);
+  const parts = string.split("_", 2);
+  if (parts.length < 2) {
+    return string;
+  }
+  return parts[0] + "_" + shortenString(parts[1], start, end);
+}
+
+export function shortenString(string: string, start: number = 8, end: number = 8) {
+  return string.substring(0, start) + "..." + string.slice(-end);
 }
 
 export function rejectReasonToString(reason: RejectReason | null): string {
@@ -89,8 +108,8 @@ export function rejectReasonToString(reason: RejectReason | null): string {
   if ("ShardRejected" in reason) {
     return `ShardRejected(${reason.ShardRejected})`;
   }
-  if ("FeesNotPaid" in reason) {
-    return `FeesNotPaid(${reason.FeesNotPaid})`;
+  if ("InsufficientFeesPaid" in reason) {
+    return `InsufficientFeesPaid(${reason.InsufficientFeesPaid})`;
   }
   if ("ForeignShardGroupDecidedToAbort" in reason) {
     const r = reason.ForeignShardGroupDecidedToAbort;

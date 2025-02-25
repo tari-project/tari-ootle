@@ -71,10 +71,11 @@ export default function Instructions({ data }: { data: Array<Instruction> }, ind
     <TableContainer>
       <Table>
         <TableBody>
-          {data &&
-            data.map((item: Instruction, index) => {
-              return <RowData key={index} title={Object.keys(item)[0]} data={item} />;
-            })}
+          {data?.length
+            ? data.map((item: Instruction, index) => {
+                return <RowData key={index} title={Object.keys(item)[0]} data={item} />;
+              })
+            : "Empty"}
         </TableBody>
       </Table>
     </TableContainer>

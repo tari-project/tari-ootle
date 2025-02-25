@@ -1,9 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::fmt::Display;
+use std::{collections::HashSet, fmt::Display};
 
-use tari_dan_common_types::{optional::Optional, VersionedSubstateId};
+use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{
     apis::accounts::{AccountsApi, AccountsApiError},
     models::Account,
@@ -11,12 +11,14 @@ use tari_dan_wallet_sdk::{
 };
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_engine_types::substate::SubstateId;
-use tari_transaction::TransactionId;
+use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
 use tari_wallet_daemon_client::ComponentAddressOrName;
 use tokio::sync::broadcast;
 
 use crate::{
+    handlers::HandlerContext,
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
+    jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
 };
 
@@ -88,18 +90,11 @@ pub async fn wait_for_result_and_account(
 pub fn get_account_with_inputs(
     account: Option<ComponentAddressOrName>,
     sdk: &DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
-) -> Result<(Account, Vec<VersionedSubstateId>), anyhow::Error> {
+) -> Result<(Account, HashSet<SubstateRequirement>), anyhow::Error> {
     let account = get_account_or_default(account, &sdk.accounts_api())?;
 
-    let mut inputs = vec![];
-
-    // add the input for the source account component substate
-    let account_substate = sdk.substate_api().get_substate(&account.address)?;
-    inputs.push(account_substate.substate_id);
-
     // Add all versioned account child addresses as inputs
-    let child_addresses = sdk.substate_api().load_dependent_substates(&[&account.address])?;
-    inputs.extend(child_addresses);
+    let inputs = sdk.substate_api().load_dependent_substates(&[&account.address])?;
 
     Ok((account, inputs))
 }
@@ -133,7 +128,7 @@ where
         result = accounts_api
             .get_default()
             .optional()?
-            .ok_or_else(|| anyhow::anyhow!("No default account found. Please set a default account."))?;
+            .ok_or_else(|| not_found("No default account found. Please create an account."))?;
     }
     Ok(result)
 }
@@ -149,4 +144,26 @@ pub(super) fn invalid_params<T: Display>(field: &str, details: Option<T>) -> any
         serde_json::Value::Null,
     )
     .into()
+}
+
+pub(super) fn application<T: Display>(code: ApplicationErrorCode, details: T) -> anyhow::Error {
+    axum_jrpc::error::JsonRpcError::new(
+        axum_jrpc::error::JsonRpcErrorReason::ApplicationError(code as i32),
+        format!("Application error: '{details}",),
+        serde_json::Value::Null,
+    )
+    .into()
+}
+pub(super) fn not_found<T: Display>(details: T) -> anyhow::Error {
+    axum_jrpc::error::JsonRpcError::new(
+        axum_jrpc::error::JsonRpcErrorReason::ApplicationError(ApplicationErrorCode::NotFound as i32),
+        format!("Not found: {details}",),
+        serde_json::Value::Null,
+    )
+    .into()
+}
+
+/// Returns a TransactionBuilder with the current network configured.
+pub fn transaction_builder(context: &HandlerContext) -> TransactionBuilder {
+    Transaction::builder().for_network(context.config().network.as_byte())
 }

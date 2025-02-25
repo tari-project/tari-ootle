@@ -13,7 +13,7 @@ use tari_dan_engine::{
     template::{LoadedTemplate, TemplateLoaderError, TemplateModuleLoader},
     wasm::{compile::compile_template, WasmModule},
 };
-use tari_engine_types::hashing::template_hasher32;
+use tari_engine_types::hashing::hash_template_code;
 use tari_template_builtin::get_template_builtin;
 use tari_template_lib::models::TemplateAddress;
 use thiserror::Error;
@@ -68,7 +68,7 @@ impl PackageBuilder {
 
     pub fn add_template_with_features<P: AsRef<Path>>(&mut self, path: P, features: &[&str]) -> &mut Self {
         let wasm = compile_template(path, features).unwrap();
-        let template_addr = template_hasher32().chain(wasm.code()).result();
+        let template_addr = hash_template_code(wasm.code());
         let wasm = wasm.load_template().unwrap();
         self.add_loaded_template(template_addr, wasm);
         self

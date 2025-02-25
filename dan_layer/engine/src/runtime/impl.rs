@@ -24,9 +24,8 @@ use std::sync::Arc;
 
 use log::{warn, *};
 use tari_common::configuration::Network;
-use tari_common_types::types::PublicKey;
 use tari_crypto::{range_proof::RangeProofService, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch};
+use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_engine_types::{
     base_layer_hashing::ownership_proof_hasher64,
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
@@ -34,6 +33,7 @@ use tari_engine_types::{
     confidential::{get_commitment_factory, get_range_proof_service, ConfidentialClaim, ConfidentialOutput},
     entity_id_provider::EntityIdProvider,
     events::Event,
+    hashing::hash_template_code,
     indexed_value::IndexedValue,
     instruction_result::InstructionResult,
     lock::LockFlag,
@@ -43,6 +43,7 @@ use tari_engine_types::{
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
+    vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
 };
 use tari_template_abi::{TemplateDef, Type};
@@ -121,11 +122,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::dan::engine::runtime::impl";
-
-// Topics for builtin events emmitted by the engine
-const STANDARD_TOPIC_PREFIX: &str = "std.";
-const VAULT_DEPOSIT_TOPIC: &str = "std.vault.deposit";
-const VAULT_WITHDRAW_TOPIC: &str = "std.vault.withdraw";
 
 #[derive(Clone)]
 pub struct RuntimeInterfaceImpl<TTemplateProvider> {
@@ -207,14 +203,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 let _ignore = state.get_proof(*proof_id)?;
             }
 
-            for address in value.referenced_substates() {
-                if !state.substate_exists(&address)? {
+            for id in value.referenced_substates() {
+                if !state.substate_exists(&id)? {
                     debug!(
                         target: LOG_TARGET,
-                        "Returned substate {address} does not exist",
+                        "Returned substate {id} does not exist",
                     );
 
-                    return Err(RuntimeError::NonExistentSubstateReturned { address });
+                    return Err(RuntimeError::NonExistentSubstateReturned { id });
                 }
             }
 
@@ -224,7 +220,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn emit_vault_events<T: Into<String>>(
         &self,
-        topic: T,
+        action: T,
         vault_id: VaultId,
         vault_lock: &LockedSubstate,
         amount: Amount,
@@ -232,37 +228,28 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         state: &mut WorkingState,
     ) -> Result<(), RuntimeError> {
         let tx_hash = self.entity_id_provider.transaction_hash();
-        let (template_address, _) = state.current_template()?;
-        let resource_address = state.get_vault(vault_lock)?.resource_address();
+        let (&template_address, _) = state.current_template()?;
+        let &resource_address = state.get_vault(vault_lock)?.resource_address();
 
-        let mut payload = Metadata::new();
-        payload.insert("vault_id", vault_id.to_string());
-        payload.insert("resource_address", resource_address.to_string());
-        payload.insert("resource_type", resource_type.to_string());
-        payload.insert("amount", amount.to_string());
+        let payload = Metadata::from_iter([
+            ("vault_id", vault_id.to_string()),
+            ("resource_address", resource_address.to_string()),
+            ("resource_type", resource_type.to_string()),
+            ("amount", amount.to_string()),
+        ]);
 
-        let topic = topic.into();
+        let action = action.into();
 
-        // we emit multiple events referencing vault and resource address
-        // this way indexers/clients can search by any one
-        let vault_event = Event::new(
+        let vault_event = Event::std(
             Some(SubstateId::Vault(vault_id)),
-            *template_address,
+            template_address,
             tx_hash,
-            topic.clone(),
-            payload.clone(),
-        );
-        let resource_event = Event::new(
-            Some(SubstateId::Resource(*resource_address)),
-            *template_address,
-            tx_hash,
-            topic,
+            "vault",
+            &action,
             payload,
         );
         debug!(target: LOG_TARGET, "Emitted vault event {}", vault_event);
-        debug!(target: LOG_TARGET, "Emitted resource event {}", resource_event);
         state.push_event(vault_event);
-        state.push_event(resource_event);
 
         Ok(())
     }
@@ -425,8 +412,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn emit_event(&self, topic: String, payload: Metadata) -> Result<(), RuntimeError> {
         // forbid template users to emit events that can be confused with the ones emitted by the engine
-        if topic.starts_with(STANDARD_TOPIC_PREFIX) {
-            return Err(RuntimeError::InvalidEventTopic { topic });
+        if Event::topic_has_std_prefix(&topic) {
+            return Err(RuntimeError::InvalidEventTopicStdPrefix { topic });
         }
 
         self.invoke_modules_on_runtime_call("emit_event")?;
@@ -443,9 +430,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let tx_hash = self.entity_id_provider.transaction_hash();
         let template_address = self.tracker.get_template_address()?;
 
-        let event = Event::new(substate_id, template_address, tx_hash, topic, payload);
-        log::log!(target: "tari::dan::engine::runtime", log::Level::Debug, "{}", event.to_string());
-        self.tracker.add_event(event);
+        self.tracker
+            .add_event(Event::new(substate_id, template_address, tx_hash, topic, payload));
         Ok(())
     }
 
@@ -1194,7 +1180,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     // Emit a builtin event for the deposit
                     self.emit_vault_events(
-                        VAULT_DEPOSIT_TOPIC.to_owned(),
+                        "deposit",
                         vault_id,
                         &vault_lock,
                         bucket.amount(),
@@ -1270,7 +1256,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     // Emit a builtin event for the withdraw
                     self.emit_vault_events(
-                        VAULT_WITHDRAW_TOPIC,
+                        "withdraw",
                         vault_id,
                         &vault_lock,
                         amount,
@@ -2248,9 +2234,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn claim_validator_fees(&self, epoch: Epoch, validator_public_key: PublicKey) -> Result<(), RuntimeError> {
+    fn claim_validator_fees(&self, pool_address: ValidatorFeePoolAddress) -> Result<(), RuntimeError> {
         self.tracker.write_with(|state| {
-            let resource = state.claim_fee(epoch, validator_public_key)?;
+            let resource = state.withdraw_all_fees_from_pool(pool_address)?;
             let bucket_id = state.new_bucket_id();
             state.new_bucket(bucket_id, resource)?;
             state.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);
@@ -2289,7 +2275,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let mut finalized = self.tracker.finalize(substates_to_persist)?;
 
         if !finalized.fee_receipt.is_paid_in_full() {
-            let reason = RejectReason::FeesNotPaid(format!(
+            let reason = RejectReason::InsufficientFeesPaid(format!(
                 "Required fees {} but {} paid",
                 finalized.fee_receipt.total_fees_charged(),
                 finalized.fee_receipt.total_fees_paid()
@@ -2345,16 +2331,36 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("publish_template")?;
         self.tracker.write_with(|state| {
-            let template_address =
-                PublishedTemplateAddress::from_author_and_code(&self.transaction_signer_public_key, &template);
+            let template_byte_size = template.len();
+            let binary_hash = hash_template_code(&template);
+            let template_address = PublishedTemplateAddress::from_author_and_binary_hash(
+                &self.transaction_signer_public_key,
+                &binary_hash,
+            );
             state.new_substate(
                 template_address,
-                SubstateValue::Template(PublishedTemplate { binary: template }),
+                SubstateValue::Template(PublishedTemplate {
+                    // We essentially store the pre-image of the template address in the substate
+                    binary_hash,
+                    author: self.transaction_signer_public_key.clone(),
+                }),
             )?;
             // Mark template substate as owned by current call stack
             let scope_mut = state.current_call_scope_mut()?;
             scope_mut.move_node_to_owned(&template_address.into())?;
+            // Publish template event
+            let mut metadata = Metadata::new();
+            metadata.insert("template_byte_size".to_string(), template_byte_size.to_string());
+            state.push_event(Event::std(
+                Some(template_address.into()),
+                template_address.as_hash(),
+                state.transaction_hash(),
+                "template",
+                "publish",
+                metadata,
+            ));
 
             Ok(())
         })

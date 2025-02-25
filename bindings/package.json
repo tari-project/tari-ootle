@@ -1,7 +1,15 @@
 {
   "name": "@tari-project/typescript-bindings",
-  "version": "1.3.0",
-  "description": "",
+  "version": "1.5.0",
+  "description": "TypeScript types synchronized to the Tari Ootle Rust codebase",
+  "homepage": "https://github.com/tari-project/tari-dan#readme",
+  "bugs": {
+    "url": "https://github.com/tari-project/tari-dan/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tari-project/tari-dan.git"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "publishConfig": {

@@ -25,6 +25,7 @@ mod transaction;
 mod transaction_id;
 mod unsigned_transaction;
 mod v1;
+mod weight;
 
 pub use builder::TransactionBuilder;
 pub use tari_engine_types::instruction::Instruction;
@@ -32,3 +33,4 @@ pub use transaction::*;
 pub use transaction_id::*;
 pub use unsigned_transaction::*;
 pub use v1::*;
+pub use weight::*;

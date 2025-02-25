@@ -9,17 +9,19 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
     borsh::indexmap as indexmap_borsh,
-    option::DisplayContainer,
+    displayable::Displayable,
     LockIntent,
     NumPreshards,
     ShardGroup,
-    SubstateRequirement,
+    SubstateAddress,
+    SubstateLockType,
+    SubstateRequirementRef,
     ToSubstateAddress,
     VersionedSubstateId,
 };
 use tari_engine_types::{serde_with, substate::SubstateId};
 
-use crate::consensus_models::QcId;
+use crate::consensus_models::{QcId, RequireLockIntentRef, SubstatePledge};
 
 const LOG_TARGET: &str = "tari::dan::consensus_models::evidence";
 
@@ -44,24 +46,34 @@ impl Evidence {
         }
     }
 
-    pub fn from_initial_substates<I, O>(num_preshards: NumPreshards, num_committees: u32, inputs: I, outputs: O) -> Self
+    pub fn from_initial_substates<'a, I, O>(
+        num_preshards: NumPreshards,
+        num_committees: u32,
+        inputs: I,
+        outputs: O,
+    ) -> Self
     where
-        I: IntoIterator<Item = SubstateRequirement>,
+        I: IntoIterator<Item = SubstateRequirementRef<'a>>,
         O: IntoIterator<Item = VersionedSubstateId>,
     {
         let mut evidence = Self::empty();
 
         for obj in inputs {
             // Version does not affect the shard group
-            let substate_address = obj.to_substate_address_zero_version();
+            let substate_address = obj.or_zero_version().to_substate_address();
             let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence.add_shard_group(sg).insert_empty_input(obj.into_substate_id());
+            evidence
+                .add_shard_group(sg)
+                .insert_unpledged_input(obj.substate_id().clone());
         }
 
         for obj in outputs {
             let substate_address = obj.to_substate_address();
             let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence.add_shard_group(sg).insert_output(obj.substate_id, obj.version);
+            let version = obj.version();
+            evidence
+                .add_shard_group(sg)
+                .insert_output(obj.into_substate_id(), version);
         }
 
         evidence.evidence.sort_keys();
@@ -76,36 +88,59 @@ impl Evidence {
         resulting_outputs: O,
     ) -> Self
     where
-        L1: LockIntent,
+        L1: LockIntent + Clone,
         I: IntoIterator<Item = L1>,
-        L2: LockIntent,
+        L2: LockIntent + Clone,
         O: IntoIterator<Item = L2>,
     {
         let mut evidence = Self::empty();
 
         for obj in resolved_inputs {
-            let substate_address = obj.to_substate_address();
-            let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence.add_shard_group(sg).insert_from_lock_intent(obj);
+            evidence.insert_from_lock_intent(num_preshards, num_committees, obj);
         }
 
         for obj in resulting_outputs {
-            let substate_address = obj.to_substate_address();
-            let sg = substate_address.to_shard_group(num_preshards, num_committees);
-            evidence.add_shard_group(sg).insert_from_lock_intent(obj);
+            evidence.insert_from_lock_intent(num_preshards, num_committees, obj);
         }
-
-        evidence.evidence.sort_keys();
 
         evidence
     }
 
-    pub fn to_includes_only_shard_group(&self, shard_group: ShardGroup) -> Self {
-        let mut evidence = Self::empty();
-        if let Some(ev) = self.get(&shard_group) {
-            *evidence.add_shard_group(shard_group) = ev.clone();
+    pub fn insert_from_lock_intent<L: LockIntent + Clone>(
+        &mut self,
+        num_preshards: NumPreshards,
+        num_committees: u32,
+        lock: L,
+    ) -> &mut Self {
+        if lock.substate_id().is_global() {
+            for sg in num_preshards.all_shard_groups_iter(num_committees) {
+                self.add_shard_group(sg).insert_from_lock_intent(lock.clone());
+            }
+        } else {
+            let substate_address = lock.to_substate_address();
+            let sg = substate_address.to_shard_group(num_preshards, num_committees);
+            self.add_shard_group(sg).insert_from_lock_intent(lock);
         }
-        evidence
+        self.evidence.sort_keys();
+        self
+    }
+
+    pub fn insert_unpledged_from_substate_id(
+        &mut self,
+        num_preshards: NumPreshards,
+        num_committees: u32,
+        substate_id: SubstateId,
+    ) -> &mut Self {
+        if substate_id.is_global() {
+            for sg in num_preshards.all_shard_groups_iter(num_committees) {
+                self.add_shard_group(sg).insert_unpledged_input(substate_id.clone());
+            }
+        } else {
+            let substate_address = SubstateAddress::from_substate_id(&substate_id, 0);
+            let sg = substate_address.to_shard_group(num_preshards, num_committees);
+            self.add_shard_group(sg).insert_unpledged_input(substate_id);
+        }
+        self
     }
 
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = (&ShardGroup, &SubstateId, &Option<EvidenceInputLockData>)> {
@@ -126,7 +161,7 @@ impl Evidence {
         })
     }
 
-    pub fn all_objects_accepted(&self) -> bool {
+    pub fn all_shard_groups_accepted(&self) -> bool {
         // CASE: all inputs and outputs are accept justified. If they have been accept justified, they have implicitly
         // been prepare justified. This may happen if the local node is only involved in outputs (and therefore
         // sequences using the LocalAccept foreign proposal)
@@ -140,6 +175,12 @@ impl Evidence {
             // may be implicit (null) if the local node is only involved in outputs (and therefore sequences using the LocalAccept
             // foreign proposal)
             .all(|e| e.is_prepare_justified() || e.is_accept_justified())
+    }
+
+    pub fn some_shard_groups_prepared(&self) -> bool {
+        self.evidence
+            .values()
+            .any(|e| e.is_prepare_justified() || e.is_accept_justified())
     }
 
     pub fn all_input_shard_groups_prepared(&self) -> bool {
@@ -162,6 +203,10 @@ impl Evidence {
         self.evidence.get(&shard_group).map_or(true, |e| e.inputs().is_empty())
     }
 
+    pub fn is_committee_input_only(&self, shard_group: ShardGroup) -> bool {
+        self.evidence.get(&shard_group).map_or(true, |e| e.outputs().is_empty())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.evidence.is_empty()
     }
@@ -178,8 +223,19 @@ impl Evidence {
         self.evidence.get_mut(shard_group)
     }
 
+    pub fn abort(&mut self) -> &mut Self {
+        for (_, ev_mut) in &mut self.evidence {
+            ev_mut.abort();
+        }
+        self
+    }
+
     pub fn has(&self, shard_group: &ShardGroup) -> bool {
         self.evidence.contains_key(shard_group)
+    }
+
+    pub fn has_inputs(&self, shard_group: ShardGroup) -> bool {
+        self.evidence.get(&shard_group).is_some_and(|e| !e.inputs.is_empty())
     }
 
     pub fn has_and_not_empty(&self, shard_group: &ShardGroup) -> bool {
@@ -203,21 +259,21 @@ impl Evidence {
     }
 
     pub fn add_shard_group(&mut self, shard_group: ShardGroup) -> &mut ShardGroupEvidence {
-        self.evidence.entry(shard_group).or_default()
+        if !self.evidence.contains_key(&shard_group) {
+            // We cannot use entry() because we want to insert sorted
+            self.evidence.insert_sorted(shard_group, ShardGroupEvidence::default());
+        }
+        self.evidence.get_mut(&shard_group).expect("added above")
     }
 
     pub fn shard_groups_iter(&self) -> impl Iterator<Item = &ShardGroup> {
         self.evidence.keys()
     }
 
-    pub fn missing_evidence_iter(&self) -> impl Iterator<Item = &ShardGroup> {
-        self.evidence.iter().filter_map(|(sg, e)| {
-            if e.prepare_qc.is_none() || e.accept_qc.is_none() {
-                Some(sg)
-            } else {
-                None
-            }
-        })
+    pub fn input_shard_groups_iter(&self) -> impl Iterator<Item = &ShardGroup> {
+        self.evidence
+            .iter()
+            .filter_map(|(sg, e)| if e.inputs.is_empty() { None } else { Some(sg) })
     }
 
     pub fn num_shard_groups(&self) -> usize {
@@ -367,22 +423,25 @@ pub struct ShardGroupEvidence {
 
 impl ShardGroupEvidence {
     pub fn insert_from_lock_intent<T: LockIntent>(&mut self, lock: T) -> &mut Self {
-        if lock.lock_type().is_input() {
+        self.insert(lock.substate_id().clone(), lock.version_to_lock(), lock.lock_type())
+    }
+
+    pub fn insert(&mut self, substate_id: SubstateId, version_to_lock: u32, lock_type: SubstateLockType) -> &mut Self {
+        if lock_type.is_input() {
             self.inputs.insert_sorted(
-                lock.substate_id().clone(),
+                substate_id,
                 Some(EvidenceInputLockData {
-                    is_write: lock.lock_type().is_write(),
-                    version: lock.version_to_lock(),
+                    is_write: lock_type.is_write(),
+                    version: version_to_lock,
                 }),
             );
         } else {
-            self.outputs
-                .insert_sorted(lock.substate_id().clone(), lock.version_to_lock());
+            self.outputs.insert_sorted(substate_id, version_to_lock);
         }
         self
     }
 
-    pub fn insert_empty_input(&mut self, substate_id: SubstateId) -> &mut Self {
+    pub fn insert_unpledged_input(&mut self, substate_id: SubstateId) -> &mut Self {
         self.inputs.insert_sorted(substate_id, None);
         self
     }
@@ -408,8 +467,36 @@ impl ShardGroupEvidence {
         &self.inputs
     }
 
+    pub fn all_pledged_inputs_iter(&self) -> impl Iterator<Item = (&SubstateId, &EvidenceInputLockData)> {
+        self.inputs.iter().filter_map(|(id, ev)| Some((id, ev.as_ref()?)))
+    }
+
+    pub fn input_lock_intents(&self) -> impl Iterator<Item = RequireLockIntentRef<'_>> + '_ {
+        self.inputs.iter().filter_map(|(substate_id, e)| {
+            e.as_ref()
+                .map(|lock| RequireLockIntentRef::new(substate_id, lock.version, lock.as_lock_type()))
+        })
+    }
+
     pub fn outputs(&self) -> &IndexMap<SubstateId, u32> {
         &self.outputs
+    }
+
+    pub fn output_pledge_iter(&self) -> impl Iterator<Item = SubstatePledge> + '_ {
+        self.outputs
+            .iter()
+            .map(|(substate_id, version)| SubstatePledge::Output {
+                substate_id: VersionedSubstateId::new(substate_id.clone(), *version),
+            })
+    }
+
+    pub fn abort(&mut self) -> &mut Self {
+        for (_, input) in &mut self.inputs {
+            *input = None;
+        }
+
+        self.outputs.clear();
+        self
     }
 
     fn sort_substates(&mut self) {
@@ -512,6 +599,16 @@ impl Display for ShardGroupEvidence {
 pub struct EvidenceInputLockData {
     pub is_write: bool,
     pub version: u32,
+}
+
+impl EvidenceInputLockData {
+    pub fn as_lock_type(&self) -> SubstateLockType {
+        if self.is_write {
+            SubstateLockType::Write
+        } else {
+            SubstateLockType::Read
+        }
+    }
 }
 
 impl Display for EvidenceInputLockData {

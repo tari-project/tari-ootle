@@ -55,12 +55,13 @@ use tari_template_lib::{
 };
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
-use tari_utilities::{hex::to_hex, ByteArray};
+use tari_utilities::ByteArray;
 use tari_wallet_daemon_client::{
     types::{
         AccountGetResponse,
         AccountsTransferRequest,
         ConfidentialTransferRequest,
+        SettingsGetResponse,
         TransactionGetResultRequest,
         TransactionSubmitDryRunRequest,
         TransactionSubmitRequest,
@@ -241,7 +242,10 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
         fee_account = client.accounts_get_default().await?.account;
     }
 
+    let SettingsGetResponse { network, .. } = client.get_settings().await?;
+
     let mut builder = Transaction::builder()
+        .for_network(network.byte)
         .fee_transaction_pay_from_component(
             fee_account.address.as_component_address().unwrap(),
             Amount::try_from(common.max_fee.unwrap_or(1000))?,
@@ -273,6 +277,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
                 signing_key_index: None,
                 autofill_inputs: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
+                detect_inputs_use_unversioned: true,
                 proof_ids: vec![],
             })
             .await?;
@@ -308,7 +313,10 @@ async fn handle_submit_manifest(
         fee_account = client.accounts_get_default().await?.account;
     }
 
+    let SettingsGetResponse { network, .. } = client.get_settings().await?;
+
     let builder = Transaction::builder()
+        .for_network(network.byte)
         .with_fee_instructions(
             instructions
                 .fee_instructions
@@ -337,6 +345,7 @@ async fn handle_submit_manifest(
                 signing_key_index: None,
                 autofill_inputs: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
+                detect_inputs_use_unversioned: true,
                 proof_ids: vec![],
             })
             .await?;
@@ -533,16 +542,12 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
                 let referenced_address = SubstateId::from(index.referenced_address().clone());
                 println!("      ▶ NFT index {} referencing {}", address, referenced_address);
             },
-            SubstateValue::FeeClaim(fee_claim) => {
-                println!("      ▶ Fee claim: {}", address);
-                println!("        ▶ Amount: {}", fee_claim.amount);
-                println!(
-                    "        ▶ validator: {}",
-                    to_hex(fee_claim.validator_public_key.as_bytes())
-                );
-            },
             SubstateValue::Template(_) => {
                 println!("      ▶ Template: {}", address);
+            },
+            SubstateValue::ValidatorFeePool(pool) => {
+                println!("      ▶ Validator Fee Pool: {}", address);
+                println!("        ▶ Total fees: {}", pool.amount);
             },
         }
         println!();
@@ -835,8 +840,8 @@ impl CliArg {
                 SubstateId::NonFungible(v) => arg!(v),
                 SubstateId::NonFungibleIndex(v) => arg!(v),
                 SubstateId::TransactionReceipt(v) => arg!(v),
-                SubstateId::FeeClaim(v) => arg!(v),
                 SubstateId::Template(v) => arg!(v),
+                SubstateId::ValidatorFeePool(v) => arg!(v),
             },
             CliArg::TemplateAddress(v) => arg!(v),
             CliArg::NonFungibleId(v) => arg!(v),

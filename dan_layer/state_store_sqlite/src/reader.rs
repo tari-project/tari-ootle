@@ -7,9 +7,7 @@ use std::{
     ops::RangeInclusive,
 };
 
-use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{
-    dsl,
     query_builder::SqlQuery,
     sql_query,
     sql_types::{BigInt, Text},
@@ -30,15 +28,17 @@ use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
+    optional::Optional,
     shard::Shard,
     Epoch,
     NodeAddressable,
     NodeHeight,
     ShardGroup,
     SubstateAddress,
-    SubstateRequirement,
+    SubstateLockType,
     ToSubstateAddress,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
     consensus_models::{
@@ -69,7 +69,6 @@ use tari_dan_storage::{
         StateTransitionId,
         SubstateChange,
         SubstateLock,
-        SubstatePledge,
         SubstatePledges,
         SubstateRecord,
         TransactionPoolConfirmedStage,
@@ -77,7 +76,6 @@ use tari_dan_storage::{
         TransactionPoolStage,
         TransactionRecord,
         ValidatorConsensusStats,
-        VersionedSubstateIdLockIntent,
         Vote,
     },
     Ordering,
@@ -91,7 +89,7 @@ use tari_utilities::{hex::Hex, ByteArray};
 
 use crate::{
     error::SqliteStorageError,
-    serialization::{deserialize_hex_try_from, deserialize_json, parse_from_string, serialize_hex},
+    serialization::{deserialize_hex_try_from, deserialize_json, serialize_hex},
     sql_models,
     sqlite_transaction::SqliteTransaction,
 };
@@ -228,7 +226,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> SqliteState
         ))
     }
 
-    fn sql_frag_for_in_statement<'i, I: Iterator<Item = &'i str> + ExactSizeIterator>(
+    fn sql_frag_for_in_statement<T: AsRef<str>, I: Iterator<Item = T> + ExactSizeIterator>(
         &self,
         values: I,
         item_size: usize,
@@ -237,7 +235,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> SqliteState
         let mut sql_frag = String::with_capacity((len * item_size + len * 3 + len).saturating_sub(1));
         for (i, value) in values.enumerate() {
             sql_frag.push('"');
-            sql_frag.push_str(value);
+            sql_frag.push_str(value.as_ref());
             sql_frag.push('"');
             if i < len - 1 {
                 sql_frag.push(',');
@@ -530,9 +528,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<ForeignProposal>, StorageError> {
         use crate::schema::{foreign_proposals, quorum_certificates};
 
+        let mut block_ids = block_ids.into_iter().peekable();
+        if block_ids.peek().is_none() {
+            return Ok(vec![]);
+        }
+
         let foreign_proposals = foreign_proposals::table
             .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
-            .filter(foreign_proposals::block_id.eq_any(block_ids.into_iter().map(serialize_hex)))
+            .filter(foreign_proposals::block_id.eq_any(block_ids.map(serialize_hex)))
             .get_results::<(sql_models::ForeignProposal, Option<sql_models::QuorumCertificate>)>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "foreign_proposals_get_any",
@@ -575,7 +578,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let foreign_proposals = foreign_proposals::table
             .filter(foreign_proposals::epoch.le(epoch.as_u64() as i64))
-            .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
+            .filter(
+                foreign_proposals::status
+                    .eq(ForeignProposalStatus::New.to_string())
+                    .or(foreign_proposals::status.eq(ForeignProposalStatus::Proposed.to_string())),
+            )
             .count()
             .limit(1)
             .get_result::<i64>(self.connection())
@@ -732,7 +739,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<TransactionRecord>, StorageError> {
         use crate::schema::transactions;
 
-        let tx_ids: Vec<String> = tx_ids.into_iter().map(serialize_hex).collect();
+        let mut tx_ids = tx_ids.into_iter().map(serialize_hex).peekable();
+        if tx_ids.peek().is_none() {
+            return Ok(vec![]);
+        }
 
         let transactions = transactions::table
             .filter(transactions::transaction_id.eq_any(tx_ids))
@@ -1174,27 +1184,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         txs.into_iter().map(|s| deserialize_hex_try_from(&s)).collect()
     }
 
-    fn blocks_get_total_leader_fee_for_epoch(
-        &self,
-        epoch: Epoch,
-        validator_public_key: &PublicKey,
-    ) -> Result<u64, StorageError> {
-        use crate::schema::blocks;
-
-        let total_fee = blocks::table
-            .select(diesel::dsl::sum(blocks::total_leader_fee))
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::proposed_by.eq(serialize_hex(validator_public_key.as_bytes())))
-            .first::<Option<BigDecimal>>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_fees_get_total_fee_for_epoch",
-                source: e,
-            })?
-            .unwrap_or(BigDecimal::default());
-
-        Ok(total_fee.to_u64().expect("total fee overflows u64"))
-    }
-
     fn blocks_get_any_with_epoch_range(
         &self,
         epoch_range: RangeInclusive<Epoch>,
@@ -1457,7 +1446,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         let commit_block = self.get_commit_block()?;
-        let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
+        let block_ids = self.get_block_ids_between(commit_block.block_id(), block_id, 2000)?;
 
         let diff = block_diffs::table
             .filter(block_diffs::block_id.eq_any(block_ids))
@@ -1466,6 +1455,39 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .first::<sql_models::BlockDiff>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "block_diffs_get_last_change_for_substate",
+                source: e,
+            })?;
+
+        sql_models::BlockDiff::try_convert_change(diff)
+    }
+
+    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        use crate::schema::block_diffs;
+        if !Block::record_exists(self, block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "block_diffs_get_change_for_versioned_substate: Block {} does not exist",
+                    block_id
+                ),
+            });
+        }
+
+        let commit_block = self.get_commit_block()?;
+        let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
+        let substate_ref = substate_id.into();
+
+        let diff = block_diffs::table
+            .filter(block_diffs::block_id.eq_any(block_ids))
+            .filter(block_diffs::substate_id.eq(substate_ref.substate_id.to_string()))
+            .filter(block_diffs::version.eq(substate_ref.version as i32))
+            .order_by(block_diffs::id.desc())
+            .first::<sql_models::BlockDiff>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "block_diffs_get_change_for_versioned_substate",
                 source: e,
             })?;
 
@@ -1487,30 +1509,35 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         deserialize_json(&qc_json)
     }
 
-    fn quorum_certificates_get_all<'a, I: IntoIterator<Item = &'a QcId>>(
-        &self,
-        qc_ids: I,
-    ) -> Result<Vec<QuorumCertificate>, StorageError> {
+    fn quorum_certificates_get_all<'a, I>(&self, qc_ids: I) -> Result<Vec<QuorumCertificate>, StorageError>
+    where
+        I: IntoIterator<Item = &'a QcId>,
+        I::IntoIter: ExactSizeIterator,
+    {
         use crate::schema::quorum_certificates;
 
-        let qc_ids: Vec<String> = qc_ids.into_iter().map(serialize_hex).collect();
+        let qc_ids = qc_ids.into_iter();
+        let num_qcs = qc_ids.len();
+        if num_qcs == 0 {
+            return Ok(vec![]);
+        }
 
         let qc_json = quorum_certificates::table
             .select(quorum_certificates::json)
-            .filter(quorum_certificates::qc_id.eq_any(&qc_ids))
+            .filter(quorum_certificates::qc_id.eq_any(qc_ids.map(serialize_hex)))
             .get_results::<String>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "quorum_certificates_get_all",
                 source: e,
             })?;
 
-        if qc_json.len() != qc_ids.len() {
+        if qc_json.len() != num_qcs {
             return Err(SqliteStorageError::NotAllItemsFound {
                 items: "QCs",
                 operation: "quorum_certificates_get_all",
                 details: format!(
                     "quorum_certificates_get_all: expected {} quorum certificates, got {}",
-                    qc_ids.len(),
+                    num_qcs,
                     qc_json.len()
                 ),
             }
@@ -1602,15 +1629,40 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError> {
-        use crate::schema::transaction_pool;
+        use crate::schema::{leaf_blocks, transaction_pool};
         let txs = transaction_pool::table
             .get_results::<sql_models::TransactionPoolRecord>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "transaction_pool_get_all",
                 source: e,
             })?;
-        // TODO: need to get the updates - this is just used in JRPC so it doesnt matter too much
-        txs.into_iter().map(|tx| tx.try_convert(None)).collect()
+
+        // There may be no locked block, in which case we assume there are no updates either
+        let mut updates = IndexMap::new();
+        if let Some(locked) = self.get_current_locked_block().optional()? {
+            let leaf_block = leaf_blocks::table
+                .select(leaf_blocks::block_id)
+                .order_by(leaf_blocks::id.desc())
+                .first::<String>(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "leaf_block_get",
+                    source: e,
+                })?;
+            let block_id = deserialize_hex_try_from(&leaf_block)?;
+
+            updates = self.get_transaction_atom_state_updates_between_blocks(
+                &locked.block_id,
+                &block_id,
+                txs.iter().map(|s| s.transaction_id.as_str()),
+            )?;
+        }
+
+        txs.into_iter()
+            .map(|tx| {
+                let maybe_update = updates.swap_remove(&tx.transaction_id);
+                tx.try_convert(maybe_update)
+            })
+            .collect()
     }
 
     fn transaction_pool_get_many_ready(
@@ -1640,9 +1692,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         debug!(
             target: LOG_TARGET,
-            "🛢️ transaction_pool_get_many_ready: block_id={}, in progress ready_txs={}",
+            "🛢️ transaction_pool_get_many_ready: block_id={}, in progress ready_txs={}, max={}",
             block_id,
-            ready_txs.len()
+            ready_txs.len(),
+            max_txs
         );
 
         // Fetch all applicable block ids between the locked block and the given block
@@ -1678,10 +1731,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         if new_limit == 0 {
             debug!(
                 target: LOG_TARGET,
-                "transaction_pool_get_many_ready: locked.block_id={}, leaf.block_id={}, len(ready_txs)={}",
+                "transaction_pool_get_many_ready: locked.block_id={}, leaf.block_id={}, len(ready_txs)={}, max={}",
                 locked.block_id,
                 block_id,
-                num_ready
+                num_ready,
+                max_txs
             );
 
             return ready_txs.collect();
@@ -1706,11 +1760,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         debug!(
             target: LOG_TARGET,
-            "🛢️ transaction_pool_get_many_ready: block_id={}, new ready_txs={}, total ready_txs={}, updates={}",
+            "🛢️ transaction_pool_get_many_ready: block_id={}, new ready_txs={}, total ready_txs={}, max={}, updates={}",
             block_id,
             new_txs.len(),
             num_ready + new_txs.len(),
-            updates.len()
+            max_txs,
+            updates.len(),
         );
 
         ready_txs
@@ -1727,11 +1782,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
-    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError> {
+    fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, StorageError> {
         use crate::schema::transaction_pool_state_updates;
+
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("transaction_pool_has_pending_state_updates: block {block_id} does not exist"),
+            });
+        }
+
+        let commit_block = self.get_commit_block()?;
+        let block_ids = self.get_block_ids_with_commands_between(commit_block.block_id(), block_id)?;
 
         let count = transaction_pool_state_updates::table
             .filter(transaction_pool_state_updates::is_applied.eq(false))
+            .filter(transaction_pool_state_updates::block_id.eq_any(block_ids))
             .count()
             .limit(1)
             .get_result::<i64>(self.connection())
@@ -1748,21 +1813,33 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         stage: Option<TransactionPoolStage>,
         is_ready: Option<bool>,
         confirmed_stage: Option<Option<TransactionPoolConfirmedStage>>,
+        skip_lock_conflicted: bool,
     ) -> Result<usize, StorageError> {
-        use crate::schema::transaction_pool;
+        use crate::schema::{lock_conflicts, transaction_pool};
 
         let mut query = transaction_pool::table.into_boxed();
         if let Some(stage) = stage {
+            let stage_str = stage.to_string();
             query = query.filter(
                 transaction_pool::pending_stage
-                    .eq(stage.to_string())
+                    .eq(stage_str.clone())
                     .or(transaction_pool::pending_stage
                         .is_null()
-                        .and(transaction_pool::stage.eq(stage.to_string()))),
+                        .and(transaction_pool::stage.eq(stage_str))),
             );
         }
         if let Some(is_ready) = is_ready {
             query = query.filter(transaction_pool::is_ready.eq(is_ready));
+        }
+        if skip_lock_conflicted {
+            // Filter out any transactions that are in lock conflict
+            query = query.filter(
+                transaction_pool::transaction_id.ne_all(
+                    lock_conflicts::table
+                        .select(lock_conflicts::transaction_id)
+                        .filter(lock_conflicts::is_local_only.eq(false)),
+                ),
+            )
         }
 
         match confirmed_stage {
@@ -1894,27 +1971,27 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         substate.try_into()
     }
 
-    fn substates_get_any(
+    fn substates_get_any<'a, I: IntoIterator<Item = &'a VersionedSubstateIdRef<'a>>>(
         &self,
-        substate_ids: &HashSet<SubstateRequirement>,
+        substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
         use crate::schema::substates;
+
+        let mut substate_ids = substate_ids.into_iter().peekable();
+        // NB: if we don't check this and substate_ids is empty, we'll return all substates!
+        if substate_ids.peek().is_none() {
+            return Ok(vec![]);
+        }
 
         let mut query = substates::table.into_boxed();
 
         for id in substate_ids {
             let id_str = id.substate_id.to_string();
-            match id.version() {
-                Some(v) => {
-                    query = query.or_filter(substates::substate_id.eq(id_str).and(substates::version.eq(v as i32)));
-                },
-                None => {
-                    // Select the max known version
-                    query = query.or_filter(substates::substate_id.eq(id_str.clone()).and(substates::version.eq(
-                        dsl::sql("SELECT MAX(version) FROM substates WHERE substate_id = ?").bind::<Text, _>(id_str),
-                    )));
-                },
-            }
+            query = query.or_filter(
+                substates::substate_id
+                    .eq(id_str)
+                    .and(substates::version.eq(id.version() as i32)),
+            );
         }
 
         let results = query
@@ -1927,10 +2004,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         results.into_iter().map(TryInto::try_into).collect()
     }
 
-    fn substates_get_any_max_version<'a, I: IntoIterator<Item = &'a SubstateId>>(
-        &self,
-        substate_ids: I,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
+    fn substates_get_any_max_version<'a, I>(&self, substate_ids: I) -> Result<Vec<SubstateRecord>, StorageError>
+    where
+        I: IntoIterator<Item = &'a SubstateId>,
+        I::IntoIter: ExactSizeIterator,
+    {
         use crate::schema::substates;
         #[derive(Debug, QueryableByName)]
         struct MaxVersionAndId {
@@ -1941,11 +2019,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             id: i32,
         }
 
-        let substate_ids = substate_ids.into_iter().map(ToString::to_string).collect::<Vec<_>>();
-        if substate_ids.is_empty() {
+        let mut substate_ids = substate_ids.into_iter().peekable();
+        if substate_ids.peek().is_none() {
             return Ok(Vec::new());
         }
-        let frag = self.sql_frag_for_in_statement(substate_ids.iter().map(|s| s.as_str()), 32);
+        let frag = self.sql_frag_for_in_statement(substate_ids.map(|s| s.to_string()), 32);
         let max_versions_and_ids = sql_query(format!(
             r#"
                 SELECT MAX(version) as max_version, id
@@ -1967,16 +2045,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 operation: "substates_get_any_max_version",
                 source: e,
             })?;
-
-        // let results = substates::table
-        //     .group_by(substates::substate_id)
-        //     .select((substates::all_columns, dsl::max(substates::version))
-        //     .filter(substates::substate_id.eq_any(substate_ids.into_iter().map(ToString::to_string)))
-        //     .get_results::<(sql_models::SubstateRecord, Option<i32>)>(self.connection())
-        //     .map_err(|e| SqliteStorageError::DieselError {
-        //         operation: "substates_get_any_max_version",
-        //         source: e,
-        //     })?;
 
         results.into_iter().map(TryInto::try_into).collect()
     }
@@ -2026,16 +2094,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<bool, StorageError> {
         use crate::schema::substates;
 
+        let mut addresses = addresses.into_iter().peekable();
+        if addresses.peek().is_none() {
+            return Ok(false);
+        }
+
         let count = substates::table
             .count()
-            .filter(
-                substates::address.eq_any(
-                    addresses
-                        .into_iter()
-                        .map(|v| v.borrow().to_substate_address())
-                        .map(serialize_hex),
-                ),
-            )
+            .filter(substates::address.eq_any(addresses.map(|v| v.borrow().to_substate_address()).map(serialize_hex)))
             .limit(1)
             .get_result::<i64>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -2196,6 +2262,45 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         recs.into_iter()
             .map(|(lock, maybe_substate)| lock.try_into_locked_substate_value(maybe_substate))
             .collect()
+    }
+
+    fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        exclude_transaction_id: Option<&TransactionId>,
+        substate_ids: I,
+        exclude_local_only: bool,
+    ) -> Result<Option<TransactionId>, StorageError> {
+        use crate::schema::substate_locks;
+
+        let mut substate_ids = substate_ids.into_iter().peekable();
+        if substate_ids.peek().is_none() {
+            return Ok(None);
+        }
+        let substate_ids = substate_ids.map(|id| id.to_string());
+        let mut query = substate_locks::table
+            .select(substate_locks::transaction_id)
+            .filter(substate_locks::substate_id.eq_any(substate_ids))
+            .filter(substate_locks::lock.eq(SubstateLockType::Write.as_str()))
+            .into_boxed();
+
+        if let Some(exclude_transaction_id) = exclude_transaction_id {
+            query = query.filter(substate_locks::transaction_id.ne(serialize_hex(exclude_transaction_id)));
+        }
+
+        if exclude_local_only {
+            query = query.filter(substate_locks::is_local_only.eq(false));
+        }
+
+        let transaction_id = query
+            .limit(1)
+            .get_result::<String>(self.connection())
+            .optional()
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "substate_locks_has_any_write_locks_for_substates",
+                source: e,
+            })?;
+
+        transaction_id.map(|id| deserialize_hex_try_from(&id)).transpose()
     }
 
     fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError> {
@@ -2369,7 +2474,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         checkpoint.try_into()
     }
 
-    fn foreign_substate_pledges_exists_for_address<T: ToSubstateAddress>(
+    fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
         transaction_id: &TransactionId,
         address: T,
@@ -2391,6 +2496,34 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(count > 0)
     }
 
+    fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I>(
+        &self,
+        transaction_id: &TransactionId,
+        substate_ids: I,
+    ) -> Result<SubstatePledges, StorageError>
+    where
+        I: IntoIterator<Item = &'a SubstateId>,
+    {
+        use crate::schema::foreign_substate_pledges;
+
+        let mut substate_ids = substate_ids.into_iter().map(|a| a.to_string()).peekable();
+        if substate_ids.peek().is_none() {
+            return Ok(SubstatePledges::new());
+        }
+
+        let pledges = foreign_substate_pledges::table
+            .filter(foreign_substate_pledges::transaction_id.eq(serialize_hex(transaction_id)))
+            .filter(foreign_substate_pledges::substate_id.eq_any(substate_ids))
+            .filter(foreign_substate_pledges::lock_type.eq(SubstateLockType::Write.as_str()))
+            .get_results::<sql_models::ForeignSubstatePledge>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "foreign_substate_pledges_any_pledged_to_different_transaction",
+                source: e,
+            })?;
+
+        pledges.into_iter().map(TryInto::try_into).collect()
+    }
+
     fn foreign_substate_pledges_get_all_by_transaction_id(
         &self,
         transaction_id: &TransactionId,
@@ -2405,24 +2538,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 source: e,
             })?;
 
-        #[allow(clippy::mutable_key_type)]
-        let mut pledges = SubstatePledges::with_capacity(recs.len());
-        for pledge in recs {
-            let substate_id = parse_from_string::<SubstateId>(&pledge.substate_id)?;
-            let version = pledge.version as u32;
-            let id = VersionedSubstateId::new(substate_id, version);
-            let lock_type = parse_from_string(&pledge.lock_type)?;
-            let lock_intent = VersionedSubstateIdLockIntent::new(id, lock_type, true);
-            let substate_value = pledge.substate_value.as_deref().map(deserialize_json).transpose()?;
-            let pledge = SubstatePledge::try_create(lock_intent.clone(), substate_value).ok_or_else(|| {
-                StorageError::DataInconsistency {
-                    details: format!("Invalid input substate pledge for {lock_intent}"),
-                }
-            })?;
-            pledges.push(pledge);
-        }
-
-        Ok(pledges)
+        recs.into_iter().map(TryInto::try_into).collect()
     }
 
     fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError> {

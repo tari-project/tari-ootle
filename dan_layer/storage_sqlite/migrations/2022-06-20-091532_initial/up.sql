@@ -66,12 +66,9 @@ create table templates
     template_type     text                              not null,
     author_public_key blob                              not null,
 
-    -- compiled template code as a WASM binary
-    compiled_code     blob                              null,
-    -- flow json
-    flow_json         text                              null,
+    -- template code for the given template type
+    code              blob                              null,
     status            VARCHAR(20)                       NOT NULL DEFAULT 'New',
-    manifest          text                              null,
     added_at          timestamp                         NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

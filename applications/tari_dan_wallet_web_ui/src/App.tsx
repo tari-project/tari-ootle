@@ -60,7 +60,7 @@ export const breadcrumbRoutes = [
   },
   {
     label: "Account Details",
-    path: "/accounts/:name",
+    path: "/accounts/:id",
     dynamic: true,
   },
   {
@@ -86,18 +86,13 @@ export const breadcrumbRoutes = [
 ];
 
 function App() {
-  const { popup, setPopup } = useAccountStore();
-
-  const handleClose = () => {
-    setPopup({ visible: false });
-  };
   return (
     <div>
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<AssetVault />} />
           <Route path="accounts" element={<Accounts />} />
-          <Route path="accounts/:name" element={<AccountDetails />} />
+          <Route path="accounts/:id" element={<AccountDetails />} />
           <Route path="keys" element={<Keys />} />
           <Route path="access-tokens" element={<AccessTokensLayout />} />
           <Route path="transactions" element={<Transactions />} />
@@ -107,12 +102,6 @@ function App() {
           <Route path="*" element={<ErrorPage />} />
         </Route>
       </Routes>
-      <Dialog open={popup.visible || false} onClose={handleClose}>
-        <DialogTitle>
-          {popup?.error ? <div style={{ color: "red" }}>{popup?.title}</div> : <div>{popup?.title}</div>}
-        </DialogTitle>
-        <DialogContent className="dialog-content">{popup?.message}</DialogContent>
-      </Dialog>
     </div>
   );
 }

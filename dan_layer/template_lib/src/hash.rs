@@ -46,6 +46,10 @@ impl Hash {
         self.0
     }
 
+    pub const fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+
     pub fn from_hex(s: &str) -> Result<Self, HashParseError> {
         if s.len() != Self::LENGTH * 2 {
             return Err(HashParseError);

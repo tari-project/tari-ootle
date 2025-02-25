@@ -28,11 +28,12 @@ fn exit_on_ci() {
     }
 }
 
-const BUILD: &[(&str, &[&str])] = &[
+const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["install"]),
     ("../../bindings", &["run", "ts-build"]),
     ("../../clients/javascript/wallet_daemon_client", &["install"]),
     ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
+    ("../tari_dan_wallet_web_ui", &["install"]),
     ("../tari_dan_wallet_web_ui", &["run", "build"]),
 ];
 
@@ -47,12 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
-    for (target, args) in BUILD {
-        if let Err(error) = Command::new(npm).args(["install"]).current_dir(target).status() {
-            println!("cargo:warning='npm install' error : {:?}", error);
-            exit_on_ci();
-            break;
-        }
+    for (target, args) in NPM_COMMANDS {
         match Command::new(npm).args(*args).current_dir(target).output() {
             Ok(output) if !output.status.success() => {
                 println!(
@@ -64,13 +60,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
                 println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
                 exit_on_ci();
-                break;
+                // Ignore it unless on CI
+                continue;
             },
             Err(error) => {
                 println!("cargo:warning='npm run build' error : {:?}", error);
                 println!("cargo:warning=The web ui will not be included!");
                 exit_on_ci();
-                break;
+                continue;
             },
             _ => {},
         }

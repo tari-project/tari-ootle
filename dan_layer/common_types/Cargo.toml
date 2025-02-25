@@ -16,11 +16,7 @@ tari_engine_types = { workspace = true }
 tari_hashing = { workspace = true }
 tari_mmr = { workspace = true }
 
-libp2p-identity = { workspace = true, features = [
-    "sr25519",
-    "serde",
-    "peerid",
-] }
+libp2p-identity = { workspace = true, features = ["sr25519", "serde", "peerid"] }
 
 borsh = { workspace = true }
 ethnum = { workspace = true }

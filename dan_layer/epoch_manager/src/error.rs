@@ -3,6 +3,7 @@
 
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{optional::IsNotFoundError, Epoch, SubstateAddress};
+use tari_dan_storage::StorageError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum EpochManagerError {
@@ -10,8 +11,6 @@ pub enum EpochManagerError {
     ReceiveError,
     #[error("Could not send to channel")]
     SendError,
-    #[error("Base node errored: {0}")]
-    BaseNodeError(anyhow::Error),
     #[error("No epoch found {0:?}")]
     NoEpochFound(Epoch),
     #[error("No committee found for shard {0:?}")]
@@ -20,8 +19,8 @@ pub enum EpochManagerError {
     UnexpectedRequest,
     #[error("Unexpected response")]
     UnexpectedResponse,
-    #[error("SQLite Storage error: {0}")]
-    SqlLiteStorageError(anyhow::Error),
+    #[error("Storage error: {0}")]
+    StorageError(StorageError),
     #[error("No validator nodes found for current shard key")]
     ValidatorNodesNotFound,
     #[error("No committee VNs found for address {substate_address} and epoch {epoch}")]
@@ -56,6 +55,10 @@ impl EpochManagerError {
 
 impl IsNotFoundError for EpochManagerError {
     fn is_not_found_error(&self) -> bool {
-        self.is_not_registered_error()
+        match self {
+            Self::ValidatorNodeNotRegistered { .. } => true,
+            Self::StorageError(err) => err.is_not_found_error(),
+            _ => false,
+        }
     }
 }

@@ -22,10 +22,11 @@ use tari_dan_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    SubstateLockType,
     VersionedSubstateId,
 };
 use tari_dan_storage::{
-    consensus_models::{BlockId, Decision, QcId, SubstateRecord, SubstateRequirementLockIntent, TransactionRecord},
+    consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -87,9 +88,9 @@ impl Test {
             transaction: transaction.transaction().clone(),
             decision,
             fee,
-            inputs: inputs
+            input_locks: inputs
                 .iter()
-                .map(|input| SubstateRequirementLockIntent::write(input.clone(), input.version()))
+                .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
                 .collect(),
             new_outputs: new_outputs.clone(),
         });
@@ -117,14 +118,14 @@ impl Test {
         &self,
         dest: TestVnDestination,
         transaction: &TransactionRecord,
-        inputs: Vec<SubstateRequirementLockIntent>,
+        input_locks: Vec<(SubstateId, SubstateLockType)>,
         new_outputs: Vec<SubstateId>,
     ) -> &Self {
         self.add_execution_at_destination(dest, ExecuteSpec {
             transaction: transaction.transaction().clone(),
             decision: transaction.current_decision(),
-            fee: transaction.transaction_fee().unwrap_or(0),
-            inputs,
+            fee: transaction.transaction_fee().unwrap_or(1),
+            input_locks,
             new_outputs,
         });
         self
@@ -169,10 +170,10 @@ impl Test {
             .map(|id| {
                 let value = make_test_component(id.substate_id().as_component_address().unwrap().entity_id());
                 SubstateRecord::new(
-                    id.substate_id.clone(),
-                    id.version,
+                    id.substate_id().clone(),
+                    id.version(),
                     value,
-                    Shard::zero(),
+                    Shard::first(),
                     Epoch(0),
                     NodeHeight(0),
                     BlockId::zero(),
@@ -481,9 +482,25 @@ impl Test {
         }
     }
 
-    pub fn assert_all_validators_committed(&self) {
+    pub fn assert_all_validators_committed(&self, tx_id: &TransactionId) {
         self.validators.values().for_each(|v| {
-            assert!(v.has_committed_substates(), "Validator {} did not commit", v.address);
+            assert!(
+                v.has_committed_substates(tx_id),
+                "Validator {} did not commit transaction {}",
+                v.address,
+                tx_id
+            );
+        });
+    }
+
+    pub fn assert_all_validators_did_not_commit(&self, tx_id: &TransactionId) {
+        self.validators.values().for_each(|v| {
+            assert!(
+                !v.has_committed_substates(tx_id),
+                "Validator {} committed {} but expected it to reject",
+                v.address,
+                tx_id
+            );
         });
     }
 
@@ -605,7 +622,7 @@ impl TestBuilder {
         failure_nodes: &[TestAddress],
         shutdown_signal: ShutdownSignal,
     ) -> (Vec<ValidatorChannels>, HashMap<TestAddress, Validator>) {
-        let num_committees = epoch_manager.get_num_committees(Epoch(0)).await.unwrap();
+        let num_committees = epoch_manager.get_num_committees(Epoch(1)).await.unwrap();
         epoch_manager
             .all_validators()
             .await
@@ -688,7 +705,7 @@ pub fn committee_number_to_shard_group(num_shards: NumPreshards, target_group: u
     // number of committees can never exceed number of shards
     assert!(num_committees <= num_shards.as_u32());
     if num_committees <= 1 {
-        return ShardGroup::new(Shard::zero(), Shard::from(num_shards.as_u32() - 1));
+        return ShardGroup::new(Shard::first(), Shard::from(num_shards.as_u32()));
     }
 
     let shards_per_committee = num_shards.as_u32() / num_committees;
@@ -713,7 +730,7 @@ pub fn committee_number_to_shard_group(num_shards: NumPreshards, target_group: u
         }
     }
 
-    ShardGroup::new(start, end - 1)
+    ShardGroup::new(start + 1, end)
 }
 
 fn build_committees(committees: HashMap<u32, Committee<TestAddress>>) -> HashMap<ShardGroup, Committee<TestAddress>> {

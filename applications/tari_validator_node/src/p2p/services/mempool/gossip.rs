@@ -3,11 +3,12 @@
 
 use std::{collections::HashSet, iter};
 
+use either::Either;
 use libp2p::{gossipsub, PeerId};
 use log::*;
 use tari_dan_common_types::{Epoch, PeerAddress, ShardGroup, ToSubstateAddress};
 use tari_dan_p2p::{proto, DanMessage, NewTransactionMessage, TariMessagingSpec};
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::{NetworkingHandle, NetworkingService};
 use tari_swarm::messaging::{prost::ProstCodec, Codec};
 use tokio::sync::mpsc;
@@ -143,7 +144,7 @@ impl MempoolGossip<PeerAddress> {
         let committee_info = self.epoch_manager.get_local_committee_info(epoch).await?;
         let local_shard_group = committee_info.shard_group();
         let shard_groups = if msg.transaction.is_global() {
-            Box::new(
+            Either::Left(
                 committee_info
                     .all_shard_groups_iter()
                     .filter(|sg| exclude_shard_group.as_ref() != Some(sg) && sg != &local_shard_group),
@@ -169,7 +170,7 @@ impl MempoolGossip<PeerAddress> {
             if shard_groups.is_empty() {
                 return Ok(());
             }
-            Box::new(shard_groups.into_iter()) as Box<dyn Iterator<Item = ShardGroup> + Send>
+            Either::Right(shard_groups.into_iter())
         };
 
         let msg = self

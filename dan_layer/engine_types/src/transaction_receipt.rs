@@ -28,7 +28,11 @@ pub struct TransactionReceiptAddress(#[cfg_attr(feature = "ts", ts(type = "strin
 
 impl TransactionReceiptAddress {
     pub const fn from_hash(hash: Hash) -> Self {
-        let key = ObjectKey::from_array(hash.into_array());
+        Self::from_array(hash.into_array())
+    }
+
+    pub const fn from_array(arr: [u8; ObjectKey::LENGTH]) -> Self {
+        let key = ObjectKey::from_array(arr);
         Self(BorTag::new(key))
     }
 

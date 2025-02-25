@@ -97,16 +97,6 @@ export default function TransactionDetails() {
       return null;
     }
 
-    if (data.status === "Pending") {
-      return (
-        <>
-          <Typography variant="body1" style={{ textAlign: "center" }}>
-            Transaction is still pending. Please check back later.
-          </Typography>
-        </>
-      );
-    }
-
     const last_update_time = new Date(data.last_update_time);
     const handleDownload = () => {
       const json = JSON.stringify(data, null, 2);
@@ -213,12 +203,16 @@ export default function TransactionDetails() {
                       </Button>
                     </DataTableCell>
                   </TableRow>
-                  {data?.result?.result ? (
-                    <TableRow>
-                      <TableCell>Reason</TableCell>
-                      <DataTableCell>{getTransactionFailure(data?.result?.result)}</DataTableCell>
-                    </TableRow>
-                  ) : null}
+                  <TableRow>
+                    {data?.result?.result ? (
+                      <>
+                        <TableCell>Reason</TableCell>
+                        <DataTableCell>{getTransactionFailure(data?.result?.result)}</DataTableCell>
+                      </>
+                    ) : (
+                      <TableCell>No result yet...</TableCell>
+                    )}
+                  </TableRow>
                 </TableBody>
               </Table>
             </TableContainer>

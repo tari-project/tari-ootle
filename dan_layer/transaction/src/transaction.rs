@@ -5,8 +5,13 @@ use std::{collections::HashSet, fmt::Display};
 
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{committee::CommitteeInfo, Epoch, SubstateRequirement, VersionedSubstateId};
+use tari_dan_common_types::{
+    committee::CommitteeInfo,
+    Epoch,
+    SubstateRequirement,
+    SubstateRequirementRef,
+    VersionedSubstateId,
+};
 use tari_engine_types::{
     indexed_value::IndexedValueError,
     instruction::Instruction,
@@ -19,6 +24,7 @@ use crate::{
     builder::TransactionBuilder,
     transaction_id::TransactionId,
     v1::UnsealedTransactionV1,
+    weight::TransactionWeight,
     TransactionSealSignature,
     TransactionSignature,
     TransactionV1,
@@ -58,6 +64,12 @@ impl Transaction {
     pub fn check_id(&self) -> bool {
         match self {
             Self::V1(tx) => tx.check_id(),
+        }
+    }
+
+    pub fn calculate_transaction_weight(&self) -> TransactionWeight {
+        match self {
+            Self::V1(tx) => tx.calculate_transaction_weight(),
         }
     }
 
@@ -128,7 +140,7 @@ impl Transaction {
         }
     }
 
-    pub fn all_published_templates_iter(&self) -> impl Iterator<Item = PublishedTemplateAddress> + '_ {
+    pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
         match self {
             Self::V1(tx) => tx.all_published_templates_iter(),
         }
@@ -146,7 +158,7 @@ impl Transaction {
         }
     }
 
-    pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirement> + '_ {
+    pub fn all_inputs_iter(&self) -> impl Iterator<Item = SubstateRequirementRef<'_>> + '_ {
         match self {
             Self::V1(tx) => tx.all_inputs_iter(),
         }
@@ -198,12 +210,6 @@ impl Transaction {
     pub fn filled_inputs_mut(&mut self) -> &mut IndexSet<VersionedSubstateId> {
         match self {
             Self::V1(tx) => tx.filled_inputs_mut(),
-        }
-    }
-
-    pub fn fee_claims(&self) -> impl Iterator<Item = (Epoch, PublicKey)> + '_ {
-        match self {
-            Self::V1(tx) => tx.fee_claims(),
         }
     }
 
@@ -262,7 +268,7 @@ impl Display for Transaction {
 #[cfg(test)]
 mod tests {
     use rand::rngs::OsRng;
-    use tari_common_types::types::PrivateKey;
+    use tari_common_types::types::{PrivateKey, PublicKey};
     use tari_crypto::{
         keys::{PublicKey as _, SecretKey},
         tari_utilities::ByteArray,
@@ -279,7 +285,7 @@ mod tests {
             .call_method(ComponentAddress::from_array([1; 32]), "method", args![1, 2, 3])
             .call_function(TemplateAddress::from_array([1; 32]), "function", args![1, 2, 3])
             .publish_template(b"template".to_vec())
-            .add_input(SubstateRequirement::with_version(
+            .add_input(SubstateRequirement::versioned(
                 SubstateId::Component(ComponentAddress::from_array([1; 32])),
                 1,
             ))

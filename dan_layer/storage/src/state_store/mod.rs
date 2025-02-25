@@ -4,7 +4,6 @@
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    iter::Peekable,
     ops::{Deref, RangeInclusive},
 };
 
@@ -18,9 +17,9 @@ use tari_dan_common_types::{
     NodeHeight,
     ShardGroup,
     SubstateAddress,
-    SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_engine_types::substate::SubstateId;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
@@ -187,11 +186,7 @@ pub trait StateStoreReadTransaction: Sized {
     fn blocks_get_ids_by_parent(&self, parent: &BlockId) -> Result<Vec<BlockId>, StorageError>;
     fn blocks_get_parent_chain(&self, block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError>;
     fn blocks_get_pending_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError>;
-    fn blocks_get_total_leader_fee_for_epoch(
-        &self,
-        epoch: Epoch,
-        validator_public_key: &PublicKey,
-    ) -> Result<u64, StorageError>;
+
     fn blocks_get_any_with_epoch_range(
         &self,
         epoch_range: RangeInclusive<Epoch>,
@@ -221,13 +216,18 @@ pub trait StateStoreReadTransaction: Sized {
         block_id: &BlockId,
         substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError>;
+    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError>;
 
     // -------------------------------- QuorumCertificate -------------------------------- //
     fn quorum_certificates_get(&self, qc_id: &QcId) -> Result<QuorumCertificate, StorageError>;
-    fn quorum_certificates_get_all<'a, I: IntoIterator<Item = &'a QcId>>(
-        &self,
-        qc_ids: I,
-    ) -> Result<Vec<QuorumCertificate>, StorageError>;
+    fn quorum_certificates_get_all<'a, I>(&self, qc_ids: I) -> Result<Vec<QuorumCertificate>, StorageError>
+    where
+        I: IntoIterator<Item = &'a QcId>,
+        I::IntoIter: ExactSizeIterator;
     fn quorum_certificates_get_by_block_id(&self, block_id: &BlockId) -> Result<QuorumCertificate, StorageError>;
 
     // -------------------------------- Transaction Pools -------------------------------- //
@@ -244,13 +244,14 @@ pub trait StateStoreReadTransaction: Sized {
         max_txs: usize,
         block_id: &BlockId,
     ) -> Result<Vec<TransactionPoolRecord>, StorageError>;
-    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError>;
+    fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, StorageError>;
 
     fn transaction_pool_count(
         &self,
         stage: Option<TransactionPoolStage>,
         is_ready: Option<bool>,
         confirmed_stage: Option<Option<TransactionPoolConfirmedStage>>,
+        skip_lock_conflicted: bool,
     ) -> Result<usize, StorageError>;
 
     fn transactions_fetch_involved_shards(
@@ -268,14 +269,14 @@ pub trait StateStoreReadTransaction: Sized {
     fn votes_get_for_block(&self, block_id: &BlockId) -> Result<Vec<Vote>, StorageError>;
     //---------------------------------- Substates --------------------------------------------//
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError>;
-    fn substates_get_any(
-        &self,
-        substate_ids: &HashSet<SubstateRequirement>,
-    ) -> Result<Vec<SubstateRecord>, StorageError>;
-    fn substates_get_any_max_version<'a, I: IntoIterator<Item = &'a SubstateId>>(
+    fn substates_get_any<'a, I: IntoIterator<Item = &'a VersionedSubstateIdRef<'a>>>(
         &self,
         substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError>;
+    fn substates_get_any_max_version<'a, I>(&self, substate_ids: I) -> Result<Vec<SubstateRecord>, StorageError>
+    where
+        I: IntoIterator<Item = &'a SubstateId>,
+        I::IntoIter: ExactSizeIterator;
     fn substates_get_max_version_for_substate(&self, substate_id: &SubstateId) -> Result<(u32, bool), StorageError>;
     fn substates_any_exist<I, S>(&self, substates: I) -> Result<bool, StorageError>
     where
@@ -311,6 +312,13 @@ pub trait StateStoreReadTransaction: Sized {
         transaction_id: &TransactionId,
     ) -> Result<Vec<LockedSubstateValue>, StorageError>;
 
+    fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        exclude_transaction_id: Option<&TransactionId>,
+        substate_ids: I,
+        exclude_local_only: bool,
+    ) -> Result<Option<TransactionId>, StorageError>;
+
     fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError>;
 
     fn pending_state_tree_diffs_get_all_up_to_commit_block(
@@ -334,11 +342,16 @@ pub trait StateStoreReadTransaction: Sized {
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError>;
 
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
-    fn foreign_substate_pledges_exists_for_address<T: ToSubstateAddress>(
+    fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
         transaction_id: &TransactionId,
         address: T,
     ) -> Result<bool, StorageError>;
+    fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        transaction_id: &TransactionId,
+        substate_ids: I,
+    ) -> Result<SubstatePledges, StorageError>;
     fn foreign_substate_pledges_get_all_by_transaction_id(
         &self,
         transaction_id: &TransactionId,
@@ -526,7 +539,7 @@ pub trait StateStoreWriteTransaction {
 
     fn substate_locks_remove_many_for_transactions<'a, I: Iterator<Item = &'a TransactionId>>(
         &mut self,
-        transaction_ids: Peekable<I>,
+        transaction_ids: I,
     ) -> Result<(), StorageError>;
 
     fn substate_locks_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError>;

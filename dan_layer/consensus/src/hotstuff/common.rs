@@ -9,14 +9,20 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use tari_common::configuration::Network;
-use tari_common_types::types::FixedHash;
+use tari_common_types::types::{FixedHash, PublicKey};
+use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
+    derive_fee_pool_address,
+    optional::Optional,
     shard::Shard,
+    substate_type::SubstateType,
     Epoch,
     NodeAddressable,
     NodeHeight,
+    NumPreshards,
     ShardGroup,
+    VersionedSubstateId,
 };
 use tari_dan_storage::{
     consensus_models::{
@@ -31,19 +37,24 @@ use tari_dan_storage::{
         ValidatorConsensusStats,
         VersionedStateHashTreeDiff,
     },
+    StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::substate::SubstateDiff;
+use tari_engine_types::{
+    substate::{Substate, SubstateDiff, SubstateId},
+    template_models::Amount,
+    vn_fee_pool::ValidatorFeePool,
+};
 use tari_state_tree::{JellyfishMerkleTree, StateTreeError};
 
 use crate::{
     hotstuff::{
-        substate_store::{ShardScopedTreeStoreReader, ShardedStateTree},
+        substate_store::{PendingSubstateStore, ShardScopedTreeStoreReader, ShardedStateTree},
         HotStuffError,
     },
-    traits::LeaderStrategy,
+    traits::{LeaderStrategy, WriteableSubstateStore},
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::common";
@@ -272,7 +283,19 @@ where
     let qcs = blocks.into_iter().map(|b| b.into_justify()).collect();
 
     // Fetch the state roots of the shards in the shard group
-    let mut shard_roots = IndexMap::with_capacity(shard_group.len());
+    let mut shard_roots = IndexMap::with_capacity(shard_group.len() + 1);
+
+    // adding global shard first
+    if let Some(version) = tx.state_tree_versions_get_latest(Shard::global())? {
+        let scoped_store = ShardScopedTreeStoreReader::new(&**tx, Shard::global());
+        let jmt = JellyfishMerkleTree::new(&scoped_store);
+        let root_hash = jmt
+            .get_root_hash(version)
+            .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
+
+        shard_roots.insert(Shard::global(), root_hash);
+    }
+
     for shard in shard_group.shard_iter() {
         let Some(version) = tx.state_tree_versions_get_latest(shard)? else {
             // At v0 there have been no state changes
@@ -336,4 +359,61 @@ pub(crate) fn get_next_block_height_and_leader<
     debug!(target: LOG_TARGET, "Validator {} selected as next leader at height {}", leader_addr, next_height);
 
     Ok((next_height, leader_addr, num_skipped))
+}
+
+pub fn to_public_key_bytes(public_key: &PublicKey) -> [u8; 32] {
+    let mut buf = [0u8; 32];
+    buf.copy_from_slice(public_key.as_bytes());
+    buf
+}
+
+pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
+    store: &mut PendingSubstateStore<TStore>,
+    claim_public_key_bytes: [u8; 32],
+    shard: Shard,
+    num_preshards: NumPreshards,
+    total_leader_fee: Amount,
+) -> Result<(), HotStuffError> {
+    let fee_substate_id = derive_fee_pool_address(claim_public_key_bytes, num_preshards, shard);
+
+    let substate_id = SubstateId::from(fee_substate_id);
+    let (next_amount, next_version) = if let Some(latest) = store.get_latest_change(&substate_id).optional()? {
+        match latest {
+            SubstateChange::Up { id, substate, .. } => {
+                debug!(target: LOG_TARGET, "DOWN current fee pool {id}");
+                let version = id.version();
+                store.put(SubstateChange::Down {
+                    id,
+                    shard,
+                    transaction_id: Default::default(),
+                })?;
+                let pool = substate.substate_value().as_validator_fee_pool().ok_or_else(|| {
+                    HotStuffError::InvariantError(format!(
+                        "Unexpected substate type {} was found at address {}",
+                        SubstateType::from(substate.substate_value()),
+                        substate_id
+                    ))
+                })?;
+                (pool.amount + total_leader_fee, version + 1)
+            },
+            // If the latest fee pool is a Down, it was previously claimed
+            SubstateChange::Down { id, .. } => (total_leader_fee, id.version() + 1),
+        }
+    } else {
+        (Amount::zero(), 0)
+    };
+
+    let id = VersionedSubstateId::new(fee_substate_id, next_version);
+    debug!(target: LOG_TARGET, "UP new fee pool {id}");
+    store.put(SubstateChange::Up {
+        id,
+        shard,
+        transaction_id: Default::default(),
+        substate: Substate::new(
+            next_version,
+            ValidatorFeePool::new(claim_public_key_bytes.into(), next_amount),
+        ),
+    })?;
+
+    Ok(())
 }

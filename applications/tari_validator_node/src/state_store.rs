@@ -24,7 +24,7 @@ use std::ops::Deref;
 
 use anyhow::Context;
 use tari_dan_common_types::PeerAddress;
-use tari_dan_storage::consensus_models::{Decision, Evidence};
+use tari_dan_storage::consensus_models::{BlockId, Decision, Evidence};
 use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
@@ -554,7 +554,7 @@ impl<'tx> StateStoreWriteTransaction
     
     fn substate_locks_remove_many_for_transactions<'a, I: Iterator<Item = &'a tari_transaction::TransactionId>>(
         &mut self,
-        transaction_ids: std::iter::Peekable<I>,
+        transaction_ids: I,
     ) -> Result<(), tari_dan_storage::StorageError> {
         match self {
             ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.substate_locks_remove_many_for_transactions(transaction_ids),
@@ -771,7 +771,10 @@ impl<'tx> StateStoreWriteTransaction
         public_key: &tari_common_types::types::PublicKey,
         epoch: Epoch,
     ) -> Result<(), tari_dan_storage::StorageError> {
-        todo!()
+        match self {
+            ValidatorNodeStateStoreWriteTransaction::Rocksdb { write_tx, .. } => write_tx.evicted_nodes_mark_eviction_as_committed(public_key, epoch),
+            ValidatorNodeStateStoreWriteTransaction::Sqlite { write_tx, .. }  => write_tx.evicted_nodes_mark_eviction_as_committed(public_key, epoch),
+        }
     }
 }
 
@@ -1038,17 +1041,6 @@ impl<'tx> StateStoreReadTransaction
         }
     }
     
-    fn blocks_get_total_leader_fee_for_epoch(
-        &self,
-        epoch: tari_dan_common_types::Epoch,
-        validator_public_key: &tari_common_types::types::PublicKey,
-    ) -> Result<u64, tari_dan_storage::StorageError> {
-        match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.blocks_get_total_leader_fee_for_epoch(epoch, validator_public_key),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.blocks_get_total_leader_fee_for_epoch(epoch, validator_public_key),
-        }
-    }
-    
     fn blocks_get_any_with_epoch_range(
         &self,
         epoch_range: std::ops::RangeInclusive<tari_dan_common_types::Epoch>,
@@ -1125,10 +1117,14 @@ impl<'tx> StateStoreReadTransaction
         }
     }
     
-    fn quorum_certificates_get_all<'a, I: IntoIterator<Item = &'a tari_dan_storage::consensus_models::QcId>>(
+    fn quorum_certificates_get_all<'a, I>(
         &self,
         qc_ids: I,
-    ) -> Result<Vec<tari_dan_storage::consensus_models::QuorumCertificate>, tari_dan_storage::StorageError> {
+    ) -> Result<Vec<tari_dan_storage::consensus_models::QuorumCertificate>, tari_dan_storage::StorageError> 
+    where
+        I: IntoIterator<Item = &'a tari_dan_storage::consensus_models::QcId>,
+        I::IntoIter: ExactSizeIterator,
+    {
         match self {
             ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.quorum_certificates_get_all(qc_ids),
             ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.quorum_certificates_get_all(qc_ids),
@@ -1178,16 +1174,17 @@ impl<'tx> StateStoreReadTransaction
             ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_get_many_ready(max_txs, block_id),
         }
     }
-    
+
     fn transaction_pool_count(
         &self,
         stage: Option<tari_dan_storage::consensus_models::TransactionPoolStage>,
         is_ready: Option<bool>,
         confirmed_stage: Option<Option<tari_dan_storage::consensus_models::TransactionPoolConfirmedStage>>,
+        skip_lock_conflicted: bool,
     ) -> Result<usize, tari_dan_storage::StorageError> {
         match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_pool_count(stage, is_ready, confirmed_stage),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_count(stage, is_ready, confirmed_stage),
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_pool_count(stage, is_ready, confirmed_stage, skip_lock_conflicted),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_count(stage, is_ready, confirmed_stage, skip_lock_conflicted),
         }
     }
     
@@ -1233,20 +1230,14 @@ impl<'tx> StateStoreReadTransaction
         }
     }
     
-    fn substates_get_any(
-        &self,
-        substate_ids: &std::collections::HashSet<tari_dan_common_types::SubstateRequirement>,
-    ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
-        match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_any(substate_ids),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_any(substate_ids),
-        }
-    }
-    
-    fn substates_get_any_max_version<'a, I: IntoIterator<Item = &'a tari_engine_types::substate::SubstateId>>(
+    fn substates_get_any_max_version<'a, I>(
         &self,
         substate_ids: I,
-    ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
+    ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError>
+    where
+        I: IntoIterator<Item = &'a tari_engine_types::substate::SubstateId>,
+        I::IntoIter: ExactSizeIterator,
+    {
         match self {
             ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_any_max_version(substate_ids),
             ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_any_max_version(substate_ids),
@@ -1393,17 +1384,6 @@ impl<'tx> StateStoreReadTransaction
         }
     }
     
-    fn foreign_substate_pledges_exists_for_address<T: tari_dan_common_types::ToSubstateAddress>(
-        &self,
-        transaction_id: &tari_transaction::TransactionId,
-        address: T,
-    ) -> Result<bool, tari_dan_storage::StorageError> {
-        match self {
-            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_substate_pledges_exists_for_address(transaction_id, address),
-            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_substate_pledges_exists_for_address(transaction_id, address),
-        }
-    }
-    
     fn foreign_substate_pledges_get_all_by_transaction_id(
         &self,
         transaction_id: &tari_transaction::TransactionId,
@@ -1483,8 +1463,66 @@ impl<'tx> StateStoreReadTransaction
         }
     }
     
-    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, tari_dan_storage::StorageError> {
-        todo!()
+    fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.transaction_pool_has_pending_state_updates(block_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.transaction_pool_has_pending_state_updates(block_id),
+        }
+    }
+    
+    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<tari_dan_common_types::VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<tari_dan_storage::consensus_models::SubstateChange, tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.block_diffs_get_change_for_versioned_substate(block_id, substate_id),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.block_diffs_get_change_for_versioned_substate(block_id, substate_id),
+        }
+    }
+    
+    fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a tari_engine_types::substate::SubstateId>>(
+        &self,
+        exclude_transaction_id: Option<&TransactionId>,
+        substate_ids: I,
+        exclude_local_only: bool,
+    ) -> Result<Option<TransactionId>, tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substate_locks_has_any_write_locks_for_substates(exclude_transaction_id, substate_ids, exclude_local_only),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substate_locks_has_any_write_locks_for_substates(exclude_transaction_id, substate_ids, exclude_local_only),
+        }
+    }
+    
+    fn foreign_substate_pledges_exists_for_transaction_and_address<T: tari_dan_common_types::ToSubstateAddress>(
+        &self,
+        transaction_id: &TransactionId,
+        address: T,
+    ) -> Result<bool, tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_substate_pledges_exists_for_transaction_and_address(transaction_id, address),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_substate_pledges_exists_for_transaction_and_address(transaction_id, address),
+        }
+    }
+    
+    fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I: IntoIterator<Item = &'a tari_engine_types::substate::SubstateId>>(
+        &self,
+        transaction_id: &TransactionId,
+        substate_ids: I,
+    ) -> Result<tari_dan_storage::consensus_models::SubstatePledges, tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.foreign_substate_pledges_get_write_pledges_to_transaction(transaction_id, substate_ids),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.foreign_substate_pledges_get_write_pledges_to_transaction(transaction_id, substate_ids),
+        }
+    }
+    
+    fn substates_get_any<'a, I: IntoIterator<Item = &'a tari_dan_common_types::VersionedSubstateIdRef<'a>>>(
+        &self,
+        substate_ids: I,
+    ) -> Result<Vec<tari_dan_storage::consensus_models::SubstateRecord>, tari_dan_storage::StorageError> {
+        match self {
+            ValidatorNodeStateStoreReadTransaction::Rocksdb(tx) => tx.substates_get_any(substate_ids),
+            ValidatorNodeStateStoreReadTransaction::Sqlite(tx) => tx.substates_get_any(substate_ids),
+        }
     }
 
 }

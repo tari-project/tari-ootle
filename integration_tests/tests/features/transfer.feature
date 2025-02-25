@@ -5,7 +5,7 @@
 @transfer
 Feature: Account transfers
 
-  Scenario: Transfer tokens to unexisting account
+  Scenario: Transfer tokens to account that does not previously exist
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE
     Given a wallet WALLET connected to base node BASE
@@ -25,14 +25,9 @@ Feature: Account transfers
     # Initialize the wallet daemon
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register the "faucet" template
-    When base wallet WALLET registers the template "faucet"
-    # Mine some blocks until the UTXOs are scanned
-    When miner MINER mines 15 new blocks
-    Then the validator node VN is listed as registered
-    Then the template "faucet" is listed as registered by the validator node VN
-    Then VN has scanned to height 42
-    Then indexer IDX has scanned to height 42
+    # Publish the "fauset" template
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
     # Create the sender account
     When I create an account ACCOUNT via the wallet daemon WALLET_D with 10000 free coins
@@ -43,8 +38,8 @@ Feature: Account transfers
     # Burn some tari in the base layer to have funds for fees in the sender account
     When I burn 10T on wallet WALLET with wallet daemon WALLET_D into commitment COMMITMENT with proof PROOF for ACCOUNT, range proof RANGEPROOF and claim public key CLAIM_PUBKEY
     When miner MINER mines 13 new blocks
-    Then VN has scanned to height 55
-    Then indexer IDX has scanned to height 55
+    Then VN has scanned to height 40
+    Then indexer IDX has scanned to height 40
 
     When I convert commitment COMMITMENT into COMM_ADDRESS address
     Then validator node VN has state at COMM_ADDRESS within 20 seconds
@@ -71,8 +66,10 @@ Feature: Account transfers
     When I check the balance of ACCOUNT on wallet daemon WALLET_D the amount is at least 10000
     # Do the transfer from ACCOUNT to the second account (which does not exist yet in the network)
     When I create a new key pair KEY_ACC_2
+    When I print the cucumber world
     When I transfer 50 tokens of resource FAUCET/resources/0 from account ACCOUNT to public key KEY_ACC_2 via the wallet daemon WALLET_D named TRANSFER
 
+    When I print the cucumber world
     # Check that ACC_2 component was created and has funds
     When I submit a transaction manifest via wallet daemon WALLET_D with inputs "FAUCET, TRANSFER" named "TX2"
   ```
@@ -102,15 +99,9 @@ Feature: Account transfers
     # Initialize different wallet daemons to simulate different users
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register the "faucet" template
-    When base wallet WALLET registers the template "faucet"
-    # Mine some blocks until the UTXOs are scanned
-    When miner MINER mines 15 new blocks
-    Then the validator node VN is listed as registered
-    Then the template "faucet" is listed as registered by the validator node VN
-
-    Then VN has scanned to height 42
-    Then indexer IDX has scanned to height 42
+    # Publish the "fauset" template
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
     # Create the sender account with some tokens
     When I create an account ACCOUNT_1 via the wallet daemon WALLET_D with 10000 free coins
@@ -122,8 +113,8 @@ Feature: Account transfers
     # Burn some tari in the base layer to have funds for fees in the sender account
     When I burn 10T on wallet WALLET with wallet daemon WALLET_D into commitment COMMITMENT with proof PROOF for ACCOUNT_1, range proof RANGEPROOF and claim public key CLAIM_PUBKEY
     When miner MINER mines 13 new blocks
-    Then VN has scanned to height 55
-    Then indexer IDX has scanned to height 55
+    Then VN has scanned to height 40
+    Then indexer IDX has scanned to height 40
 
     When I convert commitment COMMITMENT into COMM_ADDRESS address
     Then validator node VN has state at COMM_ADDRESS within 20 seconds
@@ -157,7 +148,7 @@ Feature: Account transfers
   ```
     When I print the cucumber world
 
-  Scenario: Confidential transfer to unexisting account
+  Scenario: Confidential transfer to account that does not previously exist
     # Initialize a base node, wallet, miner and VN
     Given a base node BASE
     Given a wallet WALLET connected to base node BASE

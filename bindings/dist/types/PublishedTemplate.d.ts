@@ -1,3 +1,4 @@
 export interface PublishedTemplate {
-    binary: Array<number>;
+    author: string;
+    binary_hash: string;
 }

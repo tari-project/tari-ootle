@@ -45,6 +45,11 @@ pub struct ProcessManager {
 impl ProcessManager {
     pub fn new(config: &Config, shutdown_signal: ShutdownSignal) -> (Self, ProcessManagerHandle) {
         let (tx_request, rx_request) = mpsc::channel(1);
+
+        let mut global_settings = config.settings.clone();
+        if let Some(public_ip) = config.public_ip {
+            global_settings.insert("public_ip".to_string(), public_ip.to_string());
+        }
         let this = Self {
             skip_registration: config.skip_registration,
             executable_manager: ExecutableManager::new(
@@ -54,7 +59,7 @@ impl ProcessManager {
             instance_manager: InstanceManager::new(
                 config.base_dir.clone(),
                 config.network,
-                config.settings.clone().unwrap_or_default(),
+                global_settings,
                 config.processes.instances.clone(),
                 config.start_port,
             ),
@@ -188,11 +193,11 @@ impl ProcessManager {
     }
 
     fn check_instances_running(&mut self) -> anyhow::Result<()> {
-        for instance in self
-            .instance_manager
-            .instances_mut()
-            .filter(|i| !i.instance_type().is_tari_node() && !i.instance_type().is_miner())
-        {
+        for instance in self.instance_manager.instances_mut().filter(|i| {
+            !i.instance_type().is_tari_node() &&
+                !i.instance_type().is_miner() &&
+                !i.instance_type().is_wallet_daemon_create_key()
+        }) {
             if let Some(status) = instance.check_running()? {
                 return Err(anyhow!(
                     "Failed to start instance: {} {} {}",
@@ -265,7 +270,7 @@ impl ProcessManager {
                 })?;
                 let result = self
                     .instance_manager
-                    .fork_new(executable, instance_type, name, args)
+                    .fork_new(executable, instance_type, name, None, args)
                     .await;
 
                 if reply.send(result).is_err() {
@@ -432,8 +437,9 @@ impl ProcessManager {
             }
 
             let reg_info = vn.get_registration_info().await?;
+            let claim_public_key = reg_info.claim_fees_public_key.clone();
             let tx_id = wallet.register_validator_node(reg_info).await?;
-            info!("🟢 Registered validator node {vn} with tx_id: {tx_id}");
+            info!("🟢 Registered validator node {vn} with claim key {claim_public_key} in L1 transaction: {tx_id}");
             // Just wait a bit :shrug: This could be a bug in the console wallet. If we submit too quickly it uses 0
             // inputs for a transaction.
             sleep(Duration::from_secs(2)).await;
@@ -491,7 +497,7 @@ impl ProcessManager {
         let args = HashMap::from([("max_blocks".to_string(), blocks.to_string())]);
         let id = self
             .instance_manager
-            .fork_new(executable, InstanceType::MinoTariMiner, "miner".to_string(), args)
+            .fork_new(executable, InstanceType::MinoTariMiner, "miner".to_string(), None, args)
             .await?;
 
         let status = self.instance_manager.wait(id).await?;

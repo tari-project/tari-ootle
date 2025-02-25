@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_engine_types::substate::SubstateId;
 
-use crate::{NumPreshards, ShardGroup, SubstateAddress};
+use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default, Hash)]
 #[cfg_attr(
@@ -180,6 +180,7 @@ pub struct CommitteeInfo {
     num_shard_group_members: u32,
     num_committees: u32,
     shard_group: ShardGroup,
+    epoch: Epoch,
 }
 
 impl CommitteeInfo {
@@ -188,13 +189,20 @@ impl CommitteeInfo {
         num_shard_group_members: u32,
         num_committees: u32,
         shard_group: ShardGroup,
+        epoch: Epoch,
     ) -> Self {
         Self {
             num_shards,
             num_shard_group_members,
             num_committees,
             shard_group,
+            epoch,
         }
+    }
+
+    /// Returns the epoch of this CommitteeInfo.
+    pub fn epoch(&self) -> Epoch {
+        self.epoch
     }
 
     /// Returns $n - f$ (i.e $2f + 1$) where n is the number of committee members and f is the tolerated failure nodes.

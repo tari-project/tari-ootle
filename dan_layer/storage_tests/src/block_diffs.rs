@@ -43,7 +43,7 @@ mod block_diffs {
             id: versioned_substate_id,
             shard: ShardGroup::all_shards(NumPreshards::P4).start(),
             transaction_id: TransactionId::default(),
-            substate: Substate::new(version, substate_record.substate_value)
+            substate: Substate::new(version, substate_record.substate_value.unwrap())
         };
         tx.block_diffs_insert(&block_id, &[changes]).unwrap();
 

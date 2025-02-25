@@ -3,6 +3,7 @@
 
 use std::{
     collections::HashMap,
+    io::BufReader as StdBufReader,
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
     process::{ExitStatus, Stdio},
@@ -80,22 +81,23 @@ impl InstanceManager {
 
     /// Fork all defined processes in order
     pub async fn fork_all(&mut self, executables: Executables<'_>) -> anyhow::Result<()> {
-        for instance in self.config.clone() {
-            let executable = executables.get(instance.instance_type).ok_or_else(|| {
+        for mut instance in self.config.clone() {
+            let executable = executables.get(instance.execution_instance_type()).ok_or_else(|| {
                 anyhow!(
                     "No executable found for instance type '{}'. This is a bug in the configuration",
-                    instance.instance_type
+                    instance.execution_instance_type()
                 )
             })?;
 
+            let mut settings = self.global_settings.clone();
+            settings.extend(instance.settings.drain());
             for i in 0..instance.num_instances {
-                let mut settings = self.global_settings.clone();
-                settings.extend(instance.settings.iter().map(|(k, v)| (k.clone(), v.clone())));
                 self.fork_new(
                     executable,
                     instance.instance_type,
-                    format!("{}-#{:02}", instance.name, i),
-                    settings,
+                    instance.instance_name(i),
+                    instance.base_path_override().cloned(),
+                    settings.clone(),
                 )
                 .await?;
             }
@@ -108,11 +110,20 @@ impl InstanceManager {
         executable: &Executable,
         instance_type: InstanceType,
         instance_name: String,
+        base_path_override: Option<PathBuf>,
         settings: HashMap<String, String>,
     ) -> anyhow::Result<InstanceId> {
         let instance_id = self.next_instance_id();
-        self.fork(instance_id, executable, instance_type, instance_name, settings, None)
-            .await
+        self.fork(
+            instance_id,
+            executable,
+            instance_type,
+            instance_name,
+            base_path_override,
+            settings,
+            None,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_lines)]
@@ -122,7 +133,8 @@ impl InstanceManager {
         executable: &Executable,
         instance_type: InstanceType,
         instance_name: String,
-        instance_settings: HashMap<String, String>,
+        base_path_override: Option<PathBuf>,
+        mut instance_settings: HashMap<String, String>,
         ports: Option<AllocatedPorts>,
     ) -> anyhow::Result<InstanceId> {
         let listen_ip = instance_settings
@@ -143,14 +155,45 @@ impl InstanceManager {
 
         let mut allocated_ports = ports.unwrap_or_else(|| self.port_allocator.create());
 
-        let base_path = self.base_path.join("processes").join(slugify(&instance_name));
+        let processes_path = self.base_path.join("processes");
+        let base_path = match base_path_override {
+            Some(base_path) => {
+                if base_path.is_absolute() {
+                    base_path
+                } else {
+                    processes_path.join(base_path)
+                }
+            },
+            None => processes_path.join(slugify(&instance_name)),
+        };
         fs::create_dir_all(&base_path).await.context("create_dir_all in fork")?;
+
+        // Special handling to set the claim public key if we find a file containing one
+        if instance_type.is_validator() {
+            let claim_public_key_file = processes_path.join("claim_key.json");
+            if claim_public_key_file.exists() {
+                let file = File::open(&claim_public_key_file)
+                    .await
+                    .context("Failed to open claim public key file")?;
+                let file = file.into_std().await;
+                let reader = StdBufReader::new(file);
+                let claim_public_key = serde_json::from_reader::<_, serde_json::Value>(reader)
+                    .context("Failed to read claim public key file")?;
+                let claim_public_key = claim_public_key
+                    .get("public_key")
+                    .and_then(|pk| pk.as_str())
+                    .context("Failed to extract public key from claim public key file")?;
+                info!("Setting claim public key to {}", claim_public_key);
+                instance_settings.insert("claim_public_key".to_string(), claim_public_key.to_string());
+            }
+        }
 
         let context = ProcessContext::new(
             instance_id,
             &executable.path,
             &executable.env,
             base_path.clone(),
+            processes_path,
             self.network,
             listen_ip,
             &mut allocated_ports,
@@ -240,6 +283,10 @@ impl InstanceManager {
                 self.wallet_daemons
                     .insert(instance_id, WalletDaemonProcess::new(instance));
             },
+            InstanceType::TariWalletDaemonCreateKey => {
+                self.wallet_daemons
+                    .insert(instance_id, WalletDaemonProcess::new(instance));
+            },
         }
 
         Ok(instance_id)
@@ -311,8 +358,16 @@ impl InstanceManager {
         let ports = instance.allocated_ports().clone();
 
         // This will just overwrite the previous instance
-        self.fork(id, executable, instance_type, instance_name, settings, Some(ports))
-            .await?;
+        self.fork(
+            id,
+            executable,
+            instance_type,
+            instance_name,
+            None,
+            settings,
+            Some(ports),
+        )
+        .await?;
 
         Ok(())
     }
@@ -324,6 +379,7 @@ impl InstanceManager {
             .ok_or_else(|| anyhow!("Instance not found"))?;
 
         instance.terminate().await?;
+        instance.check_running()?;
         Ok(())
     }
 

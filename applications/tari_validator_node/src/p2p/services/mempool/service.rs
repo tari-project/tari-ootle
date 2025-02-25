@@ -29,7 +29,7 @@ use tari_dan_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubst
 use tari_dan_p2p::{DanMessage, NewTransactionMessage, TariMessagingSpec};
 use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 use tari_engine_types::commit_result::RejectReason;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
@@ -102,7 +102,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
                         info!(target: LOG_TARGET, "Mempool service subscribing transaction messages for {shard_group} in {epoch}");
                         self.gossip.subscribe(shard_group).await?;
                     } else {
-                        info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip");
+                        info!(target: LOG_TARGET, "Not registered for epoch {epoch}, unsubscribing from gossip if necessary");
                         self.gossip.unsubscribe().await?;
                     }
                 },
@@ -224,7 +224,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
             let transaction_id = *transaction.id();
             self.state_store.with_write_tx(|tx| {
                 TransactionRecord::new(transaction)
-                    .set_abort_reason(RejectReason::InvalidTransaction(format!(
+                    .abort_and_finalize(RejectReason::InvalidTransaction(format!(
                         "Mempool validation failed: {e}"
                     )))
                     .insert(tx)
@@ -235,18 +235,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
             return Err(e.into());
         }
 
-        // Get the shards involved in claim fees.
-        let fee_claims = transaction.fee_claims().collect::<Vec<_>>();
-
-        let claim_shards = if fee_claims.is_empty() {
-            HashSet::new()
-        } else {
-            #[allow(clippy::mutable_key_type)]
-            let validator_nodes = self.epoch_manager.get_many_validator_nodes(fee_claims).await?;
-            validator_nodes.values().map(|vn| vn.shard_key).collect::<HashSet<_>>()
-        };
-
-        if transaction.num_unique_inputs() == 0 && claim_shards.is_empty() {
+        if transaction.num_unique_inputs() == 0 {
             warn!(target: LOG_TARGET, "⚠ No involved shards for payload");
         }
 
@@ -259,7 +248,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
             local_committee_shard.includes_any_address(
                 // Known output shards
                 // This is to allow for the txreceipt output and indicates shard involvement.
-                iter::once(&tx_substate_address).chain(claim_shards.iter()),
+                iter::once(&tx_substate_address),
             );
 
         if is_input_shard || is_output_shard {
@@ -270,9 +259,9 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
                 .await
                 .map_err(|_| MempoolError::ConsensusChannelClosed)?;
 
-            // If we received the message from our local shard group, we don't need to gossip it again on the topic
-            // (prevents Duplicate errors)
-            if sender_shard_group.map_or(true, |sg| sg != local_committee_shard.shard_group()) {
+            // If we received the message from gossip (sender_shard_group is Some), we don't need to gossip it again on
+            // the topic (prevents Duplicate errors)
+            if sender_shard_group.is_none() {
                 // This validator is involved, we to send the transaction to local replicas
                 if let Err(e) = self
                     .gossip

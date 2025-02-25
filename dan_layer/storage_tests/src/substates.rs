@@ -34,7 +34,7 @@ fn random_substate_id() -> SubstateId {
 mod substates {
     use std::collections::HashSet;
 
-    use tari_dan_common_types::{shard::Shard, SubstateRequirement, VersionedSubstateId};
+    use tari_dan_common_types::{shard::Shard, SubstateRequirement, VersionedSubstateId, VersionedSubstateIdRef};
     use tari_dan_storage::consensus_models::QcId;
     use tari_transaction::TransactionId;
 
@@ -88,14 +88,14 @@ mod substates {
 
         // substates_get_any fetches all substates
         let mut req = HashSet::new();
-        req.insert(SubstateRequirement::new(substate1_id.clone(), Some(0)) );
-        req.insert(SubstateRequirement::new(substate2_id.clone(), Some(0)) );
+        req.insert(VersionedSubstateIdRef::new(&substate1_id, 0) );
+        req.insert(VersionedSubstateIdRef::new(&substate2_id, 0) );
         let res = tx.substates_get_any(&req).unwrap();
         assert_eq!(res.len(), 2);
 
         // substates_get_any fetches the last version of a substate
         let mut req = HashSet::new();
-        req.insert(SubstateRequirement::new(substate1_id.clone(), None) );
+        req.insert(VersionedSubstateIdRef::new(&substate1_id, 0) );
         let res = tx.substates_get_any(&req).unwrap();
         assert_eq!(res.len(), 1);
         assert_eq_debug(&res[0], &substate1b);
@@ -152,7 +152,7 @@ mod substates {
         assert!(res.destroyed.is_none());
 
         let versioned_substate_id = VersionedSubstateId::new(substate2.substate_id, substate2.version);
-        let shard = Shard::zero();
+        let shard = Shard::first();
         let epoch = Epoch::zero();
         let destroyed_block_height = NodeHeight::zero();
         let destroyed_transaction_id = TransactionId::default();

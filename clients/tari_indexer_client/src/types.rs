@@ -1,19 +1,17 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
-use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{substate_type::SubstateType, Epoch, SubstateRequirement};
 use tari_dan_storage::consensus_models::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     serde_with as serde_tools,
-    substate::{Substate, SubstateId},
+    substate::{Substate, SubstateId, SubstateValue},
     TemplateAddress,
 };
 use tari_template_abi::TemplateDef;
@@ -92,7 +90,7 @@ pub struct GetSubstateRequest {
 pub struct GetSubstateResponse {
     pub address: SubstateId,
     pub version: u32,
-    pub substate: Substate,
+    pub substate: SubstateValue,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_by_transaction: TransactionId,
 }
@@ -117,7 +115,7 @@ pub struct InspectSubstateRequest {
 pub struct InspectSubstateResponse {
     pub address: SubstateId,
     pub version: u32,
-    pub substate: Substate,
+    pub substate: SubstateValue,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_by_transaction: TransactionId,
 }
@@ -234,8 +232,6 @@ pub enum IndexerTransactionFinalizedResult {
         #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number}"))]
         finalized_time: Duration,
         abort_details: Option<String>,
-        #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
-        json_results: Vec<JsonValue>,
     },
 }
 
@@ -255,34 +251,6 @@ pub struct GetIdentityResponse {
     pub public_key: PublicKey,
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub public_addresses: Vec<Multiaddr>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(
-        export,
-        export_to = "../../bindings/src/types/tari-indexer-client/",
-        rename = "IndexerGetAllVnsRequest"
-    )
-)]
-pub struct GetAllVnsRequest {
-    pub epoch: Epoch,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(
-        export,
-        export_to = "../../bindings/src/types/tari-indexer-client/",
-        rename = "IndexerGetAllVnsResponse"
-    )
-)]
-pub struct GetAllVnsResponse {
-    pub vns: Vec<BaseLayerValidatorNode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -457,7 +425,7 @@ pub struct Connection {
     pub age: Duration,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub ping_latency: Option<Duration>,
-    pub user_agent: Option<Arc<String>>,
+    pub user_agent: Option<String>,
 }
 
 #[derive(Serialize, Debug)]

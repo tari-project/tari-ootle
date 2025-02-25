@@ -5,10 +5,10 @@ use std::collections::HashSet;
 
 use log::{debug, warn};
 use tari_common::configuration::Network;
+use tari_common_types::types::FixedHash;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_common_types::{committee::Committee, DerivableFromPublicKey, Epoch, ExtraFieldKey};
 use tari_dan_storage::consensus_models::{Block, QuorumCertificate};
-use tari_epoch_manager::EpochManagerReader;
 
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, ProposalValidationError},
@@ -56,6 +56,8 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
         }
         .into());
     }
+    // TODO: cache the epoch hash for the epoch, refresh each time consensus switches to a new epoch and validate here
+    // check_epoch_hash(block, epoch_hash)?;
     check_sidechain_id(block, config)?;
     if block.is_dummy() {
         check_dummy(block)?;
@@ -107,49 +109,16 @@ pub fn check_network(candidate_block: &Block, network: Network) -> Result<(), Pr
 
 // TODO: remove allow(dead_code)
 #[allow(dead_code)]
-pub async fn check_base_layer_block_hash<TConsensusSpec: ConsensusSpec>(
-    block: &Block,
-    epoch_manager: &TConsensusSpec::EpochManager,
-    config: &HotstuffConfig,
-) -> Result<(), HotStuffError> {
-    if block.is_genesis() {
-        return Ok(());
-    }
-    // Check if know the base layer block hash
-    let base_layer_block_height = epoch_manager
-        .get_base_layer_block_height(*block.base_layer_block_hash())
-        .await?
-        .ok_or_else(|| ProposalValidationError::BlockHashNotFound {
-            hash: *block.base_layer_block_hash(),
-        })?;
-    // Check if the base layer block height is matching the base layer block hash
-    if base_layer_block_height != block.base_layer_block_height() {
-        Err(ProposalValidationError::BlockHeightMismatch {
-            height: block.base_layer_block_height(),
-            real_height: base_layer_block_height,
+pub async fn check_epoch_hash(block: &Block, expected_epoch_hash: FixedHash) -> Result<(), HotStuffError> {
+    if *block.base_layer_block_hash() != expected_epoch_hash {
+        Err(ProposalValidationError::InvalidEpochHash {
+            epoch: block.epoch(),
+            local_epoch_hash: expected_epoch_hash,
+            invalid_epoch_hash: *block.base_layer_block_hash(),
+            block_id: *block.id(),
         })?;
     }
-    // Check if the base layer block height is within the acceptable range
-    let current_height = epoch_manager.current_base_layer_block_info().await?.0;
-    // TODO: uncomment this when the sync information is available here, otherwise during sync this will fail
-    // if base_layer_block_height + config.max_base_layer_blocks_behind < current_height {
-    //     Err(ProposalValidationError::BlockHeightTooSmall {
-    //         proposed: base_layer_block_height,
-    //         current: current_height,
-    //     })?;
-    // }
-    if base_layer_block_height > current_height + config.consensus_constants.max_base_layer_blocks_ahead {
-        Err(ProposalValidationError::BlockHeightTooHigh {
-            proposed: base_layer_block_height,
-            current: current_height,
-        })?;
-    }
-    // if block.is_epoch_end() && !epoch_manager.is_last_block_of_epoch(base_layer_block_height).await? {
-    //     Err(ProposalValidationError::NotLastBlockOfEpoch {
-    //         block_id: *block.id(),
-    //         base_layer_block_height,
-    //     })?;
-    // }
+
     Ok(())
 }
 

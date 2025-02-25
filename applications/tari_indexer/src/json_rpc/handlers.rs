@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashMap, fmt::Display, sync::Arc};
+use std::{collections::HashMap, fmt::Display, ops::Deref, sync::Arc};
 
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
@@ -31,26 +31,21 @@ use axum_jrpc::{
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::{info, warn};
 use serde_json::{self as json, json, Value};
-use tari_base_node_client::{grpc::GrpcBaseNodeClient, types::BaseLayerConsensusConstants, BaseNodeClient};
+use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::hex::to_hex;
-use tari_dan_app_utilities::{
-    json_encoding::{encode_finalize_result_into_json, encode_finalized_result_into_json},
-    keypair::RistrettoKeypair,
-    substate_file_cache::SubstateFileCache,
-    template_manager::{implementation::TemplateManager, interface::TemplateExecutable},
-};
-use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, PeerAddress};
+use tari_dan_app_utilities::{keypair::RistrettoKeypair, substate_file_cache::SubstateFileCache};
+use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 use tari_dan_p2p::TariMessagingSpec;
-use tari_dan_storage::consensus_models::Decision;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_dan_storage::{consensus_models::Decision, global::GlobalDb};
+use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_indexer_client::types::{
     self,
     AddPeerRequest,
     AddPeerResponse,
     ConnectionDirection,
-    GetAllVnsRequest,
-    GetAllVnsResponse,
     GetCommsStatsResponse,
     GetConnectionsResponse,
     GetEpochManagerStatsResponse,
@@ -81,12 +76,14 @@ use tari_indexer_client::types::{
     TemplateMetadata,
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
+use tari_template_manager::{implementation::TemplateManager, interface::TemplateExecutable};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory, TransactionResultStatus};
 
 use crate::{
     bootstrap::Services,
     dry_run::processor::DryRunTransactionProcessor,
     json_rpc::error::internal_error,
+    network_client::NetworkClientError,
     substate_manager::SubstateManager,
     transaction_manager::{error::TransactionManagerError, TransactionManager},
 };
@@ -94,47 +91,40 @@ use crate::{
 const LOG_TARGET: &str = "tari::indexer::json_rpc::handlers";
 
 pub struct JsonRpcHandlers {
-    consensus_constants: BaseLayerConsensusConstants,
     keypair: RistrettoKeypair,
     networking: NetworkingHandle<TariMessagingSpec>,
-    base_node_client: GrpcBaseNodeClient,
     substate_manager: Arc<SubstateManager>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     transaction_manager:
         TransactionManager<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>,
     template_manager: TemplateManager<PeerAddress>,
+    global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
 }
 
 impl JsonRpcHandlers {
     pub fn new(
-        consensus_constants: BaseLayerConsensusConstants,
         services: &Services,
-        base_node_client: GrpcBaseNodeClient,
         substate_manager: Arc<SubstateManager>,
         transaction_manager: TransactionManager<
             EpochManagerHandle<PeerAddress>,
             TariValidatorNodeRpcClientFactory,
             SubstateFileCache,
         >,
+        global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
         template_manager: TemplateManager<PeerAddress>,
         dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
     ) -> Self {
         Self {
-            consensus_constants,
             keypair: services.keypair.clone(),
             networking: services.networking.clone(),
-            base_node_client,
+            global_db,
             substate_manager,
             epoch_manager: services.epoch_manager.clone(),
             transaction_manager,
             template_manager,
             dry_run_transaction_processor,
         }
-    }
-
-    pub fn base_node_client(&self) -> GrpcBaseNodeClient {
-        self.base_node_client.clone()
     }
 }
 
@@ -165,16 +155,6 @@ impl JsonRpcHandlers {
         };
 
         Ok(JsonRpcResponse::success(answer_id, response))
-    }
-
-    pub async fn get_all_vns(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let GetAllVnsRequest { epoch } = value.parse_params()?;
-        let epoch_blocks = self.consensus_constants.epoch_to_height(epoch);
-        match self.base_node_client().get_validator_nodes(epoch_blocks).await {
-            Ok(vns) => Ok(JsonRpcResponse::success(answer_id, GetAllVnsResponse { vns })),
-            Err(e) => Err(Self::internal_error(answer_id, format!("Failed to get all vns: {}", e))),
-        }
     }
 
     pub async fn add_peer(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -252,7 +232,7 @@ impl JsonRpcHandlers {
                 },
                 age: conn.age(),
                 ping_latency: conn.ping_latency,
-                user_agent: conn.user_agent,
+                user_agent: conn.user_agent.map(|arc| arc.deref().clone()),
             })
             .collect();
 
@@ -320,7 +300,7 @@ impl JsonRpcHandlers {
                     // Ask network
                     let substate = self
                         .transaction_manager
-                        .get_substate(request.address.clone(), request.version.unwrap_or_default())
+                        .get_substate(&SubstateRequirement::new(request.address.clone(), request.version))
                         .await
                         .map_err(|e| {
                             warn!(target: LOG_TARGET, "Error asking network for substate: {}", e);
@@ -353,7 +333,7 @@ impl JsonRpcHandlers {
                         } => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                             address: id,
                             version: substate.version(),
-                            substate,
+                            substate: substate.into_substate_value(),
                             created_by_transaction: created_by_tx,
                         })),
                         SubstateResult::Down { version, .. } => Err(JsonRpcResponse::error(
@@ -481,9 +461,6 @@ impl JsonRpcHandlers {
                 .await
                 .map_err(|e| Self::internal_error(answer_id, e))?;
 
-            let json_results = encode_finalize_result_into_json(&exec_result.finalize)
-                .map_err(|e| Self::internal_error(answer_id, e))?;
-
             return Ok(JsonRpcResponse::success(answer_id, SubmitTransactionResponse {
                 result: IndexerTransactionFinalizedResult::Finalized {
                     execution_result: Some(Box::new(exec_result)),
@@ -491,7 +468,6 @@ impl JsonRpcHandlers {
                     abort_details: None,
                     finalized_time: Default::default(),
                     execution_time: Default::default(),
-                    json_results,
                 },
                 transaction_id,
             }));
@@ -507,31 +483,34 @@ impl JsonRpcHandlers {
                 .autofill_transaction(request.transaction, request.required_substates)
                 .await
                 .map_err(|e| match e {
-                    TransactionManagerError::AllValidatorsFailed { .. } => JsonRpcResponse::error(
+                    TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) => {
+                        JsonRpcResponse::error(
+                            answer_id,
+                            JsonRpcError::new(
+                                JsonRpcErrorReason::ApplicationError(400),
+                                format!("All validators failed: {}", e),
+                                json::Value::Null,
+                            ),
+                        )
+                    },
+                    e => Self::internal_error(answer_id, e),
+                })?
+        };
+        let transaction_id = self
+            .transaction_manager
+            .submit_transaction(transaction)
+            .await
+            .map_err(|e| match e {
+                TransactionManagerError::NetworkClientError(NetworkClientError::AllValidatorsFailed { .. }) => {
+                    JsonRpcResponse::error(
                         answer_id,
                         JsonRpcError::new(
                             JsonRpcErrorReason::ApplicationError(400),
                             format!("All validators failed: {}", e),
                             json::Value::Null,
                         ),
-                    ),
-                    e => Self::internal_error(answer_id, e),
-                })?
-        };
-
-        let transaction_id = self
-            .transaction_manager
-            .submit_transaction(transaction)
-            .await
-            .map_err(|e| match e {
-                TransactionManagerError::AllValidatorsFailed { .. } => JsonRpcResponse::error(
-                    answer_id,
-                    JsonRpcError::new(
-                        JsonRpcErrorReason::ApplicationError(400),
-                        format!("All validators failed: {}", e),
-                        json::Value::Null,
-                    ),
-                ),
+                    )
+                },
                 e => Self::internal_error(answer_id, e),
             })?;
 
@@ -555,8 +534,30 @@ impl JsonRpcHandlers {
                 ),
             )
         })?;
-        let (current_block_height, current_block_hash) =
-            self.epoch_manager.current_block_info().await.map_err(|e| {
+        let (current_block_hash, current_block_height) = self
+            .global_db
+            .create_transaction()
+            .and_then(|mut tx| {
+                // This pokes into the internals of the oracles a bit. And can give incorrect results if we switch
+                // between them.
+                let current_epoch = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<Epoch>(StoreKey::StaticCurrentEpoch.as_key_bytes())?;
+                let block_hash = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<FixedHash>(StoreKey::BaseLayerLastScannedBlockHash.as_key_bytes())?
+                    .or_else(|| current_epoch.map(calc_static_epoch_hash));
+                let block_height = self
+                    .global_db
+                    .metadata(&mut tx)
+                    .get_metadata::<u64>(StoreKey::BaseLayerLastScannedBlockHeight.as_key_bytes())?
+                    // Just use the epoch here
+                    .or(current_epoch.map(|e| e.as_u64()));
+                Ok::<_, SqliteStorageError>((block_hash.unwrap_or_default(), block_height.unwrap_or_default()))
+            })
+            .map_err(|e| {
                 JsonRpcResponse::error(
                     answer_id,
                     JsonRpcError::new(
@@ -578,6 +579,7 @@ impl JsonRpcHandlers {
     pub async fn get_template_definition(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let request: GetTemplateDefinitionRequest = value.parse_params()?;
+
         let template = self
             .template_manager
             .fetch_template(&request.template_address)
@@ -643,19 +645,14 @@ impl JsonRpcHandlers {
             TransactionResultStatus::Pending => GetTransactionResultResponse {
                 result: IndexerTransactionFinalizedResult::Pending,
             },
-            TransactionResultStatus::Finalized(finalized) => {
-                let json_results =
-                    encode_finalized_result_into_json(&finalized).map_err(|e| Self::internal_error(answer_id, e))?;
-                GetTransactionResultResponse {
-                    result: IndexerTransactionFinalizedResult::Finalized {
-                        final_decision: finalized.final_decision,
-                        execution_result: finalized.execute_result.map(Box::new),
-                        execution_time: finalized.execution_time,
-                        finalized_time: finalized.finalized_time,
-                        abort_details: finalized.abort_details,
-                        json_results,
-                    },
-                }
+            TransactionResultStatus::Finalized(finalized) => GetTransactionResultResponse {
+                result: IndexerTransactionFinalizedResult::Finalized {
+                    final_decision: finalized.final_decision,
+                    execution_result: finalized.execute_result.map(Box::new),
+                    execution_time: finalized.execution_time,
+                    finalized_time: finalized.finalized_time,
+                    abort_details: finalized.abort_details,
+                },
             },
         };
 
@@ -672,7 +669,7 @@ impl JsonRpcHandlers {
         loop {
             let res = self
                 .substate_manager
-                .get_specific_substate(&request.address, version)
+                .get_specific_substate(request.address.clone(), version)
                 .await;
 
             if let Ok(substate_result) = res {
@@ -701,17 +698,12 @@ impl JsonRpcHandlers {
 
             let indexer_transaction_result = match transaction_result {
                 TransactionResultStatus::Pending => IndexerTransactionFinalizedResult::Pending,
-                TransactionResultStatus::Finalized(finalized) => {
-                    let json_results = encode_finalized_result_into_json(&finalized)
-                        .map_err(|e| Self::internal_error(answer_id, e))?;
-                    IndexerTransactionFinalizedResult::Finalized {
-                        final_decision: finalized.final_decision,
-                        execution_result: finalized.execute_result.map(Box::new),
-                        execution_time: finalized.execution_time,
-                        finalized_time: finalized.finalized_time,
-                        abort_details: finalized.abort_details,
-                        json_results,
-                    }
+                TransactionResultStatus::Finalized(finalized) => IndexerTransactionFinalizedResult::Finalized {
+                    final_decision: finalized.final_decision,
+                    execution_result: finalized.execute_result.map(Box::new),
+                    execution_time: finalized.execution_time,
+                    finalized_time: finalized.finalized_time,
+                    abort_details: finalized.abort_details,
                 },
             };
 

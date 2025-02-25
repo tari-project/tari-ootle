@@ -154,7 +154,7 @@ mod miscellaneous_operations {
         assert_eq_debug(&res, &high_qc);
 
         // foreign send counters
-        let shard = Shard::zero();
+        let shard = Shard::first();
         let block_id = BlockId::genesis();
         let mut counter = ForeignSendCounters::new();
         counter.increment_counter(shard);

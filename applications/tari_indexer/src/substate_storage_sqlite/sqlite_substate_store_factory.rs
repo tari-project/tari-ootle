@@ -187,7 +187,7 @@ pub trait SubstateStoreReadTransaction {
         limit: Option<u64>,
         offset: Option<u64>,
     ) -> Result<Vec<ListSubstateItem>, StorageError>;
-    fn get_substate(&mut self, address: &SubstateId) -> Result<Option<Substate>, StorageError>;
+    fn get_substate(&mut self, address: &SubstateId, version: Option<u32>) -> Result<Option<Substate>, StorageError>;
     #[allow(dead_code)]
     fn get_latest_version_for_substate(&mut self, address: &SubstateId) -> Result<Option<i64>, StorageError>;
     #[allow(dead_code)]
@@ -229,7 +229,7 @@ pub trait SubstateStoreReadTransaction {
         offset: u32,
         limit: u32,
     ) -> Result<Vec<Event>, StorageError>;
-    fn event_exists(&mut self, event: NewEvent) -> Result<bool, StorageError>;
+    fn event_exists(&mut self, event: &NewEvent) -> Result<bool, StorageError>;
     fn get_oldest_scanned_epoch(&mut self) -> Result<Option<Epoch>, StorageError>;
     fn get_last_scanned_block_id(
         &mut self,
@@ -255,10 +255,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         }
 
         if let Some(substate_type) = by_type {
-            let address_like = match substate_type {
-                SubstateType::NonFungible => format!("resource_% {}_%", substate_type.as_prefix_str()),
-                _ => format!("{}_%", substate_type.as_prefix_str()),
-            };
+            let address_like = format!("{}_%", substate_type.as_prefix_str());
             query = query.filter(substates::address.like(address_like));
         }
 
@@ -298,18 +295,25 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         Ok(items)
     }
 
-    fn get_substate(&mut self, address: &SubstateId) -> Result<Option<Substate>, StorageError> {
+    fn get_substate(&mut self, address: &SubstateId, version: Option<u32>) -> Result<Option<Substate>, StorageError> {
         use crate::substate_storage_sqlite::schema::substates;
 
-        let substate = substates::table
-            .filter(substates::address.eq(address.to_string()))
+        let mut substate_query = substates::table
+            .into_boxed()
+            .filter(substates::address.eq(address.to_string()));
+        if let Some(version) = version {
+            substate_query = substate_query.filter(substates::version.eq(i64::from(version)));
+        } else {
+            substate_query = substate_query.order_by(substates::version.desc())
+        }
+
+        substate_query
+            .limit(1)
             .first(self.connection())
             .optional()
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_substate: {}", e),
-            })?;
-
-        Ok(substate)
+            })
     }
 
     fn get_latest_version_for_substate(&mut self, address: &SubstateId) -> Result<Option<i64>, StorageError> {
@@ -581,18 +585,18 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         Ok(events)
     }
 
-    fn event_exists(&mut self, value: NewEvent) -> Result<bool, StorageError> {
+    fn event_exists(&mut self, value: &NewEvent) -> Result<bool, StorageError> {
         use crate::substate_storage_sqlite::schema::events;
 
         let count = events::table
             .filter(
                 events::substate_id
-                    .eq(value.substate_id)
-                    .and(events::template_address.eq(value.template_address))
-                    .and(events::topic.eq(value.topic))
-                    .and(events::version.eq(value.version))
-                    .and(events::payload.eq(value.payload))
-                    .and(events::tx_hash.eq(value.tx_hash)),
+                    .eq(&value.substate_id)
+                    .and(events::template_address.eq(&value.template_address))
+                    .and(events::topic.eq(&value.topic))
+                    .and(events::version.eq(&value.version))
+                    .and(events::payload.eq(&value.payload))
+                    .and(events::tx_hash.eq(&value.tx_hash)),
             )
             .count()
             .get_result::<i64>(self.connection())

@@ -394,10 +394,6 @@ mod block_query_operations {
         let res = tx.blocks_get_paginated(1, 0, None, None, Some(7), Some(Ordering::Descending)).unwrap();
         assert_eq!(res.len(), 1);
 
-        // blocks_get_total_leader_fee_for_epoch
-        let res = tx.blocks_get_total_leader_fee_for_epoch(Epoch(0), &Default::default()).unwrap();
-        assert_eq!(res, 9);
-
         // filtered_blocks_get_count
         let res = tx.filtered_blocks_get_count(None, None).unwrap();
         assert_eq!(res, 4);

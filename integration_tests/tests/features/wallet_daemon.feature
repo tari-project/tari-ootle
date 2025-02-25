@@ -30,14 +30,9 @@ Feature: Wallet Daemon
         # Initialize the wallet daemon
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-        # Register the "faucet" template
-    When base wallet WALLET registers the template "faucet"
-
-        # Mine some blocks until the UTXOs are scanned
-    When miner MINER mines 5 new blocks
-    Then VAL_1 has scanned to height 32
-    Then indexer IDX has scanned to height 32
-    Then the template "faucet" is listed as registered by the validator node VAL_1
+    # Publish the "fauset" template
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
         # Create two accounts to test sending the tokens
     When I create an account ACC_1 via the wallet daemon WALLET_D with 10000 free coins
@@ -140,5 +135,7 @@ Feature: Wallet Daemon
     # Create two accounts to test sending the tokens
     When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
 
-        # Mint a new account NFT
+    When I print the cucumber world
+
+    # Mint a new account NFT
     When I mint a new non fungible token NFT on ACC using wallet daemon WALLET_D

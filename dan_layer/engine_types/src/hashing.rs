@@ -53,6 +53,10 @@ pub fn template_hasher32() -> TariHasher32 {
     hasher32(EngineHashDomainLabel::Template)
 }
 
+pub fn hash_template_code(code: &[u8]) -> Hash {
+    template_hasher32().chain(&code).result()
+}
+
 #[derive(Debug, Clone)]
 pub struct TariHasher32 {
     hasher: Blake2b<U32>,

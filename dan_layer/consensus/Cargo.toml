@@ -24,7 +24,6 @@ tari_shutdown = { workspace = true }
 
 anyhow = { workspace = true }
 indexmap = { workspace = true }
-async-trait = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }

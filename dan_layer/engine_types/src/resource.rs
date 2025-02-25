@@ -20,6 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_template_lib::{
@@ -85,7 +87,7 @@ impl Resource {
     pub fn as_ownership(&self) -> Ownership<'_> {
         Ownership {
             owner_key: self.owner_key.as_ref(),
-            owner_rule: &self.owner_rule,
+            owner_rule: Cow::Borrowed(&self.owner_rule),
         }
     }
 

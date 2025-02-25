@@ -4,7 +4,7 @@
 @concurrent
 @fungible
 Feature: Fungible tokens
-
+  
   Scenario: Mint fungible tokens
 
     ##### Setup
@@ -27,11 +27,9 @@ Feature: Fungible tokens
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register the "faucet" template
-    When base wallet WALLET registers the template "faucet"
-    When miner MINER mines 20 new blocks
-    Then VN has scanned to height 53
-    Then the template "faucet" is listed as registered by the validator node VN
+    # Publish faucet template
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+    When wallet daemon WALLET_D publishes the template "faucet" using account ACC
 
     ##### Scenario
     # Create two accounts to test deposit the tokens

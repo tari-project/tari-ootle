@@ -14,6 +14,7 @@ use std::{
 use anyhow::anyhow;
 use cli::Cli;
 use rand::rngs::OsRng;
+use tari_common::configuration::Network;
 use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey, tari_utilities::hex::Hex};
 use tari_transaction_manifest::ManifestValue;
 use transaction_generator::{
@@ -79,6 +80,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn get_transaction_builder(args: &WriteArgs) -> anyhow::Result<BoxedTransactionBuilder> {
+    let network = args.network.unwrap_or(Network::LocalNet);
     match args.manifest.as_ref() {
         Some(manifest) => {
             let signer_key = args
@@ -100,9 +102,9 @@ fn get_transaction_builder(args: &WriteArgs) -> anyhow::Result<BoxedTransactionB
                     manifest_args.extend(parse_arg(line));
                 }
             }
-            manifest::builder(signer_key, manifest, manifest_args, HashMap::new())
+            manifest::builder(signer_key, network, manifest, manifest_args, HashMap::new())
         },
-        None => Ok(Box::new(free_coins::builder)),
+        None => Ok(Box::new(free_coins::builder(network))),
     }
 }
 

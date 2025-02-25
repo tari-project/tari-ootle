@@ -1,20 +1,17 @@
 //    Copyright 2024 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_app_utilities::template_manager::interface::TemplateManagerError;
+use tari_common::{configuration::Network, ConfigurationError};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::{consensus_models::TransactionPoolError, StorageError};
 use tari_networking::NetworkingError;
+use tari_template_manager::interface::TemplateManagerError;
 use tari_transaction::TransactionId;
-
-use crate::virtual_substate::VirtualSubstateError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionValidationError {
     #[error("Storage Error: {0}")]
     StorageError(#[from] StorageError),
-    #[error("Virtual substate error: {0}")]
-    VirtualSubstateError(#[from] VirtualSubstateError),
     #[error("Transaction pool error: {0}")]
     TransactionPoolError(#[from] TransactionPoolError),
 
@@ -44,4 +41,8 @@ pub enum TransactionValidationError {
     TransactionNotSigned { transaction_id: TransactionId },
     #[error("Network error: {0}")]
     NetworkingError(#[from] NetworkingError),
+    #[error("Unknown network byte \"{0:?}\": {1}")]
+    UnknownNetwork(u8, ConfigurationError),
+    #[error("Network mismatch! Current network: {actual}, Transaction network: {expected}")]
+    NetworkMismatch { actual: Network, expected: Network },
 }

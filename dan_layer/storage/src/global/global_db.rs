@@ -59,6 +59,34 @@ impl<TGlobalDbAdapter: GlobalDbAdapter> GlobalDb<TGlobalDbAdapter> {
         Ok(tx)
     }
 
+    pub fn with_write_tx<F, R, E>(&self, f: F) -> Result<R, E>
+    where
+        E: From<TGlobalDbAdapter::Error>,
+        F: FnOnce(&mut TGlobalDbAdapter::DbTransaction<'_>) -> Result<R, E>,
+    {
+        let mut tx = self.create_transaction()?;
+        match f(&mut tx) {
+            Ok(r) => {
+                self.commit(tx)?;
+                Ok(r)
+            },
+            Err(e) => {
+                self.rollback(tx)?;
+                Err(e)
+            },
+        }
+    }
+
+    pub fn with_read_tx<F, R, E>(&self, f: F) -> Result<R, E>
+    where
+        E: From<TGlobalDbAdapter::Error>,
+        F: FnOnce(&mut TGlobalDbAdapter::DbTransaction<'_>) -> Result<R, E>,
+    {
+        let mut tx = self.create_transaction()?;
+        let ret = f(&mut tx)?;
+        Ok(ret)
+    }
+
     pub fn templates<'a, 'tx>(
         &'a self,
         tx: &'tx mut TGlobalDbAdapter::DbTransaction<'a>,
@@ -103,6 +131,11 @@ impl<TGlobalDbAdapter: GlobalDbAdapter> GlobalDb<TGlobalDbAdapter> {
 
     pub fn commit(&self, tx: TGlobalDbAdapter::DbTransaction<'_>) -> Result<(), TGlobalDbAdapter::Error> {
         self.adapter.commit(tx)?;
+        Ok(())
+    }
+
+    pub fn rollback(&self, tx: TGlobalDbAdapter::DbTransaction<'_>) -> Result<(), TGlobalDbAdapter::Error> {
+        self.adapter.rollback(tx)?;
         Ok(())
     }
 }

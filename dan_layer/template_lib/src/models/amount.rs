@@ -29,13 +29,15 @@ use tari_template_abi::rust::{
     iter::Sum,
     num::TryFromIntError,
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 /// Represents an integer quantity of any fungible or non-fungible resource
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct Amount(#[cfg_attr(feature = "ts", ts(type = "number"))] pub i64);
 
 impl Amount {
@@ -263,6 +265,26 @@ mod tests {
         let a = Amount(4);
         let b = serde_json::to_string(&a).unwrap();
         assert_eq!(b, "4");
+    }
+
+    #[test]
+    fn can_de_serialize_using_cbor() {
+        let a = Amount(4);
+        let encoded = tari_bor::encode(&a).unwrap();
+        let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+        assert_eq!(a, decoded);
+
+        // Coercion
+        let encoded = tari_bor::encode(&123u32).unwrap();
+        let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+        assert_eq!(decoded, Amount(123));
+        let encoded = tari_bor::encode(&321u64).unwrap();
+        let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+        assert_eq!(decoded, Amount(321));
+
+        let encoded = tari_bor::encode(&a).unwrap();
+        let decoded = tari_bor::decode::<u64>(&encoded).unwrap();
+        assert_eq!(decoded, 4);
     }
 
     #[test]

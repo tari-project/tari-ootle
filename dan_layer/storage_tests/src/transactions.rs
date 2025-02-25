@@ -65,6 +65,8 @@ mod confirm_all_transitions {
         )
         .unwrap();
         block1.insert(&mut tx).unwrap();
+        block1.as_locked_block().set(&mut tx).unwrap();
+        block1.as_leaf_block().set(&mut tx).unwrap();
         
         tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false).unwrap();
         tx.transaction_pool_insert_new(atom2.id, atom2.decision, &Evidence::empty(), true, false).unwrap();
@@ -220,7 +222,7 @@ mod transaction_operations {
         assert_eq_debug(&res, &updated_tx);
         assert_eq!(res.abort_reason, None);
 
-        updated_tx.set_abort_reason(RejectReason::Unknown);
+        updated_tx.abort_reason = Some(RejectReason::Unknown);
 
         tx.transactions_update(&updated_tx).unwrap();
         let res = tx.transactions_get(updated_tx.id()).unwrap();

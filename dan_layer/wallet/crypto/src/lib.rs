@@ -10,7 +10,7 @@ pub use proof::*;
 
 mod api;
 pub use api::*;
-mod byte_utils;
+pub mod byte_utils;
 mod confidential_output;
 pub use confidential_output::*;
 

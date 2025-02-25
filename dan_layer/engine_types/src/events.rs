@@ -32,6 +32,13 @@ use ts_rs::TS;
 
 use crate::{serde_with, substate::SubstateId};
 
+// Topics for builtin events emitted by the engine
+const STANDARD_TOPIC_PREFIX: &str = "std.";
+
+fn std_event(object_name: &str, action_name: &str) -> String {
+    format!("{}{}.{}", STANDARD_TOPIC_PREFIX, object_name, action_name)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub struct Event {
@@ -43,8 +50,6 @@ pub struct Event {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     tx_hash: Hash,
     topic: String,
-    // NOTE: We need to use an ordered map here. HashMaps are unordered, so when we pledge this state the hash
-    // resulting hash may differ.
     payload: Metadata,
 }
 
@@ -65,8 +70,29 @@ impl Event {
         }
     }
 
-    pub fn substate_id(&self) -> Option<SubstateId> {
-        self.substate_id.clone()
+    pub fn std(
+        substate_id: Option<SubstateId>,
+        template_address: TemplateAddress,
+        tx_hash: Hash,
+        object_name: &str,
+        action_name: &str,
+        payload: Metadata,
+    ) -> Self {
+        Self::new(
+            substate_id,
+            template_address,
+            tx_hash,
+            std_event(object_name, action_name),
+            payload,
+        )
+    }
+
+    pub fn topic_has_std_prefix<T: AsRef<str>>(topic: T) -> bool {
+        topic.as_ref().starts_with(STANDARD_TOPIC_PREFIX)
+    }
+
+    pub fn substate_id(&self) -> Option<&SubstateId> {
+        self.substate_id.as_ref()
     }
 
     pub fn template_address(&self) -> TemplateAddress {
@@ -102,8 +128,12 @@ impl Display for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "event: substate_id {:?}, template_address {}, tx_hash {}, topic {} and payload {:?}",
-            self.substate_id, self.template_address, self.tx_hash, self.topic, self.payload
+            "event: substate_id {:?}, template_address {}, tx_hash {}, topic {} and payload {}",
+            self.substate_id.as_ref().map(|e| e.to_string()),
+            self.template_address,
+            self.tx_hash,
+            self.topic,
+            self.payload
         )
     }
 }

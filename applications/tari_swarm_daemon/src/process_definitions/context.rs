@@ -4,6 +4,7 @@
 use std::{collections::HashMap, net::IpAddr, path::PathBuf};
 
 use tari_common::configuration::Network;
+use url::Url;
 
 use crate::process_manager::{
     AllocatedPorts,
@@ -20,6 +21,7 @@ pub struct ProcessContext<'a> {
     bin: &'a PathBuf,
     envs: &'a [(String, String)],
     base_path: PathBuf,
+    processes_path: PathBuf,
     network: Network,
     listen_ip: IpAddr,
     port_allocator: &'a mut AllocatedPorts,
@@ -33,6 +35,7 @@ impl<'a> ProcessContext<'a> {
         bin: &'a PathBuf,
         envs: &'a [(String, String)],
         base_path: PathBuf,
+        processes_path: PathBuf,
         network: Network,
         listen_ip: IpAddr,
         port_allocator: &'a mut AllocatedPorts,
@@ -44,6 +47,7 @@ impl<'a> ProcessContext<'a> {
             bin,
             envs,
             base_path,
+            processes_path,
             network,
             listen_ip,
             port_allocator,
@@ -64,12 +68,34 @@ impl<'a> ProcessContext<'a> {
         &self.base_path
     }
 
+    pub fn processes_path(&self) -> &PathBuf {
+        &self.processes_path
+    }
+
     pub fn network(&self) -> Network {
         self.network
     }
 
-    pub fn get_setting(&self, key: &str) -> Option<&String> {
-        self.settings.get(key)
+    pub fn get_setting(&self, key: &str) -> Option<&str> {
+        self.settings.get(key).map(|s| s.as_str())
+    }
+
+    pub fn get_public_json_rpc_url(&self) -> Url {
+        match self.settings.get("public_json_rpc_url") {
+            Some(url) => url.parse().expect("Invalid JSON RPC URL"),
+            None => {
+                let public_ip = self
+                    .settings
+                    .get("public_ip")
+                    .map(|s| s.as_str())
+                    .unwrap_or("127.0.0.1");
+                let port = self
+                    .port_allocator
+                    .get("jrpc")
+                    .expect("JSON-rpc port must be allocated before calling get_public_json_rpc_url");
+                format!("http://{public_ip}:{port}").parse().expect("Invalid web URL")
+            },
+        }
     }
 
     pub async fn get_free_port(&mut self, name: &'static str) -> anyhow::Result<u16> {

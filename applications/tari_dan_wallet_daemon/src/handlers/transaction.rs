@@ -6,11 +6,9 @@ use anyhow::anyhow;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
-use tari_dan_app_utilities::json_encoding;
-use tari_dan_common_types::{optional::Optional, Epoch, SubstateRequirement};
+use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
 use tari_template_lib::{args, models::Amount};
-use tari_transaction::Transaction;
 use tari_wallet_daemon_client::types::{
     AccountGetRequest,
     AccountGetResponse,
@@ -34,7 +32,10 @@ use tokio::time;
 
 use super::{accounts, context::HandlerContext};
 use crate::{
-    handlers::{helpers::get_account_or_default, HandlerError},
+    handlers::{
+        helpers::{get_account_or_default, transaction_builder},
+        HandlerError,
+    },
     services::WalletEvent,
 };
 
@@ -45,7 +46,7 @@ pub async fn handle_submit_instruction(
     token: Option<String>,
     req: CallInstructionRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
-    let mut builder = Transaction::builder().with_instructions(req.instructions);
+    let mut builder = transaction_builder(context).with_instructions(req.instructions);
 
     if let Some(dump_account) = req.dump_outputs_into {
         let AccountGetResponse {
@@ -82,7 +83,7 @@ pub async fn handle_submit_instruction(
         signing_key_index: Some(fee_account.key_index),
         autofill_inputs: vec![],
         detect_inputs: req.override_inputs.unwrap_or_default(),
-        detect_inputs_use_unversioned: false,
+        detect_inputs_use_unversioned: true,
         proof_ids: vec![],
     };
     handle_submit(context, token, request).await
@@ -106,16 +107,24 @@ pub async fn handle_submit(
     let detected_inputs = if req.detect_inputs {
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
-        let substates = substates.into_iter().collect::<Vec<_>>();
+        let substates = substates
+            .into_iter()
+            .chain(
+                req.transaction
+                    .inputs()
+                    .into_iter()
+                    .map(|req| req.substate_id().clone()),
+            )
+            .collect::<Vec<_>>();
         let loaded_substates = sdk.substate_api().locate_dependent_substates(&substates).await?;
         loaded_substates
             .into_iter()
-            .chain(substates.into_iter().map(SubstateRequirement::unversioned))
-            .map(|mut input| {
+            .map(|input| {
                 if req.detect_inputs_use_unversioned {
-                    input.version = None;
+                    input.into_unversioned()
+                } else {
+                    input
                 }
-                input
             })
             .collect()
     } else {
@@ -130,13 +139,15 @@ pub async fn handle_submit(
         req.detect_inputs_use_unversioned,
     );
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .build_and_seal(&key.key);
 
-    for input in transaction.inputs() {
-        debug!(target: LOG_TARGET, "Input: {}", input)
+    if log_enabled!(log::Level::Debug) {
+        for input in transaction.inputs() {
+            debug!(target: LOG_TARGET, "Input: {}", input)
+        }
     }
 
     for proof_id in req.proof_ids {
@@ -178,12 +189,22 @@ pub async fn handle_submit_dry_run(
         // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
         let substates = req.transaction.to_referenced_substates()?;
         let substates = substates.into_iter().collect::<Vec<_>>();
-        sdk.substate_api().locate_dependent_substates(&substates).await?
+        let dependencies = sdk.substate_api().locate_dependent_substates(&substates).await?;
+        dependencies
+            .into_iter()
+            .map(|input| {
+                if req.detect_inputs_use_unversioned {
+                    input.into_unversioned()
+                } else {
+                    input
+                }
+            })
+            .collect()
     } else {
         vec![]
     };
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
         .build_and_seal(&key.key);
@@ -204,12 +225,9 @@ pub async fn handle_submit_dry_run(
         .submit_dry_run_transaction(transaction, autofill_inputs)
         .await?;
 
-    let json_result = json_encoding::encode_finalize_result_into_json(&exec_result.finalize)?;
-
     Ok(TransactionSubmitDryRunResponse {
         transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
         result: exec_result,
-        json_result,
     })
 }
 
@@ -274,17 +292,10 @@ pub async fn handle_get_result(
         .optional()?
         .ok_or(HandlerError::NotFound)?;
 
-    let json_result = transaction
-        .finalize
-        .as_ref()
-        .map(json_encoding::encode_finalize_result_into_json)
-        .transpose()?;
-
     Ok(TransactionGetResultResponse {
         transaction_id: req.transaction_id,
         result: transaction.finalize,
         status: transaction.status,
-        json_result,
     })
 }
 
@@ -306,15 +317,12 @@ pub async fn handle_wait_result(
         .ok_or(HandlerError::NotFound)?;
 
     if let Some(result) = transaction.finalize {
-        let json_result = json_encoding::encode_finalize_result_into_json(&result)?;
-
         return Ok(TransactionWaitResultResponse {
             transaction_id: req.transaction_id,
             result: Some(result),
             status: transaction.status,
             final_fee: transaction.final_fee.unwrap_or_default(),
             timed_out: false,
-            json_result: Some(json_result),
         });
     }
 
@@ -337,14 +345,12 @@ pub async fn handle_wait_result(
 
         match evt_or_timeout {
             Some(WalletEvent::TransactionFinalized(event)) if event.transaction_id == req.transaction_id => {
-                let json_result = json_encoding::encode_finalize_result_into_json(&event.finalize)?;
                 return Ok(TransactionWaitResultResponse {
                     transaction_id: req.transaction_id,
                     result: Some(event.finalize),
                     status: event.status,
                     final_fee: event.final_fee,
                     timed_out: false,
-                    json_result: Some(json_result),
                 });
             },
             Some(WalletEvent::TransactionInvalid(event)) if event.transaction_id == req.transaction_id => {
@@ -354,7 +360,6 @@ pub async fn handle_wait_result(
                     status: event.status,
                     final_fee: event.final_fee.unwrap_or_default(),
                     timed_out: false,
-                    json_result: None,
                 });
             },
             Some(_) => continue,
@@ -365,7 +370,6 @@ pub async fn handle_wait_result(
                     status: transaction.status,
                     final_fee: Amount::zero(),
                     timed_out: true,
-                    json_result: None,
                 });
             },
         };
@@ -381,7 +385,7 @@ pub async fn handle_publish_template(
 
     let fee_account = get_account_or_default(req.fee_account, &sdk.accounts_api())?;
 
-    let transaction = Transaction::builder()
+    let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(
             fee_account.address.as_component_address().unwrap(),
             req.max_fee.try_into()?,
@@ -395,6 +399,7 @@ pub async fn handle_publish_template(
             signing_key_index: Some(fee_account.key_index),
             autofill_inputs: vec![],
             detect_inputs: req.detect_inputs,
+            detect_inputs_use_unversioned: true,
             proof_ids: vec![],
         };
         let resp = handle_submit_dry_run(context, token, request).await?;

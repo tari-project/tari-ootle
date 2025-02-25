@@ -23,8 +23,8 @@
 use std::convert::{TryFrom, TryInto};
 
 use log::*;
-use tari_bor::{decode_exact, encode};
-use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateAddress};
+use tari_bor::encode;
+use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{
@@ -42,53 +42,54 @@ use tari_dan_p2p::{
         SyncBlocksResponse,
         SyncStateRequest,
         SyncStateResponse,
+        SyncTemplatesRequest,
+        SyncTemplatesResponse,
     },
 };
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
-use tari_engine_types::virtual_substate::VirtualSubstateId;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_engine_types::TemplateAddress;
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
-use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_lib::HashParseError;
+use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
 
 use crate::{
-    consensus::ConsensusHandle, p2p::{
-        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask},
+    consensus::ConsensusHandle,
+    p2p::{
+        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
         services::mempool::MempoolHandle,
-    }, state_store::ValidatorNodeStateStore, virtual_substate::VirtualSubstateManager
+    }, state_store::ValidatorNodeStateStore
 };
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";
 
 pub struct ValidatorNodeRpcServiceImpl {
     epoch_manager: EpochManagerHandle<PeerAddress>,
+    template_manager: TemplateManagerHandle,
     shard_state_store: ValidatorNodeStateStore,
     mempool: MempoolHandle,
-    virtual_substate_manager: VirtualSubstateManager<ValidatorNodeStateStore, EpochManagerHandle<PeerAddress>>,
     consensus: ConsensusHandle,
 }
 
 impl ValidatorNodeRpcServiceImpl {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
+        template_manager: TemplateManagerHandle,
         shard_state_store: ValidatorNodeStateStore,
         mempool: MempoolHandle,
-        virtual_substate_manager: VirtualSubstateManager<
-            ValidatorNodeStateStore,
-            EpochManagerHandle<PeerAddress>,
-        >,
         consensus: ConsensusHandle,
     ) -> Self {
         Self {
             epoch_manager,
+            template_manager,
             shard_state_store,
             mempool,
-            virtual_substate_manager,
             consensus,
         }
     }
@@ -125,15 +126,47 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
     async fn get_substate(&self, req: Request<GetSubstateRequest>) -> Result<Response<GetSubstateResponse>, RpcStatus> {
         let req = req.into_message();
 
-        let address = SubstateAddress::from_bytes(&req.address)
-            .map_err(|e| RpcStatus::bad_request(format!("Invalid encoded substate id: {}", e)))?;
+        let substate_requirement = req
+            .substate_requirement
+            .map(SubstateRequirement::try_from)
+            .transpose()
+            .map_err(|e| RpcStatus::bad_request(format!("Invalid substate requirement: {e}")))?
+            .ok_or_else(|| RpcStatus::bad_request("Missing substate requirement"))?;
 
+        if !substate_requirement.substate_id().is_global() {
+            let current_epoch = self
+                .epoch_manager
+                .current_epoch()
+                .await
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+            let local_committee_info = self
+                .epoch_manager
+                .get_local_committee_info(current_epoch)
+                .await
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+            if !local_committee_info.includes_substate_id(substate_requirement.substate_id()) {
+                return Err(RpcStatus::bad_request(format!(
+                    "This node in {} does not store {}",
+                    local_committee_info.shard_group(),
+                    substate_requirement
+                )));
+            }
+        }
+
+        debug!(
+            target: LOG_TARGET,
+            "Querying substate {substate_requirement} from the state store"
+        );
         let tx = self
             .shard_state_store
             .create_read_tx()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        let maybe_substate = SubstateRecord::get(&tx, &address)
+        let maybe_substate = substate_requirement
+            .to_substate_address()
+            .map(|address| SubstateRecord::get(&tx, &address))
+            // Just fetch the latest if no version is supplied as a requirement
+            .unwrap_or_else(|| SubstateRecord::get_latest(&tx, substate_requirement.substate_id()))
             .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
@@ -173,35 +206,14 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 status: SubstateStatus::Up as i32,
                 address: substate.substate_id().to_bytes(),
                 version: substate.version(),
-                substate: substate.substate_value().to_bytes(),
+                substate: substate
+                    .substate_value()
+                    .map(|v| v.to_bytes())
+                    .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
                 created_transaction_hash: substate.created_by_transaction().into_array().to_vec(),
                 destroyed_transaction_hash: vec![],
                 quorum_certificates: vec![(&created_qc).into()],
             }
-        };
-
-        Ok(Response::new(resp))
-    }
-
-    async fn get_virtual_substate(
-        &self,
-        req: Request<proto::rpc::GetVirtualSubstateRequest>,
-    ) -> Result<Response<proto::rpc::GetVirtualSubstateResponse>, RpcStatus> {
-        let req = req.into_message();
-
-        let address = decode_exact::<VirtualSubstateId>(&req.address)
-            .map_err(|e| RpcStatus::bad_request(format!("Invalid encoded substate id: {}", e)))?;
-
-        let substate = self
-            .virtual_substate_manager
-            .generate_for_address(&address)
-            .await
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-        let resp = proto::rpc::GetVirtualSubstateResponse {
-            substate: encode(&substate).map_err(|e| RpcStatus::general(format!("Unable to encode substate: {}", e)))?,
-            // TODO: evidence for the correctness of the substate
-            quorum_certificates: vec![],
         };
 
         Ok(Response::new(resp))
@@ -262,13 +274,18 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
     ) -> Result<Streaming<SyncBlocksResponse>, RpcStatus> {
         let req = request.into_message();
         let store = self.shard_state_store.clone();
+
+        if proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).is_err() {
+            return Err(RpcStatus::bad_request("StreamSubstateSelection is invalid"));
+        }
+
         let current_epoch = self
             .epoch_manager
             .current_epoch()
             .await
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        let start_block_id = Some(req.start_block_id)
+        let start_block_id = Some(req.start_block_id.as_slice())
             .filter(|i| !i.is_empty())
             .map(BlockId::try_from)
             .transpose()
@@ -289,6 +306,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
                 None => {
                     let epoch = req
                         .epoch
+                        .clone()
                         .map(Epoch::from)
                         .map(|end| end.min(current_epoch))
                         .unwrap_or(current_epoch);
@@ -314,7 +332,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         };
 
         let (sender, receiver) = mpsc::channel(10);
-        task::spawn(BlockSyncTask::new(self.shard_state_store.clone(), start_block_id, None, sender).run());
+        task::spawn(BlockSyncTask::new(self.shard_state_store.clone(), start_block_id, None, sender).run(req));
 
         Ok(Streaming::new(receiver))
     }
@@ -390,5 +408,36 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         );
 
         Ok(Streaming::new(receiver))
+    }
+
+    async fn sync_templates(
+        &self,
+        request: Request<SyncTemplatesRequest>,
+    ) -> Result<Streaming<SyncTemplatesResponse>, RpcStatus> {
+        let req = request.into_message();
+        const MAX_BATCH_SIZE: usize = 20;
+        info!(target: LOG_TARGET, "♻️ peer requesting template sync with {} template(s)", req.addresses.len());
+
+        if req.addresses.is_empty() {
+            return Err(RpcStatus::bad_request("No templates requested"));
+        }
+
+        if req.addresses.len() > MAX_BATCH_SIZE {
+            return Err(RpcStatus::bad_request(format!(
+                "Number of requested templates exceeds max {MAX_BATCH_SIZE}"
+            )));
+        }
+
+        let (tx, rx) = mpsc::channel(10);
+        let addresses = req
+            .addresses
+            .iter()
+            .map(|raw| TemplateAddress::try_from_vec(raw.clone()))
+            .collect::<Result<Vec<TemplateAddress>, HashParseError>>()
+            .map_err(|error| RpcStatus::bad_request(format!("Failed to parse address: {}", error)))?;
+
+        task::spawn(TemplateSyncTask::new(MAX_BATCH_SIZE, addresses, tx, self.template_manager.clone()).run());
+
+        Ok(Streaming::new(rx))
     }
 }

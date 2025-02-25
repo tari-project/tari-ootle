@@ -27,8 +27,8 @@ impl ProcessDefinition for ValidatorNode {
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
 
-        let json_rpc_public_address = format!("{listen_ip}:{jrpc_port}");
         let json_rpc_address = format!("{listen_ip}:{jrpc_port}");
+        let json_rpc_public_url = context.get_public_json_rpc_url();
         let web_ui_address = format!("{listen_ip}:{web_ui_port}");
 
         let base_node = context
@@ -40,7 +40,7 @@ impl ProcessDefinition for ValidatorNode {
             .instance()
             .allocated_ports()
             .get("grpc")
-            .map(|port| format!("http://{listen_ip}:{port}"))
+            .map(|port| format!("http://127.0.0.1:{port}"))
             .ok_or_else(|| anyhow!("grpc port not found for base node"))?;
 
         debug!(
@@ -49,17 +49,23 @@ impl ProcessDefinition for ValidatorNode {
             base_node_grpc_url
         );
 
+        if let Some(claim_public_key) = context.get_setting("claim_public_key") {
+            command.arg(format!("-pvalidator_node.fee_claim_public_key={claim_public_key}"));
+        }
+
         command
             .envs(context.environment())
             .arg("-b")
             .arg(context.base_path())
             .arg("--network")
             .arg(context.network().to_string())
-            .arg(format!("--json-rpc-public-address={json_rpc_public_address}"))
-            .arg(format!("-pvalidator_node.base_node_grpc_url={base_node_grpc_url}"))
+            .arg(format!("--json-rpc-public-url={json_rpc_public_url}"))
+            .arg(format!(
+                "-pepoch_oracle.base_layer.base_node_grpc_url={base_node_grpc_url}"
+            ))
             .arg(format!("-pvalidator_node.json_rpc_listener_address={json_rpc_address}"))
-            .arg(format!("-pvalidator_node.http_ui_listener_address={web_ui_address}"))
-            .arg("-pvalidator_node.base_layer_scanning_interval=1");
+            .arg(format!("-pvalidator_node.web_ui_listener_address={web_ui_address}"))
+            .arg("-pepoch_oracle.base_layer.scanning_interval=1");
 
         Ok(command)
     }

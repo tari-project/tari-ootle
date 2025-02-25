@@ -5,21 +5,12 @@ use std::{fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
-    LockIntent,
-    SubstateAddress,
-    SubstateLockType,
-    SubstateRequirement,
-    ToSubstateAddress,
-    VersionedSubstateId,
+    LockIntent, SubstateAddress, SubstateLockType, SubstateRequirementRef, ToSubstateAddress
 };
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
 
-use crate::{
-    consensus_models::{BlockId, VersionedSubstateIdLockIntent},
-    StateStoreReadTransaction,
-    StorageError,
-};
+use crate::{consensus_models::RequireLockIntentRef, StateStoreReadTransaction, StorageError};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SubstateLock {
@@ -84,7 +75,6 @@ impl fmt::Display for SubstateLock {
 
 #[derive(Debug, Clone)]
 pub struct LockedSubstateValue {
-    pub locked_by_block: BlockId,
     pub substate_id: SubstateId,
     pub lock: SubstateLock,
     /// The value of the locked substate. This may be None if the substate lock is Output.
@@ -92,19 +82,16 @@ pub struct LockedSubstateValue {
 }
 
 impl LockedSubstateValue {
-    pub(crate) fn to_substate_lock_intent(&self) -> VersionedSubstateIdLockIntent {
-        VersionedSubstateIdLockIntent::new(
-            VersionedSubstateId::new(self.substate_id.clone(), self.lock.version()),
-            self.lock.lock_type(),
-            true,
-        )
+    pub(crate) fn to_substate_lock_intent(&self) -> RequireLockIntentRef<'_> {
+        RequireLockIntentRef::new(&self.substate_id, self.lock.version(), self.lock.lock_type())
     }
 
     pub fn substate_id(&self) -> &SubstateId {
         &self.substate_id
     }
 
-    pub fn satisfies_requirements(&self, requirement: &SubstateRequirement) -> bool {
+    pub fn satisfies_requirements<'a, T: Into<SubstateRequirementRef<'a>>>(&self, requirement: T) -> bool {
+        let requirement = requirement.into();
         requirement.version().map_or(true, |v| v == self.lock.version) && *requirement.substate_id() == self.substate_id
     }
 
@@ -112,6 +99,10 @@ impl LockedSubstateValue {
         lock_intent.version_to_lock() == self.lock.version &&
             self.lock.lock_type.allows(lock_intent.lock_type()) &&
             *lock_intent.substate_id() == self.substate_id
+    }
+
+    pub fn take_value(&mut self) -> Option<SubstateValue> {
+        self.value.take()
     }
 }
 
@@ -121,6 +112,35 @@ impl LockedSubstateValue {
         transaction_id: &TransactionId,
     ) -> Result<Vec<LockedSubstateValue>, StorageError> {
         tx.substate_locks_get_locked_substates_for_transaction(transaction_id)
+    }
+
+    pub fn get_transaction_id_that_has_any_write_locks_for_substates<'a, TTx, I>(
+        tx: &TTx,
+        substate_ids: I,
+        exclude_local_only: bool,
+    ) -> Result<Option<TransactionId>, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        I: IntoIterator<Item = &'a SubstateId>,
+    {
+        tx.substate_locks_has_any_write_locks_for_substates(None, substate_ids, exclude_local_only)
+    }
+
+    pub fn get_transaction_id_that_conflicts_with_write_locks<'a, TTx, I>(
+        tx: &TTx,
+        exclude_transaction_id: &TransactionId,
+        substate_ids: I,
+        exclude_local_only: bool,
+    ) -> Result<Option<TransactionId>, StorageError>
+    where
+        TTx: StateStoreReadTransaction,
+        I: IntoIterator<Item = &'a SubstateId>,
+    {
+        tx.substate_locks_has_any_write_locks_for_substates(
+            Some(exclude_transaction_id),
+            substate_ids,
+            exclude_local_only,
+        )
     }
 }
 
@@ -134,8 +154,8 @@ impl Display for LockedSubstateValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "LockedSubstate(substate_id: {}, lock: {}, locked_by_block: {})",
-            self.substate_id, self.lock, self.locked_by_block
+            "LockedSubstate(substate_id: {}, lock: {})",
+            self.substate_id, self.lock,
         )
     }
 }

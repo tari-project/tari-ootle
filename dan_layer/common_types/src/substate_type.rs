@@ -1,7 +1,10 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
+use tari_engine_types::substate::SubstateValue;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[cfg_attr(
@@ -16,7 +19,9 @@ pub enum SubstateType {
     UnclaimedConfidentialOutput,
     NonFungible,
     TransactionReceipt,
-    FeeClaim,
+    NonFungibleIndex,
+    ValidatorFeePool,
+    Template,
 }
 
 impl SubstateType {
@@ -28,7 +33,31 @@ impl SubstateType {
             SubstateType::UnclaimedConfidentialOutput => "commitment",
             SubstateType::NonFungible => "nft",
             SubstateType::TransactionReceipt => "txreceipt",
-            SubstateType::FeeClaim => "feeclaim",
+            SubstateType::NonFungibleIndex => "nftindex",
+            SubstateType::ValidatorFeePool => "vnfp",
+            SubstateType::Template => "template",
         }
+    }
+}
+
+impl From<&SubstateValue> for SubstateType {
+    fn from(value: &SubstateValue) -> Self {
+        match value {
+            SubstateValue::Component(_) => SubstateType::Component,
+            SubstateValue::Resource(_) => SubstateType::Resource,
+            SubstateValue::Vault(_) => SubstateType::Vault,
+            SubstateValue::UnclaimedConfidentialOutput(_) => SubstateType::UnclaimedConfidentialOutput,
+            SubstateValue::NonFungible(_) => SubstateType::NonFungible,
+            SubstateValue::TransactionReceipt(_) => SubstateType::TransactionReceipt,
+            SubstateValue::NonFungibleIndex(_) => SubstateType::NonFungibleIndex,
+            SubstateValue::Template(_) => SubstateType::Template,
+            SubstateValue::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
+        }
+    }
+}
+
+impl Display for SubstateType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_prefix_str())
     }
 }

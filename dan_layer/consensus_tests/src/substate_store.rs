@@ -15,7 +15,7 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, QcId, SubstateChange, SubstateRecord, SubstateRequirementLockIntent},
+    consensus_models::{Block, BlockId, QcId, RequireLockIntentRef, SubstateChange, SubstateRecord},
     StateStore,
 };
 use tari_engine_types::{
@@ -42,7 +42,7 @@ fn it_allows_substate_up_for_v0() {
     store
         .put(SubstateChange::Up {
             id: VersionedSubstateId::new(id.clone(), 1),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             transaction_id: tx_id(0),
             substate: Substate::new(1, value.clone()),
         })
@@ -52,12 +52,12 @@ fn it_allows_substate_up_for_v0() {
         .put(SubstateChange::Up {
             id: VersionedSubstateId::new(id.clone(), 0),
             transaction_id: tx_id(0),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             substate: Substate::new(0, value),
         })
         .unwrap();
 
-    let s = store.get_latest(&id).unwrap();
+    let s = store.get_latest_change(&id).unwrap().into_up().unwrap();
     assert_substate_eq(s, new_substate(0, 0));
 }
 
@@ -71,13 +71,13 @@ fn it_allows_down_then_up() {
     let tx = store.create_read_tx().unwrap();
     let mut store = create_pending_store(&tx);
 
-    let s = store.get_latest(id.substate_id()).unwrap();
+    let s = store.get_latest_change(id.substate_id()).unwrap().into_up().unwrap();
     assert_substate_eq(s, new_substate(0, 0));
 
     store
         .put(SubstateChange::Down {
             id: id.clone(),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             transaction_id: Default::default(),
         })
         .unwrap();
@@ -85,7 +85,7 @@ fn it_allows_down_then_up() {
     store
         .put(SubstateChange::Up {
             id: id.to_next_version(),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             transaction_id: Default::default(),
             substate: new_substate(1, 1),
         })
@@ -93,7 +93,7 @@ fn it_allows_down_then_up() {
 
     let s = store.get(id.to_next_version().as_ref()).unwrap();
     assert_substate_eq(s, new_substate(1, 1));
-    let s = store.get_latest(id.substate_id()).unwrap();
+    let s = store.get_latest_change(id.substate_id()).unwrap().into_up().unwrap();
     assert_substate_eq(s, new_substate(1, 1));
 }
 
@@ -108,7 +108,7 @@ fn it_fails_if_previous_version_is_not_down() {
     let err = store
         .put(SubstateChange::Up {
             id: id.to_next_version(),
-            shard: Shard::zero(),
+            shard: Shard::first(),
             transaction_id: Default::default(),
             substate: new_substate(1, 1),
         })
@@ -129,14 +129,14 @@ fn it_disallows_more_than_one_write_lock_non_local_only() {
     store
         .try_lock(
             tx_id(1),
-            &SubstateRequirementLockIntent::new(id.clone(), 0, SubstateLockType::Read),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Read),
             true,
         )
         .unwrap();
     store
         .try_lock(
             tx_id(2),
-            &SubstateRequirementLockIntent::new(id.clone(), 0, SubstateLockType::Read),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Read),
             true,
         )
         .unwrap();
@@ -148,7 +148,7 @@ fn it_disallows_more_than_one_write_lock_non_local_only() {
     let err = store
         .try_lock(
             tx_id(3),
-            &SubstateRequirementLockIntent::new(id.clone(), 0, SubstateLockType::Write),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Write),
             false,
         )
         .unwrap_err();
@@ -171,7 +171,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
     store
         .try_lock(
             tx_id(1),
-            &SubstateRequirementLockIntent::new(id.clone(), 0, SubstateLockType::Write),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Write),
             false,
         )
         .unwrap();
@@ -179,7 +179,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
     let err = store
         .try_lock(
             tx_id(2),
-            &SubstateRequirementLockIntent::new(id.to_next_version(), 0, SubstateLockType::Output),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output),
             false,
         )
         .unwrap_err();
@@ -192,7 +192,7 @@ fn it_allows_requesting_the_same_lock_within_one_transaction() {
     store
         .try_lock(
             tx_id(1),
-            &SubstateRequirementLockIntent::new(id.to_next_version(), 0, SubstateLockType::Output),
+            &RequireLockIntentRef::new(id.substate_id(), 0, SubstateLockType::Output),
             false,
         )
         .unwrap();
@@ -210,13 +210,13 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
             SubstateRecord {
                 substate_id: id.clone(),
                 version,
-                substate_value: value,
+                substate_value: Some(value),
                 state_hash: [seed; 32].into(),
                 created_by_transaction: Default::default(),
                 created_justify: QcId::zero(),
                 created_block: BlockId::zero(),
                 created_height: 0.into(),
-                created_by_shard: Shard::zero(),
+                created_by_shard: Shard::first(),
                 created_at_epoch: 0.into(),
                 destroyed: None,
             }

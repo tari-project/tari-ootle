@@ -22,25 +22,22 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use log::info;
-use tari_dan_app_utilities::{
-    template_manager::implementation::TemplateManager,
-    transaction_executor::{TariDanTransactionProcessor, TransactionExecutor as _},
-};
-use tari_dan_common_types::{Epoch, PeerAddress, SubstateAddress, SubstateRequirement};
+use log::{debug, info};
+use tari_dan_app_utilities::transaction_executor::{TariDanTransactionProcessor, TransactionExecutor as _};
+use tari_dan_common_types::{Epoch, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{fees::FeeTable, state_store::new_memory_store, transaction::TransactionProcessorConfig};
 use tari_engine_types::{
     commit_result::ExecuteResult,
-    instruction::Instruction,
     substate::{Substate, SubstateId},
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_indexer_lib::{
     substate_cache::SubstateCache,
     substate_scanner::SubstateScanner,
     transaction_autofiller::TransactionAutofiller,
 };
+use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::{
     SubstateResult,
@@ -61,8 +58,6 @@ pub struct DryRunTransactionProcessor<TSubstateCache> {
     transaction_autofiller:
         TransactionAutofiller<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, TSubstateCache>,
     template_manager: TemplateManager<PeerAddress>,
-    substate_scanner:
-        Arc<SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, TSubstateCache>>,
 }
 
 impl<TSubstateCache> DryRunTransactionProcessor<TSubstateCache>
@@ -77,7 +72,7 @@ where TSubstateCache: SubstateCache + 'static
         >,
         template_manager: TemplateManager<PeerAddress>,
     ) -> Self {
-        let transaction_autofiller = TransactionAutofiller::new(substate_scanner.clone());
+        let transaction_autofiller = TransactionAutofiller::new(substate_scanner);
 
         Self {
             config,
@@ -85,7 +80,6 @@ where TSubstateCache: SubstateCache + 'static
             client_provider,
             transaction_autofiller,
             template_manager,
-            substate_scanner,
         }
     }
 
@@ -129,6 +123,7 @@ where TSubstateCache: SubstateCache + 'static
         let fee_table = if Self::transaction_includes_fees(transaction) {
             // TODO: should match the VN fee table, should the fee table values be a consensus constant?
             FeeTable {
+                per_transaction_weight_cost: 1,
                 per_module_call_cost: 1,
                 per_byte_storage_cost: 1,
                 per_event_cost: 1,
@@ -154,17 +149,13 @@ where TSubstateCache: SubstateCache + 'static
 
         // Fetch explicit inputs that may not have been resolved by the autofiller
         for requirement in transaction.inputs() {
-            let Some(address) = requirement.to_substate_address() else {
-                // No version, we cant fetch it
-                continue;
-            };
             // If the input has been filled, we've already fetched the substate
             // Note: this works because VersionedSubstateId hashes the same as SubstateId internally.
             if transaction.filled_inputs().contains(&requirement.substate_id) {
                 continue;
             }
 
-            let (id, substate) = self.fetch_substate(address, epoch).await?;
+            let (id, substate) = self.fetch_substate(requirement, epoch).await?;
             substates.insert(id, substate);
         }
 
@@ -173,11 +164,14 @@ where TSubstateCache: SubstateCache + 'static
 
     pub async fn fetch_substate(
         &self,
-        address: SubstateAddress,
+        substate_requirement: &SubstateRequirement,
         epoch: Epoch,
     ) -> Result<(SubstateId, Substate), DryRunTransactionProcessorError> {
+        let address = substate_requirement.to_substate_address_zero_version();
         let mut committee = self.epoch_manager.get_committee_for_substate(epoch, address).await?;
         committee.shuffle();
+
+        let max_failures = committee.max_failures() + 1;
 
         let mut nexist_count = 0;
         let mut err_count = 0;
@@ -186,7 +180,7 @@ where TSubstateCache: SubstateCache + 'static
             // build a client with the VN
             let mut client = self.client_provider.create_client(vn_addr);
 
-            match client.get_substate(address).await {
+            match client.get_substate(substate_requirement).await {
                 Ok(SubstateResult::Up { substate, id, .. }) => {
                     return Ok((id, substate));
                 },
@@ -195,12 +189,21 @@ where TSubstateCache: SubstateCache + 'static
                     return Err(DryRunTransactionProcessorError::SubstateDowned { id, version });
                 },
                 Ok(SubstateResult::DoesNotExist) => {
-                    // we do not stop when an individual claims DoesNotExist, we try all Vns
+                    debug!(
+                        target: LOG_TARGET,
+                        "Substate {} does not exist on validator node {}",
+                        substate_requirement,
+                        vn_addr
+                    );
+                    // we do not stop when an individual claims DoesNotExist, we try $f + 1$ Vns
                     nexist_count += 1;
+                    if nexist_count >= max_failures {
+                        break;
+                    }
                     continue;
                 },
                 Err(e) => {
-                    info!(target: LOG_TARGET, "Unable to get pledge from peer: {} ", e.to_string());
+                    info!(target: LOG_TARGET, "Unable to get substate from peer: {} ", e.to_string());
                     // we do not stop when an individual request errors, we try all Vns
                     err_count += 1;
                     continue;
@@ -210,17 +213,18 @@ where TSubstateCache: SubstateCache + 'static
 
         // The substate does not exist on any VN or all validator nodes are offline, we return an error
         Err(DryRunTransactionProcessorError::AllValidatorsFailedToReturnSubstate {
-            address,
+            substate_requirement: substate_requirement.clone(),
             epoch,
             nexist_count,
             err_count,
+            max_failures,
             committee_size: committee.members().count(),
         })
     }
 
     async fn get_virtual_substates(
         &self,
-        transaction: &Transaction,
+        _transaction: &Transaction,
         epoch: Epoch,
     ) -> Result<VirtualSubstates, DryRunTransactionProcessorError> {
         let mut virtual_substates = VirtualSubstates::new();
@@ -229,40 +233,6 @@ where TSubstateCache: SubstateCache + 'static
             VirtualSubstateId::CurrentEpoch,
             VirtualSubstate::CurrentEpoch(epoch.as_u64()),
         );
-
-        let claim_instructions = transaction
-            .instructions()
-            .iter()
-            .chain(transaction.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::ClaimValidatorFees {
-                    epoch,
-                    validator_public_key,
-                } = instruction
-                {
-                    Some((Epoch(*epoch), validator_public_key.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        if !claim_instructions.is_empty() {
-            for (epoch, public_key) in claim_instructions {
-                let vn = self
-                    .epoch_manager
-                    .get_validator_node_by_public_key(epoch, public_key.clone())
-                    .await?;
-                let address = VirtualSubstateId::UnclaimedValidatorFee {
-                    epoch: epoch.as_u64(),
-                    address: public_key,
-                };
-                let virtual_substate = self
-                    .substate_scanner
-                    .get_virtual_substate_from_committee(address.clone(), vn.shard_key)
-                    .await?;
-                virtual_substates.insert(address, virtual_substate);
-            }
-        }
 
         Ok(virtual_substates)
     }

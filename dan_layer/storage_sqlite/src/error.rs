@@ -29,8 +29,12 @@ use tari_dan_storage::StorageError;
 use tari_template_lib::HashParseError;
 use thiserror::Error;
 
+use crate::global::models::TemplateConversionError;
+
 #[derive(Debug, Error)]
 pub enum SqliteStorageError {
+    #[error("{item} not found with key {key}")]
+    NotFound { item: &'static str, key: String },
     #[error("Could not connect to database: {source}")]
     ConnectionError {
         #[from]
@@ -72,6 +76,8 @@ pub enum SqliteStorageError {
     },
     #[error("Hash parsing error: {0}")]
     HashParse(#[from] HashParseError),
+    #[error("Template conversion error: {0}")]
+    TemplateConversion(#[from] TemplateConversionError),
 }
 
 impl From<SqliteStorageError> for StorageError {
@@ -86,6 +92,7 @@ impl From<SqliteStorageError> for StorageError {
             SqliteStorageError::MigrationError { .. } => StorageError::MigrationError {
                 reason: source.to_string(),
             },
+            SqliteStorageError::NotFound { item, key } => StorageError::NotFound { item, key },
             other => StorageError::General {
                 details: other.to_string(),
             },
@@ -101,6 +108,13 @@ impl From<FixedHashSizeError> for SqliteStorageError {
 
 impl IsNotFoundError for SqliteStorageError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, SqliteStorageError::DieselError { source, .. } if matches!(source, diesel::result::Error::NotFound))
+        matches!(
+            self,
+            SqliteStorageError::NotFound { .. } |
+                SqliteStorageError::DieselError {
+                    source: diesel::result::Error::NotFound,
+                    ..
+                }
+        )
     }
 }

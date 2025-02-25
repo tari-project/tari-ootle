@@ -58,6 +58,7 @@ impl Display for ActionIdent {
 
 #[derive(Debug, Clone)]
 pub enum NativeAction {
+    WithdrawValidatorFunds,
     Component(ComponentAction),
     Resource(ResourceAuthAction),
     Vault(VaultAction),
@@ -66,6 +67,7 @@ pub enum NativeAction {
 impl Display for NativeAction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            NativeAction::WithdrawValidatorFunds => write!(f, "withdraw_validator_funds"),
             NativeAction::Component(action) => write!(f, "component.call_method.{:?}", action),
             NativeAction::Resource(action) => write!(f, "resource.{:?}", action),
             NativeAction::Vault(action) => write!(f, "vault.{:?}", action),

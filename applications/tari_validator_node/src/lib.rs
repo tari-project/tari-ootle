@@ -34,9 +34,9 @@ mod metrics;
 mod p2p;
 mod state_store;
 mod substate_resolver;
-mod virtual_substate;
 
 mod file_l1_submitter;
+mod state_bootstrap;
 pub mod transaction_validators;
 mod validator;
 mod validator_registration_file;
@@ -45,17 +45,21 @@ use std::{fs, io, process};
 
 use log::*;
 use serde::{Deserialize, Serialize};
-use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClientError};
-use tari_common::{
-    configuration::bootstrap::{grpc_default_port, ApplicationType},
-    exit_codes::{ExitCode, ExitError},
-};
+use state_store::ValidatorNodeStateStore;
+use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
-use tari_dan_app_utilities::{common::verify_correct_network, keypair::setup_keypair_prompt};
-use tari_dan_common_types::SubstateAddress;
-use tari_dan_storage::global::DbFactory;
-use tari_dan_storage_sqlite::SqliteDbFactory;
+use tari_dan_app_utilities::{
+    keypair::setup_keypair_prompt,
+    template_download_queue::TemplateDownloadQueue,
+    utxo_store::StateUtxoStore,
+};
+use tari_dan_common_types::{PeerAddress, SubstateAddress};
+use tari_dan_storage::global::{DbFactory, GlobalDb};
+use tari_dan_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
+use tari_epoch_manager::traits::EpochManagerSpec;
+use tari_epoch_oracles::EpochOracle;
 use tari_shutdown::ShutdownSignal;
+use tari_state_store_sqlite::SqliteStateStore;
 use tokio::task;
 pub use validator_registration_file::ValidatorRegistrationFile;
 
@@ -63,6 +67,7 @@ pub use crate::config::{ApplicationConfig, ValidatorNodeConfig};
 use crate::{
     bootstrap::{spawn_services, Services},
     dan_node::DanNode,
+    file_l1_submitter::FileLayerOneSubmitter,
     http_ui::server::run_http_ui_server,
     json_rpc::{spawn_json_rpc, JsonRpcHandlers},
 };
@@ -83,8 +88,6 @@ pub enum ShardKeyError {
     NotYetRegistered,
     #[error("Registration failed")]
     RegistrationFailed,
-    #[error("Base node error: {0}")]
-    BaseNodeError(#[from] BaseNodeClientError),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -121,27 +124,24 @@ pub async fn run_validator_node(
     let metrics_registry = create_metrics_registry(keypair.public_key());
 
     let consensus_constants = ConsensusConstants::from(config.network);
-    let mut base_node_client = create_base_layer_client(config).await?;
-    verify_correct_network(&mut base_node_client, config.network).await?;
     let services = spawn_services(
         config,
         shutdown_signal.clone(),
         keypair.clone(),
         global_db,
         consensus_constants,
-        base_node_client.clone(),
         #[cfg(feature = "metrics")]
         &metrics_registry,
     )
     .await?;
-    let info = services.networking.get_local_peer_info().await.unwrap();
+    let info = services.networking.get_local_peer_info().await?;
     info!(target: LOG_TARGET, "🚀 Node started: {}", info);
 
     // Run the JSON-RPC API
     let mut jrpc_address = config.validator_node.json_rpc_listener_address;
     if let Some(jrpc_address) = jrpc_address.as_mut() {
         info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
-        let handlers = JsonRpcHandlers::new(base_node_client, &services);
+        let handlers = JsonRpcHandlers::new(&services);
         *jrpc_address = spawn_json_rpc(
             *jrpc_address,
             handlers,
@@ -149,12 +149,12 @@ pub async fn run_validator_node(
             metrics_registry,
         )?;
         // Run the http ui
-        if let Some(address) = config.validator_node.http_ui_listener_address {
+        if let Some(address) = config.validator_node.web_ui_listener_address {
             task::spawn(run_http_ui_server(
                 address,
                 config
                     .validator_node
-                    .json_rpc_public_address
+                    .json_rpc_public_url
                     .clone()
                     .unwrap_or_else(|| jrpc_address.to_string()),
             ));
@@ -172,33 +172,20 @@ pub async fn run_validator_node(
     Ok(())
 }
 
-async fn create_base_layer_client(config: &ApplicationConfig) -> Result<GrpcBaseNodeClient, ExitError> {
-    let base_node_address = config.validator_node.base_node_grpc_url.clone().unwrap_or_else(|| {
-        let port = grpc_default_port(ApplicationType::BaseNode, config.network);
-        format!("http://127.0.0.1:{port}")
-            .parse()
-            .expect("Default base node GRPC URL is malformed")
-    });
-    info!(target: LOG_TARGET, "Connecting to base node on GRPC at {}", base_node_address);
-    let base_node_client = GrpcBaseNodeClient::connect(base_node_address.clone())
-        .await
-        .map_err(|error| {
-            ExitError::new(
-                ExitCode::ConfigError,
-                format!(
-                    "Could not connect to the Minotari node at address {base_node_address}: {error}. Please ensure \
-                     that the Minotari node is running and configured for GRPC."
-                ),
-            )
-        })?;
-
-    Ok(base_node_client)
-}
-
 #[cfg(feature = "metrics")]
 fn create_metrics_registry(public_key: &tari_common_types::types::PublicKey) -> prometheus::Registry {
     let mut labels = std::collections::HashMap::with_capacity(2);
     labels.insert("app".to_string(), "ValidatorNode".to_string());
     labels.insert("public_key".to_string(), public_key.to_string());
     prometheus::Registry::new_custom(Some("tari".to_string()), Some(labels)).unwrap()
+}
+
+pub struct ValidatorNodeEpochManagerSpec;
+
+impl EpochManagerSpec for ValidatorNodeEpochManagerSpec {
+    type Addr = PeerAddress;
+    type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
+    type LayerOneSubmitter = FileLayerOneSubmitter;
+    type TemplateDownloader = TemplateDownloadQueue;
+    type UtxoStore = StateUtxoStore<ValidatorNodeStateStore>;
 }

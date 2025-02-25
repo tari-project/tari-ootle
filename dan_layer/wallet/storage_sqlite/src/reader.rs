@@ -173,6 +173,18 @@ impl WalletStoreReader for ReadTransaction<'_> {
         })
     }
 
+    fn config_exists(&mut self, key: &str) -> Result<bool, WalletStorageError> {
+        use crate::schema::config;
+
+        let exists = config::table
+            .filter(config::key.eq(key))
+            .count()
+            .first::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general("config_exists", e))?;
+
+        Ok(exists > 0)
+    }
+
     // -------------------------------- JWT -------------------------------- //
     fn jwt_get_all(&mut self) -> Result<Vec<(i32, Option<String>)>, WalletStorageError> {
         use crate::schema::auth_status;

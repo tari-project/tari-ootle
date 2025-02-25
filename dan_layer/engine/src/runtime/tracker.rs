@@ -29,7 +29,7 @@ use indexmap::IndexMap;
 use log::*;
 use tari_dan_common_types::Epoch;
 use tari_engine_types::{
-    commit_result::{FinalizeResult, RejectReason, TransactionResult},
+    commit_result::{FinalizeResult, TransactionResult},
     component::{ComponentBody, ComponentHeader},
     confidential::UnclaimedConfidentialOutput,
     events::Event,
@@ -47,6 +47,7 @@ use tari_template_lib::{
     models::{AddressAllocation, Amount, BucketId, ComponentAddress, Metadata, UnclaimedConfidentialOutputAddress},
     Hash,
 };
+use tari_transaction::TransactionWeight;
 
 use crate::{
     runtime::{
@@ -65,6 +66,7 @@ const LOG_TARGET: &str = "tari::dan::engine::runtime::state_tracker";
 pub struct StateTracker {
     working_state: Arc<RwLock<WorkingState>>,
     fee_checkpoint: Arc<Mutex<Option<WorkingState>>>,
+    transaction_weight: TransactionWeight,
 }
 
 impl StateTracker {
@@ -73,6 +75,7 @@ impl StateTracker {
         virtual_substates: VirtualSubstates,
         initial_call_scope: CallScope,
         transaction_hash: Hash,
+        transaction_weight: TransactionWeight,
     ) -> Self {
         Self {
             working_state: Arc::new(RwLock::new(WorkingState::new(
@@ -82,7 +85,12 @@ impl StateTracker {
                 transaction_hash,
             ))),
             fee_checkpoint: Arc::new(Mutex::new(None)),
+            transaction_weight,
         }
+    }
+
+    pub fn get_transaction_weight(&self) -> TransactionWeight {
+        self.transaction_weight
     }
 
     pub fn get_current_epoch(&self) -> Result<Epoch, RuntimeError> {
@@ -98,6 +106,7 @@ impl StateTracker {
     }
 
     pub fn add_event(&self, event: Event) {
+        debug!(target: LOG_TARGET, "Emit: {event}");
         self.write_with(|state| state.push_event(event));
     }
 
@@ -165,7 +174,8 @@ impl StateTracker {
                     let addr = state.take_allocated_address(address_allocation.id())?;
                     addr.try_into().map_err(|error: InvalidSubstateIdVariant| {
                         RuntimeError::AddressAllocationTypeMismatch {
-                            address: error.substate_id,
+                            id: error.substate_id,
+                            expected: error.expected,
                         }
                     })?
                 },
@@ -196,11 +206,12 @@ impl StateTracker {
 
             state.new_substate(substate_id.clone(), SubstateValue::Component(component))?;
 
-            state.push_event(Event::new(
+            state.push_event(Event::std(
                 Some(substate_id),
                 template_address,
                 state.transaction_hash(),
-                "component-created".to_string(),
+                "component",
+                "created",
                 Metadata::from([("module_name".to_string(), module_name)]),
             ));
 
@@ -295,7 +306,7 @@ impl StateTracker {
 
         let result = match result {
             Ok(substate_diff) => TransactionResult::Accept(substate_diff),
-            Err(err) => TransactionResult::Reject(RejectReason::ExecutionFailure(err.to_string())),
+            Err(err) => TransactionResult::Reject(err.to_reject_reason()),
         };
 
         let finalized = FinalizeResult::new(

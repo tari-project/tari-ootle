@@ -1,10 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::{HashMap, HashSet},
-    mem,
-};
+use std::{collections::HashSet, mem};
 
 use log::*;
 use tari_dan_common_types::{
@@ -12,11 +9,18 @@ use tari_dan_common_types::{
     optional::Optional,
     Epoch,
     NodeHeight,
-    NumPreshards,
-    ShardGroup,
 };
 use tari_dan_storage::{
-    consensus_models::{Block, HighQc, LastSentVote, QuorumDecision, TransactionPool, ValidBlock, Vote},
+    consensus_models::{
+        Block,
+        ForeignProposalStatus,
+        HighQc,
+        LastSentVote,
+        QuorumDecision,
+        TransactionPool,
+        ValidBlock,
+        Vote,
+    },
     StateStore,
     StateStoreWriteTransaction,
 };
@@ -34,6 +38,7 @@ use crate::{
         on_ready_to_vote_on_local_block::OnReadyToVoteOnLocalBlock,
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
         pacemaker_handle::PaceMakerHandle,
+        to_public_key_bytes,
         transaction_manager::ConsensusTransactionManager,
         HotstuffConfig,
         HotstuffEvent,
@@ -155,24 +160,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         self.pacemaker.suspend_leader_failure().await?;
 
         // First validate and save the attached foreign proposals
-        let mut foreign_committees = HashMap::with_capacity(foreign_proposals.len());
-        // TODO(perf): fetch all committee info in single call
-        for foreign_proposal in &foreign_proposals {
-            let shard_group = foreign_proposal.block.shard_group();
-            if foreign_committees.contains_key(&shard_group) {
-                continue;
-            }
-            let foreign_committee_info = self
-                .epoch_manager
-                .get_committee_info_by_validator_public_key(
-                    foreign_proposal.block.epoch(),
-                    foreign_proposal.block.proposed_by().clone(),
-                )
-                .await?;
-
-            foreign_committees.insert(shard_group, foreign_committee_info);
-        }
-
         let is_all_foreign_proposals_valid = self.store.with_write_tx(|tx| {
             // TODO: Implement guaranteed finality in the face of a non-cooperating remote shard group.
             // Suggested strategy:
@@ -187,7 +174,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             // - Set abort and ready = true
             // self.update_foreign_proposal_transactions(tx, valid_block.block())?;
 
-            for foreign_proposal in foreign_proposals {
+            for mut foreign_proposal in foreign_proposals {
                 if foreign_proposal.exists(&**tx)? {
                     // This is expected behaviour, we may receive the same foreign proposal multiple times
                     debug!(
@@ -198,19 +185,19 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
                     continue;
                 }
-                let shard_group = foreign_proposal.block().shard_group();
 
-                if let Err(err) = self.on_receive_foreign_proposal.validate_and_save(
-                    tx,
-                    foreign_proposal,
-                    local_committee_info,
-                    foreign_committees.get(&shard_group).unwrap(),
-                ) {
-                    error!(target: LOG_TARGET, "Error processing foreign proposal: {:?}", err);
-                    if err.validation_error().is_some() {
+                if let Err(err) =
+                    self.on_receive_foreign_proposal
+                        .validate_and_save(tx, &foreign_proposal, local_committee_info)
+                {
+                    if let Some(err) = err.validation_error() {
+                        warn!(target: LOG_TARGET, "⚠️❌ Validation failed for foreign proposal: {}", err);
                         // if a node sent us an invalid foreign proposal, we immediately reject the block
+                        foreign_proposal.upsert(tx, Some(*valid_block.id()))?;
+                        foreign_proposal.set_status(tx, ForeignProposalStatus::Invalid)?;
                         return Ok(false);
                     }
+                    error!(target: LOG_TARGET, "Error processing foreign proposal: {}", err);
                     return Err(err);
                 }
             }
@@ -224,13 +211,20 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(false);
         }
 
+        // TODO: perf - we may want to cache this
+        let proposer_vn = self
+            .epoch_manager
+            .get_validator_node_by_public_key(valid_block.epoch(), valid_block.proposed_by().clone())
+            .await?;
+        let proposer_claim_public_key_bytes = to_public_key_bytes(&proposer_vn.fee_claim_public_key);
+
         let result = self
             .process_block(
                 current_epoch,
                 *local_committee_info,
                 local_committee,
+                proposer_claim_public_key_bytes,
                 valid_block,
-                foreign_committees,
             )
             .await;
 
@@ -254,9 +248,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         current_epoch: Epoch,
         local_committee_info: CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
+        proposer_claim_public_key_bytes: [u8; 32],
         valid_block: ValidBlock,
-        foreign_committees: HashMap<ShardGroup, CommitteeInfo>,
     ) -> Result<bool, HotStuffError> {
+        debug!(target: LOG_TARGET, "RECV-LOCAL-PROPOSAL - [{:?}] Starting processing block: {}", current_epoch, valid_block);
+
         let em_epoch = self.epoch_manager.current_epoch().await?;
         let can_propose_epoch_end = em_epoch > current_epoch;
         let is_epoch_end = valid_block.block().is_epoch_end();
@@ -283,8 +279,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         tx,
                         &valid_block,
                         &local_committee_info,
+                        proposer_claim_public_key_bytes,
                         can_propose_epoch_end,
-                        foreign_committees,
                         &mut change_set,
                     )?;
 
@@ -373,7 +369,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 self.store.with_write_tx(|tx| {
                     // Generate checkpoint
                     create_epoch_checkpoint(tx, epoch, local_committee_info.shard_group())?;
-
                     // Create the next genesis
                     let mut genesis = Block::genesis(
                         self.config.network,
@@ -515,9 +510,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
 
         task::spawn(propose_newly_locked_blocks_task::<TConsensusSpec>(
-            self.epoch_manager.clone(),
             self.outbound_messaging.clone(),
-            self.config.consensus_constants.num_preshards,
             local_committee_info,
             blocks,
         ));
@@ -875,85 +868,87 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 }
 
 async fn propose_newly_locked_blocks_task<TConsensusSpec: ConsensusSpec>(
-    epoch_manager: TConsensusSpec::EpochManager,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
-    num_preshards: NumPreshards,
     local_committee_info: CommitteeInfo,
     blocks: Vec<Block>,
 ) {
     let _timer = TraceTimer::debug(LOG_TARGET, "propose_newly_locked_blocks_task").with_iterations(blocks.len());
-    if let Err(err) = propose_newly_locked_blocks_task_inner::<TConsensusSpec>(
-        epoch_manager,
-        outbound_messaging,
-        num_preshards,
-        &local_committee_info,
-        blocks,
-    )
-    .await
+    if let Err(err) =
+        propose_newly_locked_blocks_task_inner::<TConsensusSpec>(outbound_messaging, &local_committee_info, blocks)
+            .await
     {
         error!(target: LOG_TARGET, "Error in propose_newly_locked_blocks_task: {:?}", err);
     }
 }
 
 async fn propose_newly_locked_blocks_task_inner<TConsensusSpec: ConsensusSpec>(
-    epoch_manager: TConsensusSpec::EpochManager,
     mut outbound_messaging: TConsensusSpec::OutboundMessaging,
-    num_preshards: NumPreshards,
     local_committee_info: &CommitteeInfo,
     blocks: Vec<Block>,
 ) -> Result<(), HotStuffError> {
     for block in blocks.into_iter().rev() {
-        broadcast_foreign_proposal_if_required::<TConsensusSpec>(
-            &mut outbound_messaging,
-            &epoch_manager,
-            num_preshards,
-            local_committee_info,
-            block,
-        )
-        .await?;
+        broadcast_foreign_proposal_if_required::<TConsensusSpec>(&mut outbound_messaging, local_committee_info, block)
+            .await?;
     }
     Ok(())
 }
 
 async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     outbound_messaging: &mut TConsensusSpec::OutboundMessaging,
-    epoch_manager: &TConsensusSpec::EpochManager,
-    num_preshards: NumPreshards,
     local_committee_info: &CommitteeInfo,
     block: Block,
 ) -> Result<(), HotStuffError> {
-    let num_committees = epoch_manager.get_num_committees(block.epoch()).await?;
-
-    let validator = epoch_manager.get_our_validator_node(block.epoch()).await?;
-    let local_shard_group = validator.shard_key.to_shard_group(num_preshards, num_committees);
     let non_local_shard_groups = block
         .commands()
         .iter()
-        .filter_map(|c| {
+        .flat_map(|c| {
             c.local_prepare()
-                // No need to broadcast LocalPrepare if the committee is output only
-                .filter(|atom| if atom.evidence.is_committee_output_only(local_committee_info.shard_group()) {
-                    debug!(
-                        target: LOG_TARGET,
-                        "🌐 FOREIGN PROPOSE: Skipping LocalPrepare({atom}) because local SG is output only",
-                    );
-                    false
-                } else {
-                    debug!(
-                        target: LOG_TARGET,
-                        "🌐 FOREIGN PROPOSE: LocalPrepare({atom})",
-                    );
-                    true
-                })
-                .or_else(|| c.local_accept().inspect(|atom| {
-                    debug!(
-                        target: LOG_TARGET,
-                        "🌐 FOREIGN PROPOSE: LocalAccept({atom})",
-                    );
-                }))
+                .map(|atom| (true, atom))
+                // .and_then(|atom| {
+                //     // No need to broadcast LocalPrepare if the committee is output only
+                //     atom.evidence.input_shard_groups_iter().copied()
+                //     if atom.evidence.is_committee_output_only(local_committee_info.shard_group()) {
+                //         debug!(
+                //         target: LOG_TARGET,
+                //         "🌐 FOREIGN PROPOSE: Skipping LocalPrepare({atom}) because local SG is output only",
+                //     );
+                //         false
+                //     } else {
+                //         debug!(
+                //         target: LOG_TARGET,
+                //         "🌐 FOREIGN PROPOSE: LocalPrepare({atom})",
+                //     );
+                //         true
+                //     }
+                // })
+                .or_else(|| c.local_accept().map(|atom| (false, atom)))
         })
-        .flat_map(|p| p.evidence.shard_groups_iter().copied())
-        .filter(|shard_group| local_shard_group != *shard_group)
+        .flat_map(|(is_local_prepare, atom)| {
+            atom.evidence.shard_groups_iter().copied().filter(move |sg| {
+                // Dont broadcast to ourselves
+                if *sg == local_committee_info.shard_group() {
+                    return false;
+                }
+                if is_local_prepare {
+                    // Only broadcast LocalPrepare to input shard groups
+                    if atom.evidence.get(sg).is_some_and(|e| !e.inputs().is_empty()) {
+                        debug!(
+                            target: LOG_TARGET,
+                            "🌐 FOREIGN PROPOSE: LocalPrepare({atom}) to {sg}",
+                        );
+                        true
+                    } else {
+                        debug!(
+                            target: LOG_TARGET,
+                            "🌐 FOREIGN PROPOSE: Skipping LocalPrepare({atom}) because {sg} does not involve inputs",
+                        );
+                        false
+                    }
+                } else {
+                    true
+                }
+            })
+        })
         .collect::<HashSet<_>>();
 
     if non_local_shard_groups.is_empty() {
@@ -974,10 +969,12 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     for shard_group in non_local_shard_groups {
         info!(
             target: LOG_TARGET,
-            "🌐 FOREIGN PROPOSE: Broadcasting locked block foreign {} notification to shard group {}.",
+            "🌐 FOREIGN PROPOSE: Broadcasting locked block {} notification to shard group {}.",
             &block,
             shard_group,
         );
+        // TODO: all local VNs will broadcast this. This message only needs to be published once. Perhaps we can reduce
+        // this to $f+1$.
         if let Err(err) = outbound_messaging
             .broadcast(
                 shard_group,

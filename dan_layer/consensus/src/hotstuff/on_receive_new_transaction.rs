@@ -128,16 +128,13 @@ where TConsensusSpec: ConsensusSpec
                 target: LOG_TARGET,
                 "Transaction {} failed validation: {}", rec.id(), err
             );
-            rec.set_abort_reason(RejectReason::InvalidTransaction(err.to_string()))
-                .save(tx)?;
+            rec.abort(RejectReason::InvalidTransaction(err.to_string())).save(tx)?;
             return Ok(Some((rec, true)));
         }
 
         rec.save(tx)?;
 
-        // Check if we're part of the input shard group. If not, only sequence the transaction (is_ready=true, see
-        // foreign_proposal_processor) once we have received the LocalAccept foreign proposal.
-        let has_some_local_inputs_or_all_foreign_inputs = rec.has_any_local_inputs(local_committee_info) ||
+        let has_some_local_inputs_or_all_foreign_inputs = rec.is_involved_in_inputs(local_committee_info) ||
             rec.has_all_foreign_input_pledges(&**tx, local_committee_info)?;
 
         if !has_some_local_inputs_or_all_foreign_inputs {

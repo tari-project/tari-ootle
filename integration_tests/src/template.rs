@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use anyhow::anyhow;
 use minotari_app_grpc::tari_rpc::{
     template_type,
     BuildInfo,
@@ -11,15 +12,76 @@ use minotari_app_grpc::tari_rpc::{
     WasmInfo,
 };
 use tari_dan_engine::wasm::compile::compile_template;
-use tari_engine_types::{hashing::template_hasher32, TemplateAddress};
+use tari_engine_types::{hashing::hash_template_code, TemplateAddress};
 use tari_template_lib::Hash;
+use tari_wallet_daemon_client::{
+    types::{PublishTemplateRequest, TransactionWaitResultRequest},
+    ComponentAddressOrName,
+};
 
-use crate::TariWorld;
+use crate::{wallet_daemon_cli::get_auth_wallet_daemon_client, TariWorld};
 
 #[derive(Debug)]
 pub struct RegisteredTemplate {
     pub name: String,
     pub address: TemplateAddress,
+}
+
+pub async fn publish_template(
+    world: &mut TariWorld,
+    wallet_daemon_name: String,
+    account_name: String,
+    template_name: String,
+) -> anyhow::Result<TemplateAddress> {
+    // compile and load wasm
+    compile_wasm_template(template_name.clone())?;
+    let wasm_file_path = get_template_wasm_path(template_name.clone());
+    let wasm_binary = tokio::fs::read(&wasm_file_path).await?;
+
+    // send publish template request
+    let mut client = get_auth_wallet_daemon_client(world, &wallet_daemon_name).await;
+    let response = client
+        .publish_template(PublishTemplateRequest {
+            binary: wasm_binary,
+            fee_account: Some(ComponentAddressOrName::Name(account_name)),
+            max_fee: 1_000_000,
+            detect_inputs: true,
+            dry_run: false,
+        })
+        .await?;
+
+    let tx_resp = client
+        .wait_transaction_result(TransactionWaitResultRequest {
+            transaction_id: response.transaction_id,
+            timeout_secs: Some(60 * 5),
+        })
+        .await?;
+
+    if tx_resp.timed_out {
+        return Err(anyhow!(format!("Transaction timed out: {}", response.transaction_id)));
+    }
+
+    let finalize_result = tx_resp.result.ok_or(anyhow!(format!(
+        "Missing transaction result: {}",
+        response.transaction_id
+    )))?;
+
+    if let Some(reason) = finalize_result.result.full_reject() {
+        return Err(anyhow!(format!(
+            "Invalid transaction {}: Status: {}, Reason: {}",
+            response.transaction_id, tx_resp.status, reason
+        )));
+    }
+
+    // look for the new UP template substate
+    let template_id = finalize_result
+        .result
+        .accept()
+        .and_then(|result| result.up_iter().find_map(|(substate_id, _)| substate_id.as_template()))
+        .map(|id| id.as_hash())
+        .ok_or_else(|| anyhow!("Transaction result did not contain a published template!"))?;
+
+    Ok(TemplateAddress::try_from_vec(template_id.to_vec())?)
 }
 
 pub async fn send_template_registration(
@@ -71,7 +133,7 @@ pub fn compile_wasm_template(template_name: String) -> Result<Hash, anyhow::Erro
     template_path.push(template_name);
     let wasm_module = compile_template(template_path.as_path(), &[])?;
     let wasm_code = wasm_module.code();
-    Ok(template_hasher32().chain(&wasm_code).result())
+    Ok(hash_template_code(wasm_code))
 }
 
 pub fn get_template_wasm_path(template_name: String) -> PathBuf {
@@ -82,19 +144,6 @@ pub fn get_template_wasm_path(template_name: String) -> PathBuf {
     wasm_path
 }
 
-// pub fn get_all_template_names() -> Vec<String> {
-//     let mut template_path = get_template_root_path();
-//     let mut templates = Vec::new();
-//     for entry in std::fs::read_dir(template_path).unwrap() {
-//         let entry = entry.unwrap();
-//         let path = entry.path();
-//         if path.is_dir() {
-//             templates.push(path.file_name().unwrap().to_str().unwrap().to_string());
-//         }
-//     }
-//     templates
-// }
-//
 fn get_template_root_path() -> PathBuf {
     let mut template_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     template_path.push("src/templates");

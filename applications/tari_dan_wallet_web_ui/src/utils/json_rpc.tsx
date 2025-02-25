@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import type {
+  AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
   AccountSetDefaultRequest,
@@ -33,6 +34,10 @@ import type {
   AccountsGetBalancesResponse,
   AccountsListRequest,
   AccountsListResponse,
+  AccountsTransferRequest,
+  AccountsTransferResponse,
+  AuthGetAllJwtRequest,
+  AuthGetAllJwtResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -43,8 +48,6 @@ import type {
   ConfidentialTransferResponse,
   ConfidentialViewVaultBalanceRequest,
   ConfidentialViewVaultBalanceResponse,
-  PublishTemplateRequest,
-  PublishTemplateResponse,
   KeysCreateRequest,
   KeysCreateResponse,
   KeysListRequest,
@@ -53,11 +56,19 @@ import type {
   KeysSetActiveResponse,
   ListAccountNftRequest,
   ListAccountNftResponse,
+  PublishTemplateRequest,
+  PublishTemplateResponse,
   RevealFundsRequest,
   RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
+  SubstatesGetRequest,
+  SubstatesGetResponse,
+  SubstatesListRequest,
+  SubstatesListResponse,
+  TemplatesGetRequest,
+  TemplatesGetResponse,
   TransactionGetAllRequest,
   TransactionGetAllResponse,
   TransactionGetRequest,
@@ -70,21 +81,9 @@ import type {
   TransactionWaitResultResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
-  AccountsTransferRequest,
-  AccountsTransferResponse,
-  SubstatesGetRequest,
-  SubstatesGetResponse,
-  TemplatesGetResponse,
-  SubstatesListRequest,
-  SubstatesListResponse,
 } from "@tari-project/wallet_jrpc_client";
-import {
-  AccountGetDefaultRequest,
-  TemplatesGetRequest,
-  WalletDaemonClient,
-  AuthGetAllJwtResponse,
-  AuthGetAllJwtRequest,
-} from "@tari-project/wallet_jrpc_client";
+import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
+import { GetValidatorFeesRequest, GetValidatorFeesResponse } from "@tari-project/typescript-bindings";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -196,6 +195,7 @@ export const accountsGetBalances = (request: AccountsGetBalancesRequest): Promis
   client().then((c) => c.accountsGetBalances(request));
 export const accountsGet = (request: AccountGetRequest): Promise<AccountGetResponse> =>
   client().then((c) => c.accountsGet(request));
+
 export const accountsTransfer = (request: AccountsTransferRequest): Promise<AccountsTransferResponse> =>
   client().then((c) => c.accountsTransfer(request));
 export const accountsConfidentialTransfer = (
@@ -222,6 +222,8 @@ export const nftList = (request: ListAccountNftRequest): Promise<ListAccountNftR
 
 export const validatorsClaimFees = (request: ClaimValidatorFeesRequest): Promise<ClaimValidatorFeesResponse> =>
   client().then((c) => c.validatorsClaimFees(request));
+export const validatorsGetFees = (request: GetValidatorFeesRequest): Promise<GetValidatorFeesResponse> =>
+  client().then((c) => c.validatorsGetFees(request));
 
 // substates
 export const substatesGet = (request: SubstatesGetRequest): Promise<SubstatesGetResponse> =>

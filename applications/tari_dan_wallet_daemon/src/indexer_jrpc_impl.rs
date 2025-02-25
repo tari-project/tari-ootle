@@ -68,14 +68,14 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
 
     async fn query_substate(
         &self,
-        address: &SubstateId,
+        substate_id: &SubstateId,
         version: Option<u32>,
         local_search_only: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
         let mut client = self.get_client()?;
         let result = client
             .get_substate(GetSubstateRequest {
-                address: address.clone(),
+                address: substate_id.clone(),
                 version,
                 local_search_only,
             })
@@ -221,14 +221,12 @@ fn convert_indexer_result_to_wallet_result(result: IndexerTransactionFinalizedRe
             finalized_time,
             execution_time,
             abort_details,
-            json_results,
         } => TransactionFinalizedResult::Finalized {
             final_decision,
             execution_result,
             execution_time,
             finalized_time,
             abort_details,
-            json_results,
         },
     }
 }

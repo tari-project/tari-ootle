@@ -48,7 +48,7 @@ async fn when_i_claim_burn_via_wallet_daemon(
         proof.clone(),
         reciprocal_claim_public_key.clone(),
         wallet_daemon_name,
-        1000,
+        5000,
     )
     .await
     .unwrap();
@@ -97,21 +97,20 @@ async fn when_i_claim_burn_via_wallet_daemon_it_fails(
         proof.clone(),
         reciprocal_claim_public_key.clone(),
         wallet_daemon_name,
-        1000,
+        5000,
     )
     .await
     .unwrap_err();
 }
 
-#[when(expr = "I claim fees for validator {word} and epoch {int} into account {word} using the wallet daemon {word}")]
+#[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}")]
 async fn when_i_claim_fees_for_validator_and_epoch(
     world: &mut TariWorld,
     validator_node: String,
-    epoch: u64,
     account_name: String,
     wallet_daemon_name: String,
 ) {
-    let resp = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, epoch, false)
+    let resp = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, false)
         .await
         .unwrap();
     resp.result.result.accept().unwrap_or_else(|| {
@@ -122,18 +121,14 @@ async fn when_i_claim_fees_for_validator_and_epoch(
     });
 }
 
-#[when(
-    expr = "I claim fees for validator {word} and epoch {int} into account {word} using the wallet daemon {word}, it \
-            fails"
-)]
+#[when(expr = "I claim fees for validator {word} into account {word} using the wallet daemon {word}, it fails")]
 async fn when_i_claim_fees_for_validator_and_epoch_fails(
     world: &mut TariWorld,
     validator_node: String,
-    epoch: u64,
     account_name: String,
     wallet_daemon_name: String,
 ) {
-    let err = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, epoch, false)
+    let err = wallet_daemon_cli::claim_fees(world, wallet_daemon_name, account_name, validator_node, false)
         .await
         .unwrap_err();
 
@@ -271,11 +266,12 @@ async fn when_i_burn_funds_with_wallet_daemon(
     );
 }
 
-#[when(expr = "I check the balance of {word} on wallet daemon {word} the amount is at {word} {int}")]
+#[when(regex = r"I check the balance of (\S+) on wallet daemon (\S+) the amount is (at )?(\S+) (\d+)")]
 async fn check_account_balance_via_daemon(
     world: &mut TariWorld,
     account_name: String,
     wallet_daemon_name: String,
+    _at: String,
     least_or_most: String,
     amount: i64,
 ) {
@@ -294,7 +290,14 @@ async fn check_account_balance_via_daemon(
                 panic!("Expected balance to be at most {} but was {}", amount, current_balance);
             }
         },
-        _ => panic!("Expected least or most, got {}", least_or_most),
+        "exactly" => {
+            if current_balance != amount {
+                println!("Expected balance to be exactly {} but was {}", amount, current_balance);
+                panic!("Expected balance to be exactly {} but was {}", amount, current_balance);
+            }
+        },
+
+        _ => panic!("Expected 'at least', 'at most' or 'exactly', got {}", least_or_most),
     }
 }
 
@@ -328,21 +331,6 @@ async fn wait_account_balance_via_daemon(
             panic!("Timeout waiting for balance. Current balance = {}", current_balance);
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-}
-
-#[when(expr = "I check the balance of {word} on wallet daemon {word} the amount is exactly {int}")]
-async fn check_account_balance_is_exactly_via_daemon(
-    world: &mut TariWorld,
-    account_name: String,
-    wallet_daemon_name: String,
-    amount: i64,
-) {
-    // THis refreshes
-    let current_balance = wallet_daemon_cli::get_balance(world, &account_name, &wallet_daemon_name).await;
-    if current_balance != amount {
-        println!("Expected balance to be {} but was {}", amount, current_balance);
-        panic!("Expected balance to be {} but was {}", amount, current_balance);
     }
 }
 

@@ -3,7 +3,8 @@
 
 use std::convert::{TryFrom, TryInto};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{shard::Shard, Epoch};
 use tari_dan_storage::consensus_models::{
     EpochCheckpoint,
@@ -13,6 +14,7 @@ use tari_dan_storage::consensus_models::{
     SubstateData,
     SubstateDestroyedProof,
     SubstateUpdate,
+    SubstateValueOrHash,
 };
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_jellyfish::TreeHash;
@@ -105,7 +107,10 @@ impl TryFrom<proto::rpc::SubstateData> for SubstateData {
         Ok(Self {
             substate_id: SubstateId::from_bytes(&value.substate_id)?,
             version: value.version,
-            substate_value: SubstateValue::from_bytes(&value.substate_value)?,
+            value: value
+                .substate_value_or_hash
+                .ok_or_else(|| anyhow!("substate_value_or_hash not provided"))?
+                .try_into()?,
             created_by_transaction: value.created_transaction.try_into()?,
         })
     }
@@ -116,8 +121,34 @@ impl From<SubstateData> for proto::rpc::SubstateData {
         Self {
             substate_id: value.substate_id.to_bytes(),
             version: value.version,
-            substate_value: value.substate_value.to_bytes(),
+            substate_value_or_hash: Some(value.value().into()),
             created_transaction: value.created_by_transaction.as_bytes().to_vec(),
+        }
+    }
+}
+
+// -------------------------------- SubstateValueOrHash -------------------------------- //
+
+impl From<&SubstateValueOrHash> for proto::rpc::substate_data::SubstateValueOrHash {
+    fn from(value: &SubstateValueOrHash) -> Self {
+        match value {
+            SubstateValueOrHash::Value(v) => proto::rpc::substate_data::SubstateValueOrHash::Value(v.to_bytes()),
+            SubstateValueOrHash::Hash(h) => proto::rpc::substate_data::SubstateValueOrHash::Hash(h.to_vec()),
+        }
+    }
+}
+
+impl TryFrom<proto::rpc::substate_data::SubstateValueOrHash> for SubstateValueOrHash {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::rpc::substate_data::SubstateValueOrHash) -> Result<Self, Self::Error> {
+        match value {
+            proto::rpc::substate_data::SubstateValueOrHash::Value(v) => Ok(SubstateValueOrHash::Value(
+                SubstateValue::from_bytes(&v).context("SubstateValueOrHash::Value")?,
+            )),
+            proto::rpc::substate_data::SubstateValueOrHash::Hash(h) => Ok(SubstateValueOrHash::Hash(
+                FixedHash::try_from(h).context("SubstateValueOrHash::Hash")?,
+            )),
         }
     }
 }

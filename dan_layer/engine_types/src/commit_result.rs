@@ -292,7 +292,7 @@ impl Display for TransactionResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub enum RejectReason {
     InvalidTransaction(String),
@@ -300,12 +300,13 @@ pub enum RejectReason {
     OneOrMoreInputsNotFound(String),
     FailedToLockInputs(String),
     FailedToLockOutputs(String),
+    ForeignPledgeInputConflict,
     ForeignShardGroupDecidedToAbort {
         start_shard: u32,
         end_shard: u32,
         abort_reason: String,
     },
-    FeesNotPaid(String),
+    InsufficientFeesPaid(String),
     Unknown,
 }
 
@@ -317,6 +318,9 @@ impl Display for RejectReason {
             RejectReason::OneOrMoreInputsNotFound(msg) => write!(f, "One or more inputs not found: {}", msg),
             RejectReason::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
             RejectReason::FailedToLockOutputs(msg) => write!(f, "Failed to lock outputs: {}", msg),
+            RejectReason::ForeignPledgeInputConflict => {
+                write!(f, "Transaction conflicts with an existing foreign pledge",)
+            },
             RejectReason::ForeignShardGroupDecidedToAbort {
                 start_shard,
                 end_shard,
@@ -327,7 +331,7 @@ impl Display for RejectReason {
                     "Foreign shard group ({start_shard}-{end_shard}) decided to abort: {abort_reason}"
                 )
             },
-            RejectReason::FeesNotPaid(msg) => write!(f, "Fee not paid: {}", msg),
+            RejectReason::InsufficientFeesPaid(msg) => write!(f, "Insufficient fees paid: {}", msg),
             RejectReason::Unknown => write!(f, "<unknown reject reason - this is not valid>"),
         }
     }

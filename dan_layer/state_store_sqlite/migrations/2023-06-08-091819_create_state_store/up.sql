@@ -148,7 +148,7 @@ create table substates
     address                  text      not NULL,
     substate_id              text      not NULL,
     version                  integer   not NULL,
-    data                     text      not NULL,
+    data                     text      NULL,
     state_hash               text      not NULL,
     created_by_transaction   text      not NULL,
     created_justify          text      not NULL,

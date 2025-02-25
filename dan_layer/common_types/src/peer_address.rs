@@ -9,7 +9,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-use crate::{DerivableFromPublicKey, NodeAddressable};
+use crate::{DerivableFromPublicKey, NodeAddressable, ToPeerId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
@@ -22,6 +22,12 @@ impl PeerAddress {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         self.0.to_bytes()
+    }
+}
+
+impl ToPeerId for PeerAddress {
+    fn to_peer_id(&self) -> PeerId {
+        self.0
     }
 }
 

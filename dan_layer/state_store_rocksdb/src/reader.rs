@@ -40,7 +40,7 @@ use tari_dan_common_types::{
     SubstateAddress,
     SubstateRequirement,
     ToSubstateAddress,
-    VersionedSubstateId,
+    VersionedSubstateId, VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
     consensus_models::{
@@ -843,34 +843,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(transaction_ids)
     }
 
-    fn blocks_get_total_leader_fee_for_epoch(
-        &self,
-        epoch: Epoch,
-        validator_public_key: &PublicKey,
-    ) -> Result<u64, StorageError> {
-        // TODO: to optimize this query we could create a new column familiy with epoch and proposed_by fields in the key
-
-        let operation = "blocks_get_total_leader_fee_for_epoch";
-
-        type Cf = crate::model::block::EpochHeightColumnFamily;
-        let cf = Cf::name();
-        let key_prefix = Cf::build_key_prefix(epoch, None);
-
-        let block_ids = BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix)?;
-
-        let mut sum = 0;
-        for block_id in block_ids {
-            let key = BlockModel::key_from_block_id(&block_id);
-            let block= BlockModel::get(&self.tx, operation, &key)?;
-
-            if block.proposed_by() == validator_public_key {
-                sum += block.total_leader_fee();
-            }
-        }
-
-        Ok(sum)
-    }
-
     fn blocks_get_any_with_epoch_range(
         &self,
         epoch_range: RangeInclusive<Epoch>,
@@ -1265,6 +1237,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         stage: Option<TransactionPoolStage>,
         is_ready: Option<bool>,
         confirmed_stage: Option<Option<TransactionPoolConfirmedStage>>,
+        skip_lock_conflicted: bool,
     ) -> Result<usize, StorageError> {
         todo!()
         /*
@@ -1382,9 +1355,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(SubstateModel::get(&self.tx, "substates_get", &key)?)
     }
 
-    fn substates_get_any(
+    fn substates_get_any<'a, I: IntoIterator<Item = &'a VersionedSubstateIdRef<'a>>>(
         &self,
-        substate_ids: &HashSet<SubstateRequirement>,
+        substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
         type Cf = crate::model::substate::VersionColumnFamily;
 
@@ -1396,7 +1369,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let mut substates = vec![];
 
         for req in substate_ids {
-            let key_prefix = Cf::build_key_from_requirement(req);
+            let requirement = SubstateRequirement::new(req.substate_id.clone(), Some(req.version));
+            let key_prefix = Cf::build_key_from_requirement(&requirement);
             if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)? {
                 substates.push(substate);
             }
@@ -1573,10 +1547,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 let substate = SubstateModel::get(&self.tx, operation, &key)?;
 
                 let locked_substate = LockedSubstateValue {
-                    locked_by_block: lock.block_id,
                     substate_id: lock.substate_id,
                     lock: lock.lock,
-                    value: Some(substate.substate_value),
+                    value: substate.substate_value,
                 };
                 locked_substates.push(locked_substate);
             }
@@ -1722,18 +1695,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let key = EpochCheckpointModel::key_from_epoch(&epoch);
         let value = EpochCheckpointModel::get(&self.tx, operation, &key)?;
         Ok(value)
-    }
-
-    fn foreign_substate_pledges_exists_for_address<T: ToSubstateAddress>(
-        &self,
-        transaction_id: &TransactionId,
-        address: T,
-    ) -> Result<bool, StorageError> {
-        let operation = "foreign_substate_pledges_exists_for_address";
-        let address = address.to_substate_address();
-        let key = ForeignSubstatePledgeModel::key_from_transaction_and_address(transaction_id, Some(&address));
-        
-        Ok(ForeignSubstatePledgeModel::key_exists(&self.tx, operation, &key)?)
     }
 
     fn foreign_substate_pledges_get_all_by_transaction_id(
@@ -1885,7 +1846,40 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(count)
     }
     
-    fn transaction_pool_has_pending_state_updates(&self) -> Result<bool, StorageError> {
+    fn transaction_pool_has_pending_state_updates(&self, _block_id: &BlockId) -> Result<bool, StorageError> {
+        todo!()
+    }
+    
+    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        todo!()
+    }
+    
+    fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        exclude_transaction_id: Option<&TransactionId>,
+        substate_ids: I,
+        exclude_local_only: bool,
+    ) -> Result<Option<TransactionId>, StorageError> {
+        todo!()
+    }
+    
+    fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
+        &self,
+        transaction_id: &TransactionId,
+        address: T,
+    ) -> Result<bool, StorageError> {
+        todo!()
+    }
+    
+    fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        transaction_id: &TransactionId,
+        substate_ids: I,
+    ) -> Result<SubstatePledges, StorageError> {
         todo!()
     }
 }

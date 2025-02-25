@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { IoExpandOutline } from "react-icons/io5";
-import { useState } from "react";
+import { ReactNode, useState } from "react";
 import Dialog from "@mui/material/Dialog";
 import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
@@ -31,7 +31,13 @@ import { CodeBlock } from "./StyledComponents";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 
-export default function CodeBlockExpand({ title, children }: any) {
+interface Props {
+  title: string;
+  children?: ReactNode;
+  contentsWhenUnexpanded?: ReactNode;
+}
+
+export default function CodeBlockDialog({ title, children, contentsWhenUnexpanded = false }: Props) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   const matches = useMediaQuery(theme.breakpoints.down("md"));
@@ -46,12 +52,7 @@ export default function CodeBlockExpand({ title, children }: any) {
 
   return (
     <div>
-      <CodeBlock
-        style={{
-          position: "relative",
-        }}
-      >
-        {children}
+      {contentsWhenUnexpanded ? (
         <IconButton
           onClick={handleClickOpen}
           style={{
@@ -60,9 +61,27 @@ export default function CodeBlockExpand({ title, children }: any) {
             float: "right",
           }}
         >
+          {contentsWhenUnexpanded}
           <IoExpandOutline style={{ height: 16, width: 16 }} />
         </IconButton>
-      </CodeBlock>
+      ) : (
+        <CodeBlock
+          style={{
+            position: "relative",
+          }}
+        >
+          {children}
+          <IconButton
+            onClick={handleClickOpen}
+            style={{
+              position: "sticky",
+              bottom: "0",
+              float: "right",
+            }}
+          >
+            <IoExpandOutline style={{ height: 16, width: 16 }} />
+          </IconButton>
+        </CodeBlock>)}
       <Dialog fullScreen={matches} open={open} onClose={handleClose} maxWidth="xl" fullWidth>
         <Box
           style={{

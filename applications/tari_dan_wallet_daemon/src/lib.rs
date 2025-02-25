@@ -33,7 +33,7 @@ mod webrtc;
 use std::{fs, panic, process};
 
 use log::*;
-use tari_dan_common_types::optional::Optional;
+use tari_dan_common_types::{optional::Optional, NumPreshards};
 use tari_dan_wallet_sdk::{
     apis::{
         config::{ConfigApi, ConfigKey},
@@ -59,6 +59,8 @@ use crate::{
 const LOG_TARGET: &str = "tari::dan::wallet_daemon";
 
 const DEFAULT_FEE: Amount = Amount::new(1500);
+// TODO: must match the global network value. All testnets currently have 256 pre-shards.
+const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 
 pub async fn run_tari_dan_wallet_daemon(
     config: ApplicationConfig,
@@ -88,17 +90,17 @@ pub async fn run_tari_dan_wallet_daemon(
         jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers, shutdown_signal)?;
 
     // Run the http ui
-    if let Some(http_address) = config.dan_wallet_daemon.http_ui_address {
-        let mut public_jrpc_address = config
+    if let Some(web_listener_address) = config.dan_wallet_daemon.web_ui_address {
+        let mut public_jrpc_url = config
             .dan_wallet_daemon
-            .ui_connect_address
+            .web_ui_public_json_rpc_url
             .unwrap_or_else(|| jrpc_address.to_string());
-        if !public_jrpc_address.starts_with("http://") && !public_jrpc_address.starts_with("https://") {
-            public_jrpc_address = format!("http://{}", public_jrpc_address);
+        if !public_jrpc_url.starts_with("http://") && !public_jrpc_url.starts_with("https://") {
+            public_jrpc_url = format!("http://{}", public_jrpc_url);
         }
 
-        let public_jrpc_address = url::Url::parse(&public_jrpc_address)?;
-        task::spawn(run_http_ui_server(http_address, public_jrpc_address));
+        let public_jrpc_url = url::Url::parse(&public_jrpc_url)?;
+        task::spawn(run_http_ui_server(web_listener_address, public_jrpc_url));
     }
 
     if let Err(e) = fs::write(config.common.base_path.join("pid"), process::id().to_string()) {
@@ -137,9 +139,9 @@ pub fn initialize_wallet_sdk(
     let indexer_jrpc_endpoint = if let Some(indexer_url) = config_api.get(ConfigKey::IndexerUrl).optional()? {
         indexer_url
     } else {
-        config.dan_wallet_daemon.indexer_node_json_rpc_url.clone()
+        config.dan_wallet_daemon.indexer_json_rpc_url.clone()
     };
     let indexer = IndexerJsonRpcNetworkInterface::new(indexer_jrpc_endpoint);
-    let wallet_sdk = DanWalletSdk::initialize(store, indexer, sdk_config)?;
+    let wallet_sdk = DanWalletSdk::initialize(config.dan_wallet_daemon.network, store, indexer, sdk_config)?;
     Ok(wallet_sdk)
 }

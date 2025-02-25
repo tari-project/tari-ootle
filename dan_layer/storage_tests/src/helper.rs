@@ -56,13 +56,13 @@ pub fn build_substate_record(substate_id: &SubstateId, version: u32) -> Substate
     SubstateRecord {
             substate_id: substate_id.clone(), 
             version,
-            substate_value: build_substate_value(Some(entity_id)),
+            substate_value: Some(build_substate_value(Some(entity_id))),
             state_hash: FixedHash::default(),
             created_by_transaction: TransactionId::default(),
             created_justify: QcId::zero(),
             created_block: BlockId::genesis(),
             created_height: NodeHeight::zero(),
-            created_by_shard: Shard::zero(),
+            created_by_shard: Shard::first(),
             created_at_epoch: Epoch::zero(),
             destroyed: None,
     }

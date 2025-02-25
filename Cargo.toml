@@ -1,6 +1,6 @@
 # NOTE: When editing this version, also edit the versions in template_built_in/templates/account and account_nft
 [workspace.package]
-version = "0.7.0"
+version = "0.8.2"
 edition = "2021"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-dan"
@@ -19,9 +19,12 @@ members = [
     "applications/tari_swarm_daemon",
     "applications/tari_validator_node_cli",
     "applications/tari_validator_node",
+    "applications/tari_watcher",
     "clients/base_node_client",
+    "clients/tari_indexer_client",
     "clients/validator_node_client",
     "clients/wallet_daemon_client",
+    "dan_layer/epoch_oracles",
     "dan_layer/consensus",
     "dan_layer/consensus_tests",
     "dan_layer/epoch_manager",
@@ -39,6 +42,7 @@ members = [
     "dan_layer/template_builtin",
     "dan_layer/template_lib",
     "dan_layer/template_macros",
+    "dan_layer/template_manager",
     "dan_layer/template_test_tooling",
     "dan_layer/transaction_manifest",
     "dan_layer/transaction",
@@ -58,7 +62,6 @@ members = [
     "utilities/transaction_submitter",
     "utilities/transaction_submitter",
     "utilities/generate_ristretto_value_lookup",
-    "applications/tari_watcher",
 ]
 resolver = "2"
 
@@ -73,10 +76,10 @@ libp2p-substream = { path = "networking/libp2p-substream" }
 proto_builder = { path = "networking/proto_builder" }
 sqlite_message_logger = { path = "networking/sqlite_message_logger" }
 tari_base_node_client = { path = "clients/base_node_client" }
-# avoid including default features so each crate can choose which ones to import
-tari_bor = { version = "0.7", path = "dan_layer/tari_bor", default-features = false }
 tari_rpc_state_sync = { path = "dan_layer/rpc_state_sync" }
 tari_consensus = { path = "dan_layer/consensus" }
+tari_epoch_oracles = { path = "dan_layer/epoch_oracles" }
+tari_bor = { version = "0.8", path = "dan_layer/tari_bor", default-features = false } # avoid including default features so each crate can choose which ones to importlibp2p-messaging = { path = "networking/libp2p-messaging" }
 tari_dan_app_utilities = { path = "applications/tari_dan_app_utilities" }
 tari_dan_common_types = { path = "dan_layer/common_types" }
 tari_dan_engine = { path = "dan_layer/engine" }
@@ -99,10 +102,11 @@ tari_state_store_sqlite = { path = "dan_layer/state_store_sqlite" }
 tari_state_store_rocksdb = { path = "dan_layer/state_store_rocksdb" }
 tari_state_tree = { path = "dan_layer/state_tree" }
 tari_swarm = { path = "networking/swarm" }
-tari_template_abi = { version = "0.7", path = "dan_layer/template_abi" }
+tari_template_abi = { version = "0.8.2", path = "dan_layer/template_abi" }
 tari_template_builtin = { path = "dan_layer/template_builtin" }
 tari_template_lib = { path = "dan_layer/template_lib" }
-tari_template_macros = { version = "0.7", path = "dan_layer/template_macros" }
+tari_template_macros = { version = "0.8", path = "dan_layer/template_macros" }
+tari_template_manager = { version = "0.8", path = "dan_layer/template_manager" }
 tari_template_test_tooling = { path = "dan_layer/template_test_tooling" }
 tari_transaction = { path = "dan_layer/transaction" }
 tari_transaction_manifest = { path = "dan_layer/transaction_manifest" }
@@ -134,7 +138,6 @@ tari_metrics = { git = "https://github.com/tari-project/tari.git", branch = "fea
 tari_mmr = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 tari_p2p = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 tari_shutdown = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
-tari_storage = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }
 
 tari_crypto = "0.21.0"
 tari_utilities = "0.8.0"
@@ -154,9 +157,8 @@ bincode = "2.0.0-rc.3"
 bitflags = "2.4"
 blake2 = "0.10.6"
 borsh = "1.5"
-bytes = "1.5"
+bytes = "1.10.0"
 cacache = "12.0.0"
-cargo_metadata = "0.15.3"
 cargo_toml = "0.20.5"
 ciborium = { git = "https://github.com/enarx/ciborium.git", rev = "114614d2a61102eb2321c68e53799d1e6f087aef", default-features = false }
 ciborium-io = { git = "https://github.com/enarx/ciborium.git", rev = "114614d2a61102eb2321c68e53799d1e6f087aef", default-features = false }
@@ -174,6 +176,7 @@ digest = "0.10"
 dirs = "4.0.0"
 env_logger = "0.10.0"
 ethnum = "1.5.0"
+either = "1.13.0"
 fern = "0.6.2"
 futures = "0.3.30"
 futures-bounded = "0.2.3"
@@ -237,8 +240,8 @@ tokio-util = "0.7.10"
 tonic = "0.12.3"
 tower = "0.4"
 tower-http = { version = "0.4", default-features = false }
-tower-layer = "0.3"
 tracing = "0.1.40"
+toml = "0.8"
 ts-rs = { version = "7.1", features = [
     "chrono-impl",
     "no-serde-warnings",
@@ -284,4 +287,3 @@ overflow-checks = true
 #tari_libtor = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_hashing = { git = "https://github.com/account/tari.git", branch = "my-branch" }
 #tari_sidechain = { git = "https://github.com/account/tari.git", branch = "my-branch" }
-

@@ -20,7 +20,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
 import Accounts from "./Components/Accounts";
 import Keys from "./Components/Keys";
 import "./Wallet.css";
@@ -32,11 +31,8 @@ import AccessTokens from "./Components/AccessTokens";
 import useAccountStore from "../../store/accountStore";
 
 function Wallet() {
-  const accountName = useAccountStore((state) => state.accountName);
-  const [error, setError] = useState("");
-  if (error !== "") {
-    return <div className="error">{error}</div>;
-  }
+  const account = useAccountStore((state) => state.account);
+
   return (
     <>
       <Grid item xs={12} md={12} lg={12}>
@@ -52,7 +48,7 @@ function Wallet() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <Transactions accountName={accountName} />
+          <Transactions account={account!} />
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>

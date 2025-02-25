@@ -3,7 +3,7 @@
 
 @concurrency
 Feature: Concurrency
-
+  
   Scenario: Concurrent calls to the Counter template
 
     ##### Setup
@@ -26,13 +26,11 @@ Feature: Concurrency
     Given an indexer IDX connected to base node BASE
     Given a wallet daemon WALLET_D connected to indexer IDX
 
-    # Register the "counter" template
-    When base wallet WALLET registers the template "counter"
-    When miner MINER mines 20 new blocks
-    Then VN has scanned to height 53
-
     # Create the sender account
-    When I create an account ACC via the wallet daemon WALLET_D with 10000 free coins
+    When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
+
+    # Publish the "counter" template
+    When wallet daemon WALLET_D publishes the template "counter" using account ACC
 
     ##### Scenario
     # The initial value of the counter must be 0

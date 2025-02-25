@@ -24,7 +24,8 @@ pub struct Config {
     pub base_dir: PathBuf,
     pub start_port: u16,
     pub network: Network,
-    pub settings: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub settings: HashMap<String, String>,
     pub webserver: WebserverConfig,
     #[serde(flatten)]
     pub processes: ProcessesConfig,
@@ -64,10 +65,6 @@ impl Config {
         Ok(())
     }
 
-    pub fn get_public_ip(&self) -> IpAddr {
-        self.public_ip.unwrap_or_else(|| [127, 0, 0, 1].into())
-    }
-
     fn overrides_from_cli(&mut self, cli: &Cli) {
         if let Commands::Start(ref overrides) = cli.command {
             self.skip_registration = overrides.skip_registration;
@@ -84,17 +81,26 @@ impl Config {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebserverConfig {
     pub bind_address: SocketAddr,
+    pub base_auth: Option<BasicAuthConfig>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BasicAuthConfig {
+    pub username: String,
+    pub password: String,
 }
 
 impl Default for WebserverConfig {
     fn default() -> Self {
         Self {
             bind_address: SocketAddr::from(([127, 0, 0, 1], 8080)),
+            base_auth: None,
         }
     }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessesConfig {
     /// If true, the executables will be compiled even if the target binary file exists
     pub force_compile: bool,
@@ -103,8 +109,15 @@ pub struct ProcessesConfig {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InstanceConfig {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub use_execution_for: Option<InstanceType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub base_path: Option<PathBuf>,
     pub instance_type: InstanceType,
     pub num_instances: u32,
     #[serde(alias = "extra_args")]
@@ -115,6 +128,8 @@ impl InstanceConfig {
     pub fn new(instance_type: InstanceType) -> Self {
         Self {
             name: instance_type.to_string(),
+            use_execution_for: None,
+            base_path: None,
             instance_type,
             num_instances: 1,
             settings: HashMap::new(),
@@ -123,6 +138,16 @@ impl InstanceConfig {
 
     pub fn with_name<S: Into<String>>(mut self, name: S) -> Self {
         self.name = name.into();
+        self
+    }
+
+    pub fn use_execution_for(mut self, instance_type: InstanceType) -> Self {
+        self.use_execution_for = Some(instance_type);
+        self
+    }
+
+    pub fn with_base_path_override<P: Into<PathBuf>>(mut self, base_path: P) -> Self {
+        self.base_path = Some(base_path.into());
         self
     }
 
@@ -136,6 +161,18 @@ impl InstanceConfig {
         self.num_instances = num_instances;
         self
     }
+
+    pub fn execution_instance_type(&self) -> InstanceType {
+        self.use_execution_for.unwrap_or(self.instance_type)
+    }
+
+    pub fn instance_name(&self, index: u32) -> String {
+        format!("{}-#{:02}", self.name, index)
+    }
+
+    pub fn base_path_override(&self) -> Option<&PathBuf> {
+        self.base_path.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -147,6 +184,7 @@ pub enum InstanceType {
     TariIndexer,
     TariWalletDaemon,
     TariSignalingServer,
+    TariWalletDaemonCreateKey,
 }
 
 impl InstanceType {
@@ -164,6 +202,14 @@ impl InstanceType {
     pub fn is_miner(self) -> bool {
         matches!(self, InstanceType::MinoTariMiner)
     }
+
+    pub fn is_validator(self) -> bool {
+        matches!(self, InstanceType::TariValidatorNode)
+    }
+
+    pub fn is_wallet_daemon_create_key(self) -> bool {
+        matches!(self, InstanceType::TariWalletDaemonCreateKey)
+    }
 }
 
 impl Display for InstanceType {
@@ -173,6 +219,7 @@ impl Display for InstanceType {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutableConfig {
     pub instance_type: InstanceType,
     pub execuable_path: Option<PathBuf>,

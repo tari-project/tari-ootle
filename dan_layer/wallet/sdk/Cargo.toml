@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 tari_bor = { workspace = true }
+tari_common = { workspace = true }
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true, features = ["borsh"] }
 tari_engine_types = { workspace = true }
@@ -30,7 +31,6 @@ digest = { workspace = true }
 jsonwebtoken = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 

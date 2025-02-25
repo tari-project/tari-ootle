@@ -14,7 +14,7 @@ use tari_template_lib::{
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-use crate::{confidential::ConfidentialClaim, serde_with};
+use crate::{confidential::ConfidentialClaim, serde_with, vn_fee_pool::ValidatorFeePoolAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
@@ -54,10 +54,8 @@ pub enum Instruction {
         claim: Box<ConfidentialClaim>,
     },
     ClaimValidatorFees {
-        #[cfg_attr(feature = "ts", ts(type = "number"))]
-        epoch: u64,
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        validator_public_key: PublicKey,
+        address: ValidatorFeePoolAddress,
     },
     DropAllProofsInWorkspace,
     AssertBucketContains {
@@ -76,6 +74,13 @@ impl Instruction {
             Self::PublishTemplate { binary } => Some(binary),
             _ => None,
         }
+    }
+
+    pub fn referenced_template(&self) -> Option<&TemplateAddress> {
+        if let Self::CallFunction { template_address, .. } = self {
+            return Some(template_address);
+        }
+        None
     }
 }
 
@@ -133,15 +138,8 @@ impl Display for Instruction {
                     claim.proof_of_knowledge.v().reveal(),
                 )
             },
-            Self::ClaimValidatorFees {
-                epoch,
-                validator_public_key,
-            } => {
-                write!(
-                    f,
-                    "ClaimValidatorFees {{ epoch: {}, validator_public_key: {:.5} }}",
-                    epoch, validator_public_key
-                )
+            Self::ClaimValidatorFees { address } => {
+                write!(f, "ClaimValidatorFees {{ address: {} }}", address)
             },
 
             Self::DropAllProofsInWorkspace => {

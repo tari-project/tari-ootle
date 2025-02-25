@@ -41,10 +41,6 @@ mod last_inserted {
         let res = tx.foreign_substate_pledges_get_all_by_transaction_id(&transaction_id).unwrap();
         assert_eq!(res.len(), 2);
 
-        let address = pledge_1.to_substate_address();
-        let res = tx.foreign_substate_pledges_exists_for_address(&transaction_id, address).unwrap();
-        assert!(res);
-
         tx.foreign_substate_pledges_remove_many(vec![&transaction_id]).unwrap();
         let res = tx.foreign_substate_pledges_get_all_by_transaction_id(&transaction_id).unwrap();
         assert_eq!(res.len(), 0);

@@ -21,9 +21,8 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState } from "react";
-import { Form, Link, useLocation } from "react-router-dom";
+import { Form, Link } from "react-router-dom";
 import AddIcon from "@mui/icons-material/Add";
-import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button/Button";
 import Fade from "@mui/material/Fade";
 import MenuItem from "@mui/material/MenuItem";
@@ -35,13 +34,11 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField/TextField";
-import CopyToClipboard from "../../../Components/CopyToClipboard";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import { ChevronRight } from "@mui/icons-material";
 import IconButton from "@mui/material/IconButton";
 import { BoxHeading2, DataTableCell } from "../../../Components/StyledComponents";
-import { shortenString, toHexString } from "../../../utils/helpers";
 import {
   useAccountsCreate,
   useAccountsCreateFreeTestCoins,
@@ -50,37 +47,32 @@ import {
 } from "../../../api/hooks/useAccounts";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import queryClient from "../../../api/queryClient";
-import type { AccountInfo } from "@tari-project/typescript-bindings";
+import { AccountInfo, substateIdToString, shortenSubstateId } from "@tari-project/typescript-bindings";
+import CopyAddress from "../../../Components/CopyAddress";
 
 function Account(account: AccountInfo, index: number) {
-  const { pathname } = useLocation();
-  if (!("Component" in account.account.address)) {
-    return null;
-  }
   return (
     <TableRow key={index}>
       <DataTableCell>
         <Link
-          to={`/accounts/${account.account.name}`}
+          to={`/accounts/${substateIdToString(account.account.address)}`}
           style={{
             textDecoration: "none",
             color: "inherit",
           }}
         >
-          {account.account.name}
+          {account.account.name || shortenSubstateId(account.account.address)}
         </Link>
       </DataTableCell>
       <DataTableCell>
-        {shortenString(account.account.address.Component)}
-        <CopyToClipboard copy={account.account.address.Component} />
+        <CopyAddress address={account.account.address} />
       </DataTableCell>
       <DataTableCell>{account.account.key_index}</DataTableCell>
       <DataTableCell>
-        {shortenString(account.public_key)}
-        <CopyToClipboard copy={account.public_key} />
+        <CopyAddress address={account.public_key} />
       </DataTableCell>
       <DataTableCell>
-        <IconButton component={Link} to={`/accounts/${account.account.name}`}>
+        <IconButton component={Link} to={`/accounts/${substateIdToString(account.account.address)}`}>
           <ChevronRight />
         </IconButton>
       </DataTableCell>
@@ -89,7 +81,6 @@ function Account(account: AccountInfo, index: number) {
 }
 
 function Accounts() {
-  const [error, setError] = useState<String>();
   const [showAccountDialog, setShowAddAccountDialog] = useState(false);
   const [showClaimDialog, setShowClaimBurnDialog] = useState(false);
   const [accountFormState, setAccountFormState] = useState({
@@ -160,7 +151,7 @@ function Accounts() {
 
   const onClaimFreeCoins = async () => {
     await mutateCreateFeeTestCoins({
-      accountName: "TestAccount",
+      account: { Name: "NewAccount" },
       amount: 1_000_000_000,
       fee: 1000,
     });
@@ -191,7 +182,6 @@ function Accounts() {
 
   return (
     <>
-      {error ? <Alert severity="error">{error}</Alert> : null}
       <BoxHeading2
         style={{
           display: "flex",
@@ -246,13 +236,10 @@ function Accounts() {
                   style={{ flexGrow: 1, minWidth: "200px" }}
                 >
                   {dataAccountsList?.accounts.map((account: AccountInfo, index: number) => {
-                    if (!("Component" in account.account.address)) {
-                      return null;
-                    }
                     return (
                       <MenuItem
-                        key={toHexString(account.account.address.Component)}
-                        value={"component_" + toHexString(account.account.address.Component)}
+                        key={substateIdToString(account.account.address)}
+                        value={substateIdToString(account.account.address)}
                       >
                         {account.account.name}
                       </MenuItem>

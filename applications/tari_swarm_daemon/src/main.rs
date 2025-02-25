@@ -121,16 +121,16 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
             }),
             env: vec![],
         },
-        ExecutableConfig {
-            instance_type: InstanceType::TariSignalingServer,
-            execuable_path: Some("target/release/tari_signaling_server".into()),
-            compile: Some(CompileConfig {
-                working_dir: Some(".".into()),
-                package_name: "tari_signaling_server".to_string(),
-                target_dir: None,
-            }),
-            env: vec![],
-        },
+        // ExecutableConfig {
+        //     instance_type: InstanceType::TariSignalingServer,
+        //     execuable_path: Some("target/release/tari_signaling_server".into()),
+        //     compile: Some(CompileConfig {
+        //         working_dir: Some(".".into()),
+        //         package_name: "tari_signaling_server".to_string(),
+        //         target_dir: None,
+        //     }),
+        //     env: vec![],
+        // },
         ExecutableConfig {
             instance_type: InstanceType::TariWalletDaemon,
             execuable_path: Some("target/release/tari_wallet_daemon".into()),
@@ -143,6 +143,13 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         },
     ];
     let instances = vec![
+        // Generate a key and use that key to assign a claim key for all validators
+        InstanceConfig::new(InstanceType::TariWalletDaemonCreateKey)
+            .with_name("Wallet Daemon Create Key")
+            .use_execution_for(InstanceType::TariWalletDaemon)
+            // This relies on the wallet daemon name being "Wallet Daemon" and the wallet daemon base path not being overridden
+            .with_base_path_override("wallet-daemon-00")
+            .with_num_instances(1),
         InstanceConfig::new(InstanceType::MinoTariNode).with_name("Minotari Node"),
         // WARN: more than one wallet will break things because a random wallet is selected each time (hashmaps) for
         // mining and registrations, so a given wallet is not guaranteed to have funds. There is no big need to fix
@@ -154,7 +161,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
             .with_name("Validator node")
             .with_num_instances(1),
         InstanceConfig::new(InstanceType::TariIndexer).with_name("Indexer"),
-        InstanceConfig::new(InstanceType::TariSignalingServer).with_name("Signaling server"),
+        // InstanceConfig::new(InstanceType::TariSignalingServer).with_name("Signaling server"),
         InstanceConfig::new(InstanceType::TariWalletDaemon).with_name("Wallet Daemon"),
     ];
 
@@ -175,7 +182,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
     Ok(Config {
         skip_registration: false,
         network: cli.common.network.unwrap_or(Network::LocalNet),
-        settings: Some(HashMap::new()),
+        settings: HashMap::new(),
         start_port: 12000,
         base_dir: base_dir
             .canonicalize()
@@ -192,7 +199,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
 }
 
 async fn start(cli: &Cli) -> anyhow::Result<()> {
-    let mut config = Config::load_with_cli(cli).await.context("load with cli")?;
+    let mut config = Config::load_with_cli(cli).await.context("failed to load config")?;
     if let Commands::Start(ref overrides) = cli.command {
         overrides.apply(&mut config).context("cli overrides")?;
     }

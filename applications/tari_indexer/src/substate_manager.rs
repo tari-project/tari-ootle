@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_dan_app_utilities::substate_file_cache::SubstateFileCache;
 use tari_dan_common_types::{substate_type::SubstateType, PeerAddress};
-use tari_engine_types::substate::{Substate, SubstateId};
-use tari_epoch_manager::base_layer::EpochManagerHandle;
+use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
+use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
 use tari_template_lib::models::TemplateAddress;
@@ -44,7 +44,7 @@ use crate::substate_storage_sqlite::sqlite_substate_store_factory::{
 pub struct SubstateResponse {
     pub address: SubstateId,
     pub version: u32,
-    pub substate: Substate,
+    pub substate: SubstateValue,
     pub created_by_transaction: TransactionId,
 }
 
@@ -123,7 +123,7 @@ impl SubstateManager {
             } => Ok(Some(SubstateResponse {
                 address: id,
                 version: substate.version(),
-                substate,
+                substate: substate.into_substate_value(),
                 created_by_transaction: created_by_tx,
             })),
             _ => Ok(None),
@@ -136,14 +136,7 @@ impl SubstateManager {
         version: Option<u32>,
     ) -> Result<Option<SubstateResponse>, anyhow::Error> {
         let mut tx = self.substate_store.create_read_tx()?;
-        if let Some(row) = tx.get_substate(substate_address)? {
-            // if a version is requested, we must check that it matches the one in db
-            if let Some(version) = version {
-                if i64::from(version) != row.version {
-                    return Ok(None);
-                }
-            }
-
+        if let Some(row) = tx.get_substate(substate_address, version)? {
             // the substate is present in db and the version matches the requested version
             let substate_resp = row.try_into()?;
             return Ok(Some(substate_resp));
@@ -155,12 +148,12 @@ impl SubstateManager {
 
     pub async fn get_specific_substate(
         &self,
-        substate_address: &SubstateId,
+        substate_id: SubstateId,
         version: u32,
     ) -> Result<SubstateResult, anyhow::Error> {
         let substate_result = self
             .substate_scanner
-            .get_specific_substate_from_committee(substate_address, version)
+            .get_specific_substate_from_committee(substate_id, version)
             .await?;
         Ok(substate_result)
     }
@@ -170,8 +163,14 @@ impl SubstateManager {
         tx.get_non_fungible_collections().map_err(|e| e.into())
     }
 
-    pub async fn get_non_fungible_count(&self, substate_address: &SubstateId) -> Result<u64, anyhow::Error> {
-        let address_str = substate_address.to_address_string();
+    pub async fn get_non_fungible_count(&self, substate_id: &SubstateId) -> Result<u64, anyhow::Error> {
+        if !substate_id.is_resource() {
+            return Err(anyhow::anyhow!(
+                "get_non_fungible_count must be called with resource address, got {substate_id}"
+            ));
+        }
+
+        let address_str = substate_id.to_address_string();
         let mut tx = self.substate_store.create_read_tx()?;
         let count = tx.get_non_fungible_count(address_str)?;
         Ok(count as u64)
@@ -179,11 +178,11 @@ impl SubstateManager {
 
     pub async fn get_non_fungibles(
         &self,
-        substate_address: &SubstateId,
+        substate_id: &SubstateId,
         start_index: u64,
         end_index: u64,
     ) -> Result<Vec<NonFungibleResponse>, anyhow::Error> {
-        let non_fungibles = if let SubstateId::Resource(addr) = substate_address {
+        let non_fungibles = if let SubstateId::Resource(addr) = substate_id {
             self.substate_scanner
                 .get_non_fungibles(addr, start_index, Some(end_index))
                 .await?

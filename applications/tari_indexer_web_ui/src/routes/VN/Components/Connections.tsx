@@ -102,7 +102,7 @@ function Connections() {
               />
               <TextField
                 name="address"
-                label="Address"
+                label="CopyAddress"
                 value={formState.address}
                 onChange={onChange}
                 style={{ flexGrow: 1 }}
@@ -130,7 +130,7 @@ function Connections() {
         <TableHead>
           <TableRow>
             <TableCell>Peer ID</TableCell>
-            <TableCell>Address</TableCell>
+            <TableCell>CopyAddress</TableCell>
             <TableCell>Age</TableCell>
             <TableCell>Direction</TableCell>
             <TableCell>Latency</TableCell>

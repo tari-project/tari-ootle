@@ -28,7 +28,7 @@ use std::{
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_common_types::types::PublicKey;
-use tari_dan_app_utilities::p2p_config::PeerSeedsConfig;
+use tari_dan_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
 use tari_p2p::Network;
 use tari_shutdown::Shutdown;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig, ValidatorRegistrationFile};
@@ -50,7 +50,7 @@ pub struct ValidatorNodeProcess {
     pub public_key: PublicKey,
     pub port: u16,
     pub json_rpc_port: u16,
-    pub http_ui_port: u16,
+    pub web_ui_port: u16,
     pub base_node_grpc_port: u16,
     pub handle: task::JoinHandle<Result<(), anyhow::Error>>,
     pub temp_dir_path: PathBuf,
@@ -88,7 +88,7 @@ pub async fn spawn_validator_node(
 ) -> ValidatorNodeProcess {
     // each spawned VN will use different ports
     let (port, json_rpc_port) = get_os_assigned_ports();
-    let http_ui_port = get_os_assigned_port();
+    let web_ui_port = get_os_assigned_port();
     let base_node_grpc_port = world.base_nodes.get(&base_node_name).unwrap().grpc_port;
     let walletd = match world.wallet_daemons.get(&wallet_daemon_name) {
         Some(walletd) => walletd,
@@ -129,6 +129,7 @@ pub async fn spawn_validator_node(
         let mut config = ApplicationConfig {
             common: CommonConfig::default(),
             validator_node: ValidatorNodeConfig::default(),
+            epoch_oracle: EpochOracleConfig::default(),
             peer_seeds: PeerSeedsConfig::default(),
             network: Network::LocalNet,
         };
@@ -136,17 +137,18 @@ pub async fn spawn_validator_node(
         // temporal folder for the VN files (e.g. sqlite file, json files, etc.)
         println!("Using validator_node temp_dir: {}", temp_dir.display());
         config.common.base_path.clone_from(&temp_dir);
+        config.network = Network::LocalNet;
         config.validator_node.data_dir = temp_dir.to_path_buf();
         config.validator_node.shard_key_file = temp_dir.join("shard_key.json");
         config.validator_node.identity_file = temp_dir.join("validator_node_id.json");
-        config.validator_node.base_node_grpc_url =
+        config.epoch_oracle.base_layer.base_node_grpc_url =
             Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
 
         // config.validator_node.public_address =
         // Some(config.validator_node.p2p.transport.tcp.listener_address.clone());
         config.validator_node.p2p.enable_mdns = false;
         config.validator_node.json_rpc_listener_address = Some(format!("127.0.0.1:{}", json_rpc_port).parse().unwrap());
-        config.validator_node.http_ui_listener_address = Some(format!("127.0.0.1:{}", http_ui_port).parse().unwrap());
+        config.validator_node.web_ui_listener_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
         config.validator_node.p2p.listener_port = port;
 
         config.validator_node.fee_claim_public_key = key.public_key;
@@ -171,7 +173,7 @@ pub async fn spawn_validator_node(
         public_key,
         port,
         base_node_grpc_port,
-        http_ui_port,
+        web_ui_port,
         handle,
         json_rpc_port,
         temp_dir_path,

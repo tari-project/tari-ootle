@@ -1,10 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::{FixedHash, PublicKey};
-use tari_dan_common_types::{vn_node_hash, Epoch, NodeAddressable, SubstateAddress};
+use tari_dan_common_types::{displayable::Displayable, vn_node_hash, Epoch, NodeAddressable, SubstateAddress};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorNode<TAddr> {
@@ -33,5 +35,19 @@ impl<TAddr> Eq for ValidatorNode<TAddr> {}
 impl<TAddr> std::hash::Hash for ValidatorNode<TAddr> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.shard_key.hash(state);
+    }
+}
+
+impl<TAddr: NodeAddressable> Display for ValidatorNode<TAddr> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Validator(pk={}, shard_key={}, addr={}, start_epoch={}, end_epoch={})",
+            self.public_key,
+            self.shard_key,
+            self.address,
+            self.start_epoch,
+            self.end_epoch.display()
+        )
     }
 }

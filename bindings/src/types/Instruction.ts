@@ -22,7 +22,7 @@ export type Instruction =
   | { PutLastInstructionOutputOnWorkspace: { key: Array<number> } }
   | { EmitLog: { level: LogLevel; message: string } }
   | { ClaimBurn: { claim: ConfidentialClaim } }
-  | { ClaimValidatorFees: { epoch: number; validator_public_key: string } }
+  | { ClaimValidatorFees: { address: string } }
   | "DropAllProofsInWorkspace"
   | { AssertBucketContains: { key: Array<number>; resource_address: ResourceAddress; min_amount: Amount } }
   | { PublishTemplate: { binary: Array<number> } };

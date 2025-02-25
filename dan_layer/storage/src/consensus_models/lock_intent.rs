@@ -139,6 +139,61 @@ impl LockIntent for &VersionedSubstateIdLockIntent {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct RequireLockIntentRef<'a> {
+    substate_id: &'a SubstateId,
+    lock_type: SubstateLockType,
+    version_to_lock: u32,
+}
+
+impl<'a> RequireLockIntentRef<'a> {
+    pub fn new(substate_id: &'a SubstateId, version_to_lock: u32, lock: SubstateLockType) -> Self {
+        Self {
+            substate_id,
+            lock_type: lock,
+            version_to_lock,
+        }
+    }
+}
+
+impl<'a> From<&'a VersionedSubstateIdLockIntent> for RequireLockIntentRef<'a> {
+    fn from(intent: &'a VersionedSubstateIdLockIntent) -> Self {
+        RequireLockIntentRef {
+            substate_id: intent.substate_id(),
+            lock_type: intent.lock_type(),
+            version_to_lock: intent.version_to_lock(),
+        }
+    }
+}
+
+impl LockIntent for RequireLockIntentRef<'_> {
+    fn substate_id(&self) -> &SubstateId {
+        self.substate_id
+    }
+
+    fn lock_type(&self) -> SubstateLockType {
+        self.lock_type
+    }
+
+    fn version_to_lock(&self) -> u32 {
+        self.version_to_lock
+    }
+
+    fn requested_version(&self) -> Option<u32> {
+        Some(self.version_to_lock)
+    }
+}
+
+impl fmt::Display for RequireLockIntentRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "RequiredLock[{} ver: {} ({})]",
+            self.substate_id, self.version_to_lock, self.lock_type
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SubstateRequirementLockIntent {
     substate_requirement: SubstateRequirement,
@@ -147,9 +202,13 @@ pub struct SubstateRequirementLockIntent {
 }
 
 impl SubstateRequirementLockIntent {
-    pub fn new<T: Into<SubstateRequirement>>(substate_id: T, version_to_lock: u32, lock: SubstateLockType) -> Self {
+    pub fn new<T: Into<SubstateRequirement>>(
+        substate_requirement: T,
+        version_to_lock: u32,
+        lock: SubstateLockType,
+    ) -> Self {
         Self {
-            substate_requirement: substate_id.into(),
+            substate_requirement: substate_requirement.into(),
             version_to_lock,
             lock_type: lock,
         }

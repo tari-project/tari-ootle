@@ -23,16 +23,18 @@
 use log::info;
 use tari_dan_app_utilities::{
     substate_file_cache::SubstateFileCache,
-    template_manager::implementation::TemplateManager,
     transaction_executor::{TariDanTransactionProcessor, TransactionExecutor, TransactionProcessorError},
 };
 use tari_dan_common_types::PeerAddress;
 use tari_dan_engine::state_store::{new_memory_store, StateStoreError};
 use tari_dan_storage::StorageError;
-use tari_engine_types::commit_result::ExecuteResult;
-use tari_epoch_manager::{base_layer::EpochManagerHandle, EpochManagerError, EpochManagerReader};
+use tari_engine_types::{
+    commit_result::ExecuteResult,
+    virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+};
+use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::RpcStatus;
-use tari_state_store_sqlite::SqliteStateStore;
+use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_client::ValidatorNodeClientError;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -40,7 +42,7 @@ use thiserror::Error;
 use tokio::task;
 
 use crate::{
-    p2p::services::mempool::{ResolvedSubstates, SubstateResolver}, state_store::ValidatorNodeStateStore, substate_resolver::{SubstateResolverError, TariSubstateResolver}, virtual_substate::VirtualSubstateError
+    p2p::services::mempool::{ResolvedSubstates, SubstateResolver}, state_store::ValidatorNodeStateStore, substate_resolver::{SubstateResolverError, TariSubstateResolver}
 };
 
 const LOG_TARGET: &str = "tari::dan::validator_node::dry_run_transaction_processor";
@@ -61,8 +63,6 @@ pub enum DryRunTransactionProcessorError {
     StateStoreError(#[from] StateStoreError),
     #[error("Substate resolver error: {0}")]
     SubstateResoverError(#[from] SubstateResolverError),
-    #[error("Virtual substate error: {0}")]
-    VirtualSubstateError(#[from] VirtualSubstateError),
     #[error("Execution thread failed: {0}")]
     ExecutionThreadFailed(#[from] task::JoinError),
 }
@@ -104,11 +104,13 @@ impl DryRunTransactionProcessor {
         // Resolve all local and foreign substates
         let mut temp_state_store = new_memory_store();
 
+        // TODO: the current epoch should come from consensus
         let current_epoch = self.epoch_manager.current_epoch().await?;
-        let virtual_substates = self
-            .substate_resolver
-            .resolve_virtual_substates(&transaction, current_epoch)
-            .await?;
+        let mut virtual_substates = VirtualSubstates::new();
+        virtual_substates.insert(
+            VirtualSubstateId::CurrentEpoch,
+            VirtualSubstate::CurrentEpoch(current_epoch.as_u64()),
+        );
 
         let ResolvedSubstates {
             local: inputs,

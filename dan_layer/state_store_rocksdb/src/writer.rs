@@ -189,7 +189,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         for change in changes {
             let block_diff_data = BlockDiffData {
                 block_id: *block_id,
-                substate_id: change.versioned_substate_id().substate_id.clone(),
+                substate_id: change.versioned_substate_id().substate_id().clone(),
                 change: change.clone(),
                 created_at: RocksdbTimestamp::now(),
             };
@@ -904,9 +904,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn substate_locks_remove_many_for_transactions<'a, I: Iterator<Item = &'a TransactionId>>(
         &mut self,
-        mut transaction_ids: Peekable<I>,
+        transaction_ids: I,
     ) -> Result<(), StorageError> {
         // let's check the peekable iterator to save an OP.
+        let mut transaction_ids = transaction_ids.peekable();
         if transaction_ids.peek().is_none() {
             return Ok(());
         }
@@ -964,30 +965,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let key_prefix = ShardCf::build_key_prefix_by_shard(&substate.created_by_shard);
         // TODO: this could be optimized by a new model function that allows to specify the we only want one key
         let shard_transitions = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, ShardCf::name(), &key_prefix, Ordering::Descending)?;
-        let next_seq = match shard_transitions.first() {
+        let _next_seq = match shard_transitions.first() {
             Some(value) => {
                 value.seq.0
             },
             None => 1,
         };
 
-        // Insert the next state transition
-        let state_transition = StateTransitionModelData::new(
-            StateTransition {
-                id: StateTransitionId::new(substate.created_at_epoch, substate.created_by_shard, next_seq),
-                update: SubstateUpdate::Create(SubstateCreatedProof {
-                    substate: SubstateData {
-                        substate_id: substate.substate_id.clone(),
-                        version: substate.version,
-                        substate_value: substate.substate_value.clone(),
-                        created_by_transaction: substate.created_by_transaction,
-                    },
-                }),
-            },
-            substate.created_by_shard,
-            next_seq,
-        )?;
-        StateTransitionModel::put(self.db.clone(), tx, operation, &state_transition)?;
+        // TODO: Insert the next state transition
 
         Ok(())
     }
@@ -1035,8 +1020,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 id: StateTransitionId::new(epoch, shard, next_seq),
                 update: SubstateUpdate::Destroy(
                     SubstateDestroyedProof {
-                        substate_id: versioned_substate_id.substate_id,
-                        version: versioned_substate_id.version,
+                        substate_id: versioned_substate_id.substate_id().clone(),
+                        version: versioned_substate_id.version(),
                         destroyed_by_transaction: *destroyed_transaction_id,
                     }
                 ),
@@ -1286,7 +1271,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn validator_epoch_stats_add_participation_share(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
+    fn validator_epoch_stats_add_participation_share(&mut self, _qc_id: &QcId) -> Result<(), StorageError> {
         todo!()
         /*
         use crate::schema::{quorum_certificates, validator_epoch_stats};

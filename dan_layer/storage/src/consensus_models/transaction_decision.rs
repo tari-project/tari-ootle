@@ -32,6 +32,15 @@ pub enum Decision {
     Abort(AbortReason),
 }
 
+impl Decision {
+    pub fn is_same_outcome(&self, other: Decision) -> bool {
+        matches!(
+            (self, other),
+            (Decision::Commit, Decision::Commit) | (Decision::Abort(_), Decision::Abort(_))
+        )
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, AsRefStr, EnumString, BorshSerialize)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub enum AbortReason {
@@ -39,15 +48,15 @@ pub enum AbortReason {
     TransactionAtomMustBeAbort,
     TransactionAtomMustBeCommit,
     InputLockConflict,
+    ForeignPledgeInputConflict,
     LockInputsFailed,
     LockOutputsFailed,
     LockInputsOutputsFailed,
-    LeaderProposalVsLocalDecisionMismatch,
     InvalidTransaction,
     ExecutionFailure,
     OneOrMoreInputsNotFound,
     ForeignShardGroupDecidedToAbort,
-    FeesNotPaid,
+    InsufficientFeesPaid,
     EarlyAbort,
 }
 
@@ -64,10 +73,11 @@ impl From<&RejectReason> for AbortReason {
             RejectReason::InvalidTransaction(_) => Self::InvalidTransaction,
             RejectReason::ExecutionFailure(_) => Self::ExecutionFailure,
             RejectReason::OneOrMoreInputsNotFound(_) => Self::OneOrMoreInputsNotFound,
+            RejectReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             RejectReason::FailedToLockInputs(_) => Self::LockInputsFailed,
             RejectReason::FailedToLockOutputs(_) => Self::LockOutputsFailed,
             RejectReason::ForeignShardGroupDecidedToAbort { .. } => Self::ForeignShardGroupDecidedToAbort,
-            RejectReason::FeesNotPaid(_) => Self::FeesNotPaid,
+            RejectReason::InsufficientFeesPaid(_) => Self::InsufficientFeesPaid,
         }
     }
 }

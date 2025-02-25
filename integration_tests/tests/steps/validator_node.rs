@@ -10,6 +10,7 @@ use std::{
 use cucumber::{given, then, when};
 use integration_tests::{
     base_node::get_base_node_client,
+    template,
     template::{send_template_registration, RegisteredTemplate},
     validator_node::spawn_validator_node,
     validator_node_cli::create_key,
@@ -182,6 +183,34 @@ pub async fn send_vn_registration_with_claim_wallet(world: &mut TariWorld, vn_na
     world.mark_point_in_logs("after register_validator_node");
 }
 
+#[when(expr = "wallet daemon {word} publishes the template \"{word}\" using account {word}")]
+async fn publish_template(
+    world: &mut TariWorld,
+    wallet_daemon_name: String,
+    template_name: String,
+    account_name: String,
+) {
+    world.mark_point_in_logs("Start publishing template");
+    let template_address =
+        match template::publish_template(world, wallet_daemon_name, account_name, template_name.clone()).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("publish_template error = {}", e);
+                panic!("publish_template error = {}", e);
+            },
+        };
+    assert!(!template_address.is_empty());
+
+    // store the template address for future reference
+    let registered_template = RegisteredTemplate {
+        name: template_name.clone(),
+        address: template_address,
+    };
+    world.templates.insert(template_name, registered_template);
+
+    world.mark_point_in_logs("End publishing template");
+}
+
 #[when(expr = "base wallet {word} registers the template \"{word}\"")]
 async fn register_template(world: &mut TariWorld, wallet_name: String, template_name: String) {
     world.mark_point_in_logs("Start register template");
@@ -278,7 +307,7 @@ async fn assert_template_is_registered(world: &mut TariWorld, template_name: Str
         let resp = client.get_template(req).await.ok();
 
         if resp.is_none() {
-            if timer.elapsed() > Duration::from_secs(10) {
+            if timer.elapsed() > Duration::from_secs(120) {
                 panic!("Timed out waiting for template to be registered by all VNs");
             }
 
@@ -309,7 +338,7 @@ async fn assert_template_is_registered_by_all(world: &mut TariWorld, template_na
             let resp = client.get_template(req).await.ok();
 
             if resp.is_none() {
-                if timer.elapsed() > Duration::from_secs(10) {
+                if timer.elapsed() > Duration::from_secs(120) {
                     panic!("Timed out waiting for template to be registered by all VNs");
                 }
 

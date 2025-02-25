@@ -36,16 +36,17 @@ use tari_common::{
 };
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::{
+    epoch_oracle_config::EpochOracleConfig,
     p2p_config::{P2pConfig, PeerSeedsConfig},
-    template_manager::implementation::TemplateConfig,
 };
-use url::Url;
+use tari_template_manager::implementation::TemplateConfig;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationConfig {
     pub common: CommonConfig,
     pub indexer: IndexerConfig,
     pub peer_seeds: PeerSeedsConfig,
+    pub epoch_oracle: EpochOracleConfig,
     pub network: Network,
 }
 
@@ -55,6 +56,7 @@ impl ApplicationConfig {
             common: CommonConfig::load_from(cfg)?,
             indexer: IndexerConfig::load_from(cfg)?,
             peer_seeds: PeerSeedsConfig::load_from(cfg)?,
+            epoch_oracle: EpochOracleConfig::load_from(cfg)?,
             network: cfg.get("network")?,
         };
         config.indexer.set_base_path(config.common.base_path());
@@ -71,11 +73,6 @@ pub struct IndexerConfig {
     pub identity_file: PathBuf,
     /// A path to the file that stores the tor hidden service private key, if using the tor transport
     pub tor_identity_file: PathBuf,
-    /// The Tari base node's GRPC URL (e.g. http://localhost:18142)
-    pub base_node_grpc_url: Option<Url>,
-    /// How often do we want to scan the base layer for changes
-    #[serde(with = "serializers::seconds")]
-    pub base_layer_scanning_interval: Duration,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
     /// The p2p configuration settings
@@ -85,10 +82,10 @@ pub struct IndexerConfig {
     /// GraphQL port of the indexer application
     pub graphql_address: Option<SocketAddr>,
     /// The address of the HTTP UI
-    pub http_ui_address: Option<SocketAddr>,
+    pub web_ui_address: Option<SocketAddr>,
     /// The jrpc address where the UI should connect (it can be the same as the json_rpc_address, but doesn't have to
     /// be), if this will be None, then the listen_addr will be used.
-    pub ui_connect_address: Option<String>,
+    pub web_ui_public_json_rpc_url: Option<String>,
     /// How often do we want to scan the second layer for new versions
     #[serde(with = "serializers::seconds")]
     pub dan_layer_scanning_internal: Duration,
@@ -128,14 +125,12 @@ impl Default for IndexerConfig {
             override_from: None,
             identity_file: PathBuf::from("indexer_id.json"),
             tor_identity_file: PathBuf::from("indexer_tor_id.json"),
-            base_node_grpc_url: None,
-            base_layer_scanning_interval: Duration::from_secs(10),
             data_dir: PathBuf::from("data/indexer"),
             p2p: P2pConfig::default(),
             json_rpc_address: Some("127.0.0.1:18300".parse().unwrap()),
             graphql_address: Some("127.0.0.1:18301".parse().unwrap()),
-            http_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
-            ui_connect_address: None,
+            web_ui_address: Some("127.0.0.1:15000".parse().unwrap()),
+            web_ui_public_json_rpc_url: None,
             dan_layer_scanning_internal: Duration::from_secs(10),
             templates: TemplateConfig::default(),
             sidechain_id: None,

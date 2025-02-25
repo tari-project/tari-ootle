@@ -20,11 +20,12 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::configuration::{ConfigOverrideProvider, Network};
+use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -34,14 +35,15 @@ pub struct Cli {
     pub common: CommonCliArgs,
     #[clap(long, alias = "endpoint", env = "JRPC_ENDPOINT")]
     pub json_rpc_address: Option<SocketAddr>,
-    #[clap(long, env = "TARI_DAN_WALLET_UI_CONNECT_ADDRESS")]
-    pub ui_connect_address: Option<String>,
+    #[clap(long, env = "TARI_WALLET_WEB_UI_JSON_RPC_PUBLIC_URL")]
+    pub web_ui_public_json_rpc_url: Option<String>,
     #[clap(long, env = "SIGNALING_SERVER_ADDRESS")]
     pub signaling_server_address: Option<SocketAddr>,
-    #[clap(long, alias = "indexer-url")]
-    pub indexer_node_json_rpc_url: Option<String>,
-    #[clap(long)]
-    pub derive_secret: Option<u64>,
+    #[clap(long, short = 'i', alias = "indexer-url")]
+    /// Indexer JSON-RPC url override
+    pub indexer_json_rpc_url: Option<Url>,
+    #[clap(subcommand)]
+    pub command: Option<Subcommand>,
 }
 
 impl Cli {
@@ -53,16 +55,17 @@ impl Cli {
 impl ConfigOverrideProvider for Cli {
     fn get_config_property_overrides(&self, network: &Network) -> Vec<(String, String)> {
         let mut overrides = self.common.get_config_property_overrides(network);
+        overrides.push(("dan_wallet_daemon.override_from".to_string(), network.to_string()));
         if let Some(json_rpc_address) = self.json_rpc_address {
             overrides.push((
                 "dan_wallet_daemon.json_rpc_address".to_string(),
                 json_rpc_address.to_string(),
             ));
         }
-        if let Some(ref ui_connect_address) = self.ui_connect_address {
+        if let Some(ref json_rpc_url) = self.web_ui_public_json_rpc_url {
             overrides.push((
-                "dan_wallet_daemon.ui_connect_address".to_string(),
-                ui_connect_address.to_string(),
+                "dan_wallet_daemon.web_ui_public_json_rpc_url".to_string(),
+                json_rpc_url.to_string(),
             ));
         }
         if let Some(ref signaling_server_address) = self.signaling_server_address {
@@ -71,12 +74,27 @@ impl ConfigOverrideProvider for Cli {
                 signaling_server_address.to_string(),
             ));
         }
-        if let Some(ref indexer_node_json_rpc_url) = &self.indexer_node_json_rpc_url {
+        if let Some(ref indexer_json_rpc_url) = self.indexer_json_rpc_url {
             overrides.push((
-                "dan_wallet_daemon.indexer_node_json_rpc_url".to_string(),
-                indexer_node_json_rpc_url.clone(),
+                "dan_wallet_daemon.indexer_json_rpc_url".to_string(),
+                indexer_json_rpc_url.to_string(),
             ));
         }
         overrides
     }
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum Subcommand {
+    #[clap(name = "run", about = "Run the wallet daemon")]
+    Run,
+    #[clap(about = "Generate a new key and output the public key")]
+    CreateKey {
+        #[clap(long, alias = "key")]
+        key_index: Option<u64>,
+        #[clap(long)]
+        set_active: bool,
+        #[clap(long, alias = "output", short = 'o')]
+        output_path: Option<PathBuf>,
+    },
 }

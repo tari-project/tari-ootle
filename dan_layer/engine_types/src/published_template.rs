@@ -14,7 +14,7 @@ use tari_template_lib::{
     Hash,
 };
 
-use crate::hashing::{hasher32, template_hasher32, EngineHashDomainLabel};
+use crate::hashing::{hasher32, EngineHashDomainLabel};
 
 const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 
@@ -32,11 +32,10 @@ impl PublishedTemplateAddress {
         Self(BorTag::new(key))
     }
 
-    pub fn from_author_and_code(author_public_key: &PublicKey, code: &[u8]) -> Self {
-        let binary_hash = template_hasher32().chain(&code).result();
+    pub fn from_author_and_binary_hash(author_public_key: &PublicKey, binary_hash: &Hash) -> Self {
         let hash = hasher32(EngineHashDomainLabel::TemplateAddress)
             .chain(author_public_key)
-            .chain(&binary_hash)
+            .chain(binary_hash)
             .result();
         Self::from_hash(hash)
     }
@@ -88,5 +87,8 @@ impl borsh::BorshSerialize for PublishedTemplateAddress {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct PublishedTemplate {
-    pub binary: Vec<u8>,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub author: PublicKey,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub binary_hash: Hash,
 }

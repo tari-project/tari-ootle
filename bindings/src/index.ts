@@ -118,6 +118,8 @@ export * from "./types/UnclaimedConfidentialOutput";
 export * from "./types/UnsealedTransactionV1";
 export * from "./types/UnsignedTransaction";
 export * from "./types/UnsignedTransactionV1";
+export * from "./types/ValidatorFeePoolAddress";
+export * from "./types/ValidatorFeePool";
 export * from "./types/ValidatorSignature";
 export * from "./types/VaultId";
 export * from "./types/Vault";

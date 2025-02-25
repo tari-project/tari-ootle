@@ -167,7 +167,7 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
                 <div onClick={() => copyToClipboard(tx)}>{copied == tx ? "Copied" : shorten(tx)}</div>
                 <div style={{ color: known ? "green" : "red" }}><b>{known && "Yes" || "No"}</b></div>
                 <div>{abort_details || <i>unknown</i>}</div>
-                <div>{final_decision || <i>unknown</i>}</div>
+                <div>{("Abort" in final_decision) ? <>Abort ({final_decision.Abort})</> : <>Commit</>}</div>
               </>
             );
           })}
@@ -258,7 +258,7 @@ function ShowInfo(params: any) {
     horizontal,
     onReload,
   } = params;
-  // const [unprocessedTx, setUnprocessedTx] = useState([]);
+
   const nameInfo = name && (
     <div>
       <pre></pre>
@@ -269,7 +269,7 @@ function ShowInfo(params: any) {
   const jrpcInfo = node?.jrpc && (
     <div>
       <b>JRPC</b>
-      <a href={`${node.jrpc}/json_rpc`} target="_blank">{node.jrpc}/json_rpc</a>
+      <a href={`${node.jrpc}`} target="_blank">{node.jrpc}</a>
     </div>
   );
   const grpcInfo = node?.grpc && (
@@ -314,15 +314,15 @@ function ShowInfo(params: any) {
   };
 
   const handleOnStart = () => {
-    jsonRpc("start_instance", { by_name: name }).then(onReload);
+    jsonRpc("start_instance", { by_id: node.instance_id }).then(onReload);
   };
 
   const handleOnStop = () => {
-    jsonRpc("stop_instance", { by_name: name }).then(onReload);
+    jsonRpc("stop_instance", { by_id: node.instance_id }).then(onReload);
   };
 
   const handleDeleteData = () => {
-    jsonRpc("delete_data", { name }).then(onReload);
+    jsonRpc("delete_data", { by_id: node.instance_id }).then(onReload);
   };
 
 
@@ -621,10 +621,19 @@ function getDecision(tx: any): string {
   if (!tx) {
     return "-";
   }
+  const decision = tx.local_decision || tx.original_decision;
 
-  if (tx.remote_decision == "Abort") {
-    return "Abort";
+  if (typeof decision === "string") {
+    return decision;
   }
 
-  return tx.local_decision || tx.original_decision;
+  if (typeof decision !== "object") {
+    return JSON.stringify(decision);
+  }
+
+  if ("Abort" in decision) {
+    return "Abort(" + decision.Abort + ")";
+  }
+
+  return "Commit";
 }

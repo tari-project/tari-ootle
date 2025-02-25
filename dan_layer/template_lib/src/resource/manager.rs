@@ -26,6 +26,7 @@ use serde::Serialize;
 use tari_bor::to_value;
 use tari_template_abi::{call_engine, rust::collections::BTreeMap, EngineOp};
 
+use crate::models::AddressAllocation;
 use crate::{
     args::{
         CreateResourceArg,
@@ -113,6 +114,7 @@ impl ResourceManager {
         mint_arg: Option<MintArg>,
         view_key: Option<RistrettoPublicKeyBytes>,
         authorize_hook: Option<AuthHook>,
+        address_allocation: Option<AddressAllocation<ResourceAddress>>,
     ) -> (ResourceAddress, Option<Bucket>) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: ResourceRef::Resource,

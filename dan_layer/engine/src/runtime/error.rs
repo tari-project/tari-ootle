@@ -37,6 +37,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceiptAddress,
     virtual_substate::VirtualSubstateId,
 };
+use tari_template_lib::args::SubstateType;
 use tari_template_lib::models::{
     Amount,
     BucketId,
@@ -255,6 +256,9 @@ pub enum RuntimeError {
 
     #[error("Assert error: {0}")]
     AssertError(#[from] AssertError),
+
+    #[error("Unsupported substate type for address allocation: {substate_type:?}")]
+    AllocateAddressUnsupportedSubstateType{substate_type: SubstateType},
 }
 
 impl RuntimeError {

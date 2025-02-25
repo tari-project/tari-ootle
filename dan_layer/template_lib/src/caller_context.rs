@@ -5,6 +5,7 @@
 
 use tari_template_abi::{call_engine, EngineOp};
 
+use crate::args::{AllocateAddressResult, SubstateType};
 use crate::{
     args::{CallerContextAction, CallerContextInvokeArg, InvokeResult},
     crypto::RistrettoPublicKeyBytes,
@@ -36,6 +37,19 @@ impl CallerContext {
         resp.decode::<Option<ComponentAddress>>()
             .expect("Failed to decode Option<ComponentAddress>")
             .expect("Not in a component instance context")
+    }
+
+    pub fn allocate_address(
+        substate_type: SubstateType,
+        public_key_address: Option<RistrettoPublicKeyBytes>,
+    ) -> AllocateAddressResult {
+        let resp: InvokeResult = call_engine(EngineOp::CallerContextInvoke, &CallerContextInvokeArg {
+            action: CallerContextAction::AllocateAddress,
+            args: invoke_args![substate_type, public_key_address],
+        });
+
+        resp.decode()
+            .expect("Failed to decode AllocateAddressResult")
     }
 
     pub fn allocate_component_address(

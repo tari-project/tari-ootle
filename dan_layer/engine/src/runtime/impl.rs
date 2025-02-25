@@ -22,6 +22,22 @@
 
 use std::sync::Arc;
 
+use super::{working_state::WorkingState, Runtime};
+use crate::{
+    runtime::{
+        engine_args::EngineArgs,
+        error::AssertError,
+        locking::{LockError, LockedSubstate},
+        scope::PushCallFrame,
+        tracker::StateTracker,
+        utils::to_ristretto_public_key_bytes,
+        RuntimeError,
+        RuntimeInterface,
+        RuntimeModule,
+    },
+    template::LoadedTemplate,
+    transaction::TransactionProcessor,
+};
 use log::{warn, *};
 use tari_common::configuration::Network;
 use tari_crypto::{range_proof::RangeProofService, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
@@ -48,6 +64,7 @@ use tari_engine_types::{
 };
 use tari_template_abi::{TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
+use tari_template_lib::args::SubstateType;
 use tari_template_lib::{
     args,
     args::{
@@ -102,23 +119,6 @@ use tari_template_lib::{
     },
     prelude::ResourceType,
     template::BuiltinTemplate,
-};
-
-use super::{working_state::WorkingState, Runtime};
-use crate::{
-    runtime::{
-        engine_args::EngineArgs,
-        error::AssertError,
-        locking::{LockError, LockedSubstate},
-        scope::PushCallFrame,
-        tracker::StateTracker,
-        utils::to_ristretto_public_key_bytes,
-        RuntimeError,
-        RuntimeInterface,
-        RuntimeModule,
-    },
-    template::LoadedTemplate,
-    transaction::TransactionProcessor,
 };
 
 const LOG_TARGET: &str = "tari::dan::engine::runtime::impl";
@@ -505,6 +505,40 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     .new_component_address(*template, public_key_address)?;
                 let allocation = state.new_address_allocation(address)?;
                 Ok(InvokeResult::encode(&allocation)?)
+            }),
+            CallerContextAction::AllocateAddress => self.tracker.write_with(|state| {
+                args.assert_n_args::<SubstateType>(2)?;
+                let substate_type: SubstateType = args.get(0)?;
+                let public_key_address: Option<RistrettoPublicKeyBytes> = args.get(1)?;
+                let public_key_address = public_key_address
+                    .map(|pk| {
+                        RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| {
+                            RuntimeError::InvalidArgument {
+                                argument: "public_key_address",
+                                reason: "Invalid RistrettoPublicKeyBytes".to_string(),
+                            }
+                        })
+                    })
+                    .transpose()?;
+
+                match substate_type {
+                    SubstateType::Component => {
+                        let (template, _) = state.current_template()?;
+                        let address = state
+                            .id_provider()?
+                            .new_component_address(*template, public_key_address)?;
+                        let allocation = state.new_address_allocation(address)?;
+                        Ok(InvokeResult::encode(&args::AllocateAddressResult::ComponentAddress(allocation))?)
+                    }
+                    SubstateType::Resource => {
+                        let address = state
+                            .id_provider()?
+                            .new_resource_address()?;
+                        let allocation = state.new_address_allocation(address)?;
+                        Ok(InvokeResult::encode(&args::AllocateAddressResult::ResourceAddress(allocation))?)
+                    }
+                    _ => Err(RuntimeError::AllocateAddressUnsupportedSubstateType{substate_type}),
+                }
             }),
         }
     }

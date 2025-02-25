@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use super::{IMAGE_URL, TOKEN_SYMBOL};
+use crate::models::AddressAllocation;
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
@@ -16,6 +17,7 @@ pub struct FungibleResourceBuilder {
     token_symbol: Option<String>,
     metadata: Metadata,
     authorize_hook: Option<AuthHook>,
+    address_allocation: Option<AddressAllocation<ResourceAddress>>,
 }
 
 impl FungibleResourceBuilder {
@@ -27,6 +29,7 @@ impl FungibleResourceBuilder {
             token_symbol: None,
             metadata: Metadata::new(),
             authorize_hook: None,
+            address_allocation: None,
         }
     }
 
@@ -40,6 +43,12 @@ impl FungibleResourceBuilder {
     /// Sets up who can access the resource for each type of action
     pub fn with_access_rules(mut self, rules: ResourceAccessRules) -> Self {
         self.access_rules = rules;
+        self
+    }
+
+    /// Sets the already allocated address for the resource
+    pub fn with_address_allocation(mut self, address: AddressAllocation<ResourceAddress>) -> Self {
+        self.address_allocation = Some(address);
         self
     }
 
@@ -156,6 +165,7 @@ impl FungibleResourceBuilder {
             mint_arg,
             None,
             self.authorize_hook,
+            self.address_allocation,
         )
     }
 }

@@ -20,9 +20,9 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+use std::hash::Hash;
 use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
@@ -30,29 +30,20 @@ use tari_template_abi::rust::{
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-use crate::{
-    args::Arg,
-    auth::{AuthHook, OwnerRule, ResourceAccessRules},
-    crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes},
-    models::{
-        AddressAllocation,
-        Amount,
-        BucketId,
-        ComponentAddress,
-        ConfidentialWithdrawProof,
-        Metadata,
-        NonFungibleAddress,
-        NonFungibleId,
-        ProofId,
-        ResourceAddress,
-        VaultId,
-        VaultRef,
-    },
-    prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},
-    resource::ResourceType,
-    template::BuiltinTemplate,
-};
-
+use crate::{args::Arg, auth::{AuthHook, OwnerRule, ResourceAccessRules}, crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes}, models::{
+    AddressAllocation,
+    Amount,
+    BucketId,
+    ComponentAddress,
+    ConfidentialWithdrawProof,
+    Metadata,
+    NonFungibleAddress,
+    NonFungibleId,
+    ProofId,
+    ResourceAddress,
+    VaultId,
+    VaultRef,
+}, prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress}, resource::ResourceType, template::BuiltinTemplate};
 // -------------------------------- LOGS -------------------------------- //
 
 /// Data needed for log emission from templates
@@ -511,12 +502,50 @@ pub struct CallerContextInvokeArg {
     pub args: Vec<Vec<u8>>,
 }
 
+/// Possible substate types
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub enum SubstateType {
+    Component,
+    Resource,
+    Vault,
+    UnclaimedConfidentialOutput,
+    NonFungible,
+    TransactionReceipt,
+    NonFungibleIndex,
+    ValidatorFeePool,
+    Template,
+}
+
+/// Result af an address allocation based on the input substate type
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum AllocateAddressResult {
+    ComponentAddress(AddressAllocation<ComponentAddress>),
+    ResourceAddress(AddressAllocation<ResourceAddress>),
+}
+
+impl AllocateAddressResult {
+    pub fn as_component_address_allocation(&self) -> Option<AddressAllocation<ComponentAddress>> {
+        if let AllocateAddressResult::ComponentAddress(result) = self {
+            return Some(result.clone());
+        }
+        None
+    }
+
+    pub fn as_resource_address_allocation(&self) -> Option<AddressAllocation<ResourceAddress>> {
+        if let AllocateAddressResult::ResourceAddress(result) = self {
+            return Some(result.clone());
+        }
+        None
+    }
+}
+
 /// The possible actions that can be performed related to the caller context
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CallerContextAction {
     GetCallerPublicKey,
     GetComponentAddress,
     AllocateNewComponentAddress,
+    AllocateAddress,
 }
 
 // -------------------------------- CallInvoke -------------------------------- //

@@ -36,9 +36,10 @@ pub const TOKEN_SYMBOL: &str = "SYMBOL";
 pub const IMAGE_URL: &str = "IMAGE_URL";
 
 /// Utility for building resources inside templates
-pub struct ResourceBuilder;
+pub struct ResourceBuilder {}
 
 impl ResourceBuilder {
+
     /// Returns a new fungible resource builder
     pub fn fungible() -> FungibleResourceBuilder {
         FungibleResourceBuilder::new()

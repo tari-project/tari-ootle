@@ -7,7 +7,7 @@ use tari_template_test_tooling::{support::assert_error::assert_reject_reason, Te
 use tari_transaction::Transaction;
 
 #[test]
-fn it_uses_allocation_address() {
+fn it_uses_allocate_component_address() {
     let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
 
     let result = test.execute_expect_success(
@@ -35,7 +35,7 @@ fn it_uses_allocation_address() {
 }
 
 #[test]
-fn it_fails_if_allocation_is_not_used() {
+fn it_fails_if_component_allocation_is_not_used() {
     let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
     let template_addr = test.get_template_address("AddressAllocationTest");
 

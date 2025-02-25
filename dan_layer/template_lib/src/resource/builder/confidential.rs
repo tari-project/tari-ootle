@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use super::{IMAGE_URL, TOKEN_SYMBOL};
+use crate::models::AddressAllocation;
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
@@ -19,6 +20,7 @@ pub struct ConfidentialResourceBuilder {
     token_symbol: Option<String>,
     owner_rule: OwnerRule,
     authorize_hook: Option<AuthHook>,
+    address_allocation: Option<AddressAllocation<ResourceAddress>>,
 }
 
 impl ConfidentialResourceBuilder {
@@ -31,6 +33,7 @@ impl ConfidentialResourceBuilder {
             token_symbol: None,
             owner_rule: OwnerRule::default(),
             authorize_hook: None,
+            address_allocation: None,
         }
     }
 
@@ -44,6 +47,12 @@ impl ConfidentialResourceBuilder {
     /// Sets up who can access the resource for each type of action
     pub fn with_access_rules(mut self, rules: ResourceAccessRules) -> Self {
         self.access_rules = rules;
+        self
+    }
+
+    /// Sets the already allocated address for the resource
+    pub fn with_address_allocation(mut self, address: AddressAllocation<ResourceAddress>) -> Self {
+        self.address_allocation = Some(address);
         self
     }
 
@@ -168,6 +177,7 @@ impl ConfidentialResourceBuilder {
             mint_arg,
             self.view_key,
             self.authorize_hook,
+            self.address_allocation,
         )
     }
 }

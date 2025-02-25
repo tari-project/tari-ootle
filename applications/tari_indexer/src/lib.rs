@@ -190,7 +190,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             task::spawn(run_http_ui_server(address, public_jrpc_address, public_graphql_address));
         }
     }
-    
+
     // Run the event scanner
     let event_filters: Vec<EventFilter> = config
         .indexer
@@ -206,8 +206,6 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         services.template_manager_service.clone(),
         event_filters,
     );
-
-    
 
     // Create pid to allow watchers to know that the process has started
     fs::write(config.common.base_path.join("pid"), std::process::id().to_string())

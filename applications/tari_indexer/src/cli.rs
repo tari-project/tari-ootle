@@ -100,10 +100,7 @@ impl ConfigOverrideProvider for Cli {
             ));
         }
         if let Some(ref graphql_url) = self.web_ui_public_graphql_url {
-            overrides.push((
-                "indexer.web_ui_public_graphql_url".to_string(),
-                graphql_url.to_string(),
-            ));
+            overrides.push(("indexer.web_ui_public_graphql_url".to_string(), graphql_url.to_string()));
         }
         if let Some(reachability) = self.reachability {
             overrides.push(("indexer.p2p.reachability_mode".to_string(), reachability.to_string()));

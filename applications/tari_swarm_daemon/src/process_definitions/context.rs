@@ -93,7 +93,9 @@ impl<'a> ProcessContext<'a> {
                     .port_allocator
                     .get("jrpc")
                     .expect("JSON-rpc port must be allocated before calling get_public_json_rpc_url");
-                format!("http://{public_ip}:{port}").parse().expect("Invalid JSON RPC URL")
+                format!("http://{public_ip}:{port}")
+                    .parse()
+                    .expect("Invalid JSON RPC URL")
             },
         }
     }
@@ -111,7 +113,9 @@ impl<'a> ProcessContext<'a> {
                     .port_allocator
                     .get("graphql")
                     .expect("Graphql port must be allocated before calling get_graphql_url");
-                format!("http://{public_ip}:{port}").parse().expect("Invalid GraphQL URL")
+                format!("http://{public_ip}:{port}")
+                    .parse()
+                    .expect("Invalid GraphQL URL")
             },
         }
     }

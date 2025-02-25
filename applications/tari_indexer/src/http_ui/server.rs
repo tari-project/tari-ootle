@@ -35,9 +35,13 @@ use url::Url;
 
 const LOG_TARGET: &str = "tari::indexer::web_ui::server";
 
-pub async fn run_http_ui_server(address: SocketAddr, json_rpc_address: Url, graphql_address: Url) -> Result<(), anyhow::Error> {
+pub async fn run_http_ui_server(
+    address: SocketAddr,
+    json_rpc_address: Url,
+    graphql_address: Url,
+) -> Result<(), anyhow::Error> {
     let json_rpc_address = Arc::new(json_rpc_address);
-    
+
     let router = Router::new()
         .route("/json_rpc_address", get(|| async move { json_rpc_address.to_string() }))
         .route("/graphql_address", get(|| async move { graphql_address.to_string() }))

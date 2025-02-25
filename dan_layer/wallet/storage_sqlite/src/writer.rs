@@ -907,6 +907,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .values((
                 non_fungible_tokens::nft_id.eq(non_fungible_token.nft_id.to_canonical_string()),
                 non_fungible_tokens::data.eq(&data),
+                non_fungible_tokens::resource_id.eq(non_fungible_token.resource_address.to_string()),
                 non_fungible_tokens::mutable_data.eq(&mutable_data),
                 non_fungible_tokens::vault_id.eq(vault_id),
                 non_fungible_tokens::is_burned.eq(non_fungible_token.is_burned),
@@ -916,7 +917,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .set((
                 non_fungible_tokens::data.eq(&data),
                 non_fungible_tokens::mutable_data.eq(&mutable_data),
-                non_fungible_tokens::vault_id.eq(vault_id),
                 non_fungible_tokens::is_burned.eq(non_fungible_token.is_burned),
             ))
             .execute(self.connection())

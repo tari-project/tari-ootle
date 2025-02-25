@@ -150,10 +150,10 @@ jobs:
       - uses: rui314/setup-mold@v1
 
       - name: wasm target install
-        run: rustup target add wasm32-unknown-unknown
+        run: rustup +${{ env.nightly_toolchain }} target add wasm32-unknown-unknown
 
       - name: cargo check
-        run: cargo check --release --all-features --all-targets --locked
+        run: cargo +${{ env.nightly_toolchain }} check --release --all-features --all-targets --locked
 
   build-stable:
     name: check stable

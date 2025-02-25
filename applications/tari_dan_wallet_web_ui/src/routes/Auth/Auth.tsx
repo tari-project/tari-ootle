@@ -1,56 +1,57 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import {useAuthMethod} from "../../api/hooks/useAuth";
-import {useEffect, useState} from "react";
+import { useAuthMethod } from "../../api/hooks/useAuth";
+import { useEffect, useState } from "react";
 import Loading from "../../Components/Loading";
-import {Navigate, useNavigate, useSearchParams} from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import useAuthStore from "../../store/authStore";
 
 export const AUTH_TOKEN_FOR_NONE_AUTH: string = "auth_none";
 
 function Auth() {
-    const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
-    const [ currAuthMethod, setCurrAuthMethod ] = useState('');
-    const {authToken, setAuthToken} = useAuthStore();
-    const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
-    const redirectQuery = searchParams.get("redirect");
-    const redirect = redirectQuery ? redirectQuery : "/";
+  const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
+  const [currAuthMethod, setCurrAuthMethod] = useState("");
+  const { authToken, setAuthToken } = useAuthStore();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectQuery = searchParams.get("redirect");
+  const redirect = redirectQuery ? redirectQuery : "/";
 
-    if (authToken) {
-        navigate(redirect);
+  if (authToken) {
+    navigate(redirect);
+  }
+
+  useEffect(() => {
+    if (!authMethodsIsError && authMethod) {
+      setCurrAuthMethod(authMethod.method);
     }
 
-    useEffect(() => {
-        if (!authMethodsIsError && authMethod) {
-            setCurrAuthMethod(authMethod.method);
+    if (authMethodsError) {
+      console.error(authMethodsError);
+    }
+  }, [authMethod, authMethodsIsError]);
+
+  const auth = (() => {
+    switch (currAuthMethod) {
+      case "none": {
+        console.log("no auth");
+        setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
+        return <Navigate replace to={redirect} />;
+      }
+      case "webauthn": {
+        if (authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
+          setAuthToken("");
         }
+        return <Navigate replace to={"/auth/webauthn?redirect=" + redirect} />;
+      }
+      default: {
+        return <Loading />;
+      }
+    }
+  })();
 
-        if (authMethodsError) {
-            console.error(authMethodsError);
-        }
-    }, [authMethod, authMethodsIsError]);
-
-    const auth = (() => {
-            switch(currAuthMethod) {
-                case 'none': {
-                    setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
-                    return <Navigate replace to={redirect} />;
-                }
-                case 'webauthn': {
-                    if (authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
-                        setAuthToken("");
-                    }
-                    return <Navigate replace to={"/auth/webauthn?redirect=" + redirect} />;
-                }
-                default: {
-                    return <Loading />;
-                }
-            }
-    })();
-
-    return auth;
+  return auth;
 }
 
 export default Auth;

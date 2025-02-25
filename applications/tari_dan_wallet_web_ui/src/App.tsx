@@ -129,14 +129,14 @@ function App() {
   let auth = !!authToken;
 
   useEffect(() => {
-    if (isTokenExpired(authToken)) {
+    if (isTokenExpired(authToken) && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) {
       setAuthToken("");
     }
   }, [authToken]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (isTokenExpired(authToken)) {
+      if (isTokenExpired(authToken) && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) {
         setAuthToken("");
       }
     }, 10000);

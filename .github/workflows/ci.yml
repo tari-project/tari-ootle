@@ -22,7 +22,7 @@ concurrency:
 
 env:
   nightly_toolchain: nightly-2025-01-17
-  stable_toolchain: 1.85
+  stable_toolchain: stable
   CARGO_HTTP_MULTIPLEXING: false
   CARGO_TERM_COLOR: always
   TARI_TARGET_NETWORK: localnet

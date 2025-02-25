@@ -34,6 +34,7 @@ use tari_engine_types::{
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_template_lib::models::{EntityId, TemplateAddress};
+use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
 
 use crate::{
@@ -87,6 +88,7 @@ pub struct EventScanner {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_factory: TariValidatorNodeRpcClientFactory,
     substate_store: SqliteSubstateStore,
+    template_manager: TemplateManagerHandle,
     event_filters: Vec<EventFilter>,
 }
 
@@ -95,12 +97,14 @@ impl EventScanner {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         client_factory: TariValidatorNodeRpcClientFactory,
         substate_store: SqliteSubstateStore,
+        template_manager: TemplateManagerHandle,
         event_filters: Vec<EventFilter>,
     ) -> Self {
         Self {
             epoch_manager,
             client_factory,
             substate_store,
+            template_manager,
             event_filters,
         }
     }
@@ -187,6 +191,29 @@ impl EventScanner {
                 );
                 self.store_events_in_db(&filtered_events, block_data.block.timestamp())?;
                 self.store_substates_in_db(&block_data.diff, block_data.block.timestamp())?;
+
+                let new_templates = block_data
+                    .diff
+                    .iter()
+                    .filter_map(|r| r.as_create())
+                    .filter_map(|create| {
+                        let value = create.substate.value().value()?;
+                        let template = value.as_template()?;
+                        let template_address = create
+                            .substate
+                            .substate_id()
+                            .as_template()
+                            .expect("Expected template substate ID");
+
+                        Some(TemplateChange::Add {
+                            template_address,
+                            author_public_key: template.author.clone(),
+                            binary_hash: template.binary_hash.into_array().into(),
+                            epoch,
+                        })
+                    })
+                    .collect();
+                self.template_manager.enqueue_template_changes(new_templates).await?;
             }
         }
 

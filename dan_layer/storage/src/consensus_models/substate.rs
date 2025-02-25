@@ -431,6 +431,10 @@ impl SubstateData {
     pub fn to_value_hash(&self) -> FixedHash {
         self.value.to_value_hash(self.version)
     }
+
+    pub fn substate_id(&self) -> &SubstateId {
+        &self.substate_id
+    }
 }
 
 impl From<SubstateRecord> for SubstateData {

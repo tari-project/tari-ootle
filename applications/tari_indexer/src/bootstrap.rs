@@ -47,10 +47,11 @@ use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{base_layer::BaseLayerOracle, configured::ConfiguredEpochOracle, EpochOracle};
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_shutdown::ShutdownSignal;
-use tari_template_manager::implementation::TemplateManager;
+use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{
+    network_client::TariNetworkClient,
     substate_storage_sqlite::sqlite_substate_store_factory::SqliteSubstateStore,
     ApplicationConfig,
     IndexerEpochManagerSpec,
@@ -114,8 +115,6 @@ pub async fn spawn_services(
     // Connect to substate db
     let substate_store = SqliteSubstateStore::try_create(config.indexer.state_db_path())?;
 
-    // Epoch manager
-    let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
     // Epoch event oracle
     let epoch_event_oracle = match config.epoch_oracle.oracle_type {
         EpochOracleType::BaseLayer => {
@@ -159,9 +158,13 @@ pub async fn spawn_services(
         shutdown.clone(),
     );
 
+    // Client factory
+    let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
+    let network_client = TariNetworkClient::new(epoch_manager.clone(), validator_node_client_factory.clone());
+
     // Template manager
     let template_manager = TemplateManager::initialize(global_db.clone(), config.indexer.templates.clone())?;
-    let (_template_manager_service, _) = tari_template_manager::implementation::spawn(
+    let (template_manager_service, _) = tari_template_manager::implementation::spawn(
         template_manager.clone(),
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
@@ -177,9 +180,11 @@ pub async fn spawn_services(
         networking,
         epoch_manager,
         validator_node_client_factory,
+        network_client,
         substate_store,
         global_db,
         template_manager,
+        template_manager_service,
     })
 }
 
@@ -189,8 +194,10 @@ pub struct Services {
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
     pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     pub substate_store: SqliteSubstateStore,
+    pub network_client: TariNetworkClient<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory>,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub template_manager: TemplateManager<PeerAddress>,
+    pub template_manager_service: TemplateManagerHandle,
 }
 
 fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {

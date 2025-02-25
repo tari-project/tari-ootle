@@ -27,6 +27,8 @@ env:
   CARGO_TERM_COLOR: always
   TARI_TARGET_NETWORK: localnet
   TARI_NETWORK: localnet
+  # https://github.com/rust-lang/rustup/issues/2949#issuecomment-2584968659
+  RUSTUP_PERMIT_COPY_RENAME: true
   PROTOC: protoc
   TERM: unknown
 

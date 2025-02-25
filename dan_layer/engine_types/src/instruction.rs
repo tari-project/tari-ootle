@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_template_lib::{
-    args::{Arg, LogLevel},
+    args::{Arg, LogLevel, SubstateType},
     auth::OwnerRule,
     models::{ComponentAddress, ResourceAddress, TemplateAddress},
     prelude::{AccessRules, Amount},
@@ -65,6 +65,11 @@ pub enum Instruction {
     },
     PublishTemplate {
         binary: Vec<u8>,
+    },
+    AllocateAddress {
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        substate_type: SubstateType,
+        custom_id: String,
     },
 }
 
@@ -158,6 +163,15 @@ impl Display for Instruction {
             },
             Instruction::PublishTemplate { .. } => {
                 write!(f, "PublishTemplate")
+            },
+            Instruction::AllocateAddress {
+                substate_type,
+                custom_id,
+            } => {
+                write!(
+                    f,
+                    "AllocateAddress {{ substate_type: {substate_type:?}, custom_id: {custom_id} }}"
+                )
             },
         }
     }

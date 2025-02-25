@@ -515,7 +515,7 @@ pub struct CallerContextInvokeArg {
 }
 
 /// Possible substate types
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SubstateType {
     Component,
     Resource,

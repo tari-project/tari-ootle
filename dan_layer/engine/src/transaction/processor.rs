@@ -42,7 +42,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     arg,
     args,
-    args::{Arg, WorkspaceAction},
+    args::{Arg, SubstateType, WorkspaceAction},
     auth::OwnerRule,
     crypto::RistrettoPublicKeyBytes,
     invoke_args,
@@ -349,6 +349,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 Ok(InstructionResult::empty())
             },
             Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),
+            Instruction::AllocateAddress {
+                substate_type,
+                custom_id,
+            } => Self::allocate_address(runtime, substate_type, custom_id),
         }
     }
 
@@ -364,6 +368,15 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             .interface()
             .workspace_invoke(WorkspaceAction::DropAllProofs, invoke_args![].into())?;
         Ok(())
+    }
+
+    /// Allocating a new address for the given [`SubstateType`].
+    pub fn allocate_address(
+        runtime: &Runtime,
+        substate_type: SubstateType,
+        custom_id: String,
+    ) -> Result<(), TransactionError> {
+        // TODO: implement
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.

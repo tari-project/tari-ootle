@@ -339,7 +339,7 @@ where
 
             for owned_id in value.referenced_substates() {
                 if let Some(pos) = rest.iter().position(|(addr, _)| addr == &owned_id) {
-                    let (_, s) = rest.swap_remove(pos);
+                    let (_, child) = rest.swap_remove(pos);
                     // If there was a previous parent for this substate, we keep it as is.
                     let parent = downed_substates_with_parents
                         .get(&owned_id)
@@ -353,7 +353,7 @@ where
                             tx.substates_upsert_child(
                                 transaction_id,
                                 vault.account_address.clone(),
-                                VersionedSubstateId::new(owned_id, substate.version()),
+                                VersionedSubstateId::new(owned_id, child.version()),
                                 [vault.resource_address.into()].into_iter().collect(),
                             )?;
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
@@ -367,8 +367,8 @@ where
                         } else {
                             tx.substates_upsert_root(
                                 transaction_id,
-                                VersionedSubstateId::new(owned_id, substate.version()),
-                                [(*s.substate_value().vault().unwrap().resource_address()).into()]
+                                VersionedSubstateId::new(owned_id, child.version()),
+                                [(*child.substate_value().vault().unwrap().resource_address()).into()]
                                     .into_iter()
                                     .collect(),
                                 None,
@@ -382,7 +382,7 @@ where
                     tx.substates_upsert_child(
                         transaction_id,
                         parent,
-                        VersionedSubstateId::new(owned_id, s.version()),
+                        VersionedSubstateId::new(owned_id, child.version()),
                         maybe_substate
                             .map(|s| s.referenced_substates.into_iter().collect())
                             .unwrap_or_default(),

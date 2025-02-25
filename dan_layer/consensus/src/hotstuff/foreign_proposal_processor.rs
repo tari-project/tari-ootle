@@ -230,7 +230,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                                         // aborted later.
                                         match conflicting_evidence.inputs().get(id) {
                                             Some(Some(ev)) => {
-                                                let conflicting_is_write = e.as_ref().map_or(true, |e| e.is_write);
+                                                let conflicting_is_write = e.as_ref().is_none_or(|e| e.is_write);
                                                 // If either are write, we ABORT
                                                 conflicting_is_write || ev.is_write
                                             },

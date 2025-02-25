@@ -33,15 +33,11 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> EpochDb<'a, 'tx, TGlobalDbAdapt
     }
 
     pub fn insert_epoch(&mut self, db_epoch: DbEpoch) -> Result<(), TGlobalDbAdapter::Error> {
-        self.backend
-            .insert_epoch(self.tx, db_epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.insert_epoch(self.tx, db_epoch)
     }
 
     pub fn get_epoch_data(&mut self, epoch: u64) -> Result<Option<DbEpoch>, TGlobalDbAdapter::Error> {
-        self.backend
-            .get_epoch(self.tx, epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.get_epoch(self.tx, epoch)
     }
 }
 

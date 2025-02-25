@@ -10544,7 +10544,6 @@ dependencies = [
 name = "tari_state_store_rocksdb"
 version = "0.8.2"
 dependencies = [
- "anyhow",
  "bigdecimal",
  "bincode 2.0.0-rc.3",
  "hex",

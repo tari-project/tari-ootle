@@ -175,6 +175,21 @@ impl TransactionRecord {
         self
     }
 
+    pub fn abort_and_finalize(&mut self, reason: RejectReason) -> &mut Self {
+        self.abort(reason.clone());
+        let exec_result = self.execution_result.as_ref().filter(|r| r.finalize.result.is_reject());
+        let execution_time = exec_result.as_ref().map(|r| r.execution_time).unwrap_or_default();
+        self.final_decision = Some(Decision::Abort(AbortReason::from(&reason)));
+        self.finalized_time = Some(execution_time);
+        self.execution_result = Some(ExecuteResult {
+            finalize: exec_result
+                .map(|r| r.finalize.clone())
+                .unwrap_or_else(|| FinalizeResult::new_rejected(self.transaction.id().into_array().into(), reason)),
+            execution_time,
+        });
+        self
+    }
+
     pub fn is_involved_in_inputs(&self, local_committee_info: &CommitteeInfo) -> bool {
         self.transaction
             .all_inputs_iter()

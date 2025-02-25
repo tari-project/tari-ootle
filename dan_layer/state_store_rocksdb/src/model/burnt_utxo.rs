@@ -25,14 +25,14 @@ use std::sync::Arc;
 use rocksdb::{Transaction, TransactionDB};
 use tari_dan_storage::consensus_models::{BlockId, BurntUtxo};
 use tari_engine_types::template_models::UnclaimedConfidentialOutputAddress;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
 
 pub struct BurntUtxoModel {}
 
 impl BurntUtxoModel {
-    pub fn key_from_commitment(commitment: &UnclaimedConfidentialOutputAddress,) -> String {
+    pub fn key_from_commitment(commitment: &UnclaimedConfidentialOutputAddress) -> String {
         format!("{}_{}", Self::key_prefix(), commitment)
     }
 }
@@ -52,17 +52,27 @@ impl RocksdbModel for BurntUtxoModel {
         vec![ProposedInColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        ProposedInColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        ProposedInColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
-    
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         ProposedInColumnFamily::delete(db.clone(), tx, operation, item)?;
         Ok(())
     }
@@ -87,7 +97,10 @@ impl ModelColumnFamily for ProposedInColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        let proposed_in = value.proposed_in_block.map(|b| b.to_string()).unwrap_or(Self::UNPROPOSED_VALUE.to_owned());
+        let proposed_in = value
+            .proposed_in_block
+            .map(|b| b.to_string())
+            .unwrap_or(Self::UNPROPOSED_VALUE.to_owned());
         format!("{}_{}_{}", BurntUtxoModel::key_prefix(), proposed_in, value.commitment)
     }
 }

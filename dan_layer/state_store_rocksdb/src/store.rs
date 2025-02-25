@@ -21,7 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    fmt, marker::PhantomData, sync::Arc, time::{Duration, Instant}
+    fmt,
+    marker::PhantomData,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 use log::log;
@@ -30,7 +33,25 @@ use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
 use tari_dan_storage::{StateStore, StorageError};
 
-use crate::{model::{block::BlockModel, block_transaction_execution::BlockTransactionExecutionModel, burnt_utxo::BurntUtxoModel, evicted_node::EvictedNodeModel, foreign_proposal::ForeignProposalModel, last_voted::LastVotedModel, lock_conflict::LockConflictModel, missing_transactions::MissingTransactionModel, traits::RocksdbModel, quorum_certificate::QuorumCertificateModel, state_transition::StateTransitionModel, substate::SubstateModel, substate_locks::SubstateLockModel}, reader::RocksDbStateStoreReadTransaction, writer::RocksDbStateStoreWriteTransaction};
+use crate::{
+    model::{
+        block::BlockModel,
+        block_transaction_execution::BlockTransactionExecutionModel,
+        burnt_utxo::BurntUtxoModel,
+        evicted_node::EvictedNodeModel,
+        foreign_proposal::ForeignProposalModel,
+        last_voted::LastVotedModel,
+        lock_conflict::LockConflictModel,
+        missing_transactions::MissingTransactionModel,
+        quorum_certificate::QuorumCertificateModel,
+        state_transition::StateTransitionModel,
+        substate::SubstateModel,
+        substate_locks::SubstateLockModel,
+        traits::RocksdbModel,
+    },
+    reader::RocksDbStateStoreReadTransaction,
+    writer::RocksDbStateStoreWriteTransaction,
+};
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 
@@ -59,10 +80,18 @@ impl<TAddr> RocksDbStateStore<TAddr> {
             StateTransitionModel::column_families(),
             SubstateModel::column_families(),
             SubstateLockModel::column_families(),
-        ].concat();
+        ]
+        .concat();
 
-        let db = TransactionDB::<SingleThreaded>::open_cf(&options, &TransactionDBOptions::default(), path, cf_names.clone())
-            .map_err(|e| StorageError::ConnectionError { reason: e.into_string() })?;
+        let db = TransactionDB::<SingleThreaded>::open_cf(
+            &options,
+            &TransactionDBOptions::default(),
+            path,
+            cf_names.clone(),
+        )
+        .map_err(|e| StorageError::ConnectionError {
+            reason: e.into_string(),
+        })?;
 
         Ok(Self {
             db: Arc::new(db),

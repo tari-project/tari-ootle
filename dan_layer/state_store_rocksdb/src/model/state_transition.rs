@@ -27,17 +27,18 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
 use tari_dan_storage::consensus_models::{StateTransition, StateTransitionId};
 
+use super::{
+    super::utils::bor_encode,
+    traits::{ModelColumnFamily, RocksdbModel},
+};
 use crate::{error::RocksDbStorageError, utils::RocksdbSeq};
-
-use super::{super::utils::bor_encode, traits::{ModelColumnFamily, RocksdbModel}};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateTransitionModelData {
     pub data: Vec<u8>,
     pub id: StateTransitionId,
     pub shard: Shard,
-    pub seq: RocksdbSeq
+    pub seq: RocksdbSeq,
 }
 
 impl StateTransitionModelData {
@@ -50,7 +51,7 @@ impl StateTransitionModelData {
             data,
             id,
             shard,
-            seq: RocksdbSeq(seq)
+            seq: RocksdbSeq(seq),
         })
     }
 }
@@ -72,19 +73,29 @@ impl RocksdbModel for StateTransitionModel {
         vec![ShardColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        ShardColumnFamily::put(db, tx, operation,  value, main_key_bytes)?;
+        ShardColumnFamily::put(db, tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
-    
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         ShardColumnFamily::delete(db.clone(), tx, operation, item)?;
-        
+
         Ok(())
     }
 }

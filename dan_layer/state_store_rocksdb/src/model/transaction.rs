@@ -23,8 +23,9 @@
 use rocksdb::{Transaction, TransactionDB};
 use tari_dan_storage::consensus_models::TransactionRecord;
 use tari_transaction::TransactionId;
-use crate::error::RocksDbStorageError;
+
 use super::traits::RocksdbModel;
+use crate::error::RocksDbStorageError;
 
 pub struct TransactionModel {}
 
@@ -33,19 +34,18 @@ impl TransactionModel {
         format!("{}_{}", Self::key_prefix(), tx_id)
     }
 
-    pub fn get_any(tx: &Transaction<'_, TransactionDB>, operation: &'static str, tx_ids: Vec<&TransactionId>) -> Result<Vec<TransactionRecord>, RocksDbStorageError> {
-        let keys: Vec<String> = tx_ids
-            .iter()
-            .map(|id| Self::key_from_transaction_id(id))
-            .collect();
+    pub fn get_any(
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        tx_ids: Vec<&TransactionId>,
+    ) -> Result<Vec<TransactionRecord>, RocksDbStorageError> {
+        let keys: Vec<String> = tx_ids.iter().map(|id| Self::key_from_transaction_id(id)).collect();
 
-        let values = tx.multi_get(keys)
+        let values = tx
+            .multi_get(keys)
             .into_iter()
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
 
         let mut res = vec![];
         for value in values.into_iter().flatten() {
@@ -54,7 +54,7 @@ impl TransactionModel {
         }
 
         Ok(res)
-    } 
+    }
 }
 
 impl RocksdbModel for TransactionModel {

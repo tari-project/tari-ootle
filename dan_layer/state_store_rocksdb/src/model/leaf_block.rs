@@ -23,6 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::consensus_models::LeafBlock;
+
 use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

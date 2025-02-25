@@ -3,11 +3,7 @@
 
 use rand::{rngs::OsRng, RngCore};
 use tari_dan_common_types::{Epoch, NodeHeight};
-use tari_dan_storage::{
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-};
+use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::models::{ComponentAddress, ComponentKey, EntityId, ObjectKey};
 
@@ -20,7 +16,7 @@ fn random_substate_id() -> SubstateId {
 
     let mut bytes = [0u8; ComponentKey::LENGTH];
     rng.fill_bytes(&mut bytes);
-    let component_key = ComponentKey::new(bytes); 
+    let component_key = ComponentKey::new(bytes);
 
     let address = ComponentAddress::new(ObjectKey::new(entity_id, component_key));
     SubstateId::Component(address)
@@ -33,9 +29,8 @@ mod substates_test {
     use tari_dan_storage::consensus_models::QcId;
     use tari_transaction::TransactionId;
 
-    use crate::helper::{assert_eq_debug, build_substate_record, create_rocksdb, create_sqlite};
-    
     use super::*;
+    use crate::helper::{assert_eq_debug, build_substate_record, create_rocksdb, create_sqlite};
 
     #[ignore]
     #[test]
@@ -83,14 +78,14 @@ mod substates_test {
 
         // substates_get_any fetches all substates
         let mut req = HashSet::new();
-        req.insert(VersionedSubstateIdRef::new(&substate1_id, 0) );
-        req.insert(VersionedSubstateIdRef::new(&substate2_id, 0) );
+        req.insert(VersionedSubstateIdRef::new(&substate1_id, 0));
+        req.insert(VersionedSubstateIdRef::new(&substate2_id, 0));
         let res = tx.substates_get_any(&req).unwrap();
         assert_eq!(res.len(), 2);
 
         // substates_get_any fetches the last version of a substate
         let mut req = HashSet::new();
-        req.insert(VersionedSubstateIdRef::new(&substate1_id, 0) );
+        req.insert(VersionedSubstateIdRef::new(&substate1_id, 0));
         let res = tx.substates_get_any(&req).unwrap();
         assert_eq!(res.len(), 1);
         assert_eq_debug(&res[0], &substate1b);
@@ -111,7 +106,7 @@ mod substates_test {
         // substates_any_exist (all exist)
         let substate_ids = vec![
             VersionedSubstateId::new(substate1_id.clone(), 0),
-            VersionedSubstateId::new(substate2_id.clone(), 0)
+            VersionedSubstateId::new(substate2_id.clone(), 0),
         ];
         let res = tx.substates_any_exist(substate_ids).unwrap();
         assert!(res);
@@ -119,7 +114,7 @@ mod substates_test {
         // substates_any_exist (some do not exist)
         let substate_ids = vec![
             VersionedSubstateId::new(substate1_id.clone(), 100), // version should not exist
-            VersionedSubstateId::new(substate2_id.clone(), 0)
+            VersionedSubstateId::new(substate2_id.clone(), 0),
         ];
         let res = tx.substates_any_exist(substate_ids).unwrap();
         assert!(res);
@@ -127,7 +122,7 @@ mod substates_test {
         // substates_any_exist (none exist)
         let substate_ids = vec![
             VersionedSubstateId::new(substate1_id, 100), // version should not exist
-            VersionedSubstateId::new(substate2_id, 100) // version should not exist
+            VersionedSubstateId::new(substate2_id, 100), // version should not exist
         ];
         let res = tx.substates_any_exist(substate_ids).unwrap();
         assert!(!res);
@@ -153,11 +148,18 @@ mod substates_test {
         let destroyed_transaction_id = TransactionId::default();
         let destroyed_qc_id = QcId::zero();
 
-        tx.substates_down(versioned_substate_id, shard, epoch, destroyed_block_height, &destroyed_transaction_id, &destroyed_qc_id).unwrap();
+        tx.substates_down(
+            versioned_substate_id,
+            shard,
+            epoch,
+            destroyed_block_height,
+            &destroyed_transaction_id,
+            &destroyed_qc_id,
+        )
+        .unwrap();
         let res = tx.substates_get(&substate2_address).unwrap();
         assert!(res.destroyed.is_some());
 
         tx.rollback().unwrap();
     }
-
 }

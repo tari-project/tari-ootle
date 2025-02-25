@@ -12,7 +12,10 @@ use tari_dan_storage::{
 };
 use tari_transaction::TransactionId;
 
-use crate::{metrics::{CollectorRegister, LabelledCollector}, state_store::ValidatorNodeStateStore};
+use crate::{
+    metrics::{CollectorRegister, LabelledCollector},
+    state_store::ValidatorNodeStateStore,
+};
 
 #[derive(Debug, Clone)]
 pub struct PrometheusConsensusMetrics<S = ValidatorNodeStateStore> {

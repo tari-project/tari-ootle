@@ -24,19 +24,27 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::SubstateAddress;
 use tari_dan_storage::consensus_models::SubstatePledge;
 use tari_transaction::TransactionId;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::{bor_decode, bor_encode}};
+
+use crate::{
+    error::RocksDbStorageError,
+    model::traits::RocksdbModel,
+    utils::{bor_decode, bor_encode},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignSubstatePledgeData {
     pub transaction_id: TransactionId,
     pub substate_address: SubstateAddress,
-    pub pledge: SubstatePledge
+    pub pledge: SubstatePledge,
 }
 
 pub struct ForeignSubstatePledgeModel {}
 
 impl ForeignSubstatePledgeModel {
-    pub fn key_from_transaction_and_address(transaction_id: &TransactionId, substate_address_opt: Option<&SubstateAddress>) -> String {
+    pub fn key_from_transaction_and_address(
+        transaction_id: &TransactionId,
+        substate_address_opt: Option<&SubstateAddress>,
+    ) -> String {
         let substate_address = substate_address_opt.map(|a| a.to_string()).unwrap_or_default();
         format!("{}_{}_{}", Self::key_prefix(), transaction_id, substate_address)
     }
@@ -53,11 +61,13 @@ impl RocksdbModel for ForeignSubstatePledgeModel {
         Self::key_from_transaction_and_address(&value.transaction_id, Some(&value.substate_address))
     }
 
-    // We need to override the default trait implementations to encode with tari_bor to avoid a bincode conflict with SubstatePledge
+    // We need to override the default trait implementations to encode with tari_bor to avoid a bincode conflict with
+    // SubstatePledge
     fn encode(value: &Self::Item) -> Result<Vec<u8>, RocksDbStorageError> {
         let bytes = bor_encode(value)?;
         Ok(bytes)
     }
+
     fn decode(bytes: Vec<u8>) -> Result<Self::Item, RocksDbStorageError> {
         let value: Self::Item = bor_decode(&bytes)?;
         Ok(value)

@@ -26,11 +26,9 @@ use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{BlockId, BlockTransactionExecution};
 use tari_transaction::TransactionId;
-use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
-
-use crate::error::RocksDbStorageError;
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockTransactionExecutionModelData {
@@ -52,7 +50,10 @@ impl From<&BlockTransactionExecution> for BlockTransactionExecutionModelData {
 pub struct BlockTransactionExecutionModel {}
 
 impl BlockTransactionExecutionModel {
-    pub fn key_prefix_by_transaction_and_block(transaction_id: &TransactionId, block_id_opt: Option<&BlockId>) -> String {
+    pub fn key_prefix_by_transaction_and_block(
+        transaction_id: &TransactionId,
+        block_id_opt: Option<&BlockId>,
+    ) -> String {
         match block_id_opt {
             Some(block_id) => format!("{}_{}_{}_", Self::key_prefix(), transaction_id, block_id),
             None => format!("{}_{}_", Self::key_prefix(), transaction_id),
@@ -79,19 +80,29 @@ impl RocksdbModel for BlockTransactionExecutionModel {
         vec![BlockColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        BlockColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        BlockColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
 
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         BlockColumnFamily::delete(db.clone(), tx, operation, item)?;
-        
+
         Ok(())
     }
 }
@@ -118,6 +129,11 @@ impl ModelColumnFamily for BlockColumnFamily {
         let transaction_id = value.transaction_execution.transaction_id();
         let block_id = value.transaction_execution.block_id();
         // the block_id field is first to allow for prefix scanning
-        format!("{}_{}_{}", BlockTransactionExecutionModel::key_prefix(), block_id, transaction_id)
+        format!(
+            "{}_{}_{}",
+            BlockTransactionExecutionModel::key_prefix(),
+            block_id,
+            transaction_id
+        )
     }
 }

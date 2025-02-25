@@ -64,7 +64,8 @@ use crate::{
     p2p::{
         rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
         services::mempool::MempoolHandle,
-    }, state_store::ValidatorNodeStateStore
+    },
+    state_store::ValidatorNodeStateStore,
 };
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";

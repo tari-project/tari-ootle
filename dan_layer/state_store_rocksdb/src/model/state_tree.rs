@@ -23,13 +23,14 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
 use tari_state_tree::{Node, NodeKey, Version};
+
 use crate::model::traits::RocksdbModel;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateTreeModelData {
     pub shard: Shard,
-    pub key: NodeKey, 
-    pub node: Node<Version>
+    pub key: NodeKey,
+    pub node: Node<Version>,
 }
 
 pub struct StateTreeModel {}

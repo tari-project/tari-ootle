@@ -20,11 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{ops::Deref, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    ops::Deref,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use indexmap::IndexMap;
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
+use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -37,16 +42,97 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::{
     consensus_models::{
-        Block, BlockId, BlockTransactionExecution, BurntUtxo, Decision, EpochCheckpoint, Evidence, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastProposed, LastSentVote, LastVoted, LeafBlock, LockConflict, LockedBlock, NoVoteReason, PendingShardStateTreeDiff, QcId, QuorumCertificate, StateTransition, StateTransitionId, SubstateChange, SubstateDestroyed, SubstateDestroyedProof, SubstateLock, SubstatePledges, SubstateRecord, SubstateUpdate, TransactionPoolConfirmedStage, TransactionPoolRecord, TransactionPoolStage, TransactionPoolStatusUpdate, TransactionRecord, VersionedStateHashTreeDiff, Vote
-    }, Ordering, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError
+        Block,
+        BlockId,
+        BlockTransactionExecution,
+        BurntUtxo,
+        Decision,
+        EpochCheckpoint,
+        Evidence,
+        ForeignParkedProposal,
+        ForeignProposal,
+        ForeignProposalStatus,
+        ForeignReceiveCounters,
+        ForeignSendCounters,
+        HighQc,
+        LastExecuted,
+        LastProposed,
+        LastSentVote,
+        LastVoted,
+        LeafBlock,
+        LockConflict,
+        LockedBlock,
+        NoVoteReason,
+        PendingShardStateTreeDiff,
+        QcId,
+        QuorumCertificate,
+        StateTransition,
+        StateTransitionId,
+        SubstateChange,
+        SubstateDestroyed,
+        SubstateDestroyedProof,
+        SubstateLock,
+        SubstatePledges,
+        SubstateRecord,
+        SubstateUpdate,
+        TransactionPoolConfirmedStage,
+        TransactionPoolRecord,
+        TransactionPoolStage,
+        TransactionPoolStatusUpdate,
+        TransactionRecord,
+        ValidatorStatsUpdate,
+        VersionedStateHashTreeDiff,
+        Vote,
+    },
+    Ordering,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+    StorageError,
 };
 use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 use tari_transaction::TransactionId;
-use tari_common_types::types::PublicKey;
-use tari_dan_storage::consensus_models::ValidatorStatsUpdate;
 
-use crate::{error::RocksDbStorageError, model::{block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, evicted_node::{EvictedNodeData, EvictedNodeModel}, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel}, foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel}, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, lock_conflict::{LockConflictData, LockConflictModel}, locked_block::LockedBlockModel, missing_transactions::{MissingTransaction, MissingTransactionModel}, traits::{ModelColumnFamily, RocksdbModel}, parked_block::{ParkedBlockData, ParkedBlockModel}, pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel}, quorum_certificate::QuorumCertificateModel, state_transition::{StateTransitionModel, StateTransitionModelData}, state_tree::{StateTreeModel, StateTreeModelData}, state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData}, substate::SubstateModel, substate_locks::{SubstateLockData, SubstateLockModel}, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}, reader::RocksDbStateStoreReadTransaction, utils::{RocksdbSeq, RocksdbTimestamp}};
+use crate::{
+    error::RocksDbStorageError,
+    model::{
+        block::BlockModel,
+        block_diff::{BlockDiffData, BlockDiffModel},
+        block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData},
+        burnt_utxo::BurntUtxoModel,
+        epoch_checkpoint::EpochCheckpointModel,
+        evicted_node::{EvictedNodeData, EvictedNodeModel},
+        foreign_parked_blocks::ForeignParkedBlockModel,
+        foreign_proposal::ForeignProposalModel,
+        foreign_receive_counter::ForeignReceiveCounterModel,
+        foreign_send_counter::{ForeignSendCounterData, ForeignSendCounterModel},
+        foreign_substate_pledge::{ForeignSubstatePledgeData, ForeignSubstatePledgeModel},
+        high_qc::HighQcModel,
+        last_executed::LastExecutedModel,
+        last_proposed::LastProposedModel,
+        last_sent_vote::LastSentVoteModel,
+        last_voted::LastVotedModel,
+        leaf_block::LeafBlockModel,
+        lock_conflict::{LockConflictData, LockConflictModel},
+        locked_block::LockedBlockModel,
+        missing_transactions::{MissingTransaction, MissingTransactionModel},
+        parked_block::{ParkedBlockData, ParkedBlockModel},
+        pending_state_tree_diff::{PendingStateTreeDiffData, PendingStateTreeDiffModel},
+        quorum_certificate::QuorumCertificateModel,
+        state_transition::{StateTransitionModel, StateTransitionModelData},
+        state_tree::{StateTreeModel, StateTreeModelData},
+        state_tree_shard_versions::{StateTreeShardVersionModel, StateTreeShardVersionModelData},
+        substate::SubstateModel,
+        substate_locks::{SubstateLockData, SubstateLockModel},
+        traits::{ModelColumnFamily, RocksdbModel},
+        transaction::TransactionModel,
+        transaction_pool::TransactionPoolModel,
+        transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData},
+        vote::VoteModel,
+    },
+    reader::RocksDbStateStoreReadTransaction,
+    utils::{RocksdbSeq, RocksdbTimestamp},
+};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::writer";
 
@@ -71,7 +157,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
     ) -> Result<(), StorageError> {
         let operation = "parked_blocks_insert";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        
+
         // check if block exists in blocks model
         let block_id = block.id();
         let key = BlockModel::key_from_block_id(block_id);
@@ -91,7 +177,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
 
         let parked_block_data = ParkedBlockData {
             block: block.clone(),
-            foreign_proposals: foreign_proposals.to_vec()
+            foreign_proposals: foreign_proposals.to_vec(),
         };
         ParkedBlockModel::put(self.db.clone(), tx, operation, &parked_block_data)?;
 
@@ -133,10 +219,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             .as_millis()
             .try_into()
             .unwrap();
-        let block_time= Some(now - block.timestamp());
+        let block_time = Some(now - block.timestamp());
         let mut block = block.clone();
         block.set_block_time(block_time);
-        
+
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
         Ok(BlockModel::put(self.db.clone(), tx, "blocks_insert", &block)?)
     }
@@ -147,7 +233,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let key = BlockModel::key_from_block_id(block_id);
         BlockModel::delete(self.db.clone(), tx, operation, &key)?;
 
-        // NOTE: we not implementing the equivalent of the sqlite "diagnostic_deleted_blocks" table as it does not seem to be used
+        // NOTE: we not implementing the equivalent of the sqlite "diagnostic_deleted_blocks" table as it does not seem
+        // to be used
 
         Ok(())
     }
@@ -172,7 +259,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         if let Some(value) = is_justified {
             block.set_is_justified(value)
         }
-        
+
         // update the block in rocksDb
         // TODO: is it better to use a RocksDB merge operator?
         BlockModel::put(self.db.clone(), tx, operation, &block)?;
@@ -215,7 +302,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn quorum_certificates_insert(&mut self, qc: &QuorumCertificate) -> Result<(), StorageError> {
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        Ok(QuorumCertificateModel::put(self.db.clone(), tx, "quorum_certificates_insert", qc)?)
+        Ok(QuorumCertificateModel::put(
+            self.db.clone(),
+            tx,
+            "quorum_certificates_insert",
+            qc,
+        )?)
     }
 
     fn quorum_certificates_set_shares_processed(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
@@ -228,7 +320,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // set the value
         qc.set_is_shares_processed(true);
-        
+
         // update the block in rocksDb
         QuorumCertificateModel::put(self.db.clone(), tx, operation, &qc)?;
 
@@ -350,7 +442,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         type Cf = crate::model::foreign_proposal::EpochStatusColumnFamily;
         let cf = Cf::name();
         let key_prefix = Cf::key_prefix_from_epoch(epoch);
-        let proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
+        let proposals =
+            ForeignProposalModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
 
         // delete all the epoch proposals in db
         for proposal in proposals {
@@ -381,7 +474,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             proposed_by_block: proposal.proposed_by_block,
             status,
         };
-        
+
         // update the block in rocksDb
         ForeignProposalModel::put(self.db.clone(), tx, operation, &updated_proposal)?;
 
@@ -408,7 +501,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             proposed_by_block: Some(*proposed_in_block),
             status: ForeignProposalStatus::Proposed,
         };
-        
+
         // update the block in rocksDb
         ForeignProposalModel::put(self.db.clone(), tx, operation, &updated_proposal)?;
 
@@ -423,11 +516,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         type Cf = crate::model::foreign_proposal::ProposedColumnFamily;
         let cf = Cf::name();
         let key_prefix = Cf::key_prefix_from_proposed_by_block(proposed_in_block);
-        let proposal = ForeignProposalModel::get_cf(self.db.clone(), tx, operation, cf, Some(&key_prefix), Ordering::Ascending)?
-            .ok_or_else(|| StorageError::NotFound {
-                item: "foreign_proposals",
-                key: proposed_in_block.to_string(),
-            })?;
+        let proposal = ForeignProposalModel::get_cf(
+            self.db.clone(),
+            tx,
+            operation,
+            cf,
+            Some(&key_prefix),
+            Ordering::Ascending,
+        )?
+        .ok_or_else(|| StorageError::NotFound {
+            item: "foreign_proposals",
+            key: proposed_in_block.to_string(),
+        })?;
 
         // set the values
         let updated_proposal = ForeignProposal {
@@ -437,7 +537,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             proposed_by_block: None,
             status: ForeignProposalStatus::New,
         };
-        
+
         // update the block in rocksDb
         ForeignProposalModel::put(self.db.clone(), tx, operation, &updated_proposal)?;
 
@@ -450,7 +550,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: &BlockId,
     ) -> Result<(), StorageError> {
         let operation = "foreign_send_counters_set";
-        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();   
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
         let value = ForeignSendCounterData::new(*block_id, foreign_send_counter.clone());
 
@@ -464,7 +564,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         foreign_receive_counter: &ForeignReceiveCounters,
     ) -> Result<(), StorageError> {
         let operation = "foreign_receive_counters_set";
-        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();   
+        let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
         ForeignReceiveCounterModel::put(self.db.clone(), tx, operation, &foreign_receive_counter.into())?;
 
@@ -521,8 +621,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             return Err(StorageError::QueryError {
                 reason: format!(
                     "{}: Cannot finalize transactions for non-existent block {}",
-                    operation,
-                    block_id
+                    operation, block_id
                 ),
             });
         }
@@ -530,14 +629,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let mut updated_recs = vec![];
         for rec in transactions {
             let exec = self
-                    .transaction_executions_get_pending_for_block(rec.transaction_id(), &block_id)
-                    .optional()?
-                    .ok_or_else(|| StorageError::DataInconsistency {
-                        details: format!(
-                            "transactions_finalize_all: No pending execution for transaction {}",
-                            rec.transaction_id()
-                        ),
-                    })?;
+                .transaction_executions_get_pending_for_block(rec.transaction_id(), &block_id)
+                .optional()?
+                .ok_or_else(|| StorageError::DataInconsistency {
+                    details: format!(
+                        "transactions_finalize_all: No pending execution for transaction {}",
+                        rec.transaction_id()
+                    ),
+                })?;
             let mut db_rec = self.transactions_get(rec.transaction_id())?;
 
             db_rec.resolved_inputs = Some(exec.resolved_inputs().to_vec());
@@ -545,7 +644,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             db_rec.execution_result = Some(exec.result().clone());
             db_rec.final_decision = Some(db_rec.current_decision());
             db_rec.abort_reason = exec.abort_reason().cloned();
-            
+
             updated_recs.push(db_rec);
         }
 
@@ -578,7 +677,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let cf = Cf::name();
         let key_prefix = Cf::key_prefix_by_block(block_id);
         let ordering = Ordering::Ascending;
-        let execs = BlockTransactionExecutionModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, ordering)?;
+        let execs =
+            BlockTransactionExecutionModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, ordering)?;
 
         for exec in execs {
             let key = BlockTransactionExecutionModel::key(&exec);
@@ -603,7 +703,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             0,
             None,
             TransactionPoolStage::New,
-             None,
+            None,
             decision,
             None,
             None,
@@ -612,7 +712,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        Ok(TransactionPoolModel::put(self.db.clone(), tx, "transaction_pool_insert_new", &value)?)
+        Ok(TransactionPoolModel::put(
+            self.db.clone(),
+            tx,
+            "transaction_pool_insert_new",
+            &value,
+        )?)
     }
 
     fn transaction_pool_add_pending_update(
@@ -688,7 +793,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             }
             .into());
         }
-            
+
         Ok(transactions)
     }
 
@@ -696,7 +801,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let operation = "transaction_pool_confirm_all_transitions";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        // fetch all the transaction updates that are not applied yet for the new block 
+        // fetch all the transaction updates that are not applied yet for the new block
         let key_prefix = TransactionPoolStateUpdateModel::key_prefix_by_block_id(new_locked_block.block_id());
         let mut updates: Vec<TransactionPoolStateUpdateModelData> = TransactionPoolStateUpdateModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?
             // TODO: do the filtering at the rocksdb query (use a dedicated column family?)
@@ -814,16 +919,24 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // if the block has no more missing transactions, delete all missing transactions from previous blocks
         type BlockIdCf = crate::model::missing_transactions::BlockIdColumnFamily;
         let key_prefix = BlockIdCf::build_key_prefix_by_block(&block_id);
-        let num_remaining = MissingTransactionModel::count_cf(self.db.clone(), tx, BlockIdCf::name(), Some(&key_prefix))?;
+        let num_remaining =
+            MissingTransactionModel::count_cf(self.db.clone(), tx, BlockIdCf::name(), Some(&key_prefix))?;
 
         if num_remaining == 0 {
             // delete all entries that are for previous heights
             type BlockHeightCf = crate::model::missing_transactions::BlockHeightColumnFamily;
             let key_prefix = MissingTransactionModel::key_prefix();
-            let values = MissingTransactionModel::multi_get_cf(self.db.clone(), tx, operation, BlockHeightCf::name(), key_prefix, Ordering::Ascending)?;
+            let values = MissingTransactionModel::multi_get_cf(
+                self.db.clone(),
+                tx,
+                operation,
+                BlockHeightCf::name(),
+                key_prefix,
+                Ordering::Ascending,
+            )?;
             for value in values {
                 if value.block_height.0 < current_height.as_u64() {
-                    let key= MissingTransactionModel::key(&value);
+                    let key = MissingTransactionModel::key(&value);
                     MissingTransactionModel::delete(self.db.clone(), tx, operation, &key)?;
                 } else {
                     break;
@@ -840,7 +953,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let operation = "foreign_parked_blocks_insert";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
-        ForeignParkedBlockModel::put(self.db.clone(), tx, operation, park_block)?; 
+        ForeignParkedBlockModel::put(self.db.clone(), tx, operation, park_block)?;
 
         Ok(())
     }
@@ -850,7 +963,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         _park_block_id: &BlockId,
         _missing_transaction_ids: I,
     ) -> Result<(), StorageError> {
-        todo!()  
+        todo!()
     }
 
     fn foreign_parked_blocks_remove_all_by_transaction(
@@ -886,7 +999,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // TODO: better performance if we batch-insert into rocksdb?
         for (substate_id, locks) in locks {
-
             for lock in locks {
                 let value = SubstateLockData {
                     substate_id: substate_id.clone(),
@@ -917,15 +1029,21 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         for transaction_id in transaction_ids {
             type Cf = crate::model::substate_locks::TransactionIdColumnFamily;
             let key_prefix = Cf::build_key_prefix_by_transaction(transaction_id);
-            let locks = SubstateLockModel::multi_get_cf(self.db.clone(), tx, Cf::name(), operation, &key_prefix, Ordering::Ascending)?;
-            
+            let locks = SubstateLockModel::multi_get_cf(
+                self.db.clone(),
+                tx,
+                Cf::name(),
+                operation,
+                &key_prefix,
+                Ordering::Ascending,
+            )?;
+
             for lock in locks {
                 let key = SubstateLockModel::key(&lock);
                 SubstateLockModel::delete(self.db.clone(), tx, operation, &key)?;
             }
-            
         }
-        
+
         Ok(())
     }
 
@@ -935,13 +1053,20 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         type Cf = crate::model::substate_locks::BlockIdColumnFamily;
         let key_prefix = Cf::build_key_prefix_by_block(block_id);
-        let locks = SubstateLockModel::multi_get_cf(self.db.clone(), tx, Cf::name(), operation, &key_prefix, Ordering::Ascending)?;
-            
+        let locks = SubstateLockModel::multi_get_cf(
+            self.db.clone(),
+            tx,
+            Cf::name(),
+            operation,
+            &key_prefix,
+            Ordering::Ascending,
+        )?;
+
         for lock in locks {
             let key = SubstateLockModel::key(&lock);
             SubstateLockModel::delete(self.db.clone(), tx, operation, &key)?;
         }
-            
+
         Ok(())
     }
 
@@ -963,11 +1088,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         type ShardCf = crate::model::state_transition::ShardColumnFamily;
         let key_prefix = ShardCf::build_key_prefix_by_shard(substate.created_by_shard);
         // TODO: this could be optimized by a new model function that allows to specify the we only want one key
-        let shard_transitions = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, ShardCf::name(), &key_prefix, Ordering::Descending)?;
+        let shard_transitions = StateTransitionModel::multi_get_cf(
+            self.db.clone(),
+            tx,
+            operation,
+            ShardCf::name(),
+            &key_prefix,
+            Ordering::Descending,
+        )?;
         let _next_seq = match shard_transitions.first() {
-            Some(value) => {
-                value.seq.0
-            },
+            Some(value) => value.seq.0,
             None => 1,
         };
 
@@ -987,7 +1117,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         let operation = "substates_down";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        
+
         // update the substate
         let address = versioned_substate_id.to_substate_address();
         let key = SubstateModel::key_from_address(&address);
@@ -1005,11 +1135,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         type ShardCf = crate::model::state_transition::ShardColumnFamily;
         let key_prefix = ShardCf::build_key_prefix_by_shard(substate.created_by_shard);
         // TODO: this could be optimized by a new model function that allows to specify the we only want one key
-        let shard_transitions = StateTransitionModel::multi_get_cf(self.db.clone(), tx, operation, ShardCf::name(), &key_prefix, Ordering::Descending)?;
+        let shard_transitions = StateTransitionModel::multi_get_cf(
+            self.db.clone(),
+            tx,
+            operation,
+            ShardCf::name(),
+            &key_prefix,
+            Ordering::Descending,
+        )?;
         let next_seq = match shard_transitions.first() {
-            Some(value) => {
-                value.seq.0
-            },
+            Some(value) => value.seq.0,
             None => 1,
         };
 
@@ -1017,13 +1152,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let state_transition = StateTransitionModelData::new(
             StateTransition {
                 id: StateTransitionId::new(epoch, shard, next_seq),
-                update: SubstateUpdate::Destroy(
-                    SubstateDestroyedProof {
-                        substate_id: versioned_substate_id.substate_id().clone(),
-                        version: versioned_substate_id.version(),
-                        destroyed_by_transaction: *destroyed_transaction_id,
-                    }
-                ),
+                update: SubstateUpdate::Destroy(SubstateDestroyedProof {
+                    substate_id: versioned_substate_id.substate_id().clone(),
+                    version: versioned_substate_id.version(),
+                    destroyed_by_transaction: *destroyed_transaction_id,
+                }),
             },
             shard,
             next_seq,
@@ -1042,7 +1175,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         let operation = "foreign_substate_pledges_save";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        
+
         for pledge in pledges {
             let value = ForeignSubstatePledgeData {
                 transaction_id: *transaction_id,
@@ -1061,7 +1194,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         let operation = "foreign_substate_pledges_remove_many";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        
+
         for transaction_id in transaction_ids {
             let key_prefix = ForeignSubstatePledgeModel::key_from_transaction_and_address(transaction_id, None);
             let pledges = ForeignSubstatePledgeModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?;
@@ -1144,12 +1277,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn state_tree_nodes_insert(&mut self, shard: Shard, key: NodeKey, node: Node<Version>) -> Result<(), StorageError> {
         let operation = "state_tree_nodes_insert";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        
-        let value = StateTreeModelData {
-            shard,
-            key,
-            node,
-        };
+
+        let value = StateTreeModelData { shard, key, node };
 
         StateTreeModel::put(self.db.clone(), tx, operation, &value)?;
 
@@ -1170,18 +1299,25 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {    
+    fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        let value = StateTreeShardVersionModelData {
-            shard,
-            version
-        };
-        Ok(StateTreeShardVersionModel::put(self.db.clone(), tx, "state_tree_shard_versions_set", &value)?)
+        let value = StateTreeShardVersionModelData { shard, version };
+        Ok(StateTreeShardVersionModel::put(
+            self.db.clone(),
+            tx,
+            "state_tree_shard_versions_set",
+            &value,
+        )?)
     }
 
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
-        Ok(EpochCheckpointModel::put(self.db.clone(), tx, "epoch_checkpoint_save", checkpoint)?)
+        Ok(EpochCheckpointModel::put(
+            self.db.clone(),
+            tx,
+            "epoch_checkpoint_save",
+            checkpoint,
+        )?)
     }
 
     fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError> {
@@ -1220,7 +1356,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         type Cf = crate::model::burnt_utxo::ProposedInColumnFamily;
         let cf = Cf::name();
         let key_prefix = Cf::build_key_prefix(proposed_in_block);
-        let mut utxtos = BurntUtxoModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
+        let mut utxtos =
+            BurntUtxoModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
 
         // clear the proposed_in field in all utxos
         for utxo in &mut utxtos {
@@ -1286,7 +1423,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // Table not used
         todo!()
     }
-    
+
     fn lock_conflicts_remove_by_transaction_ids<'a, I: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         transaction_ids: I,
@@ -1298,9 +1435,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // TODO: for performance reasons, there should be a better way to iterate over conflicts in RocksDB
         let conflicts = LockConflictModel::multi_get(tx, None, Ordering::Ascending)?
             .into_iter()
-            .filter(|c| {
-                transaction_ids.contains(&c.transaction_id) || transaction_ids.contains(&c.depends_on_tx)
-            })
+            .filter(|c| transaction_ids.contains(&c.transaction_id) || transaction_ids.contains(&c.depends_on_tx))
             .collect::<Vec<_>>();
 
         for conflict in conflicts {
@@ -1310,7 +1445,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         Ok(())
     }
-    
+
     fn lock_conflicts_remove_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         let operation = "lock_conflicts_remove_by_block_id";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
@@ -1318,7 +1453,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         type Cf = crate::model::lock_conflict::BlockIdColumnFamily;
         let cf = Cf::name();
         let key_prefix = Cf::build_key_prefix_by_block(block_id);
-        let conflicts = LockConflictModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
+        let conflicts =
+            LockConflictModel::multi_get_cf(self.db.clone(), tx, operation, cf, &key_prefix, Ordering::Ascending)?;
 
         for conflict in conflicts {
             let key = LockConflictModel::key(&conflict);
@@ -1327,7 +1463,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         Ok(())
     }
-    
+
     fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError> {
         if !self.blocks_exists(&evicted_in_block)? {
             return Err(StorageError::QueryError {
@@ -1340,7 +1476,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let block_key = BlockModel::key_from_block_id(&evicted_in_block);
         let block = BlockModel::get(tx, operation, &block_key)?;
-        
+
         let value = EvictedNodeData {
             public_key: public_key.clone(),
             evicted_in_block,
@@ -1353,7 +1489,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         Ok(())
     }
-    
+
     fn evicted_nodes_mark_eviction_as_committed(
         &mut self,
         public_key: &PublicKey,

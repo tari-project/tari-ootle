@@ -25,9 +25,9 @@ use std::sync::Arc;
 use rocksdb::{Transaction, TransactionDB};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::consensus_models::{BlockId, ForeignProposal, ForeignProposalStatus};
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
 
 pub struct ForeignProposalModel {}
 
@@ -49,38 +49,52 @@ impl RocksdbModel for ForeignProposalModel {
     }
 
     fn column_families() -> Vec<&'static str> {
-        vec![EpochStatusColumnFamily::name(), ProposedColumnFamily::name(), UnconfirmedColumnFamily::name()]
+        vec![
+            EpochStatusColumnFamily::name(),
+            ProposedColumnFamily::name(),
+            UnconfirmedColumnFamily::name(),
+        ]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        EpochStatusColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        EpochStatusColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         if value.proposed_by_block.is_some() {
-            ProposedColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+            ProposedColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
         }
 
         if value.status != ForeignProposalStatus::Confirmed {
-            UnconfirmedColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+            UnconfirmedColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
         }
 
         Ok(())
     }
 
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         EpochStatusColumnFamily::delete(db.clone(), tx, operation, item)?;
 
         if item.proposed_by_block.is_some() {
-            ProposedColumnFamily::delete(db.clone(), tx, operation,  item)?;
+            ProposedColumnFamily::delete(db.clone(), tx, operation, item)?;
         }
 
         if item.status != ForeignProposalStatus::Confirmed {
-            UnconfirmedColumnFamily::delete(db.clone(), tx, operation,  item)?;
+            UnconfirmedColumnFamily::delete(db.clone(), tx, operation, item)?;
         }
-        
+
         Ok(())
     }
 }
@@ -106,7 +120,13 @@ impl ModelColumnFamily for EpochStatusColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        format!("{}_{}_{}_{}", ForeignProposalModel::key_prefix(), value.block.epoch(), value.status, value.block.id())
+        format!(
+            "{}_{}_{}_{}",
+            ForeignProposalModel::key_prefix(),
+            value.block.epoch(),
+            value.status,
+            value.block.id()
+        )
     }
 }
 
@@ -127,10 +147,16 @@ impl ModelColumnFamily for ProposedColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        let proposed = value.proposed_by_block
+        let proposed = value
+            .proposed_by_block
             .map(|b| b.to_string())
             .unwrap_or("None".to_owned());
-        format!("{}_{}_{}", ForeignProposalModel::key_prefix(), proposed, value.block.id())
+        format!(
+            "{}_{}_{}",
+            ForeignProposalModel::key_prefix(),
+            proposed,
+            value.block.id()
+        )
     }
 }
 
@@ -151,6 +177,11 @@ impl ModelColumnFamily for UnconfirmedColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", ForeignProposalModel::key_prefix(), value.block.epoch(), value.block.id())
+        format!(
+            "{}_{}_{}",
+            ForeignProposalModel::key_prefix(),
+            value.block.epoch(),
+            value.block.id()
+        )
     }
 }

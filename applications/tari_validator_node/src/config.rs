@@ -21,8 +21,12 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    fmt::{self, Display}, net::SocketAddr, path::{Path, PathBuf}, str::FromStr
+    fmt::{self, Display},
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    str::FromStr,
 };
+
 use anyhow::anyhow;
 use config::Config;
 use serde::{Deserialize, Serialize};
@@ -82,7 +86,7 @@ pub struct ValidatorNodeConfig {
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
     /// The type of database to use
-    pub database_type: DatabaseType, 
+    pub database_type: DatabaseType,
     /// The p2p configuration settings
     pub p2p: P2pConfig,
     /// P2P RPC configuration

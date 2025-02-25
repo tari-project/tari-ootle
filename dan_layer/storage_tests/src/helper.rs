@@ -20,28 +20,39 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use rand::{rngs::OsRng, Rng, RngCore};
 use tari_common_types::types::{FixedHash, PublicKey};
+use tari_crypto::{keys::PublicKey as _, signatures::SchnorrSignature};
 use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
-use tari_dan_storage::consensus_models::{Block, BlockId, Command, Decision, QcId, SubstateRecord, TransactionAtom, ValidatorSignature};
-use tari_engine_types::{component::{ComponentBody, ComponentHeader}, substate::{SubstateId, SubstateValue}};
+use tari_dan_storage::consensus_models::{
+    Block,
+    BlockId,
+    Command,
+    Decision,
+    QcId,
+    SubstateRecord,
+    TransactionAtom,
+    ValidatorSignature,
+};
+use tari_engine_types::{
+    component::{ComponentBody, ComponentHeader},
+    substate::{SubstateId, SubstateValue},
+};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_template_lib::{auth::OwnerRule, models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress}};
-use tari_template_lib::prelude::ComponentAccessRules;
+use tari_template_lib::{
+    auth::OwnerRule,
+    models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress},
+    prelude::ComponentAccessRules,
+};
+use tari_transaction::TransactionId;
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::tempdir;
-use rand::{rngs::OsRng, Rng, RngCore};
-use tari_transaction::TransactionId;
-use tari_crypto::{
-    keys::PublicKey as _, signatures::SchnorrSignature
-};
 
 pub fn create_rocksdb() -> RocksDbStateStore<String> {
     let temp_dir = tempdir().unwrap();
     let db_file = temp_dir.path().join("rocksdb");
-    let db_file = db_file
-        .as_os_str()
-        .to_str().unwrap();
+    let db_file = db_file.as_os_str().to_str().unwrap();
 
     RocksDbStateStore::connect(db_file).unwrap()
 }
@@ -76,17 +87,17 @@ pub fn create_random_substate_id() -> SubstateId {
 pub fn build_substate_record(substate_id: &SubstateId, version: u32) -> SubstateRecord {
     let entity_id = substate_id.to_object_key().as_entity_id();
     SubstateRecord {
-            substate_id: substate_id.clone(), 
-            version,
-            substate_value: Some(build_substate_value(Some(entity_id))),
-            state_hash: FixedHash::default(),
-            created_by_transaction: TransactionId::default(),
-            created_justify: QcId::zero(),
-            created_block: BlockId::genesis(),
-            created_height: NodeHeight::zero(),
-            created_by_shard: Shard::first(),
-            created_at_epoch: Epoch::zero(),
-            destroyed: None,
+        substate_id: substate_id.clone(),
+        version,
+        substate_value: Some(build_substate_value(Some(entity_id))),
+        state_hash: FixedHash::default(),
+        created_by_transaction: TransactionId::default(),
+        created_justify: QcId::zero(),
+        created_block: BlockId::genesis(),
+        created_height: NodeHeight::zero(),
+        created_by_shard: Shard::first(),
+        created_at_epoch: Epoch::zero(),
+        destroyed: None,
     }
 }
 
@@ -111,12 +122,8 @@ pub fn copy_fixed<const SZ: usize>(bytes: &[u8]) -> [u8; SZ] {
 }
 
 pub fn assert_eq_debug<T>(a: &T, b: &T)
-    where T: std::fmt::Debug
-{
-    assert_eq!(
-        format!("{:?}", a),
-        format!("{:?}", b),
-    );
+where T: std::fmt::Debug {
+    assert_eq!(format!("{:?}", a), format!("{:?}", b),);
 }
 
 pub fn create_random_block_id() -> BlockId {
@@ -132,10 +139,7 @@ pub fn create_random_vn_signature() -> ValidatorSignature {
     let message = OsRng.gen::<[u8; FixedHash::byte_size()]>();
     let (secret_key, public_key) = PublicKey::random_keypair(&mut OsRng);
     let signature = SchnorrSignature::sign(&secret_key, message, &mut OsRng).unwrap();
-    ValidatorSignature {
-        public_key,
-        signature,
-    }
+    ValidatorSignature { public_key, signature }
 }
 
 pub fn create_block(parent: Option<&Block>) -> Block {

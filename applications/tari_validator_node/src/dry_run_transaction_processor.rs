@@ -42,7 +42,9 @@ use thiserror::Error;
 use tokio::task;
 
 use crate::{
-    p2p::services::mempool::{ResolvedSubstates, SubstateResolver}, state_store::ValidatorNodeStateStore, substate_resolver::{SubstateResolverError, TariSubstateResolver}
+    p2p::services::mempool::{ResolvedSubstates, SubstateResolver},
+    state_store::ValidatorNodeStateStore,
+    substate_resolver::{SubstateResolverError, TariSubstateResolver},
 };
 
 const LOG_TARGET: &str = "tari::dan::validator_node::dry_run_transaction_processor";

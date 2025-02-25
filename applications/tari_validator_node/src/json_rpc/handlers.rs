@@ -96,7 +96,12 @@ use tari_validator_node_client::types::{
 };
 
 use crate::{
-    bootstrap::Services, consensus::ConsensusHandle, dry_run_transaction_processor::DryRunTransactionProcessor, json_rpc::jrpc_errors::{internal_error, not_found}, p2p::services::mempool::MempoolHandle, state_store::ValidatorNodeStateStore
+    bootstrap::Services,
+    consensus::ConsensusHandle,
+    dry_run_transaction_processor::DryRunTransactionProcessor,
+    json_rpc::jrpc_errors::{internal_error, not_found},
+    p2p::services::mempool::MempoolHandle,
+    state_store::ValidatorNodeStateStore,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";

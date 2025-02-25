@@ -26,9 +26,9 @@ use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{BlockId, LockConflict};
 use tari_transaction::TransactionId;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockConflictData {
@@ -50,24 +50,39 @@ impl RocksdbModel for LockConflictModel {
     }
 
     fn key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", Self::key_prefix(), &value.conflict.transaction_id, value.created_at)
+        format!(
+            "{}_{}_{}",
+            Self::key_prefix(),
+            &value.conflict.transaction_id,
+            value.created_at
+        )
     }
 
     fn column_families() -> Vec<&'static str> {
         vec![BlockIdColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        BlockIdColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        BlockIdColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
-    
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         BlockIdColumnFamily::delete(db.clone(), tx, operation, item)?;
         Ok(())
     }
@@ -92,6 +107,11 @@ impl ModelColumnFamily for BlockIdColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", LockConflictModel::key_prefix(), value.block_id, value.conflict.transaction_id)
+        format!(
+            "{}_{}_{}",
+            LockConflictModel::key_prefix(),
+            value.block_id,
+            value.conflict.transaction_id
+        )
     }
 }

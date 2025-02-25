@@ -11,13 +11,11 @@ use tari_dan_storage::{
 };
 use tari_utilities::epoch_time::EpochTime;
 
-
 mod basic_block_operations {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
 
-    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
-
     use super::*;
+    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
     // TODO: sqlite fails due to missing foreign key values
     #[ignore]
@@ -40,7 +38,7 @@ mod basic_block_operations {
         // insert multiple blocks
         let network = Default::default();
         let atom1 = create_tx_atom();
-        
+
         let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
 
@@ -87,7 +85,7 @@ mod basic_block_operations {
         tx.blocks_set_flags(block1_from_db.id(), None, Some(true)).unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(block1_from_db.is_justified());
-        
+
         // set is_commited flag
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(!block1_from_db.is_committed());
@@ -109,9 +107,8 @@ mod basic_block_operations {
 mod block_parent_operations {
     use tari_dan_common_types::{ExtraData, NumPreshards, ShardGroup};
 
-    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
-
     use super::*;
+    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
     // TODO: sqlite fails due to missing foreign key values
     #[ignore]
@@ -135,7 +132,7 @@ mod block_parent_operations {
         let network = Default::default();
         let atom1 = create_tx_atom();
         let atom2 = create_tx_atom();
-        
+
         let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
 
@@ -240,16 +237,14 @@ mod block_parent_operations {
     }
 }
 
-
 mod block_query_operations {
     use std::ops::RangeInclusive;
 
     use tari_dan_common_types::{ExtraData, ExtraFieldKey, NumPreshards, ShardGroup};
     use tari_dan_storage::Ordering;
 
-    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
-
     use super::*;
+    use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
     // TODO: sqlite fails due to missing foreign key values
     #[ignore]
@@ -266,6 +261,7 @@ mod block_query_operations {
         block_query_operations(db);
     }
 
+    #[allow(clippy::too_many_lines)]
     fn block_query_operations(db: impl StateStore) {
         let mut tx = db.create_write_tx().unwrap();
 
@@ -273,7 +269,7 @@ mod block_query_operations {
         let network = Default::default();
         let atom1 = create_tx_atom();
         let atom2 = create_tx_atom();
-        
+
         let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
 
@@ -326,8 +322,10 @@ mod block_query_operations {
         block2.insert(&mut tx).unwrap();
 
         let mut block3_data = ExtraData::new();
-        block3_data
-            .insert(ExtraFieldKey::SidechainId, "block3".as_bytes().to_vec().try_into().unwrap());
+        block3_data.insert(
+            ExtraFieldKey::SidechainId,
+            "block3".as_bytes().to_vec().try_into().unwrap(),
+        );
         let mut block3 = Block::create(
             network,
             *block1.id(),
@@ -352,7 +350,6 @@ mod block_query_operations {
         .unwrap();
         block3.set_is_committed(true);
         block3.insert(&mut tx).unwrap();
-        
 
         // blocks_get_all_ids_by_height
         let res = tx.blocks_get_all_ids_by_height(Epoch(0), NodeHeight(1)).unwrap();
@@ -372,13 +369,17 @@ mod block_query_operations {
 
         // TODO: blocks_get_all_between
         let shard_group = ShardGroup::all_shards(NumPreshards::P64);
-        let res = tx.blocks_get_all_between(Epoch(0), shard_group, NodeHeight(0), NodeHeight(1), false, 10).unwrap();
+        let res = tx
+            .blocks_get_all_between(Epoch(0), shard_group, NodeHeight(0), NodeHeight(1), false, 10)
+            .unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(res[0].to_string(), zero_block.to_string());
         assert_eq!(res[1].to_string(), block1.to_string());
 
         // blocks_get_any_with_epoch_range
-        let res = tx.blocks_get_any_with_epoch_range(RangeInclusive::new(Epoch(0), Epoch(0)), None).unwrap();
+        let res = tx
+            .blocks_get_any_with_epoch_range(RangeInclusive::new(Epoch(0), Epoch(0)), None)
+            .unwrap();
         assert_eq!(res.len(), 4);
 
         // TODO: test with a greater epoch range
@@ -387,10 +388,14 @@ mod block_query_operations {
         // blocks_get_paginated
         let res = tx.blocks_get_paginated(10, 0, None, None, None, None).unwrap();
         assert_eq!(res.len(), 4);
-        let res = tx.blocks_get_paginated(10, 0, Some(2), Some(1_u64.to_string()), None, None).unwrap();
+        let res = tx
+            .blocks_get_paginated(10, 0, Some(2), Some(1_u64.to_string()), None, None)
+            .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].to_string(), block1.to_string());
-        let res = tx.blocks_get_paginated(1, 0, None, None, Some(7), Some(Ordering::Descending)).unwrap();
+        let res = tx
+            .blocks_get_paginated(1, 0, None, None, Some(7), Some(Ordering::Descending))
+            .unwrap();
         assert_eq!(res.len(), 1);
 
         // filtered_blocks_get_count

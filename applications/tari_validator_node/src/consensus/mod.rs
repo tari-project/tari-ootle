@@ -22,7 +22,12 @@ use tokio::{
 };
 
 use crate::{
-    consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec}, event_subscription::EventSubscription, p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging}, state_store::ValidatorNodeStateStore, transaction_validators::TransactionValidationError, validator::BoxedValidator
+    consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec},
+    event_subscription::EventSubscription,
+    p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
+    state_store::ValidatorNodeStateStore,
+    transaction_validators::TransactionValidationError,
+    validator::BoxedValidator,
 };
 
 mod block_transaction_executor;

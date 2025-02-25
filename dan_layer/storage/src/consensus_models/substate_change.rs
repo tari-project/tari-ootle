@@ -1,9 +1,9 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, SubstateAddress, ToSubstateAddress, VersionedSubstateId};
 use tari_engine_types::substate::Substate;
 use tari_state_tree::SubstateTreeChange;

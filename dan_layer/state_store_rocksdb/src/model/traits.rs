@@ -26,9 +26,8 @@ use rocksdb::{Transaction, TransactionDB};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_storage::Ordering;
 
-use crate::error::RocksDbStorageError;
-
 use super::super::utils::{bincode_decode, bincode_encode};
+use crate::error::RocksDbStorageError;
 
 pub trait ModelColumnFamily {
     type Item: Serialize;
@@ -37,26 +36,31 @@ pub trait ModelColumnFamily {
 
     fn build_key(value: &Self::Item) -> String;
 
-    fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item, value: &[u8]) -> Result<(), RocksDbStorageError> {
+    fn put(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+        value: &[u8],
+    ) -> Result<(), RocksDbStorageError> {
         let key = Self::build_key(item);
         let cf = db.cf_handle(Self::name()).unwrap();
         tx.put_cf(cf, key, value)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
 
-        Ok(()) 
+        Ok(())
     }
 
-    fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn delete(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         let key = Self::build_key(item);
         let cf = db.cf_handle(Self::name()).unwrap();
         tx.delete_cf(cf, key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
 
         Ok(())
     }
@@ -85,16 +89,18 @@ pub trait RocksdbModel {
         Ok(value)
     }
 
-    fn put(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         let key = Self::key(value);
         let encoded_value = Self::encode(value)?;
 
         // put the value in the default column family
         tx.put(&key, encoded_value)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-        })?;
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
 
         // insert the main key in each of the column families
         Self::put_in_cfs(db.clone(), tx, operation, value)?;
@@ -102,33 +108,50 @@ pub trait RocksdbModel {
         Ok(())
     }
 
-    fn put_in_cfs(_db: Arc<TransactionDB>, _tx: &mut Transaction<'_, TransactionDB>, _operation: &'static str, _value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        _db: Arc<TransactionDB>,
+        _tx: &mut Transaction<'_, TransactionDB>,
+        _operation: &'static str,
+        _value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // It's up to concrete models to override this method
         // We provide a default implementation to simplify all the models that do not have column families
         Ok(())
     }
 
-    fn key_exists(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<bool, RocksDbStorageError> {
-        let value = tx.get(key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
+    fn key_exists(
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        key: &str,
+    ) -> Result<bool, RocksDbStorageError> {
+        let value = tx
+            .get(key)
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         Ok(value.is_some())
     }
 
-    fn get(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<Self::Item, RocksDbStorageError> {
-        let value = tx.get(key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
-        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key: key.to_owned(), operation })?;
+    fn get(
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        key: &str,
+    ) -> Result<Self::Item, RocksDbStorageError> {
+        let value = tx
+            .get(key)
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
+        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound {
+            key: key.to_owned(),
+            operation,
+        })?;
         let value = Self::decode(bytes)?;
         Ok(value)
     }
 
-    fn get_first(tx: &Transaction<'_, TransactionDB>, operation: &'static str, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Option<Self::Item>, RocksDbStorageError> {
+    fn get_first(
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        key_prefix_opt: Option<&str>,
+        ordering: Ordering,
+    ) -> Result<Option<Self::Item>, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
 
         let default_key_prefix = format!("{}_", Self::key_prefix());
@@ -144,15 +167,19 @@ pub trait RocksdbModel {
         let Some(value) = iterator.next() else {
             return Ok(None);
         };
-        let (_, bytes) = value.map_err(|e| RocksDbStorageError::RocksDbError {
-            operation,
-            source: e,
-        })?;
+        let (_, bytes) = value.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         let value = Self::decode(bytes.to_vec())?;
         Ok(Some(value))
     }
 
-    fn get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf_name: &str, operation: &'static str, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Option<Self::Item>, RocksDbStorageError> {
+    fn get_cf(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        cf_name: &str,
+        operation: &'static str,
+        key_prefix_opt: Option<&str>,
+        ordering: Ordering,
+    ) -> Result<Option<Self::Item>, RocksDbStorageError> {
         let cf = db.cf_handle(cf_name).unwrap();
 
         let mut options = rocksdb::ReadOptions::default();
@@ -160,7 +187,7 @@ pub trait RocksdbModel {
         let default_key_prefix = format!("{}_", Self::key_prefix());
         let key_prefix = key_prefix_opt.unwrap_or(&default_key_prefix);
         options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
-       
+
         let iterator_mode = match ordering {
             Ordering::Ascending => rocksdb::IteratorMode::Start,
             Ordering::Descending => rocksdb::IteratorMode::End,
@@ -171,26 +198,28 @@ pub trait RocksdbModel {
         let Some(value) = iterator.next() else {
             return Ok(None);
         };
-        let (_, key_bytes) = value.map_err(|e| RocksDbStorageError::RocksDbError {
-            operation,
-            source: e,
-        })?;
+        let (_, key_bytes) = value.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         let key = String::from_utf8(key_bytes.to_vec()).unwrap();
 
         // get the value
-        let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
+        let value = tx
+            .get(&key)
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
         let value = Self::decode(bytes)?;
         Ok(Some(value))
     }
 
-    fn multi_get_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, cf_name: &str, key_prefix: &str, ordering: Ordering) -> Result<Vec<Self::Item>, RocksDbStorageError> {
+    fn multi_get_cf(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        cf_name: &str,
+        key_prefix: &str,
+        ordering: Ordering,
+    ) -> Result<Vec<Self::Item>, RocksDbStorageError> {
         let cf = db.cf_handle(cf_name).unwrap();
-        
+
         let mut options = rocksdb::ReadOptions::default();
         options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
 
@@ -200,23 +229,22 @@ pub trait RocksdbModel {
         };
 
         // get all the keys
-        let iterator = tx.iterator_cf_opt(cf,options, iterator_mode);
-        let keys: Vec<String> = iterator.map(|item| {
-            // TODO: properly handle errors and avoid unwraps
-            let (_, value) = item.unwrap();
-            // the value is the key in the default CF
-            String::from_utf8(value.to_vec()).unwrap()
-        })
-        .collect();
+        let iterator = tx.iterator_cf_opt(cf, options, iterator_mode);
+        let keys: Vec<String> = iterator
+            .map(|item| {
+                // TODO: properly handle errors and avoid unwraps
+                let (_, value) = item.unwrap();
+                // the value is the key in the default CF
+                String::from_utf8(value.to_vec()).unwrap()
+            })
+            .collect();
 
         // get all the values
         let mut values = vec![];
         for key in keys {
-            let value = tx.get(&key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-                operation,
-                source: e,
-            })?;
+            let value = tx
+                .get(&key)
+                .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
             let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
             let value = Self::decode(bytes)?;
             values.push(value);
@@ -235,18 +263,27 @@ pub trait RocksdbModel {
         Ok(count)
     }
 
-    fn count_cf(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, cf_name: &str, key_prefix: Option<&str>) -> Result<u64, RocksDbStorageError> {
+    fn count_cf(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        cf_name: &str,
+        key_prefix: Option<&str>,
+    ) -> Result<u64, RocksDbStorageError> {
         let cf = db.cf_handle(cf_name).unwrap();
         let mut options = rocksdb::ReadOptions::default();
         // TODO: Should default to the model's key prefix instead of empty string?
         let key_prefix = key_prefix.unwrap_or_default();
         options.set_iterate_range(rocksdb::PrefixRange(key_prefix.as_bytes()));
-        let iterator = tx.iterator_cf_opt(cf,options, rocksdb::IteratorMode::Start);
+        let iterator = tx.iterator_cf_opt(cf, options, rocksdb::IteratorMode::Start);
         let count = iterator.count() as u64;
         Ok(count)
     }
 
-    fn multi_get(tx: &Transaction<'_, TransactionDB>, key_prefix_opt: Option<&str>, ordering: Ordering) -> Result<Vec<Self::Item>, RocksDbStorageError> {
+    fn multi_get(
+        tx: &Transaction<'_, TransactionDB>,
+        key_prefix_opt: Option<&str>,
+        ordering: Ordering,
+    ) -> Result<Vec<Self::Item>, RocksDbStorageError> {
         let mut options = rocksdb::ReadOptions::default();
 
         let default_key_prefix = format!("{}_", Self::key_prefix());
@@ -258,12 +295,13 @@ pub trait RocksdbModel {
             Ordering::Descending => rocksdb::IteratorMode::End,
         };
 
-        let iterator = tx.iterator_opt( iterator_mode, options);
-        let values = iterator.map(|item| {
-            let (_, bytes) = item.unwrap();
-            Self::decode(bytes.to_vec()).unwrap()
-        })
-        .collect();
+        let iterator = tx.iterator_opt(iterator_mode, options);
+        let values = iterator
+            .map(|item| {
+                let (_, bytes) = item.unwrap();
+                Self::decode(bytes.to_vec()).unwrap()
+            })
+            .collect();
 
         Ok(values)
     }
@@ -276,29 +314,33 @@ pub trait RocksdbModel {
         for value in iterator {
             let (key, _) = value.unwrap();
             tx.delete(key)
-                .map_err(|e| RocksDbStorageError::RocksDbError {
-                    operation,
-                    source: e,
-                })?;
+                .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         }
 
         Ok(())
     }
 
-    fn delete(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, key: &str) -> Result<(), RocksDbStorageError> {
+    fn delete(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        key: &str,
+    ) -> Result<(), RocksDbStorageError> {
         // we need to have the main value to delete CF values later
         let value = Self::get(tx, operation, key)?;
         tx.delete(key)
-            .map_err(|e| RocksDbStorageError::RocksDbError {
-            operation,
-            source: e,
-        })?;
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         // we also need to delete related CF keys
         Self::delete_from_cfs(db.clone(), tx, operation, &value)?;
         Ok(())
     }
 
-    fn delete_from_cfs(_db: Arc<TransactionDB>, _tx: &Transaction<'_, TransactionDB>, _operation: &'static str, _value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn delete_from_cfs(
+        _db: Arc<TransactionDB>,
+        _tx: &Transaction<'_, TransactionDB>,
+        _operation: &'static str,
+        _value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // It's up to concrete models to override this method
         // We provide a default implementation to simplify all the models that do not have column families
         Ok(())

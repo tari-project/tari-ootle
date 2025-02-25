@@ -25,9 +25,9 @@ use std::sync::Arc;
 use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::LastProposed;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LastProposedModelData {
@@ -55,26 +55,41 @@ impl RocksdbModel for LastProposedModel {
     }
 
     fn key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", Self::key_prefix(), value.last_proposed.block_id, value.last_proposed.height)
+        format!(
+            "{}_{}_{}",
+            Self::key_prefix(),
+            value.last_proposed.block_id,
+            value.last_proposed.height
+        )
     }
 
     fn column_families() -> Vec<&'static str> {
         vec![TimestampColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        TimestampColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        TimestampColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
 
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         TimestampColumnFamily::delete(db.clone(), tx, operation, item)?;
-        
+
         Ok(())
     }
 }

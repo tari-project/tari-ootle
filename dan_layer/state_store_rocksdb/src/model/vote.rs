@@ -22,6 +22,7 @@
 
 use tari_common_types::types::FixedHash;
 use tari_dan_storage::consensus_models::{BlockId, Vote};
+
 use crate::model::traits::RocksdbModel;
 
 pub struct VoteModel {}

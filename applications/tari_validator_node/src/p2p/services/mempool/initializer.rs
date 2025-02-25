@@ -32,7 +32,11 @@ use tokio::{sync::mpsc, task, task::JoinHandle};
 #[cfg(feature = "metrics")]
 use super::metrics::PrometheusMempoolMetrics;
 use crate::{
-    consensus::ConsensusHandle, p2p::services::mempool::{handle::MempoolHandle, service::MempoolService}, state_store::ValidatorNodeStateStore, transaction_validators::TransactionValidationError, validator::Validator
+    consensus::ConsensusHandle,
+    p2p::services::mempool::{handle::MempoolHandle, service::MempoolService},
+    state_store::ValidatorNodeStateStore,
+    transaction_validators::TransactionValidationError,
+    validator::Validator,
 };
 
 const LOG_TARGET: &str = "tari::dan::validator_node::mempool";

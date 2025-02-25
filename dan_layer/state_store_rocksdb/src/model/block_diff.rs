@@ -23,7 +23,12 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{self, BlockId, SubstateChange};
 use tari_engine_types::substate::SubstateId;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::{bor_decode, bor_encode, RocksdbTimestamp}};
+
+use crate::{
+    error::RocksDbStorageError,
+    model::traits::RocksdbModel,
+    utils::{bor_decode, bor_encode, RocksdbTimestamp},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockDiffData {
@@ -36,10 +41,7 @@ pub struct BlockDiffData {
 
 impl BlockDiffData {
     pub fn load(block_id: BlockId, diff: Vec<Self>) -> consensus_models::BlockDiff {
-        let changes = diff
-            .into_iter()
-            .map(|d| d.change)
-            .collect::<Vec<_>>();
+        let changes = diff.into_iter().map(|d| d.change).collect::<Vec<_>>();
         consensus_models::BlockDiff { block_id, changes }
     }
 }
@@ -52,11 +54,10 @@ impl BlockDiffModel {
             Some(substate_id) => format!("{}_{}_{}_", Self::key_prefix(), block_id, substate_id),
             None => format!("{}_{}_", Self::key_prefix(), block_id),
         }
-        
     }
 
     pub fn build_key_prefix(block_id: BlockId, substate_id_opt: Option<&SubstateId>) -> String {
-        Self::build_key_prefix_str(&block_id.to_string(), substate_id_opt)    
+        Self::build_key_prefix_str(&block_id.to_string(), substate_id_opt)
     }
 }
 
@@ -68,14 +69,22 @@ impl RocksdbModel for BlockDiffModel {
     }
 
     fn key(value: &Self::Item) -> String {
-        format!("{}_{}_{}_{}", Self::key_prefix(), value.block_id, value.substate_id, value.created_at)
+        format!(
+            "{}_{}_{}_{}",
+            Self::key_prefix(),
+            value.block_id,
+            value.substate_id,
+            value.created_at
+        )
     }
 
-    // We need to override the default trait implementations to encode with tari_bor to avoid a bincode conflict with SubstateChange
+    // We need to override the default trait implementations to encode with tari_bor to avoid a bincode conflict with
+    // SubstateChange
     fn encode(value: &Self::Item) -> Result<Vec<u8>, RocksDbStorageError> {
         let bytes = bor_encode(value)?;
         Ok(bytes)
     }
+
     fn decode(bytes: Vec<u8>) -> Result<Self::Item, RocksDbStorageError> {
         let value: Self::Item = bor_decode(&bytes)?;
         Ok(value)

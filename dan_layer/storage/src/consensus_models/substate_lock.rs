@@ -4,9 +4,7 @@
 use std::{fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{
-    LockIntent, SubstateAddress, SubstateLockType, SubstateRequirementRef, ToSubstateAddress
-};
+use tari_dan_common_types::{LockIntent, SubstateAddress, SubstateLockType, SubstateRequirementRef, ToSubstateAddress};
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
 

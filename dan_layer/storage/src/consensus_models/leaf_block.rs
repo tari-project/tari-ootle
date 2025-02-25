@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{Epoch, NodeHeight};
 

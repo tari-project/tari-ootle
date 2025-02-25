@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_dan_storage::consensus_models::LastSentVote;
+
 use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 pub struct LastSentVoteModel {}

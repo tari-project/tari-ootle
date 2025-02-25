@@ -23,6 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, NodeHeight};
 use tari_dan_storage::consensus_models::{self, BlockId, VersionedStateHashTreeDiff};
+
 use crate::{model::traits::RocksdbModel, utils::RocksdbSeq};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,8 +48,7 @@ impl PendingStateTreeDiffModel {
         let height = height
             .map(|h|
                 // RocksdbSeq allows us to properly order keys by height
-                RocksdbSeq(h.as_u64()).to_string()
-            )
+                RocksdbSeq(h.as_u64()).to_string())
             .unwrap_or_default();
         format!("{}_{}_{}", Self::key_prefix(), block_id, height)
     }

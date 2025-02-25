@@ -44,9 +44,7 @@ pub enum RocksDbStorageError {
         source: bincode::error::DecodeError,
     },
     #[error("General error: {message}")]
-    GeneralError {
-        message: String,
-    },
+    GeneralError { message: String },
     #[error("[{operation}] Not all queried transactions were found: {details}")]
     NotAllTransactionsFound { operation: &'static str, details: String },
 }
@@ -58,9 +56,19 @@ impl From<RocksDbStorageError> for StorageError {
                 reason: source.to_string(),
             },
             RocksDbStorageError::NotFound { key, operation } => StorageError::NotFound { item: operation, key },
-            RocksDbStorageError::EncodeError { source } => StorageError::EncodingError { operation: "", item: "", details: source.to_string() },
-            RocksDbStorageError::DecodeError { source } => StorageError::DecodingError { operation: "", item: "", details: source.to_string() },
-            RocksDbStorageError::GeneralError { .. } => StorageError::General { details: source.to_string() },
+            RocksDbStorageError::EncodeError { source } => StorageError::EncodingError {
+                operation: "",
+                item: "",
+                details: source.to_string(),
+            },
+            RocksDbStorageError::DecodeError { source } => StorageError::DecodingError {
+                operation: "",
+                item: "",
+                details: source.to_string(),
+            },
+            RocksDbStorageError::GeneralError { .. } => StorageError::General {
+                details: source.to_string(),
+            },
             other => StorageError::General {
                 details: other.to_string(),
             },

@@ -2,19 +2,20 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::{
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-};
+use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 
 mod foreign_proposals_test {
     use tari_dan_common_types::{NumPreshards, ShardGroup};
-    use tari_dan_storage::consensus_models::{Block, BlockPledge, ForeignProposal, ForeignProposalStatus, QuorumCertificate};
+    use tari_dan_storage::consensus_models::{
+        Block,
+        BlockPledge,
+        ForeignProposal,
+        ForeignProposalStatus,
+        QuorumCertificate,
+    };
 
-    use crate::helper::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
-    
     use super::*;
+    use crate::helper::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
 
     #[test]
     fn foreign_proposals_sqlite() {
@@ -35,7 +36,7 @@ mod foreign_proposals_test {
         let network = Default::default();
         let shard_group = ShardGroup::all_shards(NumPreshards::P4);
         let epoch = Epoch::zero();
-        
+
         let block = Block::zero_block(network, NumPreshards::P64);
         tx.blocks_insert(&block).unwrap();
 
@@ -64,9 +65,9 @@ mod foreign_proposals_test {
 
         // foreign_proposals_get_all_new
         // TODO: uncomment and test when "locked_block" functionality is implemented
-        //let res = tx.foreign_proposals_get_all_new(block.id(), 10).unwrap();
-        //assert_eq!(res.len(), 1);
-        //assert_eq_debug(&res[0], &proposal_1);
+        // let res = tx.foreign_proposals_get_all_new(block.id(), 10).unwrap();
+        // assert_eq!(res.len(), 1);
+        // assert_eq_debug(&res[0], &proposal_1);
 
         // foreign_proposal_get_all_pending
         // TODO: uncomment and test when "get_block_ids_with_commands_between" is implemented

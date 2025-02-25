@@ -21,7 +21,11 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    borrow::Borrow, collections::{HashMap, HashSet}, marker::PhantomData, ops::RangeInclusive, sync::Arc
+    borrow::Borrow,
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    ops::RangeInclusive,
+    sync::Arc,
 };
 
 use indexmap::IndexMap;
@@ -38,7 +42,8 @@ use tari_dan_common_types::{
     SubstateAddress,
     SubstateRequirement,
     ToSubstateAddress,
-    VersionedSubstateId, VersionedSubstateIdRef,
+    VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
     consensus_models::{
@@ -74,6 +79,7 @@ use tari_dan_storage::{
         TransactionPoolRecord,
         TransactionPoolStage,
         TransactionRecord,
+        ValidatorConsensusStats,
         Vote,
     },
     Ordering,
@@ -84,17 +90,51 @@ use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfiden
 use tari_state_tree::{Node, NodeKey, Version};
 use tari_transaction::TransactionId;
 use tari_utilities::hex::Hex;
-use tari_dan_storage::consensus_models::ValidatorConsensusStats;
 
-use crate::{error::RocksDbStorageError, model::{self, block::BlockModel, block_diff::{BlockDiffData, BlockDiffModel}, block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData}, burnt_utxo::BurntUtxoModel, epoch_checkpoint::EpochCheckpointModel, evicted_node::EvictedNodeModel, foreign_parked_blocks::ForeignParkedBlockModel, foreign_proposal::ForeignProposalModel, foreign_receive_counter::ForeignReceiveCounterModel, foreign_send_counter::ForeignSendCounterModel, foreign_substate_pledge::ForeignSubstatePledgeModel, high_qc::HighQcModel, last_executed::LastExecutedModel, last_proposed::LastProposedModel, last_sent_vote::LastSentVoteModel, last_voted::LastVotedModel, leaf_block::LeafBlockModel, locked_block::LockedBlockModel, missing_transactions::MissingTransactionModel, traits::{ModelColumnFamily, RocksdbModel}, pending_state_tree_diff::PendingStateTreeDiffModel, quorum_certificate::QuorumCertificateModel, state_tree::StateTreeModel, state_tree_shard_versions::StateTreeShardVersionModel, substate::SubstateModel, substate_locks::SubstateLockModel, transaction::TransactionModel, transaction_pool::TransactionPoolModel, transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData}, vote::VoteModel}};
+use crate::{
+    error::RocksDbStorageError,
+    model::{
+        self,
+        block::BlockModel,
+        block_diff::{BlockDiffData, BlockDiffModel},
+        block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData},
+        burnt_utxo::BurntUtxoModel,
+        epoch_checkpoint::EpochCheckpointModel,
+        evicted_node::EvictedNodeModel,
+        foreign_parked_blocks::ForeignParkedBlockModel,
+        foreign_proposal::ForeignProposalModel,
+        foreign_receive_counter::ForeignReceiveCounterModel,
+        foreign_send_counter::ForeignSendCounterModel,
+        foreign_substate_pledge::ForeignSubstatePledgeModel,
+        high_qc::HighQcModel,
+        last_executed::LastExecutedModel,
+        last_proposed::LastProposedModel,
+        last_sent_vote::LastSentVoteModel,
+        last_voted::LastVotedModel,
+        leaf_block::LeafBlockModel,
+        locked_block::LockedBlockModel,
+        missing_transactions::MissingTransactionModel,
+        pending_state_tree_diff::PendingStateTreeDiffModel,
+        quorum_certificate::QuorumCertificateModel,
+        state_tree::StateTreeModel,
+        state_tree_shard_versions::StateTreeShardVersionModel,
+        substate::SubstateModel,
+        substate_locks::SubstateLockModel,
+        traits::{ModelColumnFamily, RocksdbModel},
+        transaction::TransactionModel,
+        transaction_pool::TransactionPoolModel,
+        transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData},
+        vote::VoteModel,
+    },
+};
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
 pub struct RocksDbStateStoreReadTransaction<'a, TAddr> {
-    //transaction: RocksDbTransaction<'a>,
-    //db: MutexGuard<'a, TransactionDB>,
-    //tx: UnsafeCell<MutexGuard<'a, Transaction<'a, TransactionDB>>>,
-    tx:  Transaction<'a, TransactionDB>,
+    // transaction: RocksDbTransaction<'a>,
+    // db: MutexGuard<'a, TransactionDB>,
+    // tx: UnsafeCell<MutexGuard<'a, Transaction<'a, TransactionDB>>>,
+    tx: Transaction<'a, TransactionDB>,
     db: Arc<TransactionDB>,
     _addr: PhantomData<TAddr>,
 }
@@ -113,8 +153,7 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
     }
 
     pub(crate) fn commit(self) -> Result<(), RocksDbStorageError> {
-        self.tx.commit()
-        .map_err(|source| RocksDbStorageError::RocksDbError {
+        self.tx.commit().map_err(|source| RocksDbStorageError::RocksDbError {
             source,
             operation: "commit",
         })?;
@@ -122,8 +161,7 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
     }
 
     pub(crate) fn rollback(self) -> Result<(), RocksDbStorageError> {
-        self.tx.rollback()
-        .map_err(|source| RocksDbStorageError::RocksDbError {
+        self.tx.rollback().map_err(|source| RocksDbStorageError::RocksDbError {
             source,
             operation: "commit",
         })?;
@@ -175,14 +213,13 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         &self,
         transaction_ids: ITx,
         block_ids: IBlk,
-    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModelData>, RocksDbStorageError>
-    {
+    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModelData>, RocksDbStorageError> {
         // TODO: optimize this query in RocksDB
         let transaction_ids: Vec<String> = transaction_ids.map(|id| id.to_string()).collect();
         let mut res = IndexMap::new();
         for block_id in block_ids {
             let key_value = TransactionPoolStateUpdateModel::key_prefix_by_block_id_str(block_id);
-            let updates = TransactionPoolStateUpdateModel::multi_get( &self.tx, Some(&key_value), Ordering::Ascending)?;
+            let updates = TransactionPoolStateUpdateModel::multi_get(&self.tx, Some(&key_value), Ordering::Ascending)?;
             updates
                 .iter()
                 .filter(|u| {
@@ -206,7 +243,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         end_block: &BlockId,
     ) -> Result<Vec<String>, RocksDbStorageError> {
         debug!(target: LOG_TARGET, "get_block_ids_between: start: {start_block}, end: {end_block}");
-        
+
         let mut block_ids = vec![];
 
         let mut block_id = *end_block;
@@ -234,12 +271,19 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     pub(crate) fn get_commit_block_id(&self) -> Result<BlockId, StorageError> {
-        let block_opt = BlockModel::get_cf(self.db.clone(), &self.tx, model::block::IsCommittedColumnFamily::NAME, "get_commit_block_id", None, Ordering::Descending)?;
+        let block_opt = BlockModel::get_cf(
+            self.db.clone(),
+            &self.tx,
+            model::block::IsCommittedColumnFamily::NAME,
+            "get_commit_block_id",
+            None,
+            Ordering::Descending,
+        )?;
         match block_opt {
             Some(block) => Ok(*block.id()),
             None => Err(StorageError::General {
-                details: "get_commit_block_id: no commited block found".to_string() 
-            })
+                details: "get_commit_block_id: no commited block found".to_string(),
+            }),
         }
     }
 
@@ -253,7 +297,9 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
 
     fn get_current_locked_block(&self) -> Result<LockedBlock, StorageError> {
         let value = LockedBlockModel::get_first(&self.tx, "get_current_locked_block", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No locked block stored in database".to_string() })?;
+            .ok_or_else(|| StorageError::General {
+                details: "No locked block stored in database".to_string(),
+            })?;
         Ok(value.locked_block)
     }
 }
@@ -265,7 +311,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn last_sent_vote_get(&self) -> Result<LastSentVote, StorageError> {
         let value = LastSentVoteModel::get_first(&self.tx, "last_sent_vote_get", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No last sent vote stored in database".to_string() })?;
+            .ok_or_else(|| StorageError::General {
+                details: "No last sent vote stored in database".to_string(),
+            })?;
         Ok(value)
     }
 
@@ -273,16 +321,26 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         type Cf = crate::model::last_voted::TimestampColumnFamily;
         let cf = Cf::name();
 
-        let value = LastVotedModel::
-            get_cf(self.db.clone(), &self.tx, cf, "last_voted_get", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No last voted stored in database".to_string() })?;
+        let value = LastVotedModel::get_cf(
+            self.db.clone(),
+            &self.tx,
+            cf,
+            "last_voted_get",
+            None,
+            Ordering::Descending,
+        )?
+        .ok_or_else(|| StorageError::General {
+            details: "No last voted stored in database".to_string(),
+        })?;
 
         Ok(value.last_voted)
     }
 
     fn last_executed_get(&self) -> Result<LastExecuted, StorageError> {
         let value = LastExecutedModel::get_first(&self.tx, "last_executed_get", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No last executed stored in database".to_string() })?;
+            .ok_or_else(|| StorageError::General {
+                details: "No last executed stored in database".to_string(),
+            })?;
         Ok(value)
     }
 
@@ -290,9 +348,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         type Cf = crate::model::last_proposed::TimestampColumnFamily;
         let cf = Cf::name();
 
-        let value = LastProposedModel::
-            get_cf(self.db.clone(), &self.tx, cf, "last_proposed_get", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No last executed stored in database".to_string() })?;
+        let value = LastProposedModel::get_cf(
+            self.db.clone(),
+            &self.tx,
+            cf,
+            "last_proposed_get",
+            None,
+            Ordering::Descending,
+        )?
+        .ok_or_else(|| StorageError::General {
+            details: "No last executed stored in database".to_string(),
+        })?;
 
         Ok(value.last_proposed)
     }
@@ -300,21 +366,27 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError> {
         let key_prefix = LockedBlockModel::key_prefix_by_epoch(epoch);
         let value = LockedBlockModel::get_first(&self.tx, "locked_block_get", Some(&key_prefix), Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No locked block stored in database".to_string() })?;
+            .ok_or_else(|| StorageError::General {
+                details: "No locked block stored in database".to_string(),
+            })?;
         Ok(value.locked_block)
     }
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
         let key_prefix = LeafBlockModel::key_prefix_by_epoch(epoch);
         let value = LeafBlockModel::get_first(&self.tx, "leaf_block_get", Some(&key_prefix), Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No leaf block stored in database".to_string() })?;
+            .ok_or_else(|| StorageError::General {
+                details: "No leaf block stored in database".to_string(),
+            })?;
         Ok(value.leaf_block)
     }
 
     fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError> {
         let key_prefix = HighQcModel::key_prefix_by_epoch(epoch);
         let value = HighQcModel::get_first(&self.tx, "high_qc_get", Some(&key_prefix), Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No high qc stored in database".to_string() })?;
+            .ok_or_else(|| StorageError::General {
+                details: "No high qc stored in database".to_string(),
+            })?;
         Ok(value.high_qc)
     }
 
@@ -326,7 +398,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         for block_id in block_ids {
             let key = ForeignProposalModel::key_from_block_id(block_id);
-            let res = ForeignProposalModel::get_first(&self.tx, "foreign_proposals_get_any", Some(&key), Ordering::Descending)?;
+            let res = ForeignProposalModel::get_first(
+                &self.tx,
+                "foreign_proposals_get_any",
+                Some(&key),
+                Ordering::Descending,
+            )?;
             if let Some(proposal) = res {
                 proposals.push(proposal);
             }
@@ -347,8 +424,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         type Cf = crate::model::foreign_proposal::UnconfirmedColumnFamily;
         let cf = Cf::name();
         let key_prefix = Cf::key_prefix_by_epoch(epoch);
-        let res = ForeignProposalModel::get_cf(self.db.clone(), &self.tx, cf, "foreign_proposals_has_unconfirmed", Some(&key_prefix), Ordering::Ascending)?;
-        
+        let res = ForeignProposalModel::get_cf(
+            self.db.clone(),
+            &self.tx,
+            cf,
+            "foreign_proposals_has_unconfirmed",
+            Some(&key_prefix),
+            Ordering::Ascending,
+        )?;
+
         Ok(res.is_some())
     }
 
@@ -376,17 +460,27 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         // get all proposals with status "New"
         let key_prefix = Cf::key_prefix_from_epoch_and_status(locked.epoch, ForeignProposalStatus::New);
-        let new_proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, Ordering::Ascending)?;
-        proposals.extend(new_proposals
-            .into_iter()
-            .map(|f| (*f.block.id(), f)));
+        let new_proposals = ForeignProposalModel::multi_get_cf(
+            self.db.clone(),
+            &self.tx,
+            operation,
+            cf,
+            &key_prefix,
+            Ordering::Ascending,
+        )?;
+        proposals.extend(new_proposals.into_iter().map(|f| (*f.block.id(), f)));
 
         // get all proposals with status "Proposed"
         let key_prefix = Cf::key_prefix_from_epoch_and_status(locked.epoch, ForeignProposalStatus::Proposed);
-        let proposed_proposals = ForeignProposalModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, Ordering::Ascending)?;
-        proposals.extend(proposed_proposals
-            .into_iter()
-            .map(|f| (*f.block.id(), f)));
+        let proposed_proposals = ForeignProposalModel::multi_get_cf(
+            self.db.clone(),
+            &self.tx,
+            operation,
+            cf,
+            &key_prefix,
+            Ordering::Ascending,
+        )?;
+        proposals.extend(proposed_proposals.into_iter().map(|f| (*f.block.id(), f)));
 
         let proposals: Vec<ForeignProposal> = proposals
             .into_values()
@@ -402,7 +496,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         // TODO: use "limit" in rocksdb
 
-        Ok(proposals)    
+        Ok(proposals)
     }
 
     fn foreign_proposal_get_all_pending(
@@ -436,14 +530,24 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {
         let key_prefix = ForeignSendCounterModel::key_prefix_by_block_id(block_id);
-        let value = ForeignSendCounterModel::get_first(&self.tx, "foreign_send_counters_get", Some(&key_prefix), Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No foreign send counter in database".to_string() })?;
+        let value = ForeignSendCounterModel::get_first(
+            &self.tx,
+            "foreign_send_counters_get",
+            Some(&key_prefix),
+            Ordering::Descending,
+        )?
+        .ok_or_else(|| StorageError::General {
+            details: "No foreign send counter in database".to_string(),
+        })?;
         Ok(value.counters)
     }
 
     fn foreign_receive_counters_get(&self) -> Result<ForeignReceiveCounters, StorageError> {
-        let value = ForeignReceiveCounterModel::get_first(&self.tx, "foreign_send_counters_get", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No foreign receive counter in database".to_string() })?;
+        let value =
+            ForeignReceiveCounterModel::get_first(&self.tx, "foreign_send_counters_get", None, Ordering::Descending)?
+                .ok_or_else(|| StorageError::General {
+                details: "No foreign receive counter in database".to_string(),
+            })?;
         Ok(value.counters)
     }
 
@@ -476,8 +580,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let mut transactions: Vec<TransactionRecord> =
             TransactionModel::multi_get(&self.tx, None, Ordering::Ascending)?
-            .into_iter()
-            .collect();
+                .into_iter()
+                .collect();
 
         // pagination
         transactions = transactions
@@ -496,10 +600,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<BlockTransactionExecution, StorageError> {
         let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, Some(block));
         let executions = BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
-        
+
         match executions.first() {
             Some(execution) => Ok(execution.transaction_execution.clone()),
-            None => Err(StorageError::NotFound { item: "transaction_execution", key: format!("tx_id={}, block={}", tx_id, block) }),
+            None => Err(StorageError::NotFound {
+                item: "transaction_execution",
+                key: format!("tx_id={}, block={}", tx_id, block),
+            }),
         }
     }
 
@@ -526,14 +633,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let mut executions: Vec<BlockTransactionExecutionModelData> = vec![];
         for block_id in block_ids {
             let block_id = BlockId::new(FixedHash::from_hex(&block_id).unwrap());
-            let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, Some(&block_id));
-            let block_executions = BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
+            let key_prefix =
+                BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, Some(&block_id));
+            let block_executions =
+                BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
             if let Some(exec) = block_executions.first() {
                 executions.push(exec.clone());
             }
         }
         // get the latest execution
-        executions.sort_by(|a,b| b.created_at.cmp(&a.created_at));
+        executions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         let execution = executions.first();
 
         if let Some(execution) = execution {
@@ -547,7 +656,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             let key = BlockModel::key_from_block_id(execution.transaction_execution.block_id());
             let block = BlockModel::get(&self.tx, operation, &key)?;
             if block.is_committed() {
-                return Ok(execution.transaction_execution)
+                return Ok(execution.transaction_execution);
             }
         }
 
@@ -570,10 +679,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let cf = Cf::name();
         let key_prefix = Cf::build_key_prefix(epoch, Some(height));
 
-        let block_ids =
-            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_all_ids_by_height",  cf, &key_prefix)?
-                .into_iter()
-                .collect();
+        let block_ids = BlockModel::multi_get_ids_by_cf(
+            self.db.clone(),
+            &self.tx,
+            "blocks_get_all_ids_by_height",
+            cf,
+            &key_prefix,
+        )?
+        .into_iter()
+        .collect();
 
         Ok(block_ids)
     }
@@ -583,17 +697,25 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let cf = Cf::name();
         let key_prefix = Cf::build_key_prefix(epoch, Some(NodeHeight(0)));
 
-        let block_id =
-            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_genesis_for_epoch",  cf, &key_prefix)?
-            .into_iter()
-            .next();
+        let block_id = BlockModel::multi_get_ids_by_cf(
+            self.db.clone(),
+            &self.tx,
+            "blocks_get_genesis_for_epoch",
+            cf,
+            &key_prefix,
+        )?
+        .into_iter()
+        .next();
 
         if let Some(block_id) = block_id {
             let key = BlockModel::key_from_block_id(&block_id);
-            let block= BlockModel::get(&self.tx, "blocks_get_genesis_for_epoch", &key)?;
+            let block = BlockModel::get(&self.tx, "blocks_get_genesis_for_epoch", &key)?;
             Ok(block)
         } else {
-            Err(RocksDbStorageError::GeneralError { message: "Genesis block not found".to_owned() }.into())
+            Err(RocksDbStorageError::GeneralError {
+                message: "Genesis block not found".to_owned(),
+            }
+            .into())
         }
     }
 
@@ -606,21 +728,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let key_prefix = Cf::build_key_prefix(epoch, None);
 
         let block_ids: Vec<BlockId> =
-            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_last_n_in_epoch",  cf, &key_prefix)?
-            .into_iter()
-            .collect();
+            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_last_n_in_epoch", cf, &key_prefix)?
+                .into_iter()
+                .collect();
 
         let mut blocks = vec![];
         for block_id in block_ids {
             let key = BlockModel::key_from_block_id(&block_id);
-            let block= BlockModel::get(&self.tx, "blocks_get_last_n_in_epoch", &key)?;
+            let block = BlockModel::get(&self.tx, "blocks_get_last_n_in_epoch", &key)?;
             if block.is_committed() {
                 blocks.push(block);
             }
         }
-        // order by descending height 
+        // order by descending height
         blocks.sort_by_key(|b| std::cmp::Reverse(b.height()));
-        
+
         let last_n = blocks.into_iter().take(n).collect();
 
         Ok(last_n)
@@ -635,10 +757,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         include_dummy_blocks: bool,
         limit: u64,
     ) -> Result<Vec<Block>, StorageError> {
-        // TODO: this operation could be optimized by creating a new column family that includes shard_group as part of the key
+        // TODO: this operation could be optimized by creating a new column family that includes shard_group as part of
+        // the key
 
         let operation = "blocks_get_all_between";
-        
+
         if start_block_height > end_block_height {
             return Err(StorageError::QueryError {
                 reason: format!(
@@ -653,15 +776,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // in rocksdb, the upper bound of a range is not included, and we want the blocks with the end height
         let upper_prefix = Cf::build_key_prefix(epoch, Some(end_block_height + NodeHeight(1)));
 
-        let block_ids: Vec<BlockId> =
-            BlockModel::multi_get_ids_by_cf_range(self.db.clone(), &self.tx, operation, cf, &lower_prefix, &upper_prefix)?
-            .into_iter()
-            .collect();
+        let block_ids: Vec<BlockId> = BlockModel::multi_get_ids_by_cf_range(
+            self.db.clone(),
+            &self.tx,
+            operation,
+            cf,
+            &lower_prefix,
+            &upper_prefix,
+        )?
+        .into_iter()
+        .collect();
 
         let mut blocks = vec![];
         for block_id in block_ids {
             let key = BlockModel::key_from_block_id(&block_id);
-            let block= BlockModel::get(&self.tx, operation, &key)?;
+            let block = BlockModel::get(&self.tx, operation, &key)?;
 
             if !include_dummy_blocks && block.is_dummy() {
                 continue;
@@ -671,9 +800,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 blocks.push(block);
             }
         }
-        // order by ascending height 
+        // order by ascending height
         blocks.sort_by_key(|a| a.height());
-        
+
         let first_n = blocks.into_iter().take(limit.try_into().unwrap()).collect();
 
         Ok(first_n)
@@ -702,7 +831,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         while block_id != BlockId::genesis() {
             let key = BlockModel::key_from_block_id(&block_id);
             let block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;
-            
+
             if block.parent() == ancestor {
                 return Ok(true);
             }
@@ -717,9 +846,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         type Cf = crate::model::block::ParentIdColumnFamily;
         let cf = Cf::name();
         let key_prefix = Cf::build_key_prefix(parent_id);
-        
-        let block_ids =
-            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_ids_by_parent",  cf, &key_prefix)?
+
+        let block_ids = BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_ids_by_parent",  cf, &key_prefix)?
             .into_iter()
             // Exclude the genesis block
             .filter(|block_id| block_id != parent_id)
@@ -739,7 +867,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             let block = BlockModel::get(&self.tx, "blocks_get_all_by_parent", &key)?;
             blocks.push(block);
         }
-        
+
         Ok(blocks)
     }
 
@@ -753,7 +881,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let mut blocks = vec![];
         let mut i = 0;
         let key = BlockModel::key_from_block_id(block_id);
-        let initial_block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;  
+        let initial_block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;
         let mut current_block_id = *initial_block.parent();
         while i < limit && current_block_id != BlockId::genesis() {
             let key = BlockModel::key_from_block_id(&current_block_id);
@@ -770,12 +898,18 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         type Cf = crate::model::missing_transactions::BlockIdColumnFamily;
         let cf = Cf::name();
         let key_prefix = Cf::build_key_prefix_by_block(block_id);
-        
-        let transaction_ids =
-            MissingTransactionModel::multi_get_cf(self.db.clone(), &self.tx, "blocks_get_pending_transactions",  cf, &key_prefix, Ordering::Ascending)?
-            .into_iter()
-            .map(|value| value.transaction_id)
-            .collect();
+
+        let transaction_ids = MissingTransactionModel::multi_get_cf(
+            self.db.clone(),
+            &self.tx,
+            "blocks_get_pending_transactions",
+            cf,
+            &key_prefix,
+            Ordering::Ascending,
+        )?
+        .into_iter()
+        .map(|value| value.transaction_id)
+        .collect();
 
         Ok(transaction_ids)
     }
@@ -795,19 +929,25 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // in rocksdb, the upper bound of a range is not included, and we want the blocks with the end epoch
         let upper_prefix = Cf::build_key_prefix(epoch_range.end() + &Epoch(1), None);
 
-        let block_ids: Vec<BlockId> =
-            BlockModel::multi_get_ids_by_cf_range(self.db.clone(), &self.tx, operation,  cf, &lower_prefix, &upper_prefix)?
-            .into_iter()
-            .collect();
+        let block_ids: Vec<BlockId> = BlockModel::multi_get_ids_by_cf_range(
+            self.db.clone(),
+            &self.tx,
+            operation,
+            cf,
+            &lower_prefix,
+            &upper_prefix,
+        )?
+        .into_iter()
+        .collect();
 
         let mut blocks = vec![];
         for block_id in block_ids {
             let key = BlockModel::key_from_block_id(&block_id);
-            let block= BlockModel::get(&self.tx, "blocks_get_any_with_epoch_range", &key)?;
+            let block = BlockModel::get(&self.tx, "blocks_get_any_with_epoch_range", &key)?;
 
             if let Some(vn) = validator_public_key {
                 if block.proposed_by() != vn {
-                    continue
+                    continue;
                 }
             }
 
@@ -855,28 +995,28 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                             7 => res = block.proposed_by().to_string().contains(filter),
                             _ => (),
                         }
-                    } 
+                    }
                 }
             }
             res
         };
 
         // list all the blocks
-        let mut blocks: Vec<Block> =
-            BlockModel::multi_get(&self.tx, None, Ordering::Ascending)?
+        let mut blocks: Vec<Block> = BlockModel::multi_get(&self.tx, None, Ordering::Ascending)?
             .into_iter()
             .filter(block_filter)
             .collect();
 
         // ordering
         match ordering_index {
-            Some(0) => blocks.sort_by(|a, b| a.id().cmp(b.id())),   
+            Some(0) => blocks.sort_by(|a, b| a.id().cmp(b.id())),
             Some(1) => blocks.sort_by_key(|a| a.epoch()),
             Some(2) => blocks.sort_by_key(|a| (a.epoch(), a.height())),
             Some(4) => blocks.sort_by_key(|a| a.command_count()),
             Some(5) => blocks.sort_by_key(|a| a.total_leader_fee()),
             Some(6) => blocks.sort_by_key(|a| a.block_time()),
-            // TODO: This filter is by creation time, but we don't have a created_at field yet in the corresponding RocksDB values
+            // TODO: This filter is by creation time, but we don't have a created_at field yet in the corresponding
+            // RocksDB values
             Some(7) => (),
             Some(8) => blocks.sort_by(|a, b| a.proposed_by().cmp(b.proposed_by())),
             _ => blocks.sort_by_key(|a| (a.epoch(), a.height())),
@@ -887,11 +1027,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         // pagination
-        blocks = blocks
-            .into_iter()
-            .skip(offset as usize)
-            .take(limit as usize)
-            .collect();
+        blocks = blocks.into_iter().skip(offset as usize).take(limit as usize).collect();
 
         Ok(blocks)
     }
@@ -934,7 +1070,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                             7 => res = block.proposed_by().to_string().contains(filter),
                             _ => (),
                         }
-                    } 
+                    }
                 }
             }
             res
@@ -978,8 +1114,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         // we want the most recent change
         diffs.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-        let most_recent_diff = diffs.first()
-            .ok_or_else(|| StorageError::General { details: "No block_diffs found".to_string() })?;
+        let most_recent_diff = diffs.first().ok_or_else(|| StorageError::General {
+            details: "No block_diffs found".to_string(),
+        })?;
         Ok(most_recent_diff.change.clone())
     }
 
@@ -1012,10 +1149,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let key_prefix = Cf::key_from_block_id(block_id);
         let ordering = Ordering::Ascending;
 
-        let res = QuorumCertificateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?;
+        let res =
+            QuorumCertificateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?;
 
         let Some(qc) = res else {
-            return Err(StorageError::NotFound { item: "quorum_certificate", key: format!("block_id={block_id}") });
+            return Err(StorageError::NotFound {
+                item: "quorum_certificate",
+                key: format!("block_id={block_id}"),
+            });
         };
 
         Ok(qc)
@@ -1135,7 +1276,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         type Cf = crate::model::substate::VersionColumnFamily;
 
         let operation = "substates_get_any";
-        // we want descending key order to get the highest version of each substate, because rocksdb orders incrementally by key
+        // we want descending key order to get the highest version of each substate, because rocksdb orders
+        // incrementally by key
         let ordering = Ordering::Descending;
 
         let cf = Cf::name();
@@ -1144,7 +1286,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         for req in substate_ids {
             let requirement = SubstateRequirement::new(req.substate_id.clone(), Some(req.version));
             let key_prefix = Cf::build_key_from_requirement(&requirement);
-            if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)? {
+            if let Some(substate) =
+                SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?
+            {
                 substates.push(substate);
             }
         }
@@ -1160,7 +1304,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let operation = "substates_get_any_max_version";
         let cf = Cf::name();
-        // we want descending key order to get the highest version of each substate, because rocksdb orders incrementally by key
+        // we want descending key order to get the highest version of each substate, because rocksdb orders
+        // incrementally by key
         let ordering = Ordering::Descending;
 
         let mut substates = vec![];
@@ -1168,7 +1313,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         for substate_id in substate_ids {
             let req = SubstateRequirement::new(substate_id.clone(), None);
             let key_prefix = Cf::build_key_from_requirement(&req);
-            if let Some(substate) = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)? {
+            if let Some(substate) =
+                SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?
+            {
                 substates.push(substate);
             }
         }
@@ -1181,7 +1328,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let operation = "substates_get_max_version_for_substate";
         let cf = Cf::name();
-        // we want descending key order to get the highest version of the substate, because rocksdb orders incrementally by key
+        // we want descending key order to get the highest version of the substate, because rocksdb orders incrementally
+        // by key
         let ordering = Ordering::Descending;
 
         let req = SubstateRequirement::new(substate_id.clone(), None);
@@ -1190,13 +1338,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let res = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?;
 
         match res {
-            Some(substate) =>
-                Ok((substate.version, substate.destroyed.is_some()))
-            ,
+            Some(substate) => Ok((substate.version, substate.destroyed.is_some())),
             None => Err(StorageError::NotFound {
                 item: "Substate (substates_get_max_version_for_substate)",
                 key: substate_id.to_string(),
-            })
+            }),
         }
     }
 
@@ -1214,7 +1360,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 Err(e) => match e {
                     RocksDbStorageError::NotFound { .. } => continue,
                     _ => return Err(e.into()),
-                }
+                },
             }
         }
 
@@ -1273,10 +1419,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(substates)
     }
 
-    fn substates_get_all_for_transaction(
-        &self,
-        tx_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
+    fn substates_get_all_for_transaction(&self, tx_id: &TransactionId) -> Result<Vec<SubstateRecord>, StorageError> {
         let operation = "substates_get_all_for_transaction";
         let ordering = Ordering::Ascending;
 
@@ -1288,16 +1431,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let mut substates = created_by
             .into_iter()
             .map(|s| (s.to_substate_address(), s))
-            .collect::<HashMap<_,_>>();       
-        
+            .collect::<HashMap<_, _>>();
+
         // get all destroyed by transaction
         type DestroyedCf = crate::model::substate::DestroyedByTxColumnFamily;
         let cf = DestroyedCf::name();
         let key_prefix = DestroyedCf::build_key_by_transaction(tx_id, None);
-        let destroyed_by = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
+        let destroyed_by =
+            SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
         for substate in destroyed_by {
             substates.insert(substate.to_substate_address(), substate);
-        }    
+        }
 
         Ok(substates.into_values().collect())
     }
@@ -1310,8 +1454,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         type Cf = crate::model::substate_locks::TransactionIdColumnFamily;
         let key_prefix = Cf::build_key_prefix_by_transaction(transaction_id);
-        let locks = SubstateLockModel::multi_get_cf(self.db.clone(), &self.tx, Cf::name(), operation, &key_prefix, Ordering::Ascending)?;
-            
+        let locks = SubstateLockModel::multi_get_cf(
+            self.db.clone(),
+            &self.tx,
+            Cf::name(),
+            operation,
+            &key_prefix,
+            Ordering::Ascending,
+        )?;
+
         let mut locked_substates = vec![];
         for lock in locks {
             let address = SubstateAddress::from_substate_id(&lock.substate_id, lock.lock.version());
@@ -1334,9 +1485,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError> {
         let key_prefix = SubstateLockModel::key_prefix_by_substate_id(substate_id);
 
-        let lock = SubstateLockModel::
-            get_first(&self.tx, "substate_locks_get_latest_for_substate", Some(&key_prefix), Ordering::Descending)?
-            .ok_or_else(|| StorageError::General { details: "No locked substate found".to_string() })?;
+        let lock = SubstateLockModel::get_first(
+            &self.tx,
+            "substate_locks_get_latest_for_substate",
+            Some(&key_prefix),
+            Ordering::Descending,
+        )?
+        .ok_or_else(|| StorageError::General {
+            details: "No locked substate found".to_string(),
+        })?;
 
         Ok(lock.lock)
     }
@@ -1351,10 +1508,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 key: block_id.to_string(),
             });
         }
-        
+
         // Get the last committed block
         let committed_block_id = self.get_commit_block_id()?;
-        
+
         // Block may modify state with zero commands because the justify a block that changes state
         let block_ids = self.get_block_ids_between(&committed_block_id, block_id)?;
 
@@ -1408,7 +1565,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let key = StateTreeShardVersionModel::key_from_shard(shard);
 
         if !StateTreeShardVersionModel::key_exists(&self.tx, operation, &key)? {
-            return Ok(None)
+            return Ok(None);
         }
 
         let value = StateTreeShardVersionModel::get(&self.tx, operation, &key)?;
@@ -1428,11 +1585,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<SubstatePledges, StorageError> {
         let key_prefix = ForeignSubstatePledgeModel::key_from_transaction_and_address(transaction_id, None);
         let foreign_pledges = ForeignSubstatePledgeModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?;
-        let substate_pledges = foreign_pledges
-            .into_iter()
-            .map(|p| p.pledge)
-            .collect();
-        
+        let substate_pledges = foreign_pledges.into_iter().map(|p| p.pledge).collect();
+
         Ok(substate_pledges)
     }
 
@@ -1464,7 +1618,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         // TODO: optimize this query in RocksDB
         // TODO: implement limit in RocksDB model
-        let utxos = BurntUtxoModel::multi_get( &self.tx, None, Ordering::Ascending)?;
+        let utxos = BurntUtxoModel::multi_get(&self.tx, None, Ordering::Ascending)?;
         Ok(utxos
             .into_iter()
             .filter(|u| {
@@ -1497,7 +1651,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<ValidatorConsensusStats, StorageError> {
         todo!()
     }
-    
+
     fn validator_epoch_stats_get_nodes_to_evict(
         &self,
         _block_id: &BlockId,
@@ -1506,7 +1660,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<PublicKey>, StorageError> {
         todo!()
     }
-    
+
     fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::QueryError {
@@ -1523,17 +1677,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let block_ids = self.get_block_ids_between(&commit_block_id, block_id)?;
 
         let key_prefix = EvictedNodeModel::key_prefix_by_public_key(public_key);
-        let count =
-            EvictedNodeModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?
+        let count = EvictedNodeModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?
             .into_iter()
-            .filter(|n|
-                !block_ids.contains(&n.evicted_in_block.to_string()) || n.evicted_in_block_height <= commit_block.height()
-            )
+            .filter(|n| {
+                !block_ids.contains(&n.evicted_in_block.to_string()) ||
+                    n.evicted_in_block_height <= commit_block.height()
+            })
             .count();
 
         Ok(count > 0)
     }
-    
+
     fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError> {
         type Cf = crate::model::evicted_node::EvictionCommittedColumnFamily;
         let key_prefix = Cf::key_prefix_by_epoch(epoch);
@@ -1541,11 +1695,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         Ok(count)
     }
-    
+
     fn transaction_pool_has_pending_state_updates(&self, _block_id: &BlockId) -> Result<bool, StorageError> {
         todo!()
     }
-    
+
     fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
         &self,
         _block_id: &BlockId,
@@ -1553,7 +1707,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<SubstateChange, StorageError> {
         todo!()
     }
-    
+
     fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
         &self,
         _exclude_transaction_id: Option<&TransactionId>,
@@ -1562,7 +1716,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Option<TransactionId>, StorageError> {
         todo!()
     }
-    
+
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
         _transaction_id: &TransactionId,
@@ -1570,7 +1724,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<bool, StorageError> {
         todo!()
     }
-    
+
     fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I: IntoIterator<Item = &'a SubstateId>>(
         &self,
         _transaction_id: &TransactionId,

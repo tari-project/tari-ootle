@@ -37,7 +37,7 @@ pub struct StateTreeShardVersionModel {}
 impl StateTreeShardVersionModel {
     pub fn key_from_shard(shard: Shard) -> String {
         format!("{}_{}", Self::key_prefix(), shard)
-    } 
+    }
 }
 
 impl RocksdbModel for StateTreeShardVersionModel {

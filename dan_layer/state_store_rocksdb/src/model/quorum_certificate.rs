@@ -24,9 +24,9 @@ use std::sync::Arc;
 
 use rocksdb::{Transaction, TransactionDB};
 use tari_dan_storage::consensus_models::{BlockId, QcId, QuorumCertificate};
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
 
 pub struct QuorumCertificateModel {}
 
@@ -51,19 +51,29 @@ impl RocksdbModel for QuorumCertificateModel {
         vec![BlockColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        BlockColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        BlockColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
 
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         BlockColumnFamily::delete(db.clone(), tx, operation, item)?;
-        
+
         Ok(())
     }
 }

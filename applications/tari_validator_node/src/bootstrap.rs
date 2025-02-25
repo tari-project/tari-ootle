@@ -76,7 +76,10 @@ use tokio::{
 #[cfg(feature = "metrics")]
 use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
-    consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor, ValidationContext}, dry_run_transaction_processor::DryRunTransactionProcessor, file_l1_submitter::FileLayerOneSubmitter, p2p::{
+    consensus::{self, ConsensusHandle, TariDanBlockTransactionExecutor, ValidationContext},
+    dry_run_transaction_processor::DryRunTransactionProcessor,
+    file_l1_submitter::FileLayerOneSubmitter,
+    p2p::{
         create_tari_validator_node_rpc_service,
         services::{
             consensus_gossip::{self},
@@ -84,7 +87,11 @@ use crate::{
             messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         },
         NopLogger,
-    }, state_bootstrap::bootstrap_state, state_store::ValidatorNodeStateStore, substate_resolver::TariSubstateResolver, transaction_validators::{
+    },
+    state_bootstrap::bootstrap_state,
+    state_store::ValidatorNodeStateStore,
+    substate_resolver::TariSubstateResolver,
+    transaction_validators::{
         EpochRangeValidator,
         FeeTransactionValidator,
         HasInputs,
@@ -93,7 +100,11 @@ use crate::{
         TransactionSignatureValidator,
         TransactionValidationError,
         WithContext,
-    }, validator::Validator, validator_registration_file::ValidatorRegistrationFile, ApplicationConfig, ValidatorNodeEpochManagerSpec
+    },
+    validator::Validator,
+    validator_registration_file::ValidatorRegistrationFile,
+    ApplicationConfig,
+    ValidatorNodeEpochManagerSpec,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::bootstrap";
@@ -396,7 +407,6 @@ pub async fn spawn_services(
         // consensus_gossip_service,
     })
 }
-
 
 async fn create_registration_file(
     config: &ApplicationConfig,

@@ -1,19 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_storage::{
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-};
+use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 
 mod pending_state_tree_diffs {
     use tari_dan_storage::consensus_models::VersionedStateHashTreeDiff;
     use tari_state_tree::StateHashTreeDiff;
 
-    use crate::helper::{create_block, create_rocksdb, create_sqlite};
-    
     use super::*;
+    use crate::helper::{create_block, create_rocksdb, create_sqlite};
 
     #[test]
     fn pending_state_tree_diff_sqlite() {
@@ -52,13 +47,19 @@ mod pending_state_tree_diffs {
         tx.pending_state_tree_diffs_insert(*block_2.id(), shard, &diff).unwrap();
 
         // pending_state_tree_diffs_get_all_up_to_commit_block
-        let res = tx.pending_state_tree_diffs_get_all_up_to_commit_block(block_3.id()).unwrap();
+        let res = tx
+            .pending_state_tree_diffs_get_all_up_to_commit_block(block_3.id())
+            .unwrap();
         assert_eq!(res.len(), 1);
 
         // pending_state_tree_diffs_remove_and_return_by_block
-        let res = tx.pending_state_tree_diffs_remove_and_return_by_block(block_2.id()).unwrap();
+        let res = tx
+            .pending_state_tree_diffs_remove_and_return_by_block(block_2.id())
+            .unwrap();
         assert_eq!(res.len(), 1);
-        let res = tx.pending_state_tree_diffs_get_all_up_to_commit_block(block_3.id()).unwrap();
+        let res = tx
+            .pending_state_tree_diffs_get_all_up_to_commit_block(block_3.id())
+            .unwrap();
         assert_eq!(res.len(), 0);
 
         tx.rollback().unwrap();

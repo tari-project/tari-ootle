@@ -2,22 +2,38 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_common_types::{Epoch, NodeHeight};
-use tari_dan_storage::{
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-};
+use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 
 mod miscellaneous_operations_test {
     use indexmap::IndexMap;
     use tari_common_types::types::PublicKey;
     use tari_dan_common_types::{shard::Shard, NumPreshards, ShardGroup};
-    use tari_dan_storage::consensus_models::{Block, BlockId, BlockPledge, EpochCheckpoint, ForeignParkedProposal, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters, ForeignSendCounters, HighQc, LastExecuted, LastSentVote, LastVoted, LeafBlock, LockedBlock, QcId, QuorumCertificate, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+    use tari_dan_storage::consensus_models::{
+        Block,
+        BlockId,
+        BlockPledge,
+        EpochCheckpoint,
+        ForeignParkedProposal,
+        ForeignProposal,
+        ForeignProposalStatus,
+        ForeignReceiveCounters,
+        ForeignSendCounters,
+        HighQc,
+        LastExecuted,
+        LastSentVote,
+        LastVoted,
+        LeafBlock,
+        LockedBlock,
+        QcId,
+        QuorumCertificate,
+        QuorumDecision,
+        ValidatorSchnorrSignature,
+        ValidatorSignature,
+    };
     use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeHash};
 
-    use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
-    
     use super::*;
+    use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
 
     #[test]
     fn miscellaneous_sqlite() {
@@ -187,29 +203,31 @@ mod miscellaneous_operations_test {
 
         // foreign parked blocks
         let justify_qc = QuorumCertificate::genesis(epoch, shard_group);
-        let foreign_parked_block = ForeignParkedProposal::new(
-            ForeignProposal {
-                block: block.clone(),
-                block_pledge: BlockPledge::new(),
-                justify_qc,
-                proposed_by_block: None,
-                status: ForeignProposalStatus::New,
-            });
+        let foreign_parked_block = ForeignParkedProposal::new(ForeignProposal {
+            block: block.clone(),
+            block_pledge: BlockPledge::new(),
+            justify_qc,
+            proposed_by_block: None,
+            status: ForeignProposalStatus::New,
+        });
         tx.foreign_parked_blocks_insert(&foreign_parked_block).unwrap();
-        let res = tx.foreign_parked_blocks_exists(foreign_parked_block.block().id()).unwrap();
+        let res = tx
+            .foreign_parked_blocks_exists(foreign_parked_block.block().id())
+            .unwrap();
         assert!(res);
 
         // state_tree
         let node = Node::Null;
         let node_key = NodeKey::new_empty_path(0);
-        tx.state_tree_nodes_insert(shard, node_key.clone(), node.clone()).unwrap();
+        tx.state_tree_nodes_insert(shard, node_key.clone(), node.clone())
+            .unwrap();
         let res = tx.state_tree_nodes_get(shard, &node_key).unwrap();
         assert_eq_debug(&res, &node);
 
         let stale_node = StaleTreeNode::Node(node_key.clone());
         tx.state_tree_nodes_record_stale_tree_node(shard, stale_node).unwrap();
         let res = tx.state_tree_nodes_get(shard, &node_key);
-        assert!(res.is_err());   
+        assert!(res.is_err());
 
         tx.rollback().unwrap();
     }

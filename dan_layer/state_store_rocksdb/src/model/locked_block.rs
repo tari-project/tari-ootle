@@ -23,6 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::consensus_models::LockedBlock;
+
 use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +58,11 @@ impl RocksdbModel for LockedBlockModel {
     }
 
     fn key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", Self::key_prefix(), value.locked_block.epoch, value.created_at)
+        format!(
+            "{}_{}_{}",
+            Self::key_prefix(),
+            value.locked_block.epoch,
+            value.created_at
+        )
     }
 }

@@ -23,9 +23,8 @@
 use tari_dan_storage::consensus_models::TransactionPoolRecord;
 use tari_transaction::TransactionId;
 
-use crate::error::RocksDbStorageError;
-
 use super::{traits::RocksdbModel, transaction_pool_state_update::TransactionPoolStateUpdateModelData};
+use crate::error::RocksDbStorageError;
 
 pub struct TransactionPoolModel {}
 

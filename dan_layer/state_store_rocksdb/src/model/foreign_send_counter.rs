@@ -22,6 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{BlockId, ForeignSendCounters};
+
 use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

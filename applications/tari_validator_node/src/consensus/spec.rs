@@ -22,7 +22,8 @@ use crate::{
     p2p::{
         services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         NopLogger,
-    }, state_store::ValidatorNodeStateStore,
+    },
+    state_store::ValidatorNodeStateStore,
 };
 
 #[derive(Clone)]

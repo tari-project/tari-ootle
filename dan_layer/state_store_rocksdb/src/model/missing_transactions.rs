@@ -26,21 +26,24 @@ use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::BlockId;
 use tari_transaction::TransactionId;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbSeq};
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbSeq};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissingTransaction {
     pub block_id: BlockId,
     pub block_height: RocksdbSeq,
-    pub transaction_id: TransactionId
+    pub transaction_id: TransactionId,
 }
 
 pub struct MissingTransactionModel {}
 
 impl MissingTransactionModel {
-    pub fn key_prefix_from_transaction_and_height(transaction_id: &TransactionId, height: Option<RocksdbSeq>) -> String {
+    pub fn key_prefix_from_transaction_and_height(
+        transaction_id: &TransactionId,
+        height: Option<RocksdbSeq>,
+    ) -> String {
         let height = height.unwrap_or_default();
         format!("{}_{}_{}", Self::key_prefix(), transaction_id, height)
     }
@@ -61,18 +64,28 @@ impl RocksdbModel for MissingTransactionModel {
         vec![BlockIdColumnFamily::name(), BlockHeightColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        BlockIdColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
-        BlockHeightColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        BlockIdColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
+        BlockHeightColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
-    
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         BlockIdColumnFamily::delete(db.clone(), tx, operation, item)?;
         BlockHeightColumnFamily::delete(db.clone(), tx, operation, item)?;
         Ok(())
@@ -98,7 +111,12 @@ impl ModelColumnFamily for BlockIdColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", MissingTransactionModel::key_prefix(), value.block_id, value.transaction_id)
+        format!(
+            "{}_{}_{}",
+            MissingTransactionModel::key_prefix(),
+            value.block_id,
+            value.transaction_id
+        )
     }
 }
 
@@ -118,6 +136,11 @@ impl ModelColumnFamily for BlockHeightColumnFamily {
 
     fn build_key(value: &Self::Item) -> String {
         let height = value.block_height;
-        format!("{}_{}_{}", MissingTransactionModel::key_prefix(), height, value.transaction_id)
+        format!(
+            "{}_{}_{}",
+            MissingTransactionModel::key_prefix(),
+            height,
+            value.transaction_id
+        )
     }
 }

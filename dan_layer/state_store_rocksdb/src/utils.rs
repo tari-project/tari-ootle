@@ -20,12 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fmt::{self, Display}, time::SystemTime};
+use std::{
+    fmt::{self, Display},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::error::RocksDbStorageError;
-use std::time::UNIX_EPOCH;
 
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
@@ -40,13 +42,15 @@ pub fn bincode_decode<T: DeserializeOwned>(bytes: Vec<u8>) -> Result<T, RocksDbS
 }
 
 pub fn bor_encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RocksDbStorageError> {
-    tari_bor::encode(value)
-        .map_err(|e| RocksDbStorageError::GeneralError { message: e.into_string() })
+    tari_bor::encode(value).map_err(|e| RocksDbStorageError::GeneralError {
+        message: e.into_string(),
+    })
 }
 
 pub fn bor_decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-    tari_bor::decode_exact(bytes)
-        .map_err(|e| RocksDbStorageError::GeneralError { message: e.into_string() })
+    tari_bor::decode_exact(bytes).map_err(|e| RocksDbStorageError::GeneralError {
+        message: e.into_string(),
+    })
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord)]

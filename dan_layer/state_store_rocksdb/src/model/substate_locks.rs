@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{BlockId, SubstateLock};
 use tari_engine_types::substate::SubstateId;
 use tari_transaction::TransactionId;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubstateLockData {
@@ -43,11 +43,9 @@ pub struct SubstateLockData {
 pub struct SubstateLockModel {}
 
 impl SubstateLockModel {
-
     pub fn key_prefix_by_substate_id(substate_id: &SubstateId) -> String {
         format!("{}_{}_", Self::key_prefix(), substate_id)
     }
-
 }
 
 impl RocksdbModel for SubstateLockModel {
@@ -65,18 +63,28 @@ impl RocksdbModel for SubstateLockModel {
         vec![BlockIdColumnFamily::name(), TransactionIdColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        BlockIdColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
-        TransactionIdColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        BlockIdColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
+        TransactionIdColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
-    
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         BlockIdColumnFamily::delete(db.clone(), tx, operation, item)?;
         TransactionIdColumnFamily::delete(db.clone(), tx, operation, item)?;
         Ok(())
@@ -102,7 +110,13 @@ impl ModelColumnFamily for BlockIdColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        format!("{}_{}_{}_{}", SubstateLockModel::key_prefix(), value.block_id,  value.substate_id, value.lock.transaction_id())
+        format!(
+            "{}_{}_{}_{}",
+            SubstateLockModel::key_prefix(),
+            value.block_id,
+            value.substate_id,
+            value.lock.transaction_id()
+        )
     }
 }
 
@@ -125,6 +139,11 @@ impl ModelColumnFamily for TransactionIdColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", SubstateLockModel::key_prefix(), value.lock.transaction_id(), value.block_id)
+        format!(
+            "{}_{}_{}",
+            SubstateLockModel::key_prefix(),
+            value.lock.transaction_id(),
+            value.block_id
+        )
     }
 }

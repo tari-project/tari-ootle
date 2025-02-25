@@ -38,10 +38,14 @@ use tokio::sync::{mpsc, oneshot};
 use super::metrics::PrometheusMempoolMetrics;
 use super::MempoolError;
 use crate::{
-    consensus::ConsensusHandle, p2p::services::mempool::{
+    consensus::ConsensusHandle,
+    p2p::services::mempool::{
         gossip::{IncomingMessage, MempoolGossip},
         handle::MempoolRequest,
-    }, state_store::ValidatorNodeStateStore, transaction_validators::TransactionValidationError, validator::Validator
+    },
+    state_store::ValidatorNodeStateStore,
+    transaction_validators::TransactionValidationError,
+    validator::Validator,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::mempool::service";

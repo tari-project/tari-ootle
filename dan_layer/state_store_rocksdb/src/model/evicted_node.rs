@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_dan_storage::consensus_models::BlockId;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 use super::traits::ModelColumnFamily;
+use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvictedNodeData {
@@ -66,17 +66,27 @@ impl RocksdbModel for EvictedNodeModel {
         vec![EvictionCommittedColumnFamily::name()]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        EvictionCommittedColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        EvictionCommittedColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
-    
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         EvictionCommittedColumnFamily::delete(db.clone(), tx, operation, item)?;
         Ok(())
     }
@@ -101,7 +111,15 @@ impl ModelColumnFamily for EvictionCommittedColumnFamily {
     }
 
     fn build_key(value: &Self::Item) -> String {
-        let committed_in_epoch = value.eviction_commmited_in_epoch.map(|b| b.to_string()).unwrap_or(Self::UNCOMMITTED_VALUE.to_owned());
-        format!("{}_{}_{}", EvictedNodeModel::key_prefix(), &committed_in_epoch, value.created_at)
+        let committed_in_epoch = value
+            .eviction_commmited_in_epoch
+            .map(|b| b.to_string())
+            .unwrap_or(Self::UNCOMMITTED_VALUE.to_owned());
+        format!(
+            "{}_{}_{}",
+            EvictedNodeModel::key_prefix(),
+            &committed_in_epoch,
+            value.created_at
+        )
     }
 }

@@ -1,11 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_storage::{
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-};
+use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 
 mod missing_transactions_test {
     use tari_common_types::types::FixedHash;
@@ -13,9 +9,8 @@ mod missing_transactions_test {
     use tari_dan_storage::consensus_models::{Block, Command};
     use tari_utilities::epoch_time::EpochTime;
 
-    use crate::helper::{create_block, create_rocksdb, create_sqlite, create_tx_atom};
-    
     use super::*;
+    use crate::helper::{create_block, create_rocksdb, create_sqlite, create_tx_atom};
 
     #[test]
     fn missing_transactions_sqlite() {
@@ -64,8 +59,8 @@ mod missing_transactions_test {
 
         // missing_transactions_insert
         let missing_transaction_ids = vec![&atom1.id];
-        tx.missing_transactions_insert(&block1, &[], missing_transaction_ids).unwrap();
-
+        tx.missing_transactions_insert(&block1, &[], missing_transaction_ids)
+            .unwrap();
 
         // blocks_get_pending_transactions
         let res = tx.blocks_get_pending_transactions(block1.id()).unwrap();

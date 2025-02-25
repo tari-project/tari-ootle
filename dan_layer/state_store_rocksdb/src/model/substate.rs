@@ -30,9 +30,11 @@ use tari_dan_storage::consensus_models::{BlockId, QcId, SubstateDestroyed, Subst
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
 
+use super::{
+    super::utils::{bincode_decode, bincode_encode},
+    traits::{ModelColumnFamily, RocksdbModel},
+};
 use crate::error::RocksDbStorageError;
-
-use super::{super::utils::{bincode_decode, bincode_encode}, traits::{ModelColumnFamily, RocksdbModel}};
 
 // We need to reimplement the "SubstateRecord" struct because of a incompatiblity between bincode and ciborium Value,
 // which we use for the substate state.
@@ -77,8 +79,7 @@ impl TryFrom<SubstateModelData> for SubstateRecord {
     fn try_from(model: SubstateModelData) -> Result<Self, Self::Error> {
         let substate_value = match model.substate_value {
             Some(value) => {
-                let value = SubstateValue::from_bytes(&value)
-                    .map_err(|err| err.to_string())?;
+                let value = SubstateValue::from_bytes(&value).map_err(|err| err.to_string())?;
                 Some(value)
             },
             None => None,
@@ -130,32 +131,47 @@ impl RocksdbModel for SubstateModel {
     // We need to override the default trait implementation to decode as SubstateModelData
     fn decode(bytes: Vec<u8>) -> Result<Self::Item, RocksDbStorageError> {
         let value: SubstateModelData = bincode_decode(bytes)?;
-        let value: SubstateRecord = value.try_into()
+        let value: SubstateRecord = value
+            .try_into()
             .map_err(|e| RocksDbStorageError::GeneralError { message: e })?;
         Ok(value)
     }
 
     fn column_families() -> Vec<&'static str> {
-        vec![VersionColumnFamily::name(), CreatedByTxColumnFamily::name(), DestroyedByTxColumnFamily::name()]
+        vec![
+            VersionColumnFamily::name(),
+            CreatedByTxColumnFamily::name(),
+            DestroyedByTxColumnFamily::name(),
+        ]
     }
 
-    fn put_in_cfs(db: Arc<TransactionDB>, tx: &mut Transaction<'_, TransactionDB>, operation: &'static str, value: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn put_in_cfs(
+        db: Arc<TransactionDB>,
+        tx: &mut Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        value: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         // In each CF value We store the key to the main collection, so we can retrieve the actual value
         let main_key = Self::key(value);
         let main_key_bytes = main_key.as_bytes();
 
-        VersionColumnFamily::put(db.clone(), tx, operation,  value, main_key_bytes)?;
+        VersionColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
         CreatedByTxColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
         DestroyedByTxColumnFamily::put(db, tx, operation, value, main_key_bytes)?;
 
         Ok(())
     }
 
-    fn delete_from_cfs(db: Arc<TransactionDB>, tx: &Transaction<'_, TransactionDB>, operation: &'static str, item: &Self::Item) -> Result<(), RocksDbStorageError> {
+    fn delete_from_cfs(
+        db: Arc<TransactionDB>,
+        tx: &Transaction<'_, TransactionDB>,
+        operation: &'static str,
+        item: &Self::Item,
+    ) -> Result<(), RocksDbStorageError> {
         VersionColumnFamily::delete(db.clone(), tx, operation, item)?;
         CreatedByTxColumnFamily::delete(db.clone(), tx, operation, item)?;
         DestroyedByTxColumnFamily::delete(db, tx, operation, item)?;
-        
+
         Ok(())
     }
 }
@@ -168,11 +184,11 @@ impl VersionColumnFamily {
     pub const NAME: &str = "substates_version";
 
     pub fn build_key_from_requirement(req: &SubstateRequirement) -> String {
-        let version = req.version()
+        let version = req
+            .version()
             .map(|version|
                 // hexadecimal endcoding with full 0 padding, so the key preserves ordering
-                format!{"{version:#018x}"}
-            )
+                format!{"{version:#018x}"})
             .unwrap_or_default();
 
         format!("{}_{}_{}", SubstateModel::key_prefix(), req.substate_id, version)
@@ -242,5 +258,5 @@ impl ModelColumnFamily for DestroyedByTxColumnFamily {
 
 fn key_cf_by_tx(tx_id: &TransactionId, address_opt: Option<&SubstateAddress>) -> String {
     let address = address_opt.map(|s| s.to_string()).unwrap_or_default();
-    format!("{}_{}_{}", SubstateModel::key_prefix(), tx_id, address)        
+    format!("{}_{}_{}", SubstateModel::key_prefix(), tx_id, address)
 }

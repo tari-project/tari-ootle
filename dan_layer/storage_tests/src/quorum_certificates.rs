@@ -2,19 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_common_types::{Epoch, NodeHeight};
-use tari_dan_storage::{
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-};
+use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 
 mod quorum_certificate {
     use tari_dan_common_types::{NumPreshards, ShardGroup};
     use tari_dan_storage::consensus_models::{QuorumCertificate, QuorumDecision};
 
-    use crate::helper::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
-    
     use super::*;
+    use crate::helper::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
 
     #[test]
     fn quorum_certificates_sqlite() {

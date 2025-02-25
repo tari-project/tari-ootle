@@ -1528,7 +1528,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
         let mut remaining = counts
             .iter()
-            .filter(|(_, count)| count.map_or(true, |c| c == 0))
+            .filter(|(_, count)| count.is_none_or(|c| c == 0))
             .map(|(id, _)| *id)
             .peekable();
 

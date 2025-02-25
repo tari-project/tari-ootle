@@ -39,18 +39,14 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> BmtDb<'a, 'tx, TGlobalDbAdapter
         epoch: u64,
         bmt: ValidatorNodeBalancedMerkleTree,
     ) -> Result<(), TGlobalDbAdapter::Error> {
-        self.backend
-            .insert_bmt(self.tx, epoch, bmt)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.insert_bmt(self.tx, epoch, bmt)
     }
 
     pub fn get_bmt(
         &mut self,
         epoch: Epoch,
     ) -> Result<Option<ValidatorNodeBalancedMerkleTree>, TGlobalDbAdapter::Error> {
-        self.backend
-            .get_bmt(self.tx, epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.get_bmt(self.tx, epoch)
     }
 }
 

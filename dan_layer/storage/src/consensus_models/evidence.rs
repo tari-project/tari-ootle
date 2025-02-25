@@ -200,11 +200,11 @@ impl Evidence {
     /// This assumes the provided evidence is complete before this is called.
     /// If no evidence is present for the shard group, false is returned.
     pub fn is_committee_output_only(&self, shard_group: ShardGroup) -> bool {
-        self.evidence.get(&shard_group).map_or(true, |e| e.inputs().is_empty())
+        self.evidence.get(&shard_group).is_none_or(|e| e.inputs().is_empty())
     }
 
     pub fn is_committee_input_only(&self, shard_group: ShardGroup) -> bool {
-        self.evidence.get(&shard_group).map_or(true, |e| e.outputs().is_empty())
+        self.evidence.get(&shard_group).is_none_or(|e| e.outputs().is_empty())
     }
 
     pub fn is_empty(&self) -> bool {

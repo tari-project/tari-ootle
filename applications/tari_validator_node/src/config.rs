@@ -176,8 +176,8 @@ impl SubConfigPath for ValidatorNodeConfig {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DatabaseType {
     #[default]
-    Rocksdb,
     Sqlite,
+    Rocksdb,
 }
 
 impl FromStr for DatabaseType {

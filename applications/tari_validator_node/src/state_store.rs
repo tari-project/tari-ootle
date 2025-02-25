@@ -23,12 +23,11 @@
 use std::ops::Deref;
 
 use anyhow::Context;
-use tari_dan_common_types::{NodeAddressable, PeerAddress};
+use tari_dan_common_types::PeerAddress;
 use tari_dan_storage::consensus_models::{Decision, Evidence};
 use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
-use serde::{de::DeserializeOwned, Serialize};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 use tari_dan_common_types::NodeHeight;
 use tari_dan_common_types::ShardGroup;

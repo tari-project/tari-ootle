@@ -28,8 +28,8 @@
 # The relative path to store persistent data (default = "data/validator_node")
 #data_dir = "data/validator_node"
 
-# The type of database ("rocksdb" or "sqlite") to use (default = "rocksdb")
-#database_type = "rocksdb"
+# The type of database ("rocksdb" or "sqlite") to use (default = "sqlite")
+#database_type = "sqlite"
 
 # JSON-RPC listener address (default = "127.0.0.1:18200")
 #json_rpc_address = "127.0.0.1:18200"

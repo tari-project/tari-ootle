@@ -261,10 +261,7 @@ impl NonFungibleAddress {
             return None;
         }
         match self.id() {
-            NonFungibleId::U256(bytes) => match RistrettoPublicKeyBytes::from_bytes(bytes) {
-                Ok(public_key) => Some(public_key),
-                Err(_) => None,
-            },
+            NonFungibleId::U256(bytes) => RistrettoPublicKeyBytes::from_bytes(bytes).ok(),
             _ => None,
         }
     }

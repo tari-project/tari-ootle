@@ -32,26 +32,20 @@ function Auth() {
     }
   }, [authMethod, authMethodsIsError]);
 
-  const auth = (() => {
-    switch (currAuthMethod) {
-      case "none": {
-        console.log("no auth");
-        setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
-        return <Navigate replace to={redirect} />;
-      }
-      case "webauthn": {
-        if (authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
-          setAuthToken("");
-        }
-        return <Navigate replace to={"/auth/webauthn?redirect=" + redirect} />;
-      }
-      default: {
-        return <Loading />;
-      }
-    }
-  })();
+  if (currAuthMethod === "none") {
+    console.log("no auth");
+    setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
+    return <Navigate replace to={redirect} />;
+  }
 
-  return auth;
+  if (currAuthMethod === "webauthn") {
+    if (authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
+      setAuthToken("");
+    }
+    return <Navigate replace to={"/auth/webauthn?redirect=" + redirect} />;
+  }
+
+  return <Loading />;
 }
 
 export default Auth;

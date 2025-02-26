@@ -34,7 +34,7 @@ export async function getGraphQLAddress(): Promise<URL> {
       try {
         return new URL(url);
       } catch (e) {
-        throw new Error(`Invalid URL: ${url} : {e}`);
+        throw new Error(`Invalid URL: ${url} : ${e}`);
       }
     }
   } catch (e) {

@@ -13,7 +13,7 @@ import { Buffer } from "buffer";
 import Loading from "../../../Components/Loading";
 import useAuthStore from "../../../store/authStore";
 
-const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || "localhost";
+const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 
 const createCredential = async (rpOptions: { rpId: string; rpName: string }, username: string, challenge: Buffer) => {
   const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {

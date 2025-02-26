@@ -81,7 +81,7 @@ import {
   TransactionSubmitResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
-  Type,
+  Type, WebauthnAlreadyRegisteredRequest,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
@@ -93,7 +93,7 @@ import {
   WebRtcStartRequest,
   WebRtcStartResponse,
 } from "@tari-project/typescript-bindings";
-import {FetchRpcTransport, RpcTransport} from "./transports";
+import { FetchRpcTransport, RpcTransport } from "./transports";
 
 export * as transports from "./transports";
 
@@ -217,7 +217,11 @@ export class WalletDaemonClient {
 
   public async authRequest(permissions: string[], webauthnFinishAuthRequest?: WebauthnFinishAuthRequest): Promise<string> {
     // TODO: Exchange some secret credentials for a JWT
-    let request: AuthLoginRequest = {permissions: permissions, duration: null, webauthn_finish_auth_request: webauthnFinishAuthRequest};
+    let request: AuthLoginRequest = {
+      permissions: permissions,
+      duration: null,
+      webauthn_finish_auth_request: webauthnFinishAuthRequest,
+    };
     let resp = await this.__invokeRpc("auth.request", request);
     return resp.auth_token;
   }
@@ -358,20 +362,20 @@ export class WalletDaemonClient {
     return this.__invokeRpc("settings.set", params);
   }
 
-  public webauthnAlreadyRegistered(): Promise<WebauthnAlreadyRegisteredResponse> {
-    return this.__invokeRpc("webauthn.already_registered", {});
+  public webauthnAlreadyRegistered(params: WebauthnAlreadyRegisteredRequest): Promise<WebauthnAlreadyRegisteredResponse> {
+    return this.__invokeRpc("webauthn.already_registered", params);
   }
 
-  public webauthnStartRegistration(request: WebauthnStartRegisterRequest): Promise<WebauthnStartRegisterResponse> {
-    return this.__invokeRpc("webauthn.reg_start", request);
+  public webauthnStartRegistration(params: WebauthnStartRegisterRequest): Promise<WebauthnStartRegisterResponse> {
+    return this.__invokeRpc("webauthn.reg_start", params);
   }
 
-  public webauthnFinishRegistration(request: WebauthnFinishRegisterRequest): Promise<WebauthnFinishRegisterResponse> {
-    return this.__invokeRpc("webauthn.reg_finish", request);
+  public webauthnFinishRegistration(params: WebauthnFinishRegisterRequest): Promise<WebauthnFinishRegisterResponse> {
+    return this.__invokeRpc("webauthn.reg_finish", params);
   }
 
-  public webauthnAuthStart(request: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> {
-    return this.__invokeRpc("webauthn.auth_start", request);
+  public webauthnAuthStart(params: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> {
+    return this.__invokeRpc("webauthn.auth_start", params);
   }
 
   async __invokeRpc(method: string, params: object = null) {

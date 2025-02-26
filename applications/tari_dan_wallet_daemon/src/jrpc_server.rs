@@ -274,6 +274,7 @@ fn resolve_any_error(answer_id: i64, e: &anyhow::Error) -> JsonRpcResponse {
 #[repr(i32)]
 pub enum ApplicationErrorCode {
     NotFound = 404,
+    InvalidRequest = 400,
     TransactionRejected = 1000,
     GeneralError = 500,
 }

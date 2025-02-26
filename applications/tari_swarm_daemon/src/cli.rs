@@ -1,15 +1,15 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::{fmt::Display, net::SocketAddr, path::PathBuf, str::FromStr};
 
-use anyhow::Context;
-use clap::Parser;
+use anyhow::{anyhow, Context};
+use clap::{Parser, ValueEnum};
 use tari_common::configuration::Network;
 
 use crate::{
     config::{Config, InstanceType},
-    process_definitions::{WalletDaemonAuth, WALLET_DAEMON_AUTH_SETTINGS_KEY},
+    process_definitions::WALLET_DAEMON_AUTH_SETTINGS_KEY,
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -76,8 +76,8 @@ pub struct Overrides {
     pub skip_registration: bool,
     #[clap(long)]
     pub disable_template_auto_register: bool,
-    #[clap(long, value_enum, default_value_t=WalletDaemonAuth::None)]
-    pub wallet_daemon_auth: WalletDaemonAuth,
+    #[clap(long, value_enum)]
+    pub wallet_daemon_auth: Option<WalletDaemonAuth>,
 }
 
 impl Overrides {
@@ -116,15 +116,16 @@ impl Overrides {
             config.auto_register_previous_templates = false;
         }
 
-        // add wallet daemon auth method
-        config.processes.instances.iter_mut().for_each(|instance| {
-            if instance.instance_type.is_wallet_daemon() {
-                instance.settings.insert(
-                    WALLET_DAEMON_AUTH_SETTINGS_KEY.to_string(),
-                    self.wallet_daemon_auth.to_string(),
-                );
-            }
-        });
+        if let Some(auth) = self.wallet_daemon_auth {
+            // set wallet daemon auth method for all instances using the override
+            config.processes.instances.iter_mut().for_each(|instance| {
+                if instance.instance_type.is_wallet_daemon() {
+                    instance
+                        .settings
+                        .insert(WALLET_DAEMON_AUTH_SETTINGS_KEY.to_string(), auth.to_string());
+                }
+            });
+        }
 
         Ok(())
     }
@@ -140,5 +141,33 @@ fn instance_type_to_package_name(instance_type: InstanceType) -> String {
         InstanceType::TariWalletDaemon => "tari_dan_wallet_daemon".to_string(),
         InstanceType::TariSignalingServer => "tari_signaling_server".to_string(),
         InstanceType::TariWalletDaemonCreateKey => "tari_wallet_daemon_create_key".to_string(),
+    }
+}
+
+#[derive(Clone, Debug, ValueEnum, Default, Copy)]
+pub enum WalletDaemonAuth {
+    #[default]
+    None,
+    Webauthn,
+}
+
+impl FromStr for WalletDaemonAuth {
+    type Err = anyhow::Error;
+
+    fn from_str(auth_str: &str) -> Result<Self, Self::Err> {
+        match auth_str {
+            "none" => Ok(WalletDaemonAuth::None),
+            "webauthn" => Ok(WalletDaemonAuth::Webauthn),
+            _ => Err(anyhow!("Invalid auth option!")),
+        }
+    }
+}
+
+impl Display for WalletDaemonAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WalletDaemonAuth::None => write!(f, "none"),
+            WalletDaemonAuth::Webauthn => write!(f, "webauthn"),
+        }
     }
 }

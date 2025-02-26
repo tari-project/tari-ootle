@@ -19,7 +19,7 @@ pub enum WebauthnServiceError {
 
 /// Registration session data
 #[derive(Debug, Clone)]
-struct RegistrationSessionData {
+pub(crate) struct RegistrationSessionData {
     username: String,
     passkey_reg: PasskeyRegistration,
     created_at: Instant,
@@ -32,6 +32,14 @@ impl RegistrationSessionData {
             passkey_reg,
             created_at: Instant::now(),
         }
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    pub fn passkey_reg(&self) -> &PasskeyRegistration {
+        &self.passkey_reg
     }
 }
 
@@ -66,9 +74,7 @@ impl SessionData for AuthSessionData {
 /// A service to store temporary registration data (between `start` and `finish` RPC calls)
 /// and save the result in DB when finished.
 #[derive(Debug, Clone)]
-pub struct WebauthnService<TStore>
-where TStore: WalletStore
-{
+pub struct WebauthnService<TStore> {
     wallet_store: TStore,
     registration_sessions: SessionStore<RegistrationSessionData>,
     auth_sessions: SessionStore<AuthSessionData>,
@@ -85,9 +91,9 @@ where TStore: WalletStore
         }
     }
 
-    pub async fn registration_count(&self) -> Result<u64, WebauthnServiceError> {
+    pub fn is_user_registered(&self, username: &str) -> Result<bool, WebauthnServiceError> {
         let mut tx = self.wallet_store.create_read_tx()?;
-        Ok(tx.webauthn_reg_count()?)
+        Ok(tx.webauthn_is_user_registered(username)?)
     }
 
     /// Start registration by creating a new session and save the temporary [`PasskeyRegistration`].
@@ -103,9 +109,9 @@ where TStore: WalletStore
     }
 
     /// Retrieve [`PasskeyRegistration`] by session ID.
-    pub async fn registration_passkey(&self, session_id: String) -> Result<PasskeyRegistration, WebauthnServiceError> {
-        let session = self.registration_sessions.get(session_id.as_str()).await?;
-        Ok(session.passkey_reg.clone())
+    pub async fn get_session(&self, session_id: &str) -> Result<RegistrationSessionData, WebauthnServiceError> {
+        let session = self.registration_sessions.get(session_id).await?;
+        Ok(session)
     }
 
     /// Finalizing registration, remove session from store and save passkey (public key of credential) to DB

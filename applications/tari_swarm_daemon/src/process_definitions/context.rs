@@ -87,8 +87,13 @@ impl<'a> ProcessContext<'a> {
                 let public_ip = self
                     .settings
                     .get("public_ip")
-                    .map(|s| s.as_str())
-                    .unwrap_or("127.0.0.1");
+                    .map(|s| {
+                        if s == "127.0.0.1" {
+                            return "localhost";
+                        }
+                        s.as_str()
+                    })
+                    .unwrap_or("localhost");
                 let port = self
                     .port_allocator
                     .get("jrpc")

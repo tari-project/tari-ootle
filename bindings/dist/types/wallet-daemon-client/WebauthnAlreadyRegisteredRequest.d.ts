@@ -1,1 +1,3 @@
-export type WebauthnAlreadyRegisteredRequest = Record<string, never>;
+export interface WebauthnAlreadyRegisteredRequest {
+    username: string;
+}

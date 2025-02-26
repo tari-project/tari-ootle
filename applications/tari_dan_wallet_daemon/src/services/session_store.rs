@@ -18,19 +18,19 @@ pub enum SessionStoreError {
 }
 
 /// A trait the every session data must implement.
-pub trait SessionData: Clone {
+pub trait SessionData {
     fn created_at(&self) -> Instant;
 }
 
 /// A thread-safe store that acts like a classical Session storage for web, but uses unique IDs for a session
 /// instead of using cookies, so it is suitable for stateless RPC calls.
 #[derive(Debug, Clone)]
-pub struct SessionStore<T: SessionData> {
+pub struct SessionStore<T> {
     sessions: Arc<RwLock<HashMap<String, T>>>,
     session_ttl: Duration,
 }
 
-impl<T: SessionData> SessionStore<T> {
+impl<T: SessionData + Clone> SessionStore<T> {
     pub fn new(session_ttl: Duration) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -40,14 +40,10 @@ impl<T: SessionData> SessionStore<T> {
 
     async fn remove_expired_sessions(&self) {
         let mut lock = self.sessions.write().await;
-        let expired_sessions: Vec<String> = lock
-            .iter_mut()
-            .filter(|(_, session)| session.created_at().elapsed() > self.session_ttl)
-            .map(|(key, _)| key.clone())
+        *lock = lock
+            .drain()
+            .filter(|(_, session)| session.created_at().elapsed() <= self.session_ttl)
             .collect();
-        expired_sessions.iter().for_each(|key| {
-            lock.remove(key);
-        })
     }
 
     /// Returns session by its ID.

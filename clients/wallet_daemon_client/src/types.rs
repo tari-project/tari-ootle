@@ -1303,7 +1303,9 @@ pub struct AuthGetMethodResponse {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
-pub struct WebauthnAlreadyRegisteredRequest {}
+pub struct WebauthnAlreadyRegisteredRequest {
+    pub username: String,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(

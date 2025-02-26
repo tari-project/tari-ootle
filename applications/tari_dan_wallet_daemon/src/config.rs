@@ -50,13 +50,6 @@ impl ApplicationConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "lowercase")]
-pub enum WalletDaemonAuth {
-    None,
-    WebAuthn,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct WalletDaemonConfig {
     override_from: Option<String>,
@@ -92,7 +85,7 @@ impl Default for WalletDaemonConfig {
         Self {
             override_from: None,
             network: Network::Igor,
-            authentication: WalletDaemonAuth::None,
+            authentication: WalletDaemonAuth::default(),
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
             web_ui_public_json_rpc_url: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
@@ -112,4 +105,12 @@ impl SubConfigPath for WalletDaemonConfig {
     fn main_key_prefix() -> &'static str {
         "dan_wallet_daemon"
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WalletDaemonAuth {
+    #[default]
+    None,
+    WebAuthn,
 }

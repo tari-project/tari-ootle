@@ -41,15 +41,13 @@ impl WalletDaemonProcess {
                 duration: None,
                 webauthn_finish_auth_request,
             })
-            .await
-            .unwrap();
+            .await?;
         let auth_response = client
             .auth_accept(AuthLoginAcceptRequest {
                 auth_token,
                 name: "Testing Token".to_string(),
             })
-            .await
-            .unwrap();
+            .await?;
         client.set_auth_token(auth_response.permissions_token);
 
         Ok(client)

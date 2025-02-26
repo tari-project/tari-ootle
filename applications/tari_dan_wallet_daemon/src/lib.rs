@@ -30,7 +30,7 @@ mod notify;
 mod services;
 mod webrtc;
 
-use std::{fs, panic, process, sync::Arc, time::Duration};
+use std::{fs, panic, process};
 
 use log::*;
 use tari_dan_common_types::{optional::Optional, NumPreshards};
@@ -46,16 +46,14 @@ use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::models::Amount;
 use tokio::task;
-use url::Url;
-use webauthn_rs::WebauthnBuilder;
 
 use crate::{
-    config::{ApplicationConfig, WalletDaemonConfig},
-    handlers::{auth::get_authenticator, HandlerContext},
+    config::ApplicationConfig,
+    handlers::{auth::create_authenticator, HandlerContext},
     http_ui::server::run_http_ui_server,
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
-    services::{spawn_services, WebauthnService},
+    services::spawn_services,
 };
 
 const LOG_TARGET: &str = "tari::dan::wallet_daemon";
@@ -83,25 +81,10 @@ pub async fn run_tari_dan_wallet_daemon(
 
     let jrpc_address = config.dan_wallet_daemon.json_rpc_address.unwrap();
     let signaling_server_address = config.dan_wallet_daemon.signaling_server_address.unwrap();
-    let webauthn_service = Arc::new(WebauthnService::new(wallet_store, Duration::from_secs(60 * 60)));
 
     // webauthn
-    let rp_origin = match config.dan_wallet_daemon.web_ui_address {
-        Some(ui_address) => Url::parse(format!("http://localhost:{}", ui_address.port()).as_str())?,
-        None => {
-            let ui_address = WalletDaemonConfig::default().web_ui_address.unwrap();
-            Url::parse(format!("http://localhost:{}", ui_address.port()).as_str())?
-        },
-    };
-    let webauthn = WebauthnBuilder::new("localhost", &rp_origin)?
-        .rp_name("Tari Ootle")
-        .build()?;
 
-    let authenticator = get_authenticator(
-        config.dan_wallet_daemon.authentication.clone(),
-        webauthn.clone(),
-        webauthn_service.clone(),
-    );
+    let authenticator = create_authenticator(&config.dan_wallet_daemon, wallet_store.clone())?;
 
     let handlers = HandlerContext::new(
         wallet_sdk.clone(),
@@ -110,8 +93,6 @@ pub async fn run_tari_dan_wallet_daemon(
         services.account_monitor_handle.clone(),
         config.dan_wallet_daemon.clone(),
         authenticator,
-        webauthn_service,
-        webauthn,
     );
     let (jrpc_address, listen_fut) =
         jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers, shutdown_signal)?;

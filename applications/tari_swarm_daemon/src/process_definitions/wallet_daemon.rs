@@ -1,51 +1,16 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt::Display, path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use clap::ValueEnum;
 use tokio::process::Command;
 
 use crate::process_definitions::{ProcessContext, ProcessDefinition};
 
 pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
-pub const WALLET_DAEMON_AUTH_DEFAULT: WalletDaemonAuth = WalletDaemonAuth::None;
-
-#[derive(Clone, Debug, ValueEnum)]
-pub enum WalletDaemonAuth {
-    None,
-    Webauthn,
-}
-
-impl FromStr for WalletDaemonAuth {
-    type Err = anyhow::Error;
-
-    fn from_str(auth_str: &str) -> Result<Self, Self::Err> {
-        match auth_str {
-            "none" => Ok(WalletDaemonAuth::None),
-            "webauthn" => Ok(WalletDaemonAuth::Webauthn),
-            _ => Err(anyhow!("Invalid auth option!")),
-        }
-    }
-}
-
-impl Default for WalletDaemonAuth {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-impl Display for WalletDaemonAuth {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            WalletDaemonAuth::None => "none".to_string(),
-            WalletDaemonAuth::Webauthn => "webauthn".to_string(),
-        };
-        write!(f, "{}", str)
-    }
-}
+const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
 
 #[derive(Debug, Default)]
 pub struct WalletDaemon;
@@ -81,10 +46,10 @@ impl ProcessDefinition for WalletDaemon {
                 .ok_or_else(|| anyhow!("Indexer jrpc port not found"))?
         );
 
-        let default_auth_str = WALLET_DAEMON_AUTH_DEFAULT.to_string();
         let auth = context
             .get_setting(WALLET_DAEMON_AUTH_SETTINGS_KEY)
-            .unwrap_or(default_auth_str.as_str());
+            .or_else(|| context.get_setting("auth_method"))
+            .unwrap_or(WALLET_DAEMON_AUTH_DEFAULT);
 
         command
             .envs(context.environment())

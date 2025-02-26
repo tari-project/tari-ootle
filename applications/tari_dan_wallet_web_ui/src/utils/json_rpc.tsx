@@ -83,7 +83,7 @@ import type {
   WebRtcStartRequest,
   WebRtcStartResponse,
 } from "@tari-project/wallet_jrpc_client";
-import {WalletDaemonClient} from "@tari-project/wallet_jrpc_client";
+import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import {
   GetValidatorFeesRequest,
   GetValidatorFeesResponse,
@@ -94,10 +94,10 @@ import {
   WebauthnStartAuthRequest,
   WebauthnStartAuthResponse,
   WebauthnStartRegisterRequest,
-  WebauthnStartRegisterResponse
+  WebauthnStartRegisterResponse,
 } from "@tari-project/typescript-bindings";
 import useAuthStore from "../store/authStore";
-import {AUTH_TOKEN_FOR_NONE_AUTH} from "../routes/Auth/Auth";
+import { AUTH_TOKEN_FOR_NONE_AUTH } from "../routes/Auth/Auth";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -130,7 +130,7 @@ export async function getClientAddress(): Promise<URL> {
 
 function getAuthToken() {
   const authToken = useAuthStore.getState().authToken;
-  return (authToken && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) ? authToken : null;
+  return authToken && authToken !== AUTH_TOKEN_FOR_NONE_AUTH ? authToken : null;
 }
 
 async function client() {
@@ -186,27 +186,32 @@ async function authenticateClient(client: WalletDaemonClient, webauthnFinishAuth
 }
 
 export const authGetMethod = (): Promise<AuthGetMethodResponse> =>
-    unauthenticated_client().then((c) => c.authGetMethod());
+  unauthenticated_client().then((c) => c.authGetMethod());
 
-export const webauthnAlreadyRegistered = (): Promise<WebauthnAlreadyRegisteredResponse> =>
-    unauthenticated_client().then((c) => c.webauthnAlreadyRegistered());
+export const webauthnAlreadyRegistered = (username: string): Promise<WebauthnAlreadyRegisteredResponse> =>
+  unauthenticated_client().then((c) => c.webauthnAlreadyRegistered({ username }));
 
-export const webauthnStartRegistration = (request: WebauthnStartRegisterRequest): Promise<WebauthnStartRegisterResponse> =>
-    unauthenticated_client().then((c) => c.webauthnStartRegistration(request));
+export const webauthnStartRegistration = (
+  request: WebauthnStartRegisterRequest,
+): Promise<WebauthnStartRegisterResponse> => unauthenticated_client().then((c) => c.webauthnStartRegistration(request));
 
-export const webauthnFinishRegistration = (request: WebauthnFinishRegisterRequest): Promise<WebauthnFinishRegisterResponse> =>
-    unauthenticated_client().then((c) => c.webauthnFinishRegistration(request));
+export const webauthnFinishRegistration = (
+  request: WebauthnFinishRegisterRequest,
+): Promise<WebauthnFinishRegisterResponse> =>
+  unauthenticated_client().then((c) => c.webauthnFinishRegistration(request));
 
 export const webauthnStartAuth = (request: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> =>
-    unauthenticated_client().then((c) => c.webauthnAuthStart(request));
+  unauthenticated_client().then((c) => c.webauthnAuthStart(request));
 
 export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> =>
-  client().then((c) => c.authRevoke(request).then(response => {
+  client().then((c) =>
+    c.authRevoke(request).then((response) => {
       if (response) {
         useAuthStore.getState().setAuthToken("");
       }
       return response;
-    }));
+    }),
+  );
 export const authGetAllJwt = (request: AuthGetAllJwtRequest): Promise<AuthGetAllJwtResponse> =>
   client().then((c) => c.authGetAllJwt(request));
 

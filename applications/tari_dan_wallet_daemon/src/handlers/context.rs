@@ -1,15 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::sync::Arc;
-
 use tari_dan_wallet_sdk::DanWalletSdk;
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use webauthn_rs::Webauthn;
 
 use crate::{
     config::WalletDaemonConfig,
-    handlers::auth::Authenticator,
+    handlers::auth::WalletAuthenticator,
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
     services::{AccountMonitorHandle, TransactionServiceHandle, WalletEvent, WebauthnService},
@@ -22,9 +20,7 @@ pub struct HandlerContext {
     transaction_service: TransactionServiceHandle,
     account_monitor: AccountMonitorHandle,
     config: WalletDaemonConfig,
-    authenticator: Arc<dyn Authenticator>,
-    webauthn: Webauthn,
-    webauthn_service: Arc<WebauthnService<SqliteWalletStore>>,
+    authenticator: WalletAuthenticator,
 }
 
 impl HandlerContext {
@@ -34,9 +30,7 @@ impl HandlerContext {
         transaction_service: TransactionServiceHandle,
         account_monitor: AccountMonitorHandle,
         config: WalletDaemonConfig,
-        authenticator: Arc<dyn Authenticator>,
-        webauthn_service: Arc<WebauthnService<SqliteWalletStore>>,
-        webauthn: Webauthn,
+        authenticator: WalletAuthenticator,
     ) -> Self {
         Self {
             wallet_sdk,
@@ -45,8 +39,6 @@ impl HandlerContext {
             account_monitor,
             config,
             authenticator,
-            webauthn,
-            webauthn_service,
         }
     }
 
@@ -70,15 +62,15 @@ impl HandlerContext {
         &self.config
     }
 
-    pub fn authenticator(&self) -> Arc<dyn Authenticator> {
-        self.authenticator.clone()
+    pub fn authenticator(&self) -> &WalletAuthenticator {
+        &self.authenticator
     }
 
-    pub fn webauthn_service(&self) -> Arc<WebauthnService<SqliteWalletStore>> {
-        self.webauthn_service.clone()
+    pub fn webauthn_service(&self) -> Option<&WebauthnService<SqliteWalletStore>> {
+        self.authenticator.webauthn_service()
     }
 
-    pub fn webauthn(&self) -> &Webauthn {
-        &self.webauthn
+    pub fn webauthn(&self) -> Option<&Webauthn> {
+        self.authenticator.webauthn()
     }
 }

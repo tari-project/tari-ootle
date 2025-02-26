@@ -4,29 +4,35 @@
 use std::{fmt::Debug, sync::Arc};
 
 use anyhow::anyhow;
-use axum::async_trait;
 use tari_dan_wallet_sdk::storage::WalletStore;
 use tari_wallet_daemon_client::types::AuthLoginRequest;
 use webauthn_rs::Webauthn;
 
 use crate::{handlers::auth::Authenticator, services::WebauthnService};
 
-#[derive(Debug)]
-pub struct WebAuthnAuth<TStore: WalletStore + Debug + Send + Sync> {
-    webauthn: Webauthn,
-    webauthn_service: Arc<WebauthnService<TStore>>,
+#[derive(Debug, Clone)]
+pub struct WebAuthnAuth<TStore> {
+    webauthn: Arc<Webauthn>,
+    webauthn_service: WebauthnService<TStore>,
 }
 
 impl<TStore: WalletStore + Debug + Send + Sync> WebAuthnAuth<TStore> {
-    pub fn new(webauthn: Webauthn, webauthn_service: Arc<WebauthnService<TStore>>) -> Self {
+    pub fn new(webauthn: Webauthn, webauthn_service: WebauthnService<TStore>) -> Self {
         WebAuthnAuth {
-            webauthn,
+            webauthn: Arc::new(webauthn),
             webauthn_service,
         }
     }
+
+    pub fn webauthn(&self) -> &Webauthn {
+        &self.webauthn
+    }
+
+    pub fn webauthn_service(&self) -> &WebauthnService<TStore> {
+        &self.webauthn_service
+    }
 }
 
-#[async_trait]
 impl<TStore: WalletStore + Debug + Send + Sync> Authenticator for WebAuthnAuth<TStore> {
     async fn authenticate(&self, request: &AuthLoginRequest) -> Result<(), anyhow::Error> {
         match &request.webauthn_finish_auth_request {

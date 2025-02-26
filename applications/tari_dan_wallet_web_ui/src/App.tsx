@@ -118,26 +118,40 @@ const isTokenExpired = (token: any) => {
   }
 };
 
+interface GuardedRouteProps {
+  component: React.ComponentType<any>;
+  redirect?: string;
+  isAuthenticated: boolean;
+
+  [key: string]: any;
+}
+
 // @ts-ignore
-const GuardedRoute = ({ component: Component, redirect = "/", auth = false, ...rest }) => {
-  return auth ? <Component {...rest} /> : <Navigate replace to={"/auth?redirect=" + redirect} />;
+const GuardedRoute = ({
+  component: Component,
+  redirect = "/",
+  isAuthenticated = false,
+  ...rest
+}: GuardedRouteProps) => {
+  return isAuthenticated ? <Component {...rest} /> : <Navigate replace to={"/auth?redirect=" + redirect} />;
 };
 
 function App() {
   const { data: authMethod, isError: authMethodsIsError, error: authMethodsError } = useAuthMethod();
-  const { authToken, setAuthToken } = useAuthStore();
-  let auth = !!authToken;
+  const authStore = useAuthStore();
+  const { authToken } = authStore;
+  let isAuthenticated = !!authToken;
 
   useEffect(() => {
     if (isTokenExpired(authToken) && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) {
-      setAuthToken("");
+      authStore.clearToken();
     }
   }, [authToken]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (isTokenExpired(authToken) && authToken !== AUTH_TOKEN_FOR_NONE_AUTH) {
-        setAuthToken("");
+      if (authToken !== AUTH_TOKEN_FOR_NONE_AUTH && isTokenExpired(authToken)) {
+        authStore.clearToken();
       }
     }, 10000);
 
@@ -147,11 +161,11 @@ function App() {
   useEffect(() => {
     if (!authMethodsIsError && authMethod) {
       if (authMethod.method !== "none" && authToken === AUTH_TOKEN_FOR_NONE_AUTH) {
-        setAuthToken("");
+        authStore.clearToken();
       }
 
       if (authMethod.method === "none") {
-        useAuthStore.getState().setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
+        authStore.setAuthToken(AUTH_TOKEN_FOR_NONE_AUTH);
       }
     }
 
@@ -164,33 +178,57 @@ function App() {
     <div>
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<GuardedRoute component={AssetVault} auth={auth} />} />
+          <Route index element={<GuardedRoute component={AssetVault} isAuthenticated={isAuthenticated} />} />
           <Route path="auth" element={<Auth />} />
           <Route path="auth/webauthn" element={<Webauthn />} />
           <Route
             path="access-token"
-            element={<GuardedRoute auth={auth} redirect="/access-token" component={AccessToken} />}
+            element={
+              <GuardedRoute isAuthenticated={isAuthenticated} redirect="/access-token" component={AccessToken} />
+            }
           />
-          <Route path="accounts" element={<GuardedRoute auth={auth} redirect="/accounts" component={Accounts} />} />
+          <Route
+            path="accounts"
+            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/accounts" component={Accounts} />}
+          />
           <Route
             path="accounts/:id"
-            element={<GuardedRoute auth={auth} redirect="/accounts" component={AccountDetails} />}
+            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/accounts" component={AccountDetails} />}
           />
-          <Route path="keys" element={<GuardedRoute auth={auth} redirect="/keys" component={Keys} />} />
+          <Route
+            path="keys"
+            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/keys" component={Keys} />}
+          />
           <Route
             path="access-tokens"
-            element={<GuardedRoute redirect="/access-tokens" auth={auth} component={AccessTokensLayout} />}
+            element={
+              <GuardedRoute
+                redirect="/access-tokens"
+                isAuthenticated={isAuthenticated}
+                component={AccessTokensLayout}
+              />
+            }
           />
           <Route
             path="transactions"
-            element={<GuardedRoute auth={auth} redirect="/transactions" component={Transactions} />}
+            element={
+              <GuardedRoute isAuthenticated={isAuthenticated} redirect="/transactions" component={Transactions} />
+            }
           />
-          <Route path="wallet" element={<GuardedRoute auth={auth} redirect="/wallet" component={Wallet} />} />
+          <Route
+            path="wallet"
+            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/wallet" component={Wallet} />}
+          />
           <Route
             path="transactions/:id"
-            element={<GuardedRoute auth={auth} redirect="/transactions" component={TransactionDetails} />}
+            element={
+              <GuardedRoute isAuthenticated={isAuthenticated} redirect="/transactions" component={TransactionDetails} />
+            }
           />
-          <Route path="settings" element={<GuardedRoute auth={auth} redirect="/settings" component={SettingsPage} />} />
+          <Route
+            path="settings"
+            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/settings" component={SettingsPage} />}
+          />
           <Route path="*" element={<ErrorPage />} />
         </Route>
       </Routes>

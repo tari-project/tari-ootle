@@ -18,7 +18,11 @@ use tari_wallet_daemon_client::types::{
     AuthRevokeTokenResponse,
 };
 
-use crate::{config::WalletDaemonAuth, handlers::HandlerContext, services::AuthLoginRequestEvent};
+use crate::{
+    config::WalletDaemonAuth,
+    handlers::{auth::Authenticator, HandlerContext},
+    services::AuthLoginRequestEvent,
+};
 
 pub async fn handle_discover(
     _context: &HandlerContext,

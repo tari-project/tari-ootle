@@ -44,7 +44,7 @@ impl<TStore: WalletStore + Debug + Send + Sync> Authenticator for WebAuthnAuth<T
                     .map_err(|error| anyhow!("Authentication failed: {error:?}"))?;
                 self.webauthn_service
                     .finish_authentication(req.session_id.as_str())
-                    .await;
+                    .await?;
                 Ok(())
             },
             None => Err(anyhow!("No webauthn finish login request present in request!")),

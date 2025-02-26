@@ -116,16 +116,9 @@ where TStore: WalletStore
 
     /// Finalizing registration, remove session from store and save passkey (public key of credential) to DB
     pub async fn finish_registration(&self, session_id: String, passkey: Passkey) -> Result<(), WebauthnServiceError> {
-        let username = self
-            .registration_sessions
-            .remove(session_id.as_str())
-            .await
-            .ok_or(WebauthnServiceError::SessionStore(SessionStoreError::SessionNotFound {
-                session_id,
-            }))?
-            .username;
+        let session = self.registration_sessions.remove(session_id.as_str()).await?;
         let mut tx = self.wallet_store.create_write_tx()?;
-        tx.webauthn_reg_insert(username, passkey)?;
+        tx.webauthn_reg_insert(session.username, passkey)?;
         tx.commit()?;
         Ok(())
     }
@@ -147,7 +140,8 @@ where TStore: WalletStore
         Ok(self.auth_sessions.get(session_id).await?.passkey_auth.clone())
     }
 
-    pub async fn finish_authentication(&self, session_id: &str) {
-        self.auth_sessions.remove(session_id).await;
+    pub async fn finish_authentication(&self, session_id: &str) -> Result<(), WebauthnServiceError> {
+        self.auth_sessions.remove(session_id).await?;
+        Ok(())
     }
 }

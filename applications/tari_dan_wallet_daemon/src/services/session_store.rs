@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use tari_dan_common_types::optional::IsNotFoundError;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -15,6 +16,12 @@ use uuid::Uuid;
 pub enum SessionStoreError {
     #[error("Session not found: {session_id}")]
     SessionNotFound { session_id: String },
+}
+
+impl IsNotFoundError for SessionStoreError {
+    fn is_not_found_error(&self) -> bool {
+        matches!(self, SessionStoreError::SessionNotFound { .. })
+    }
 }
 
 /// A trait the every session data must implement.
@@ -78,13 +85,13 @@ impl<T: SessionData + Clone> SessionStore<T> {
     }
 
     /// Removes session, if it does not exists, this call have no effect.
-    pub async fn remove(&self, session_id: &str) -> Option<T> {
-        if let Ok(session) = self.session(session_id).await {
-            let result = session.clone();
-            let mut sessions = self.sessions.write().await;
-            sessions.remove(session_id);
-            return Some(result);
-        }
-        None
+    pub async fn remove(&self, session_id: &str) -> Result<T, SessionStoreError> {
+        let mut sessions = self.sessions.write().await;
+        let session = sessions
+            .remove(session_id)
+            .ok_or_else(|| SessionStoreError::SessionNotFound {
+                session_id: session_id.to_string(),
+            })?;
+        Ok(session)
     }
 }

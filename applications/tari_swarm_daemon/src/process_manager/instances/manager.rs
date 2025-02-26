@@ -403,6 +403,45 @@ impl InstanceManager {
         Ok(())
     }
 
+    pub fn remove_instance(&mut self, id: InstanceId) -> anyhow::Result<()> {
+        let instance = self
+            .instances()
+            .find(|i| i.id() == id)
+            .ok_or_else(|| anyhow!("Instance not found"))?;
+
+        match instance.instance_type() {
+            InstanceType::MinoTariNode => {
+                self.minotari_nodes.remove(&id);
+            },
+            InstanceType::MinoTariConsoleWallet => {
+                self.minotari_wallets.remove(&id);
+            },
+            InstanceType::MinoTariMiner => {
+                self.minotari_miners.remove(&id);
+            },
+            InstanceType::TariValidatorNode => {
+                self.validator_nodes.remove(&id);
+            },
+            InstanceType::TariIndexer => {
+                self.indexers.remove(&id);
+            },
+            InstanceType::TariSignalingServer => {
+                self.signaling_servers.remove(&id);
+            },
+            InstanceType::TariWalletDaemon => {
+                self.wallet_daemons.remove(&id);
+            },
+            InstanceType::TariWalletDaemonCreateKey => {
+                self.wallet_daemons.remove(&id);
+            },
+        }
+
+        // Remove allocated any ports for instance
+        self.port_allocator.unregister(id);
+
+        Ok(())
+    }
+
     pub fn instances_mut(&mut self) -> impl Iterator<Item = &mut Instance> {
         self.minotari_nodes
             .values_mut()

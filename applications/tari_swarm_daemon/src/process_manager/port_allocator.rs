@@ -35,6 +35,10 @@ impl PortAllocator {
         self.current_port = ports.current_port;
         self.instances.insert(instance_id, ports);
     }
+
+    pub fn unregister(&mut self, instance_id: InstanceId) {
+        self.instances.remove(&instance_id);
+    }
 }
 
 #[derive(Debug, Clone)]

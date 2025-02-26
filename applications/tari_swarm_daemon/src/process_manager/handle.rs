@@ -130,11 +130,11 @@ impl InstanceInfo {
                     .get("public_ip")
                     .map(|s| s.as_str())
                     .unwrap_or("127.0.0.1");
-                let web_port = self
+                let port = self
                     .ports
                     .get("graphql")
                     .expect("Graphql port must be allocated before calling get_graphql_url");
-                format!("http://{public_ip}:{web_port}/json_rpc")
+                format!("http://{public_ip}:{port}")
                     .parse()
                     .expect("Invalid GraphQL URL")
             },

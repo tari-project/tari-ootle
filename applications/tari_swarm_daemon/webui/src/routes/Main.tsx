@@ -272,6 +272,12 @@ function ShowInfo(params: any) {
       <a href={`${node.jrpc}`} target="_blank">{node.jrpc}</a>
     </div>
   );
+  const graphQLInfo = node?.graphql && (
+    <div>
+      <b>GraphQL</b>
+      <a href={`${node.graphql}`} target="_blank">{node.graphql}</a>
+    </div>
+  );
   const grpcInfo = node?.grpc && (
     <div>
       <b>GRPC</b>
@@ -331,6 +337,7 @@ function ShowInfo(params: any) {
       {nameInfo}
       {httpInfo}
       {jrpcInfo}
+      {graphQLInfo}
       {grpcInfo}
       {showLogs && logInfo}
       {executable === Executable.ValidatorNode && node?.jrpc &&

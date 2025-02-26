@@ -169,7 +169,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             let public_jrpc_url = config
                 .indexer
                 .web_ui_public_json_rpc_url
-                .unwrap_or_else(|| format!("http://{jrpc_address}"));
+                .unwrap_or_else(|| format!("http://{jrpc_address}/json_rpc"));
             let public_jrpc_address = url::Url::parse(&public_jrpc_url).map_err(|err| {
                 ExitError::new(
                     ExitCode::ConfigError,

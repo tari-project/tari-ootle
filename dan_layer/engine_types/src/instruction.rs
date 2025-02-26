@@ -69,7 +69,7 @@ pub enum Instruction {
     AllocateAddress {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         substate_type: SubstateType,
-        custom_id: String,
+        workspace_id: String,
     },
 }
 
@@ -166,11 +166,11 @@ impl Display for Instruction {
             },
             Instruction::AllocateAddress {
                 substate_type,
-                custom_id,
+                workspace_id,
             } => {
                 write!(
                     f,
-                    "AllocateAddress {{ substate_type: {substate_type:?}, custom_id: {custom_id} }}"
+                    "AllocateAddress {{ substate_type: {substate_type:?}, workspace ID: {workspace_id} }}"
                 )
             },
         }

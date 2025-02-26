@@ -31,18 +31,26 @@ use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
     component::new_component_address_from_public_key,
     entity_id_provider::EntityIdProvider,
-    indexed_value::IndexedWellKnownTypes,
+    indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction::Instruction,
     instruction_result::InstructionResult,
     lock::LockFlag,
     virtual_substate::VirtualSubstates,
 };
-use tari_template_abi::FunctionDef;
+use tari_template_abi::{call_engine, EngineOp, FunctionDef};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     arg,
     args,
-    args::{Arg, SubstateType, WorkspaceAction},
+    args::{
+        AllocateAddressResult,
+        Arg,
+        CallerContextAction,
+        CallerContextInvokeArg,
+        InvokeResult,
+        SubstateType,
+        WorkspaceAction,
+    },
     auth::OwnerRule,
     crypto::RistrettoPublicKeyBytes,
     invoke_args,
@@ -57,6 +65,7 @@ use crate::{
         scope::{CallScope, PushCallFrame},
         AuthParams,
         AuthorizationScope,
+        EngineArgs,
         Runtime,
         RuntimeInterfaceImpl,
         RuntimeModule,
@@ -351,8 +360,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),
             Instruction::AllocateAddress {
                 substate_type,
-                custom_id,
-            } => Self::allocate_address(runtime, substate_type, custom_id),
+                workspace_id,
+            } => Self::allocate_address(runtime, substate_type, workspace_id),
         }
     }
 
@@ -371,12 +380,25 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     /// Allocating a new address for the given [`SubstateType`].
-    pub fn allocate_address(
+    pub fn allocate_address<T: Into<Vec<u8>>>(
         runtime: &Runtime,
         substate_type: SubstateType,
-        custom_id: String,
-    ) -> Result<(), TransactionError> {
-        // TODO: implement
+        workspace_id: T,
+    ) -> Result<InstructionResult, TransactionError> {
+        let resp: InvokeResult = runtime.interface().caller_context_invoke(
+            CallerContextAction::AllocateAddress,
+            EngineArgs::from(invoke_args![substate_type, None]),
+        )?;
+
+        let result: AllocateAddressResult = resp.decode()?;
+        let indexed_value = IndexedValue::from_raw(match result {
+            AllocateAddressResult::ComponentAddress(allocation) => allocation.address().as_bytes(),
+            AllocateAddressResult::ResourceAddress(allocation) => allocation.as_bytes(),
+        })?;
+        runtime.interface().set_last_instruction_output(indexed_value)?;
+        Self::put_output_on_workspace_with_name(runtime, workspace_id)?;
+
+        Ok(InstructionResult::empty())
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.

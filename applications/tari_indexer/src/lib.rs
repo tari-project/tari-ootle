@@ -152,7 +152,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
 
     // Run the JSON-RPC API
     let jrpc_address = config.indexer.json_rpc_address;
-    if let (Some(jrpc_address), Some(graphql_address)) = (jrpc_address, graphql_address) {
+    if let Some(jrpc_address) = jrpc_address {
         info!(target: LOG_TARGET, "🌐 Started JSON-RPC server on {}", jrpc_address);
         let handlers = JsonRpcHandlers::new(
             &services,
@@ -166,28 +166,34 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         // Run the http ui
         if let Some(address) = config.indexer.web_ui_address {
             // json rpc
-            let mut public_jrpc_address = config
+            let public_jrpc_url = config
                 .indexer
                 .web_ui_public_json_rpc_url
-                .unwrap_or_else(|| jrpc_address.to_string());
-            if !public_jrpc_address.starts_with("http://") && !public_jrpc_address.starts_with("https://") {
-                public_jrpc_address = format!("http://{}", public_jrpc_address);
-            }
-            let public_jrpc_address = url::Url::parse(&public_jrpc_address)
-                .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Invalid public JSON-rpc url: {err}")))?;
+                .unwrap_or_else(|| format!("http://{jrpc_address}"));
+            let public_jrpc_address = url::Url::parse(&public_jrpc_url).map_err(|err| {
+                ExitError::new(
+                    ExitCode::ConfigError,
+                    format!("Invalid public JSON-rpc url '{public_jrpc_url}': {err}"),
+                )
+            })?;
 
             // graphql
-            let mut public_graphql_address = config
+            let public_graphql_url = config
                 .indexer
                 .web_ui_public_graphql_url
-                .unwrap_or_else(|| graphql_address.to_string());
-            if !public_graphql_address.starts_with("http://") && !public_graphql_address.starts_with("https://") {
-                public_graphql_address = format!("http://{}", public_graphql_address);
-            }
-            let public_graphql_address = url::Url::parse(&public_graphql_address)
-                .map_err(|err| ExitError::new(ExitCode::ConfigError, format!("Invalid public GraphQL url: {err}")))?;
+                .filter(|_| graphql_address.is_some())
+                .or_else(|| graphql_address.map(|a| format!("http://{a}")))
+                .map(|addr| {
+                    url::Url::parse(&addr).map_err(|err| {
+                        ExitError::new(
+                            ExitCode::ConfigError,
+                            format!("Invalid public GraphQL url '{addr}': {err}"),
+                        )
+                    })
+                })
+                .transpose()?;
 
-            task::spawn(run_http_ui_server(address, public_jrpc_address, public_graphql_address));
+            task::spawn(run_http_ui_server(address, public_jrpc_address, public_graphql_url));
         }
     }
 

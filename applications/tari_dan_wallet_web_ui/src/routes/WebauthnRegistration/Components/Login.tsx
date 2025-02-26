@@ -20,7 +20,7 @@ const getCredential = async (challenge: any, allowCredentials: any) => {
         challenge: challenge,
         allowCredentials: allowCredentials,
         timeout: 60000,
-        userVerification: 'preferred',
+        userVerification: 'required',
     }
     return await navigator.credentials.get({
         publicKey: publicKeyCredentialRequestOptions,

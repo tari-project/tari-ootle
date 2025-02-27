@@ -46,7 +46,10 @@ use tari_dan_p2p::{
         SyncTemplatesResponse,
     },
 };
-use tari_dan_storage::consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord};
+use tari_dan_storage::{
+    consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
+    StateStore,
+};
 use tari_engine_types::TemplateAddress;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
@@ -56,14 +59,13 @@ use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
-use tari_dan_storage::StateStore;
 
 use crate::{
     consensus::ConsensusHandle,
     p2p::{
         rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
         services::mempool::MempoolHandle,
-    }
+    },
 };
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";

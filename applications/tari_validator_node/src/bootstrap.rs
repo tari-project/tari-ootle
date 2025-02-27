@@ -186,7 +186,7 @@ pub async fn spawn_services(
 
     // Connect to shard db
     let state_store =
-        SqliteStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path().display()))?;      
+        SqliteStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path().display()))?;
     state_store.with_write_tx(|tx| {
         bootstrap_state(
             tx,

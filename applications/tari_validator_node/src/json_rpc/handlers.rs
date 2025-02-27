@@ -38,14 +38,14 @@ use tari_dan_storage::{
     consensus_models::{Block, ExecutedTransaction, LeafBlock, QuorumDecision, SubstateRecord, TransactionRecord},
     global::GlobalDb,
     Ordering,
+    StateStore,
+    StateStoreReadTransaction,
 };
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_dan_storage::StateStoreReadTransaction;
-use tari_dan_storage::StateStore;
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_client::types::{
     self,

@@ -140,7 +140,7 @@ impl RocksdbModel for BlockModel {
         let value = tx
             .get(&key)
             .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
-        let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound { key, operation })?;
+        let bytes = value.ok_or(RocksDbStorageError::NotFound { key, operation })?;
         let value = Self::decode(bytes)?;
         Ok(Some(value))
     }

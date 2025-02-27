@@ -41,7 +41,6 @@ tari_rpc_state_sync = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
 tari_consensus = { workspace = true }
 tari_state_store_sqlite = { workspace = true }
-tari_state_tree = { workspace = true }
 tari_networking = { workspace = true }
 tari_rpc_framework = { workspace = true }
 tari_template_builtin = { workspace = true }

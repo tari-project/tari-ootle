@@ -10544,7 +10544,6 @@ dependencies = [
 name = "tari_state_store_rocksdb"
 version = "0.8.2"
 dependencies = [
- "bigdecimal",
  "bincode 2.0.0-rc.3",
  "hex",
  "indexmap 2.6.0",
@@ -10552,7 +10551,6 @@ dependencies = [
  "rand",
  "rocksdb",
  "serde",
- "serde_json",
  "tari_bor",
  "tari_common_types",
  "tari_dan_common_types",
@@ -10881,7 +10879,6 @@ dependencies = [
  "tari_rpc_state_sync",
  "tari_shutdown",
  "tari_state_store_sqlite",
- "tari_state_tree",
  "tari_swarm",
  "tari_template_builtin",
  "tari_template_lib",

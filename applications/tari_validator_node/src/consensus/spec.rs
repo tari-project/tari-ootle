@@ -8,6 +8,7 @@ use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
 use tari_dan_common_types::PeerAddress;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::implementation::TemplateManager;
 
 #[cfg(feature = "metrics")]
@@ -23,7 +24,6 @@ use crate::{
         services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
         NopLogger,
     },
-    state_store::ValidatorNodeStateStore,
 };
 
 #[derive(Clone)]
@@ -40,7 +40,7 @@ impl ConsensusSpec for TariConsensusSpec {
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
     type SignatureService = TariSignatureService;
-    type StateStore = ValidatorNodeStateStore;
+    type StateStore = SqliteStateStore<PeerAddress>;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
     type TransactionExecutor = TariDanBlockTransactionExecutor<
         TariDanTransactionProcessor<TemplateManager<PeerAddress>>,

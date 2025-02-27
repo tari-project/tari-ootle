@@ -31,6 +31,7 @@ use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 use tari_engine_types::commit_result::RejectReason;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{mpsc, oneshot};
 
@@ -43,7 +44,6 @@ use crate::{
         gossip::{IncomingMessage, MempoolGossip},
         handle::MempoolRequest,
     },
-    state_store::ValidatorNodeStateStore,
     transaction_validators::TransactionValidationError,
     validator::Validator,
 };
@@ -56,7 +56,7 @@ pub struct MempoolService<TValidator> {
     mempool_requests: mpsc::Receiver<MempoolRequest>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     before_execute_validator: TValidator,
-    state_store: ValidatorNodeStateStore,
+    state_store: SqliteStateStore<PeerAddress>,
     gossip: MempoolGossip<PeerAddress>,
     consensus_handle: ConsensusHandle,
     #[cfg(feature = "metrics")]
@@ -70,7 +70,7 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
         mempool_requests: mpsc::Receiver<MempoolRequest>,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         before_execute_validator: TValidator,
-        state_store: ValidatorNodeStateStore,
+        state_store: SqliteStateStore<PeerAddress>,
         consensus_handle: ConsensusHandle,
         networking: NetworkingHandle<TariMessagingSpec>,
         rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,

@@ -5,20 +5,18 @@ use std::{collections::HashMap, str::FromStr};
 
 use prometheus::{core::Collector, IntCounter, IntGauge, IntGaugeVec, Opts, Registry};
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage, traits::hooks::ConsensusHooks};
-use tari_dan_common_types::NodeHeight;
+use tari_dan_common_types::{NodeHeight, PeerAddress};
 use tari_dan_storage::{
     consensus_models::{Decision, QuorumDecision, TransactionAtom, ValidBlock},
     StateStore,
 };
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::TransactionId;
 
-use crate::{
-    metrics::{CollectorRegister, LabelledCollector},
-    state_store::ValidatorNodeStateStore,
-};
+use crate::metrics::{CollectorRegister, LabelledCollector};
 
 #[derive(Debug, Clone)]
-pub struct PrometheusConsensusMetrics<S = ValidatorNodeStateStore> {
+pub struct PrometheusConsensusMetrics<S = SqliteStateStore<PeerAddress>> {
     _state_store: S,
     local_blocks_received: IntCounter,
     blocks_accepted: IntCounter,

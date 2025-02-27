@@ -13,6 +13,7 @@ use tari_dan_storage::consensus_models::TransactionPool;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -25,7 +26,6 @@ use crate::{
     consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec},
     event_subscription::EventSubscription,
     p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
-    state_store::ValidatorNodeStateStore,
     transaction_validators::TransactionValidationError,
     validator::BoxedValidator,
 };
@@ -51,7 +51,7 @@ pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Trans
 pub async fn spawn(
     network: Network,
     sidechain_id: Option<RistrettoPublicKey>,
-    store: ValidatorNodeStateStore,
+    store: SqliteStateStore<PeerAddress>,
     local_addr: PeerAddress,
     signing_service: TariSignatureService,
     epoch_manager: EpochManagerHandle<PeerAddress>,

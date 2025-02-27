@@ -34,6 +34,7 @@ use tari_engine_types::{
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::RpcStatus;
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_client::ValidatorNodeClientError;
@@ -43,7 +44,6 @@ use tokio::task;
 
 use crate::{
     p2p::services::mempool::{ResolvedSubstates, SubstateResolver},
-    state_store::ValidatorNodeStateStore,
     substate_resolver::{SubstateResolverError, TariSubstateResolver},
 };
 
@@ -72,7 +72,7 @@ pub enum DryRunTransactionProcessorError {
 #[derive(Clone, Debug)]
 pub struct DryRunTransactionProcessor {
     substate_resolver: TariSubstateResolver<
-        ValidatorNodeStateStore,
+        SqliteStateStore<PeerAddress>,
         EpochManagerHandle<PeerAddress>,
         TariValidatorNodeRpcClientFactory,
         SubstateFileCache,
@@ -86,7 +86,7 @@ impl DryRunTransactionProcessor {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         payload_processor: TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
         substate_resolver: TariSubstateResolver<
-            ValidatorNodeStateStore,
+            SqliteStateStore<PeerAddress>,
             EpochManagerHandle<PeerAddress>,
             TariValidatorNodeRpcClientFactory,
             SubstateFileCache,

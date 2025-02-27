@@ -65,6 +65,7 @@ use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -89,7 +90,6 @@ use crate::{
         NopLogger,
     },
     state_bootstrap::bootstrap_state,
-    state_store::ValidatorNodeStateStore,
     substate_resolver::TariSubstateResolver,
     transaction_validators::{
         EpochRangeValidator,
@@ -185,7 +185,8 @@ pub async fn spawn_services(
     let sidechain_id = config.validator_node.validator_node_sidechain_id.clone();
 
     // Connect to shard db
-    let state_store = ValidatorNodeStateStore::connect(config)?;
+    let state_store =
+        SqliteStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path().display()))?;      
     state_store.with_write_tx(|tx| {
         bootstrap_state(
             tx,
@@ -468,7 +469,7 @@ pub struct Services {
     pub dry_run_transaction_processor: DryRunTransactionProcessor,
     // pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     // pub consensus_gossip_service: ConsensusGossipHandle,
-    pub state_store: ValidatorNodeStateStore,
+    pub state_store: SqliteStateStore<PeerAddress>,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
 
     pub handles: Vec<JoinHandle<Result<(), anyhow::Error>>>,
@@ -487,7 +488,7 @@ async fn spawn_p2p_rpc(
     config: &ApplicationConfig,
     networking: &mut NetworkingHandle<TariMessagingSpec>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    shard_store_store: ValidatorNodeStateStore,
+    shard_store_store: SqliteStateStore<PeerAddress>,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
     template_manager: TemplateManagerHandle,

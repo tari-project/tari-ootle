@@ -26,6 +26,7 @@ use tari_dan_common_types::PeerAddress;
 use tari_dan_p2p::TariMessagingSpec;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_networking::NetworkingHandle;
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::Transaction;
 use tokio::{sync::mpsc, task, task::JoinHandle};
 
@@ -34,7 +35,6 @@ use super::metrics::PrometheusMempoolMetrics;
 use crate::{
     consensus::ConsensusHandle,
     p2p::services::mempool::{handle::MempoolHandle, service::MempoolService},
-    state_store::ValidatorNodeStateStore,
     transaction_validators::TransactionValidationError,
     validator::Validator,
 };
@@ -44,7 +44,7 @@ const LOG_TARGET: &str = "tari::dan::validator_node::mempool";
 pub fn spawn<TValidator>(
     epoch_manager: EpochManagerHandle<PeerAddress>,
     transaction_validator: TValidator,
-    state_store: ValidatorNodeStateStore,
+    state_store: SqliteStateStore<PeerAddress>,
     consensus_handle: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
     rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,

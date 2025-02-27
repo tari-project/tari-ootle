@@ -10880,7 +10880,6 @@ dependencies = [
  "tari_rpc_framework",
  "tari_rpc_state_sync",
  "tari_shutdown",
- "tari_state_store_rocksdb",
  "tari_state_store_sqlite",
  "tari_state_tree",
  "tari_swarm",

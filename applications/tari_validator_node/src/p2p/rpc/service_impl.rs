@@ -46,26 +46,24 @@ use tari_dan_p2p::{
         SyncTemplatesResponse,
     },
 };
-use tari_dan_storage::{
-    consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
-    StateStore,
-};
+use tari_dan_storage::consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord};
 use tari_engine_types::TemplateAddress;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
+use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::HashParseError;
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
+use tari_dan_storage::StateStore;
 
 use crate::{
     consensus::ConsensusHandle,
     p2p::{
         rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
         services::mempool::MempoolHandle,
-    },
-    state_store::ValidatorNodeStateStore,
+    }
 };
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";
@@ -73,7 +71,7 @@ const LOG_TARGET: &str = "tari::dan::p2p::rpc";
 pub struct ValidatorNodeRpcServiceImpl {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     template_manager: TemplateManagerHandle,
-    shard_state_store: ValidatorNodeStateStore,
+    shard_state_store: SqliteStateStore<PeerAddress>,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
 }
@@ -82,7 +80,7 @@ impl ValidatorNodeRpcServiceImpl {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
         template_manager: TemplateManagerHandle,
-        shard_state_store: ValidatorNodeStateStore,
+        shard_state_store: SqliteStateStore<PeerAddress>,
         mempool: MempoolHandle,
         consensus: ConsensusHandle,
     ) -> Self {

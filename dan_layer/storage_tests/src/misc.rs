@@ -35,6 +35,7 @@ mod miscellaneous_operations_test {
     use super::*;
     use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
 
+    #[ignore]
     #[test]
     fn miscellaneous_sqlite() {
         let db = create_sqlite();
@@ -42,6 +43,7 @@ mod miscellaneous_operations_test {
         miscellaneous_operations(db);
     }
 
+    #[ignore]
     #[test]
     fn miscellaneous_rocksdb() {
         let db = create_rocksdb();

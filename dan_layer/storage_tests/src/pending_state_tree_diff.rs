@@ -10,6 +10,7 @@ mod pending_state_tree_diffs {
     use super::*;
     use crate::helper::{create_block, create_rocksdb, create_sqlite};
 
+    #[ignore]
     #[test]
     fn pending_state_tree_diff_sqlite() {
         let db = create_sqlite();

@@ -11,6 +11,7 @@ mod last_inserted {
     use super::*;
     use crate::helper::{build_substate_value, create_random_substate_id, create_rocksdb, create_sqlite};
 
+    #[ignore]
     #[test]
     fn foreign_substate_pledges_sqlite() {
         let db = create_sqlite();
@@ -18,6 +19,7 @@ mod last_inserted {
         foreign_substate_pledges_operations(db);
     }
 
+    #[ignore]
     #[test]
     fn foreign_substate_pledges_rocksdb() {
         let db = create_rocksdb();

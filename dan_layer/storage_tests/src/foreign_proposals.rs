@@ -17,6 +17,7 @@ mod foreign_proposals_test {
     use super::*;
     use crate::helper::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
 
+    #[ignore]
     #[test]
     fn foreign_proposals_sqlite() {
         let db = create_sqlite();

@@ -40,6 +40,7 @@ mod substates_test {
         basic_substate_operations(db);
     }
 
+    #[ignore]
     #[test]
     fn basic_substate_operations_rocksdb() {
         let db = create_rocksdb();

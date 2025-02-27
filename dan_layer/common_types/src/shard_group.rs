@@ -200,4 +200,21 @@ mod tests {
         let n = u64::from(u32::MAX) + 1;
         format!("{n}-999").parse::<ShardGroup>().unwrap_err();
     }
+
+    #[test]
+    fn contains_or_global_works_correctly() {
+        let sg = ShardGroup::new(10, 20);
+
+        // Test with a global shard
+        let global_shard = Shard::global(); // Assuming this constructor exists
+        assert!(sg.contains_or_global(&global_shard));
+
+        // Test with a contained shard
+        let contained_shard = Shard::from(15);
+        assert!(sg.contains_or_global(&contained_shard));
+
+        // Test with a non-contained shard
+        let non_contained_shard = Shard::from(30);
+        assert!(!sg.contains_or_global(&non_contained_shard));
+    }
 }

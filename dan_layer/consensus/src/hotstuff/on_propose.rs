@@ -452,12 +452,6 @@ where TConsensusSpec: ConsensusSpec
         let mut executed_transactions = HashMap::new();
         let mut commands = if can_propose_epoch_end {
             BTreeSet::from_iter([Command::EndEpoch])
-            // self.fetch_end_of_epoch_commands(
-            //     &start_of_chain_block,
-            //     epoch,
-            //     &mut executed_transactions,
-            //     &mut substate_store,
-            // )?
         } else {
             BTreeSet::from_iter(
                 batch
@@ -737,95 +731,6 @@ where TConsensusSpec: ConsensusSpec
             commands: vec![],
         })
     }
-
-    // fn fetch_end_of_epoch_commands(
-    //     &self,
-    //     leaf_block: &LeafBlock,
-    //     epoch: Epoch,
-    //     transaction_executions: &mut HashMap<TransactionId, TransactionExecution>,
-    //     substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
-    // ) -> Result<ProposalBatch, HotStuffError> {
-    //     let _timer = TraceTimer::debug(LOG_TARGET, "fetch_end_of_epoch_commands");
-    //     let mut batch = ProposalBatch::default();
-    //
-    //     // First, load up the required fee mints
-    //     let fee_mints = ValidatorFeeMint::get_all_for_epoch(substate_store.read_transaction(), epoch)?;
-    //
-    //     if fee_mints.is_empty() {
-    //         debug!(target: LOG_TARGET, "No FeeMints for epoch {epoch}");
-    //         batch.commands = vec![Command::EndEpoch(EndEpochAtom::empty())];
-    //         return Ok(batch);
-    //     }
-    //
-    //     let mut atom = EndEpochAtom::with_capacity(fee_mints.len());
-    //     // Then, check for conflicting transactions in LocalAccept phase or greater.
-    //     let mut conflicting_must_finalize = vec![];
-    //     let mut conflicting_must_abort = vec![];
-    //     let mut fees_to_mint = vec![];
-    //     // TODO(perf): worst case O(4n)
-    //     for mint in fee_mints {
-    //         // TODO: check pledges
-    //         match substate_store.get_latest_lock_by_id(&mint.substate_id)? {
-    //             Some(lock) => {
-    //                 let mut transaction = self.transaction_pool.get(
-    //                     substate_store.read_transaction(),
-    //                     leaf_block,
-    //                     lock.transaction_id(),
-    //                 )?;
-    //                 if transaction.current_stage() >= TransactionPoolStage::LocalAccepted {
-    //                     conflicting_must_finalize.push(transaction);
-    //                 } else {
-    //                     let version = lock.version() + 1;
-    //                     let mut tx_rec = transaction.get_transaction(substate_store.read_transaction())?;
-    //                     tx_rec.abort(RejectReason::ValidatorFeePoolConflict {
-    //                         substate_id: mint.substate_id.clone(),
-    //                     });
-    //                     transaction.set_local_decision(tx_rec.current_decision());
-    //                     transaction_executions.insert(*tx_rec.id(), tx_rec.into_execution().expect("Aborted above"));
-    //                     conflicting_must_abort.push(transaction);
-    //                     atom.fee_mints.insert_sorted(mint.substate_id.clone(), FeeMint {
-    //                         version,
-    //                         amount: mint.amount,
-    //                     });
-    //                     fees_to_mint.push((
-    //                         mint.substate_id,
-    //                         Substate::new(version, ValidatorFeePool::new(mint.claim_key_bytes.into(), mint.amount)),
-    //                     ));
-    //                 }
-    //             },
-    //             None => {
-    //                 let version = substate_store.get_latest_version(&mint.substate_id).optional()?;
-    //                 let version = version.map(|v| v.version() + 1).unwrap_or(0);
-    //                 fees_to_mint.push((
-    //                     mint.substate_id.clone(),
-    //                     Substate::new(version, ValidatorFeePool::new(mint.claim_key_bytes.into(), mint.amount)),
-    //                 ));
-    //                 atom.fee_mints.insert_sorted(mint.substate_id, FeeMint {
-    //                     version,
-    //                     amount: mint.amount,
-    //                 });
-    //             },
-    //         }
-    //     }
-    //
-    //     // If any need to be finalized before epoch end, move to finalize them without proposing epoch end
-    //     if !conflicting_must_finalize.is_empty() {
-    //         info!(target: LOG_TARGET, "❗️ {} transaction(s) must finalize before epoch end");
-    //         batch.transactions = conflicting_must_finalize;
-    //         return Ok(batch);
-    //     }
-    //
-    //     if !conflicting_must_abort.is_empty() {
-    //         warn!(target: LOG_TARGET, "❗️ {} transaction(s) must ABORT before epoch end");
-    //         batch.transactions = conflicting_must_abort;
-    //     }
-    //
-    //     // Include end epoch command with mints
-    //     batch.commands.push(Command::EndEpoch(atom));
-    //
-    //     // Mint the validator fees
-    //     Ok(batch)
-    // }
 
     #[allow(clippy::too_many_lines)]
     fn prepare_transaction(

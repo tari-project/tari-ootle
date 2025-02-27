@@ -37,10 +37,10 @@ impl<TStore: WalletStore + Debug + Send + Sync> Authenticator for WebAuthnAuth<T
     async fn authenticate(&self, request: &AuthLoginRequest) -> Result<(), anyhow::Error> {
         match &request.webauthn_finish_auth_request {
             Some(req) => {
-                let credential = req.credential()?;
+                let credential = &req.credential;
                 let auth_passkey = self.webauthn_service.auth_passkey(req.session_id.as_str()).await?;
                 self.webauthn
-                    .finish_passkey_authentication(&credential, &auth_passkey)
+                    .finish_passkey_authentication(credential, &auth_passkey)
                     .map_err(|error| anyhow!("Authentication failed: {error:?}"))?;
                 self.webauthn_service
                     .finish_authentication(req.session_id.as_str())

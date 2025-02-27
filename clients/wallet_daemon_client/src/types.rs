@@ -1337,14 +1337,8 @@ pub struct WebauthnStartRegisterResponse {
     /// Unique ID of the current registration Session.
     pub session_id: String,
     /// [`PublicKeyCredentialCreationOptions`] serialized as JSON
-    pub public_key: String,
-}
-
-impl WebauthnStartRegisterResponse {
-    pub fn new(session_id: String, public_key: PublicKeyCredentialCreationOptions) -> Result<Self, serde_json::Error> {
-        let public_key = serde_json::to_string(&public_key)?;
-        Ok(Self { session_id, public_key })
-    }
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub public_key: PublicKeyCredentialCreationOptions,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1357,13 +1351,8 @@ pub struct WebauthnFinishRegisterRequest {
     /// Session ID received from [`WebauthnStartRegisterResponse`].
     pub session_id: String,
     /// [`RegisterPublicKeyCredential`] serialized as JSON.
-    credential: String,
-}
-
-impl WebauthnFinishRegisterRequest {
-    pub fn credential(&self) -> Result<RegisterPublicKeyCredential, serde_json::Error> {
-        serde_json::from_str(&self.credential)
-    }
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub credential: RegisterPublicKeyCredential,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1372,15 +1361,7 @@ impl WebauthnFinishRegisterRequest {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
-pub struct WebauthnFinishRegisterResponse {
-    pub success: bool,
-}
-
-impl WebauthnFinishRegisterResponse {
-    pub fn new(success: bool) -> Self {
-        Self { success }
-    }
-}
+pub struct WebauthnFinishRegisterResponse {}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
@@ -1402,14 +1383,8 @@ pub struct WebauthnStartAuthResponse {
     /// Session ID.
     pub session_id: String,
     /// [`RequestChallengeResponse`] serialized as JSON string.
-    pub challenge: String,
-}
-
-impl WebauthnStartAuthResponse {
-    pub fn new(session_id: String, challenge: RequestChallengeResponse) -> Result<Self, serde_json::Error> {
-        let challenge = serde_json::to_string(&challenge)?;
-        Ok(Self { session_id, challenge })
-    }
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub challenge: RequestChallengeResponse,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1421,12 +1396,7 @@ impl WebauthnStartAuthResponse {
 pub struct WebauthnFinishAuthRequest {
     /// Session ID received from [`WebauthnStartAuthResponse`].
     pub session_id: String,
-    /// [`PublicKeyCredential`] serialized as JSON.
-    credential: String,
-}
-
-impl WebauthnFinishAuthRequest {
-    pub fn credential(&self) -> Result<PublicKeyCredential, serde_json::Error> {
-        serde_json::from_str(&self.credential)
-    }
+    /// [`PublicKeyCredential`]
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub credential: PublicKeyCredential,
 }

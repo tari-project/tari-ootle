@@ -50,6 +50,9 @@ const createCredential = async (rpOptions: { rpId: string; rpName: string }, use
     extensions: {
       credProps: true,
     },
+    authenticatorSelection: {
+      userVerification: "required",
+    },
   };
   return await navigator.credentials.create({
     publicKey: publicKeyCredentialCreationOptions,
@@ -68,58 +71,53 @@ function WebauthnRegistration() {
 
     setLoading(true);
 
-    // start registration by getting challenge
-    const startRegisterResponse = await webauthnStartRegistration({
-      username,
-    })
-      .catch((reason) => {
-        setError(reason);
-        console.error(reason);
-      })
-      .finally(() => {
-        setLoading(false);
+    try {
+      // start registration by getting challenge
+      const startRegisterResponse = await webauthnStartRegistration({
+        username,
       });
 
-    if (!startRegisterResponse) {
-      return;
-    }
+      if (!startRegisterResponse) {
+        throw new Error("Failed to start registration");
+      }
 
-    const challenge = Buffer.from(JSON.parse(startRegisterResponse.public_key).challenge, "base64");
-    const regSessionId = startRegisterResponse.session_id;
+      if (!startRegisterResponse.public_key) {
+        throw new Error("Failed to start registration: missing public_key");
+      }
 
-    // get credential
-    const credential = await createCredential(
-      {
-        rpId: WEBAUTHN_RP_ID,
-        rpName: "Tari Ootle Wallet",
-      },
-      username,
-      challenge,
-    ).catch((reason) => {
-      setLoading(false);
-      setError(reason);
-      console.error(reason);
-    });
+      // @ts-ignore
+      const challenge = Buffer.from(startRegisterResponse.public_key.challenge, "base64");
+      const regSessionId = startRegisterResponse.session_id;
 
-    if (!credential) {
-      return;
-    }
+      // get credential
+      const credential = await createCredential(
+        {
+          rpId: WEBAUTHN_RP_ID,
+          rpName: "Tari Ootle Wallet",
+        },
+        username,
+        challenge,
+      );
 
-    const finishRegisterResponse = await webauthnFinishRegistration({
-      credential: JSON.stringify(credential),
-      session_id: regSessionId,
-    }).catch((reason) => {
-      setLoading(false);
-      setError(reason);
-      console.error(reason);
-    });
+      if (!credential) {
+        throw new Error("Failed to create credential");
+      }
 
-    if (!finishRegisterResponse) {
-      return;
-    }
+      await webauthnFinishRegistration({
+        credential,
+        session_id: regSessionId,
+      });
 
-    if (finishRegisterResponse.success) {
       navigate("/auth");
+    } catch (error) {
+      console.error("Error registering WebAuthn key:", error);
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError(error as string);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 

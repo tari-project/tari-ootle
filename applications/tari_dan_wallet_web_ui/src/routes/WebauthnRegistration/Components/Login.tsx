@@ -40,51 +40,59 @@ function WebauthnLogin() {
     e.preventDefault();
     setLoading(true);
 
-    // start authentication by getting challenge
-    const startAuthResponse = await webauthnStartAuth({ username }).catch((reason) => {
-      setLoading(false);
-      setError(reason);
-      console.error(reason);
-    });
+    try {
+      // start authentication by getting challenge
+      const startAuthResponse = await webauthnStartAuth({ username });
 
-    if (!startAuthResponse) {
-      return;
-    }
+      if (!startAuthResponse) {
+        throw new Error("Failed to start authentication");
+      }
 
-    const challengeResponse = JSON.parse(startAuthResponse.challenge);
-    const challenge = Buffer.from(challengeResponse.publicKey.challenge, "base64");
-    const loginSessionId = startAuthResponse.session_id;
-    let allowCredentials = challengeResponse.publicKey.allowCredentials.map((value: any) => {
-      return {
-        id: Buffer.from(value.id, "base64"),
-        type: value.type,
+      if (!startAuthResponse.challenge) {
+        throw new Error("Failed to get challenge");
+      }
+
+      const challengeResponse = startAuthResponse.challenge;
+      // @ts-ignore
+      const challenge = Buffer.from(startAuthResponse.challenge.publicKey.challenge, "base64");
+      const loginSessionId = startAuthResponse.session_id;
+      // @ts-ignore
+      let allowCredentials = challengeResponse.publicKey.allowCredentials.map((value: any) => {
+        return {
+          id: Buffer.from(value.id, "base64"),
+          type: value.type,
+        };
+      });
+      let credential = await getCredential(challenge, allowCredentials);
+
+      if (!credential) {
+        throw new Error("Failed to get credential");
+      }
+
+      const client = await unauthenticated_client();
+      const webauthnFinishAuthRequest: WebauthnFinishAuthRequest = {
+        credential,
+        session_id: loginSessionId,
       };
-    });
-    let credential = await getCredential(challenge, allowCredentials);
+      const authToken = await client.authRequest(["Admin"], webauthnFinishAuthRequest);
 
-    if (!credential) {
-      return;
-    }
+      if (!authToken) {
+        throw new Error("Failed to get auth token");
+      }
 
-    const client = await unauthenticated_client();
-    const webauthnFinishAuthRequest: WebauthnFinishAuthRequest = {
-      credential: JSON.stringify(credential),
-      session_id: loginSessionId,
-    };
-    const authToken = await client.authRequest(["Admin"], webauthnFinishAuthRequest).catch((reason) => {
+      const acceptToken = await client.authAccept(authToken, authToken);
+      setAuthToken(acceptToken);
+      navigate(redirect);
+    } catch (error) {
+      console.error(error);
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError(error as string);
+      }
+    } finally {
       setLoading(false);
-      setError(reason);
-      console.error(reason);
-    });
-
-    if (!authToken) {
-      return;
     }
-
-    const acceptToken = await client.authAccept(authToken, authToken);
-
-    setAuthToken(acceptToken);
-    navigate(redirect);
   };
 
   const errorMessage = error ? (

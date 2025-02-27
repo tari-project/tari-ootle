@@ -89,7 +89,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let last_inserted_id: i32 =
             diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>("last_insert_rowid()"))
                 .get_result(self.connection())
-                .unwrap();
+                .map_err(|e| WalletStorageError::general("jwt_add_empty_token", e))?;
         Ok(last_inserted_id as u64)
     }
 
@@ -720,7 +720,14 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             value: locked_output.value as u64,
             sender_public_nonce: locked_output
                 .sender_public_nonce
-                .map(|nonce| PublicKey::from_hex(&nonce).unwrap()),
+                .map(|nonce| {
+                    PublicKey::from_hex(&nonce).map_err(|e| WalletStorageError::DecodingError {
+                        operation: "outputs_lock_smallest_amount",
+                        item: "sender public nonce",
+                        details: e.to_string(),
+                    })
+                })
+                .transpose()?,
             encryption_secret_key_index: locked_output.encryption_secret_key_index as u64,
             encrypted_data: EncryptedData::try_from(locked_output.encrypted_data).map_err(|len| {
                 WalletStorageError::DecodingError {
@@ -940,7 +947,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let registration_id: i32 =
             diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>("last_insert_rowid()"))
                 .get_result(self.connection())
-                .unwrap();
+                .map_err(|e| WalletStorageError::general("webauthn_reg_insert", e))?;
 
         let passkey_json = serde_json::to_string(&passkey).map_err(|e| WalletStorageError::DecodingError {
             operation: "webauthn_reg_insert",

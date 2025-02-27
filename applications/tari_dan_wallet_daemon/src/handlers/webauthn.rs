@@ -73,7 +73,10 @@ pub async fn handle_start_registration(
         .start_registration(request.username, passkey_reg)
         .await?;
 
-    Ok(WebauthnStartRegisterResponse::new(session_id, response.public_key)?)
+    Ok(WebauthnStartRegisterResponse {
+        session_id,
+        public_key: response.public_key,
+    })
 }
 
 pub async fn handle_finish_registration(
@@ -85,11 +88,11 @@ pub async fn handle_finish_registration(
     let webauthn_service = webauthn_service(context)?;
     let session_data = webauthn_service.get_session(&request.session_id).await?;
     assert_user_not_registered(context, session_data.username())?;
-    let passkey = webauthn.finish_passkey_registration(&request.credential()?, session_data.passkey_reg())?;
+    let passkey = webauthn.finish_passkey_registration(&request.credential, session_data.passkey_reg())?;
     webauthn_service
         .finish_registration(request.session_id, passkey)
         .await?;
-    Ok(WebauthnFinishRegisterResponse::new(true))
+    Ok(WebauthnFinishRegisterResponse {})
 }
 
 pub async fn handle_start_auth(
@@ -102,5 +105,5 @@ pub async fn handle_start_auth(
     let passkeys = webauthn_service.passkeys(request.username)?;
     let (challenge, passkey_auth) = webauthn.start_passkey_authentication(passkeys.as_slice())?;
     let session_id = webauthn_service.start_authentication(passkey_auth).await?;
-    Ok(WebauthnStartAuthResponse::new(session_id, challenge)?)
+    Ok(WebauthnStartAuthResponse { session_id, challenge })
 }

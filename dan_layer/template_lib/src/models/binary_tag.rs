@@ -35,6 +35,8 @@ pub enum BinaryTag {
     UnclaimedConfidentialOutputAddress = 136,
     TemplateAddress = 137,
     ValidatorNodeFeePool = 138,
+    AllocatedComponentAddress = 139,
+    AllocatedResourceAddress = 140,
 }
 
 impl BinaryTag {
@@ -51,6 +53,8 @@ impl BinaryTag {
             136 => Some(Self::UnclaimedConfidentialOutputAddress),
             137 => Some(Self::TemplateAddress),
             138 => Some(Self::ValidatorNodeFeePool),
+            139 => Some(Self::AllocatedComponentAddress),
+            140 => Some(Self::AllocatedResourceAddress),
             _ => None,
         }
     }
@@ -78,6 +82,8 @@ mod tests {
             BinaryTag::UnclaimedConfidentialOutputAddress,
             BinaryTag::TemplateAddress,
             BinaryTag::ValidatorNodeFeePool,
+            BinaryTag::AllocatedComponentAddress,
+            BinaryTag::AllocatedResourceAddress,
         ];
 
         for case in cases {

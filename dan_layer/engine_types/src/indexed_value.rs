@@ -12,7 +12,6 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, BorError, FromTagAndValue, ValueVisitor};
-use tari_template_lib::models::AddressAllocation;
 use tari_template_lib::{
     models::{
         BinaryTag,
@@ -150,8 +149,8 @@ pub struct IndexedWellKnownTypes {
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
-    component_address_allocations: Vec<AddressAllocation<ComponentAddress>>,
-    resource_address_allocations: Vec<AddressAllocation<ResourceAddress>>,
+    component_address_allocations: Vec<ComponentAddress>,
+    resource_address_allocations: Vec<ResourceAddress>,
 }
 
 impl IndexedWellKnownTypes {
@@ -193,6 +192,8 @@ impl IndexedWellKnownTypes {
             unclaimed_confidential_output_address: visitor.unclaimed_confidential_output_addresses,
             published_template_addresses: visitor.published_templates,
             validator_node_fee_pools: visitor.validator_node_fee_pools,
+            component_address_allocations: visitor.component_address_allocations,
+            resource_address_allocations: visitor.resource_address_allocations,
         })
     }
 
@@ -229,6 +230,8 @@ impl IndexedWellKnownTypes {
                     },
                     WellKnownTariValue::BucketId(_) |
                     WellKnownTariValue::Metadata(_) |
+                    WellKnownTariValue::ComponentAddressAllocation(_) |
+                    WellKnownTariValue::ResourceAddressAllocation(_) |
                     WellKnownTariValue::ProofId(_) => {},
                 }
 
@@ -354,6 +357,8 @@ pub enum WellKnownTariValue {
     UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
     PublishedTemplateAddress(PublishedTemplateAddress),
     ValidatorNodeFeePool(ValidatorFeePoolAddress),
+    ComponentAddressAllocation(ComponentAddress),
+    ResourceAddressAllocation(ResourceAddress),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
@@ -407,6 +412,14 @@ impl FromTagAndValue for WellKnownTariValue {
                 let value: [u8; 32] = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ValidatorNodeFeePool(value.into()))
             },
+            BinaryTag::AllocatedComponentAddress => {
+                let value: ComponentAddress = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::ComponentAddressAllocation(value))
+            },
+            BinaryTag::AllocatedResourceAddress => {
+                let value: ResourceAddress = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::ResourceAddressAllocation(value))
+            }
         }
     }
 }
@@ -424,6 +437,8 @@ pub struct IndexedValueVisitor {
     unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
     published_templates: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
+    component_address_allocations: Vec<ComponentAddress>,
+    resource_address_allocations: Vec<ResourceAddress>,
 }
 
 impl IndexedValueVisitor {
@@ -440,6 +455,8 @@ impl IndexedValueVisitor {
             unclaimed_confidential_output_addresses: vec![],
             published_templates: vec![],
             validator_node_fee_pools: vec![],
+            component_address_allocations: vec![],
+            resource_address_allocations: vec![],
         }
     }
 }
@@ -482,6 +499,12 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             WellKnownTariValue::ValidatorNodeFeePool(address) => {
                 self.validator_node_fee_pools.push(address);
             },
+            WellKnownTariValue::ComponentAddressAllocation(allocation) => {
+                self.component_address_allocations.push(allocation);
+            }
+            WellKnownTariValue::ResourceAddressAllocation(allocation) => {
+                self.resource_address_allocations.push(allocation);
+            }
         }
         Ok(ControlFlow::Continue(()))
     }

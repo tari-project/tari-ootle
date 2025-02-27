@@ -22,8 +22,25 @@
 
 use std::{sync::Arc, time::Instant};
 
+use crate::{
+    runtime::{
+        scope::{CallScope, PushCallFrame},
+        AuthParams,
+        AuthorizationScope,
+        EngineArgs,
+        Runtime,
+        RuntimeInterfaceImpl,
+        RuntimeModule,
+        StateTracker,
+    },
+    state_store::memory::ReadOnlyMemoryStateStore,
+    template::LoadedTemplate,
+    traits::Invokable,
+    transaction::TransactionError,
+    wasm::{WasmModule, WasmProcess},
+};
 use log::*;
-use tari_bor::to_value;
+use tari_bor::{to_value, BorTag};
 use tari_common::configuration::Network;
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::services::template_provider::TemplateProvider;
@@ -39,6 +56,7 @@ use tari_engine_types::{
 };
 use tari_template_abi::{call_engine, EngineOp, FunctionDef};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+use tari_template_lib::models::{AddressAllocation, BinaryTag, ResourceAddress};
 use tari_template_lib::{
     arg,
     args,
@@ -60,27 +78,12 @@ use tari_template_lib::{
 use tari_transaction::Transaction;
 use tari_utilities::ByteArray;
 
-use crate::{
-    runtime::{
-        scope::{CallScope, PushCallFrame},
-        AuthParams,
-        AuthorizationScope,
-        EngineArgs,
-        Runtime,
-        RuntimeInterfaceImpl,
-        RuntimeModule,
-        StateTracker,
-    },
-    state_store::memory::ReadOnlyMemoryStateStore,
-    template::LoadedTemplate,
-    traits::Invokable,
-    transaction::TransactionError,
-    wasm::{WasmModule, WasmProcess},
-};
-
 const LOG_TARGET: &str = "tari::dan::engine::instruction_processor";
 pub const MAX_CALL_DEPTH: usize = 10;
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
+
+const ALLOCATED_COMPONENT_ADDRESS_TAG: u64 = BinaryTag::AllocatedComponentAddress.as_u64();
+const ALLOCATED_RESOURCE_ADDRESS_TAG: u64 = BinaryTag::AllocatedResourceAddress.as_u64();
 
 #[derive(Clone, Debug)]
 pub struct TransactionProcessorConfig {
@@ -393,13 +396,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let result: AllocateAddressResult = resp.decode()?;
 
         println!("Allocated address: {:?}", result);
-        
+
+        // TODO: try to use AddressAllocation<ComponentAddress> in from_type call and refer to that type in template code
         let indexed_value = match result {
             AllocateAddressResult::ComponentAddress(allocation) => {
-                IndexedValue::from_type(allocation)
+                IndexedValue::from_type(&BorTag::<ComponentAddress, ALLOCATED_COMPONENT_ADDRESS_TAG>::new(*allocation.address()))
             },
             AllocateAddressResult::ResourceAddress(allocation) => {
-                IndexedValue::from_type(allocation.address())
+                IndexedValue::from_type(&BorTag::<ResourceAddress, ALLOCATED_RESOURCE_ADDRESS_TAG>::new(*allocation.address()))
             },
         }?;
 

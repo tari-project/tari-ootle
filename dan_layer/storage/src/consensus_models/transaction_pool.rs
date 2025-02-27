@@ -629,7 +629,7 @@ impl TransactionPoolRecord {
         execution: &TransactionExecution,
     ) -> &mut Self {
         // Only change the local decision if we haven't already decided to ABORT
-        if self.local_decision().map_or(true, |d| d.is_commit()) {
+        if self.local_decision().is_none_or(|d| d.is_commit()) {
             self.set_local_decision(execution.decision());
         }
 

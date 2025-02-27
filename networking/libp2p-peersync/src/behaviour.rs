@@ -307,7 +307,7 @@ where TPeerStore: PeerStore
             Event::InboundStreamInterrupted { .. } => {},
             Event::OutboundStreamInterrupted { .. } => {},
             Event::InboundRequestCompleted { .. } => {},
-            Event::LocalPeerRecordUpdated { .. } => {},
+            Event::LocalPeerRecordUpdated => {},
             Event::Error(_) => {},
         }
 

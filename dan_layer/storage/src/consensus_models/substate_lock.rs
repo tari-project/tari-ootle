@@ -90,7 +90,7 @@ impl LockedSubstateValue {
 
     pub fn satisfies_requirements<'a, T: Into<SubstateRequirementRef<'a>>>(&self, requirement: T) -> bool {
         let requirement = requirement.into();
-        requirement.version().map_or(true, |v| v == self.lock.version) && *requirement.substate_id() == self.substate_id
+        requirement.version().is_none_or(|v| v == self.lock.version) && *requirement.substate_id() == self.substate_id
     }
 
     pub fn satisfies_lock_intent<T: LockIntent>(&self, lock_intent: T) -> bool {

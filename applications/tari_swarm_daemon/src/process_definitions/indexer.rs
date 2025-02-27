@@ -23,11 +23,14 @@ impl ProcessDefinition for Indexer {
     async fn get_command(&self, mut context: ProcessContext<'_>) -> anyhow::Result<Command> {
         let mut command = Command::new(context.bin());
         let jrpc_port = context.get_free_port("jrpc").await?;
+        let graphql_port = context.get_free_port("graphql").await?;
         let web_ui_port = context.get_free_port("web").await?;
         let listen_ip = context.listen_ip();
 
         let json_rpc_public_url = context.get_public_json_rpc_url();
+        let graphql_public_url = context.get_public_graphql_url();
         let json_rpc_listener_address = format!("{listen_ip}:{jrpc_port}");
+        let graphql_listener_address = format!("{listen_ip}:{graphql_port}");
         let web_ui_listener_address = format!("{listen_ip}:{web_ui_port}");
 
         let base_node = context
@@ -52,8 +55,10 @@ impl ProcessDefinition for Indexer {
                 "-pepoch_oracle.base_layer.base_node_grpc_url={base_node_grpc_url}"
             ))
             .arg(format!("-pindexer.json_rpc_address={json_rpc_listener_address}"))
+            .arg(format!("-pindexer.graphql_address={graphql_listener_address}"))
             .arg(format!("-pindexer.web_ui_address={web_ui_listener_address}"))
             .arg(format!("-pindexer.web_ui_public_json_rpc_url={json_rpc_public_url}"))
+            .arg(format!("-pindexer.web_ui_public_graphql_url={graphql_public_url}"))
             .arg("-pepoch_oracle.base_layer.scanning_interval=1");
 
         Ok(command)

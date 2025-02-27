@@ -21,12 +21,14 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') || github.ref != 'refs/heads/development' }}
 
 env:
-  nightly_toolchain: nightly-2025-01-17
-  stable_toolchain: 1.84
+  nightly_toolchain: nightly-2025-02-25
+  stable_toolchain: stable
   CARGO_HTTP_MULTIPLEXING: false
   CARGO_TERM_COLOR: always
   TARI_TARGET_NETWORK: localnet
   TARI_NETWORK: localnet
+  # https://github.com/rust-lang/rustup/issues/2949#issuecomment-2584968659
+  RUSTUP_PERMIT_COPY_RENAME: true
   PROTOC: protoc
   TERM: unknown
 
@@ -148,10 +150,10 @@ jobs:
       - uses: rui314/setup-mold@v1
 
       - name: wasm target install
-        run: rustup target add wasm32-unknown-unknown
+        run: rustup +${{ env.nightly_toolchain }} target add wasm32-unknown-unknown
 
       - name: cargo check
-        run: cargo check --release --all-features --all-targets --locked
+        run: cargo +${{ env.nightly_toolchain }} check --release --all-features --all-targets --locked
 
   build-stable:
     name: check stable

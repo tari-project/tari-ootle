@@ -88,9 +88,7 @@ async fn handler(
 ) -> impl IntoResponse {
     if let Some(ref basic_auth) = context.config().webserver.base_auth {
         // NOTE: this does not have to be secure (timing attacks etc), this is to prevent easy access to the Web UI
-        if auth.map_or(true, |a| {
-            a.username() != basic_auth.username || a.password() != basic_auth.password
-        }) {
+        if auth.is_none_or(|a| a.username() != basic_auth.username || a.password() != basic_auth.password) {
             return Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .header("WWW-Authenticate", "Basic realm=\"tari-swarm\"")

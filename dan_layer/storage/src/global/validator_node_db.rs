@@ -45,16 +45,14 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         start_epoch: Epoch,
         fee_claim_public_key: PublicKey,
     ) -> Result<(), TGlobalDbAdapter::Error> {
-        self.backend
-            .insert_validator_node(
-                self.tx,
-                peer_address,
-                public_key,
-                shard_key,
-                start_epoch,
-                fee_claim_public_key,
-            )
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.insert_validator_node(
+            self.tx,
+            peer_address,
+            public_key,
+            shard_key,
+            start_epoch,
+            fee_claim_public_key,
+        )
     }
 
     pub fn deactivate(
@@ -64,13 +62,10 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend
             .deactivate_validator_node(self.tx, public_key, deactivation_epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
     }
 
     pub fn count(&mut self, epoch: Epoch) -> Result<u64, TGlobalDbAdapter::Error> {
-        self.backend
-            .validator_nodes_count(self.tx, epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.validator_nodes_count(self.tx, epoch)
     }
 
     pub fn count_in_shard_group(
@@ -80,7 +75,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     ) -> Result<u64, TGlobalDbAdapter::Error> {
         self.backend
             .validator_nodes_count_for_shard_group(self.tx, epoch, shard_group)
-            .map_err(TGlobalDbAdapter::Error::into)
     }
 
     pub fn get_by_public_key(
@@ -90,7 +84,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     ) -> Result<ValidatorNode<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
         self.backend
             .get_validator_node_by_public_key(self.tx, epoch, public_key)
-            .map_err(TGlobalDbAdapter::Error::into)
     }
 
     pub fn get_by_address(
@@ -98,9 +91,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         epoch: Epoch,
         address: &TGlobalDbAdapter::Addr,
     ) -> Result<ValidatorNode<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
-        self.backend
-            .get_validator_node_by_address(self.tx, epoch, address)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.get_validator_node_by_address(self.tx, epoch, address)
     }
 
     /// Returns all registered validator nodes from the given epoch
@@ -111,9 +102,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         &mut self,
         epoch: Epoch,
     ) -> Result<Vec<ValidatorNode<TGlobalDbAdapter::Addr>>, TGlobalDbAdapter::Error> {
-        self.backend
-            .get_validator_nodes_within_start_epoch(self.tx, epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.get_validator_nodes_within_start_epoch(self.tx, epoch)
     }
 
     /// Fetches all validator nodes that are active for a given epoch
@@ -121,9 +110,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
         &mut self,
         epoch: Epoch,
     ) -> Result<Vec<ValidatorNode<TGlobalDbAdapter::Addr>>, TGlobalDbAdapter::Error> {
-        self.backend
-            .get_validator_nodes_within_committee_epoch(self.tx, epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.get_validator_nodes_within_committee_epoch(self.tx, epoch)
     }
 
     pub fn get_committee_for_shard_group(
@@ -135,7 +122,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     ) -> Result<Committee<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
         self.backend
             .validator_nodes_get_for_shard_group(self.tx, epoch, shard_group, shuffle, limit)
-            .map_err(TGlobalDbAdapter::Error::into)
     }
 
     pub fn get_committees_overlapping_shard_group(
@@ -145,7 +131,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     ) -> Result<HashMap<ShardGroup, Committee<TGlobalDbAdapter::Addr>>, TGlobalDbAdapter::Error> {
         self.backend
             .validator_nodes_get_overlapping_shard_group(self.tx, epoch, shard_group)
-            .map_err(TGlobalDbAdapter::Error::into)
     }
 
     pub fn get_random_committee_member_from_shard_group(
@@ -156,16 +141,13 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     ) -> Result<ValidatorNode<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
         self.backend
             .validator_nodes_get_random_committee_member_from_shard_group(self.tx, epoch, shard_group, excluding)
-            .map_err(TGlobalDbAdapter::Error::into)
     }
 
     pub fn get_committees(
         &mut self,
         epoch: Epoch,
     ) -> Result<HashMap<ShardGroup, Committee<TGlobalDbAdapter::Addr>>, TGlobalDbAdapter::Error> {
-        self.backend
-            .validator_nodes_get_committees_for_epoch(self.tx, epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.validator_nodes_get_committees_for_epoch(self.tx, epoch)
     }
 
     pub fn set_committee_shard(
@@ -176,6 +158,5 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend
             .validator_nodes_set_committee_shard(self.tx, substate_address, shard_group, epoch)
-            .map_err(TGlobalDbAdapter::Error::into)
     }
 }

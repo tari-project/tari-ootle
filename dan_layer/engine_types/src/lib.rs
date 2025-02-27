@@ -34,9 +34,9 @@ pub mod id_provider;
 mod argument_parser;
 pub mod published_template;
 mod substate_serde;
-pub mod vn_fee_pool;
-
+mod validator_fee;
 pub use argument_parser::parse_arg;
+pub use validator_fee::*;
 
 pub mod template_models {
     pub use tari_template_lib::models::*;

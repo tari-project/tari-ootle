@@ -91,6 +91,13 @@ impl ShardGroup {
         self.as_range().contains(shard)
     }
 
+    pub fn contains_or_global(&self, shard: &Shard) -> bool {
+        if shard.is_global() {
+            return true;
+        }
+        self.contains(shard)
+    }
+
     pub fn overlaps_shard_group(&self, other: &ShardGroup) -> bool {
         self.start <= other.end_inclusive && self.end_inclusive >= other.start
     }

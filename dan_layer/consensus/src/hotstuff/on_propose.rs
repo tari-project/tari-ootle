@@ -297,38 +297,7 @@ where TConsensusSpec: ConsensusSpec
                 lock_conflicts,
             ),
             // Leader thinks all local nodes have prepared
-            TransactionPoolStage::Prepared => {
-                if tx_rec.current_decision().is_abort() {
-                    let atom = tx_rec.get_current_transaction_atom();
-                    return Ok(Some(Command::LocalAccept(atom)));
-                }
-                if tx_rec
-                    .evidence()
-                    .is_committee_output_only(local_committee_info.shard_group())
-                {
-                    if !tx_rec.has_all_required_foreign_input_pledges(tx, local_committee_info)? {
-                        error!(
-                            target: LOG_TARGET,
-                            "BUG: attempted to propose transaction {} as Prepared but not all foreign input pledges were found. \
-                             This transaction should not have been marked as ready. {}",
-                            tx_rec.transaction_id(),
-                            tx_rec.evidence()
-                        );
-                        return Ok(None);
-                    }
-                    let atom = tx_rec.get_local_transaction_atom();
-                    debug!(
-                        target: LOG_TARGET,
-                        "ℹ️ Transaction {} is output-only for {}, proposing LocalAccept",
-                        tx_rec.transaction_id(),
-                        local_committee_info.shard_group()
-                    );
-                    Ok(Some(Command::LocalAccept(atom)))
-                } else {
-                    let atom = tx_rec.get_local_transaction_atom();
-                    Ok(Some(Command::LocalPrepare(atom)))
-                }
-            },
+            TransactionPoolStage::Prepared => self.local_prepare_transaction(tx, local_committee_info, &tx_rec),
             // Leader thinks all foreign PREPARE pledges have been received (condition for LocalPrepared stage to be
             // ready)
             TransactionPoolStage::LocalPrepared => self.all_or_some_prepare_transaction(
@@ -447,7 +416,7 @@ where TConsensusSpec: ConsensusSpec
         dont_propose_transactions: bool,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
-        propose_epoch_end: bool,
+        can_propose_epoch_end: bool,
     ) -> Result<NextBlock, HotStuffError> {
         // The parent block will only ever not exist if it is a dummy block
         let parent_exists = Block::record_exists(tx, parent_block.block_id())?;
@@ -462,7 +431,7 @@ where TConsensusSpec: ConsensusSpec
 
         let mut total_leader_fee = 0;
 
-        let batch = if propose_epoch_end {
+        let batch = if can_propose_epoch_end {
             ProposalBatch::default()
         } else {
             self.fetch_next_proposal_batch(
@@ -473,10 +442,22 @@ where TConsensusSpec: ConsensusSpec
             )?
         };
 
-        debug!(target: LOG_TARGET, "🌿 PROPOSE: {batch}");
+        let mut substate_store = PendingSubstateStore::new(
+            tx,
+            *start_of_chain_block.block_id(),
+            self.config.consensus_constants.num_preshards,
+        );
 
-        let mut commands = if propose_epoch_end {
+        debug!(target: LOG_TARGET, "🌿 PROPOSE: {batch}");
+        let mut executed_transactions = HashMap::new();
+        let mut commands = if can_propose_epoch_end {
             BTreeSet::from_iter([Command::EndEpoch])
+            // self.fetch_end_of_epoch_commands(
+            //     &start_of_chain_block,
+            //     epoch,
+            //     &mut executed_transactions,
+            //     &mut substate_store,
+            // )?
         } else {
             BTreeSet::from_iter(
                 batch
@@ -545,12 +526,6 @@ where TConsensusSpec: ConsensusSpec
         }
 
         // batch is empty for is_empty, is_epoch_end and is_epoch_start blocks
-        let mut substate_store = PendingSubstateStore::new(
-            tx,
-            *start_of_chain_block.block_id(),
-            self.config.consensus_constants.num_preshards,
-        );
-        let mut executed_transactions = HashMap::new();
         let timer = TraceTimer::info(LOG_TARGET, "Generating commands").with_iterations(batch.transactions.len());
         let mut lock_conflicts = TransactionLockConflicts::new();
         for mut transaction in batch.transactions {
@@ -759,8 +734,98 @@ where TConsensusSpec: ConsensusSpec
             burnt_utxos,
             transactions,
             evict_nodes,
+            commands: vec![],
         })
     }
+
+    // fn fetch_end_of_epoch_commands(
+    //     &self,
+    //     leaf_block: &LeafBlock,
+    //     epoch: Epoch,
+    //     transaction_executions: &mut HashMap<TransactionId, TransactionExecution>,
+    //     substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
+    // ) -> Result<ProposalBatch, HotStuffError> {
+    //     let _timer = TraceTimer::debug(LOG_TARGET, "fetch_end_of_epoch_commands");
+    //     let mut batch = ProposalBatch::default();
+    //
+    //     // First, load up the required fee mints
+    //     let fee_mints = ValidatorFeeMint::get_all_for_epoch(substate_store.read_transaction(), epoch)?;
+    //
+    //     if fee_mints.is_empty() {
+    //         debug!(target: LOG_TARGET, "No FeeMints for epoch {epoch}");
+    //         batch.commands = vec![Command::EndEpoch(EndEpochAtom::empty())];
+    //         return Ok(batch);
+    //     }
+    //
+    //     let mut atom = EndEpochAtom::with_capacity(fee_mints.len());
+    //     // Then, check for conflicting transactions in LocalAccept phase or greater.
+    //     let mut conflicting_must_finalize = vec![];
+    //     let mut conflicting_must_abort = vec![];
+    //     let mut fees_to_mint = vec![];
+    //     // TODO(perf): worst case O(4n)
+    //     for mint in fee_mints {
+    //         // TODO: check pledges
+    //         match substate_store.get_latest_lock_by_id(&mint.substate_id)? {
+    //             Some(lock) => {
+    //                 let mut transaction = self.transaction_pool.get(
+    //                     substate_store.read_transaction(),
+    //                     leaf_block,
+    //                     lock.transaction_id(),
+    //                 )?;
+    //                 if transaction.current_stage() >= TransactionPoolStage::LocalAccepted {
+    //                     conflicting_must_finalize.push(transaction);
+    //                 } else {
+    //                     let version = lock.version() + 1;
+    //                     let mut tx_rec = transaction.get_transaction(substate_store.read_transaction())?;
+    //                     tx_rec.abort(RejectReason::ValidatorFeePoolConflict {
+    //                         substate_id: mint.substate_id.clone(),
+    //                     });
+    //                     transaction.set_local_decision(tx_rec.current_decision());
+    //                     transaction_executions.insert(*tx_rec.id(), tx_rec.into_execution().expect("Aborted above"));
+    //                     conflicting_must_abort.push(transaction);
+    //                     atom.fee_mints.insert_sorted(mint.substate_id.clone(), FeeMint {
+    //                         version,
+    //                         amount: mint.amount,
+    //                     });
+    //                     fees_to_mint.push((
+    //                         mint.substate_id,
+    //                         Substate::new(version, ValidatorFeePool::new(mint.claim_key_bytes.into(), mint.amount)),
+    //                     ));
+    //                 }
+    //             },
+    //             None => {
+    //                 let version = substate_store.get_latest_version(&mint.substate_id).optional()?;
+    //                 let version = version.map(|v| v.version() + 1).unwrap_or(0);
+    //                 fees_to_mint.push((
+    //                     mint.substate_id.clone(),
+    //                     Substate::new(version, ValidatorFeePool::new(mint.claim_key_bytes.into(), mint.amount)),
+    //                 ));
+    //                 atom.fee_mints.insert_sorted(mint.substate_id, FeeMint {
+    //                     version,
+    //                     amount: mint.amount,
+    //                 });
+    //             },
+    //         }
+    //     }
+    //
+    //     // If any need to be finalized before epoch end, move to finalize them without proposing epoch end
+    //     if !conflicting_must_finalize.is_empty() {
+    //         info!(target: LOG_TARGET, "❗️ {} transaction(s) must finalize before epoch end");
+    //         batch.transactions = conflicting_must_finalize;
+    //         return Ok(batch);
+    //     }
+    //
+    //     if !conflicting_must_abort.is_empty() {
+    //         warn!(target: LOG_TARGET, "❗️ {} transaction(s) must ABORT before epoch end");
+    //         batch.transactions = conflicting_must_abort;
+    //     }
+    //
+    //     // Include end epoch command with mints
+    //     batch.commands.push(Command::EndEpoch(atom));
+    //
+    //     // Mint the validator fees
+    //     Ok(batch)
+    // }
 
     #[allow(clippy::too_many_lines)]
     fn prepare_transaction(
@@ -941,6 +1006,44 @@ where TConsensusSpec: ConsensusSpec
         Ok(Some(command))
     }
 
+    fn local_prepare_transaction(
+        &self,
+        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        local_committee_info: &CommitteeInfo,
+        tx_rec: &TransactionPoolRecord,
+    ) -> Result<Option<Command>, HotStuffError> {
+        if tx_rec.current_decision().is_abort() {
+            let atom = tx_rec.get_current_transaction_atom();
+            return Ok(Some(Command::LocalAccept(atom)));
+        }
+        if tx_rec
+            .evidence()
+            .is_committee_output_only(local_committee_info.shard_group())
+        {
+            if !tx_rec.has_all_required_foreign_input_pledges(tx, local_committee_info)? {
+                error!(
+                    target: LOG_TARGET,
+                    "BUG: attempted to propose transaction {} as Prepared but not all foreign input pledges were found. \
+                     This transaction should not have been marked as ready. {}",
+                    tx_rec.transaction_id(),
+                    tx_rec.evidence()
+                );
+                return Ok(None);
+            }
+            let atom = tx_rec.get_local_transaction_atom();
+            debug!(
+                target: LOG_TARGET,
+                "ℹ️ Transaction {} is output-only for {}, proposing LocalAccept",
+                tx_rec.transaction_id(),
+                local_committee_info.shard_group()
+            );
+            Ok(Some(Command::LocalAccept(atom)))
+        } else {
+            let atom = tx_rec.get_local_transaction_atom();
+            Ok(Some(Command::LocalPrepare(atom)))
+        }
+    }
+
     fn all_or_some_prepare_transaction(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
@@ -1035,10 +1138,18 @@ where TConsensusSpec: ConsensusSpec
                 tx_rec.transaction_id(),
             ))
         })?;
-        substate_store.put_diff(
-            *tx_rec.transaction_id(),
-            &filter_diff_for_committee(local_committee_info, diff),
-        )?;
+        let filtered_diff = filter_diff_for_committee(local_committee_info, diff);
+        if let Err(err) = substate_store.put_diff(*tx_rec.transaction_id(), &filtered_diff) {
+            error!(
+                target: LOG_TARGET,
+                "🔒 Failed to write to temporary state store for transaction {} for Accept: {}. Skipping proposing this transaction...",
+                tx_rec.transaction_id(),
+                err,
+            );
+            // Only error if it is not related to lock errors
+            let _err = err.ok_lock_failed()?;
+            return Ok(None);
+        }
         let atom = self.get_transaction_atom_with_leader_fee(tx_rec)?;
         Ok(Some(Command::AllAccept(atom)))
     }
@@ -1098,13 +1209,16 @@ where TConsensusSpec: ConsensusSpec
     }
 }
 
-pub fn get_non_local_shards(diff: &[SubstateChange], local_committee_info: &CommitteeInfo) -> HashSet<Shard> {
-    diff.iter()
+pub fn get_non_local_shards<'a, I: IntoIterator<Item = &'a SubstateChange>>(
+    diff: I,
+    local_committee_info: &CommitteeInfo,
+) -> HashSet<Shard> {
+    diff.into_iter()
         .map(|ch| {
             ch.versioned_substate_id()
                 .to_shard(local_committee_info.num_preshards())
         })
-        .filter(|shard| local_committee_info.shard_group().contains(shard))
+        .filter(|shard| !local_committee_info.shard_group().contains(shard))
         .collect()
 }
 
@@ -1114,17 +1228,19 @@ struct ProposalBatch {
     pub burnt_utxos: Vec<BurntUtxo>,
     pub transactions: Vec<TransactionPoolRecord>,
     pub evict_nodes: Vec<PublicKey>,
+    pub commands: Vec<Command>,
 }
 
 impl Display for ProposalBatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} transaction(s), {} foreign proposal(s), {} UTXOs, {} evict",
+            "{} transaction(s), {} foreign proposal(s), {} UTXOs, {} evict, {} command(s)",
             self.transactions.len(),
             self.foreign_proposals.len(),
             self.burnt_utxos.len(),
-            self.evict_nodes.len()
+            self.evict_nodes.len(),
+            self.commands.len()
         )
     }
 }

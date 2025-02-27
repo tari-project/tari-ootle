@@ -73,7 +73,11 @@ export function stringToSubstateId(substateId: string): SubstateId {
   }
 }
 
-export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 4, end: number = 4) {
+export function shortenSubstateId(
+  substateId: SubstateId | string | null | undefined,
+  start: number = 4,
+  end: number = 4,
+) {
   if (substateId === null || substateId === undefined) {
     return "";
   }

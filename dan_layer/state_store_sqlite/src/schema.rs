@@ -543,6 +543,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    validator_fee_changes (id) {
+        id -> Integer,
+        block_id -> Text,
+        address -> Text,
+        amount -> BigInt,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     votes (id) {
         id -> Integer,
         siphash -> BigInt,
@@ -594,5 +604,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     transaction_pool_state_updates,
     transactions,
     validator_epoch_stats,
+    validator_fee_changes,
     votes,
 );

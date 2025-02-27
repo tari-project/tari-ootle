@@ -54,7 +54,9 @@ use crate::{
     resource::Resource,
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
     vault::Vault,
-    vn_fee_pool::{ValidatorFeePool, ValidatorFeePoolAddress},
+    ValidatorFeePool,
+    ValidatorFeePoolAddress,
+    ValidatorFeeWithdrawal,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,6 +178,13 @@ impl SubstateId {
         }
     }
 
+    pub fn as_validator_fee_pool_address(&self) -> Option<ValidatorFeePoolAddress> {
+        match self {
+            Self::ValidatorFeePool(address) => Some(*address),
+            _ => None,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(self).unwrap()
     }
@@ -278,6 +287,10 @@ impl SubstateId {
 
     pub fn is_template(&self) -> bool {
         matches!(self, Self::Template(_))
+    }
+
+    pub fn is_validator_fee_pool(&self) -> bool {
+        matches!(self, Self::ValidatorFeePool(_))
     }
 
     pub fn is_global(&self) -> bool {
@@ -748,6 +761,13 @@ impl SubstateValue {
         }
     }
 
+    pub fn into_validator_fee_pool(self) -> Option<ValidatorFeePool> {
+        match self {
+            SubstateValue::ValidatorFeePool(value) => Some(value),
+            _ => None,
+        }
+    }
+
     pub fn as_validator_fee_pool_mut(&mut self) -> Option<&mut ValidatorFeePool> {
         match self {
             SubstateValue::ValidatorFeePool(value) => Some(value),
@@ -834,6 +854,7 @@ impl From<ValidatorFeePool> for SubstateValue {
 pub struct SubstateDiff {
     up_substates: Vec<(SubstateId, Substate)>,
     down_substates: Vec<(SubstateId, u32)>,
+    fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
 }
 
 impl SubstateDiff {
@@ -841,11 +862,22 @@ impl SubstateDiff {
         Self {
             up_substates: Vec::new(),
             down_substates: Vec::new(),
+            fee_withdrawals: Vec::new(),
         }
     }
 
-    pub fn up(&mut self, address: SubstateId, value: Substate) {
-        self.up_substates.push((address, value));
+    pub fn up(&mut self, id: SubstateId, value: Substate) {
+        self.up_substates.push((id, value));
+    }
+
+    /// Set the fee withdrawals for this diff.
+    ///
+    /// # Panics
+    /// Panics if the fee withdrawals have already been set.
+    pub fn set_once_fee_withdrawals(&mut self, withdrawals: Vec<ValidatorFeeWithdrawal>) -> &mut Self {
+        assert!(self.fee_withdrawals.is_empty(), "Fee withdrawals set more than once");
+        self.fee_withdrawals = withdrawals;
+        self
     }
 
     pub fn extend_up(&mut self, iter: impl Iterator<Item = (SubstateId, Substate)>) -> &mut Self {
@@ -853,8 +885,8 @@ impl SubstateDiff {
         self
     }
 
-    pub fn down(&mut self, address: SubstateId, version: u32) {
-        self.down_substates.push((address, version));
+    pub fn down(&mut self, id: SubstateId, version: u32) {
+        self.down_substates.push((id, version));
     }
 
     pub fn extend_down(&mut self, iter: impl Iterator<Item = (SubstateId, u32)>) -> &mut Self {
@@ -872,6 +904,10 @@ impl SubstateDiff {
 
     pub fn down_iter(&self) -> impl Iterator<Item = &(SubstateId, u32)> + '_ {
         self.down_substates.iter()
+    }
+
+    pub fn validator_fee_withdrawals(&self) -> &[ValidatorFeeWithdrawal] {
+        &self.fee_withdrawals
     }
 
     pub fn up_len(&self) -> usize {

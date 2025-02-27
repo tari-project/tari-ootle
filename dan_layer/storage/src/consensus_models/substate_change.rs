@@ -13,12 +13,14 @@ pub enum SubstateChange {
     Up {
         id: VersionedSubstateId,
         shard: Shard,
+        // TODO: determine if this is needed or if it can be removed
         transaction_id: TransactionId,
         substate: Substate,
     },
     Down {
         id: VersionedSubstateId,
         shard: Shard,
+        // TODO: determine if this is needed or if it can be removed
         transaction_id: TransactionId,
     },
 }
@@ -67,16 +69,16 @@ impl SubstateChange {
         matches!(self, SubstateChange::Up { .. })
     }
 
-    pub fn up(&self) -> Option<&Substate> {
+    pub fn up_substate(&self) -> Option<&Substate> {
         match self {
             SubstateChange::Up { substate, .. } => Some(substate),
             _ => None,
         }
     }
 
-    pub fn down(&self) -> Option<&VersionedSubstateId> {
+    pub fn up_mut(&mut self) -> Option<&mut Substate> {
         match self {
-            SubstateChange::Down { id, .. } => Some(id),
+            SubstateChange::Up { substate, .. } => Some(substate),
             _ => None,
         }
     }

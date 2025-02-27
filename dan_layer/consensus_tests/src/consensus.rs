@@ -12,10 +12,14 @@ use std::time::Duration;
 
 use log::info;
 use tari_common_types::types::PrivateKey;
-use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage};
+use tari_consensus::{
+    hotstuff::{to_public_key_bytes, HotStuffError},
+    messages::HotstuffMessage,
+};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
-    crypto::create_key_pair,
+    crypto::{create_key_pair, create_key_pair_from_seed},
+    derive_fee_pool_address,
     optional::Optional,
     Epoch,
     NodeHeight,
@@ -34,6 +38,7 @@ use tari_engine_types::{
     hashing::hash_template_code,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
+    ValidatorFeeWithdrawal,
 };
 use tari_transaction::Transaction;
 
@@ -911,6 +916,7 @@ async fn single_shard_input_conflict() {
         fee: 1,
         input_locks: vec![(substate_id.substate_id().clone(), SubstateLockType::Write)],
         new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
     })
     .add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx2.transaction().clone(),
@@ -918,6 +924,7 @@ async fn single_shard_input_conflict() {
         fee: 1,
         input_locks: vec![(substate_id.substate_id().clone(), SubstateLockType::Write)],
         new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
     });
 
     test.network()
@@ -1179,6 +1186,7 @@ async fn single_shard_unversioned_inputs() {
             .map(|input| (input.into_substate_id(), SubstateLockType::Write))
             .collect(),
         new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
     });
 
     test.start_epoch(Epoch(1)).await;
@@ -1262,6 +1270,7 @@ async fn multishard_unversioned_input_conflict() {
             (id1.substate_id().clone(), SubstateLockType::Write),
         ],
         new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
     })
     .add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx2.transaction().clone(),
@@ -1272,6 +1281,7 @@ async fn multishard_unversioned_input_conflict() {
             (id1.substate_id().clone(), SubstateLockType::Write),
         ],
         new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
     });
 
     // NOTE: we send tx1 to committee 0 and tx2 to committee 1 to loosely ensure that we create the situation this test
@@ -1361,6 +1371,7 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
             (id1.substate_id().clone(), SubstateLockType::Write),
         ],
         new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
     })
     .add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx2.transaction().clone(),
@@ -1371,6 +1382,7 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
             (id2.substate_id().clone(), SubstateLockType::Write),
         ],
         new_outputs: vec![],
+        validator_fee_withdrawals: vec![],
     });
 
     test.network()
@@ -1545,6 +1557,7 @@ async fn multishard_publish_template() {
             .map(|input| (input.into_substate_id(), SubstateLockType::Write))
             .collect(),
         new_outputs: vec![SubstateId::Template(template_id)],
+        validator_fee_withdrawals: vec![],
     });
 
     test.start_epoch(Epoch(1)).await;
@@ -1564,7 +1577,7 @@ async fn multishard_publish_template() {
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx.id());
 
-    // Assert all LocalOnly
+    // Assert all have the template
     let template_substate = test
         .get_validator(&TestAddress::new("1"))
         .state_store
@@ -1577,6 +1590,95 @@ async fn multishard_publish_template() {
         .expect("Expected template substate")
         .binary_hash;
     assert_eq!(binary_hash, hash_template_code(&wasm), "Template binary does not match");
+
+    test.assert_clean_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multishard_validator_fee_claim() {
+    setup_logger();
+    let (claim_sk, claim_pk) = create_key_pair_from_seed(100);
+    let claim_bytes = to_public_key_bytes(&claim_pk);
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .set_claim_key(TestVnDestination::All, claim_pk)
+        .start()
+        .await;
+    // Create and send publish template transaction
+    let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
+    let address = derive_fee_pool_address(
+        claim_bytes,
+        test.num_preshards(),
+        test.num_preshards()
+            .all_shard_groups_iter(test.num_committees())
+            .next()
+            .unwrap()
+            .start(),
+    );
+    let claim_tx = Transaction::builder()
+        .claim_validator_fees(address)
+        .with_inputs(inputs.iter().cloned().map(Into::into))
+        .add_input(address)
+        .build_and_seal(&claim_sk);
+    let claim_tx = TransactionRecord::new(claim_tx);
+
+    test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
+        transaction: claim_tx.transaction().clone(),
+        decision: Decision::Commit,
+        fee: 1000,
+        input_locks: inputs
+            .into_iter()
+            .map(|input| (input.into_substate_id(), SubstateLockType::Write))
+            .collect(),
+        new_outputs: vec![],
+        validator_fee_withdrawals: vec![ValidatorFeeWithdrawal {
+            address,
+            amount: 500.into(),
+        }],
+    });
+
+    // Get some fees
+    test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
+    test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
+
+    test.start_epoch(Epoch(1)).await;
+    let mut tx_sent = false;
+
+    loop {
+        test.on_block_committed().await;
+
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+
+        let is_pool_empty = test.is_transaction_pool_empty();
+        let mut sent_now = false;
+        if !tx_sent && (is_pool_empty || leaf.height >= NodeHeight(15)) {
+            // Send a claim
+            test.send_transaction_to_destination(TestVnDestination::All, claim_tx.clone())
+                .await;
+            tx_sent = true;
+            sent_now = true;
+        }
+
+        // Prevent race condition between sending the transaction and it entering the pool
+        if !sent_now && is_pool_empty {
+            break;
+        }
+
+        if leaf.height >= NodeHeight(30) {
+            panic!("Not all transaction committed after {} blocks", leaf.height);
+        }
+    }
+
+    test.assert_all_validators_at_same_height().await;
+    test.assert_all_validators_committed(claim_tx.id());
+
+    // Assert fee pool exists
+    let _fee_pool = test
+        .get_validator(&TestAddress::new("1"))
+        .state_store
+        .with_read_tx(|tx| SubstateRecord::get_latest(tx, &address.into()))
+        .unwrap();
 
     test.assert_clean_shutdown().await;
 }

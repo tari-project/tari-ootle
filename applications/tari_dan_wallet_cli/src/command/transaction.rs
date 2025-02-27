@@ -547,7 +547,7 @@ pub fn print_substate_diff(diff: &SubstateDiff) {
             },
             SubstateValue::ValidatorFeePool(pool) => {
                 println!("      ▶ Validator Fee Pool: {}", address);
-                println!("        ▶ Total fees: {}", pool.amount);
+                println!("        ▶ Total fees: {}", pool.amount());
             },
         }
         println!();

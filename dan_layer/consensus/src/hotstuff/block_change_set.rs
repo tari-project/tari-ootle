@@ -358,9 +358,9 @@ impl ProposedBlockChangeSet {
 
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save");
         // Store the block diff
-        BlockDiff::insert_record(tx, &self.block.block_id, &self.substate_changes)?;
+        BlockDiff::insert(tx, &self.block.block_id, &self.substate_changes)?;
 
-        // Store the tree diffs for each effected shard
+        // Store the tree diffs for each affected shard
         for (shard, diff) in &self.state_tree_diffs {
             PendingShardStateTreeDiff::create(tx, *self.block.block_id(), *shard, diff)?;
         }

@@ -14,7 +14,6 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     derive_fee_pool_address,
-    optional::Optional,
     shard::Shard,
     substate_type::SubstateType,
     Epoch,
@@ -22,7 +21,6 @@ use tari_dan_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
-    VersionedSubstateId,
 };
 use tari_dan_storage::{
     consensus_models::{
@@ -42,11 +40,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::{
-    substate::{Substate, SubstateDiff, SubstateId},
-    template_models::Amount,
-    vn_fee_pool::ValidatorFeePool,
-};
+use tari_engine_types::{substate::SubstateDiff, template_models::Amount, ValidatorFeePool};
 use tari_state_tree::{JellyfishMerkleTree, StateTreeError};
 
 use crate::{
@@ -54,7 +48,7 @@ use crate::{
         substate_store::{PendingSubstateStore, ShardScopedTreeStoreReader, ShardedStateTree},
         HotStuffError,
     },
-    traits::{LeaderStrategy, WriteableSubstateStore},
+    traits::LeaderStrategy,
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::common";
@@ -328,6 +322,13 @@ pub(crate) fn filter_diff_for_committee(committee_info: &CommitteeInfo, diff: &S
             diff.down_iter()
                 .filter(|(id, _)| committee_info.includes_substate_id(id))
                 .cloned(),
+        )
+        .set_once_fee_withdrawals(
+            diff.validator_fee_withdrawals()
+                .iter()
+                .filter(|f| committee_info.includes_substate_id(&f.address.into()))
+                .cloned()
+                .collect(),
         );
     filtered_diff
 }
@@ -374,46 +375,38 @@ pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
     num_preshards: NumPreshards,
     total_leader_fee: Amount,
 ) -> Result<(), HotStuffError> {
+    // Basic defensive checks
+    assert!(
+        total_leader_fee.is_positive(),
+        "apply_leader_fee_to_substate_store: total_leader_fee ({total_leader_fee}) must be positive"
+    );
+    if total_leader_fee.is_zero() {
+        // Nothing to do
+        return Ok(());
+    }
+
     let fee_substate_id = derive_fee_pool_address(claim_public_key_bytes, num_preshards, shard);
+    store.update_in_place(
+        &fee_substate_id.into(),
+        |value_mut| {
+            debug!(target: LOG_TARGET, "🪙 Deposit leader fee {total_leader_fee} into fee pool {fee_substate_id}");
+            let substate_type = SubstateType::from(&*value_mut);
+            let pool = value_mut.as_validator_fee_pool_mut().ok_or_else(|| {
+                HotStuffError::InvariantError(format!(
+                    "Unexpected substate type {} was found at address {}",
+                    substate_type, fee_substate_id
+                ))
+            })?;
+            if !pool.deposit_direct(total_leader_fee) {
+                return Err(HotStuffError::InvariantError(format!(
+                    "Failed to deposit leader fee {total_leader_fee} into fee pool {fee_substate_id}"
+                )));
+            }
 
-    let substate_id = SubstateId::from(fee_substate_id);
-    let (next_amount, next_version) = if let Some(latest) = store.get_latest_change(&substate_id).optional()? {
-        match latest {
-            SubstateChange::Up { id, substate, .. } => {
-                debug!(target: LOG_TARGET, "DOWN current fee pool {id}");
-                let version = id.version();
-                store.put(SubstateChange::Down {
-                    id,
-                    shard,
-                    transaction_id: Default::default(),
-                })?;
-                let pool = substate.substate_value().as_validator_fee_pool().ok_or_else(|| {
-                    HotStuffError::InvariantError(format!(
-                        "Unexpected substate type {} was found at address {}",
-                        SubstateType::from(substate.substate_value()),
-                        substate_id
-                    ))
-                })?;
-                (pool.amount + total_leader_fee, version + 1)
-            },
-            // If the latest fee pool is a Down, it was previously claimed
-            SubstateChange::Down { id, .. } => (total_leader_fee, id.version() + 1),
-        }
-    } else {
-        (Amount::zero(), 0)
-    };
-
-    let id = VersionedSubstateId::new(fee_substate_id, next_version);
-    debug!(target: LOG_TARGET, "UP new fee pool {id}");
-    store.put(SubstateChange::Up {
-        id,
-        shard,
-        transaction_id: Default::default(),
-        substate: Substate::new(
-            next_version,
-            ValidatorFeePool::new(claim_public_key_bytes.into(), next_amount),
-        ),
-    })?;
+            Ok(())
+        },
+        |_| Ok(ValidatorFeePool::new(claim_public_key_bytes.into(), total_leader_fee).into()),
+    )?;
 
     Ok(())
 }

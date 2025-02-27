@@ -21,7 +21,7 @@ use crate::{
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
-    vn_fee_pool::ValidatorFeePoolAddress,
+    ValidatorFeePoolAddress,
 };
 
 impl serde::Serialize for SubstateId {

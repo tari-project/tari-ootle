@@ -26,6 +26,7 @@ use log::{warn, *};
 use tari_common::configuration::Network;
 use tari_crypto::{range_proof::RangeProofService, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_common_types::services::template_provider::TemplateProvider;
+use tari_engine_types::id_provider::DerivedComponentAddress;
 use tari_engine_types::{
     base_layer_hashing::ownership_proof_hasher64,
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
@@ -89,7 +90,6 @@ use tari_template_lib::{
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR},
     crypto::RistrettoPublicKeyBytes,
     models::{
-        AddressAllocation,
         Amount,
         BucketId,
         ComponentAddress,
@@ -107,6 +107,7 @@ use tari_template_lib::{
 };
 
 use super::{working_state::WorkingState, Runtime};
+use crate::runtime::scope::CallFrame;
 use crate::{
     runtime::{
         engine_args::EngineArgs,
@@ -505,23 +506,30 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 match substate_type {
                     SubstateType::Component => {
-                        let (template, _) = state.current_template()?;
+                        let current_template = state.current_template().ok().map(|(addr, _)| {*addr});
+                        let derived_address =
+                            if let (Some(template_address), Some(public_key_address)) = (current_template, public_key_address) {
+                            Some(DerivedComponentAddress{ template_address, public_key_address })
+                        } else {
+                            None
+                        };
+
                         let address = state
-                            .id_provider()?
-                            .new_component_address(*template, public_key_address)?;
+                            .id_provider_no_call_frame()?
+                            .new_component_address(derived_address)?;
                         let allocation = state.new_address_allocation(address)?;
                         Ok(InvokeResult::encode(&args::AllocateAddressResult::ComponentAddress(
                             allocation,
                         ))?)
                     },
                     SubstateType::Resource => {
-                        let address = state.id_provider()?.new_resource_address()?;
+                        let address = state.id_provider_no_call_frame()?.new_resource_address()?;
                         let allocation = state.new_address_allocation(address)?;
                         Ok(InvokeResult::encode(&args::AllocateAddressResult::ResourceAddress(
                             allocation,
                         ))?)
                     },
-                    _ => Err(RuntimeError::AllocateAddressUnsupportedSubstateType { substate_type }),
+                    _ => Err(RuntimeError::AddressAllocationUnsupportedSubstateType { substate_type }),
                 }
             }),
         }

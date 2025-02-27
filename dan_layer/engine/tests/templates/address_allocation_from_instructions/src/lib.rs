@@ -7,14 +7,6 @@ use tari_template_lib::prelude::*;
 mod template {
     use super::*;
 
-    pub struct ComponentAddressAllocationTest {}
-
-    impl ComponentAddressAllocationTest {
-        pub fn create(comp_addr: ComponentAddress) -> Component<Self> {
-            Component::new(Self {}).with_address_allocation(comp_addr.into()).create()
-        }
-    }
-
     pub struct AddressAllocationFromInstructionsTest {
         comp_addr: ComponentAddress,
         res_address: ResourceAddress,
@@ -22,7 +14,7 @@ mod template {
     }
 
     impl AddressAllocationFromInstructionsTest {
-        pub fn create(comp_addr: ComponentAddress, res_address: ResourceAddress) -> (Component<Self>, Component<ComponentAddressAllocationTest>) {
+        pub fn create(comp_addr: ComponentAddress, res_address: ResourceAddress) -> Component<Self> {
             // Create the non-fungible resource with 1 token (optional)
             let tokens = [
                 NonFungibleId::from_u32(1),
@@ -38,21 +30,14 @@ mod template {
                 .mintable(rule!(allow_all))
                 .burnable(rule!(allow_all))
                 .initial_supply(tokens);
-
-            (
-                Component::new(Self {
+            
+            Component::new(Self {
                     res_address: bucket.resource_address(),
                     vault: Vault::from_bucket(bucket),
-                    comp_addr: comp_addr.clone(),
+                    comp_addr,
                 })
                     .with_access_rules(AccessRules::allow_all())
-                    .create(),
-                Component::new(
-                    ComponentAddressAllocationTest::create(comp_addr)
-                )
-                    .with_access_rules(AccessRules::allow_all())
                     .create()
-            )
         }
 
         pub fn drop_allocation() {

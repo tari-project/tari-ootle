@@ -9,15 +9,15 @@ use tari_template_lib::models::{ComponentAddress, ResourceAddress};
 
 #[derive(Debug, Clone)]
 pub struct AllocatedAddress {
-    template_address: TemplateAddress,
     address: SubstateId,
+    template_address: Option<TemplateAddress>,
 }
 
 impl AllocatedAddress {
-    pub fn new(template_address: TemplateAddress, address: SubstateId) -> Self {
+    pub fn new(address: SubstateId, template_address: Option<TemplateAddress>) -> Self {
         Self {
-            template_address,
             address,
+            template_address,
         }
     }
 
@@ -25,8 +25,8 @@ impl AllocatedAddress {
         &self.address
     }
 
-    pub fn template_address(&self) -> &TemplateAddress {
-        &self.template_address
+    pub fn template_address(&self) -> Option<&TemplateAddress> {
+        self.template_address.as_ref()
     }
 }
 

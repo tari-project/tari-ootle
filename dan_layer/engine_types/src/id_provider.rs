@@ -39,6 +39,11 @@ pub enum IdProviderError {
     LockingError { operation: String },
 }
 
+pub struct DerivedComponentAddress {
+    pub template_address: TemplateAddress,
+    pub public_key_address: RistrettoPublicKey,
+}
+
 impl<'a> IdProvider<'a> {
     pub fn new(entity_id: EntityId, transaction_hash: Hash, object_ids: &'a ObjectIds) -> Self {
         Self {
@@ -55,13 +60,12 @@ impl<'a> IdProvider<'a> {
 
     pub fn new_component_address(
         &self,
-        template_address: TemplateAddress,
-        public_key_address: Option<RistrettoPublicKey>,
+        derived_address: Option<DerivedComponentAddress>,
     ) -> Result<ComponentAddress, IdProviderError> {
-        if let Some(key) = public_key_address {
+        if let Some(address) = derived_address {
             // if a public key address is specified, then it will derive the address from the
             // template hash and public key
-            return Ok(new_component_address_from_public_key(&template_address, &key));
+            return Ok(new_component_address_from_public_key(&address.template_address, &address.public_key_address));
         }
 
         let component_id = hasher32(EngineHashDomainLabel::ComponentAddress)

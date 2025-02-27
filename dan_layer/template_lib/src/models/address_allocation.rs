@@ -3,7 +3,12 @@
 
 use crate::models::{ComponentAddress, ResourceAddress};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct AddressAllocation<T> {
     id: u32,
     address: T,

@@ -179,7 +179,7 @@ impl StateTracker {
                         }
                     })?
                 },
-                None => state.id_provider()?.new_component_address(template_address, None)?,
+                None => state.id_provider()?.new_component_address(None)?,
             };
 
             let component = ComponentBody { state: component_state };

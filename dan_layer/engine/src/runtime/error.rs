@@ -247,6 +247,10 @@ pub enum RuntimeError {
     AddressAllocationNotFound { id: u32 },
     #[error("Address allocation type mismatch: got {id}, expected: {expected}")]
     AddressAllocationTypeMismatch { id: SubstateId, expected: &'static str },
+    #[error("Unsupported substate type for address allocation: {substate_type:?}")]
+    AddressAllocationUnsupportedSubstateType { substate_type: SubstateType },
+    #[error("Allocated address does not have an associated template")]
+    AddressAllocationNoTemplate,
 
     #[error("Invalid event topic '{topic}': 'std' prefix is reserved for built-in events")]
     InvalidEventTopicStdPrefix { topic: String },
@@ -258,9 +262,6 @@ pub enum RuntimeError {
 
     #[error("Assert error: {0}")]
     AssertError(#[from] AssertError),
-
-    #[error("Unsupported substate type for address allocation: {substate_type:?}")]
-    AllocateAddressUnsupportedSubstateType { substate_type: SubstateType },
 }
 
 impl RuntimeError {

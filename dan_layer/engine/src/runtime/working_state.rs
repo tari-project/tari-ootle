@@ -7,6 +7,22 @@ use std::{
     mem,
 };
 
+use super::workspace::Workspace;
+use crate::{
+    runtime::{
+        address_allocation::AllocatedAddress,
+        fee_state::FeeState,
+        locking::LockedSubstate,
+        scope::{CallFrame, CallScope},
+        state_store::WorkingStateStore,
+        tracker_auth::Authorization,
+        ActionIdent,
+        NativeAction,
+        RuntimeError,
+        TransactionCommitError,
+    },
+    state_store::memory::ReadOnlyMemoryStateStore,
+};
 use indexmap::IndexMap;
 use log::*;
 use tari_dan_common_types::{optional::Optional, Epoch};
@@ -30,6 +46,7 @@ use tari_engine_types::{
     vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
 };
+use tari_template_lib::models::EntityId;
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator},
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -45,23 +62,6 @@ use tari_template_lib::{
     },
     prelude::{AuthHookCaller, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
     Hash,
-};
-
-use super::workspace::Workspace;
-use crate::{
-    runtime::{
-        address_allocation::AllocatedAddress,
-        fee_state::FeeState,
-        locking::LockedSubstate,
-        scope::{CallFrame, CallScope},
-        state_store::WorkingStateStore,
-        tracker_auth::Authorization,
-        ActionIdent,
-        NativeAction,
-        RuntimeError,
-        TransactionCommitError,
-    },
-    state_store::memory::ReadOnlyMemoryStateStore,
 };
 
 const LOG_TARGET: &str = "dan::engine::runtime::working_state";
@@ -703,10 +703,10 @@ impl WorkingState {
     ) -> Result<AddressAllocation<T>, RuntimeError> {
         let id = self.address_allocation_id;
         self.address_allocation_id += 1;
-        let (current_template, _) = self.current_template()?;
-        let current_template = *current_template;
+        let current_template = self.current_template().ok()
+            .map(|(template_addr, _)| {*template_addr});
         self.address_allocations
-            .insert(id, AllocatedAddress::new(current_template, address.clone().into()));
+            .insert(id, AllocatedAddress::new(address.clone().into(), current_template));
         let allocation = AddressAllocation::new(id, address);
         Ok(allocation)
     }
@@ -723,7 +723,9 @@ impl WorkingState {
         component_address: &ComponentAddress,
     ) -> Result<TemplateAddress, RuntimeError> {
         match self.get_allocated_address_by_address(*component_address) {
-            Some(alloc) => Ok(*alloc.template_address()),
+            Some(alloc) => Ok(
+                *alloc.template_address().ok_or(RuntimeError::AddressAllocationNoTemplate)?
+            ),
             None => {
                 let component = self.store.load_component(component_address)?;
                 Ok(component.template_address)
@@ -926,6 +928,10 @@ impl WorkingState {
             .last()
             .map(|frame| IdProvider::new(frame.entity_id(), self.transaction_hash, &self.object_ids))
             .ok_or(RuntimeError::NoActiveCallFrame)
+    }
+
+    pub fn id_provider_no_call_frame(&self) -> Result<IdProvider<'_>, RuntimeError> {
+        Ok(IdProvider::new(EntityId::default(), self.transaction_hash, &self.object_ids))
     }
 
     pub fn new_bucket_id(&mut self) -> BucketId {

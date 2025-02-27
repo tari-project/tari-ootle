@@ -3,8 +3,16 @@
 
 use std::{collections::BTreeMap, ops::ControlFlow};
 
+use crate::{
+    published_template::PublishedTemplateAddress,
+    serde_with,
+    substate::SubstateId,
+    transaction_receipt::TransactionReceiptAddress,
+    vn_fee_pool::ValidatorFeePoolAddress,
+};
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, BorError, FromTagAndValue, ValueVisitor};
+use tari_template_lib::models::AddressAllocation;
 use tari_template_lib::{
     models::{
         BinaryTag,
@@ -18,14 +26,6 @@ use tari_template_lib::{
     },
     prelude::{ComponentAddress, Metadata, NonFungibleAddress},
     Hash,
-};
-
-use crate::{
-    published_template::PublishedTemplateAddress,
-    serde_with,
-    substate::SubstateId,
-    transaction_receipt::TransactionReceiptAddress,
-    vn_fee_pool::ValidatorFeePoolAddress,
 };
 
 const MAX_VISITOR_DEPTH: usize = 50;
@@ -150,6 +150,8 @@ pub struct IndexedWellKnownTypes {
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
+    component_address_allocations: Vec<AddressAllocation<ComponentAddress>>,
+    resource_address_allocations: Vec<AddressAllocation<ResourceAddress>>,
 }
 
 impl IndexedWellKnownTypes {
@@ -166,6 +168,8 @@ impl IndexedWellKnownTypes {
             unclaimed_confidential_output_address: vec![],
             published_template_addresses: vec![],
             validator_node_fee_pools: vec![],
+            component_address_allocations: vec![],
+            resource_address_allocations: vec![],
         }
     }
 
@@ -300,6 +304,14 @@ impl IndexedWellKnownTypes {
                 &other.published_template_addresses,
             ),
             validator_node_fee_pools: diff_vec(&self.validator_node_fee_pools, &other.validator_node_fee_pools),
+            component_address_allocations: diff_vec(
+                &self.component_address_allocations,
+                &other.component_address_allocations,
+            ),
+            resource_address_allocations: diff_vec(
+                &self.resource_address_allocations,
+                &other.resource_address_allocations,
+            ),
         }
     }
 }

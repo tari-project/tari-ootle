@@ -98,3 +98,43 @@ fn it_fails_if_resource_address_allocation_is_not_used() {
 
     assert_reject_reason(reason, TransactionCommitError::DanglingAddressAllocations { count: 1 });
 }
+
+#[test]
+fn it_allocation_using_tx_builder() {
+    let mut test = TemplateTest::new([
+        "tests/templates/address_allocation_from_instructions",
+        "tests/templates/component_address_allocation_from_already_allocated",
+    ]);
+
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .allocate_address(args::SubstateType::Component, "my_addr")
+            // .allocate_address(args::SubstateType::Resource, "my_res")
+            .call_function(test.get_template_address("ComponentAddressAllocationTest"), "create", args![Workspace("my_addr")])
+            // .call_function(
+            //     test.get_template_address("AddressAllocationFromInstructionsTest"),
+            //     "create",
+            //     args![Workspace("my_addr"), Workspace("my_res")],
+            // )
+            .build_and_seal(test.get_test_secret_key()),
+        vec![],
+    );
+
+    println!("{:?}", result);
+
+    // let actual = result
+    //     .finalize
+    //     .result
+    //     .accept()
+    //     .unwrap()
+    //     .up_iter()
+    //     .find_map(|(k, _)| k.as_resource_address())
+    //     .unwrap();
+    //
+    // let allocated = result.finalize.execution_results[0]
+    //     .indexed
+    //     .get_value::<ResourceAddress>("$.1")
+    //     .unwrap()
+    //     .unwrap();
+    // assert_eq!(actual, allocated);
+}

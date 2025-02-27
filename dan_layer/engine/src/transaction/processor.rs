@@ -387,16 +387,26 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     ) -> Result<InstructionResult, TransactionError> {
         let resp: InvokeResult = runtime.interface().caller_context_invoke(
             CallerContextAction::AllocateAddress,
-            EngineArgs::from(invoke_args![substate_type, None]),
+            EngineArgs::from(invoke_args![substate_type, Option::<RistrettoPublicKeyBytes>::None]),
         )?;
 
         let result: AllocateAddressResult = resp.decode()?;
-        let indexed_value = IndexedValue::from_raw(match result {
-            AllocateAddressResult::ComponentAddress(allocation) => allocation.address().as_bytes(),
-            AllocateAddressResult::ResourceAddress(allocation) => allocation.as_bytes(),
-        })?;
+
+        println!("Allocated address: {:?}", result);
+        
+        let indexed_value = match result {
+            AllocateAddressResult::ComponentAddress(allocation) => {
+                IndexedValue::from_type(allocation)
+            },
+            AllocateAddressResult::ResourceAddress(allocation) => {
+                IndexedValue::from_type(allocation.address())
+            },
+        }?;
+
+        println!("Address: {:?}", indexed_value);
+
         runtime.interface().set_last_instruction_output(indexed_value)?;
-        Self::put_output_on_workspace_with_name(runtime, workspace_id)?;
+        Self::put_output_on_workspace_with_name(runtime, workspace_id.into())?;
 
         Ok(InstructionResult::empty())
     }

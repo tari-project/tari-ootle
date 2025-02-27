@@ -10545,7 +10545,6 @@ name = "tari_state_store_rocksdb"
 version = "0.8.2"
 dependencies = [
  "bincode 2.0.0-rc.3",
- "hex",
  "indexmap 2.6.0",
  "log",
  "rand",

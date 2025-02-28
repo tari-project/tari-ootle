@@ -394,20 +394,15 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         )?;
 
         let result: AllocateAddressResult = resp.decode()?;
-
-        println!("Allocated address: {:?}", result);
-
-        // TODO: try to use AddressAllocation<ComponentAddress> in from_type call and refer to that type in template code
+        
         let indexed_value = match result {
             AllocateAddressResult::ComponentAddress(allocation) => {
-                IndexedValue::from_type(&BorTag::<ComponentAddress, ALLOCATED_COMPONENT_ADDRESS_TAG>::new(*allocation.address()))
+                IndexedValue::from_type(&BorTag::<AddressAllocation<ComponentAddress>, ALLOCATED_COMPONENT_ADDRESS_TAG>::new(allocation))
             },
             AllocateAddressResult::ResourceAddress(allocation) => {
-                IndexedValue::from_type(&BorTag::<ResourceAddress, ALLOCATED_RESOURCE_ADDRESS_TAG>::new(*allocation.address()))
+                IndexedValue::from_type(&BorTag::<AddressAllocation<ResourceAddress>, ALLOCATED_RESOURCE_ADDRESS_TAG>::new(allocation))
             },
         }?;
-
-        println!("Address: {:?}", indexed_value);
 
         runtime.interface().set_last_instruction_output(indexed_value)?;
         Self::put_output_on_workspace_with_name(runtime, workspace_id.into())?;

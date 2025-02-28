@@ -12,6 +12,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, BorError, FromTagAndValue, ValueVisitor};
+use tari_template_lib::prelude::AddressAllocation;
 use tari_template_lib::{
     models::{
         BinaryTag,
@@ -149,8 +150,8 @@ pub struct IndexedWellKnownTypes {
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
-    component_address_allocations: Vec<ComponentAddress>,
-    resource_address_allocations: Vec<ResourceAddress>,
+    component_address_allocations: Vec<AddressAllocation<ComponentAddress>>,
+    resource_address_allocations: Vec<AddressAllocation<ResourceAddress>>,
 }
 
 impl IndexedWellKnownTypes {
@@ -357,8 +358,8 @@ pub enum WellKnownTariValue {
     UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
     PublishedTemplateAddress(PublishedTemplateAddress),
     ValidatorNodeFeePool(ValidatorFeePoolAddress),
-    ComponentAddressAllocation(ComponentAddress),
-    ResourceAddressAllocation(ResourceAddress),
+    ComponentAddressAllocation(AddressAllocation<ComponentAddress>),
+    ResourceAddressAllocation(AddressAllocation<ResourceAddress>),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
@@ -413,11 +414,11 @@ impl FromTagAndValue for WellKnownTariValue {
                 Ok(Self::ValidatorNodeFeePool(value.into()))
             },
             BinaryTag::AllocatedComponentAddress => {
-                let value: ComponentAddress = value.deserialized().map_err(BorError::from)?;
+                let value: AddressAllocation<ComponentAddress> = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ComponentAddressAllocation(value))
             },
             BinaryTag::AllocatedResourceAddress => {
-                let value: ResourceAddress = value.deserialized().map_err(BorError::from)?;
+                let value: AddressAllocation<ResourceAddress> = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ResourceAddressAllocation(value))
             }
         }
@@ -437,8 +438,8 @@ pub struct IndexedValueVisitor {
     unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
     published_templates: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
-    component_address_allocations: Vec<ComponentAddress>,
-    resource_address_allocations: Vec<ResourceAddress>,
+    component_address_allocations: Vec<AddressAllocation<ComponentAddress>>,
+    resource_address_allocations: Vec<AddressAllocation<ResourceAddress>>,
 }
 
 impl IndexedValueVisitor {

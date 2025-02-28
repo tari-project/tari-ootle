@@ -14,7 +14,7 @@ mod template {
     }
 
     impl AddressAllocationFromInstructionsTest {
-        pub fn create(comp_addr: ComponentAddress, res_address: ResourceAddress) -> Component<Self> {
+        pub fn create(comp_addr: AddressAllocation<ComponentAddress>, res_address: AddressAllocation<ResourceAddress>) -> Component<Self> {
             // Create the non-fungible resource with 1 token (optional)
             let tokens = [
                 NonFungibleId::from_u32(1),
@@ -25,7 +25,7 @@ mod template {
 
             let bucket = ResourceBuilder::non_fungible()
                 .with_token_symbol("AAFIT")
-                .with_address_allocation(res_address.into())
+                .with_address_allocation(res_address)
                 // Allow minting and burning for tests
                 .mintable(rule!(allow_all))
                 .burnable(rule!(allow_all))
@@ -34,7 +34,7 @@ mod template {
             Component::new(Self {
                     res_address: bucket.resource_address(),
                     vault: Vault::from_bucket(bucket),
-                    comp_addr,
+                    comp_addr: comp_addr.address().clone(),
                 })
                     .with_access_rules(AccessRules::allow_all())
                     .create()

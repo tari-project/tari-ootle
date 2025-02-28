@@ -76,13 +76,6 @@ impl SubstateChange {
         }
     }
 
-    pub fn up_mut(&mut self) -> Option<&mut Substate> {
-        match self {
-            SubstateChange::Up { substate, .. } => Some(substate),
-            _ => None,
-        }
-    }
-
     pub fn into_up(self) -> Option<Substate> {
         match self {
             SubstateChange::Up { substate: value, .. } => Some(value),

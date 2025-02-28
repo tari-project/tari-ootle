@@ -12,6 +12,7 @@ use diesel::{
     OptionalExtension,
     QueryDsl,
     RunQueryDsl,
+    SelectableHelper,
     SqliteConnection,
     TextExpressionMethods,
 };
@@ -31,6 +32,7 @@ use tari_dan_wallet_sdk::{
         TransactionStatus,
         VaultModel,
         WalletTransaction,
+        WebauthnRegistrationPasskeyModel,
     },
     storage::{WalletStorageError, WalletStoreReader},
 };
@@ -44,10 +46,12 @@ use tari_template_lib::{
 };
 use tari_transaction::TransactionId;
 use tari_utilities::hex::Hex;
+use webauthn_rs::prelude::Passkey;
 
 use crate::{
     diesel::{ExpressionMethods, NullableExpressionMethods},
     models,
+    models::WebauthnRegistrationPasskey,
     serialization::deserialize_json,
 };
 
@@ -831,6 +835,33 @@ impl WalletStoreReader for ReadTransaction<'_> {
             operation: "non_fungible_token_get_resource_address",
             details: e.to_string(),
         })
+    }
+
+    fn webauthn_is_user_registered(&mut self, username: &str) -> Result<bool, WalletStorageError> {
+        use crate::schema::webauthn_registrations;
+        let count: i64 = webauthn_registrations::table
+            .count()
+            .filter(webauthn_registrations::username.eq(username))
+            .limit(1)
+            .get_result(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_count", e))?;
+        Ok(count > 0)
+    }
+
+    fn webauthn_reg_fetch_passkeys(&mut self, username: String) -> Result<Vec<Passkey>, WalletStorageError> {
+        use crate::schema::{webauthn_registration_passkeys, webauthn_registrations};
+        Ok(webauthn_registration_passkeys::table
+            .inner_join(webauthn_registrations::table)
+            .filter(webauthn_registrations::username.eq(username))
+            .select(WebauthnRegistrationPasskey::as_select())
+            .load::<WebauthnRegistrationPasskey>(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_fetch", e))?
+            .iter()
+            .filter_map(|model| match WebauthnRegistrationPasskeyModel::try_from(model) {
+                Ok(value) => Some(value.passkey),
+                Err(_) => None,
+            })
+            .collect::<Vec<Passkey>>())
     }
 }
 

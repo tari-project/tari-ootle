@@ -23,6 +23,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    webauthn_registrations (id) {
+        id -> Integer,
+        username -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    webauthn_registration_passkeys (id) {
+        id -> Integer,
+        registration_id -> Integer,
+        passkey -> Binary,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     config (id) {
         id -> Integer,
         key -> Text,
@@ -151,6 +170,7 @@ diesel::joinable!(outputs -> vaults (vault_id));
 diesel::joinable!(proofs -> accounts (account_id));
 diesel::joinable!(proofs -> vaults (vault_id));
 diesel::joinable!(vaults -> accounts (account_id));
+diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     accounts,
@@ -163,4 +183,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     substates,
     transactions,
     vaults,
+    webauthn_registration_passkeys,
+    webauthn_registrations
 );

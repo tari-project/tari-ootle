@@ -247,6 +247,9 @@ wasmer = "4.4.0"
 wasmer-middlewares = "4.4.0"
 webrtc = "0.9.0"
 zeroize = "1"
+webauthn-rs = { version = "0.5.1", features = ["default"] }
+webauthn-rs-proto = { version = "0.5.1", features = ["default"] }
+uuid = "1.15.0"
 
 # Shutdown when panicking so we can see the error, specifically for the wallet
 [profile.release]

@@ -30,7 +30,7 @@ use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{application, get_account, transaction_builder},
+    handlers::helpers::{application_error, get_account, transaction_builder},
     jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
@@ -203,7 +203,7 @@ async fn mint_account_nft(
 
     let event = wait_for_result(&mut events, tx_id).await?;
     if let Some(reject) = event.finalize.full_reject() {
-        return Err(application(
+        return Err(application_error(
             ApplicationErrorCode::TransactionRejected,
             format!("Mint new NFT using account {} was rejected: {}", account, reject),
         ));
@@ -244,7 +244,7 @@ async fn create_account_nft(
     let event = wait_for_result(&mut events, tx_id).await?;
 
     if let Some(reason) = event.finalize.reject() {
-        return Err(application(
+        return Err(application_error(
             ApplicationErrorCode::TransactionRejected,
             format!(
                 "Create NFT resource address transaction, from account {}, failed: {}",

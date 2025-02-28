@@ -90,8 +90,14 @@ impl InstanceInfo {
                 let public_ip = self
                     .settings
                     .get("public_ip")
-                    .map(|s| s.as_str())
-                    .unwrap_or("127.0.0.1");
+                    .map(|s| {
+                        // Required for webauthn
+                        if s == "127.0.0.1" {
+                            return "localhost";
+                        }
+                        s.as_str()
+                    })
+                    .unwrap_or("localhost");
                 let web_port = self.ports.get("web").expect("web port not found");
                 format!("http://{public_ip}:{web_port}")
                     .parse()
@@ -109,8 +115,14 @@ impl InstanceInfo {
                 let public_ip = self
                     .settings
                     .get("public_ip")
-                    .map(|s| s.as_str())
-                    .unwrap_or("127.0.0.1");
+                    .map(|s| {
+                        // Required for webauthn
+                        if s == "127.0.0.1" {
+                            return "localhost";
+                        }
+                        s.as_str()
+                    })
+                    .unwrap_or("localhost");
                 let web_port = self.ports.get("jrpc").expect("jrpc port not found");
                 format!("http://{public_ip}:{web_port}/json_rpc")
                     .parse()

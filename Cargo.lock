@@ -68,7 +68,7 @@ version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.15",
  "once_cell",
  "version_check",
 ]
@@ -864,6 +864,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
+name = "base64urlsafedata"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f0ad38ce7fbed55985ad5b2197f05cff8324ee6eb6638304e78f0108fae56c"
+dependencies = [
+ "base64 0.21.7",
+ "paste",
+ "serde",
+]
+
+[[package]]
 name = "basic-cookies"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1546,6 +1557,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "compact_jwt"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12bbab6445446e8d0b07468a01d0bfdae15879de5c440c5e47ae4ae0e18a1fba"
+dependencies = [
+ "base64 0.21.7",
+ "base64urlsafedata",
+ "hex",
+ "openssl",
+ "serde",
+ "serde_json",
+ "tracing",
+ "url",
+ "uuid 1.15.0",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1674,7 +1702,7 @@ version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9d839f2a20b0aee515dc581a6172f2321f96cab76c1a38a4c584a194955390e"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.15",
  "once_cell",
  "tiny-keccak",
 ]
@@ -3219,8 +3247,20 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "wasi",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "getrandom"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43a49c392881ce6d5c3b8cb70f98717b7c07aabbdff06687b9030dbfbe2725f8"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "wasi 0.13.3+wasi-0.2.2",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -4839,7 +4879,7 @@ dependencies = [
  "either",
  "futures 0.3.31",
  "futures-timer",
- "getrandom",
+ "getrandom 0.2.15",
  "libp2p-allow-block-list",
  "libp2p-autonat",
  "libp2p-connection-limits",
@@ -4990,7 +5030,7 @@ dependencies = [
  "fnv",
  "futures 0.3.31",
  "futures-ticker",
- "getrandom",
+ "getrandom 0.2.15",
  "hex_fmt",
  "libp2p-core",
  "libp2p-identity",
@@ -6048,7 +6088,7 @@ checksum = "a4a650543ca06a924e8b371db273b2756685faae30f8487da1b56505a8f78b0c"
 dependencies = [
  "libc",
  "log",
- "wasi",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.48.0",
 ]
 
@@ -6061,7 +6101,7 @@ dependencies = [
  "hermit-abi 0.3.9",
  "libc",
  "log",
- "wasi",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.52.0",
 ]
 
@@ -7373,7 +7413,7 @@ checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes 1.10.0",
  "heck 0.5.0",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -7394,7 +7434,7 @@ checksum = "0c1318b19085f08681016926435853bbf7858f9c082d0999b80550ff5d9abe15"
 dependencies = [
  "bytes 1.10.0",
  "heck 0.5.0",
- "itertools 0.11.0",
+ "itertools 0.13.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -7440,7 +7480,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -7453,7 +7493,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9552f850d5f0964a4e4d0bf306459ac29323ddfbae05e35a7c0d35cb0803cc5"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -7719,7 +7759,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.15",
 ]
 
 [[package]]
@@ -7802,7 +7842,7 @@ version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.15",
  "libredox",
  "thiserror 1.0.68",
 ]
@@ -7989,7 +8029,7 @@ checksum = "c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d"
 dependencies = [
  "cc",
  "cfg-if",
- "getrandom",
+ "getrandom 0.2.15",
  "libc",
  "spin 0.9.8",
  "untrusted 0.9.0",
@@ -8021,7 +8061,7 @@ dependencies = [
  "rkyv_derive",
  "seahash",
  "tinyvec",
- "uuid 1.11.0",
+ "uuid 1.15.0",
 ]
 
 [[package]]
@@ -8482,6 +8522,16 @@ dependencies = [
  "js-sys",
  "serde",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "serde_cbor_2"
+version = "0.12.0-dev"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b46d75f449e01f1eddbe9b00f432d616fbbd899b809c837d0fbc380496a0dd55"
+dependencies = [
+ "half",
+ "serde",
 ]
 
 [[package]]
@@ -9513,7 +9563,7 @@ dependencies = [
  "thiserror 1.0.68",
  "tokio",
  "tower 0.4.13",
- "uuid 1.11.0",
+ "uuid 1.15.0",
 ]
 
 [[package]]
@@ -9869,6 +9919,8 @@ dependencies = [
  "tokio",
  "tower-http",
  "url",
+ "uuid 1.15.0",
+ "webauthn-rs",
  "webrtc",
 ]
 
@@ -9901,6 +9953,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.68",
  "ts-rs",
+ "webauthn-rs",
 ]
 
 [[package]]
@@ -9924,6 +9977,7 @@ dependencies = [
  "tari_template_lib",
  "tari_transaction",
  "tari_utilities",
+ "webauthn-rs",
 ]
 
 [[package]]
@@ -10822,6 +10876,7 @@ dependencies = [
  "tari_transaction",
  "thiserror 1.0.68",
  "ts-rs",
+ "webauthn-rs-proto",
 ]
 
 [[package]]
@@ -11804,16 +11859,17 @@ version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.15",
 ]
 
 [[package]]
 name = "uuid"
-version = "1.11.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8c5f0a0af699448548ad1a2fbf920fb4bee257eae39953ba95cb84891a0446a"
+checksum = "bd8dcafa1ca14750d8d7a05aa05988c17aab20886e1f3ae33a40223c58d92ef7"
 dependencies = [
- "getrandom",
+ "getrandom 0.3.1",
+ "serde",
 ]
 
 [[package]]
@@ -11917,6 +11973,15 @@ name = "wasi"
 version = "0.11.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
+
+[[package]]
+name = "wasi"
+version = "0.13.3+wasi-0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26816d2e1a4a36a2940b96c5296ce403917633dff8f3440e9b236ed6f6bacad2"
+dependencies = [
+ "wit-bindgen-rt",
+]
 
 [[package]]
 name = "wasm-bindgen"
@@ -12103,7 +12168,7 @@ dependencies = [
  "bytecheck",
  "enum-iterator",
  "enumset",
- "getrandom",
+ "getrandom 0.2.15",
  "hex",
  "indexmap 1.9.3",
  "more-asserts",
@@ -12192,6 +12257,73 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webauthn-attestation-ca"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29e77e8859ecb93b00e4a8e56ae45f8a8dd69b1539e3d32cf4cce1db9a3a0b99"
+dependencies = [
+ "base64urlsafedata",
+ "openssl",
+ "serde",
+ "tracing",
+ "uuid 1.15.0",
+]
+
+[[package]]
+name = "webauthn-rs"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b44347ee0d66f222043663a6aaf5ec78022b9b11c3a9ed488c21f2bd5680856"
+dependencies = [
+ "base64urlsafedata",
+ "serde",
+ "tracing",
+ "url",
+ "uuid 1.15.0",
+ "webauthn-rs-core",
+]
+
+[[package]]
+name = "webauthn-rs-core"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ef48f07ed8f3dfe304d6c48e85317feba0439675f31a13063b2936c9b4eaf0d"
+dependencies = [
+ "base64 0.21.7",
+ "base64urlsafedata",
+ "compact_jwt",
+ "der-parser 9.0.0",
+ "hex",
+ "nom",
+ "openssl",
+ "rand",
+ "rand_chacha",
+ "serde",
+ "serde_cbor_2",
+ "serde_json",
+ "thiserror 1.0.68",
+ "tracing",
+ "url",
+ "uuid 1.15.0",
+ "webauthn-attestation-ca",
+ "webauthn-rs-proto",
+ "x509-parser 0.16.0",
+]
+
+[[package]]
+name = "webauthn-rs-proto"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14e1367f70e7dc7b83afc971ce8a54d578f4fdf488ea093021180e073744a69f"
+dependencies = [
+ "base64 0.21.7",
+ "base64urlsafedata",
+ "serde",
+ "serde_json",
+ "url",
 ]
 
 [[package]]
@@ -12320,7 +12452,7 @@ dependencies = [
  "tokio",
  "turn",
  "url",
- "uuid 1.11.0",
+ "uuid 1.15.0",
  "waitgroup",
  "webrtc-mdns",
  "webrtc-util",
@@ -12752,6 +12884,15 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "wit-bindgen-rt"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3268f3d866458b787f390cf61f4bbb563b922d091359f9608842999eaee3943c"
+dependencies = [
+ "bitflags 2.6.0",
 ]
 
 [[package]]

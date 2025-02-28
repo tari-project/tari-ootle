@@ -31,6 +31,7 @@ use tari_dan_app_utilities::configuration::load_configuration;
 use tari_dan_wallet_daemon::{
     cli::{Cli, Subcommand},
     config::ApplicationConfig,
+    init_wallet_store,
     initialize_wallet_sdk,
     run_tari_dan_wallet_daemon,
 };
@@ -65,7 +66,8 @@ async fn main() -> Result<(), anyhow::Error> {
             set_active,
             output_path,
         }) => {
-            let sdk = initialize_wallet_sdk(&config)?;
+            let wallet_store = init_wallet_store(&config)?;
+            let sdk = initialize_wallet_sdk(&config, wallet_store)?;
             let km = sdk.key_manager_api();
             let secret = if let Some(index) = key_index {
                 km.derive_key(key_manager::TRANSACTION_BRANCH, index)?

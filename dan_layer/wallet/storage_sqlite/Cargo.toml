@@ -26,6 +26,7 @@ diesel_migrations = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
 serde_json = { workspace = true }
+webauthn-rs = { workspace = true }
 
 # Bundle libsqlite3
 libsqlite3-sys = { workspace = true, features = ["bundled"] }

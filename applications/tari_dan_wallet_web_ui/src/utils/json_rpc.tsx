@@ -24,12 +24,12 @@ import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
-  AccountSetDefaultRequest,
-  AccountSetDefaultResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountSetDefaultRequest,
+  AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
@@ -38,6 +38,7 @@ import type {
   AccountsTransferResponse,
   AuthGetAllJwtRequest,
   AuthGetAllJwtResponse,
+  AuthGetMethodResponse,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -83,10 +84,24 @@ import type {
   WebRtcStartResponse,
 } from "@tari-project/wallet_jrpc_client";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
-import { GetValidatorFeesRequest, GetValidatorFeesResponse } from "@tari-project/typescript-bindings";
+import {
+  GetValidatorFeesRequest,
+  GetValidatorFeesResponse,
+  WebauthnAlreadyRegisteredResponse,
+  WebauthnFinishAuthRequest,
+  WebauthnFinishRegisterRequest,
+  WebauthnFinishRegisterResponse,
+  WebauthnStartAuthRequest,
+  WebauthnStartAuthResponse,
+  WebauthnStartRegisterRequest,
+  WebauthnStartRegisterResponse,
+} from "@tari-project/typescript-bindings";
+import useAuthStore from "../store/authStore";
+import { AUTH_TOKEN_FOR_NONE_AUTH } from "../routes/Auth/Auth";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
+let unAuthenticatedClient: Promise<WalletDaemonClient> | null = null;
 let outerAddress: URL | null = null;
 const DEFAULT_WALLET_ADDRESS = new URL(
   import.meta.env.VITE_DAEMON_JRPC_ADDRESS ||
@@ -113,13 +128,24 @@ export async function getClientAddress(): Promise<URL> {
   return DEFAULT_WALLET_ADDRESS;
 }
 
+function getAuthToken() {
+  const authToken = useAuthStore.getState().authToken;
+  return authToken && authToken !== AUTH_TOKEN_FOR_NONE_AUTH ? authToken : null;
+}
+
 async function client() {
+  const authToken = getAuthToken();
+
   if (pendingClientInstance) {
     return pendingClientInstance;
   }
+
   if (clientInstance) {
+    if (authToken) {
+      clientInstance.setToken(authToken);
+    }
     if (!clientInstance.isAuthenticated()) {
-      return authenticateClient(clientInstance).then(() => clientInstance!);
+      return await authenticateClient(clientInstance).then(() => clientInstance!);
     }
     return Promise.resolve(clientInstance);
   }
@@ -128,22 +154,64 @@ async function client() {
 
   pendingClientInstance = getAddress.then(async (addr) => {
     const client = WalletDaemonClient.usingFetchTransport(addr.toString());
-    await authenticateClient(client);
+    if (authToken) {
+      client.setToken(authToken);
+    } else {
+      await authenticateClient(client);
+    }
     outerAddress = addr;
     clientInstance = client;
     pendingClientInstance = null;
     return client;
   });
+
   return pendingClientInstance;
 }
 
-async function authenticateClient(client: WalletDaemonClient) {
-  const auth_token = await client.authRequest(["Admin"]);
+export async function unauthenticated_client() {
+  if (unAuthenticatedClient) {
+    return unAuthenticatedClient;
+  }
+
+  const getAddress = !outerAddress ? getClientAddress() : Promise.resolve(DEFAULT_WALLET_ADDRESS);
+  unAuthenticatedClient = getAddress.then(async (addr) => {
+    return WalletDaemonClient.usingFetchTransport(addr.toString());
+  });
+  return unAuthenticatedClient;
+}
+
+async function authenticateClient(client: WalletDaemonClient, webauthnFinishAuthRequest?: WebauthnFinishAuthRequest) {
+  const auth_token = await client.authRequest(["Admin"], webauthnFinishAuthRequest);
   await client.authAccept(auth_token, auth_token);
 }
 
+export const authGetMethod = (): Promise<AuthGetMethodResponse> =>
+  unauthenticated_client().then((c) => c.authGetMethod());
+
+export const webauthnAlreadyRegistered = (username: string): Promise<WebauthnAlreadyRegisteredResponse> =>
+  unauthenticated_client().then((c) => c.webauthnAlreadyRegistered({ username }));
+
+export const webauthnStartRegistration = (
+  request: WebauthnStartRegisterRequest,
+): Promise<WebauthnStartRegisterResponse> => unauthenticated_client().then((c) => c.webauthnStartRegistration(request));
+
+export const webauthnFinishRegistration = (
+  request: WebauthnFinishRegisterRequest,
+): Promise<WebauthnFinishRegisterResponse> =>
+  unauthenticated_client().then((c) => c.webauthnFinishRegistration(request));
+
+export const webauthnStartAuth = (request: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> =>
+  unauthenticated_client().then((c) => c.webauthnAuthStart(request));
+
 export const authRevoke = (request: AuthRevokeTokenRequest): Promise<AuthRevokeTokenResponse> =>
-  client().then((c) => c.authRevoke(request));
+  client().then((c) =>
+    c.authRevoke(request).then((response) => {
+      if (response) {
+        useAuthStore.getState().setAuthToken("");
+      }
+      return response;
+    }),
+  );
 export const authGetAllJwt = (request: AuthGetAllJwtRequest): Promise<AuthGetAllJwtResponse> =>
   client().then((c) => c.authGetAllJwt(request));
 

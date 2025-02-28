@@ -35,7 +35,7 @@ env:
 jobs:
   fmt:
     name: fmt
-    runs-on: [ self-hosted, ubuntu-high-cpu ]
+    runs-on: [ ubuntu-latest ]
 
     steps:
       - name: checkout
@@ -60,7 +60,7 @@ jobs:
 
   prettier:
     name: prettier
-    runs-on: [ self-hosted, ubuntu-high-cpu ]
+    runs-on: [ ubuntu-latest ]
 
     steps:
       - name: checkout
@@ -76,7 +76,7 @@ jobs:
 
   clippy:
     name: clippy
-    runs-on: [ self-hosted, ubuntu-high-cpu ]
+    runs-on: [ ubuntu-latest ]
 
     steps:
       - name: checkout
@@ -131,7 +131,7 @@ jobs:
 
   build:
     name: check nightly
-    runs-on: [ self-hosted, ubuntu-high-cpu ]
+    runs-on: [ ubuntu-latest ]
 
     steps:
       - name: checkout
@@ -157,7 +157,7 @@ jobs:
 
   build-stable:
     name: check stable
-    runs-on: [ self-hosted, ubuntu-high-cpu ]
+    runs-on: [ ubuntu-latest ]
     env:
       RUSTUP_PERMIT_COPY_RENAME: true
 
@@ -212,7 +212,7 @@ jobs:
 
   test:
     name: test
-    runs-on: [ self-hosted, ubuntu-high-cpu ]
+    runs-on: [ ubuntu-latest ]
 
     steps:
       - name: checkout

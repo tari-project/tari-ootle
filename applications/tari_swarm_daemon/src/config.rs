@@ -203,6 +203,10 @@ impl InstanceType {
         matches!(self, InstanceType::MinoTariMiner)
     }
 
+    pub fn is_wallet_daemon(self) -> bool {
+        matches!(self, InstanceType::TariWalletDaemon)
+    }
+
     pub fn is_validator(self) -> bool {
         matches!(self, InstanceType::TariValidatorNode)
     }

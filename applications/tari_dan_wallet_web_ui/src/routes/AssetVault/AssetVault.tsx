@@ -20,18 +20,18 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useAccountsGetDefault, useAccountsList } from "../../api/hooks/useAccounts";
+import { useAccountsGetDefault } from "../../api/hooks/useAccounts";
 import useAccountStore from "../../store/accountStore";
 import Onboarding from "../Onboarding/Onboarding";
 import MyAssets from "./Components/MyAssets";
-import { substateIdToString } from "@tari-project/typescript-bindings";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import { ApiError } from "../../api/helpers/types";
+import useAuthStore from "../../store/authStore";
 
 function AssetVault() {
   const { account, setAccount, setPublicKey } = useAccountStore();
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
+  const authStore = useAuthStore();
 
   useEffect(() => {
     if (!isError && defaultAccount) {
@@ -40,7 +40,9 @@ function AssetVault() {
     }
 
     if (error) {
-      console.info(error);
+      // This can happen when the token is invalid
+      console.error(error);
+      authStore.clearToken();
     }
   }, [defaultAccount, isError]);
 

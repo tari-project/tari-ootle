@@ -22,9 +22,11 @@ env:
   TS_BUNDLE_ID_BASE: "com.tari.network.pkg"
   TS_SIG_FN: "sha256-unsigned.txt"
   ## Must be a JSon string
-  TS_FILES: '["tari_dan_wallet_cli","tari_dan_wallet_daemon","tari_indexer","tari_validator_node","tari_signaling_server","tari_generate","tari_swarm_daemon"]'
+  TS_FILES: '["tari_dan_wallet_cli","tari_dan_wallet_daemon","tari_indexer","tari_validator_node","tari_generate","tari_swarm_daemon"]'
   TS_FEATURES: "default"
   TS_LIBRARIES: ""
+  TS_DESCRIPTION: "Tari Suite"
+  TS_URL: "https://tari.com"
   # For debug builds
   # TS_BUILD: "debug"
   TS_BUILD: "release"
@@ -182,8 +184,10 @@ jobs:
           sudo apt-get update
           sudo bash scripts/install_ubuntu_dependencies.sh
 
-      - name: Install Linux dependencies - Ubuntu - cross-compiled ${{ env.TARI_BUILD_ISA_CPU }} on x86-64
-        if: ${{ startsWith(runner.os,'Linux') && ( ! matrix.builds.cross ) && matrix.builds.name != 'linux-x86_64' }}
+      - name: Install Linux dependencies - Ubuntu - local cross-compiled ${{ env.TARI_BUILD_ISA_CPU }} on x86-64
+        # Disabled
+        if: ${{ false }}
+        # if: ${{ startsWith(runner.os,'Linux') && ( ! matrix.builds.cross ) && matrix.builds.name != 'linux-x86_64' }}
         run: |
           sudo apt-get update
           sudo bash scripts/install_ubuntu_dependencies-cross_compile.sh ${{ env.TARI_BUILD_ISA_CPU }}
@@ -206,13 +210,12 @@ jobs:
         if: startsWith(runner.os,'Windows')
         run: |
           vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
+          # Needed for hickory openssl dependency
+          vcpkg install openssl:x64-windows-static
           # Bug in choco - need to install each package individually
           choco upgrade llvm -y
           # psutils is out of date
           # choco upgrade psutils -y
-          choco upgrade openssl -y
-          # Should already be installed
-          # choco upgrade strawberryperl -y
           choco upgrade protoc -y
           rustup target add ${{ matrix.builds.target }}
 
@@ -267,9 +270,8 @@ jobs:
           echo "TS_DIST=\dist" >> $GITHUB_ENV
           echo "PLATFORM_SPECIFIC_DIR=windows" >> $GITHUB_ENV
           echo "SQLITE3_LIB_DIR=C:\vcpkg\installed\x64-windows\lib" >> $GITHUB_ENV
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $GITHUB_ENV
+          echo "X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR=C:\vcpkg\packages\openssl_x64-windows-static" >> $GITHUB_ENV
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $GITHUB_ENV
-          echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
 
       - name: Cache cargo files and outputs
         if: ${{ ( ! startsWith(github.ref, 'refs/tags/v') ) && ( ! matrix.builds.cross ) && ( env.CARGO_CACHE ) }}
@@ -378,9 +380,7 @@ jobs:
           path: "${{ env.MTS_SOURCE }}/*"
 
       - name: Build the macOS pkg
-        # Disabled
-        if: ${{ false }}
-        # if: startsWith(runner.os,'macOS')
+        if: startsWith(runner.os,'macOS')
         continue-on-error: true
         env:
           MACOS_KEYCHAIN_PASS: ${{ secrets.MACOS_KEYCHAIN_PASS }}
@@ -476,14 +476,32 @@ jobs:
           ${SHARUN} --check "${{ env.TS_FILENAME }}-${{ matrix.builds.name }}-${{ env.TARI_VERSION }}.pkg.sha256"
 
       - name: Artifact upload for macOS pkg
-        # Disabled
-        if: ${{ false }}
-        # if: startsWith(runner.os,'macOS')
+        if: startsWith(runner.os,'macOS')
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.TS_FILENAME }}-${{ matrix.builds.name }}-${{ env.TARI_VERSION }}.pkg
           path: "${{ env.distDirPKG }}/${{ env.TS_FILENAME }}-${{ matrix.builds.name }}-${{ env.TARI_VERSION }}*.pkg*"
+
+      - name: Sign Windows files with Trusted Signing
+        if: ${{ ( startsWith(runner.os,'Windows') ) && ( env.AZURE_TENANT_ID != '' ) }}
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net/
+          trusted-signing-account-name: Tari
+          certificate-profile-name: Tarilabs
+          files-folder: ${{ github.workspace }}${{ env.TS_DIST }}/
+          files-folder-filter: exe,dll
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: ${{ env.TS_DESCRIPTION }}
+          description-url: ${{ env.TS_URL }}
 
       - name: Build the Windows installer
         # Disabled
@@ -500,6 +518,68 @@ jobs:
           cat "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}-installer.exe.sha256"
           echo "Checksum verification archive is "
           ${{ env.SHARUN }} --check "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}-installer.exe.sha256"
+
+      - name: Sign Windows installer with Trusted Signing
+        # Disabled
+        if: ${{ false }}
+        # if: ${{ ( startsWith(runner.os,'Windows') ) && ( env.AZURE_TENANT_ID != '' ) }}
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net/
+          trusted-signing-account-name: Tari
+          certificate-profile-name: Tarilabs
+          files-folder: ${{ github.workspace }}/buildtools/Output/
+          files-folder-filter: exe,dll
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: ${{ env.TS_DESCRIPTION }}
+          description-url: ${{ env.TS_URL }}
+
+      - name: Verify Windows signing for installer
+        # Disabled
+        if: ${{ false }}
+        # if: ${{ ( startsWith(runner.os,'Windows') ) && ( env.AZURE_TENANT_ID != '' ) }}
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        shell: powershell
+        run: |
+          # Get the Program Files (x86) directory dynamically
+          $programFilesX86 = [System.Environment]::GetFolderPath("ProgramFilesX86")
+          $sdkBasePath = Join-Path $programFilesX86 "Windows Kits"
+
+          # Check if Windows Kits exists
+          if (-Not (Test-Path $sdkBasePath)) {
+            Write-Error "Windows Kits folder not found at $sdkBasePath!"
+            exit 1
+          }
+
+          Write-Output "Searching for signtool.exe in: $sdkBasePath"
+
+          # Search for signtool.exe within Windows Kits fold with x64 in the path
+          $signtoolPath = Get-ChildItem -Path $sdkBasePath -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+                          Where-Object { $_.FullName -match '\\x64\\' } |
+                          Select-Object -ExpandProperty FullName -First 1
+
+          if (-not $signtoolPath) {
+            Write-Error "signtool.exe not found in Windows Kits folder!"
+            exit 1
+          }
+
+          Write-Output "Found signtool.exe at: $signtoolPath"
+
+          cd buildtools\Output
+
+          & $signtoolPath verify /pa "${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}-installer.exe"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "!! Signature verification failed for ${{ env.TS_FILENAME }}-${{ env.TARI_VERSION }}-${{ env.VSHA_SHORT }}-${{ matrix.builds.name }}-installer.exe !!"
+            exit 1
+          }
 
       - name: Artifact upload for Windows installer
         # Disabled

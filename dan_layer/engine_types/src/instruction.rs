@@ -14,7 +14,7 @@ use tari_template_lib::{
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-use crate::{confidential::ConfidentialClaim, serde_with, vn_fee_pool::ValidatorFeePoolAddress};
+use crate::{confidential::ConfidentialClaim, serde_with, ValidatorFeePoolAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]

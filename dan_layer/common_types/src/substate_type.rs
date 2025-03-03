@@ -4,7 +4,7 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use tari_engine_types::substate::SubstateValue;
+use tari_engine_types::substate::{Substate, SubstateValue};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[cfg_attr(
@@ -53,6 +53,12 @@ impl From<&SubstateValue> for SubstateType {
             SubstateValue::Template(_) => SubstateType::Template,
             SubstateValue::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
         }
+    }
+}
+
+impl From<&Substate> for SubstateType {
+    fn from(value: &Substate) -> Self {
+        value.substate_value().into()
     }
 }
 

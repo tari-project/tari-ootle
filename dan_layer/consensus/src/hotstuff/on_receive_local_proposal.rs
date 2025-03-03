@@ -17,6 +17,7 @@ use tari_dan_storage::{
         HighQc,
         LastSentVote,
         QuorumDecision,
+        SubstateRecord,
         TransactionPool,
         ValidBlock,
         Vote,
@@ -354,8 +355,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
         self.propose_newly_locked_blocks(local_committee_info, block_decision.locked_blocks);
 
-        if let Some(epoch) = block_decision.end_of_epoch {
-            let next_epoch = epoch + Epoch(1);
+        if let Some(prev_epoch) = block_decision.end_of_epoch {
+            let next_epoch = prev_epoch + Epoch(1);
             let mut registered_shard_group = None;
 
             // If we're registered for the next epoch. Create a new genesis block.
@@ -368,7 +369,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 registered_shard_group = Some(next_shard_group);
                 self.store.with_write_tx(|tx| {
                     // Generate checkpoint
-                    create_epoch_checkpoint(tx, epoch, local_committee_info.shard_group())?;
+                    create_epoch_checkpoint(tx, prev_epoch, local_committee_info.shard_group())?;
+                    // Prune all DOWNed values
+                    // TODO: we cannot prune downed values during the epoch because nodes currently need to provide
+                    // historical values for catch up, and for validator fees pledging as vnfp's are able to be downed
+                    // while locked. This may be fine or we may need to improve this (potentially by requesting FPs from
+                    // local nodes during catch up)
+                    SubstateRecord::prune_downed_values(tx, prev_epoch)?;
                     // Create the next genesis
                     let mut genesis = Block::genesis(
                         self.config.network,
@@ -388,7 +395,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     genesis.as_last_voted().set(tx)?;
                     genesis.justify().as_high_qc().set(tx)?;
 
-                    cleanup_epoch(tx, epoch)?;
+                    cleanup_epoch(tx, prev_epoch)?;
 
                     Ok::<_, HotStuffError>(())
                 })?;

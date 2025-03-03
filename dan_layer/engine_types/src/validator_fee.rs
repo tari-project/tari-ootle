@@ -1,5 +1,5 @@
-// Copyright 2024 The Tari Project
-// SPDX-License-Identifier: BSD-3-Clause
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
     borrow::Cow,
@@ -8,7 +8,8 @@ use std::{
     str::FromStr,
 };
 
-use tari_bor::{BorTag, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use tari_bor::BorTag;
 use tari_template_lib::{
     auth::{OwnerRule, Ownership},
     constants::XTR,
@@ -120,11 +121,50 @@ impl ValidatorFeePool {
         }
     }
 
-    pub fn deposit(&mut self, amount: Amount) -> &mut Self {
-        self.amount += amount;
-        self
+    /// Withdraws the given amount from the pool. If the amount is greater than the current balance, the function will
+    /// return false and the balance will remain unchanged.
+    /// NB: Do not use this function in the engine. This is used at the consensus level to update fee substates in
+    /// place.
+    #[must_use]
+    pub fn withdraw_direct(&mut self, amount: Amount) -> bool {
+        match self.amount.checked_sub_positive(amount) {
+            Some(new_amount) => {
+                self.amount = new_amount;
+                true
+            },
+            None => false,
+        }
     }
 
+    /// Deposits the given amount into the pool. If the amount is zero or negative, the function will return false and
+    /// the balance will remain unchanged.
+    /// NB: Do not use this function in the engine. This is used at the consensus level to update fee substates in
+    /// place.
+    #[must_use]
+    pub fn deposit_direct(&mut self, amount: Amount) -> bool {
+        if amount.is_negative() {
+            return false;
+        }
+        match self.amount.checked_add(amount) {
+            Some(new_amount) => {
+                self.amount = new_amount;
+                true
+            },
+            None => false,
+        }
+    }
+
+    pub fn amount(&self) -> Amount {
+        self.amount
+    }
+
+    pub fn claim_public_key(&self) -> &RistrettoPublicKeyBytes {
+        &self.claim_public_key
+    }
+
+    /// Withdraws all the funds from the pool and returns them in a ResourceContainer.
+    /// If the pool has insufficient funds, an error is returned.
+    /// This function is used in the engine to withdraw the funds from the pool and create a Bucket.
     pub fn withdraw_all(&mut self) -> Result<ResourceContainer, ResourceError> {
         if self.amount.is_zero() {
             return Err(ResourceError::InsufficientBalance {
@@ -141,4 +181,15 @@ impl ValidatorFeePool {
             locked_revealed_amount: Default::default(),
         })
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct ValidatorFeeWithdrawal {
+    pub address: ValidatorFeePoolAddress,
+    pub amount: Amount,
 }

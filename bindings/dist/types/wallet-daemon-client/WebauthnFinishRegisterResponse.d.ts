@@ -1,3 +1,1 @@
-export interface WebauthnFinishRegisterResponse {
-    success: boolean;
-}
+export type WebauthnFinishRegisterResponse = Record<string, never>;

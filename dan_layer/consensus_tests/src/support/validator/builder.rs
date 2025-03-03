@@ -33,6 +33,7 @@ pub struct ValidatorBuilder {
     pub secret_key: PrivateKey,
     pub public_key: PublicKey,
     pub shard_address: SubstateAddress,
+    pub fee_claim_public_key: PublicKey,
     pub shard_group: ShardGroup,
     pub sql_url: String,
     pub leader_strategy: RoundRobinLeaderStrategy,
@@ -48,6 +49,7 @@ impl ValidatorBuilder {
             address: TestAddress::new("default"),
             secret_key: PrivateKey::default(),
             public_key: PublicKey::default(),
+            fee_claim_public_key: PublicKey::default(),
             shard_address: SubstateAddress::zero(),
             num_committees: 0,
             shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
@@ -73,6 +75,11 @@ impl ValidatorBuilder {
 
     pub fn with_shard_group(&mut self, shard_group: ShardGroup) -> &mut Self {
         self.shard_group = shard_group;
+        self
+    }
+
+    pub fn with_fee_claim_public_key(&mut self, fee_claim_public_key: PublicKey) -> &mut Self {
+        self.fee_claim_public_key = fee_claim_public_key;
         self
     }
 
@@ -117,6 +124,7 @@ impl ValidatorBuilder {
             self.address.clone(),
             self.public_key.clone(),
             self.shard_address,
+            self.fee_claim_public_key.clone(),
         );
 
         let (outbound_messaging, rx_loopback) =

@@ -8,7 +8,7 @@ use std::{
 
 use tari_dan_common_types::SubstateLockType;
 use tari_dan_storage::consensus_models::Decision;
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, ValidatorFeeWithdrawal};
 use tari_transaction::{Transaction, TransactionId};
 
 type TestExecutionOutputMap = HashMap<TransactionId, ExecuteSpec>;
@@ -42,4 +42,5 @@ pub struct ExecuteSpec {
     pub fee: u64,
     pub input_locks: Vec<(SubstateId, SubstateLockType)>,
     pub new_outputs: Vec<SubstateId>,
+    pub validator_fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
 }

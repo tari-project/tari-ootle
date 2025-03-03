@@ -36,16 +36,13 @@ impl BlockDiff {
         self.changes.is_empty()
     }
 
-    pub fn into_filtered(self, info: &CommitteeInfo) -> Self {
+    pub fn into_filtered(self, committee: &CommitteeInfo) -> Self {
         Self {
             block_id: self.block_id,
             changes: self
                 .changes
                 .into_iter()
-                // Commit all substates included in this shard. Every involved validator commits the transaction receipt.
-                .filter(|change|
-                        info.includes_substate_id(change.versioned_substate_id().substate_id())
-                )
+                .filter(|change| committee.shard_group().contains_or_global(&change.shard()))
                 .collect(),
         }
     }
@@ -64,7 +61,7 @@ impl BlockDiff {
 }
 
 impl BlockDiff {
-    pub fn insert_record<TTx: StateStoreWriteTransaction>(
+    pub fn insert<TTx: StateStoreWriteTransaction>(
         tx: &mut TTx,
         block_id: &BlockId,
         changes: &[SubstateChange],

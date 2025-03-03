@@ -42,8 +42,8 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     serde_with,
     substate::{SubstateId, SubstateValue},
-    vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
+    ValidatorFeePoolAddress,
 };
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{

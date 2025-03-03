@@ -11,6 +11,7 @@ use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::info;
 use tari_common::configuration::Network;
+use tari_common_types::types::PublicKey;
 use tari_consensus::{
     consensus_constants::ConsensusConstants,
     hotstuff::{HotstuffConfig, HotstuffEvent},
@@ -93,6 +94,7 @@ impl Test {
                 .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
                 .collect(),
             new_outputs: new_outputs.clone(),
+            validator_fee_withdrawals: vec![],
         });
 
         self.send_transaction_to_destination(TestVnDestination::All, transaction.clone())
@@ -127,6 +129,7 @@ impl Test {
             fee: transaction.transaction_fee().unwrap_or(1),
             input_locks,
             new_outputs,
+            validator_fee_withdrawals: vec![],
         });
         self
     }
@@ -213,6 +216,14 @@ impl Test {
 
     pub fn validators(&self) -> &HashMap<TestAddress, Validator> {
         &self.validators
+    }
+
+    pub const fn num_preshards(&self) -> NumPreshards {
+        TEST_NUM_PRESHARDS
+    }
+
+    pub fn num_committees(&self) -> u32 {
+        self.num_committees
     }
 
     pub async fn on_hotstuff_event(&mut self) -> (TestAddress, HotstuffEvent) {
@@ -529,6 +540,7 @@ pub struct TestBuilder {
     message_filter: Option<MessageFilter>,
     failure_nodes: Vec<TestAddress>,
     config: HotstuffConfig,
+    claim_keys: Option<(TestVnDestination, PublicKey)>,
 }
 
 impl TestBuilder {
@@ -540,6 +552,7 @@ impl TestBuilder {
             debug_sql_file: None,
             message_filter: None,
             failure_nodes: Vec::new(),
+            claim_keys: None,
             config: HotstuffConfig {
                 network: Network::LocalNet,
                 sidechain_id: None,
@@ -582,6 +595,11 @@ impl TestBuilder {
 
     pub fn with_test_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn set_claim_key(mut self, dest: TestVnDestination, claim_key: PublicKey) -> Self {
+        self.claim_keys = Some((dest, claim_key));
         self
     }
 
@@ -645,7 +663,8 @@ impl TestBuilder {
                     .with_address_and_secret_key(vn.address.clone(), sk)
                     .with_shard(vn.shard_key)
                     .with_shard_group(shard_group)
-                    .with_epoch_manager(epoch_manager.clone_for(vn.address.clone(), pk, vn.shard_key))
+                    .with_fee_claim_public_key(vn.fee_claim_public_key.clone())
+                    .with_epoch_manager(epoch_manager.clone_for(vn.address.clone(), pk, vn.shard_key, vn.fee_claim_public_key))
                     .with_leader_strategy(*leader_strategy)
                     .with_num_committees(num_committees)
                     .spawn(shutdown_signal.clone());
@@ -675,6 +694,9 @@ impl TestBuilder {
         let (tx_epoch_events, _) = broadcast::channel(10);
         let epoch_manager = TestEpochManager::new(tx_epoch_events);
         epoch_manager.add_committees(committees).await;
+        if let Some((dest, claim_key)) = self.claim_keys {
+            epoch_manager.set_claim_keys(dest, claim_key).await;
+        }
         let shutdown = Shutdown::new();
         let (channels, validators) = Self::build_validators(
             &leader_strategy,

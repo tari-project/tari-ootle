@@ -255,6 +255,12 @@ impl PartialEq<SubstateId> for SubstateRequirementRef<'_> {
 
 impl Eq for SubstateRequirementRef<'_> {}
 
+impl AsRef<SubstateId> for SubstateRequirementRef<'_> {
+    fn as_ref(&self) -> &SubstateId {
+        self.substate_id
+    }
+}
+
 // Only consider the substate id in maps. This means that duplicates found if the substate id is the same regardless of
 // the version.
 impl std::hash::Hash for SubstateRequirementRef<'_> {

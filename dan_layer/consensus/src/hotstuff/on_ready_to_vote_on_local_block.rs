@@ -9,7 +9,6 @@ use tari_dan_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
-    shard::Shard,
     Epoch,
     ShardGroup,
     VersionedSubstateId,
@@ -568,8 +567,8 @@ where TConsensusSpec: ConsensusSpec
             substate_store
                 .diff()
                 .iter()
-                // Calculate for local shards only AND global shard
-                .filter(|ch| block.shard_group().contains(&ch.shard()) || ch.shard() == Shard::global()),
+                // Calculate for local shards only or the global shard
+                .filter(|ch| block.shard_group().contains_or_global(&ch.shard())),
         )?;
         if expected_merkle_root != *block.state_merkle_root() {
             warn!(

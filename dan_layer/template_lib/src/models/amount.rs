@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::cmp;
+use std::{cmp, ops::Neg};
 
 use newtype_ops::newtype_ops;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,7 @@ use tari_template_abi::rust::{
 
 /// Represents an integer quantity of any fungible or non-fungible resource
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 #[serde(transparent)]
 #[cfg_attr(
     feature = "ts",
@@ -156,6 +157,14 @@ impl From<u32> for Amount {
 impl From<i64> for Amount {
     fn from(value: i64) -> Self {
         Amount(value)
+    }
+}
+
+impl Neg for Amount {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Amount(-self.0)
     }
 }
 

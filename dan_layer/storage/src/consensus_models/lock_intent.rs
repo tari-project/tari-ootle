@@ -139,6 +139,12 @@ impl LockIntent for &VersionedSubstateIdLockIntent {
     }
 }
 
+impl AsRef<SubstateId> for VersionedSubstateIdLockIntent {
+    fn as_ref(&self) -> &SubstateId {
+        self.substate_id()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RequireLockIntentRef<'a> {
     substate_id: &'a SubstateId,

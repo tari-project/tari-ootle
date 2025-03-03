@@ -387,8 +387,8 @@ fn print_substate_diff(diff: &SubstateDiff) {
             },
             SubstateValue::ValidatorFeePool(fee_pool) => {
                 println!("      ▶ fee_pool: {}", address);
-                println!("        ▶ amount: {}", fee_pool.amount);
-                println!("        ▶ recipient: {}", fee_pool.claim_public_key);
+                println!("        ▶ amount: {}", fee_pool.amount());
+                println!("        ▶ recipient: {}", fee_pool.claim_public_key());
             },
             SubstateValue::Template(_) => {
                 println!("      ▶ Template: {}", address);

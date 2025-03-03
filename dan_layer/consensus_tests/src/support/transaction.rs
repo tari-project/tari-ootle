@@ -14,6 +14,8 @@ use tari_engine_types::{
     published_template::PublishedTemplate,
     substate::{Substate, SubstateDiff, SubstateId},
     transaction_receipt::{TransactionReceipt, TransactionReceiptAddress},
+    ValidatorFeePool,
+    ValidatorFeeWithdrawal,
 };
 use tari_template_lib::args;
 use tari_transaction::Transaction;
@@ -34,6 +36,7 @@ pub fn create_execution_result_for_transaction(
     fee: u64,
     resolved_inputs: &[VersionedSubstateIdLockIntent],
     resulting_outputs: &[VersionedSubstateIdLockIntent],
+    validator_fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
 ) -> ExecuteResult {
     let result = if decision.is_commit() {
         let mut diff = SubstateDiff::new();
@@ -84,10 +87,20 @@ pub fn create_execution_result_for_transaction(
                         }),
                     );
                 },
+                SubstateId::ValidatorFeePool(_) => {
+                    diff.up(
+                        output.versioned_substate_id().substate_id().clone(),
+                        Substate::new(output.versioned_substate_id().version(), ValidatorFeePool {
+                            // This does not matter in tests
+                            claim_public_key: Default::default(),
+                            amount: 100_000.into(),
+                        }),
+                    );
+                },
                 _ => {
                     panic!(
-                        "create_execution_result_for_transaction: Test harness only supports generating component and \
-                         template outputs. Got {output}"
+                        "create_execution_result_for_transaction: Test harness only supports generating component, vn \
+                         fee, and template outputs. Got {output}"
                     );
                 },
             }
@@ -106,6 +119,8 @@ pub fn create_execution_result_for_transaction(
                 },
             }),
         );
+
+        diff.set_once_fee_withdrawals(validator_fee_withdrawals);
 
         TransactionResult::Accept(diff)
     } else {

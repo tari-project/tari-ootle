@@ -650,11 +650,11 @@ impl Block {
         tx.blocks_delete(block_id)
     }
 
-    pub fn commit_diff<TTx: StateStoreWriteTransaction>(
-        &self,
-        tx: &mut TTx,
-        block_diff: BlockDiff,
-    ) -> Result<(), StorageError> {
+    pub fn commit_diff<TTx>(&self, tx: &mut TTx, block_diff: BlockDiff) -> Result<(), StorageError>
+    where
+        TTx: StateStoreWriteTransaction + Deref,
+        TTx::Target: StateStoreReadTransaction,
+    {
         if block_diff.block_id() != self.id() {
             return Err(StorageError::QueryError {
                 reason: format!(
@@ -678,7 +678,9 @@ impl Block {
             block_diff.remove(tx)?;
         }
 
-        for change in block_diff.into_changes() {
+        let BlockDiff { changes, .. } = block_diff;
+
+        for change in changes {
             match change {
                 SubstateChange::Up {
                     id,

@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::vn_fee_pool::ValidatorFeePoolAddress;
+use tari_engine_types::ValidatorFeePoolAddress;
 
 use crate::{shard::Shard, uint::U256, NumPreshards};
 

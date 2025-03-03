@@ -341,6 +341,13 @@ impl SubstateRecord {
             destroyed_justify,
         )
     }
+
+    pub fn prune_downed_values<TTx: StateStoreWriteTransaction>(
+        tx: &mut TTx,
+        epoch: Epoch,
+    ) -> Result<(), StorageError> {
+        tx.substates_prune_downed_values(epoch)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

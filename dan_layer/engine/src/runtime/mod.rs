@@ -61,7 +61,7 @@ use tari_engine_types::{
     indexed_value::IndexedValue,
     lock::LockFlag,
     substate::SubstateValue,
-    vn_fee_pool::ValidatorFeePoolAddress,
+    ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
     args::{

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {useMutation, useQuery} from "@tanstack/react-query";
 import {
   accountsClaimBurn,
   accountsConfidentialTransfer,
@@ -32,16 +32,15 @@ import {
   accountsList,
   accountsTransfer,
   nftList,
-  transactionsPublishTemplate,
   validatorsGetFees,
 } from "../../utils/json_rpc";
-import { ApiError } from "../helpers/types";
+import {ApiError} from "../helpers/types";
 import queryClient from "../queryClient";
 import type {
-  ComponentAccessRules,
-  ConfidentialTransferInputSelection,
-  ComponentAddressOrName,
   AccountOrKeyIndex,
+  ComponentAccessRules,
+  ComponentAddressOrName,
+  ConfidentialTransferInputSelection,
 } from "@tari-project/typescript-bindings";
 
 //   Fees are passed as strings because Amount is tagged

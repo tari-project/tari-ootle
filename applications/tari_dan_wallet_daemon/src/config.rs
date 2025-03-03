@@ -55,6 +55,8 @@ pub struct WalletDaemonConfig {
     override_from: Option<String>,
     /// Network that is used to send transactions.
     pub network: Network,
+    /// Authentication method.
+    pub authentication: WalletDaemonAuth,
     /// The wallet daemon listening address
     pub json_rpc_address: Option<SocketAddr>,
     /// The public URL to JSON-RPC server used by the web UI. If not specified, the json_rpc_address is used.
@@ -83,6 +85,7 @@ impl Default for WalletDaemonConfig {
         Self {
             override_from: None,
             network: Network::Igor,
+            authentication: WalletDaemonAuth::default(),
             json_rpc_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9000))),
             web_ui_public_json_rpc_url: None,
             signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
@@ -102,4 +105,12 @@ impl SubConfigPath for WalletDaemonConfig {
     fn main_key_prefix() -> &'static str {
         "dan_wallet_daemon"
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WalletDaemonAuth {
+    #[default]
+    None,
+    WebAuthn,
 }

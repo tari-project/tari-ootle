@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Borrow, cmp, ops::RangeInclusive};
+use std::{cmp, ops::RangeInclusive};
 
 use rand::{rngs::OsRng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
@@ -254,32 +254,14 @@ impl CommitteeInfo {
         self.shard_group.contains(&shard)
     }
 
-    pub fn includes_all_substate_addresses<I: IntoIterator<Item = B>, B: Borrow<SubstateAddress>>(
-        &self,
-        substate_addresses: I,
-    ) -> bool {
-        substate_addresses
-            .into_iter()
-            .all(|substate_address| self.includes_substate_address(substate_address.borrow()))
-    }
-
-    pub fn includes_any_address<I: IntoIterator<Item = B>, B: Borrow<SubstateAddress>>(
-        &self,
-        substate_addresses: I,
-    ) -> bool {
-        substate_addresses
-            .into_iter()
-            .any(|substate_address| self.includes_substate_address(substate_address.borrow()))
-    }
-
-    pub fn filter<'a, I, B>(&'a self, items: I) -> impl Iterator<Item = B> + 'a
-    where
-        I: IntoIterator<Item = B> + 'a,
-        B: Borrow<SubstateAddress>,
-    {
-        items
-            .into_iter()
-            .filter(|substate_address| self.includes_substate_address(substate_address.borrow()))
+    pub fn is_all_local<T: AsRef<SubstateId>, I: IntoIterator<Item = T>>(&self, substate_ids: I) -> bool {
+        substate_ids.into_iter().all(|substate_id| {
+            let substate_id = substate_id.as_ref();
+            if substate_id.is_global() && self.num_committees > 1 {
+                return false;
+            }
+            self.includes_substate_id(substate_id)
+        })
     }
 
     pub fn all_shard_groups_iter(&self) -> impl Iterator<Item = ShardGroup> {

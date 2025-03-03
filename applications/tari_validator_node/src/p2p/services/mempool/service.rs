@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{collections::HashSet, fmt::Display, iter};
+use std::{collections::HashSet, fmt::Display};
 
 use libp2p::{gossipsub, PeerId};
 use log::*;
@@ -248,10 +248,10 @@ where TValidator: Validator<Transaction, Context = (), Error = TransactionValida
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let is_input_shard = transaction.is_involved_inputs(&local_committee_shard);
         let is_output_shard = transaction.is_global() ||
-            local_committee_shard.includes_any_address(
+            local_committee_shard.includes_substate_address(
                 // Known output shards
                 // This is to allow for the txreceipt output and indicates shard involvement.
-                iter::once(&tx_substate_address),
+                &tx_substate_address,
             );
 
         if is_input_shard || is_output_shard {

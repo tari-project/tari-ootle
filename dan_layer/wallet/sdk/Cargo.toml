@@ -33,6 +33,7 @@ log = { workspace = true }
 serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
+webauthn-rs = { workspace = true }
 
 [dev-dependencies]
 tari_dan_wallet_storage_sqlite = { workspace = true }

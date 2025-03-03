@@ -1,6 +1,6 @@
 {
   "name": "@tari-project/wallet_jrpc_client",
-  "version": "1.4.1",
+  "version": "1.5.1",
   "description": "Tari wallet JSON-RPC client library",
   "homepage": "https://github.com/tari-project/tari-dan#readme",
   "bugs": {
@@ -25,7 +25,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@tari-project/typescript-bindings": "^1.5.0"
+    "@tari-project/typescript-bindings": "^1.5.1"
   },
   "devDependencies": {
     "typescript": "^5.3.3"

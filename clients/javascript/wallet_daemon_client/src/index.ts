@@ -7,20 +7,25 @@ import {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
-  AccountSetDefaultRequest,
-  AccountSetDefaultResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountSetDefaultRequest,
+  AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
   AccountsListResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
+  Arg,
+  ArgDef,
   AuthGetAllJwtRequest,
   AuthGetAllJwtResponse,
+  AuthGetMethodRequest,
+  AuthGetMethodResponse,
+  AuthLoginRequest,
   AuthRevokeTokenRequest,
   AuthRevokeTokenResponse,
   ClaimBurnRequest,
@@ -32,6 +37,11 @@ import {
   ConfidentialTransferResponse,
   ConfidentialViewVaultBalanceRequest,
   ConfidentialViewVaultBalanceResponse,
+  FinalizeResult,
+  FunctionDef,
+  GetValidatorFeesRequest,
+  GetValidatorFeesResponse,
+  Instruction,
   KeyBranch,
   KeysCreateRequest,
   KeysCreateResponse,
@@ -43,15 +53,21 @@ import {
   ListAccountNftResponse,
   PublishTemplateRequest,
   PublishTemplateResponse,
+  rejectReasonToString,
   RevealFundsRequest,
   RevealFundsResponse,
   SettingsGetResponse,
   SettingsSetRequest,
   SettingsSetResponse,
+  stringToSubstateId,
+  SubstateId,
+  substateIdToString,
   SubstatesGetRequest,
   SubstatesGetResponse,
   SubstatesListRequest,
   SubstatesListResponse,
+  SubstateType,
+  TemplateDef,
   TemplatesGetRequest,
   TemplatesGetResponse,
   TransactionGetAllRequest,
@@ -60,25 +76,22 @@ import {
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
+  TransactionStatus,
   TransactionSubmitRequest,
   TransactionSubmitResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
+  Type, WebauthnAlreadyRegisteredRequest,
+  WebauthnAlreadyRegisteredResponse,
+  WebauthnFinishAuthRequest,
+  WebauthnFinishRegisterRequest,
+  WebauthnFinishRegisterResponse,
+  WebauthnStartAuthRequest,
+  WebauthnStartAuthResponse,
+  WebauthnStartRegisterRequest,
+  WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
-  Arg,
-  FinalizeResult,
-  TemplateDef,
-  FunctionDef,
-  Type,
-  ArgDef,
-  Instruction,
-  SubstateType,
-  TransactionStatus,
-  SubstateId,
-  substateIdToString,
-  stringToSubstateId,
-  rejectReasonToString, GetValidatorFeesRequest, GetValidatorFeesResponse,
 } from "@tari-project/typescript-bindings";
 import { FetchRpcTransport, RpcTransport } from "./transports";
 
@@ -87,6 +100,8 @@ export * as transports from "./transports";
 export { substateIdToString, stringToSubstateId, rejectReasonToString };
 
 export type {
+  AuthGetMethodRequest,
+  AuthGetMethodResponse,
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
@@ -192,13 +207,22 @@ export class WalletDaemonClient {
     this.token = token;
   }
 
+  public authGetMethod(): Promise<AuthGetMethodResponse> {
+    return this.__invokeRpc("auth.method", {});
+  }
+
   public authGetAllJwt(params: AuthGetAllJwtRequest): Promise<AuthGetAllJwtResponse> {
     return this.__invokeRpc("auth.get_all_jwt", params);
   }
 
-  public async authRequest(permissions: string[]): Promise<string> {
+  public async authRequest(permissions: string[], webauthnFinishAuthRequest?: WebauthnFinishAuthRequest): Promise<string> {
     // TODO: Exchange some secret credentials for a JWT
-    let resp = await this.__invokeRpc("auth.request", { permissions });
+    let request: AuthLoginRequest = {
+      permissions: permissions,
+      duration: null,
+      webauthn_finish_auth_request: webauthnFinishAuthRequest,
+    };
+    let resp = await this.__invokeRpc("auth.request", request);
     return resp.auth_token;
   }
 
@@ -336,6 +360,22 @@ export class WalletDaemonClient {
 
   public settingsSet(params: SettingsSetRequest): Promise<SettingsSetResponse> {
     return this.__invokeRpc("settings.set", params);
+  }
+
+  public webauthnAlreadyRegistered(params: WebauthnAlreadyRegisteredRequest): Promise<WebauthnAlreadyRegisteredResponse> {
+    return this.__invokeRpc("webauthn.already_registered", params);
+  }
+
+  public webauthnStartRegistration(params: WebauthnStartRegisterRequest): Promise<WebauthnStartRegisterResponse> {
+    return this.__invokeRpc("webauthn.reg_start", params);
+  }
+
+  public webauthnFinishRegistration(params: WebauthnFinishRegisterRequest): Promise<WebauthnFinishRegisterResponse> {
+    return this.__invokeRpc("webauthn.reg_finish", params);
+  }
+
+  public webauthnAuthStart(params: WebauthnStartAuthRequest): Promise<WebauthnStartAuthResponse> {
+    return this.__invokeRpc("webauthn.auth_start", params);
   }
 
   async __invokeRpc(method: string, params: object = null) {

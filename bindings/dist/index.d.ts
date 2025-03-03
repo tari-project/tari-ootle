@@ -117,6 +117,7 @@ export * from "./types/UnsignedTransaction";
 export * from "./types/UnsignedTransactionV1";
 export * from "./types/ValidatorFeePoolAddress";
 export * from "./types/ValidatorFeePool";
+export * from "./types/ValidatorFeeWithdrawal";
 export * from "./types/ValidatorSignature";
 export * from "./types/VaultId";
 export * from "./types/Vault";

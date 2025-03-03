@@ -12,7 +12,6 @@ use tari_dan_common_types::{
     LockIntent,
     SubstateRequirement,
     SubstateRequirementRef,
-    ToSubstateAddress,
     VersionedSubstateId,
 };
 use tari_dan_storage::{
@@ -197,12 +196,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 if !err.is_not_found_error() && !err.is_substate_down_error() {
                     return Err(err);
                 }
-                let is_local_only = local_committee_info.includes_all_substate_addresses(
-                    transaction
-                        .transaction
-                        .all_inputs_iter()
-                        .map(|i| i.or_zero_version().to_substate_address()),
-                );
+                let is_local_only = local_committee_info.is_all_local(transaction.transaction.all_inputs_iter());
                 // Currently this message will differ depending on which involved shard is asked.
                 // e.g. local nodes will say "failed to lock inputs", foreign nodes will say "foreign shard abort"
                 transaction.abort(RejectReason::OneOrMoreInputsNotFound(err.to_string()));
@@ -258,8 +252,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 .unwrap_or_else(|| self.execute_or_fetch(store, transaction, current_epoch, &local_inputs, block_id))?;
 
             // local-only transaction can be determined if we've executed the transaction
-            let is_local_only = local_committee_info
-                .includes_all_substate_addresses(execution.resulting_outputs().iter().map(|o| o.to_substate_address()));
+            let is_local_only = local_committee_info.is_all_local(execution.resulting_outputs());
             if is_local_only {
                 info!(
                     target: LOG_TARGET,
@@ -279,6 +272,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                     warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
                     execution.set_abort_reason(RejectReason::FailedToLockInputs(err.to_string()));
                 }
+
                 Ok(PreparedTransaction::new_local_accept(execution, lock_status))
             } else {
                 info!(target: LOG_TARGET, "👨‍🔧 PREPARE: transaction {} has local inputs and foreign outputs (Local decision: {})", execution.id(), execution.decision());

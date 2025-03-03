@@ -17,7 +17,12 @@ use tari_dan_storage::{global::models::ValidatorNode, StorageError};
 use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader};
 use tokio::sync::{broadcast, Mutex, MutexGuard};
 
-use crate::support::{address::TestAddress, helpers::random_substate_in_shard_group, TEST_NUM_PRESHARDS};
+use crate::support::{
+    address::TestAddress,
+    helpers::random_substate_in_shard_group,
+    TestVnDestination,
+    TEST_NUM_PRESHARDS,
+};
 
 #[derive(Debug, Clone)]
 pub struct TestEpochManager {
@@ -57,7 +62,13 @@ impl TestEpochManager {
         self.inner.lock().await
     }
 
-    pub fn clone_for(&self, address: TestAddress, public_key: PublicKey, shard_key: SubstateAddress) -> Self {
+    pub fn clone_for(
+        &self,
+        address: TestAddress,
+        public_key: PublicKey,
+        shard_key: SubstateAddress,
+        fee_claim_pk: PublicKey,
+    ) -> Self {
         let mut copy = self.clone();
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
@@ -66,7 +77,7 @@ impl TestEpochManager {
                 shard_key,
                 start_epoch: our_validator_node.start_epoch,
                 end_epoch: None,
-                fee_claim_public_key: public_key,
+                fee_claim_public_key: fee_claim_pk,
             });
         } else {
             copy.our_validator_node = Some(ValidatorNode {
@@ -75,13 +86,13 @@ impl TestEpochManager {
                 shard_key,
                 start_epoch: Epoch(0),
                 end_epoch: None,
-                fee_claim_public_key: public_key,
+                fee_claim_public_key: fee_claim_pk,
             });
         }
         copy
     }
 
-    pub async fn add_committees(&self, committees: HashMap<ShardGroup, Committee<TestAddress>>) {
+    pub async fn add_committees(&self, committees: HashMap<ShardGroup, Committee<TestAddress>>) -> &Self {
         let mut state = self.state_lock().await;
         for (shard_group, committee) in committees {
             for (address, pk) in &committee.members {
@@ -106,6 +117,18 @@ impl TestEpochManager {
 
             state.committees.insert(shard_group, committee);
         }
+        self
+    }
+
+    pub async fn set_claim_keys(&self, dest: TestVnDestination, claim_key: PublicKey) -> &Self {
+        let mut state = self.state_lock().await;
+        let num_committees = state.committees.len() as u32;
+        state.validator_nodes.iter_mut().for_each(|(address, (vn, sg))| {
+            if dest.is_for(address, *sg, num_committees) {
+                vn.fee_claim_public_key = claim_key.clone();
+            }
+        });
+        self
     }
 
     pub async fn all_validators(&self) -> Vec<(ValidatorNode<TestAddress>, ShardGroup)> {

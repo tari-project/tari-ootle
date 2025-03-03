@@ -21,6 +21,7 @@ use tari_template_lib::{
     prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
 };
 use tari_transaction::{Transaction, TransactionId};
+use webauthn_rs::prelude::Passkey;
 
 use crate::models::{
     Account,
@@ -202,6 +203,10 @@ pub trait WalletStoreReader {
         &mut self,
         nft_id: NonFungibleId,
     ) -> Result<ResourceAddress, WalletStorageError>;
+
+    // Webauthn registration
+    fn webauthn_is_user_registered(&mut self, username: &str) -> Result<bool, WalletStorageError>;
+    fn webauthn_reg_fetch_passkeys(&mut self, username: String) -> Result<Vec<Passkey>, WalletStorageError>;
 }
 
 pub trait WalletStoreWriter {
@@ -317,4 +322,7 @@ pub trait WalletStoreWriter {
 
     // Non fungible tokens
     fn non_fungible_token_upsert(&mut self, non_fungible_token: &NonFungibleToken) -> Result<(), WalletStorageError>;
+
+    // Webauthn registrations
+    fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError>;
 }

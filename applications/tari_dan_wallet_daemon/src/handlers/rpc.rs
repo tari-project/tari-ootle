@@ -5,17 +5,24 @@ use tari_dan_wallet_sdk::apis::jwt::JrpcPermission;
 use tari_wallet_daemon_client::types::{
     AuthGetAllJwtRequest,
     AuthGetAllJwtResponse,
+    AuthGetMethodRequest,
+    AuthGetMethodResponse,
     AuthLoginAcceptRequest,
     AuthLoginAcceptResponse,
     AuthLoginDenyRequest,
     AuthLoginDenyResponse,
     AuthLoginRequest,
     AuthLoginResponse,
+    AuthMethod,
     AuthRevokeTokenRequest,
     AuthRevokeTokenResponse,
 };
 
-use crate::{handlers::HandlerContext, services::AuthLoginRequestEvent};
+use crate::{
+    config::WalletDaemonAuth,
+    handlers::{auth::Authenticator, HandlerContext},
+    services::AuthLoginRequestEvent,
+};
 
 pub async fn handle_discover(
     _context: &HandlerContext,
@@ -30,8 +37,8 @@ pub async fn handle_login_request(
     _token: Option<String>,
     auth_request: AuthLoginRequest,
 ) -> Result<AuthLoginResponse, anyhow::Error> {
+    context.authenticator().authenticate(&auth_request).await?;
     let jwt = context.wallet_sdk().jwt_api();
-
     let (auth_token, valid_for) =
         jwt.generate_auth_token(auth_request.permissions.as_slice().try_into()?, auth_request.duration)?;
     context.notifier().notify(AuthLoginRequestEvent);
@@ -81,4 +88,17 @@ pub async fn handle_get_all_jwt(
     jwt.check_auth(token, &[JrpcPermission::Admin])?;
     let tokens = jwt.get_tokens()?;
     Ok(AuthGetAllJwtResponse { jwt: tokens })
+}
+
+pub async fn handle_get_auth_method(
+    context: &HandlerContext,
+    _token: Option<String>,
+    _request: AuthGetMethodRequest,
+) -> Result<AuthGetMethodResponse, anyhow::Error> {
+    Ok(AuthGetMethodResponse {
+        method: match context.config().authentication {
+            WalletDaemonAuth::None => AuthMethod::None,
+            WalletDaemonAuth::WebAuthn => AuthMethod::Webauthn,
+        },
+    })
 }

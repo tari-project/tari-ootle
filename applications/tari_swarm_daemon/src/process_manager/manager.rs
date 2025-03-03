@@ -420,7 +420,7 @@ impl ProcessManager {
                      burning funds"
                 )
             })?;
-        let claim_public_key = wallet.get_account_public_key(account_name.clone()).await?;
+        let claim_public_key = wallet.get_account_public_key(account_name.clone(), None).await?;
         let wallet = self
             .instance_manager
             .minotari_wallets()

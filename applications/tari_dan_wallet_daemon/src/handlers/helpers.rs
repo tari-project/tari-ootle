@@ -146,7 +146,7 @@ pub(super) fn invalid_params<T: Display>(field: &str, details: Option<T>) -> any
     .into()
 }
 
-pub(super) fn application<T: Display>(code: ApplicationErrorCode, details: T) -> anyhow::Error {
+pub(super) fn application_error<T: Display>(code: ApplicationErrorCode, details: T) -> anyhow::Error {
     axum_jrpc::error::JsonRpcError::new(
         axum_jrpc::error::JsonRpcErrorReason::ApplicationError(code as i32),
         format!("Application error: '{details}",),
@@ -161,6 +161,13 @@ pub(super) fn not_found<T: Display>(details: T) -> anyhow::Error {
         serde_json::Value::Null,
     )
     .into()
+}
+
+pub(super) fn invalid_request<T: Display>(details: T) -> anyhow::Error {
+    application_error(
+        ApplicationErrorCode::InvalidRequest,
+        format!("Invalid request: {details}"),
+    )
 }
 
 /// Returns a TransactionBuilder with the current network configured.

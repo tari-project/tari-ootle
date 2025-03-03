@@ -107,6 +107,14 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
                 0,
             )))
             .map(VersionedSubstateIdLockIntent::output)
+            .chain(
+                spec.validator_fee_withdrawals
+                    .iter()
+                    .filter_map(|w| {
+                        let input = resolved_inputs.iter().find(|i| i.versioned_substate_id().substate_id().as_validator_fee_pool_address() == Some(w.address))?;
+                        Some(VersionedSubstateIdLockIntent::output(VersionedSubstateId::new(w.address, input.version() + 1)))
+                    })
+            )
             .collect::<Vec<_>>();
 
         let result = create_execution_result_for_transaction(
@@ -115,6 +123,7 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
             spec.fee,
             &resolved_inputs,
             &resulting_outputs,
+            spec.validator_fee_withdrawals,
         );
 
         let executed = ExecutedTransaction::new(transaction, result, resolved_inputs);

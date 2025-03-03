@@ -1650,18 +1650,15 @@ async fn multishard_validator_fee_claim() {
 
         let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
 
-        let is_pool_empty = test.is_transaction_pool_empty();
-        let mut sent_now = false;
-        if !tx_sent && (is_pool_empty || leaf.height >= NodeHeight(15)) {
+        if !tx_sent && (test.is_transaction_pool_empty() || leaf.height >= NodeHeight(15)) {
             // Send a claim
             test.send_transaction_to_destination(TestVnDestination::All, claim_tx.clone())
                 .await;
+            test.wait_for_pool_count(TestVnDestination::All, 1).await;
             tx_sent = true;
-            sent_now = true;
         }
 
-        // Prevent race condition between sending the transaction and it entering the pool
-        if !sent_now && is_pool_empty {
+        if tx_sent && test.is_transaction_pool_empty() {
             break;
         }
 

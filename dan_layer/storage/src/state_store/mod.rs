@@ -493,7 +493,7 @@ pub trait StateStoreWriteTransaction {
         &mut self,
         transaction_ids: I,
     ) -> Result<Vec<TransactionPoolRecord>, StorageError>;
-    fn transaction_pool_confirm_all_transitions(&mut self, new_locked_block: &LockedBlock) -> Result<(), StorageError>;
+    fn transaction_pool_confirm_all_transitions(&mut self, block: &LeafBlock) -> Result<(), StorageError>;
     fn transaction_pool_state_updates_remove_any_by_block_id(&mut self, block_id: &BlockId)
         -> Result<(), StorageError>;
 

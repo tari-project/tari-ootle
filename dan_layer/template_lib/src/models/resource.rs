@@ -102,6 +102,15 @@ impl TryFrom<&[u8]> for ResourceAddress {
     }
 }
 
+impl TryFrom<Vec<u8>> for ResourceAddress {
+    type Error = KeyParseError;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        let key = ObjectKey::try_from(value)?;
+        Ok(Self::new(key))
+    }
+}
+
 newtype_struct_serde_impl!(ResourceAddress, BorTag<ObjectKey, TAG>);
 
 #[cfg(feature = "borsh")]

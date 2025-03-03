@@ -54,7 +54,7 @@ use tari_engine_types::{
     lock::LockFlag,
     virtual_substate::VirtualSubstates,
 };
-use tari_template_abi::{call_engine, EngineOp, FunctionDef};
+use tari_template_abi::{call_engine, EngineOp, FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::{AddressAllocation, BinaryTag, ResourceAddress};
 use tari_template_lib::{
@@ -394,20 +394,28 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         )?;
 
         let result: AllocateAddressResult = resp.decode()?;
-        
+        let result_name: String;
+
         let indexed_value = match result {
             AllocateAddressResult::ComponentAddress(allocation) => {
+                result_name = "ComponentAddressAllocation".to_string();
                 IndexedValue::from_type(&BorTag::<AddressAllocation<ComponentAddress>, ALLOCATED_COMPONENT_ADDRESS_TAG>::new(allocation))
             },
             AllocateAddressResult::ResourceAddress(allocation) => {
+                result_name = "ResourceAddressAllocation".to_string();
                 IndexedValue::from_type(&BorTag::<AddressAllocation<ResourceAddress>, ALLOCATED_RESOURCE_ADDRESS_TAG>::new(allocation))
             },
         }?;
 
-        runtime.interface().set_last_instruction_output(indexed_value)?;
+        runtime.interface().set_last_instruction_output(indexed_value.clone())?;
         Self::put_output_on_workspace_with_name(runtime, workspace_id.into())?;
 
-        Ok(InstructionResult::empty())
+        Ok(
+            InstructionResult {
+                indexed: indexed_value,
+                return_type: Type::Other {name: result_name}
+            }
+        )
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.

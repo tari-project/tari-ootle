@@ -4,6 +4,7 @@
 use tari_bor::Value;
 use tari_bor::Value::Tag;
 use tari_dan_engine::runtime::TransactionCommitError;
+use tari_template_abi::Type;
 use tari_template_lib::models::BinaryTag;
 use tari_template_lib::{
     args,
@@ -11,6 +12,7 @@ use tari_template_lib::{
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::Transaction;
+use wasmer::IntoBytes;
 
 const ALLOCATED_COMPONENT_ADDRESS_TAG: u64 = BinaryTag::AllocatedComponentAddress.as_u64();
 const ALLOCATED_RESOURCE_ADDRESS_TAG: u64 = BinaryTag::AllocatedResourceAddress.as_u64();
@@ -126,7 +128,22 @@ fn it_allocation_using_tx_builder() {
         vec![],
     );
 
-    let actual = result
+    // assert execution results
+    let comp_addr_allocation_exec_result = result.finalize.execution_results.first().unwrap().clone();
+    let Type::Other {name: comp_alloc_return_type_name} = comp_addr_allocation_exec_result.return_type else { panic!("Invalid return type for component address allocation!") };
+    assert_eq!(comp_alloc_return_type_name, "ComponentAddressAllocation".to_string());
+    let exec_result_allocated_comp_addr: ComponentAddress = address_allocation_from_cbor(
+        comp_addr_allocation_exec_result.indexed.clone().into_value()
+    ).unwrap();
+
+    let res_addr_allocation_exec_result = result.finalize.execution_results.get(1).unwrap().clone();
+    let Type::Other {name: res_alloc_return_type_name} = res_addr_allocation_exec_result.return_type else { panic!("Invalid return type for resource address allocation!") };
+    assert_eq!(res_alloc_return_type_name, "ResourceAddressAllocation".to_string());
+    let exec_result_allocated_res_addr: ResourceAddress = address_allocation_from_cbor(
+        res_addr_allocation_exec_result.indexed.clone().into_value()
+    ).unwrap();
+
+    let actual_comp = result
         .finalize
         .result
         .accept()
@@ -134,23 +151,50 @@ fn it_allocation_using_tx_builder() {
         .up_iter()
         .find_map(|(k, _)| k.as_component_address())
         .unwrap();
-    
-    let allocated = component_address_from_cbor(
+
+    let allocated_comp_after_func_call: ComponentAddress = address_from_cbor(
         result.finalize.execution_results[2].clone().indexed.into_value()
     ).unwrap();
-    
-    // TODO: in transaction processor return the allocated address as a result, so it can be checked in the execution results
+
+    assert_eq!(actual_comp, allocated_comp_after_func_call);
+    assert_eq!(actual_comp, exec_result_allocated_comp_addr);
+
+    let (container_comp_id, container_comp_value) = result
+        .finalize
+        .result
+        .accept()
+        .unwrap()
+        .up_iter()
+        .filter(|(k, _)| k.as_component_address().is_some())
+        .last()
+        .unwrap();
+
     // TODO: add other checks (new components contains the right addresses etc..)
-    
-    assert_eq!(actual, allocated);
 }
 
-fn component_address_from_cbor(value: Value) -> Option<ComponentAddress> {
+fn address_from_cbor<T: TryFrom<Vec<u8>>>(value: Value) -> Option<T> {
     if let Tag(_, address_raw) = value {
         if let Ok(address_bytes) = address_raw.into_bytes() {
-            if let Ok(address) = ComponentAddress::try_from(address_bytes.as_slice()) {
+            if let Ok(address) = address_bytes.try_into() {
                 return Some(address);
             }
+        }
+    }
+    None
+}
+
+fn address_allocation_from_cbor<T: TryFrom<Vec<u8>>>(value: Value) -> Option<T> {
+    if let Tag(_, allocation_raw) = value {
+        if let Ok(properties) = allocation_raw.into_map() {
+            return properties.iter()
+                .filter_map(|(key, value)| {
+                    if let Some(property_id) = key.as_text() {
+                        if property_id == "address" {
+                            return address_from_cbor::<T>(value.clone());
+                        }
+                    }
+                    None
+                }).last();
         }
     }
     None

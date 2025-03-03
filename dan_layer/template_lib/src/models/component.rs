@@ -92,6 +92,15 @@ impl TryFrom<&[u8]> for ComponentAddress {
     }
 }
 
+impl TryFrom<Vec<u8>> for ComponentAddress {
+    type Error = KeyParseError;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        let key = ObjectKey::try_from(value)?;
+        Ok(Self::new(key))
+    }
+}
+
 impl Display for ComponentAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "component_{}", *self.0)

@@ -358,9 +358,9 @@ impl ProposedBlockChangeSet {
 
         let _timer = TraceTimer::debug(LOG_TARGET, "ProposedBlockChangeSet::save");
         // Store the block diff
-        BlockDiff::insert_record(tx, &self.block.block_id, &self.substate_changes)?;
+        BlockDiff::insert(tx, &self.block.block_id, &self.substate_changes)?;
 
-        // Store the tree diffs for each effected shard
+        // Store the tree diffs for each affected shard
         for (shard, diff) in &self.state_tree_diffs {
             PendingShardStateTreeDiff::create(tx, *self.block.block_id(), *shard, diff)?;
         }
@@ -531,7 +531,7 @@ mod tests {
     fn check_max_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 22_112_000;
+        const TARGET_MAX_MEM_USAGE: usize = 22_136_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
         eprintln!("mem_block_diff: {}MiB", mem_block_diff / 1024 / 1024);
         let mem_state_tree_diffs =

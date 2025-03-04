@@ -34,6 +34,7 @@ use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId, Tem
 use tari_template_lib::models::{Amount, EncryptedData};
 use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;
+use webauthn_rs::prelude::Passkey;
 
 use crate::{
     diesel::ExpressionMethods,
@@ -88,7 +89,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let last_inserted_id: i32 =
             diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>("last_insert_rowid()"))
                 .get_result(self.connection())
-                .unwrap();
+                .map_err(|e| WalletStorageError::general("jwt_add_empty_token", e))?;
         Ok(last_inserted_id as u64)
     }
 
@@ -719,7 +720,14 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             value: locked_output.value as u64,
             sender_public_nonce: locked_output
                 .sender_public_nonce
-                .map(|nonce| PublicKey::from_hex(&nonce).unwrap()),
+                .map(|nonce| {
+                    PublicKey::from_hex(&nonce).map_err(|e| WalletStorageError::DecodingError {
+                        operation: "outputs_lock_smallest_amount",
+                        item: "sender public nonce",
+                        details: e.to_string(),
+                    })
+                })
+                .transpose()?,
             encryption_secret_key_index: locked_output.encryption_secret_key_index as u64,
             encrypted_data: EncryptedData::try_from(locked_output.encrypted_data).map_err(|len| {
                 WalletStorageError::DecodingError {
@@ -907,6 +915,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .values((
                 non_fungible_tokens::nft_id.eq(non_fungible_token.nft_id.to_canonical_string()),
                 non_fungible_tokens::data.eq(&data),
+                non_fungible_tokens::resource_id.eq(non_fungible_token.resource_address.to_string()),
                 non_fungible_tokens::mutable_data.eq(&mutable_data),
                 non_fungible_tokens::vault_id.eq(vault_id),
                 non_fungible_tokens::is_burned.eq(non_fungible_token.is_burned),
@@ -916,7 +925,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .set((
                 non_fungible_tokens::data.eq(&data),
                 non_fungible_tokens::mutable_data.eq(&mutable_data),
-                non_fungible_tokens::vault_id.eq(vault_id),
                 non_fungible_tokens::is_burned.eq(non_fungible_token.is_burned),
             ))
             .execute(self.connection())
@@ -926,6 +934,35 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             target: LOG_TARGET,
             "Inserted successfully new non fungible token with id = {}", non_fungible_token.nft_id
         );
+        Ok(())
+    }
+
+    fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError> {
+        use crate::schema::{webauthn_registration_passkeys, webauthn_registrations};
+        diesel::insert_into(webauthn_registrations::table)
+            .values(webauthn_registrations::username.eq(username))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_insert", e))?;
+
+        let registration_id: i32 =
+            diesel::select(diesel::dsl::sql::<diesel::sql_types::Integer>("last_insert_rowid()"))
+                .get_result(self.connection())
+                .map_err(|e| WalletStorageError::general("webauthn_reg_insert", e))?;
+
+        let passkey_json = serde_json::to_string(&passkey).map_err(|e| WalletStorageError::DecodingError {
+            operation: "webauthn_reg_insert",
+            item: "passkey",
+            details: e.to_string(),
+        })?;
+
+        diesel::insert_into(webauthn_registration_passkeys::table)
+            .values((
+                webauthn_registration_passkeys::registration_id.eq(registration_id),
+                webauthn_registration_passkeys::passkey.eq(passkey_json.as_bytes()),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_passkeys_insert", e))?;
+
         Ok(())
     }
 }

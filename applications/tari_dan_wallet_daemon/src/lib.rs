@@ -49,7 +49,7 @@ use tokio::task;
 
 use crate::{
     config::ApplicationConfig,
-    handlers::HandlerContext,
+    handlers::{auth::create_authenticator, HandlerContext},
     http_ui::server::run_http_ui_server,
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
@@ -69,7 +69,9 @@ pub async fn run_tari_dan_wallet_daemon(
     // Uncomment to enable tokio tracing via tokio-console
     // console_subscriber::init();
 
-    let wallet_sdk = initialize_wallet_sdk(&config)?;
+    let wallet_store = init_wallet_store(&config)?;
+
+    let wallet_sdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
     wallet_sdk
         .key_manager_api()
         .get_or_create_initial(key_manager::TRANSACTION_BRANCH)?;
@@ -79,12 +81,18 @@ pub async fn run_tari_dan_wallet_daemon(
 
     let jrpc_address = config.dan_wallet_daemon.json_rpc_address.unwrap();
     let signaling_server_address = config.dan_wallet_daemon.signaling_server_address.unwrap();
+
+    // webauthn
+
+    let authenticator = create_authenticator(&config.dan_wallet_daemon, wallet_store.clone())?;
+
     let handlers = HandlerContext::new(
         wallet_sdk.clone(),
         notify,
         services.transaction_service_handle.clone(),
         services.account_monitor_handle.clone(),
         config.dan_wallet_daemon.clone(),
+        authenticator,
     );
     let (jrpc_address, listen_fut) =
         jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers, shutdown_signal)?;
@@ -123,12 +131,16 @@ pub async fn run_tari_dan_wallet_daemon(
     Ok(())
 }
 
-pub fn initialize_wallet_sdk(
-    config: &ApplicationConfig,
-) -> anyhow::Result<DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
+pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWalletStore> {
     let store = SqliteWalletStore::try_open(config.common.base_path.join("data/wallet.sqlite"))?;
     store.run_migrations()?;
+    Ok(store)
+}
 
+pub fn initialize_wallet_sdk(
+    config: &ApplicationConfig,
+    store: SqliteWalletStore,
+) -> anyhow::Result<DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
     let sdk_config = WalletSdkConfig {
         // TODO: Configure
         password: None,

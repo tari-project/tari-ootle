@@ -237,11 +237,11 @@ impl EventScanner {
     }
 
     fn event_matches_filter(filter: &EventFilter, event: &Event) -> bool {
-        let matches_topic = filter.topic.as_ref().map_or(true, |t| *t == event.topic());
+        let matches_topic = filter.topic.as_ref().is_none_or(|t| *t == event.topic());
         let matches_template = filter
             .template_address
             .as_ref()
-            .map_or(true, |t| *t == event.template_address());
+            .is_none_or(|t| *t == event.template_address());
 
         let matches_substate_id = match filter.substate_id {
             Some(ref substate_id) => event.substate_id().map(|s| s == substate_id).unwrap_or(false),

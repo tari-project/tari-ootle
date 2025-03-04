@@ -44,8 +44,8 @@ use tari_engine_types::{
     resource_container::ResourceContainer,
     substate::{InvalidSubstateIdVariant, SubstateId, SubstateValue},
     vault::Vault,
-    vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
+    ValidatorFeePoolAddress,
 };
 use tari_template_abi::{TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
@@ -2281,10 +2281,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             let bucket_id = state.new_bucket_id();
             state.new_bucket(bucket_id, resource)?;
             state.set_last_instruction_output(IndexedValue::from_type(&bucket_id)?);
-            Ok::<_, RuntimeError>(())
-        })?;
-
-        Ok(())
+            Ok(())
+        })
     }
 
     fn set_fee_checkpoint(&self) -> Result<(), RuntimeError> {

@@ -346,8 +346,7 @@ where TSpec: EpochManagerSpec
         epoch: Epoch,
     ) -> Result<Vec<ValidatorNode<TSpec::Addr>>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
-        let db_vns = self.global_db.validator_nodes(&mut tx).get_all_within_epoch(epoch)?;
-        let vns = db_vns.into_iter().map(Into::into).collect();
+        let vns = self.global_db.validator_nodes(&mut tx).get_all_within_epoch(epoch)?;
         Ok(vns)
     }
 

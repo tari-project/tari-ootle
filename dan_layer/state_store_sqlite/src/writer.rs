@@ -1528,7 +1528,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
         let mut remaining = counts
             .iter()
-            .filter(|(_, count)| count.map_or(true, |c| c == 0))
+            .filter(|(_, count)| count.is_none_or(|c| c == 0))
             .map(|(id, _)| *id)
             .peekable();
 
@@ -1765,7 +1765,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             substates::destroyed_at_epoch.eq(Some(epoch.as_u64() as i64)),
             substates::destroyed_by_shard.eq(Some(shard.as_u32() as i32)),
             substates::destroyed_justify.eq(Some(serialize_hex(destroyed_qc_id))),
-            substates::data.eq(None::<String>),
+            // TODO: we cannot down substates for now until the end of the epoch since validators may request
+            // historical values in foreign pledges.
+            // substates::data.eq(None::<String>),
         );
 
         let address = versioned_substate_id.to_substate_address();
@@ -1809,6 +1811,20 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 source: e,
             })?;
 
+        Ok(())
+    }
+
+    fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<(), StorageError> {
+        use crate::schema::substates;
+
+        diesel::update(substates::table)
+            .filter(substates::destroyed_at_epoch.eq(Some(epoch.as_u64() as i64)))
+            .set(substates::data.eq(None::<String>))
+            .execute(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "substates_prune_downed_values",
+                source: e,
+            })?;
         Ok(())
     }
 

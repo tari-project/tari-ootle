@@ -89,7 +89,7 @@ pub async fn handle_get_validator_fees(
             continue;
         };
 
-        let Some(amount) = result.substate.as_validator_fee_pool().map(|p| p.amount) else {
+        let Some(amount) = result.substate.as_validator_fee_pool().map(|p| p.amount()) else {
             warn!(target: LOG_TARGET, "Incorrect substate type found at address {}", address);
             continue;
         };

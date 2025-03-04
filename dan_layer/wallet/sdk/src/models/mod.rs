@@ -23,4 +23,6 @@ mod vault;
 pub use vault::*;
 
 mod non_fungible_tokens;
+mod webauthn_registration;
 pub use non_fungible_tokens::*;
+pub use webauthn_registration::*;

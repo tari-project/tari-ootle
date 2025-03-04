@@ -717,7 +717,7 @@ pub fn find_output_version(
         .iter()
         .filter(|(_, requirement)| requirement.substate_id == output_component_substate_id)
         .map(|(_, requirement)| requirement.version)
-        .last()
+        .next_back()
         .unwrap_or_default())
 }
 

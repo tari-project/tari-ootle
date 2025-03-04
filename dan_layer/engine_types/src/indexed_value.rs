@@ -25,7 +25,7 @@ use crate::{
     serde_with,
     substate::SubstateId,
     transaction_receipt::TransactionReceiptAddress,
-    vn_fee_pool::ValidatorFeePoolAddress,
+    ValidatorFeePoolAddress,
 };
 
 const MAX_VISITOR_DEPTH: usize = 50;

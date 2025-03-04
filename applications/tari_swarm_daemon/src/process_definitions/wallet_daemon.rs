@@ -9,6 +9,9 @@ use tokio::process::Command;
 
 use crate::process_definitions::{ProcessContext, ProcessDefinition};
 
+pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
+const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
+
 #[derive(Debug, Default)]
 pub struct WalletDaemon;
 
@@ -43,6 +46,11 @@ impl ProcessDefinition for WalletDaemon {
                 .ok_or_else(|| anyhow!("Indexer jrpc port not found"))?
         );
 
+        let auth = context
+            .get_setting(WALLET_DAEMON_AUTH_SETTINGS_KEY)
+            .or_else(|| context.get_setting("auth_method"))
+            .unwrap_or(WALLET_DAEMON_AUTH_DEFAULT);
+
         command
             .envs(context.environment())
             .arg("-b")
@@ -52,7 +60,8 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("--json-rpc-address={json_rpc_address}"))
             .arg(format!("--indexer-url={indexer_url}"))
             .arg(format!("--web-ui-public-json-rpc-url={json_rpc_public_url}"))
-            .arg(format!("-pdan_wallet_daemon.web_ui_address={web_ui_address}"));
+            .arg(format!("-pdan_wallet_daemon.web_ui_address={web_ui_address}"))
+            .arg(format!("-pdan_wallet_daemon.authentication={auth}"));
 
         // A signaling server is not required for startup of the wallet daemon,
         // but if it is available we want to set it up

@@ -26,7 +26,7 @@ use tari_shutdown::ShutdownSignal;
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-use super::handlers::{substates, templates, HandlerContext};
+use super::handlers::{substates, templates, webauthn, HandlerContext};
 use crate::handlers::{
     accounts,
     confidential,
@@ -107,6 +107,14 @@ async fn handler(
             "deny" => call_handler(context, value, token, rpc::handle_login_deny).await,
             "revoke" => call_handler(context, value, token, rpc::handle_revoke).await,
             "get_all_jwt" => call_handler(context, value, token, rpc::handle_get_all_jwt).await,
+            "method" => call_handler(context, value, token, rpc::handle_get_auth_method).await,
+            _ => Ok(value.method_not_found(&value.method)),
+        },
+        Some(("webauthn", method)) => match method {
+            "already_registered" => call_handler(context, value, token, webauthn::handle_already_registered).await,
+            "reg_start" => call_handler(context, value, token, webauthn::handle_start_registration).await,
+            "reg_finish" => call_handler(context, value, token, webauthn::handle_finish_registration).await,
+            "auth_start" => call_handler(context, value, token, webauthn::handle_start_auth).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("settings", method)) => match method {
@@ -130,7 +138,7 @@ async fn handler(
             "get" => call_handler(context, value, token, transaction::handle_get).await,
             "get_result" => call_handler(context, value, token, transaction::handle_get_result).await,
             "wait_result" => call_handler(context, value, token, transaction::handle_wait_result).await,
-            "get_all" => call_handler(context, value, token, transaction::handle_get_all).await,
+            "list" | "get_all" => call_handler(context, value, token, transaction::handle_get_all).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
         Some(("accounts", method)) => match method {
@@ -266,6 +274,7 @@ fn resolve_any_error(answer_id: i64, e: &anyhow::Error) -> JsonRpcResponse {
 #[repr(i32)]
 pub enum ApplicationErrorCode {
     NotFound = 404,
+    InvalidRequest = 400,
     TransactionRejected = 1000,
     GeneralError = 500,
 }

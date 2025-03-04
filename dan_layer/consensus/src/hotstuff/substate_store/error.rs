@@ -19,6 +19,8 @@ pub enum SubstateStoreError {
     StoreError(#[from] StorageError),
     #[error(transparent)]
     StateTreeError(#[from] tari_state_tree::StateTreeError),
+    #[error("Invariant error: {details}")]
+    InvariantError { details: String },
 }
 
 impl IsNotFoundError for SubstateStoreError {

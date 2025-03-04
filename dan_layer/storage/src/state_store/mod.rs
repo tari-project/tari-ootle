@@ -554,6 +554,7 @@ pub trait StateStoreWriteTransaction {
         destroyed_transaction_id: &TransactionId,
         destroyed_qc_id: &QcId,
     ) -> Result<(), StorageError>;
+    fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<(), StorageError>;
 
     // -------------------------------- Foreign pledges -------------------------------- //
 

@@ -18,14 +18,14 @@ pub async fn get_templates(cli: &CommonArgs) -> anyhow::Result<(TemplateMetadata
     } else {
         templates
             .iter()
-            .find(|t| t.name == "TariSwapPool")
+            .find(|t| t.name.eq_ignore_ascii_case("TariSwapPool"))
             .ok_or(anyhow::anyhow!("Tariswap template not found"))?
             .clone()
     };
 
     let faucet = templates
         .iter()
-        .find(|t| t.name == "TestFaucet")
+        .find(|t| t.name.eq_ignore_ascii_case("TestFaucet"))
         .ok_or(anyhow::anyhow!("Faucet template not found"))?
         .clone();
 

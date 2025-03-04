@@ -526,7 +526,7 @@ CREATE TABLE validator_epoch_stats
     created_at              timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX participation_shares_uniq_idx_epoch_public_key on validator_epoch_stats (epoch, public_key);
+CREATE UNIQUE INDEX validator_epoch_stats_uniq_idx_epoch_public_key on validator_epoch_stats (epoch, public_key);
 
 CREATE TABLE evicted_nodes
 (

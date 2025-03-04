@@ -42,8 +42,8 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     serde_with,
     substate::{SubstateId, SubstateValue},
-    vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
+    ValidatorFeePoolAddress,
 };
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
@@ -55,6 +55,12 @@ use tari_template_lib::{
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
+use webauthn_rs_proto::{
+    PublicKeyCredential,
+    PublicKeyCredentialCreationOptions,
+    RegisterPublicKeyCredential,
+    RequestChallengeResponse,
+};
 
 use crate::{
     serialize::{opt_string_or_struct, string_or_struct},
@@ -909,6 +915,7 @@ pub struct AuthLoginRequest {
     pub permissions: Vec<String>,
     #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub duration: Option<Duration>,
+    pub webauthn_finish_auth_request: Option<WebauthnFinishAuthRequest>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1258,4 +1265,138 @@ pub struct TemplatesGetRequest {
 )]
 pub struct TemplatesGetResponse {
     pub template_definition: TemplateDef,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct AuthGetMethodRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMethod {
+    None,
+    Webauthn,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct AuthGetMethodResponse {
+    pub method: AuthMethod,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnAlreadyRegisteredRequest {
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnAlreadyRegisteredResponse {
+    pub registered: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnStartRegisterRequest {
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnStartRegisterResponse {
+    /// Unique ID of the current registration Session.
+    pub session_id: String,
+    /// [`PublicKeyCredentialCreationOptions`] serialized as JSON
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub public_key: PublicKeyCredentialCreationOptions,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnFinishRegisterRequest {
+    /// Session ID received from [`WebauthnStartRegisterResponse`].
+    pub session_id: String,
+    /// [`RegisterPublicKeyCredential`] serialized as JSON.
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub credential: RegisterPublicKeyCredential,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnFinishRegisterResponse {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnStartAuthRequest {
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnStartAuthResponse {
+    /// Session ID.
+    pub session_id: String,
+    /// [`RequestChallengeResponse`] serialized as JSON string.
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub challenge: RequestChallengeResponse,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WebauthnFinishAuthRequest {
+    /// Session ID received from [`WebauthnStartAuthResponse`].
+    pub session_id: String,
+    /// [`PublicKeyCredential`]
+    #[cfg_attr(feature = "ts", ts(type = "object"))]
+    pub credential: PublicKeyCredential,
 }

@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 pub mod accounts;
+pub mod auth;
 pub mod confidential;
 mod context;
 pub mod error;
@@ -14,6 +15,7 @@ pub mod substates;
 pub mod templates;
 pub mod transaction;
 pub mod validator;
+pub mod webauthn;
 pub mod webrtc;
 
 use std::future::Future;

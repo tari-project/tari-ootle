@@ -83,13 +83,21 @@ pub struct InstanceInfo {
 impl InstanceInfo {
     pub fn get_public_web_url(&self) -> Url {
         match self.settings.get("public_web_url") {
-            Some(url) => url.parse().expect("Invalid web URL"),
+            Some(url) => url
+                .parse()
+                .expect("Invalid web URL. Please check `public_web_url` in your config."),
             None => {
                 let public_ip = self
                     .settings
                     .get("public_ip")
-                    .map(|s| s.as_str())
-                    .unwrap_or("127.0.0.1");
+                    .map(|s| {
+                        // Required for webauthn
+                        if s == "127.0.0.1" {
+                            return "localhost";
+                        }
+                        s.as_str()
+                    })
+                    .unwrap_or("localhost");
                 let web_port = self.ports.get("web").expect("web port not found");
                 format!("http://{public_ip}:{web_port}")
                     .parse()
@@ -100,17 +108,47 @@ impl InstanceInfo {
 
     pub fn get_public_json_rpc_url(&self) -> Url {
         match self.settings.get("public_json_rpc_url") {
-            Some(url) => url.parse().expect("Invalid JSON RPC URL"),
+            Some(url) => url
+                .parse()
+                .expect("Invalid JSON RPC URL. Please check `public_json_rpc_url` in your config."),
+            None => {
+                let public_ip = self
+                    .settings
+                    .get("public_ip")
+                    .map(|s| {
+                        // Required for webauthn
+                        if s == "127.0.0.1" {
+                            return "localhost";
+                        }
+                        s.as_str()
+                    })
+                    .unwrap_or("localhost");
+                let web_port = self.ports.get("jrpc").expect("jrpc port not found");
+                format!("http://{public_ip}:{web_port}/json_rpc")
+                    .parse()
+                    .expect("Invalid web URL")
+            },
+        }
+    }
+
+    pub fn get_public_graphql_url(&self) -> Url {
+        match self.settings.get("public_graphql_url") {
+            Some(url) => url
+                .parse()
+                .expect("Invalid GraphQL URL. Please check `public_graphql_url` in your config."),
             None => {
                 let public_ip = self
                     .settings
                     .get("public_ip")
                     .map(|s| s.as_str())
                     .unwrap_or("127.0.0.1");
-                let web_port = self.ports.get("jrpc").expect("jrpc port not found");
-                format!("http://{public_ip}:{web_port}/json_rpc")
+                let port = self
+                    .ports
+                    .get("graphql")
+                    .expect("Graphql port must be allocated before calling get_graphql_url");
+                format!("http://{public_ip}:{port}")
                     .parse()
-                    .expect("Invalid web URL")
+                    .expect("Invalid GraphQL URL")
             },
         }
     }

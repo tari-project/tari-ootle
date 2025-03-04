@@ -27,8 +27,9 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceipt,
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
-    vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
+    ValidatorFeePoolAddress,
+    ValidatorFeeWithdrawal,
 };
 use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator},
@@ -82,6 +83,7 @@ pub(super) struct WorkingState {
 
     claimed_confidential_outputs: Vec<UnclaimedConfidentialOutputAddress>,
     virtual_substates: VirtualSubstates,
+    validator_fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
 
     last_instruction_output: Option<IndexedValue>,
     workspace: Workspace,
@@ -114,6 +116,7 @@ impl WorkingState {
 
             workspace: Workspace::default(),
             virtual_substates,
+            validator_fee_withdrawals: Vec::new(),
             call_frames: Vec::new(),
             initial_call_scope,
             fee_state: FeeState::new(),
@@ -749,26 +752,32 @@ impl WorkingState {
         address: ValidatorFeePoolAddress,
     ) -> Result<ResourceContainer, RuntimeError> {
         let locked_substate = self.lock_substate(&SubstateId::ValidatorFeePool(address), LockFlag::Write)?;
-        let fee_pool = self
-            .get_locked_substate(&locked_substate)?
-            .as_validator_fee_pool()
-            .ok_or_else(|| RuntimeError::InvariantError {
-                function: "StateTracker::claim_fee",
-                details: format!("Expected substate at address {address} to be an ValidatorFeePool",),
-            })?;
+        {
+            let fee_pool = self
+                .get_locked_substate(&locked_substate)?
+                .as_validator_fee_pool()
+                .ok_or_else(|| RuntimeError::InvariantError {
+                    function: "StateTracker::withdraw_all_fees_from_pool",
+                    details: format!("Expected substate at address {address} to be an ValidatorFeePool",),
+                })?;
 
-        self.authorization()
-            .require_ownership(NativeAction::WithdrawValidatorFunds, fee_pool.as_ownership())?;
+            self.authorization()
+                .require_ownership(NativeAction::WithdrawValidatorFunds, fee_pool.as_ownership())?;
+        }
 
         let pool_mut = self
             .get_locked_substate_mut(&locked_substate)?
             .as_validator_fee_pool_mut()
             .ok_or_else(|| RuntimeError::InvariantError {
-                function: "StateTracker::claim_fee",
+                function: "StateTracker::withdraw_all_fees_from_pool",
                 details: format!("Expected substate at address {address} to be an ValidatorFeePool",),
             })?;
 
         let resource_container = pool_mut.withdraw_all()?;
+        self.validator_fee_withdrawals.push(ValidatorFeeWithdrawal {
+            address,
+            amount: resource_container.amount(),
+        });
         Ok(resource_container)
     }
 
@@ -826,6 +835,10 @@ impl WorkingState {
 
     pub fn mutated_substates(&mut self) -> &IndexMap<SubstateId, SubstateValue> {
         self.store.mutated_substates()
+    }
+
+    pub fn take_validator_fee_withdrawals(&mut self) -> Vec<ValidatorFeeWithdrawal> {
+        mem::take(&mut self.validator_fee_withdrawals)
     }
 
     pub fn fee_state(&self) -> &FeeState {
@@ -1130,13 +1143,16 @@ impl WorkingState {
         &self,
         transaction_receipt: TransactionReceipt,
         substates_to_persist: IndexMap<SubstateId, SubstateValue>,
+        fee_withdrawals: Vec<ValidatorFeeWithdrawal>,
     ) -> Result<SubstateDiff, RuntimeError> {
         let mut substate_diff = SubstateDiff::new();
 
-        for (address, substate) in substates_to_persist {
-            let new_substate = match self.store.get_unmodified_substate(&address).optional()? {
+        substate_diff.set_once_fee_withdrawals(fee_withdrawals);
+
+        for (id, substate) in substates_to_persist {
+            let new_substate = match self.store.get_unmodified_substate(&id).optional()? {
                 Some(existing_state) => {
-                    substate_diff.down(address.clone(), existing_state.version());
+                    substate_diff.down(id.clone(), existing_state.version());
                     if substate.as_validator_fee_pool().is_some_and(|fee| fee.amount.is_zero()) {
                         // If there are no fees left, do not up the fee pool
                         continue;
@@ -1145,7 +1161,7 @@ impl WorkingState {
                 },
                 None => Substate::new(0, substate),
             };
-            substate_diff.up(address, new_substate);
+            substate_diff.up(id, new_substate);
         }
 
         // Special case: unclaimed confidential outputs are downed without being upped if claimed

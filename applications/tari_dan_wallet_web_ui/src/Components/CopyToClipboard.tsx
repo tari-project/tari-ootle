@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import {useState} from "react";
 import IconButton from "@mui/material/IconButton";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import Tooltip from "@mui/material/Tooltip";
@@ -29,9 +29,11 @@ interface CopyProps {
   copy: string;
   floatright?: boolean;
   title?: string;
+  iconWidth?: string,
+  iconHeight?: string,
 }
 
-const CopyToClipboard = ({ copy, floatright, title }: CopyProps) => {
+const CopyToClipboard = ({ copy, floatright, title, iconWidth="16px", iconHeight="16px" }: CopyProps) => {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const handleClick = async (copyThis: string) => {
     try {
@@ -62,8 +64,8 @@ const CopyToClipboard = ({ copy, floatright, title }: CopyProps) => {
           <ContentCopyIcon
             color="primary"
             style={{
-              width: "16px",
-              height: "16px",
+              width: iconWidth,
+              height: iconHeight,
             }}
           />
         </Tooltip>

@@ -32,16 +32,15 @@ import {
   accountsList,
   accountsTransfer,
   nftList,
-  transactionsPublishTemplate,
   validatorsGetFees,
 } from "../../utils/json_rpc";
 import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 import type {
-  ComponentAccessRules,
-  ConfidentialTransferInputSelection,
-  ComponentAddressOrName,
   AccountOrKeyIndex,
+  ComponentAccessRules,
+  ComponentAddressOrName,
+  ConfidentialTransferInputSelection,
 } from "@tari-project/typescript-bindings";
 
 //   Fees are passed as strings because Amount is tagged
@@ -182,6 +181,17 @@ export const useAccountsGetBalances = (account: ComponentAddressOrName | null, r
     queryFn: () => accountsGetBalances({ account, refresh }),
     onError: (_error: ApiError) => {},
     refetchInterval: 5000,
+  });
+};
+
+export const refreshAccountsBalances = (account: ComponentAddressOrName | null) => {
+  return useMutation(() => accountsGetBalances({ account, refresh: true }), {
+    onError: (error: ApiError) => {
+      error;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries(["accounts_balances"]);
+    },
   });
 };
 

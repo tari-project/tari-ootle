@@ -6,8 +6,8 @@ use tari_dan_common_types::{Epoch, SubstateRequirement};
 use tari_engine_types::{
     confidential::ConfidentialClaim,
     instruction::Instruction,
-    vn_fee_pool::ValidatorFeePoolAddress,
     TemplateAddress,
+    ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
     args,

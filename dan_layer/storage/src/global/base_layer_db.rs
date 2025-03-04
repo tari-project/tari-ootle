@@ -39,28 +39,22 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> BaseLayerDb<'a, 'tx, TGlobalDbA
     }
 
     pub fn insert_base_layer_block_info(&mut self, info: DbBaseLayerBlockInfo) -> Result<(), TGlobalDbAdapter::Error> {
-        self.backend
-            .insert_base_layer_block_info(self.tx, info)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.insert_base_layer_block_info(self.tx, info)
     }
 
     pub fn get_base_layer_block_height(
         &mut self,
         hash: FixedHash,
     ) -> Result<Option<DbBaseLayerBlockInfo>, TGlobalDbAdapter::Error> {
-        self.backend
-            .get_base_layer_block_info(self.tx, hash)
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.get_base_layer_block_info(self.tx, hash)
     }
 
     pub fn insert_eviction_proof(&mut self, proof: &EvictionProof) -> Result<(), TGlobalDbAdapter::Error> {
-        self.backend
-            .insert_layer_one_transaction(self.tx, DbLayer1Transaction {
-                epoch: Epoch(proof.epoch().as_u64()),
-                proof_type: DbLayerOnePayloadType::EvictionProof,
-                payload: proof,
-            })
-            .map_err(TGlobalDbAdapter::Error::into)
+        self.backend.insert_layer_one_transaction(self.tx, DbLayer1Transaction {
+            epoch: Epoch(proof.epoch().as_u64()),
+            proof_type: DbLayerOnePayloadType::EvictionProof,
+            payload: proof,
+        })
     }
 }
 

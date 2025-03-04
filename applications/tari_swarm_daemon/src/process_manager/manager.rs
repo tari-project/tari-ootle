@@ -6,7 +6,7 @@ use std::{
     fs::File,
     net::SocketAddr,
     path::PathBuf,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context};
@@ -17,7 +17,7 @@ use tari_dan_engine::wasm::WasmModule;
 use tari_engine_types::{calculate_template_binary_hash, TemplateAddress};
 use tari_shutdown::ShutdownSignal;
 use tari_validator_node_client::types::GetTemplatesRequest;
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{sync::mpsc, time, time::sleep};
 use url::Url;
 
 use crate::{
@@ -210,6 +210,37 @@ impl ProcessManager {
         Ok(())
     }
 
+    fn clear_terminated_instances(&mut self) -> anyhow::Result<()> {
+        let mut instances_to_remove = vec![];
+        for instance in self.instance_manager.instances_mut() {
+            if let Some(status) = instance.check_running()? {
+                if status.success() {
+                    info!(
+                        "Instance exited cleanly: {} {}",
+                        instance.name(),
+                        instance.instance_type()
+                    );
+                } else {
+                    log::error!(
+                        "Instance exited with status {}: {} {}",
+                        status.code().unwrap_or(-1),
+                        instance.name(),
+                        instance.instance_type()
+                    );
+                }
+                // We only want to clear the miners, the rest we keep around to display that they are terminated
+                if instance.instance_type().is_miner() {
+                    instances_to_remove.push(instance.id());
+                }
+            }
+        }
+
+        for instance_id in instances_to_remove {
+            self.instance_manager.remove_instance(instance_id)?;
+        }
+        Ok(())
+    }
+
     pub async fn start(mut self) -> anyhow::Result<()> {
         let mut shutdown_signal = self.shutdown_signal.clone();
 
@@ -223,13 +254,24 @@ impl ProcessManager {
             }
         }
 
+        let mut check_interval = time::interval_at(
+            time::Instant::from_std(Instant::now() + Duration::from_secs(10)),
+            Duration::from_secs(10),
+        );
+
         loop {
             tokio::select! {
                 Some(req) = self.rx_request.recv() => {
                     if let Err(err) = self.handle_request(req).await {
                         log::error!("Error handling request: {:?}", err);
                     }
-                }
+                },
+
+                _ = check_interval.tick() => {
+                    if let Err(err) = self.clear_terminated_instances() {
+                        log::error!("Error checking instances: {:?}", err);
+                    }
+                },
 
                 _ = self.shutdown_signal.wait() => {
                     info!("Shutting down process manager");
@@ -378,7 +420,7 @@ impl ProcessManager {
                      burning funds"
                 )
             })?;
-        let claim_public_key = wallet.get_account_public_key(account_name.clone()).await?;
+        let claim_public_key = wallet.get_account_public_key(account_name.clone(), None).await?;
         let wallet = self
             .instance_manager
             .minotari_wallets()

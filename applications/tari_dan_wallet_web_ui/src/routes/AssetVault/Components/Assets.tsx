@@ -41,6 +41,7 @@ import { Button } from "@mui/material";
 import { SendMoneyDialog } from "./SendMoney";
 import { ResourceAddress, ResourceType, VaultId, BalanceEntry, Account } from "@tari-project/typescript-bindings";
 import CopyAddress from "../../../Components/CopyAddress";
+import { Refresh } from "@mui/icons-material";
 
 interface TabPanelProps {
   children?: React.ReactNode;

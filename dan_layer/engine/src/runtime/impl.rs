@@ -26,7 +26,6 @@ use log::{warn, *};
 use tari_common::configuration::Network;
 use tari_crypto::{range_proof::RangeProofService, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_common_types::services::template_provider::TemplateProvider;
-use tari_engine_types::id_provider::DerivedComponentAddress;
 use tari_engine_types::{
     base_layer_hashing::ownership_proof_hasher64,
     commit_result::{FinalizeResult, RejectReason, TransactionResult},
@@ -35,6 +34,7 @@ use tari_engine_types::{
     entity_id_provider::EntityIdProvider,
     events::Event,
     hashing::hash_template_code,
+    id_provider::DerivedComponentAddress,
     indexed_value::IndexedValue,
     instruction_result::InstructionResult,
     lock::LockFlag,
@@ -107,7 +107,6 @@ use tari_template_lib::{
 };
 
 use super::{working_state::WorkingState, Runtime};
-use crate::runtime::scope::CallFrame;
 use crate::{
     runtime::{
         engine_args::EngineArgs,
@@ -506,10 +505,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 match substate_type {
                     SubstateType::Component => {
-                        let current_template = state.current_template().ok().map(|(addr, _)| {*addr});
-                        let derived_address =
-                            if let (Some(template_address), Some(public_key_address)) = (current_template, public_key_address) {
-                            Some(DerivedComponentAddress{ template_address, public_key_address })
+                        let current_template = state.current_template().ok().map(|(addr, _)| *addr);
+                        let derived_address = if let (Some(template_address), Some(public_key_address)) =
+                            (current_template, public_key_address)
+                        {
+                            Some(DerivedComponentAddress {
+                                template_address,
+                                public_key_address,
+                            })
                         } else {
                             None
                         };

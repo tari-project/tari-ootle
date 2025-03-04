@@ -65,7 +65,10 @@ impl<'a> IdProvider<'a> {
         if let Some(address) = derived_address {
             // if a public key address is specified, then it will derive the address from the
             // template hash and public key
-            return Ok(new_component_address_from_public_key(&address.template_address, &address.public_key_address));
+            return Ok(new_component_address_from_public_key(
+                &address.template_address,
+                &address.public_key_address,
+            ));
         }
 
         let component_id = hasher32(EngineHashDomainLabel::ComponentAddress)

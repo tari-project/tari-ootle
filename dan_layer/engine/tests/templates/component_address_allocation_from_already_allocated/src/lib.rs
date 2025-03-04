@@ -9,9 +9,9 @@ mod template {
 
     pub struct ComponentAddressAllocationTest {}
 
-        impl ComponentAddressAllocationTest {
-            pub fn create(comp_addr: AddressAllocation<ComponentAddress>) -> Component<Self> {
-                Component::new(Self {}).with_address_allocation(comp_addr).create()
-            }
+    impl ComponentAddressAllocationTest {
+        pub fn create(comp_addr: AddressAllocation<ComponentAddress>) -> Component<Self> {
+            Component::new(Self {}).with_address_allocation(comp_addr).create()
         }
+    }
 }

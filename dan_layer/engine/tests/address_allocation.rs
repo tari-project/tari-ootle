@@ -1,21 +1,15 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_bor::Value;
-use tari_bor::Value::Tag;
+use tari_bor::{Value, Value::Tag};
 use tari_dan_engine::runtime::TransactionCommitError;
 use tari_template_abi::Type;
-use tari_template_lib::models::BinaryTag;
 use tari_template_lib::{
     args,
     models::{ComponentAddress, ResourceAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::Transaction;
-use wasmer::IntoBytes;
-
-const ALLOCATED_COMPONENT_ADDRESS_TAG: u64 = BinaryTag::AllocatedComponentAddress.as_u64();
-const ALLOCATED_RESOURCE_ADDRESS_TAG: u64 = BinaryTag::AllocatedResourceAddress.as_u64();
 
 #[test]
 fn it_uses_allocate_component_address() {
@@ -118,7 +112,11 @@ fn it_allocation_using_tx_builder() {
         Transaction::builder()
             .allocate_address(args::SubstateType::Component, "my_addr")
             .allocate_address(args::SubstateType::Resource, "my_res")
-            .call_function(test.get_template_address("ComponentAddressAllocationTest"), "create", args![Workspace("my_addr")])
+            .call_function(
+                test.get_template_address("ComponentAddressAllocationTest"),
+                "create",
+                args![Workspace("my_addr")],
+            )
             .call_function(
                 test.get_template_address("AddressAllocationFromInstructionsTest"),
                 "create",
@@ -128,21 +126,20 @@ fn it_allocation_using_tx_builder() {
         vec![],
     );
 
-    // assert execution results
+    // assert allocation execution results
     let comp_addr_allocation_exec_result = result.finalize.execution_results.first().unwrap().clone();
     let Type::Other {name: comp_alloc_return_type_name} = comp_addr_allocation_exec_result.return_type else { panic!("Invalid return type for component address allocation!") };
     assert_eq!(comp_alloc_return_type_name, "ComponentAddressAllocation".to_string());
-    let exec_result_allocated_comp_addr: ComponentAddress = address_allocation_from_cbor(
-        comp_addr_allocation_exec_result.indexed.clone().into_value()
-    ).unwrap();
+    let exec_result_allocated_comp_addr: ComponentAddress =
+        address_allocation_from_cbor(comp_addr_allocation_exec_result.indexed.clone().into_value()).unwrap();
 
     let res_addr_allocation_exec_result = result.finalize.execution_results.get(1).unwrap().clone();
     let Type::Other {name: res_alloc_return_type_name} = res_addr_allocation_exec_result.return_type else { panic!("Invalid return type for resource address allocation!") };
     assert_eq!(res_alloc_return_type_name, "ResourceAddressAllocation".to_string());
-    let exec_result_allocated_res_addr: ResourceAddress = address_allocation_from_cbor(
-        res_addr_allocation_exec_result.indexed.clone().into_value()
-    ).unwrap();
+    let exec_result_allocated_res_addr: ResourceAddress =
+        address_allocation_from_cbor(res_addr_allocation_exec_result.indexed.clone().into_value()).unwrap();
 
+    // assert new component's address
     let actual_comp = result
         .finalize
         .result
@@ -152,14 +149,13 @@ fn it_allocation_using_tx_builder() {
         .find_map(|(k, _)| k.as_component_address())
         .unwrap();
 
-    let allocated_comp_after_func_call: ComponentAddress = address_from_cbor(
-        result.finalize.execution_results[2].clone().indexed.into_value()
-    ).unwrap();
+    let allocated_comp_after_func_call: ComponentAddress =
+        address_from_cbor(result.finalize.execution_results[2].clone().indexed.into_value()).unwrap();
 
     assert_eq!(actual_comp, allocated_comp_after_func_call);
     assert_eq!(actual_comp, exec_result_allocated_comp_addr);
 
-    let (container_comp_id, container_comp_value) = result
+    let (_, container_comp_value) = result
         .finalize
         .result
         .accept()
@@ -169,7 +165,42 @@ fn it_allocation_using_tx_builder() {
         .last()
         .unwrap();
 
-    // TODO: add other checks (new components contains the right addresses etc..)
+    let component_header = container_comp_value.substate_value().as_component().unwrap();
+    let return_values = component_header.body.state.as_map().unwrap();
+
+    // assert component address stored in `AddressAllocationFromInstructionsTest`
+    let stored_comp_address = return_values
+        .iter()
+        .filter_map(|(k, v)| {
+            if let Some(key) = k.as_text() {
+                if key == "comp_addr" {
+                    return Some(address_from_cbor::<ComponentAddress>(v.clone()).unwrap());
+                }
+            }
+            None
+        })
+        .last()
+        .unwrap();
+
+    assert_eq!(stored_comp_address, actual_comp);
+    assert_eq!(stored_comp_address, exec_result_allocated_comp_addr);
+    assert_eq!(stored_comp_address, allocated_comp_after_func_call);
+
+    // assert resource address stored in `AddressAllocationFromInstructionsTest`
+    let stored_res_address = return_values
+        .iter()
+        .filter_map(|(k, v)| {
+            if let Some(key) = k.as_text() {
+                if key == "res_address" {
+                    return Some(address_from_cbor::<ResourceAddress>(v.clone()).unwrap());
+                }
+            }
+            None
+        })
+        .last()
+        .unwrap();
+
+    assert_eq!(stored_res_address, exec_result_allocated_res_addr);
 }
 
 fn address_from_cbor<T: TryFrom<Vec<u8>>>(value: Value) -> Option<T> {
@@ -186,7 +217,8 @@ fn address_from_cbor<T: TryFrom<Vec<u8>>>(value: Value) -> Option<T> {
 fn address_allocation_from_cbor<T: TryFrom<Vec<u8>>>(value: Value) -> Option<T> {
     if let Tag(_, allocation_raw) = value {
         if let Ok(properties) = allocation_raw.into_map() {
-            return properties.iter()
+            return properties
+                .iter()
                 .filter_map(|(key, value)| {
                     if let Some(property_id) = key.as_text() {
                         if property_id == "address" {
@@ -194,7 +226,8 @@ fn address_allocation_from_cbor<T: TryFrom<Vec<u8>>>(value: Value) -> Option<T> 
                         }
                     }
                     None
-                }).last();
+                })
+                .last();
         }
     }
     None

@@ -19,7 +19,7 @@ mod template {
             let tokens = [
                 NonFungibleId::from_u32(1),
                 NonFungibleId::from_u64(u64::MAX),
-                NonFungibleId::from_string("Sparkle1"),
+                NonFungibleId::from_string("AAFIT"),
                 NonFungibleId::from_u256([0u8; 32]),
             ];
 

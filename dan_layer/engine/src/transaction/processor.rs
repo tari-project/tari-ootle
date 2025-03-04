@@ -22,6 +22,36 @@
 
 use std::{sync::Arc, time::Instant};
 
+use log::*;
+use tari_bor::{to_value, BorTag};
+use tari_common::configuration::Network;
+use tari_common_types::types::PublicKey;
+use tari_dan_common_types::services::template_provider::TemplateProvider;
+use tari_engine_types::{
+    commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
+    component::new_component_address_from_public_key,
+    entity_id_provider::EntityIdProvider,
+    indexed_value::{IndexedValue, IndexedWellKnownTypes},
+    instruction::Instruction,
+    instruction_result::InstructionResult,
+    lock::LockFlag,
+    virtual_substate::VirtualSubstates,
+};
+use tari_template_abi::{FunctionDef, Type};
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+use tari_template_lib::{
+    arg,
+    args,
+    args::{AllocateAddressResult, Arg, CallerContextAction, InvokeResult, SubstateType, WorkspaceAction},
+    auth::OwnerRule,
+    crypto::RistrettoPublicKeyBytes,
+    invoke_args,
+    models::{AddressAllocation, BinaryTag, Bucket, ComponentAddress, NonFungibleAddress, ResourceAddress},
+    prelude::{AccessRules, TemplateAddress},
+};
+use tari_transaction::Transaction;
+use tari_utilities::ByteArray;
+
 use crate::{
     runtime::{
         scope::{CallScope, PushCallFrame},
@@ -39,44 +69,6 @@ use crate::{
     transaction::TransactionError,
     wasm::{WasmModule, WasmProcess},
 };
-use log::*;
-use tari_bor::{to_value, BorTag};
-use tari_common::configuration::Network;
-use tari_common_types::types::PublicKey;
-use tari_dan_common_types::services::template_provider::TemplateProvider;
-use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
-    component::new_component_address_from_public_key,
-    entity_id_provider::EntityIdProvider,
-    indexed_value::{IndexedValue, IndexedWellKnownTypes},
-    instruction::Instruction,
-    instruction_result::InstructionResult,
-    lock::LockFlag,
-    virtual_substate::VirtualSubstates,
-};
-use tari_template_abi::{call_engine, EngineOp, FunctionDef, Type};
-use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::models::{AddressAllocation, BinaryTag, ResourceAddress};
-use tari_template_lib::{
-    arg,
-    args,
-    args::{
-        AllocateAddressResult,
-        Arg,
-        CallerContextAction,
-        CallerContextInvokeArg,
-        InvokeResult,
-        SubstateType,
-        WorkspaceAction,
-    },
-    auth::OwnerRule,
-    crypto::RistrettoPublicKeyBytes,
-    invoke_args,
-    models::{Bucket, ComponentAddress, NonFungibleAddress},
-    prelude::{AccessRules, TemplateAddress},
-};
-use tari_transaction::Transaction;
-use tari_utilities::ByteArray;
 
 const LOG_TARGET: &str = "tari::dan::engine::instruction_processor";
 pub const MAX_CALL_DEPTH: usize = 10;
@@ -399,23 +391,27 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let indexed_value = match result {
             AllocateAddressResult::ComponentAddress(allocation) => {
                 result_name = "ComponentAddressAllocation".to_string();
-                IndexedValue::from_type(&BorTag::<AddressAllocation<ComponentAddress>, ALLOCATED_COMPONENT_ADDRESS_TAG>::new(allocation))
+                IndexedValue::from_type(&BorTag::<
+                    AddressAllocation<ComponentAddress>,
+                    ALLOCATED_COMPONENT_ADDRESS_TAG,
+                >::new(allocation))
             },
             AllocateAddressResult::ResourceAddress(allocation) => {
                 result_name = "ResourceAddressAllocation".to_string();
-                IndexedValue::from_type(&BorTag::<AddressAllocation<ResourceAddress>, ALLOCATED_RESOURCE_ADDRESS_TAG>::new(allocation))
+                IndexedValue::from_type(&BorTag::<
+                    AddressAllocation<ResourceAddress>,
+                    ALLOCATED_RESOURCE_ADDRESS_TAG,
+                >::new(allocation))
             },
         }?;
 
         runtime.interface().set_last_instruction_output(indexed_value.clone())?;
         Self::put_output_on_workspace_with_name(runtime, workspace_id.into())?;
 
-        Ok(
-            InstructionResult {
-                indexed: indexed_value,
-                return_type: Type::Other {name: result_name}
-            }
-        )
+        Ok(InstructionResult {
+            indexed: indexed_value,
+            return_type: Type::Other { name: result_name },
+        })
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.

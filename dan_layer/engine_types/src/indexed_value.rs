@@ -3,16 +3,8 @@
 
 use std::{collections::BTreeMap, ops::ControlFlow};
 
-use crate::{
-    published_template::PublishedTemplateAddress,
-    serde_with,
-    substate::SubstateId,
-    transaction_receipt::TransactionReceiptAddress,
-    vn_fee_pool::ValidatorFeePoolAddress,
-};
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, BorError, FromTagAndValue, ValueVisitor};
-use tari_template_lib::prelude::AddressAllocation;
 use tari_template_lib::{
     models::{
         BinaryTag,
@@ -24,8 +16,16 @@ use tari_template_lib::{
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
-    prelude::{ComponentAddress, Metadata, NonFungibleAddress},
+    prelude::{AddressAllocation, ComponentAddress, Metadata, NonFungibleAddress},
     Hash,
+};
+
+use crate::{
+    published_template::PublishedTemplateAddress,
+    serde_with,
+    substate::SubstateId,
+    transaction_receipt::TransactionReceiptAddress,
+    vn_fee_pool::ValidatorFeePoolAddress,
 };
 
 const MAX_VISITOR_DEPTH: usize = 50;
@@ -420,7 +420,7 @@ impl FromTagAndValue for WellKnownTariValue {
             BinaryTag::AllocatedResourceAddress => {
                 let value: AddressAllocation<ResourceAddress> = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ResourceAddressAllocation(value))
-            }
+            },
         }
     }
 }
@@ -502,10 +502,10 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             },
             WellKnownTariValue::ComponentAddressAllocation(allocation) => {
                 self.component_address_allocations.push(allocation);
-            }
+            },
             WellKnownTariValue::ResourceAddressAllocation(allocation) => {
                 self.resource_address_allocations.push(allocation);
-            }
+            },
         }
         Ok(ControlFlow::Continue(()))
     }

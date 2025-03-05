@@ -323,8 +323,8 @@ impl Block {
         self.commands.iter().filter_map(|c| c.mint_confidential_output())
     }
 
-    pub fn all_some_prepare(&self) -> impl Iterator<Item = &TransactionAtom> + '_ {
-        self.commands.iter().filter_map(|c| c.some_prepare())
+    pub fn all_local_accept(&self) -> impl Iterator<Item = &TransactionAtom> + '_ {
+        self.commands.iter().filter_map(|c| c.local_accept())
     }
 
     pub fn command_count(&self) -> usize {

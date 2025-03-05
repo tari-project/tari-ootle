@@ -1247,11 +1247,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         txs.into_iter().map(|tx| tx.try_convert(None)).collect()
     }
 
-    fn transaction_pool_confirm_all_transitions(&mut self, new_locked_block: &LockedBlock) -> Result<(), StorageError> {
+    fn transaction_pool_confirm_all_transitions(&mut self, block: &LeafBlock) -> Result<(), StorageError> {
         use crate::schema::{transaction_pool, transaction_pool_state_updates};
 
         let updates = transaction_pool_state_updates::table
-            .filter(transaction_pool_state_updates::block_id.eq(serialize_hex(new_locked_block.block_id())))
+            .filter(transaction_pool_state_updates::block_id.eq(serialize_hex(block.block_id())))
             .filter(transaction_pool_state_updates::is_applied.eq(false))
             .get_results::<sql_models::TransactionPoolStateUpdate>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -1261,12 +1261,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
         debug!(
             target: LOG_TARGET,
-            "transaction_pool_confirm_all_transitions: new_locked_block={}, {} updates",  new_locked_block, updates.len()
+            "transaction_pool_confirm_all_transitions: new_locked_block={}, {} updates",  block, updates.len()
         );
 
         diesel::update(transaction_pool_state_updates::table)
             .filter(transaction_pool_state_updates::id.eq_any(updates.iter().map(|u| u.id)))
-            .filter(transaction_pool_state_updates::block_height.le(new_locked_block.height().as_u64() as i64))
+            .filter(transaction_pool_state_updates::block_height.le(block.height().as_u64() as i64))
             .set(transaction_pool_state_updates::is_applied.eq(true))
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {

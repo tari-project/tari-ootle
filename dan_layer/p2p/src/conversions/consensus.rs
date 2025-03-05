@@ -562,10 +562,7 @@ impl From<&Command> for proto::consensus::Command {
     fn from(value: &Command) -> Self {
         let command = match value {
             Command::LocalOnly(tx) => proto::consensus::command::Command::LocalOnly(tx.into()),
-            Command::Prepare(tx) => proto::consensus::command::Command::Prepare(tx.into()),
             Command::LocalPrepare(tx) => proto::consensus::command::Command::LocalPrepare(tx.into()),
-            Command::AllPrepare(tx) => proto::consensus::command::Command::AllPrepare(tx.into()),
-            Command::SomePrepare(tx) => proto::consensus::command::Command::SomePrepare(tx.into()),
             Command::LocalAccept(tx) => proto::consensus::command::Command::LocalAccept(tx.into()),
             Command::AllAccept(tx) => proto::consensus::command::Command::AllAccept(tx.into()),
             Command::SomeAccept(tx) => proto::consensus::command::Command::SomeAccept(tx.into()),
@@ -590,10 +587,7 @@ impl TryFrom<proto::consensus::Command> for Command {
         let command = value.command.ok_or_else(|| anyhow!("Command is missing"))?;
         Ok(match command {
             proto::consensus::command::Command::LocalOnly(tx) => Command::LocalOnly(tx.try_into()?),
-            proto::consensus::command::Command::Prepare(tx) => Command::Prepare(tx.try_into()?),
             proto::consensus::command::Command::LocalPrepare(tx) => Command::LocalPrepare(tx.try_into()?),
-            proto::consensus::command::Command::AllPrepare(tx) => Command::AllPrepare(tx.try_into()?),
-            proto::consensus::command::Command::SomePrepare(tx) => Command::SomePrepare(tx.try_into()?),
             proto::consensus::command::Command::LocalAccept(tx) => Command::LocalAccept(tx.try_into()?),
             proto::consensus::command::Command::AllAccept(tx) => Command::AllAccept(tx.try_into()?),
             proto::consensus::command::Command::SomeAccept(tx) => Command::SomeAccept(tx.try_into()?),

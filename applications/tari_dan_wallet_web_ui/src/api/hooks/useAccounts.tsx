@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {useMutation, useQuery} from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   accountsClaimBurn,
   accountsConfidentialTransfer,
@@ -34,7 +34,7 @@ import {
   nftList,
   validatorsGetFees,
 } from "../../utils/json_rpc";
-import {ApiError} from "../helpers/types";
+import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 import type {
   AccountOrKeyIndex,
@@ -181,6 +181,17 @@ export const useAccountsGetBalances = (account: ComponentAddressOrName | null, r
     queryFn: () => accountsGetBalances({ account, refresh }),
     onError: (_error: ApiError) => {},
     refetchInterval: 5000,
+  });
+};
+
+export const refreshAccountsBalances = (account: ComponentAddressOrName | null) => {
+  return useMutation(() => accountsGetBalances({ account, refresh: true }), {
+    onError: (error: ApiError) => {
+      error;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries(["accounts_balances"]);
+    },
   });
 };
 

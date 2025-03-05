@@ -28,6 +28,7 @@ import { useTheme } from "@mui/material/styles";
 import { useEffect } from "react";
 import { InnerHeading, StyledPaper } from "../../../Components/StyledComponents";
 import {
+  refreshAccountsBalances,
   useAccountNFTsList,
   useAccountsGet,
   useAccountsGetBalances,
@@ -42,6 +43,8 @@ import Assets from "./Assets";
 import SelectAccount from "./SelectAccount";
 import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { substateIdToString } from "@tari-project/typescript-bindings";
+import { Button } from "@mui/material";
+import { Refresh } from "@mui/icons-material";
 
 function MyAssets() {
   const theme = useTheme();
@@ -51,19 +54,10 @@ function MyAssets() {
     return <>Loading...</>;
   }
 
-  // const { refetch: balancesRefetch, data } = useAccountsGetBalances({
-  //   ComponentAddress: substateIdToString(account.address),
-  // });
-  // const { refetch: nftsListRefetch } = useAccountNFTsList(
-  //   { ComponentAddress: substateIdToString(account.address) },
-  //   0,
-  //   10,
-  // );
-
-  // useEffect(() => {
-  //   balancesRefetch();
-  //   nftsListRefetch();
-  // }, [accountId]);
+  const refreshBalances = refreshAccountsBalances({ ComponentAddress: substateIdToString(account.address) });
+  const handleRefreshClicked = () => {
+    refreshBalances.mutate();
+  };
 
   return (
     <>
@@ -124,7 +118,17 @@ function MyAssets() {
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <InnerHeading>Assets</InnerHeading>
+          <InnerHeading>
+            Assets
+            <Button
+              title="Refresh all accounts"
+              variant="text"
+              disabled={refreshBalances.isLoading}
+              onClick={handleRefreshClicked}
+            >
+              <Refresh />
+            </Button>
+          </InnerHeading>
           <Assets account={account} />
         </StyledPaper>
       </Grid>

@@ -215,9 +215,9 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
     pub fn confirm_all_transitions(
         &self,
         tx: &mut TStateStore::WriteTransaction<'_>,
-        locked_block: &LockedBlock,
+        block: &LeafBlock,
     ) -> Result<(), TransactionPoolError> {
-        tx.transaction_pool_confirm_all_transitions(locked_block)?;
+        tx.transaction_pool_confirm_all_transitions(block)?;
         Ok(())
     }
 
@@ -240,16 +240,11 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 pub enum TransactionPoolStage {
     /// Transaction has just come in and has never been proposed
     New,
-    /// Transaction is prepared in response to a Prepare command, but we do not yet have confirmation that the rest of
-    /// the local committee has prepared.
-    Prepared,
-    /// We have proof that all local committees have prepared the transaction
+    /// Transaction is prepared in response to a LocalPrepare command. We have proof that all local committees have
+    /// prepared the transaction
     LocalPrepared,
-    /// All involved shard groups have prepared and all have pledged their local inputs
-    AllPrepared,
-    /// Some involved shard groups have prepared but one or more did not successfully pledge their local inputs
-    SomePrepared,
-    /// The local shard group has accepted the transaction
+    /// All (Commit), Some or None (Abort) of involved shard groups have prepared and all have pledged their local
+    /// inputs The local shard group should accept the transaction
     LocalAccepted,
     /// All involved shard groups have accepted the transaction
     AllAccepted,
@@ -268,24 +263,12 @@ impl TransactionPoolStage {
         matches!(self, Self::LocalOnly)
     }
 
-    pub fn is_prepared(&self) -> bool {
-        matches!(self, Self::Prepared)
-    }
-
     pub fn is_local_prepared(&self) -> bool {
         matches!(self, Self::LocalPrepared)
     }
 
     pub fn is_local_accepted(&self) -> bool {
         matches!(self, Self::LocalAccepted)
-    }
-
-    pub fn is_some_prepared(&self) -> bool {
-        matches!(self, Self::SomePrepared)
-    }
-
-    pub fn is_all_prepared(&self) -> bool {
-        matches!(self, Self::AllPrepared)
     }
 
     pub fn is_all_accepted(&self) -> bool {
@@ -313,10 +296,7 @@ impl FromStr for TransactionPoolStage {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "New" => Ok(TransactionPoolStage::New),
-            "Prepared" => Ok(TransactionPoolStage::Prepared),
             "LocalPrepared" => Ok(TransactionPoolStage::LocalPrepared),
-            "SomePrepared" => Ok(TransactionPoolStage::SomePrepared),
-            "AllPrepared" => Ok(TransactionPoolStage::AllPrepared),
             "LocalAccepted" => Ok(TransactionPoolStage::LocalAccepted),
             "AllAccepted" => Ok(TransactionPoolStage::AllAccepted),
             "SomeAccepted" => Ok(TransactionPoolStage::SomeAccepted),
@@ -422,13 +402,10 @@ impl TransactionPoolRecord {
     fn can_continue_to(&self, stage: TransactionPoolStage) -> bool {
         match stage {
             TransactionPoolStage::New => self.is_ready,
-            TransactionPoolStage::Prepared => true,
             TransactionPoolStage::LocalPrepared => match self.current_decision() {
                 Decision::Commit => self.evidence.all_input_shard_groups_prepared(),
                 Decision::Abort(_) => self.evidence.some_shard_groups_prepared(),
             },
-            TransactionPoolStage::AllPrepared => self.evidence.all_input_shard_groups_prepared(),
-            TransactionPoolStage::SomePrepared => self.evidence.some_shard_groups_prepared(),
             TransactionPoolStage::LocalAccepted => match self.current_decision() {
                 Decision::Commit => self.evidence.all_shard_groups_accepted(),
                 // If we have decided to abort, we can continue if any foreign shard or locally has prepared
@@ -683,23 +660,13 @@ impl TransactionPoolRecord {
         // Check that only permitted stage transactions are performed
         match ((self.current_stage(), pending_stage), is_ready) {
             ((TransactionPoolStage::New, TransactionPoolStage::New), true) |
-            ((TransactionPoolStage::New, TransactionPoolStage::Prepared), true) |
+            ((TransactionPoolStage::New, TransactionPoolStage::LocalPrepared), _) |
             ((TransactionPoolStage::New, TransactionPoolStage::LocalOnly), false) |
-            // Prepared
-            ((TransactionPoolStage::Prepared, TransactionPoolStage::Prepared), _) |
-            ((TransactionPoolStage::Prepared, TransactionPoolStage::LocalPrepared), _) |
             // Output-only case - we can skip straight to LocalAccepted
-            ((TransactionPoolStage::Prepared, TransactionPoolStage::LocalAccepted), _) |
+            ((TransactionPoolStage::New, TransactionPoolStage::LocalAccepted), _) |
             // LocalPrepared
             ((TransactionPoolStage::LocalPrepared, TransactionPoolStage::LocalPrepared), _) |
-            ((TransactionPoolStage::LocalPrepared, TransactionPoolStage::AllPrepared), _) |
-            ((TransactionPoolStage::LocalPrepared, TransactionPoolStage::SomePrepared), _) |
-            // AllPrepared
-            ((TransactionPoolStage::AllPrepared, TransactionPoolStage::AllPrepared), _) |
-            ((TransactionPoolStage::AllPrepared, TransactionPoolStage::LocalAccepted), _) |
-            // SomePrepared
-            ((TransactionPoolStage::SomePrepared, TransactionPoolStage::SomePrepared), _) |
-            ((TransactionPoolStage::SomePrepared, TransactionPoolStage::LocalAccepted), _) |
+            ((TransactionPoolStage::LocalPrepared, TransactionPoolStage::LocalAccepted), _) |
             // LocalAccepted
             ((TransactionPoolStage::LocalAccepted, TransactionPoolStage::LocalAccepted), _) |
             ((TransactionPoolStage::LocalAccepted, TransactionPoolStage::AllAccepted), false) |
@@ -919,12 +886,7 @@ mod tests {
 
         #[test]
         fn it_is_ordered_correctly() {
-            assert!(TransactionPoolStage::New < TransactionPoolStage::Prepared);
-            assert!(TransactionPoolStage::Prepared < TransactionPoolStage::LocalPrepared);
-            assert!(TransactionPoolStage::LocalPrepared < TransactionPoolStage::AllPrepared);
-            assert!(TransactionPoolStage::LocalPrepared < TransactionPoolStage::SomePrepared);
-            assert!(TransactionPoolStage::AllPrepared < TransactionPoolStage::LocalAccepted);
-            assert!(TransactionPoolStage::SomePrepared < TransactionPoolStage::LocalAccepted);
+            assert!(TransactionPoolStage::New < TransactionPoolStage::LocalPrepared);
             assert!(TransactionPoolStage::LocalAccepted < TransactionPoolStage::AllAccepted);
             assert!(TransactionPoolStage::LocalAccepted < TransactionPoolStage::SomeAccepted);
         }

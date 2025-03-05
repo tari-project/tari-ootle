@@ -232,12 +232,13 @@ where
 
             is_updated = true;
 
-            // substate_api.save_child(
-            //     created_by_tx,
-            //     versioned_account_address.substate_id().clone(),
-            //     versioned_addr,
-            //     substate
-            // )?;
+            // Save the vault substate
+            substate_api.save_child(
+                created_by_tx,
+                versioned_account_address.substate_id().clone(),
+                versioned_addr,
+                [SubstateId::from(*vault.resource_address())],
+            )?;
 
             self.add_vault_to_account_if_not_exist(versioned_account_address.substate_id(), *vault_id, &vault)
                 .await?;

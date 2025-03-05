@@ -112,18 +112,15 @@ message LeaderFee {
 message Command {
   oneof command {
     TransactionAtom local_only = 1;
-    TransactionAtom prepare = 2;
-    TransactionAtom local_prepare = 3;
-    TransactionAtom all_prepare = 4;
-    TransactionAtom some_prepare = 5;
-    TransactionAtom local_accept = 6;
-    TransactionAtom all_accept = 7;
-    TransactionAtom some_accept = 8;
+    TransactionAtom local_prepare = 2;
+    TransactionAtom local_accept = 3;
+    TransactionAtom all_accept = 4;
+    TransactionAtom some_accept = 5;
 
-    ForeignProposalAtom foreign_proposal = 9;
-    MintConfidentialOutputAtom mint_confidential_output = 10;
-    EvictNodeAtom evict_node = 11;
-    bool end_epoch = 12;
+    ForeignProposalAtom foreign_proposal = 6;
+    MintConfidentialOutputAtom mint_confidential_output = 7;
+    EvictNodeAtom evict_node = 8;
+    bool end_epoch = 9;
   }
 }
 

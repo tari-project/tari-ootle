@@ -356,6 +356,11 @@ impl From<ValidatorFeePoolAddress> for SubstateId {
     }
 }
 
+impl AsRef<SubstateId> for SubstateId {
+    fn as_ref(&self) -> &SubstateId {
+        self
+    }
+}
 #[derive(Debug, thiserror::Error)]
 #[error("Could not convert substate ID variant '{substate_id}' to {expected}")]
 pub struct InvalidSubstateIdVariant {

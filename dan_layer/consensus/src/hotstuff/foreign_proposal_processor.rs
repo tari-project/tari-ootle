@@ -526,7 +526,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for ALL_ACCEPT({}, {}) Local Stage: {}, All Justified: {}. Waiting for local or foreign proposal.",
+                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllAccept({}, {}) Local Stage: {}, All Justified: {}. Waiting for local or foreign proposal.",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
@@ -548,9 +548,6 @@ pub fn process_foreign_block<TStore: StateStore>(
             // TODO(perf): Can we find a way to exclude these unused commands to reduce message size?
             Command::AllAccept(_) |
             Command::SomeAccept(_) |
-            Command::AllPrepare(_) |
-            Command::SomePrepare(_) |
-            Command::Prepare(_) |
             Command::LocalOnly(_) |
             Command::ForeignProposal(_) |
             Command::EvictNode(_) |

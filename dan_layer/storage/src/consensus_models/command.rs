@@ -96,14 +96,9 @@ pub enum Command {
     /// Request validators to prepare a local-only transaction
     LocalOnly(TransactionAtom),
     /// Request validators to prepare a transaction.
-    Prepare(TransactionAtom),
-    /// Request validators to agree that the transaction was prepared by all local validators.
     LocalPrepare(TransactionAtom),
-    /// Request validators to agree that all involved shard groups prepared the transaction.
-    AllPrepare(TransactionAtom),
-    /// Request validators to agree that one or more involved shard groups did not prepare the transaction.
-    SomePrepare(TransactionAtom),
-    /// Request validators to accept (i.e. accept COMMIT/ABORT decision) a transaction. All foreign inputs are received
+    /// Request validators to  agree that all involved shard groups prepared the transaction and
+    /// accept (i.e. accept COMMIT/ABORT decision) a transaction. All foreign inputs are received
     /// and the transaction is executed with the same decision.
     LocalAccept(TransactionAtom),
     /// Request validators to agree that all involved shard groups agreed to ACCEPT the transaction.
@@ -132,10 +127,7 @@ enum CommandOrdering<'a> {
 impl Command {
     pub fn transaction(&self) -> Option<&TransactionAtom> {
         match self {
-            Command::Prepare(tx) |
             Command::LocalPrepare(tx) |
-            Command::AllPrepare(tx) |
-            Command::SomePrepare(tx) |
             Command::LocalAccept(tx) |
             Command::AllAccept(tx) |
             Command::SomeAccept(tx) |
@@ -149,10 +141,7 @@ impl Command {
 
     fn as_ordering(&self) -> CommandOrdering<'_> {
         match self {
-            Command::Prepare(tx) |
             Command::LocalPrepare(tx) |
-            Command::AllPrepare(tx) |
-            Command::SomePrepare(tx) |
             Command::LocalAccept(tx) |
             Command::AllAccept(tx) |
             Command::SomeAccept(tx) |
@@ -178,23 +167,9 @@ impl Command {
         }
     }
 
-    pub fn prepare(&self) -> Option<&TransactionAtom> {
-        match self {
-            Command::Prepare(tx) => Some(tx),
-            _ => None,
-        }
-    }
-
     pub fn local_prepare(&self) -> Option<&TransactionAtom> {
         match self {
             Command::LocalPrepare(tx) => Some(tx),
-            _ => None,
-        }
-    }
-
-    pub fn some_prepare(&self) -> Option<&TransactionAtom> {
-        match self {
-            Command::SomePrepare(tx) => Some(tx),
             _ => None,
         }
     }
@@ -297,10 +272,7 @@ impl Display for Command {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Command::LocalOnly(tx) => write!(f, "LocalOnly({}, {})", tx.id, tx.decision),
-            Command::Prepare(tx) => write!(f, "Prepare({}, {})", tx.id, tx.decision),
             Command::LocalPrepare(tx) => write!(f, "LocalPrepare({}, {})", tx.id, tx.decision),
-            Command::AllPrepare(tx) => write!(f, "AllPrepared({}, {})", tx.id, tx.decision),
-            Command::SomePrepare(tx) => write!(f, "SomePrepared({}, {})", tx.id, tx.decision),
             Command::LocalAccept(tx) => write!(f, "LocalAccept({}, {})", tx.id, tx.decision),
             Command::AllAccept(tx) => write!(f, "AllAccept({}, {})", tx.id, tx.decision),
             Command::SomeAccept(tx) => write!(f, "SomeAccept({}, {})", tx.id, tx.decision),
@@ -375,7 +347,7 @@ mod tests {
                 block_id: BlockId::zero(),
                 shard_group: ShardGroup::new(0, 64),
             }),
-            Command::Prepare(TransactionAtom {
+            Command::LocalPrepare(TransactionAtom {
                 id: TransactionId::default(),
                 decision: Decision::Commit,
                 evidence: Evidence::default(),

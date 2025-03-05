@@ -5,14 +5,7 @@ use std::num::NonZeroU64;
 
 use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_common_types::{
-    committee::CommitteeInfo,
-    displayable::Displayable,
-    optional::Optional,
-    Epoch,
-    ShardGroup,
-    VersionedSubstateId,
-};
+use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup, VersionedSubstateId};
 use tari_dan_storage::{
     consensus_models::{
         AbortReason,
@@ -349,20 +342,6 @@ where TConsensusSpec: ConsensusSpec
                         return Ok(());
                     }
                 },
-                Command::Prepare(atom) => {
-                    if let Some(reason) = self.evaluate_prepare_command(
-                        tx,
-                        block,
-                        &locked_block,
-                        atom,
-                        local_committee_info,
-                        &mut substate_store,
-                        proposed_block_change_set,
-                    )? {
-                        proposed_block_change_set.no_vote(reason);
-                        return Ok(());
-                    }
-                },
                 Command::LocalPrepare(atom) => {
                     if let Some(reason) = self.evaluate_local_prepare_command(
                         tx,
@@ -370,31 +349,9 @@ where TConsensusSpec: ConsensusSpec
                         &locked_block,
                         atom,
                         local_committee_info,
-                        proposed_block_change_set,
-                    )? {
-                        proposed_block_change_set.no_vote(reason);
-                        return Ok(());
-                    }
-                },
-                Command::AllPrepare(atom) => {
-                    // Execute here
-                    if let Some(reason) = self.evaluate_all_prepare_command(
-                        tx,
-                        block,
-                        &locked_block,
-                        atom,
-                        local_committee_info,
                         &mut substate_store,
                         proposed_block_change_set,
                     )? {
-                        proposed_block_change_set.no_vote(reason);
-                        return Ok(());
-                    }
-                },
-                Command::SomePrepare(atom) => {
-                    if let Some(reason) =
-                        self.evaluate_some_prepare_command(tx, block, &locked_block, atom, proposed_block_change_set)?
-                    {
                         proposed_block_change_set.no_vote(reason);
                         return Ok(());
                     }
@@ -406,6 +363,7 @@ where TConsensusSpec: ConsensusSpec
                         &locked_block,
                         atom,
                         local_committee_info,
+                        &mut substate_store,
                         proposed_block_change_set,
                     )? {
                         proposed_block_change_set.no_vote(reason);
@@ -777,29 +735,16 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn evaluate_prepare_command(
+    fn initial_prepare_multishard(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
+        tx_rec: &mut TransactionPoolRecord,
         block: &Block,
-        locked_block: &LockedBlock,
         atom: &TransactionAtom,
         local_committee_info: &CommitteeInfo,
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::info(LOG_TARGET, "Evaluate Prepare command");
-        let Some(mut tx_rec) = proposed_block_change_set
-            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
-            .optional()?
-        else {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ Local proposal received ({}) for transaction {} which is not in the pool. This is likely a previous transaction that has been re-proposed. Not voting on block.",
-                block,
-                atom.id(),
-            );
-            return Ok(Some(NoVoteReason::TransactionNotInPool));
-        };
 
         info!(
             target: LOG_TARGET,
@@ -824,7 +769,7 @@ where TConsensusSpec: ConsensusSpec
 
         let prepared = self
             .transaction_manager
-            .prepare(substate_store, local_committee_info, block.epoch(), &tx_rec, block.id())
+            .prepare(substate_store, local_committee_info, block.epoch(), tx_rec, block.id())
             .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
 
         if !prepared.is_involved(local_committee_info) {
@@ -863,22 +808,6 @@ where TConsensusSpec: ConsensusSpec
                         remote: atom.decision,
                     }));
                 }
-
-                if !atom.evidence.contains(&local_committee_info.shard_group()) {
-                    warn!(
-                        target: LOG_TARGET,
-                        "❌ Prepare command for transaction {} has invalid evidence {} missing local shard group {}
-                    in {}",         tx_rec.transaction_id(),
-                        atom.evidence,
-                        local_committee_info.shard_group(),
-                        block,
-                    );
-                    return Ok(Some(NoVoteReason::InvalidEvidence {
-                        reason: InvalidEvidenceReason::MissingInvolvedShardGroup {
-                            shard_group: local_committee_info.shard_group(),
-                        },
-                    }));
-                };
 
                 // TODO: this is kinda hacky - we may not be involved in the transaction after ABORT execution,
                 // but this would be invalid so we ensure that we are added to evidence. Ideally, we wouldn't
@@ -933,42 +862,8 @@ where TConsensusSpec: ConsensusSpec
                         tx_rec.set_evidence(evidence);
                     },
                 }
-
-                // Check the local evidence only since in this phase that is all that should be included.
-                // Aside from data reduction, on_propose may propose a foreign proposal that updates the
-                // evidence in the same block. However, because on_propose does not
-                // include the evidence from the foreign proposal since it is processed here for the proposer,
-                // foreign shard evidence will mismatch in this case.
-                if atom.evidence.get(&local_committee_info.shard_group()) !=
-                    tx_rec.evidence().get(&local_committee_info.shard_group())
-                {
-                    warn!(
-                        target: LOG_TARGET,
-                        "❌ Prepare command for transaction {} has invalid evidence in {}",
-                        tx_rec.transaction_id(),
-                        block,
-                    );
-                    warn!(
-                        target: LOG_TARGET,
-                        "❌ Prepare command evidence {} {}",
-                        local_committee_info.shard_group(),
-                        atom.evidence.get(&local_committee_info.shard_group()).display()
-                    );
-                    warn!(
-                        target: LOG_TARGET,
-                        "❌ local evidence {} {}",
-                        local_committee_info.shard_group(),
-                        tx_rec.evidence().get(&local_committee_info.shard_group()).display()
-                    );
-                    return Ok(Some(NoVoteReason::InvalidEvidence {
-                        reason: InvalidEvidenceReason::MismatchedEvidence,
-                    }));
-                }
             },
         }
-
-        tx_rec.set_next_stage(TransactionPoolStage::Prepared)?;
-        proposed_block_change_set.set_next_transaction_update(tx_rec)?;
 
         Ok(None)
     }
@@ -980,6 +875,7 @@ where TConsensusSpec: ConsensusSpec
         locked_block: &LockedBlock,
         atom: &TransactionAtom,
         local_committee_info: &CommitteeInfo,
+        substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let Some(mut tx_rec) = proposed_block_change_set
@@ -995,7 +891,7 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::TransactionNotInPool));
         };
 
-        if !tx_rec.current_stage().is_prepared() {
+        if !tx_rec.current_stage().is_new() {
             warn!(
                 target: LOG_TARGET,
                 "{} ❌ LocalPrepare Stage disagreement in block {} for transaction {}. Leader proposed LocalPrepare, but local stage is {}",
@@ -1005,26 +901,20 @@ where TConsensusSpec: ConsensusSpec
                 tx_rec.current_stage()
             );
             return Ok(Some(NoVoteReason::StageDisagreement {
-                expected: TransactionPoolStage::Prepared,
+                expected: TransactionPoolStage::New,
                 stage: tx_rec.current_stage(),
             }));
         }
-        // We check that the leader decision is the same as our local decision.
-        // We disregard the remote decision because not all validators may have received the foreign
-        // LocalPrepared yet. We will never accept a decision disagreement for the Accept command.
-        if tx_rec.current_local_decision() != atom.decision {
-            warn!(
-                target: LOG_TARGET,
-                "❌ LocalPrepared decision disagreement for transaction {} in block {}. Leader proposed {}, we decided {}",
-                tx_rec.transaction_id(),
-                block,
-                atom.decision,
-                tx_rec.current_local_decision()
-            );
-            return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: tx_rec.current_local_decision(),
-                remote: atom.decision,
-            }));
+
+        if let Some(reason) = self.initial_prepare_multishard(
+            &mut tx_rec,
+            block,
+            atom,
+            local_committee_info,
+            substate_store,
+            proposed_block_change_set,
+        )? {
+            return Ok(Some(reason));
         }
 
         if tx_rec.transaction_fee() != atom.transaction_fee {
@@ -1062,7 +952,7 @@ where TConsensusSpec: ConsensusSpec
     }
 
     #[allow(clippy::too_many_lines)]
-    fn evaluate_all_prepare_command(
+    fn evaluate_local_accept_command(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         block: &Block,
@@ -1072,7 +962,6 @@ where TConsensusSpec: ConsensusSpec
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
-        let _timer = TraceTimer::info(LOG_TARGET, "Evaluate AllPrepare command (execute)");
         let Some(mut tx_rec) = proposed_block_change_set
             .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
             .optional()?
@@ -1086,65 +975,53 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::TransactionNotInPool));
         };
 
-        if !tx_rec.current_stage().is_local_prepared() {
-            warn!(
-                target: LOG_TARGET,
-                "{} ❌ Stage disagreement in block {} for transaction {}. Leader proposed AllPrepare, but current stage is {}",
-                self.local_validator_pk,
+        if tx_rec.current_stage().is_new() {
+            // CASE: This was supposedly sequenced because we are aborting or because we are an output-only shardgroup
+            if let Some(reason) = self.initial_prepare_multishard(
+                &mut tx_rec,
                 block,
-                tx_rec.transaction_id(),
-                tx_rec.current_stage()
-            );
-            return Ok(Some(NoVoteReason::StageDisagreement {
-                expected: TransactionPoolStage::LocalPrepared,
-                stage: tx_rec.current_stage(),
-            }));
-        }
+                atom,
+                local_committee_info,
+                substate_store,
+                proposed_block_change_set,
+            )? {
+                return Ok(Some(reason));
+            }
+            if !tx_rec.current_decision().is_abort() &&
+                !tx_rec
+                    .evidence()
+                    .is_committee_output_only(local_committee_info.shard_group())
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "❌ LocalAccept: transaction {} in block {} is not output-only",
+                    tx_rec.transaction_id(),
+                    block,
+                );
+                return Ok(Some(NoVoteReason::OutputOnlyDisagreement {
+                    transaction_id: *tx_rec.transaction_id(),
+                    shard_group: local_committee_info.shard_group(),
+                    command: "LocalAccept",
+                    stage: tx_rec.current_stage(),
+                }));
+            }
+        } else if tx_rec.current_decision().is_commit() {
+            // CASE: We are in the LocalPrepared stage, and want to proceed to LocalAccept
 
-        // If we've already decided to abort, we cannot change to commit in LocalPrepared phase so proposing AllPrepared
-        // is invalid
-        if tx_rec.current_decision().is_abort() && atom.decision.is_commit() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE AllPrepare: decision disagreement for transaction {} in block {}. Leader proposed {}, we decided {}",
-                tx_rec.transaction_id(),
-                block,
-                atom.decision,
-                tx_rec.current_decision()
-            );
-            return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: tx_rec.current_decision(),
-                remote: atom.decision,
-            }));
-        }
-
-        if !tx_rec.evidence().all_input_shard_groups_prepared() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE: AllPrepare disagreement for transaction {} in block {}. Leader proposed that all shard groups have prepared, but this is not the case",
-                tx_rec.transaction_id(),
-                block,
-            );
-            return Ok(Some(NoVoteReason::NotAllShardGroupsPrepared));
-        }
-
-        // TODO: on_propose does not process foreign proposals so we cannot rely on this check
-        // if !atom.evidence.all_input_shard_groups_prepared() {
-        //     warn!(
-        //         target: LOG_TARGET,
-        //         "❌ NO VOTE: AllPrepare disagreement for transaction {} in block {}. {}",
-        //         tx_rec.transaction_id(),
-        //         block,
-        //         InvalidEvidenceReason::NotAllShardGroupsPrepared,
-        //     );
-        //     return Ok(Some(NoVoteReason::InvalidEvidence {
-        //         reason: InvalidEvidenceReason::NotAllShardGroupsPrepared,
-        //     }));
-        // }
-
-        let maybe_execution = if tx_rec.current_decision().is_commit() {
-            // TODO: provide the current input locks to the executor, the executor must fail if a write lock is
-            // requested for a read-locked substate.
+            if !tx_rec.current_stage().is_local_prepared() {
+                warn!(
+                    target: LOG_TARGET,
+                    "❌ LocalAccept: transaction {} in block {} is not in COMMITTED LocalPrepared stage (committed stage: {}, current stage: {})",
+                    tx_rec.transaction_id(),
+                    block,
+                    tx_rec.committed_stage(),
+                    tx_rec.current_stage(),
+                );
+                return Ok(Some(NoVoteReason::StageDisagreement {
+                    expected: TransactionPoolStage::LocalPrepared,
+                    stage: tx_rec.current_stage(),
+                }));
+            }
 
             let transaction = tx_rec.get_transaction(tx)?;
             if !transaction.has_all_required_input_pledges(tx, local_committee_info)? {
@@ -1201,9 +1078,10 @@ where TConsensusSpec: ConsensusSpec
 
                     execution.set_abort_reason(RejectReason::FailedToLockOutputs(err.to_string()));
 
-                    tx_rec.set_local_decision(Decision::Abort(AbortReason::LockOutputsFailed));
-                    tx_rec.set_transaction_fee(0);
-                    tx_rec.set_next_stage(TransactionPoolStage::AllPrepared)?;
+                    tx_rec
+                        .set_local_decision(Decision::Abort(AbortReason::LockOutputsFailed))
+                        .set_transaction_fee(0)
+                        .set_next_stage(TransactionPoolStage::LocalAccepted)?;
 
                     proposed_block_change_set
                         .set_next_transaction_update(tx_rec)?
@@ -1213,233 +1091,16 @@ where TConsensusSpec: ConsensusSpec
                 }
             }
 
-            Some(execution)
-        } else {
-            // If we already locally decided to abort, there is no purpose in executing the transaction
-            None
-        };
-
-        // We check that the leader decision is the same as our local decision.
-        if tx_rec.current_decision() != atom.decision {
-            warn!(
+            info!(
                 target: LOG_TARGET,
-                "❌ NO VOTE AllAccept: decision disagreement for transaction {} (after execute) in block {}. Leader proposed {}, we decided {}",
+                "👨‍🔧 LocalAccept: Executed transaction {} in block {} with decision {}",
                 tx_rec.transaction_id(),
                 block,
-                atom.decision,
-                tx_rec.current_decision()
+                execution.decision()
             );
-            return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: tx_rec.current_decision(),
-                remote: atom.decision,
-            }));
-        }
-
-        if tx_rec.transaction_fee() != atom.transaction_fee {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE AllAccept: transaction fee disagreement tx {} in block {}. Leader proposed {}, we calculated {}",
-                tx_rec.transaction_id(),
-                block,
-                atom.transaction_fee,
-                tx_rec.transaction_fee()
-            );
-            return Ok(Some(NoVoteReason::FeeDisagreement));
-        }
-
-        if tx_rec.transaction_fee() != atom.transaction_fee {
-            warn!(
-                target: LOG_TARGET,
-                "❌ AllPrepare transaction fee disagreement tx {} in block {}. Leader proposed {}, we calculated {}",
-                tx_rec.transaction_id(),
-                block,
-                atom.transaction_fee,
-                tx_rec.transaction_fee()
-            );
-            return Ok(Some(NoVoteReason::FeeDisagreement));
-        }
-
-        if !tx_rec.evidence().eq_pledges(&atom.evidence) {
-            warn!(
-                target: LOG_TARGET,
-                "❌ AllPrepare evidence disagreement tx {} in block {}. Leader proposed {}, we calculated {}",
-                tx_rec.transaction_id(),
-                block,
-                atom.evidence,
-                tx_rec.evidence()
-            );
-            return Ok(Some(NoVoteReason::InvalidEvidence {
-                reason: InvalidEvidenceReason::MismatchedEvidence,
-            }));
-        }
-
-        // maybe_execution is only None if the transaction is not committed
-        if let Some(execution) = maybe_execution {
             proposed_block_change_set.add_transaction_execution(execution)?;
-        }
-
-        tx_rec.set_next_stage(TransactionPoolStage::AllPrepared)?;
-        proposed_block_change_set.set_next_transaction_update(tx_rec)?;
-
-        Ok(None)
-    }
-
-    fn evaluate_some_prepare_command(
-        &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-        block: &Block,
-        locked_block: &LockedBlock,
-        atom: &TransactionAtom,
-        proposed_block_change_set: &mut ProposedBlockChangeSet,
-    ) -> Result<Option<NoVoteReason>, HotStuffError> {
-        if atom.decision.is_commit() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ SomePrepare command received for block {} but requires that the transaction is ABORT",
-                block.id(),
-            );
-            return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: Decision::Abort(AbortReason::TransactionAtomMustBeAbort),
-                remote: Decision::Commit,
-            }));
-        }
-
-        let Some(mut tx_rec) = proposed_block_change_set
-            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
-            .optional()?
-        else {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ Local proposal received ({}) for transaction {} which is not in the pool. This is likely a previous transaction that has been re-proposed. Not voting on block.",
-                block,
-                atom.id(),
-            );
-            return Ok(Some(NoVoteReason::TransactionNotInPool));
-        };
-
-        // If the local node would decide SomePrepare too, we should have already ABORTed due to foreign prepare abort
-        // or local input lock conflict
-        if tx_rec.current_decision().is_commit() {
-            warn!(
-                target: LOG_TARGET,
-                "❌ SomePrepare decision disagreement for transaction {} in block {}. Leader proposed ABORT, we decided COMMIT",
-                tx_rec.transaction_id(),
-                block,
-            );
-            return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: Decision::Commit,
-                remote: atom.decision,
-            }));
-        }
-
-        if !tx_rec.current_stage().is_local_prepared() {
-            warn!(
-                target: LOG_TARGET,
-                "{} ❌ Stage disagreement in block {} for transaction {}. Leader proposed SomePrepare, but local stage is {}",
-                self.local_validator_pk,
-                block,
-                tx_rec.transaction_id(),
-                tx_rec.current_stage()
-            );
-            return Ok(Some(NoVoteReason::StageDisagreement {
-                expected: TransactionPoolStage::LocalPrepared,
-                stage: tx_rec.current_stage(),
-            }));
-        }
-
-        if tx_rec.transaction_fee() != atom.transaction_fee {
-            warn!(
-                target: LOG_TARGET,
-                "❌ SomePrepare transaction fee disagreement tx {} in block {}. Leader proposed {}, we calculated {}",
-                tx_rec.transaction_id(),
-                block,
-                atom.transaction_fee,
-                tx_rec.transaction_fee()
-            );
-            return Ok(Some(NoVoteReason::FeeDisagreement));
-        }
-
-        tx_rec.set_next_stage(TransactionPoolStage::SomePrepared)?;
-        proposed_block_change_set.set_next_transaction_update(tx_rec)?;
-
-        Ok(None)
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn evaluate_local_accept_command(
-        &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-        block: &Block,
-        locked_block: &LockedBlock,
-        atom: &TransactionAtom,
-        local_committee_info: &CommitteeInfo,
-        proposed_block_change_set: &mut ProposedBlockChangeSet,
-    ) -> Result<Option<NoVoteReason>, HotStuffError> {
-        let Some(mut tx_rec) = proposed_block_change_set
-            .get_transaction(tx, locked_block, &block.as_leaf_block(), atom.id())
-            .optional()?
-        else {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ Local proposal received ({}) for transaction {} which is not in the pool. This is likely a previous transaction that has been re-proposed. Not voting on block.",
-                block,
-                atom.id(),
-            );
-            return Ok(Some(NoVoteReason::TransactionNotInPool));
-        };
-
-        // We check that the leader decision is the same as our local decision.
-        // We disregard the remote decision because not all validators may have received the foreign
-        // LocalPrepared yet. We will never accept a decision disagreement for the Accept command.
-        if tx_rec.current_decision() != atom.decision {
-            warn!(
-                target: LOG_TARGET,
-                "❌ NO VOTE LocalAccept: decision disagreement for transaction {} in block {}. Leader proposed {}, we decided {}",
-                tx_rec.transaction_id(),
-                block,
-                atom.decision,
-                tx_rec.current_decision()
-            );
-            return Ok(Some(NoVoteReason::DecisionDisagreement {
-                local: tx_rec.current_decision(),
-                remote: atom.decision,
-            }));
-        }
-
-        let is_applicable_stage = match tx_rec.current_decision() {
-            Decision::Commit => {
-                // Commit. AllPrepared, or from Prepared directly if we are output-only (which only has Accept phase)
-                tx_rec.current_stage().is_all_prepared() ||
-                    (tx_rec.current_stage().is_prepared() &&
-                        tx_rec
-                            .evidence()
-                            .is_committee_output_only(local_committee_info.shard_group()))
-            },
-            Decision::Abort(_) => {
-                // Abort. AllPrepared (aborted after executing) or SomePrepared (aborted before executing). We allow the
-                // transition from Prepared to LocalAccepted if ABORT, or we are output-only
-                tx_rec.current_stage().is_all_prepared() ||
-                    tx_rec.current_stage().is_some_prepared() ||
-                    (tx_rec.current_stage().is_prepared() ||
-                        tx_rec
-                            .evidence()
-                            .is_committee_output_only(local_committee_info.shard_group()))
-            },
-        };
-
-        if !is_applicable_stage {
-            let is_output_only = tx_rec
-                .evidence()
-                .is_committee_output_only(local_committee_info.shard_group());
-            let reason = NoVoteReason::StageTransitionNotApplicable {
-                current: tx_rec.current_stage(),
-                next: TransactionPoolStage::LocalAccepted,
-                is_output_only,
-                decision: tx_rec.current_decision(),
-            };
-
-            warn!(target: LOG_TARGET, "❌ {reason} in {block}");
-            return Ok(Some(reason));
+        } else {
+            // Abort - nothing to do here
         }
 
         if tx_rec.transaction_fee() != atom.transaction_fee {
@@ -1957,16 +1618,18 @@ where TConsensusSpec: ConsensusSpec
             new_locked_block,
         );
 
-        // Release all locks for SomePrepare transactions since these can never be committed
-        SubstateRecord::unlock_all(tx, new_locked_block.all_some_prepare().map(|t| &t.id))?;
+        // Release all locks for Aborted transactions since these can never be committed after accept
+        SubstateRecord::unlock_all(
+            tx,
+            new_locked_block
+                .all_local_accept()
+                .filter(|a| a.decision.is_abort())
+                .map(|t| &t.id),
+        )?;
 
         // Remove the chains that are no longer in this block's chain
         // This will also release any locks for blocks that no longer apply
         new_locked_block.remove_parallel_chains(tx)?;
-
-        // This moves the stage update from pending to current for all transactions on the locked block
-        self.transaction_pool
-            .confirm_all_transitions(tx, &new_locked_block.as_locked_block())?;
 
         Ok(())
     }
@@ -1997,6 +1660,10 @@ where TConsensusSpec: ConsensusSpec
             target: LOG_TARGET,
             "🌳 Committing block {} with {} substate change(s)", block, diff.len()
         );
+
+        // This moves the stage update from pending to current for all transactions on the commit block
+        self.transaction_pool
+            .confirm_all_transitions(tx, &block.as_leaf_block())?;
 
         for atom in block.all_foreign_proposals() {
             // TODO: we need to keep these ATM to send them if a node needs to catch up

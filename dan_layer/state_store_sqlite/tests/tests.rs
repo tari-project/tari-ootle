@@ -60,7 +60,7 @@ mod confirm_all_transitions {
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
-            [Command::Prepare(atom1.clone())].into_iter().collect(),
+            [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -100,11 +100,10 @@ mod confirm_all_transitions {
             .unwrap()
             .clone();
 
-        tx_1.set_next_stage(TransactionPoolStage::Prepared).unwrap();
         tx_1.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
 
-        tx_2.set_next_stage(TransactionPoolStage::Prepared).unwrap();
-        tx_3.set_next_stage(TransactionPoolStage::Prepared).unwrap();
+        tx_2.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
+        tx_3.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
 
         tx.transaction_pool_add_pending_update(&block_id, &TransactionPoolStatusUpdate::new(tx_1, true))
             .unwrap();
@@ -123,9 +122,9 @@ mod confirm_all_transitions {
             .transaction_pool_get_for_blocks(zero_block.id(), &block_id, &atom2.id)
             .unwrap();
         assert!(rec.committed_stage().is_new());
-        assert!(rec.pending_stage().unwrap().is_prepared());
+        assert!(rec.pending_stage().unwrap().is_local_prepared());
 
-        tx.transaction_pool_confirm_all_transitions(&block1.as_locked_block())
+        tx.transaction_pool_confirm_all_transitions(&block1.as_leaf_block())
             .unwrap();
 
         let rec = tx
@@ -137,13 +136,13 @@ mod confirm_all_transitions {
         let rec = tx
             .transaction_pool_get_for_blocks(zero_block.id(), &block_id, &atom2.id)
             .unwrap();
-        assert_eq!(rec.committed_stage(), TransactionPoolStage::Prepared);
+        assert_eq!(rec.committed_stage(), TransactionPoolStage::LocalPrepared);
         assert_eq!(rec.pending_stage(), None);
 
         let rec = tx
             .transaction_pool_get_for_blocks(zero_block.id(), &block_id, &atom3.id)
             .unwrap();
-        assert_eq!(rec.committed_stage(), TransactionPoolStage::Prepared);
+        assert_eq!(rec.committed_stage(), TransactionPoolStage::LocalPrepared);
         assert_eq!(rec.pending_stage(), None);
 
         tx.rollback().unwrap();

@@ -79,7 +79,7 @@ use crate::{
     traits::{ConsensusSpec, OutboundMessaging, ValidatorSignatureService, WriteableSubstateStore},
 };
 
-const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_local_propose";
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_propose";
 
 struct NextBlock {
     block: Block,
@@ -289,6 +289,7 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<Option<Command>, HotStuffError> {
         match tx_rec.current_stage() {
             TransactionPoolStage::New => self.prepare_transaction(
+                tx,
                 start_of_chain_id,
                 &mut tx_rec,
                 local_committee_info,
@@ -296,11 +297,9 @@ where TConsensusSpec: ConsensusSpec
                 executed_transactions,
                 lock_conflicts,
             ),
-            // Leader thinks all local nodes have prepared
-            TransactionPoolStage::Prepared => self.local_prepare_transaction(tx, local_committee_info, &tx_rec),
             // Leader thinks all foreign PREPARE pledges have been received (condition for LocalPrepared stage to be
             // ready)
-            TransactionPoolStage::LocalPrepared => self.all_or_some_prepare_transaction(
+            TransactionPoolStage::LocalPrepared => self.local_accept_transaction(
                 tx,
                 start_of_chain_id,
                 local_committee_info,
@@ -309,13 +308,6 @@ where TConsensusSpec: ConsensusSpec
                 executed_transactions,
             ),
 
-            // Leader thinks that all local nodes agree that all shard groups have prepared, we are ready to accept
-            // locally
-            TransactionPoolStage::AllPrepared => Ok(Some(Command::LocalAccept(
-                self.get_transaction_atom_with_leader_fee(&mut tx_rec)?,
-            ))),
-            // Leader thinks local nodes are ready to accept an ABORT
-            TransactionPoolStage::SomePrepared => Ok(Some(Command::LocalAccept(tx_rec.get_current_transaction_atom()))),
             // Leader thinks that all foreign ACCEPT pledges have been received and, we are ready to accept the result
             // (COMMIT/ABORT)
             TransactionPoolStage::LocalAccepted => {
@@ -735,6 +727,7 @@ where TConsensusSpec: ConsensusSpec
     #[allow(clippy::too_many_lines)]
     fn prepare_transaction(
         &self,
+        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         parent_block: &LeafBlock,
         tx_rec: &mut TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
@@ -784,7 +777,7 @@ where TConsensusSpec: ConsensusSpec
             return Ok(None);
         }
 
-        let command = match prepared {
+        match prepared {
             PreparedTransaction::LocalOnly(local) => match *local {
                 LocalPreparedTransaction::Accept { execution, .. } => {
                     tx_rec
@@ -830,7 +823,7 @@ where TConsensusSpec: ConsensusSpec
                     executed_transactions.insert(*tx_rec.transaction_id(), execution);
 
                     let atom = tx_rec.get_current_transaction_atom();
-                    Command::LocalOnly(atom)
+                    Ok(Some(Command::LocalOnly(atom)))
                 },
                 LocalPreparedTransaction::EarlyAbort { execution } => {
                     info!(
@@ -847,7 +840,7 @@ where TConsensusSpec: ConsensusSpec
                         ));
                     executed_transactions.insert(*tx_rec.transaction_id(), execution);
                     let atom = tx_rec.get_current_transaction_atom();
-                    Command::LocalOnly(atom)
+                    Ok(Some(Command::LocalOnly(atom)))
                 },
             },
 
@@ -903,53 +896,43 @@ where TConsensusSpec: ConsensusSpec
                     tx_rec.current_decision(),
                 );
 
-                let atom = tx_rec.get_local_transaction_atom();
-                Command::Prepare(atom)
+                if tx_rec.current_decision().is_abort() {
+                    let atom = tx_rec.get_current_transaction_atom();
+                    return Ok(Some(Command::LocalAccept(atom)));
+                }
+                if tx_rec
+                    .evidence()
+                    .is_committee_output_only(local_committee_info.shard_group())
+                {
+                    // No prepare phase needed for output-only transactions. All foreign shards have prepared inputs
+                    // and the output shard groups need to execute and accept outputs.
+                    if !tx_rec.has_all_required_foreign_input_pledges(tx, local_committee_info)? {
+                        error!(
+                            target: LOG_TARGET,
+                            "BUG: attempted to propose transaction {} as LocalPrepared but not all foreign input pledges were found. \
+                             This transaction should not have been marked as ready. {}",
+                            tx_rec.transaction_id(),
+                            tx_rec.evidence()
+                        );
+                        return Ok(None);
+                    }
+                    let atom = tx_rec.get_local_transaction_atom();
+                    debug!(
+                        target: LOG_TARGET,
+                        "ℹ️ Transaction {} is output-only for {}, proposing LocalAccept",
+                        tx_rec.transaction_id(),
+                        local_committee_info.shard_group()
+                    );
+                    Ok(Some(Command::LocalAccept(atom)))
+                } else {
+                    let atom = tx_rec.get_current_transaction_atom();
+                    Ok(Some(Command::LocalPrepare(atom)))
+                }
             },
-        };
-
-        Ok(Some(command))
-    }
-
-    fn local_prepare_transaction(
-        &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-        local_committee_info: &CommitteeInfo,
-        tx_rec: &TransactionPoolRecord,
-    ) -> Result<Option<Command>, HotStuffError> {
-        if tx_rec.current_decision().is_abort() {
-            let atom = tx_rec.get_current_transaction_atom();
-            return Ok(Some(Command::LocalAccept(atom)));
-        }
-        if tx_rec
-            .evidence()
-            .is_committee_output_only(local_committee_info.shard_group())
-        {
-            if !tx_rec.has_all_required_foreign_input_pledges(tx, local_committee_info)? {
-                error!(
-                    target: LOG_TARGET,
-                    "BUG: attempted to propose transaction {} as Prepared but not all foreign input pledges were found. \
-                     This transaction should not have been marked as ready. {}",
-                    tx_rec.transaction_id(),
-                    tx_rec.evidence()
-                );
-                return Ok(None);
-            }
-            let atom = tx_rec.get_local_transaction_atom();
-            debug!(
-                target: LOG_TARGET,
-                "ℹ️ Transaction {} is output-only for {}, proposing LocalAccept",
-                tx_rec.transaction_id(),
-                local_committee_info.shard_group()
-            );
-            Ok(Some(Command::LocalAccept(atom)))
-        } else {
-            let atom = tx_rec.get_local_transaction_atom();
-            Ok(Some(Command::LocalPrepare(atom)))
         }
     }
 
-    fn all_or_some_prepare_transaction(
+    fn local_accept_transaction(
         &self,
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         parent_block: &LeafBlock,
@@ -960,7 +943,7 @@ where TConsensusSpec: ConsensusSpec
     ) -> Result<Option<Command>, HotStuffError> {
         // Only set to abort if either the local or one or more foreign shards decided to ABORT
         if tx_rec.current_decision().is_abort() {
-            return Ok(Some(Command::SomePrepare(tx_rec.get_current_transaction_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_transaction_atom())));
         }
 
         let transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
@@ -1001,7 +984,7 @@ where TConsensusSpec: ConsensusSpec
             );
 
             executed_transactions.insert(*tx_rec.transaction_id(), execution);
-            return Ok(Some(Command::AllPrepare(tx_rec.get_current_transaction_atom())));
+            return Ok(Some(Command::LocalAccept(tx_rec.get_current_transaction_atom())));
         }
 
         tx_rec.update_from_execution(
@@ -1009,11 +992,11 @@ where TConsensusSpec: ConsensusSpec
             local_committee_info.num_committees(),
             &execution,
         );
-
         executed_transactions.insert(*tx_rec.transaction_id(), execution);
         // If we locally decided to ABORT, we are still saying that we think all prepared and, after execution decide to
         // ABORT. When we enter the acceptance phase, we will propose SomeAccept for this case.
-        Ok(Some(Command::AllPrepare(tx_rec.get_current_transaction_atom())))
+        let atom = self.get_transaction_atom_with_leader_fee(tx_rec)?;
+        Ok(Some(Command::LocalAccept(atom)))
     }
 
     fn accept_transaction(

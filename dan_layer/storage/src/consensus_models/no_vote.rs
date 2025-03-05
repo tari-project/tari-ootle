@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_common_types::ShardGroup;
+use tari_transaction::TransactionId;
 
 use crate::consensus_models::{Decision, TransactionPoolStage};
 
@@ -20,6 +21,16 @@ pub enum NoVoteReason {
         next: TransactionPoolStage,
         is_output_only: bool,
         decision: Decision,
+    },
+    #[error(
+        "Output only disagreement for local {shard_group}. Transaction ID: {transaction_id}, Stage: {stage}, Command: \
+         {command}"
+    )]
+    OutputOnlyDisagreement {
+        transaction_id: TransactionId,
+        shard_group: ShardGroup,
+        stage: TransactionPoolStage,
+        command: &'static str,
     },
     #[error("The transaction is not in the pool")]
     TransactionNotInPool,
@@ -91,6 +102,7 @@ impl NoVoteReason {
             Self::AlreadyVotedAtHeight => "ShouldNotVote",
             Self::StageDisagreement { .. } => "StageDisagreement",
             Self::StageTransitionNotApplicable { .. } => "StageTransitionNotApplicable",
+            Self::OutputOnlyDisagreement { .. } => "OutputOnlyDisagreement",
             Self::TransactionNotInPool => "TransactionNotInPool",
             Self::DecisionDisagreement { .. } => "DecisionDisagreement",
             Self::FeeDisagreement => "FeeDisagreement",

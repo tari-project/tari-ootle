@@ -5,6 +5,7 @@
 
 use tari_template_abi::{call_engine, EngineOp};
 
+use crate::models::AddressAllocation;
 use crate::{
     args::{AllocateAddressResult, CallerContextAction, CallerContextInvokeArg, InvokeResult, SubstateType},
     crypto::RistrettoPublicKeyBytes,
@@ -38,6 +39,13 @@ impl CallerContext {
             .expect("Not in a component instance context")
     }
 
+    /// Alias function to allocate component address
+    pub fn allocate_component_address(public_key_address: Option<RistrettoPublicKeyBytes>) -> AddressAllocation<ComponentAddress> {
+        let result = Self::allocate_address(SubstateType::Component, public_key_address);
+        result.as_component_address_allocation().expect("We must have a component address allocation")
+    }
+
+    /// Allocating an address for the given [`SubstateType`].
     pub fn allocate_address(
         substate_type: SubstateType,
         public_key_address: Option<RistrettoPublicKeyBytes>,

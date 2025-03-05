@@ -128,13 +128,23 @@ fn it_allocation_using_tx_builder() {
 
     // assert allocation execution results
     let comp_addr_allocation_exec_result = result.finalize.execution_results.first().unwrap().clone();
-    let Type::Other {name: comp_alloc_return_type_name} = comp_addr_allocation_exec_result.return_type else { panic!("Invalid return type for component address allocation!") };
+    let Type::Other {
+        name: comp_alloc_return_type_name,
+    } = comp_addr_allocation_exec_result.return_type
+    else {
+        panic!("Invalid return type for component address allocation!")
+    };
     assert_eq!(comp_alloc_return_type_name, "ComponentAddressAllocation".to_string());
     let exec_result_allocated_comp_addr: ComponentAddress =
         address_allocation_from_cbor(comp_addr_allocation_exec_result.indexed.clone().into_value()).unwrap();
 
     let res_addr_allocation_exec_result = result.finalize.execution_results.get(1).unwrap().clone();
-    let Type::Other {name: res_alloc_return_type_name} = res_addr_allocation_exec_result.return_type else { panic!("Invalid return type for resource address allocation!") };
+    let Type::Other {
+        name: res_alloc_return_type_name,
+    } = res_addr_allocation_exec_result.return_type
+    else {
+        panic!("Invalid return type for resource address allocation!")
+    };
     assert_eq!(res_alloc_return_type_name, "ResourceAddressAllocation".to_string());
     let exec_result_allocated_res_addr: ResourceAddress =
         address_allocation_from_cbor(res_addr_allocation_exec_result.indexed.clone().into_value()).unwrap();

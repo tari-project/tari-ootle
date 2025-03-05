@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1.3
 
 # https://hub.docker.com/_/rust
-ARG RUST_VERSION=1.74
+ARG RUST_VERSION=1.84
 ARG OS_BASE=bookworm
 
 # Node Version
@@ -58,9 +58,12 @@ WORKDIR /tari-dan
 
 ADD . .
 
+RUN apt-get update && \
+    sh /tari-dan/scripts/install_ubuntu_dependencies.sh
+
 RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
       # Run script to help setup cross-compile environment
-      . /tari-dan/docker_rig/cross-compile-tooling.sh ; \
+      . /tari-dan/docker_rig/cross_compile_tooling.sh ; \
     fi && \
     if [ -n "${RUST_TOOLCHAIN}" ] ; then \
       # Install a non-standard toolchain if it has been requested.
@@ -80,17 +83,19 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
     rustup show && \
     cargo build ${RUST_TARGET} \
       --release --locked \
-      --bin tari_indexer \
-      --bin tari_dan_wallet_daemon \
       --bin tari_dan_wallet_cli \
-      --bin tari_signaling_server \
+      --bin tari_dan_wallet_daemon \
+      --bin tari_indexer \
+      --bin tari_generate \
+      --bin tari_swarm_daemon \
       --bin tari_validator_node \
       --bin tari_validator_node_cli && \
     # Copy executable out of the cache so it is available in the runtime image.
-    cp -v /tari-dan/target/${BUILD_TARGET}release/tari_indexer /usr/local/bin/ && \
-    cp -v /tari-dan/target/${BUILD_TARGET}release/tari_dan_wallet_daemon /usr/local/bin/ && \
     cp -v /tari-dan/target/${BUILD_TARGET}release/tari_dan_wallet_cli /usr/local/bin/ && \
-    cp -v /tari-dan/target/${BUILD_TARGET}release/tari_signaling_server /usr/local/bin/ && \
+    cp -v /tari-dan/target/${BUILD_TARGET}release/tari_dan_wallet_daemon /usr/local/bin/ && \
+    cp -v /tari-dan/target/${BUILD_TARGET}release/tari_indexer /usr/local/bin/ && \
+    cp -v /tari-dan/target/${BUILD_TARGET}release/tari_generate /usr/local/bin/ && \
+    cp -v /tari-dan/target/${BUILD_TARGET}release/tari_swarm_daemon /usr/local/bin/ && \
     cp -v /tari-dan/target/${BUILD_TARGET}release/tari_validator_node /usr/local/bin/ && \
     cp -v /tari-dan/target/${BUILD_TARGET}release/tari_validator_node_cli /usr/local/bin/ && \
     echo "Tari Dan Build Done"

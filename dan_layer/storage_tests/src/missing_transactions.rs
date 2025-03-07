@@ -45,7 +45,7 @@ mod missing_transactions_test {
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
-            [Command::Prepare(atom1.clone())].into_iter().collect(),
+            [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
             Default::default(),

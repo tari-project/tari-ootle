@@ -166,7 +166,7 @@ pub fn create_block(parent: Option<&Block>) -> Block {
         Default::default(),
         // Need to have a command in, otherwise this block will not be included internally in the query because it
         // cannot cause a state change without any commands
-        [Command::Prepare(atom1.clone())].into_iter().collect(),
+        [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
         random_merkle_root,
         Default::default(),
         Default::default(),

@@ -52,7 +52,7 @@ mod basic_block_operations {
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
-            [Command::Prepare(atom1.clone())].into_iter().collect(),
+            [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -146,7 +146,7 @@ mod block_parent_operations {
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
-            [Command::Prepare(atom1.clone())].into_iter().collect(),
+            [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -169,7 +169,7 @@ mod block_parent_operations {
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
-            [Command::Prepare(atom2.clone())].into_iter().collect(),
+            [Command::LocalPrepare(atom2.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -283,7 +283,7 @@ mod block_query_operations {
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
-            [Command::Prepare(atom1.clone())].into_iter().collect(),
+            [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -306,7 +306,7 @@ mod block_query_operations {
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
-            [Command::Prepare(atom2.clone())].into_iter().collect(),
+            [Command::LocalPrepare(atom2.clone())].into_iter().collect(),
             Default::default(),
             // adding some fee to test blocks_get_total_leader_fee_for_epoch
             4,
@@ -336,7 +336,7 @@ mod block_query_operations {
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
-            [Command::Prepare(atom2.clone())].into_iter().collect(),
+            [Command::LocalPrepare(atom2.clone())].into_iter().collect(),
             Default::default(),
             // adding some fee to test blocks_get_total_leader_fee_for_epoch
             5,

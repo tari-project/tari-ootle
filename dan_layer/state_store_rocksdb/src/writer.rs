@@ -797,24 +797,24 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(transactions)
     }
 
-    fn transaction_pool_confirm_all_transitions(&mut self, new_locked_block: &LockedBlock) -> Result<(), StorageError> {
+    fn transaction_pool_confirm_all_transitions(&mut self, block: &LeafBlock) -> Result<(), StorageError> {
         let operation = "transaction_pool_confirm_all_transitions";
         let tx = self.transaction.as_mut().unwrap().rocksdb_transaction();
 
         // fetch all the transaction updates that are not applied yet for the new block
-        let key_prefix = TransactionPoolStateUpdateModel::key_prefix_by_block_id(new_locked_block.block_id());
+        let key_prefix = TransactionPoolStateUpdateModel::key_prefix_by_block_id(block.block_id());
         let mut updates: Vec<TransactionPoolStateUpdateModelData> = TransactionPoolStateUpdateModel::multi_get(tx, Some(&key_prefix), Ordering::Ascending)?
             // TODO: do the filtering at the rocksdb query (use a dedicated column family?)
             .into_iter()
             .filter(|u| {
-                u.block_height <= new_locked_block.height() &&
+                u.block_height <= block.height() &&
                 !u.is_applied
             })
             .collect();
 
         debug!(
             target: LOG_TARGET,
-            "transaction_pool_confirm_all_transitions: new_locked_block={}, {} updates",  new_locked_block, updates.len()
+            "transaction_pool_confirm_all_transitions: new_locked_block={}, {} updates",  block, updates.len()
         );
 
         // mark all transaction updates as applied
@@ -1514,6 +1514,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         }
 
         Ok(())
+    }
+
+    fn substates_prune_downed_values(&mut self, _epoch: Epoch) -> Result<(), StorageError> {
+        todo!()
     }
 }
 

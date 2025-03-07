@@ -21,10 +21,13 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
+    fmt::{self, Display},
     net::SocketAddr,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
+use anyhow::anyhow;
 use config::Config;
 use serde::{Deserialize, Serialize};
 use tari_common::{
@@ -82,6 +85,8 @@ pub struct ValidatorNodeConfig {
     pub identity_file: PathBuf,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
+    /// The type of database to use
+    pub database_type: DatabaseType,
     /// The p2p configuration settings
     pub p2p: P2pConfig,
     /// P2P RPC configuration
@@ -133,6 +138,7 @@ impl Default for ValidatorNodeConfig {
             shard_key_file: PathBuf::from("shard_key.json"),
             identity_file: PathBuf::from("validator_node_id.json"),
             data_dir: PathBuf::from("data/validator_node"),
+            database_type: DatabaseType::default(),
             p2p: P2pConfig::default(),
             rpc: RpcConfig::default(),
             json_rpc_listener_address: Some("127.0.0.1:18200".parse().unwrap()),
@@ -153,5 +159,33 @@ impl Default for ValidatorNodeConfig {
 impl SubConfigPath for ValidatorNodeConfig {
     fn main_key_prefix() -> &'static str {
         "validator_node"
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatabaseType {
+    #[default]
+    Sqlite,
+    Rocksdb,
+}
+
+impl FromStr for DatabaseType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "rocksdb" => Ok(DatabaseType::Rocksdb),
+            "sqlite" => Ok(DatabaseType::Sqlite),
+            _ => Err(anyhow!("Invalid database type '{}'", s)),
+        }
+    }
+}
+
+impl Display for DatabaseType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DatabaseType::Rocksdb => write!(f, "rocksdb"),
+            DatabaseType::Sqlite => write!(f, "sqlite"),
+        }
     }
 }

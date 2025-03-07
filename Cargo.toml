@@ -31,10 +31,12 @@ members = [
     "dan_layer/indexer_lib",
     "dan_layer/p2p",
     "dan_layer/rpc_state_sync",
+    "dan_layer/state_store_rocksdb",
     "dan_layer/state_store_sqlite",
     "dan_layer/state_tree",
     "dan_layer/storage_sqlite",
     "dan_layer/storage",
+    "dan_layer/storage_tests",
     "dan_layer/tari_bor",
     "dan_layer/template_abi",
     "dan_layer/template_builtin",
@@ -97,6 +99,7 @@ tari_networking = { path = "networking/core" }
 tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }
 tari_state_store_sqlite = { path = "dan_layer/state_store_sqlite" }
+tari_state_store_rocksdb = { path = "dan_layer/state_store_rocksdb" }
 tari_state_tree = { path = "dan_layer/state_tree" }
 tari_swarm = { path = "networking/swarm" }
 tari_template_abi = { version = "0.8.2", path = "dan_layer/template_abi" }
@@ -217,6 +220,9 @@ quote = "1.0.7"
 rand = "0.8.5"
 rayon = "1.7.0"
 reqwest = "0.11.16"
+# TODO: use the next release (the one after 0.22.0) when available
+# https://github.com/rust-rocksdb/rust-rocksdb/issues/881
+rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb", rev = "1cf906dc4087f06631820f13855e6b27bd21b972" }
 semver = "1.0"
 serde = { version = "1.0", default-features = false }
 serde_json = "1.0"

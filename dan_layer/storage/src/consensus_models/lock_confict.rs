@@ -1,10 +1,11 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::SubstateLockType;
 use tari_transaction::TransactionId;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct LockConflict {
     pub transaction_id: TransactionId,
     pub existing_lock: SubstateLockType,

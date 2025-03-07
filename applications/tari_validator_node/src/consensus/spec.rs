@@ -40,7 +40,7 @@ impl ConsensusSpec for TariConsensusSpec {
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
     type SignatureService = TariSignatureService;
-    type StateStore = SqliteStateStore<Self::Addr>;
+    type StateStore = SqliteStateStore<PeerAddress>;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
     type TransactionExecutor = TariDanBlockTransactionExecutor<
         TariDanTransactionProcessor<TemplateManager<PeerAddress>>,

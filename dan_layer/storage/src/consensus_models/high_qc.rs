@@ -22,7 +22,7 @@
 
 use std::fmt::Display;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{Epoch, NodeHeight};
 
 use crate::{
@@ -32,7 +32,7 @@ use crate::{
     StorageError,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HighQc {
     pub block_id: BlockId,
     pub block_height: NodeHeight,

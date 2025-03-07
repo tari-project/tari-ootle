@@ -38,6 +38,10 @@ where
     }
 
     pub async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, NetworkClientError> {
+        if transaction.num_unique_inputs() == 0 {
+            return Err(NetworkClientError::NoInputsProvided);
+        }
+
         let tx_id = *transaction.id();
 
         info!(
@@ -191,4 +195,6 @@ pub enum NetworkClientError {
     },
     #[error("No committee at present. Try again later")]
     NoCommitteeMembers,
+    #[error("No inputs provided in transaction.")]
+    NoInputsProvided,
 }

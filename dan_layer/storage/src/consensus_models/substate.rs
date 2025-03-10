@@ -350,13 +350,13 @@ impl SubstateRecord {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubstateCreatedProof {
     pub substate: SubstateData,
     // TODO: proof that data was created
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubstateDestroyedProof {
     pub substate_id: SubstateId,
     pub version: u32,
@@ -370,7 +370,7 @@ impl SubstateDestroyedProof {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateValueOrHash {
     Value(SubstateValue),
     Hash(FixedHash),
@@ -418,7 +418,7 @@ impl From<FixedHash> for SubstateValueOrHash {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubstateData {
     pub substate_id: SubstateId,
     pub version: u32,
@@ -458,7 +458,7 @@ impl From<SubstateRecord> for SubstateData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateUpdate {
     Create(SubstateCreatedProof),
     Destroy(SubstateDestroyedProof),

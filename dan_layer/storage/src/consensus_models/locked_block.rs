@@ -3,6 +3,7 @@
 
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{Epoch, NodeHeight};
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     StorageError,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockedBlock {
     pub height: NodeHeight,
     pub block_id: BlockId,

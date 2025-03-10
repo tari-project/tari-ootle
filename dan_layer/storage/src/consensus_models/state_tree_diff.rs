@@ -7,6 +7,7 @@
 use std::{collections::HashMap, fmt::Display, ops::Deref};
 
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
 use tari_state_tree::{StateHashTreeDiff, Version};
 
@@ -58,7 +59,7 @@ impl PendingShardStateTreeDiff {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionedStateHashTreeDiff {
     pub version: Version,
     pub diff: StateHashTreeDiff<Version>,

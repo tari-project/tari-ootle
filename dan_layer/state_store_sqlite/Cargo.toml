@@ -1,6 +1,6 @@
 [package]
 name = "tari_state_store_sqlite"
-description = "The Tari DAN wallet daemon"
+description = "SQLite implementation of Tari state store"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

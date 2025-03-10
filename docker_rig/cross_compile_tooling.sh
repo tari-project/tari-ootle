@@ -24,7 +24,7 @@ if [ "${TARGETARCH}" = "arm64" ] ; then
   # Check for Debian
   if [ -f "/etc/debian_version" ] ; then
     dpkg --add-architecture ${TARGETARCH}
-    apt-get update
+    apt-get update || true
     apt-get install -y pkg-config libssl-dev:${TARGETARCH} gcc-${platform_env}-linux-gnu g++-${platform_env}-linux-gnu
     export AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include/${platform_env}-linux-gnu/openssl/
     export PKG_CONFIG_ALLOW_CROSS=1

@@ -3,6 +3,7 @@
 
 use std::{fmt::Display, time::Duration};
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{NumPreshards, ShardGroup, ToSubstateAddress};
 use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
 use tari_transaction::TransactionId;
@@ -14,7 +15,7 @@ use crate::{
     StorageError,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionExecution {
     pub transaction_id: TransactionId,
     pub result: ExecuteResult,
@@ -113,7 +114,7 @@ impl TransactionExecution {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockTransactionExecution {
     pub block_id: BlockId,
     pub execution: TransactionExecution,

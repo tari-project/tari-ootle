@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, str::FromStr, sync::MutexGuard};
+use std::{collections::HashMap, convert::Infallible, str::FromStr, sync::MutexGuard};
 
 use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{
@@ -23,6 +23,7 @@ use tari_dan_common_types::substate_type::SubstateType;
 use tari_dan_wallet_sdk::{
     models::{
         Account,
+        AuthoredTemplateModel,
         ConfidentialOutputModel,
         ConfidentialProofId,
         Config,
@@ -51,7 +52,7 @@ use webauthn_rs::prelude::Passkey;
 use crate::{
     diesel::{ExpressionMethods, NullableExpressionMethods},
     models,
-    models::WebauthnRegistrationPasskey,
+    models::{AuthoredTemplate, WebauthnRegistrationPasskey},
     serialization::deserialize_json,
 };
 
@@ -862,6 +863,50 @@ impl WalletStoreReader for ReadTransaction<'_> {
                 Err(_) => None,
             })
             .collect::<Vec<Passkey>>())
+    }
+
+    fn authored_templates_exists_by_address(&mut self, address: &TemplateAddress) -> Result<bool, WalletStorageError> {
+        use crate::schema::authored_templates;
+        let address_hex = format!("{}", address);
+        let address_count = authored_templates::table
+            .filter(authored_templates::address.eq(address_hex))
+            .count()
+            .first::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general("webauthn_reg_fetch", e))?;
+        Ok(address_count > 0)
+    }
+
+    fn authored_templates_fetch_by_key_index(
+        &mut self,
+        key_index: u64,
+        page: u64,
+        page_size: u64,
+    ) -> Result<(Vec<AuthoredTemplateModel>, u64), WalletStorageError> {
+        use crate::schema::authored_templates;
+
+        let total_templates_for_key_index = authored_templates::table
+            .filter(authored_templates::key_index.eq(key_index as i32))
+            .count()
+            .first::<i64>(self.connection())
+            .map_err(|e| WalletStorageError::general("authored_templates_fetch_by_key_index", e))?;
+
+        let total_pages = total_templates_for_key_index / page_size as i64;
+
+        let templates = authored_templates::table
+            .filter(authored_templates::key_index.eq(key_index as i32))
+            .limit(page_size as i64)
+            .offset((page * page_size) as i64)
+            .select(AuthoredTemplate::as_select())
+            .load::<AuthoredTemplate>(self.connection())
+            .map_err(|e| WalletStorageError::general("authored_templates_fetch_by_key_index", e))?
+            .iter()
+            .filter_map(|model| match AuthoredTemplateModel::try_from(model) {
+                Ok(model) => Some(model),
+                Err(_) => None,
+            })
+            .collect::<Vec<AuthoredTemplateModel>>();
+
+        Ok((templates, total_pages as u64))
     }
 }
 

@@ -34,7 +34,7 @@ use tari_dan_common_types::{
 };
 use tari_dan_wallet_sdk::{
     apis::{confidential_transfer::ConfidentialTransferInputSelection, jwt::Claims, key_manager},
-    models::{Account, ConfidentialProofId, NonFungibleToken, TransactionStatus},
+    models::{Account, AuthoredTemplateModel, ConfidentialProofId, NonFungibleToken, TransactionStatus},
 };
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
@@ -45,7 +45,7 @@ use tari_engine_types::{
     TemplateAddress,
     ValidatorFeePoolAddress,
 };
-use tari_template_abi::TemplateDef;
+use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
     args::Arg,
     auth::ComponentAccessRules,
@@ -1265,6 +1265,61 @@ pub struct TemplatesGetRequest {
 )]
 pub struct TemplatesGetResponse {
     pub template_definition: TemplateDef,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct TemplatesListAuthoredRequest {
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub key_index: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub page: u64,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub page_size: u64,
+}
+
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AuthoredTemplate {
+    pub key_index: u64,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::string")]
+    pub address: TemplateAddress,
+    pub name: String,
+    pub tari_version: String,
+    pub functions: Vec<FunctionDef>,
+}
+
+impl From<&AuthoredTemplateModel> for AuthoredTemplate {
+    fn from(model: &AuthoredTemplateModel) -> Self {
+        AuthoredTemplate {
+            key_index: model.key_index,
+            address: model.address,
+            name: model.name.clone(),
+            tari_version: model.tari_version.clone(),
+            functions: model.functions.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct TemplatesListAuthoredResponse {
+    pub templates: Vec<AuthoredTemplate>,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub total_pages: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

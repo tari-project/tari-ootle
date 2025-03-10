@@ -1,0 +1,1 @@
+DROP TABLE owned_templates;

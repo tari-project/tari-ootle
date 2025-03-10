@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Navigate, Route, Routes } from "react-router-dom";
+import {Navigate, Route, Routes} from "react-router-dom";
 import Accounts from "./routes/Accounts/Accounts";
 import AccountDetails from "./routes/AccountDetails/AccountDetails";
 import Keys from "./routes/Keys/Keys";
@@ -32,13 +32,14 @@ import Transactions from "./routes/Transactions/TransactionsLayout";
 import TransactionDetails from "./routes/Transactions/TransactionDetails";
 import AssetVault from "./routes/AssetVault/AssetVault";
 import SettingsPage from "./routes/Settings/Settings";
-import Auth, { AUTH_TOKEN_FOR_NONE_AUTH } from "./routes/Auth/Auth";
+import Auth, {AUTH_TOKEN_FOR_NONE_AUTH} from "./routes/Auth/Auth";
 import Webauthn from "./routes/WebauthnRegistration/Webauthn";
 import useAuthStore from "./store/authStore";
-import { useEffect } from "react";
-import { useAuthMethod } from "./api/hooks/useAuth";
+import {useEffect} from "react";
+import {useAuthMethod} from "./api/hooks/useAuth";
 import AccessToken from "./routes/AccessToken/AccessToken";
-import { jwtDecode } from "jwt-decode";
+import {jwtDecode} from "jwt-decode";
+import Templates from "./routes/Templates/Templates";
 
 export const breadcrumbRoutes = [
   {
@@ -99,6 +100,11 @@ export const breadcrumbRoutes = [
   {
     label: "Settings",
     path: "/settings",
+    dynamic: false,
+  },
+  {
+    label: "Templates",
+    path: "/templates",
     dynamic: false,
   },
 ];
@@ -228,6 +234,10 @@ function App() {
           <Route
             path="settings"
             element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/settings" component={SettingsPage} />}
+          />
+          <Route
+              path="templates"
+              element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/templates" component={Templates} />}
           />
           <Route path="*" element={<ErrorPage />} />
         </Route>

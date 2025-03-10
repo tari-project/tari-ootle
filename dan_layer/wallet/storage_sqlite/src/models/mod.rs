@@ -23,8 +23,10 @@ mod non_fungible_tokens;
 
 pub use non_fungible_tokens::NonFungibleToken;
 
+mod authored_template;
 mod proof;
 mod webauthn_registrations;
+pub use authored_template::AuthoredTemplate;
 // Currently only used internally
 pub(crate) use proof::Proof;
 pub use webauthn_registrations::*;

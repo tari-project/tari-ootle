@@ -2,7 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_wallet_sdk::{apis::jwt::JrpcPermission, network::WalletNetworkInterface};
-use tari_wallet_daemon_client::types::{TemplatesGetRequest, TemplatesGetResponse};
+use tari_wallet_daemon_client::types::{
+    AuthoredTemplate,
+    TemplatesGetRequest,
+    TemplatesGetResponse,
+    TemplatesListAuthoredRequest,
+    TemplatesListAuthoredResponse,
+};
 
 use crate::handlers::HandlerContext;
 
@@ -20,4 +26,20 @@ pub async fn handle_get(
         .await?;
 
     Ok(TemplatesGetResponse { template_definition })
+}
+
+pub async fn handle_list_owned(
+    context: &HandlerContext,
+    token: Option<String>,
+    req: TemplatesListAuthoredRequest,
+) -> Result<TemplatesListAuthoredResponse, anyhow::Error> {
+    let (templates, total_pages) =
+        context
+            .wallet_sdk()
+            .template_api()
+            .list_authored_templates(req.key_index, req.page, req.page_size)?;
+    Ok(TemplatesListAuthoredResponse {
+        templates: templates.iter().map(AuthoredTemplate::from).collect(),
+        total_pages,
+    })
 }

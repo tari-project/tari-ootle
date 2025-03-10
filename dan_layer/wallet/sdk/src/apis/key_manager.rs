@@ -109,8 +109,8 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         &self,
         branch: &str,
         public_key: &PublicKey,
-        max_index: u64,
     ) -> Result<(u64, DerivedKey<RistrettoPublicKey>), KeyManagerApiError> {
+        let max_index = self.store.with_read_tx(|tx| tx.key_manager_get_last_index(branch))?;
         for index in 0..=max_index {
             let key = self.derive_key(branch, index)?;
             if &PublicKey::from_secret_key(&key.key) == public_key {

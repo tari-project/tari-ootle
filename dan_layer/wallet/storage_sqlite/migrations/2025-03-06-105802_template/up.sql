@@ -9,4 +9,3 @@ CREATE TABLE authored_templates
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX authored_templates_key_indexes ON authored_templates (key_index);

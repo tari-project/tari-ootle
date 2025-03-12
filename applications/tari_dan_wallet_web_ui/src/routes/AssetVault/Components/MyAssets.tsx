@@ -24,16 +24,9 @@ import Grid from "@mui/material/Grid";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
-import { useTheme } from "@mui/material/styles";
-import { useEffect } from "react";
-import { InnerHeading, StyledPaper } from "../../../Components/StyledComponents";
-import {
-  refreshAccountsBalances,
-  useAccountNFTsList,
-  useAccountsGet,
-  useAccountsGetBalances,
-  useAccountsGetDefault,
-} from "../../../api/hooks/useAccounts";
+import {useTheme} from "@mui/material/styles";
+import {InnerHeading, StyledPaper} from "../../../Components/StyledComponents";
+import {refreshAccountsBalances,} from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
 import Transactions from "../../Transactions/Transactions";
 import AccountBalance from "./AccountBalance";
@@ -41,10 +34,10 @@ import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
 import SelectAccount from "./SelectAccount";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
-import { substateIdToString } from "@tari-project/typescript-bindings";
-import { Button } from "@mui/material";
-import { Refresh } from "@mui/icons-material";
+import {substateIdToString} from "@tari-project/typescript-bindings";
+import {Button} from "@mui/material";
+import {Refresh} from "@mui/icons-material";
+import Templates from "../../Templates/Templates";
 
 function MyAssets() {
   const theme = useTheme();
@@ -116,6 +109,12 @@ function MyAssets() {
           <AccountDetails />
         </StyledPaper>
       </Grid>
+        <Grid item xs={12} md={12} lg={12}>
+            <StyledPaper>
+                <InnerHeading>Templates</InnerHeading>
+                <Templates props={{account: account}} />
+            </StyledPaper>
+        </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
           <InnerHeading>

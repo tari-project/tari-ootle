@@ -888,9 +888,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .filter(authored_templates::key_index.eq(key_index as i32))
             .count()
             .first::<i64>(self.connection())
-            .map_err(|e| WalletStorageError::general("authored_templates_fetch_by_key_index", e))?;
-
-        let total_pages = total_templates_for_key_index / page_size as i64;
+            .map_err(|e| WalletStorageError::general("count_authored_templates_fetch_by_key_index", e))?;
 
         let templates = authored_templates::table
             .filter(authored_templates::key_index.eq(key_index as i32))
@@ -906,7 +904,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             })
             .collect::<Vec<AuthoredTemplateModel>>();
 
-        Ok((templates, total_pages as u64))
+        Ok((templates, total_templates_for_key_index as u64))
     }
 }
 

@@ -7,6 +7,7 @@ import {useAccountsList} from "../../api/hooks/useAccounts";
 import InputLabel from "@mui/material/InputLabel";
 import Select, {SelectChangeEvent} from "@mui/material/Select/Select";
 import {
+    Account,
     AccountInfo,
     ArgDef,
     AuthoredTemplate,
@@ -58,42 +59,55 @@ function getTypeAsString(funcType: FuncType): any {
     return "Unknown";
 }
 
-function Templates() {
+export interface TemplatesProps {
+    account?: Account,
+}
+
+function Templates({ props }: { props: TemplatesProps }) {
     const [page, setPage] = useState(0);
+    const [templatesCount, setTemplatesCount] = useState(0);
     const [keyIndex, setKeyIndex] = useState(0);
-    const [maxPage, setMaxPage] = useState(0);
     const [account, setAccount] = useState("");
     const [open, setOpen] = useState<boolean[]>([]);
-    const [rowsPerPage, setRowsPerPage] = useState(2);
+    const [rowsPerPage, setRowsPerPage] = useState(10);
+    const theme = useTheme();
     const {
         data: templatesResponse,
     } = useListTemplatesAuthored({key_index: keyIndex, page: page, page_size: rowsPerPage});
-    const theme = useTheme();
 
     const {
         data: dataAccountsList,
     } = useAccountsList(0, 10);
 
+    useEffect(() => {
+        if (props && props.account) {
+            setAccount(props.account.key_index.toString());
+            setKeyIndex(props.account.key_index);
+        }
+    }, [props]);
+
     const onAccountChange = (e: SelectChangeEvent<string>) => {
         const newKeyIndex: number = +e.target.value;
         setKeyIndex(newKeyIndex);
+        console.log("target value:", e.target.value);
         setAccount(e.target.value);
     };
 
     useEffect(() => {
-        if (templatesResponse) {
-            if (templatesResponse.templates.length > 0) {
+        if (templatesResponse && templatesResponse.templates.length > 0) {
                 let opens = new Array<boolean>(templatesResponse.templates.length);
                 opens.fill(false);
                 setOpen(opens);
-            }
+                setTemplatesCount(templatesResponse.total_templates);
         }
     }, [templatesResponse]);
 
     return (
         <Grid item xs={12} md={12} lg={12}>
-            <h2>Templates</h2>
-        <FormControl>
+            {!props || !props.account ? <h2>Templates</h2> : null}
+
+            {!props || !props.account ?
+                <FormControl>
         <InputLabel id="account">Account</InputLabel>
         <Select
             labelId="account"
@@ -114,10 +128,11 @@ function Templates() {
                 );
             })}
         </Select>
-        </FormControl>
+        </FormControl> : null}
 
         {account ?
-            (<TableContainer>
+            (<Grid item xs={12} md={12} lg={12}>
+            <TableContainer>
             <Table>
                 <TableHead>
                     <TableRow>
@@ -131,7 +146,7 @@ function Templates() {
                     {templatesResponse?.templates.map((template: AuthoredTemplate, index: number) => {
                         return (
                             <>
-                            <TableRow key={`${index}-1`}>
+                            <TableRow key={`template-${index}-1`}>
                                 <DataTableCell>
                                     <CopyAddress address={template.address} />
                                 </DataTableCell>
@@ -163,7 +178,7 @@ function Templates() {
                                 </TableCell>
                             </TableRow>
                             {open[index] ?
-                                <TableRow key={`${index}-2`}>
+                                <TableRow key={`template-${index}-open`}>
                                     <DataTableCell
                                         style={{
                                             paddingBottom: theme.spacing(1),
@@ -207,9 +222,9 @@ function Templates() {
                                                                                                 </TableRow>
                                                                                             </TableHead>
                                                                                             <TableBody>
-                                                                                                {funcDef.arguments.map((arg: ArgDef) => {
+                                                                                                {funcDef.arguments.map((arg: ArgDef, index: number) => {
                                                                                                     return (
-                                                                                                        <TableRow>
+                                                                                                        <TableRow key={index}>
                                                                                                             <TableCell>{arg.name}</TableCell>
                                                                                                             <TableCell>{getTypeAsString(arg.arg_type)}</TableCell>
                                                                                                         </TableRow>
@@ -236,19 +251,21 @@ function Templates() {
                             </>
                         )
                     })}
-                    {/*TODO: let JRPC call return not the number of pages but the count of all templates for this key index to make the page calculation good*/}
-                    <TablePagination
-                        rowsPerPageOptions={[10, 25, 50]}
-                        component="div"
-                        count={(templatesResponse?.total_pages + 1) * rowsPerPage}
-                        rowsPerPage={rowsPerPage}
-                        page={page}
-                        onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
-                        onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
-                    />
                 </TableBody>
             </Table>
-        </TableContainer>) : null }
+        </TableContainer>
+                    <Grid item xs={12} md={12} lg={12}>
+                        <TablePagination
+                            rowsPerPageOptions={[10, 25, 50]}
+                            component="div"
+                            count={templatesCount}
+                            rowsPerPage={rowsPerPage}
+                            page={page}
+                            onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
+                            onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
+                        />
+                    </Grid>
+            </Grid>) : null }
         </Grid>
     );
 }

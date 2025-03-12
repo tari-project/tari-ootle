@@ -1319,7 +1319,7 @@ impl From<&AuthoredTemplateModel> for AuthoredTemplate {
 pub struct TemplatesListAuthoredResponse {
     pub templates: Vec<AuthoredTemplate>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub total_pages: u64,
+    pub total_templates: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

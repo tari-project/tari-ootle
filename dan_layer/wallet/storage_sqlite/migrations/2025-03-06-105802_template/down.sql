@@ -1,1 +1,1 @@
-DROP TABLE owned_templates;
+DROP TABLE authored_templates;

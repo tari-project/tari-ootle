@@ -872,7 +872,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .filter(authored_templates::address.eq(address_hex))
             .count()
             .first::<i64>(self.connection())
-            .map_err(|e| WalletStorageError::general("webauthn_reg_fetch", e))?;
+            .map_err(|e| WalletStorageError::general("authored_templates_exists_by_address", e))?;
         Ok(address_count > 0)
     }
 

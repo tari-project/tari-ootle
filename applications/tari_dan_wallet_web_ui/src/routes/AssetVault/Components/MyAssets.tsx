@@ -37,7 +37,6 @@ import SelectAccount from "./SelectAccount";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import { Button } from "@mui/material";
 import { Refresh } from "@mui/icons-material";
-import Templates from "../../Templates/Templates";
 
 function MyAssets() {
   const theme = useTheme();
@@ -107,12 +106,6 @@ function MyAssets() {
         <StyledPaper>
           <InnerHeading>Account Details</InnerHeading>
           <AccountDetails />
-        </StyledPaper>
-      </Grid>
-      <Grid item xs={12} md={12} lg={12}>
-        <StyledPaper>
-          <InnerHeading>Templates</InnerHeading>
-          <Templates props={{ account: account }} />
         </StyledPaper>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>

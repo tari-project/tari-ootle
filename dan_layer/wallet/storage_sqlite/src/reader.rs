@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, convert::Infallible, str::FromStr, sync::MutexGuard};
+use std::{collections::HashMap, str::FromStr, sync::MutexGuard};
 
 use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{

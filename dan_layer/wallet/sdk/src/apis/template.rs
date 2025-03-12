@@ -11,8 +11,6 @@ use crate::{
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
-const LOG_TARGET: &str = "tari::dan::wallet_sdk::apis::template";
-
 pub struct TemplateApi<'a, TStore, TNetworkInterface> {
     store: &'a TStore,
     network_interface: &'a TNetworkInterface,

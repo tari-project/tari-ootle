@@ -89,7 +89,6 @@ function Templates({ props }: { props: TemplatesProps }) {
   const onAccountChange = (e: SelectChangeEvent<string>) => {
     const newKeyIndex: number = +e.target.value;
     setKeyIndex(newKeyIndex);
-    console.log("target value:", e.target.value);
     setAccount(e.target.value);
   };
 

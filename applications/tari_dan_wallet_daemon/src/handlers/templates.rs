@@ -30,7 +30,7 @@ pub async fn handle_get(
 
 pub async fn handle_list_owned(
     context: &HandlerContext,
-    token: Option<String>,
+    _token: Option<String>,
     req: TemplatesListAuthoredRequest,
 ) -> Result<TemplatesListAuthoredResponse, anyhow::Error> {
     let (templates, total_templates) =

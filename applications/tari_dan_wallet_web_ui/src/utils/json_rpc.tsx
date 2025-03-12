@@ -83,7 +83,7 @@ import type {
   WebRtcStartRequest,
   WebRtcStartResponse,
 } from "@tari-project/wallet_jrpc_client";
-import {WalletDaemonClient} from "@tari-project/wallet_jrpc_client";
+import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import {
   GetValidatorFeesRequest,
   GetValidatorFeesResponse,
@@ -99,7 +99,7 @@ import {
   WebauthnStartRegisterResponse,
 } from "@tari-project/typescript-bindings";
 import useAuthStore from "../store/authStore";
-import {AUTH_TOKEN_FOR_NONE_AUTH} from "../routes/Auth/Auth";
+import { AUTH_TOKEN_FOR_NONE_AUTH } from "../routes/Auth/Auth";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -307,4 +307,4 @@ export const templatesGet = (request: TemplatesGetRequest): Promise<TemplatesGet
   client().then((c) => c.templatesGet(request));
 
 export const templatesListAuthored = (request: TemplatesListAuthoredRequest): Promise<TemplatesListAuthoredResponse> =>
-    client().then((c) => c.templatesListAuthored(request));
+  client().then((c) => c.templatesListAuthored(request));

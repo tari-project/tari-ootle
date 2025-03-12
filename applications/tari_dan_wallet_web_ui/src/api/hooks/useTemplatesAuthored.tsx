@@ -1,10 +1,10 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-import {useQuery} from "@tanstack/react-query";
-import {ApiError} from "../helpers/types";
-import {templatesListAuthored} from "../../utils/json_rpc";
-import {TemplatesListAuthoredRequest} from "@tari-project/typescript-bindings";
+import { useQuery } from "@tanstack/react-query";
+import { ApiError } from "../helpers/types";
+import { templatesListAuthored } from "../../utils/json_rpc";
+import { TemplatesListAuthoredRequest } from "@tari-project/typescript-bindings";
 
 export const useListTemplatesAuthored = (request: TemplatesListAuthoredRequest) => {
   return useQuery({

@@ -443,6 +443,10 @@ impl Block {
         self.block_time
     }
 
+    pub fn set_block_time(&mut self, block_time: Option<u64>) {
+        self.block_time = block_time;
+    }
+
     pub fn timestamp(&self) -> u64 {
         self.header.timestamp()
     }
@@ -477,6 +481,14 @@ impl Block {
             "Value not found in proof. This is a bug because the hash is taken from commands that generate the tree",
         );
         Ok(proof)
+    }
+
+    pub fn set_is_justified(&mut self, is_justified: bool) {
+        self.is_justified = is_justified;
+    }
+
+    pub fn set_is_committed(&mut self, is_committed: bool) {
+        self.is_committed = is_committed;
     }
 }
 

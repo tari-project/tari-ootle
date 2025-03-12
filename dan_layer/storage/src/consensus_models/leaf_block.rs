@@ -22,6 +22,7 @@
 
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{Epoch, NodeHeight};
 
 use crate::{
@@ -31,7 +32,7 @@ use crate::{
     StorageError,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeafBlock {
     pub block_id: BlockId,
     pub height: NodeHeight,

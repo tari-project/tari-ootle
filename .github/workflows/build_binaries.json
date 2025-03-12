@@ -9,10 +9,10 @@
   },
   {
     "name": "linux-arm64",
-    "runs-on": "ubuntu-20.04",
+    "runs-on": "ubuntu-22.04-arm",
     "rust": "1.77",
     "target": "aarch64-unknown-linux-gnu",
-    "cross": true,
+    "cross": false,
     "flags": "--workspace --exclude tari_integration_tests",
     "build_enabled": true,
     "best_effort": true

@@ -10,7 +10,7 @@ use std::{
 };
 
 use log::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
@@ -231,7 +231,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 }
 
 // Ord: ensure that the enum variants are ordered in the order of their progression
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -341,7 +341,7 @@ impl FromStr for TransactionPoolConfirmedStage {
 #[error("Invalid TransactionPoolConfirmedStage string '{0}'")]
 pub struct TransactionPoolConfirmedStageFromStrErr(String);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
@@ -468,6 +468,10 @@ impl TransactionPoolRecord {
         self.pending_stage.unwrap_or(self.stage)
     }
 
+    pub fn stage(&self) -> TransactionPoolStage {
+        self.stage
+    }
+
     pub fn leader_fee(&self) -> Option<&LeaderFee> {
         if self.current_decision().is_abort() {
             return None;
@@ -577,6 +581,21 @@ impl TransactionPoolRecord {
 
     pub fn set_leader_fee(&mut self, leader_fee: LeaderFee) -> &mut Self {
         self.leader_fee = Some(leader_fee);
+        self
+    }
+
+    pub fn set_is_ready(&mut self, is_ready: bool) -> &mut Self {
+        self.is_ready = is_ready;
+        self
+    }
+
+    pub fn set_pending_stage(&mut self, pending_stage: Option<TransactionPoolStage>) -> &mut Self {
+        self.pending_stage = pending_stage;
+        self
+    }
+
+    pub fn set_stage(&mut self, stage: TransactionPoolStage) -> &mut Self {
+        self.stage = stage;
         self
     }
 

@@ -192,6 +192,10 @@ impl QuorumCertificate {
             epoch: self.epoch,
         }
     }
+
+    pub fn set_is_shares_processed(&mut self, is_shared_processed: bool) {
+        self.is_shares_processed = is_shared_processed;
+    }
 }
 
 impl QuorumCertificate {

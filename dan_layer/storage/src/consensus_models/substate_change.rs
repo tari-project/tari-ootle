@@ -3,12 +3,13 @@
 
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, SubstateAddress, ToSubstateAddress, VersionedSubstateId};
 use tari_engine_types::substate::Substate;
 use tari_state_tree::SubstateTreeChange;
 use tari_transaction::TransactionId;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateChange {
     Up {
         id: VersionedSubstateId,

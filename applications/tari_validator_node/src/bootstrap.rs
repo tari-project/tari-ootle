@@ -181,10 +181,12 @@ pub async fn spawn_services(
     info!(target: LOG_TARGET, "Message logging initializing");
 
     info!(target: LOG_TARGET, "State store initializing");
+
+    let sidechain_id = config.validator_node.validator_node_sidechain_id.clone();
+
     // Connect to shard db
     let state_store =
         SqliteStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path().display()))?;
-    let sidechain_id = config.validator_node.validator_node_sidechain_id.clone();
     state_store.with_write_tx(|tx| {
         bootstrap_state(
             tx,

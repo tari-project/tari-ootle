@@ -3,11 +3,12 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{optional::Optional, shard::Shard, ShardGroup};
 
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignReceiveCounters {
     pub counters: HashMap<Shard, u64>,
 }

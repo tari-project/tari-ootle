@@ -4,6 +4,7 @@
 use std::fmt::Display;
 
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, Epoch};
 use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash, SPARSE_MERKLE_PLACEHOLDER_HASH};
 
@@ -14,7 +15,7 @@ use crate::{
     StorageError,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpochCheckpoint {
     block: Block,
     linked_qcs: Vec<QuorumCertificate>,

@@ -105,7 +105,7 @@ impl Display for BlockPledge {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstatePledge {
     Input {
         substate_id: VersionedSubstateId,

@@ -436,23 +436,21 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     };
 
                     let address = if with_call_frame {
-                        state.id_provider()?.new_component_address(derived_address)?
+                        state.id_provider()?
                     } else {
-                        state
-                            .id_provider_no_call_frame(self.next_entity_id()?)?
-                            .new_component_address(derived_address)?
-                    };
+                        state.id_provider_no_call_frame(self.next_entity_id()?)?
+                    }
+                    .new_component_address(derived_address)?;
                     let allocation = state.new_address_allocation(address)?;
                     Ok(AllocateAddressResult::ComponentAddress(allocation))
                 },
                 SubstateType::Resource => {
                     let address = if with_call_frame {
-                        state.id_provider()?.new_resource_address()?
+                        state.id_provider()?
                     } else {
-                        state
-                            .id_provider_no_call_frame(self.next_entity_id()?)?
-                            .new_resource_address()?
-                    };
+                        state.id_provider_no_call_frame(self.next_entity_id()?)?
+                    }
+                    .new_resource_address()?;
                     let allocation = state.new_address_allocation(address)?;
                     Ok(AllocateAddressResult::ResourceAddress(allocation))
                 },

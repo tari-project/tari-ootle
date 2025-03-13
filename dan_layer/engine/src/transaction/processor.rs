@@ -42,7 +42,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     arg,
     args,
-    args::{AllocateAddressResult, Arg, CallerContextAction, InvokeResult, SubstateType, WorkspaceAction},
+    args::{AllocateAddressResult, Arg, SubstateType, WorkspaceAction},
     auth::OwnerRule,
     crypto::RistrettoPublicKeyBytes,
     invoke_args,
@@ -57,7 +57,6 @@ use crate::{
         scope::{CallScope, PushCallFrame},
         AuthParams,
         AuthorizationScope,
-        EngineArgs,
         Runtime,
         RuntimeInterfaceImpl,
         RuntimeModule,
@@ -380,12 +379,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         substate_type: SubstateType,
         workspace_id: T,
     ) -> Result<InstructionResult, TransactionError> {
-        let resp: InvokeResult = runtime.interface().caller_context_invoke(
-            CallerContextAction::AllocateAddress,
-            EngineArgs::from(invoke_args![substate_type, Option::<RistrettoPublicKeyBytes>::None]),
-        )?;
-
-        let result: AllocateAddressResult = resp.decode()?;
+        let result = runtime.interface().allocate_address(substate_type, None)?;
         let result_name: String;
 
         let indexed_value = match result {

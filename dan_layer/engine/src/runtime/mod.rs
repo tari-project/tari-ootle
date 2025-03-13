@@ -65,6 +65,7 @@ use tari_engine_types::{
 };
 use tari_template_lib::{
     args::{
+        AllocateAddressResult,
         Arg,
         BucketAction,
         BucketRef,
@@ -82,11 +83,13 @@ use tari_template_lib::{
         ProofRef,
         ResourceAction,
         ResourceRef,
+        SubstateType,
         VaultAction,
         WorkspaceAction,
     },
     invoke_args,
     models::{ComponentAddress, EntityId, Metadata, NonFungibleAddress, VaultRef},
+    prelude::RistrettoPublicKeyBytes,
 };
 pub use tracker::StateTracker;
 
@@ -180,6 +183,12 @@ pub trait RuntimeInterface: Send + Sync {
     fn push_call_frame(&self, frame: PushCallFrame) -> Result<(), RuntimeError>;
     fn pop_call_frame(&self) -> Result<(), RuntimeError>;
     fn publish_template(&self, template: Vec<u8>) -> Result<(), RuntimeError>;
+
+    fn allocate_address(
+        &self,
+        substate_type: SubstateType,
+        public_key: Option<RistrettoPublicKeyBytes>,
+    ) -> Result<AllocateAddressResult, RuntimeError>;
 }
 
 #[derive(Clone)]

@@ -52,6 +52,7 @@ use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRE
 use tari_template_lib::{
     args,
     args::{
+        AllocateAddressResult,
         Arg,
         BucketAction,
         BucketRef,
@@ -402,6 +403,63 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         Ok(())
     }
+
+    /// Allocating an address for the given [`SubstateType`] using current call frame or not.
+    fn allocate_address_with_call_frame_opt(
+        &self,
+        with_call_frame: bool,
+        substate_type: SubstateType,
+        public_key_address: Option<RistrettoPublicKeyBytes>,
+    ) -> Result<AllocateAddressResult, RuntimeError> {
+        self.tracker.write_with(|state| {
+            let public_key_address = public_key_address
+                .map(|pk| {
+                    RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| RuntimeError::InvalidArgument {
+                        argument: "public_key_address",
+                        reason: "Invalid RistrettoPublicKeyBytes".to_string(),
+                    })
+                })
+                .transpose()?;
+
+            match substate_type {
+                SubstateType::Component => {
+                    let current_template = state.current_template().ok().map(|(addr, _)| *addr);
+                    let derived_address = if let (Some(template_address), Some(public_key_address)) =
+                        (current_template, public_key_address)
+                    {
+                        Some(DerivedComponentAddress {
+                            template_address,
+                            public_key_address,
+                        })
+                    } else {
+                        None
+                    };
+
+                    let address = if with_call_frame {
+                        state.id_provider()?.new_component_address(derived_address)?
+                    } else {
+                        state
+                            .id_provider_no_call_frame(self.next_entity_id()?)?
+                            .new_component_address(derived_address)?
+                    };
+                    let allocation = state.new_address_allocation(address)?;
+                    Ok(AllocateAddressResult::ComponentAddress(allocation))
+                },
+                SubstateType::Resource => {
+                    let address = if with_call_frame {
+                        state.id_provider()?.new_resource_address()?
+                    } else {
+                        state
+                            .id_provider_no_call_frame(self.next_entity_id()?)?
+                            .new_resource_address()?
+                    };
+                    let allocation = state.new_address_allocation(address)?;
+                    Ok(AllocateAddressResult::ResourceAddress(allocation))
+                },
+                _ => Err(RuntimeError::AddressAllocationUnsupportedSubstateType { substate_type }),
+            }
+        })
+    }
 }
 
 impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInterface
@@ -488,55 +546,19 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     .map(|l| l.address().as_component_address().unwrap());
                 Ok(InvokeResult::encode(&maybe_address)?)
             }),
-            CallerContextAction::AllocateAddress => self.tracker.write_with(|state| {
+            CallerContextAction::AllocateAddress => {
                 args.assert_n_args::<SubstateType>(2)?;
                 let substate_type: SubstateType = args.get(0)?;
                 let public_key_address: Option<RistrettoPublicKeyBytes> = args.get(1)?;
-                let public_key_address = public_key_address
-                    .map(|pk| {
-                        RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| {
-                            RuntimeError::InvalidArgument {
-                                argument: "public_key_address",
-                                reason: "Invalid RistrettoPublicKeyBytes".to_string(),
-                            }
-                        })
-                    })
-                    .transpose()?;
-
-                match substate_type {
-                    SubstateType::Component => {
-                        let current_template = state.current_template().ok().map(|(addr, _)| *addr);
-                        let derived_address = if let (Some(template_address), Some(public_key_address)) =
-                            (current_template, public_key_address)
-                        {
-                            Some(DerivedComponentAddress {
-                                template_address,
-                                public_key_address,
-                            })
-                        } else {
-                            None
-                        };
-
-                        let address = state
-                            .id_provider_no_call_frame(self.next_entity_id()?)?
-                            .new_component_address(derived_address)?;
-                        let allocation = state.new_address_allocation(address)?;
-                        Ok(InvokeResult::encode(&args::AllocateAddressResult::ComponentAddress(
-                            allocation,
-                        ))?)
-                    },
-                    SubstateType::Resource => {
-                        let address = state
-                            .id_provider_no_call_frame(self.next_entity_id()?)?
-                            .new_resource_address()?;
-                        let allocation = state.new_address_allocation(address)?;
-                        Ok(InvokeResult::encode(&args::AllocateAddressResult::ResourceAddress(
-                            allocation,
-                        ))?)
-                    },
-                    _ => Err(RuntimeError::AddressAllocationUnsupportedSubstateType { substate_type }),
+                match self.allocate_address_with_call_frame_opt(true, substate_type, public_key_address)? {
+                    AllocateAddressResult::ComponentAddress(allocation) => Ok(InvokeResult::encode(
+                        &AllocateAddressResult::ComponentAddress(allocation),
+                    )?),
+                    AllocateAddressResult::ResourceAddress(allocation) => Ok(InvokeResult::encode(
+                        &AllocateAddressResult::ResourceAddress(allocation),
+                    )?),
                 }
-            }),
+            },
         }
     }
 
@@ -2405,6 +2427,15 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
             Ok(())
         })
+    }
+
+    /// Allocating an address without expecting a call frame.
+    fn allocate_address(
+        &self,
+        substate_type: SubstateType,
+        public_key_address: Option<RistrettoPublicKeyBytes>,
+    ) -> Result<AllocateAddressResult, RuntimeError> {
+        self.allocate_address_with_call_frame_opt(false, substate_type, public_key_address)
     }
 }
 

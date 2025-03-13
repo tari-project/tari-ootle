@@ -33,7 +33,7 @@ import { useTheme } from "@mui/material/styles";
 import { SlCheck, SlClose } from "react-icons/sl";
 import { handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
 
-function getTypeAsString(funcType: FuncType): any {
+function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {
     return funcType;
   }
@@ -42,16 +42,14 @@ function getTypeAsString(funcType: FuncType): any {
   if (funcTypeKeys.length > 0) {
     switch (funcTypeKeys[0]) {
       case "Vec": {
-        // @ts-ignore
-        return getTypeAsString(funcType["Vec"]);
+        return getTypeAsString(funcType["Vec" as keyof typeof funcType]);
       }
       case "Tuple": {
-        // @ts-ignore
-        return JSON.stringify(funcType["Tuple"]);
+        return JSON.stringify(funcType["Tuple" as keyof typeof funcType]);
       }
       case "Other": {
-        // @ts-ignore
-        return funcType["Other"]["name"];
+        const other = funcType["Other" as keyof typeof funcType] as { name: string };
+        return other.name;
       }
     }
   }
@@ -63,7 +61,7 @@ export interface TemplatesProps {
   account?: Account;
 }
 
-function Templates({ props }: { props: TemplatesProps }) {
+function Templates(props: TemplatesProps) {
   const [page, setPage] = useState(0);
   const [templatesCount, setTemplatesCount] = useState(0);
   const [keyIndex, setKeyIndex] = useState(0);
@@ -80,14 +78,18 @@ function Templates({ props }: { props: TemplatesProps }) {
   const { data: dataAccountsList } = useAccountsList(0, 10);
 
   useEffect(() => {
-    if (props && props.account) {
+    if (props?.account) {
       setAccount(props.account.key_index.toString());
       setKeyIndex(props.account.key_index);
     }
   }, [props]);
 
   const onAccountChange = (e: SelectChangeEvent<string>) => {
-    const newKeyIndex: number = +e.target.value;
+    const newKeyIndex: number = parseInt(e.target.value, 10);
+    if (isNaN(newKeyIndex)) {
+      console.error("Invalid account key index:", e.target.value);
+      return;
+    }
     setKeyIndex(newKeyIndex);
     setAccount(e.target.value);
   };
@@ -158,13 +160,7 @@ function Templates({ props }: { props: TemplatesProps }) {
                             size="small"
                             onClick={() => {
                               if (open) {
-                                let newOpen: boolean[] = [];
-                                open.forEach((value, idx) => {
-                                  if (idx == index) {
-                                    value = !value;
-                                  }
-                                  newOpen[idx] = value;
-                                });
+                                const newOpen = open.map((value, idx) => (idx === index ? !value : value));
                                 setOpen(newOpen);
                               }
                             }}

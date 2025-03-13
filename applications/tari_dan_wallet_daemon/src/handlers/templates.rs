@@ -30,9 +30,12 @@ pub async fn handle_get(
 
 pub async fn handle_list_owned(
     context: &HandlerContext,
-    _token: Option<String>,
+    token: Option<String>,
     req: TemplatesListAuthoredRequest,
 ) -> Result<TemplatesListAuthoredResponse, anyhow::Error> {
+    let sdk = context.wallet_sdk().clone();
+    sdk.jwt_api().check_auth(token, &[JrpcPermission::TemplatesRead])?;
+
     let (templates, total_templates) =
         context
             .wallet_sdk()

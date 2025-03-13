@@ -518,7 +518,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         };
 
                         let address = state
-                            .id_provider_no_call_frame()?
+                            .id_provider_no_call_frame(self.next_entity_id()?)?
                             .new_component_address(derived_address)?;
                         let allocation = state.new_address_allocation(address)?;
                         Ok(InvokeResult::encode(&args::AllocateAddressResult::ComponentAddress(
@@ -526,7 +526,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ))?)
                     },
                     SubstateType::Resource => {
-                        let address = state.id_provider_no_call_frame()?.new_resource_address()?;
+                        let address = state
+                            .id_provider_no_call_frame(self.next_entity_id()?)?
+                            .new_resource_address()?;
                         let allocation = state.new_address_allocation(address)?;
                         Ok(InvokeResult::encode(&args::AllocateAddressResult::ResourceAddress(
                             allocation,

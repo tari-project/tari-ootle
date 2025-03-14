@@ -1,13 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{sync::Arc, time::Duration};
-
-use tari_common::configuration::Network;
-use tari_crypto::tari_utilities::SafePassword;
-use tari_dan_common_types::optional::{IsNotFoundError, Optional};
-use tari_key_manager::cipher_seed::CipherSeed;
-
 use crate::{
     apis::{
         accounts::AccountsApi,
@@ -24,6 +17,17 @@ use crate::{
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
+use keyring::Entry;
+use std::str::FromStr;
+use std::{sync::Arc, time::Duration};
+use tari_common::configuration::Network;
+use tari_crypto::tari_utilities::SafePassword;
+use tari_dan_common_types::optional::{IsNotFoundError, Optional};
+use tari_key_manager::cipher_seed::CipherSeed;
+use tari_key_manager::error::KeyManagerError;
+
+const KEYRING_ENTRIES_SERVICE: &str = "tari-ootle-wallet-sdk";
+const CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME: &str = "cipher-seed-password";
 
 #[derive(Debug, Clone)]
 pub struct WalletSdkConfig {
@@ -42,7 +46,7 @@ pub struct DanWalletSdk<TStore, TNetworkInterface> {
     store: TStore,
     network_interface: TNetworkInterface,
     config: WalletSdkConfig,
-    cipher_seed: Arc<CipherSeed>,
+    cipher_seed: Arc<Option<CipherSeed>>,
 }
 
 impl<TStore, TNetworkInterface> DanWalletSdk<TStore, TNetworkInterface>
@@ -57,7 +61,7 @@ where
         indexer: TNetworkInterface,
         config: WalletSdkConfig,
     ) -> Result<Self, WalletSdkError> {
-        let cipher_seed = Self::get_or_create_cipher_seed(&store)?;
+        let cipher_seed = Self::cipher_seed(&store)?;
 
         let config_api = ConfigApi::new(&store);
         if !config_api.exists(ConfigKey::Network)? {
@@ -88,8 +92,14 @@ where
         &mut self.network_interface
     }
 
-    pub fn key_manager_api(&self) -> KeyManagerApi<'_, TStore> {
-        KeyManagerApi::new(&self.store, &self.cipher_seed)
+    pub fn key_manager_api(&self) -> Result<KeyManagerApi<'_, TStore>, WalletSdkError> {
+        if let Some(cipher_seed) = &self.cipher_seed.as_ref() {
+            return Ok(
+                KeyManagerApi::new(&self.store, cipher_seed)
+            );
+        }
+
+        Err(WalletSdkError::NoCipherSeed)
     }
 
     pub fn transaction_api(&self) -> TransactionApi<'_, TStore, TNetworkInterface> {
@@ -112,23 +122,27 @@ where
         JwtApi::new(&self.store, self.config.jwt_expiry, self.config.jwt_secret_key.clone())
     }
 
-    pub fn confidential_outputs_api(&self) -> ConfidentialOutputsApi<'_, TStore> {
-        ConfidentialOutputsApi::new(
+    pub fn confidential_outputs_api(&self) -> Result<ConfidentialOutputsApi<'_, TStore>, WalletSdkError> {
+        Ok(
+            ConfidentialOutputsApi::new(
             &self.store,
-            self.key_manager_api(),
+            self.key_manager_api()?,
             self.accounts_api(),
             self.confidential_crypto_api(),
         )
+        )
     }
 
-    pub fn confidential_transfer_api(&self) -> ConfidentialTransferApi<'_, TStore, TNetworkInterface> {
-        ConfidentialTransferApi::new(
-            self.key_manager_api(),
+    pub fn confidential_transfer_api(&self) -> Result<ConfidentialTransferApi<'_, TStore, TNetworkInterface>, WalletSdkError> {
+        Ok(
+            ConfidentialTransferApi::new(
+            self.key_manager_api()?,
             self.accounts_api(),
-            self.confidential_outputs_api(),
+            self.confidential_outputs_api()?,
             self.substate_api(),
             self.confidential_crypto_api(),
             self.config_api(),
+        )
         )
     }
 
@@ -136,18 +150,45 @@ where
         NonFungibleTokensApi::new(&self.store)
     }
 
-    fn get_or_create_cipher_seed(store: &TStore) -> Result<CipherSeed, WalletSdkError> {
+    /// Tries to get encrypted cipher seed from DB and decrypts it using OS keyring if possible.
+    fn cipher_seed(store: &TStore) -> Result<Option<CipherSeed>, WalletSdkError> {
         let config_api = ConfigApi::new(store);
-        let maybe_cipher_seed = config_api.get(ConfigKey::CipherSeed).optional()?;
-
-        match maybe_cipher_seed {
-            Some(cipher_seed) => Ok(cipher_seed),
-            None => {
-                let cipher_seed = CipherSeed::new();
-                config_api.set(ConfigKey::CipherSeed, &cipher_seed, true)?;
-                Ok(cipher_seed)
-            },
+        let cipher_seed_encrypted: Option<Vec<u8>> = config_api.get(ConfigKey::CipherSeed).optional()?;
+        if cipher_seed_encrypted.is_none() {
+            return Ok(None);
         }
+        let cipher_seed_encrypted = cipher_seed_encrypted.unwrap();
+        let entry = Entry::new(KEYRING_ENTRIES_SERVICE, CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME)?;
+        match entry.get_password() {
+            Ok(raw_password) => {
+                let password = SafePassword::from_str(raw_password.as_str())
+                    .map_err(|_| WalletSdkError::SafePassword)?;
+                let cipher_seed = CipherSeed::from_enciphered_bytes(&cipher_seed_encrypted, Some(password))?;
+                Ok(Some(cipher_seed))
+            }
+            Err(keyring::Error::NoEntry) => {
+                // if we have no entry found in OS keyring it means that,
+                // we did not create the cipher seed yet, so it's not an error
+                Ok(None)
+            }
+            Err(error) => {
+                Err(error.into())
+            }
+        }
+    }
+
+    // TODO: finish impl
+    fn create_cipher_seed(&mut self, store: &TStore) -> Result<CipherSeed, WalletSdkError> {
+        let config_api = ConfigApi::new(store);
+        let cipher_seed = CipherSeed::new();
+        let password = SafePassword::from_str("test")
+            .map_err(|_| WalletSdkError::SafePassword)?;
+        // TODO: generate real random password
+        // TODO: save password to OS keyring
+        let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
+        config_api.set(ConfigKey::CipherSeed, &encrypted_cipher_seed, true)?;
+        // TODO: set current cipher_seed to the new one
+        Ok(cipher_seed)
     }
 }
 
@@ -157,4 +198,12 @@ pub enum WalletSdkError {
     WalletStorageError(#[from] WalletStorageError),
     #[error("Config API error: {0}")]
     ConfigApiError(#[from] ConfigApiError),
+    #[error("OS Keyring error: {0}")]
+    KeyRing(#[from] keyring::Error),
+    #[error("Key manager error: {0}")]
+    KeyManager(#[from] KeyManagerError),
+    #[error("Failed to get safe password")]
+    SafePassword,
+    #[error("No cipher seed present")]
+    NoCipherSeed,
 }

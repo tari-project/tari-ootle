@@ -34,7 +34,8 @@ serde = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 webauthn-rs = { workspace = true }
-keyring = "3.6.2"
+keyring = { version = "3.6.2", features = ["apple-native", "windows-native", "linux-native"] }
+passwords = "3.1.16"
 
 [dev-dependencies]
 tari_dan_wallet_storage_sqlite = { workspace = true }

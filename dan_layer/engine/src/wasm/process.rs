@@ -26,6 +26,7 @@ use tari_engine_types::{indexed_value::IndexedValue, instruction_result::Instruc
 use tari_template_abi::{CallInfo, EngineOp, FunctionDef};
 use tari_template_lib::{
     args::{
+        AddressAllocationInvokeArg,
         BucketInvokeArg,
         BuiltinTemplateInvokeArg,
         CallInvokeArg,
@@ -60,7 +61,7 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::dan::engine::wasm::process";
 
-const MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION: &str = "0.8.0";
+const MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION: &str = "0.9.0";
 
 pub struct WasmProcess {
     module: LoadedWasmTemplate,
@@ -175,6 +176,11 @@ impl WasmProcess {
             EngineOp::CallerContextInvoke => Self::handle(store, env_mut, arg, |env, arg: CallerContextInvokeArg| {
                 env.interface().caller_context_invoke(arg.action, arg.args.into())
             }),
+            EngineOp::AddressAllocationInvoke => {
+                Self::handle(store, env_mut, arg, |env, arg: AddressAllocationInvokeArg| {
+                    env.interface().allocate_address_invoke(arg)
+                })
+            },
             EngineOp::GenerateRandomInvoke => Self::handle(store, env_mut, arg, |env, arg: GenerateRandomInvokeArg| {
                 env.interface().generate_random_invoke(arg.action)
             }),

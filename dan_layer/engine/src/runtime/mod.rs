@@ -65,6 +65,7 @@ use tari_engine_types::{
 };
 use tari_template_lib::{
     args::{
+        AddressAllocationInvokeArg,
         AllocateAddressResult,
         Arg,
         BucketAction,
@@ -89,7 +90,6 @@ use tari_template_lib::{
     },
     invoke_args,
     models::{ComponentAddress, EntityId, Metadata, NonFungibleAddress, VaultRef},
-    prelude::RistrettoPublicKeyBytes,
 };
 pub use tracker::StateTracker;
 
@@ -172,6 +172,8 @@ pub trait RuntimeInterface: Send + Sync {
         args: EngineArgs,
     ) -> Result<InvokeResult, RuntimeError>;
 
+    fn allocate_address_invoke(&self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError>;
+
     fn call_invoke(&self, action: CallAction, args: EngineArgs) -> Result<InvokeResult, RuntimeError>;
 
     fn builtin_template_invoke(&self, action: BuiltinTemplateAction) -> Result<InvokeResult, RuntimeError>;
@@ -187,7 +189,8 @@ pub trait RuntimeInterface: Send + Sync {
     fn allocate_address(
         &self,
         substate_type: SubstateType,
-        public_key: Option<RistrettoPublicKeyBytes>,
+        entity_id: EntityId,
+        workspace_key: Vec<u8>,
     ) -> Result<AllocateAddressResult, RuntimeError>;
 }
 
@@ -197,7 +200,14 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub(crate) fn resolve_args(&self, args: Vec<Arg>) -> Result<Vec<tari_bor::Value>, RuntimeError> {
+    pub(crate) fn resolve_args(&self, args: &[Arg]) -> Result<Vec<tari_bor::Value>, RuntimeError> {
+        const MAX_PERMITTED_ARGS: usize = 100;
+        if args.len() > MAX_PERMITTED_ARGS {
+            return Err(RuntimeError::TooManyArguments {
+                got: args.len(),
+                max: MAX_PERMITTED_ARGS,
+            });
+        }
         let mut resolved = Vec::with_capacity(args.len());
         for arg in args {
             match arg {
@@ -207,7 +217,7 @@ impl Runtime {
                         .workspace_invoke(WorkspaceAction::Get, invoke_args![key].into())?;
                     resolved.push(value.into_value()?);
                 },
-                Arg::Literal(v) => resolved.push(decode_exact(&v)?),
+                Arg::Literal(v) => resolved.push(decode_exact(v)?),
             }
         }
         Ok(resolved)

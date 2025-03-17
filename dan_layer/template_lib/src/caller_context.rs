@@ -6,9 +6,9 @@
 use tari_template_abi::{call_engine, EngineOp};
 
 use crate::{
-    args::{AllocateAddressResult, CallerContextAction, CallerContextInvokeArg, InvokeResult, SubstateType},
+    args::{AddressAllocationInvokeArg, CallerContextAction, CallerContextInvokeArg, InvokeResult},
     crypto::RistrettoPublicKeyBytes,
-    models::{AddressAllocation, ComponentAddress},
+    models::{ComponentAddress, ComponentAddressAllocation, ResourceAddressAllocation},
 };
 
 /// Allows a template to access information about the current instruction's caller
@@ -41,23 +41,21 @@ impl CallerContext {
     /// Alias function to allocate component address
     pub fn allocate_component_address(
         public_key_address: Option<RistrettoPublicKeyBytes>,
-    ) -> AddressAllocation<ComponentAddress> {
-        let result = Self::allocate_address(SubstateType::Component, public_key_address);
-        result
-            .as_component_address_allocation()
-            .expect("We must have a component address allocation")
+    ) -> ComponentAddressAllocation {
+        let resp: InvokeResult = call_engine(
+            EngineOp::AddressAllocationInvoke,
+            &AddressAllocationInvokeArg::CreateComponentAllocation { public_key_address },
+        );
+
+        resp.decode().expect("Failed to decode ComponentAddressAllocation ")
     }
 
-    /// Allocating an address for the given [`SubstateType`].
-    pub fn allocate_address(
-        substate_type: SubstateType,
-        public_key_address: Option<RistrettoPublicKeyBytes>,
-    ) -> AllocateAddressResult {
-        let resp: InvokeResult = call_engine(EngineOp::CallerContextInvoke, &CallerContextInvokeArg {
-            action: CallerContextAction::AllocateAddress,
-            args: invoke_args![substate_type, public_key_address],
-        });
+    pub fn allocate_resource_address() -> ResourceAddressAllocation {
+        let resp: InvokeResult = call_engine(
+            EngineOp::AddressAllocationInvoke,
+            &AddressAllocationInvokeArg::CreateResourceAllocation,
+        );
 
-        resp.decode().expect("Failed to decode AllocateAddressResult")
+        resp.decode().expect("Failed to decode ResourceAddressAllocation ")
     }
 }

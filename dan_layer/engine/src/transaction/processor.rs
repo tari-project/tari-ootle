@@ -23,7 +23,7 @@
 use std::{sync::Arc, time::Instant};
 
 use log::*;
-use tari_bor::{to_value, BorTag};
+use tari_bor::to_value;
 use tari_common::configuration::Network;
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::services::template_provider::TemplateProvider;
@@ -46,7 +46,7 @@ use tari_template_lib::{
     auth::OwnerRule,
     crypto::RistrettoPublicKeyBytes,
     invoke_args,
-    models::{AddressAllocation, BinaryTag, Bucket, ComponentAddress, NonFungibleAddress, ResourceAddress},
+    models::{Bucket, ComponentAddress, NonFungibleAddress},
     prelude::{AccessRules, TemplateAddress},
 };
 use tari_transaction::Transaction;
@@ -72,9 +72,6 @@ use crate::{
 const LOG_TARGET: &str = "tari::dan::engine::instruction_processor";
 pub const MAX_CALL_DEPTH: usize = 10;
 const ACCOUNT_CONSTRUCTOR_FUNCTION: &str = "create";
-
-const ALLOCATED_COMPONENT_ADDRESS_TAG: u64 = BinaryTag::AllocatedComponentAddress.as_u64();
-const ALLOCATED_RESOURCE_ADDRESS_TAG: u64 = BinaryTag::AllocatedResourceAddress.as_u64();
 
 #[derive(Clone, Debug)]
 pub struct TransactionProcessorConfig {
@@ -379,33 +376,25 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         substate_type: SubstateType,
         workspace_id: T,
     ) -> Result<InstructionResult, TransactionError> {
-        let result = runtime.interface().allocate_address(substate_type, None)?;
-        let result_name: String;
+        let entity_id = runtime.interface().next_entity_id()?;
+        let result = runtime
+            .interface()
+            .allocate_address(substate_type, entity_id, workspace_id.into())?;
 
-        let indexed_value = match result {
-            AllocateAddressResult::ComponentAddress(allocation) => {
-                result_name = "ComponentAddressAllocation".to_string();
-                IndexedValue::from_type(&BorTag::<
-                    AddressAllocation<ComponentAddress>,
-                    ALLOCATED_COMPONENT_ADDRESS_TAG,
-                >::new(allocation))
-            },
-            AllocateAddressResult::ResourceAddress(allocation) => {
-                result_name = "ResourceAddressAllocation".to_string();
-                IndexedValue::from_type(&BorTag::<
-                    AddressAllocation<ResourceAddress>,
-                    ALLOCATED_RESOURCE_ADDRESS_TAG,
-                >::new(allocation))
-            },
-        }?;
-
-        runtime.interface().set_last_instruction_output(indexed_value.clone())?;
-        Self::put_output_on_workspace_with_name(runtime, workspace_id.into())?;
-
-        Ok(InstructionResult {
-            indexed: indexed_value,
-            return_type: Type::Other { name: result_name },
-        })
+        match result {
+            AllocateAddressResult::ComponentAddress(alloc) => Ok(InstructionResult {
+                indexed: IndexedValue::from_type(&alloc)?,
+                return_type: Type::Other {
+                    name: "ComponentAddressAllocation".to_string(),
+                },
+            }),
+            AllocateAddressResult::ResourceAddress(alloc) => Ok(InstructionResult {
+                indexed: IndexedValue::from_type(&alloc)?,
+                return_type: Type::Other {
+                    name: "ResourceAddressAllocation".to_string(),
+                },
+            }),
+        }
     }
 
     /// Load, validate template binary and adds it to TemplateProvider.
@@ -459,23 +448,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         // the publick key is the first argument of the Account template constructor
         let public_key = RistrettoPublicKeyBytes::from_bytes(public_key_address.as_bytes()).unwrap();
-        let mut args = args![NonFungibleAddress::from_public_key(public_key)];
-
-        // add the optional owner rule if specified
-        if let Some(owner_rule) = owner_rule {
-            args.push(arg![Literal(owner_rule)]);
-        } else {
-            let none: Option<OwnerRule> = None;
-            args.push(arg![Literal(none)]);
-        }
-
-        // add the optional access rules if specified
-        if let Some(access_rules) = access_rules {
-            args.push(arg![Literal(access_rules)]);
-        } else {
-            let none: Option<AccessRules> = None;
-            args.push(arg![Literal(none)]);
-        }
+        let mut args = args![
+            NonFungibleAddress::from_public_key(public_key),
+            owner_rule,
+            access_rules
+        ];
 
         // add the optional workspace bucket with the initial funds of the account
         if let Some(workspace_bucket) = workspace_bucket {
@@ -485,8 +462,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             args.push(arg![Literal(none)]);
         }
 
-        let args = runtime.resolve_args(args)?;
-        let arg_scope = args
+        let resolved_args = runtime.resolve_args(&args)?;
+        let arg_scope = resolved_args
             .iter()
             .map(IndexedWellKnownTypes::from_value)
             .collect::<Result<_, _>>()?;
@@ -498,7 +475,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             entity_id: account_address.entity_id(),
         })?;
 
-        let result = Self::invoke_template(template, template_provider, runtime.clone(), function_def, args)?;
+        let result = Self::invoke_template(
+            template,
+            template_provider,
+            runtime.clone(),
+            function_def,
+            resolved_args,
+        )?;
 
         runtime.interface().validate_return_value(&result.indexed)?;
 
@@ -530,8 +513,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             }
         })?;
 
-        let args = runtime.resolve_args(args)?;
-        let arg_scope = args
+        let resolved_args = runtime.resolve_args(&args)?;
+        let arg_scope = resolved_args
             .iter()
             .map(IndexedWellKnownTypes::from_value)
             .collect::<Result<_, _>>()?;
@@ -543,7 +526,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             entity_id: runtime.interface().next_entity_id()?,
         })?;
 
-        let result = Self::invoke_template(template, template_provider, runtime.clone(), function_def, args)?;
+        let result = Self::invoke_template(
+            template,
+            template_provider,
+            runtime.clone(),
+            function_def,
+            resolved_args,
+        )?;
 
         runtime.interface().validate_return_value(&result.indexed)?;
 
@@ -586,8 +575,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         let component_lock = runtime.interface().lock_component(component_address, lock_flag)?;
 
-        let args = runtime.resolve_args(args)?;
-        let arg_scope = args
+        let resolved_args = runtime.resolve_args(&args)?;
+        let arg_scope = resolved_args
             .iter()
             .map(IndexedWellKnownTypes::from_value)
             .collect::<Result<_, _>>()?;
@@ -608,9 +597,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             .interface()
             .check_component_access_rules(method, &component_lock)?;
 
-        let mut final_args = Vec::with_capacity(args.len() + 1);
+        let mut final_args = Vec::with_capacity(resolved_args.len() + 1);
         final_args.push(to_value(component_address)?);
-        final_args.extend(args);
+        final_args.extend(resolved_args);
 
         let result = Self::invoke_template(template, template_provider, runtime.clone(), function_def, final_args)?;
 

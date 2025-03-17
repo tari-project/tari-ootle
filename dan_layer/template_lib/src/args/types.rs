@@ -38,16 +38,18 @@ use crate::{
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes},
     models::{
-        AddressAllocation,
+        AddressAllocationId,
         Amount,
         BucketId,
         ComponentAddress,
+        ComponentAddressAllocation,
         ConfidentialWithdrawProof,
         Metadata,
         NonFungibleAddress,
         NonFungibleId,
         ProofId,
         ResourceAddress,
+        ResourceAddressAllocation,
         VaultId,
         VaultRef,
     },
@@ -162,7 +164,7 @@ pub struct CreateComponentArg {
     pub encoded_state: tari_bor::Value,
     pub owner_rule: OwnerRule,
     pub access_rules: ComponentAccessRules,
-    pub address_allocation: Option<AddressAllocation<ComponentAddress>>,
+    pub address_allocation: Option<ComponentAddressAllocation>,
 }
 
 // -------------------------------- Events -------------------------------- //
@@ -262,7 +264,7 @@ pub struct CreateResourceArg {
     pub mint_arg: Option<MintArg>,
     pub view_key: Option<RistrettoPublicKeyBytes>,
     pub authorize_hook: Option<AuthHook>,
-    pub address_allocation: Option<AddressAllocation<ResourceAddress>>,
+    pub address_allocation: Option<ResourceAddressAllocation>,
 }
 
 /// A resource minting operation argument
@@ -507,6 +509,13 @@ pub enum GenerateRandomAction {
 
 // -------------------------------- CallerContext -------------------------------- //
 
+/// The possible actions that can be performed related to the caller context
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum CallerContextAction {
+    GetCallerPublicKey,
+    GetComponentAddress,
+}
+
 /// A caller context operation argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CallerContextInvokeArg {
@@ -528,35 +537,23 @@ pub enum SubstateType {
     Template,
 }
 
-/// Result af an address allocation based on the input substate type
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub enum AllocateAddressResult {
-    ComponentAddress(AddressAllocation<ComponentAddress>),
-    ResourceAddress(AddressAllocation<ResourceAddress>),
-}
-
-impl AllocateAddressResult {
-    pub fn as_component_address_allocation(&self) -> Option<AddressAllocation<ComponentAddress>> {
-        if let AllocateAddressResult::ComponentAddress(result) = self {
-            return Some(result.clone());
-        }
-        None
-    }
-
-    pub fn as_resource_address_allocation(&self) -> Option<AddressAllocation<ResourceAddress>> {
-        if let AllocateAddressResult::ResourceAddress(result) = self {
-            return Some(result.clone());
-        }
-        None
-    }
-}
+// -------------------------------- AddressAllocation -------------------------------- //
 
 /// The possible actions that can be performed related to the caller context
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum CallerContextAction {
-    GetCallerPublicKey,
-    GetComponentAddress,
-    AllocateAddress,
+pub enum AddressAllocationInvokeArg {
+    GetAddress(AddressAllocationId),
+    CreateComponentAllocation {
+        public_key_address: Option<RistrettoPublicKeyBytes>,
+    },
+    CreateResourceAllocation,
+}
+
+/// Result af an address allocation based on the input substate type
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum AllocateAddressResult {
+    ComponentAddress(ComponentAddressAllocation),
+    ResourceAddress(ResourceAddressAllocation),
 }
 
 // -------------------------------- CallInvoke -------------------------------- //

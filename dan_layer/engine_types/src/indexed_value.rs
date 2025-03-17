@@ -9,14 +9,16 @@ use tari_template_lib::{
     models::{
         BinaryTag,
         BucketId,
+        ComponentAddressAllocation,
         NonFungibleAddressContents,
         ObjectKey,
         ProofId,
         ResourceAddress,
+        ResourceAddressAllocation,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
-    prelude::{AddressAllocation, ComponentAddress, Metadata, NonFungibleAddress},
+    prelude::{ComponentAddress, Metadata, NonFungibleAddress},
     Hash,
 };
 
@@ -112,6 +114,11 @@ impl IndexedValue {
         self.value
     }
 
+    pub fn decoded<T>(&self) -> Result<T, IndexedValueError>
+    where for<'a> T: serde::Deserialize<'a> {
+        tari_bor::from_value(&self.value).map_err(Into::into)
+    }
+
     pub fn get_value<T>(&self, path: &str) -> Result<Option<T>, IndexedValueError>
     where for<'a> T: serde::Deserialize<'a> {
         decode_value_at_path(&self.value, path)
@@ -150,8 +157,10 @@ pub struct IndexedWellKnownTypes {
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
-    component_address_allocations: Vec<AddressAllocation<ComponentAddress>>,
-    resource_address_allocations: Vec<AddressAllocation<ResourceAddress>>,
+    #[cfg_attr(feature = "ts", ts(type = "[number]"))]
+    component_address_allocations: Vec<ComponentAddressAllocation>,
+    #[cfg_attr(feature = "ts", ts(type = "[number]"))]
+    resource_address_allocations: Vec<ResourceAddressAllocation>,
 }
 
 impl IndexedWellKnownTypes {
@@ -252,9 +261,11 @@ impl IndexedWellKnownTypes {
             .iter()
             .map(|a| (*a).into())
             .chain(self.resource_addresses.iter().map(|a| (*a).into()))
+            .chain(self.transaction_receipt_addresses.iter().map(|a| (*a).into()))
             .chain(self.non_fungible_addresses.iter().map(|a| a.clone().into()))
             .chain(self.vault_ids.iter().map(|a| (*a).into()))
             .chain(self.unclaimed_confidential_output_address.iter().map(|a| (*a).into()))
+            .chain(self.published_template_addresses.iter().map(|a| (*a).into()))
             .chain(self.validator_node_fee_pools.iter().map(|a| (*a).into()))
     }
 
@@ -284,6 +295,14 @@ impl IndexedWellKnownTypes {
 
     pub fn metadata(&self) -> &[Metadata] {
         &self.metadata
+    }
+
+    pub fn component_address_allocations(&self) -> &[ComponentAddressAllocation] {
+        &self.component_address_allocations
+    }
+
+    pub fn resource_address_allocations(&self) -> &[ResourceAddressAllocation] {
+        &self.resource_address_allocations
     }
 
     pub fn diff(&self, other: &Self) -> Self {
@@ -358,8 +377,8 @@ pub enum WellKnownTariValue {
     UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
     PublishedTemplateAddress(PublishedTemplateAddress),
     ValidatorNodeFeePool(ValidatorFeePoolAddress),
-    ComponentAddressAllocation(AddressAllocation<ComponentAddress>),
-    ResourceAddressAllocation(AddressAllocation<ResourceAddress>),
+    ComponentAddressAllocation(ComponentAddressAllocation),
+    ResourceAddressAllocation(ResourceAddressAllocation),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
@@ -414,12 +433,12 @@ impl FromTagAndValue for WellKnownTariValue {
                 Ok(Self::ValidatorNodeFeePool(value.into()))
             },
             BinaryTag::AllocatedComponentAddress => {
-                let value: AddressAllocation<ComponentAddress> = value.deserialized().map_err(BorError::from)?;
-                Ok(Self::ComponentAddressAllocation(value))
+                let value = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::ComponentAddressAllocation(ComponentAddressAllocation::new(value)))
             },
             BinaryTag::AllocatedResourceAddress => {
-                let value: AddressAllocation<ResourceAddress> = value.deserialized().map_err(BorError::from)?;
-                Ok(Self::ResourceAddressAllocation(value))
+                let value = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::ResourceAddressAllocation(ResourceAddressAllocation::new(value)))
             },
         }
     }
@@ -438,8 +457,8 @@ pub struct IndexedValueVisitor {
     unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
     published_templates: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
-    component_address_allocations: Vec<AddressAllocation<ComponentAddress>>,
-    resource_address_allocations: Vec<AddressAllocation<ResourceAddress>>,
+    component_address_allocations: Vec<ComponentAddressAllocation>,
+    resource_address_allocations: Vec<ResourceAddressAllocation>,
 }
 
 impl IndexedValueVisitor {

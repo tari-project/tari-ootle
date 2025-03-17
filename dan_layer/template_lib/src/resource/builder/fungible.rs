@@ -5,7 +5,7 @@ use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    models::{AddressAllocation, Amount, Bucket, ComponentAddress, Metadata, ResourceAddress},
+    models::{Amount, Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
     resource::{ResourceManager, ResourceType},
 };
 
@@ -16,7 +16,7 @@ pub struct FungibleResourceBuilder {
     token_symbol: Option<String>,
     metadata: Metadata,
     authorize_hook: Option<AuthHook>,
-    address_allocation: Option<AddressAllocation<ResourceAddress>>,
+    address_allocation: Option<ResourceAddressAllocation>,
 }
 
 impl FungibleResourceBuilder {
@@ -46,7 +46,7 @@ impl FungibleResourceBuilder {
     }
 
     /// Sets the already allocated address for the resource
-    pub fn with_address_allocation(mut self, address: AddressAllocation<ResourceAddress>) -> Self {
+    pub fn with_address_allocation(mut self, address: ResourceAddressAllocation) -> Self {
         self.address_allocation = Some(address);
         self
     }

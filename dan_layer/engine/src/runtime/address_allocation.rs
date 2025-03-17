@@ -1,47 +1,27 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::{
-    substate::{InvalidSubstateIdVariant, SubstateId},
-    TemplateAddress,
-};
-use tari_template_lib::models::{ComponentAddress, ResourceAddress};
+use tari_engine_types::{substate::SubstateId, TemplateAddress};
 
 #[derive(Debug, Clone)]
 pub struct AllocatedAddress {
-    address: SubstateId,
+    substate_id: SubstateId,
     template_address: Option<TemplateAddress>,
 }
 
 impl AllocatedAddress {
-    pub fn new(address: SubstateId, template_address: Option<TemplateAddress>) -> Self {
+    pub fn new(substate_id: SubstateId, template_address: Option<TemplateAddress>) -> Self {
         Self {
-            address,
+            substate_id,
             template_address,
         }
     }
 
-    pub fn address(&self) -> &SubstateId {
-        &self.address
+    pub fn substate_id(&self) -> &SubstateId {
+        &self.substate_id
     }
 
     pub fn template_address(&self) -> Option<&TemplateAddress> {
         self.template_address.as_ref()
-    }
-}
-
-impl TryFrom<AllocatedAddress> for ComponentAddress {
-    type Error = InvalidSubstateIdVariant;
-
-    fn try_from(value: AllocatedAddress) -> Result<Self, Self::Error> {
-        value.address.try_into()
-    }
-}
-
-impl TryFrom<AllocatedAddress> for ResourceAddress {
-    type Error = InvalidSubstateIdVariant;
-
-    fn try_from(value: AllocatedAddress) -> Result<Self, Self::Error> {
-        value.address.try_into()
     }
 }

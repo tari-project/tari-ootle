@@ -21,7 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 /// A tag applied to various engine types. We use an unassigned CBOR tag range (128 to 255 inclusive). <https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml>
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum BinaryTag {
     ComponentAddress = 128,

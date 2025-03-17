@@ -39,11 +39,6 @@ pub enum IdProviderError {
     LockingError { operation: String },
 }
 
-pub struct DerivedComponentAddress {
-    pub template_address: TemplateAddress,
-    pub public_key_address: RistrettoPublicKey,
-}
-
 impl<'a> IdProvider<'a> {
     pub fn new(entity_id: EntityId, transaction_hash: Hash, object_ids: &'a ObjectIds) -> Self {
         Self {
@@ -58,19 +53,7 @@ impl<'a> IdProvider<'a> {
         Ok(ResourceAddress::new(key))
     }
 
-    pub fn new_component_address(
-        &self,
-        derived_address: Option<DerivedComponentAddress>,
-    ) -> Result<ComponentAddress, IdProviderError> {
-        if let Some(address) = derived_address {
-            // if a public key address is specified, then it will derive the address from the
-            // template hash and public key
-            return Ok(new_component_address_from_public_key(
-                &address.template_address,
-                &address.public_key_address,
-            ));
-        }
-
+    pub fn new_component_address(&self) -> Result<ComponentAddress, IdProviderError> {
         let component_id = hasher32(EngineHashDomainLabel::ComponentAddress)
             .chain(&self.transaction_hash)
             .chain(&self.next()?)
@@ -78,6 +61,17 @@ impl<'a> IdProvider<'a> {
 
         let object_key = ObjectKey::new(self.entity_id, ComponentKey::new(component_id.trailing_bytes()));
         Ok(ComponentAddress::new(object_key))
+    }
+
+    pub fn derive_new_component_address(
+        &self,
+        template_address: &TemplateAddress,
+        public_key_address: &RistrettoPublicKey,
+    ) -> Result<ComponentAddress, IdProviderError> {
+        Ok(new_component_address_from_public_key(
+            template_address,
+            public_key_address,
+        ))
     }
 
     pub fn new_vault_id(&self) -> Result<VaultId, IdProviderError> {

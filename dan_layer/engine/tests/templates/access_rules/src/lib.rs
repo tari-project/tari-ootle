@@ -76,7 +76,7 @@ mod access_rules_template {
             let address_alloc = CallerContext::allocate_component_address(None);
 
             let tokens = ResourceBuilder::fungible()
-                .with_authorization_hook(*address_alloc.address(), hook)
+                .with_authorization_hook(address_alloc.get_address(), hook)
                 .initial_supply(1000);
 
             Component::new(Self {
@@ -100,7 +100,7 @@ mod access_rules_template {
 
             let tokens = ResourceBuilder::fungible()
                 .with_authorization_hook(
-                    *address_alloc.address(),
+                    address_alloc.get_address(),
                     "malicious_auth_hook_set_state_on_another_component",
                 )
                 .initial_supply(1000);
@@ -178,7 +178,7 @@ mod access_rules_template {
 
             let allocation = CallerContext::allocate_component_address(None);
             let tokens = ResourceBuilder::fungible()
-                .mintable(rule!(component(*allocation.address())))
+                .mintable(rule!(component(allocation.get_address())))
                 // Only access rules apply, this just makes the test simpler because we do not need to change the transaction signer
                 .with_owner_rule(OwnerRule::None)
                 .initial_supply(1000);

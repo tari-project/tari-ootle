@@ -3,17 +3,16 @@
 
 use tari_dan_engine::runtime::TransactionCommitError;
 use tari_engine_types::indexed_value::IndexedValue;
-use tari_template_abi::Type;
 use tari_template_lib::{
     args,
-    models::{AddressAllocation, ComponentAddress, ResourceAddress},
+    models::{ComponentAddress, ResourceAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::Transaction;
 
 #[test]
-fn it_uses_allocate_component_address() {
-    let mut test = TemplateTest::new(["tests/templates/component_address_allocation"]);
+fn it_allocates_addresses_in_template_code() {
+    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
 
     let result = test.execute_expect_success(
         Transaction::builder()
@@ -22,7 +21,7 @@ fn it_uses_allocate_component_address() {
         vec![],
     );
 
-    let actual = result
+    let component_addr = result
         .finalize
         .result
         .accept()
@@ -33,41 +32,9 @@ fn it_uses_allocate_component_address() {
 
     let allocated = result.finalize.execution_results[0]
         .indexed
-        .get_value::<ComponentAddress>("$.1")
-        .unwrap()
+        .decoded::<ComponentAddress>()
         .unwrap();
-    assert_eq!(actual, allocated);
-}
-
-#[test]
-fn it_fails_if_component_address_allocation_is_not_used() {
-    let mut test = TemplateTest::new(["tests/templates/component_address_allocation"]);
-    let template_addr = test.get_template_address("AddressAllocationTest");
-
-    let reason = test.execute_expect_failure(
-        Transaction::builder()
-            .call_function(template_addr, "drop_allocation", args![])
-            .build_and_seal(test.get_test_secret_key()),
-        vec![],
-    );
-
-    assert_reject_reason(reason, TransactionCommitError::DanglingAddressAllocations { count: 1 });
-}
-
-#[test]
-fn it_uses_allocate_resource_address() {
-    let mut test = TemplateTest::new(["tests/templates/resource_address_allocation"]);
-
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_function(
-                test.get_template_address("ResourceAddressAllocationTest"),
-                "create",
-                args![],
-            )
-            .build_and_seal(test.get_test_secret_key()),
-        vec![],
-    );
+    assert_eq!(component_addr, allocated);
 
     let actual = result
         .finalize
@@ -78,22 +45,40 @@ fn it_uses_allocate_resource_address() {
         .find_map(|(k, _)| k.as_resource_address())
         .unwrap();
 
-    let allocated = result.finalize.execution_results[0]
-        .indexed
-        .get_value::<ResourceAddress>("$.1")
+    let component_state = result
+        .finalize
+        .result
+        .accept()
+        .unwrap()
+        .up_iter()
+        .find_map(|(_, substate)| substate.substate_value().component())
+        .unwrap();
+
+    let component_state = IndexedValue::from_value(component_state.state().clone()).unwrap();
+
+    let allocated = component_state
+        .get_value::<ResourceAddress>("$.resource")
         .unwrap()
         .unwrap();
     assert_eq!(actual, allocated);
 }
 
 #[test]
-fn it_fails_if_resource_address_allocation_is_not_used() {
-    let mut test = TemplateTest::new(["tests/templates/resource_address_allocation"]);
-    let template_addr = test.get_template_address("ResourceAddressAllocationTest");
+fn it_fails_if_address_allocation_is_not_used() {
+    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+    let template_addr = test.get_template_address("AddressAllocationTest");
 
     let reason = test.execute_expect_failure(
         Transaction::builder()
-            .call_function(template_addr, "drop_allocation", args![])
+            .call_function(template_addr, "drop_component_allocation", args![])
+            .build_and_seal(test.get_test_secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, TransactionCommitError::DanglingAddressAllocations { count: 1 });
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_function(template_addr, "drop_resource_allocation", args![])
             .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
@@ -102,62 +87,44 @@ fn it_fails_if_resource_address_allocation_is_not_used() {
 }
 
 #[test]
-fn it_allocation_using_tx_builder() {
-    let mut test = TemplateTest::new([
-        "tests/templates/address_allocation_from_instructions",
-        "tests/templates/component_address_allocation_from_already_allocated",
-    ]);
+fn it_fails_if_instruction_allocated_addresses_are_not_used() {
+    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .allocate_address(args::SubstateType::Component, "my_addr")
+            .allocate_address(args::SubstateType::Resource, "my_res")
+            .build_and_seal(test.get_test_secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, TransactionCommitError::DanglingAddressAllocations { count: 2 });
+}
+
+#[test]
+fn it_allocates_an_address_using_instructions() {
+    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+
+    let template_addr = test.get_template_address("AddressAllocationTest");
 
     let result = test.execute_expect_success(
         Transaction::builder()
             .allocate_address(args::SubstateType::Component, "my_addr")
             .allocate_address(args::SubstateType::Resource, "my_res")
-            .call_function(
-                test.get_template_address("ComponentAddressAllocationTest"),
-                "create",
-                args![Workspace("my_addr")],
-            )
-            .call_function(
-                test.get_template_address("AddressAllocationFromInstructionsTest"),
-                "create",
-                args![Workspace("my_addr"), Workspace("my_res")],
-            )
+            .call_function(template_addr, "get_component_allocation_address", args![Workspace(
+                "my_addr"
+            )])
+            .call_function(template_addr, "get_resource_allocation_address", args![Workspace(
+                "my_res"
+            )])
+            .call_function(template_addr, "create_from_allocations", args![
+                Workspace("my_addr"),
+                Workspace("my_res")
+            ])
             .build_and_seal(test.get_test_secret_key()),
         vec![],
     );
 
-    // assert allocation execution results
-    let comp_addr_allocation_exec_result = result.finalize.execution_results.first().unwrap().clone();
-    let Type::Other {
-        name: comp_alloc_return_type_name,
-    } = comp_addr_allocation_exec_result.return_type
-    else {
-        panic!("Invalid return type for component address allocation!")
-    };
-    assert_eq!(comp_alloc_return_type_name, "ComponentAddressAllocation".to_string());
-    let exec_result_allocated_comp_addr = *comp_addr_allocation_exec_result
-        .indexed
-        .get_value::<AddressAllocation<ComponentAddress>>("$")
-        .unwrap()
-        .unwrap()
-        .address();
-
-    let res_addr_allocation_exec_result = result.finalize.execution_results.get(1).unwrap().clone();
-    let Type::Other {
-        name: res_alloc_return_type_name,
-    } = res_addr_allocation_exec_result.return_type
-    else {
-        panic!("Invalid return type for resource address allocation!")
-    };
-    assert_eq!(res_alloc_return_type_name, "ResourceAddressAllocation".to_string());
-    let exec_result_allocated_res_addr = *res_addr_allocation_exec_result
-        .indexed
-        .get_value::<AddressAllocation<ResourceAddress>>("$")
-        .unwrap()
-        .unwrap()
-        .address();
-
-    // assert new component's address
     let actual_comp = result
         .finalize
         .result
@@ -167,41 +134,18 @@ fn it_allocation_using_tx_builder() {
         .find_map(|(k, _)| k.as_component_address())
         .unwrap();
 
-    let allocated_comp_after_func_call_indexed = result.finalize.execution_results[2].clone().indexed;
-    let allocated_comp_after_func_call = allocated_comp_after_func_call_indexed
-        .get_value::<ComponentAddress>("$")
-        .unwrap()
-        .unwrap();
+    let addr = result.expect_return::<String>(2);
+    assert_eq!(addr, actual_comp.to_string());
 
-    assert_eq!(actual_comp, allocated_comp_after_func_call);
-    assert_eq!(actual_comp, exec_result_allocated_comp_addr);
-
-    let (_, container_comp_value) = result
+    let actual_resx = result
         .finalize
         .result
         .accept()
         .unwrap()
         .up_iter()
-        .filter(|(k, _)| k.as_component_address().is_some())
-        .last()
+        .find_map(|(k, _)| k.as_resource_address())
         .unwrap();
 
-    let component_header = container_comp_value.substate_value().as_component().unwrap();
-    let return_values = IndexedValue::from_value(component_header.body.state.clone()).unwrap();
-
-    // assert component address stored in `AddressAllocationFromInstructionsTest`
-    let stored_comp_address = return_values
-        .get_value::<ComponentAddress>("$.comp_addr")
-        .unwrap()
-        .unwrap();
-    assert_eq!(stored_comp_address, actual_comp);
-    assert_eq!(stored_comp_address, exec_result_allocated_comp_addr);
-    assert_eq!(stored_comp_address, allocated_comp_after_func_call);
-
-    // assert resource address stored in `AddressAllocationFromInstructionsTest`
-    let stored_res_address = return_values
-        .get_value::<ResourceAddress>("$.res_address")
-        .unwrap()
-        .unwrap();
-    assert_eq!(stored_res_address, exec_result_allocated_res_addr);
+    let addr = result.expect_return::<String>(3);
+    assert_eq!(addr, actual_resx.to_string());
 }

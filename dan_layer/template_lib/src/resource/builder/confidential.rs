@@ -6,7 +6,7 @@ use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
     crypto::RistrettoPublicKeyBytes,
-    models::{AddressAllocation, Bucket, ComponentAddress, Metadata, ResourceAddress},
+    models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
     prelude::ConfidentialOutputStatement,
     resource::{ResourceManager, ResourceType},
 };
@@ -19,7 +19,7 @@ pub struct ConfidentialResourceBuilder {
     token_symbol: Option<String>,
     owner_rule: OwnerRule,
     authorize_hook: Option<AuthHook>,
-    address_allocation: Option<AddressAllocation<ResourceAddress>>,
+    address_allocation: Option<ResourceAddressAllocation>,
 }
 
 impl ConfidentialResourceBuilder {
@@ -50,7 +50,7 @@ impl ConfidentialResourceBuilder {
     }
 
     /// Sets the already allocated address for the resource
-    pub fn with_address_allocation(mut self, address: AddressAllocation<ResourceAddress>) -> Self {
+    pub fn with_address_allocation(mut self, address: ResourceAddressAllocation) -> Self {
         self.address_allocation = Some(address);
         self
     }

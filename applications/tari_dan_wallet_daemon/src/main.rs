@@ -67,7 +67,7 @@ async fn main() -> Result<(), anyhow::Error> {
             output_path,
         }) => {
             let wallet_store = init_wallet_store(&config)?;
-            let sdk = initialize_wallet_sdk(&config, wallet_store)?;
+            let sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store)?;
             let km = sdk.key_manager_api();
             let secret = if let Some(index) = key_index {
                 km.derive_key(key_manager::TRANSACTION_BRANCH, index)?
@@ -101,6 +101,12 @@ async fn main() -> Result<(), anyhow::Error> {
 
             return Ok(());
         },
+        Some(Subcommand::SeedWords) => {
+            let wallet_store = init_wallet_store(&config)?;
+            let sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store)?;
+            let seed_words = sdk.seed_words()?;
+            println!("{}", seed_words.join(" ").reveal())
+        },
     }
 
     Ok(())
@@ -129,5 +135,5 @@ async fn run(cli: Cli, config: ApplicationConfig) -> Result<(), anyhow::Error> {
         config.dan_wallet_daemon.indexer_json_rpc_url
     );
 
-    run_tari_dan_wallet_daemon(config, shutdown_signal).await
+    run_tari_dan_wallet_daemon(cli, config, shutdown_signal).await
 }

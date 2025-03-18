@@ -33,6 +33,7 @@ mod webrtc;
 use std::{fs, panic, process};
 
 use log::*;
+use tari_crypto::tari_utilities::Hidden;
 use tari_dan_common_types::{optional::Optional, NumPreshards};
 use tari_dan_wallet_sdk::{
     apis::{
@@ -43,11 +44,13 @@ use tari_dan_wallet_sdk::{
     WalletSdkConfig,
 };
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
+use tari_key_manager::SeedWords;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::models::Amount;
 use tokio::task;
 
 use crate::{
+    cli::{Cli, WalletRestoreArgs},
     config::ApplicationConfig,
     handlers::{auth::create_authenticator, HandlerContext},
     http_ui::server::run_http_ui_server,
@@ -63,6 +66,7 @@ const DEFAULT_FEE: Amount = Amount::new(1500);
 const NUM_PRESHARDS: NumPreshards = NumPreshards::current();
 
 pub async fn run_tari_dan_wallet_daemon(
+    cli: Cli,
     config: ApplicationConfig,
     shutdown_signal: ShutdownSignal,
 ) -> Result<(), anyhow::Error> {
@@ -71,7 +75,7 @@ pub async fn run_tari_dan_wallet_daemon(
 
     let wallet_store = init_wallet_store(&config)?;
 
-    let wallet_sdk = initialize_wallet_sdk(&config, wallet_store.clone())?;
+    let wallet_sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store.clone())?;
     wallet_sdk
         .key_manager_api()
         .get_or_create_initial(key_manager::TRANSACTION_BRANCH)?;
@@ -138,6 +142,7 @@ pub fn init_wallet_store(config: &ApplicationConfig) -> anyhow::Result<SqliteWal
 }
 
 pub fn initialize_wallet_sdk(
+    wallet_restore_args: &WalletRestoreArgs,
     config: &ApplicationConfig,
     store: SqliteWalletStore,
 ) -> anyhow::Result<DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
@@ -154,6 +159,18 @@ pub fn initialize_wallet_sdk(
         config.dan_wallet_daemon.indexer_json_rpc_url.clone()
     };
     let indexer = IndexerJsonRpcNetworkInterface::new(indexer_jrpc_endpoint);
-    let wallet_sdk = DanWalletSdk::initialize(config.dan_wallet_daemon.network, store, indexer, sdk_config)?;
+    let seed_words = wallet_restore_args.seed_words.clone().map(|seed_words| {
+        SeedWords::new(
+            seed_words
+                .split(" ")
+                .map(|word| Hidden::hide(word.to_string()))
+                .collect(),
+        )
+    });
+    let wallet_sdk =
+        DanWalletSdk::initialize(config.dan_wallet_daemon.network, store, indexer, sdk_config, seed_words)?;
+
+    // TODO: if we need to scan the network, just use indexer client and go through all substates using a scan service
+
     Ok(wallet_sdk)
 }

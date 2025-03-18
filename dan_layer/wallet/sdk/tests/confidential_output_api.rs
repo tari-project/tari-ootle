@@ -141,11 +141,17 @@ impl Test {
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
 
-        let sdk = DanWalletSdk::initialize(Network::LocalNet, store.clone(), PanicIndexer, WalletSdkConfig {
-            password: None,
-            jwt_expiry: Duration::from_secs(60),
-            jwt_secret_key: "secret_key".to_string(),
-        })
+        let sdk = DanWalletSdk::initialize(
+            Network::LocalNet,
+            store.clone(),
+            PanicIndexer,
+            WalletSdkConfig {
+                password: None,
+                jwt_expiry: Duration::from_secs(60),
+                jwt_secret_key: "secret_key".to_string(),
+            },
+            None,
+        )
         .unwrap();
         let accounts_api = sdk.accounts_api();
         accounts_api

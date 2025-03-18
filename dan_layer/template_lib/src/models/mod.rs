@@ -24,7 +24,7 @@
 //! proofs, etc.)
 
 mod address_allocation;
-pub use address_allocation::AddressAllocation;
+pub use address_allocation::*;
 
 mod non_fungible_index;
 pub use non_fungible_index::NonFungibleIndexAddress;

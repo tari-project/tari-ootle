@@ -37,16 +37,20 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceiptAddress,
     virtual_substate::VirtualSubstateId,
 };
-use tari_template_lib::models::{
-    Amount,
-    BucketId,
-    ComponentAddress,
-    NonFungibleId,
-    ProofId,
-    ResourceAddress,
-    TemplateAddress,
-    UnclaimedConfidentialOutputAddress,
-    VaultId,
+use tari_template_lib::{
+    args::SubstateType,
+    models::{
+        AddressAllocationId,
+        Amount,
+        BucketId,
+        ComponentAddress,
+        NonFungibleId,
+        ProofId,
+        ResourceAddress,
+        TemplateAddress,
+        UnclaimedConfidentialOutputAddress,
+        VaultId,
+    },
 };
 
 use super::workspace::WorkspaceError;
@@ -99,6 +103,8 @@ pub enum RuntimeError {
     ValidationFailedBucketNotInScope { bucket_id: BucketId },
     #[error("Encountered unknown or out of scope proof {proof_id}")]
     ValidationFailedProofNotInScope { proof_id: ProofId },
+    #[error("Encountered unknown or out of scope address allocation {id}")]
+    ValidationFailedAddressAllocationNotInScope { id: AddressAllocationId },
     #[error("Component not found with address '{address}'")]
     ComponentNotFound { address: ComponentAddress },
     #[error("Layer one commitment not found with address '{address}'")]
@@ -222,6 +228,8 @@ pub enum RuntimeError {
     CallFrameRemainingOnStack { remaining: usize },
     #[error("Duplicate reference to substate {address}")]
     DuplicateReference { address: SubstateId },
+    #[error("Too many arguments provided. Got {got}, max is {max}")]
+    TooManyArguments { got: usize, max: usize },
 
     #[error("BUG: [{function}] Invariant error {details}")]
     InvariantError { function: &'static str, details: String },
@@ -244,6 +252,10 @@ pub enum RuntimeError {
     AddressAllocationNotFound { id: u32 },
     #[error("Address allocation type mismatch: got {id}, expected: {expected}")]
     AddressAllocationTypeMismatch { id: SubstateId, expected: &'static str },
+    #[error("Unsupported substate type for address allocation: {substate_type:?}")]
+    AddressAllocationUnsupportedSubstateType { substate_type: SubstateType },
+    #[error("Allocated address does not have an associated template")]
+    AddressAllocationNoTemplate,
 
     #[error("Invalid event topic '{topic}': 'std' prefix is reserved for built-in events")]
     InvalidEventTopicStdPrefix { topic: String },
@@ -252,6 +264,9 @@ pub enum RuntimeError {
     NumericConversionError { details: String },
     #[error("Auth callback MUST return null, but it returned non-null")]
     UnexpectedNonNullInAuthHookReturn,
+
+    #[error("Not supported: {details}")]
+    NotSupported { details: String },
 
     #[error("Assert error: {0}")]
     AssertError(#[from] AssertError),

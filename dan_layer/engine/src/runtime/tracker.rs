@@ -37,14 +37,21 @@ use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedWellKnownTypes},
     lock::LockFlag,
     logs::LogEntry,
-    substate::{InvalidSubstateIdVariant, SubstateId, SubstateValue},
+    substate::{SubstateId, SubstateValue},
     virtual_substate::VirtualSubstates,
     TemplateAddress,
 };
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
     crypto::RistrettoPublicKeyBytes,
-    models::{AddressAllocation, Amount, BucketId, ComponentAddress, Metadata, UnclaimedConfidentialOutputAddress},
+    models::{
+        Amount,
+        BucketId,
+        ComponentAddress,
+        ComponentAddressAllocation,
+        Metadata,
+        UnclaimedConfidentialOutputAddress,
+    },
     Hash,
 };
 use tari_transaction::TransactionWeight;
@@ -163,7 +170,7 @@ impl StateTracker {
         owner_key: Option<RistrettoPublicKeyBytes>,
         owner_rule: OwnerRule,
         access_rules: ComponentAccessRules,
-        address_allocation: Option<AddressAllocation<ComponentAddress>>,
+        address_allocation: Option<ComponentAddressAllocation>,
     ) -> Result<ComponentAddress, RuntimeError> {
         self.write_with(|state| {
             let (template_address, module_name) =
@@ -171,15 +178,15 @@ impl StateTracker {
 
             let component_address = match address_allocation {
                 Some(address_allocation) => {
-                    let addr = state.take_allocated_address(address_allocation.id())?;
-                    addr.try_into().map_err(|error: InvalidSubstateIdVariant| {
+                    let alloc = state.take_allocated_address(address_allocation.id())?;
+                    alloc.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::AddressAllocationTypeMismatch {
-                            id: error.substate_id,
-                            expected: error.expected,
+                            id: alloc.substate_id().clone(),
+                            expected: "ComponentAddress",
                         }
                     })?
                 },
-                None => state.id_provider()?.new_component_address(template_address, None)?,
+                None => state.id_provider()?.new_component_address()?,
             };
 
             let component = ComponentBody { state: component_state };

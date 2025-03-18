@@ -29,7 +29,7 @@ use tari_crypto::{ristretto::RistrettoComSig, tari_utilities::ByteArray};
 use tari_dan_common_types::{SubstateRequirement, VersionedSubstateId};
 use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
-    args::Arg,
+    args::{Arg, SubstateType},
     auth::OwnerRule,
     crypto::{BalanceProofSignature, PedersonCommitmentBytes, RistrettoPublicKeyBytes},
     models::{
@@ -154,10 +154,50 @@ impl From<&Transaction> for proto::transaction::Transaction {
 
 // -------------------------------- Instruction -------------------------------- //
 
+impl TryFrom<proto::transaction::SubstateType> for SubstateType {
+    type Error = anyhow::Error;
+
+    fn try_from(substate_type: proto::transaction::SubstateType) -> Result<Self, Self::Error> {
+        match substate_type {
+            proto::transaction::SubstateType::Unknown => {
+                anyhow::bail!("Unknown substate type")
+            },
+            proto::transaction::SubstateType::Component => Ok(SubstateType::Component),
+            proto::transaction::SubstateType::Resource => Ok(SubstateType::Resource),
+            proto::transaction::SubstateType::Vault => Ok(SubstateType::Vault),
+            proto::transaction::SubstateType::UnclaimedConfidentialOutput => {
+                Ok(SubstateType::UnclaimedConfidentialOutput)
+            },
+            proto::transaction::SubstateType::NonFungible => Ok(SubstateType::NonFungible),
+            proto::transaction::SubstateType::TransactionReceipt => Ok(SubstateType::TransactionReceipt),
+            proto::transaction::SubstateType::NonFungibleIndex => Ok(SubstateType::NonFungibleIndex),
+            proto::transaction::SubstateType::ValidatorFeePool => Ok(SubstateType::ValidatorFeePool),
+            proto::transaction::SubstateType::Template => Ok(SubstateType::Template),
+        }
+    }
+}
+
+impl From<SubstateType> for proto::transaction::SubstateType {
+    fn from(substate_type: SubstateType) -> Self {
+        match substate_type {
+            SubstateType::Component => proto::transaction::SubstateType::Component,
+            SubstateType::Resource => proto::transaction::SubstateType::Resource,
+            SubstateType::Vault => proto::transaction::SubstateType::Vault,
+            SubstateType::UnclaimedConfidentialOutput => proto::transaction::SubstateType::UnclaimedConfidentialOutput,
+            SubstateType::NonFungible => proto::transaction::SubstateType::NonFungible,
+            SubstateType::TransactionReceipt => proto::transaction::SubstateType::TransactionReceipt,
+            SubstateType::NonFungibleIndex => proto::transaction::SubstateType::NonFungibleIndex,
+            SubstateType::ValidatorFeePool => proto::transaction::SubstateType::ValidatorFeePool,
+            SubstateType::Template => proto::transaction::SubstateType::Template,
+        }
+    }
+}
+
 impl TryFrom<proto::transaction::Instruction> for Instruction {
     type Error = anyhow::Error;
 
     fn try_from(request: proto::transaction::Instruction) -> Result<Self, Self::Error> {
+        let substate_type = request.substate_type();
         let args = request
             .args
             .into_iter()
@@ -234,6 +274,10 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
             },
             InstructionType::PublishTemplate => Instruction::PublishTemplate {
                 binary: request.template_binary,
+            },
+            InstructionType::AllocateAddress => Instruction::AllocateAddress {
+                substate_type: substate_type.try_into()?,
+                workspace_id: request.workspace_id,
             },
         };
 
@@ -315,6 +359,15 @@ impl From<Instruction> for proto::transaction::Instruction {
             Instruction::PublishTemplate { binary } => {
                 result.instruction_type = InstructionType::PublishTemplate as i32;
                 result.template_binary = binary;
+            },
+            Instruction::AllocateAddress {
+                substate_type,
+                workspace_id,
+            } => {
+                result.instruction_type = InstructionType::AllocateAddress as i32;
+                let substate_type: proto::transaction::SubstateType = substate_type.into();
+                result.substate_type = substate_type as i32;
+                result.workspace_id = workspace_id;
             },
         }
         result

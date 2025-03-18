@@ -20,7 +20,10 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    hash::Hash,
+};
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::{
@@ -35,16 +38,18 @@ use crate::{
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes},
     models::{
-        AddressAllocation,
+        AddressAllocationId,
         Amount,
         BucketId,
         ComponentAddress,
+        ComponentAddressAllocation,
         ConfidentialWithdrawProof,
         Metadata,
         NonFungibleAddress,
         NonFungibleId,
         ProofId,
         ResourceAddress,
+        ResourceAddressAllocation,
         VaultId,
         VaultRef,
     },
@@ -52,7 +57,6 @@ use crate::{
     resource::ResourceType,
     template::BuiltinTemplate,
 };
-
 // -------------------------------- LOGS -------------------------------- //
 
 /// Data needed for log emission from templates
@@ -160,7 +164,7 @@ pub struct CreateComponentArg {
     pub encoded_state: tari_bor::Value,
     pub owner_rule: OwnerRule,
     pub access_rules: ComponentAccessRules,
-    pub address_allocation: Option<AddressAllocation<ComponentAddress>>,
+    pub address_allocation: Option<ComponentAddressAllocation>,
 }
 
 // -------------------------------- Events -------------------------------- //
@@ -260,6 +264,7 @@ pub struct CreateResourceArg {
     pub mint_arg: Option<MintArg>,
     pub view_key: Option<RistrettoPublicKeyBytes>,
     pub authorize_hook: Option<AuthHook>,
+    pub address_allocation: Option<ResourceAddressAllocation>,
 }
 
 /// A resource minting operation argument
@@ -504,6 +509,13 @@ pub enum GenerateRandomAction {
 
 // -------------------------------- CallerContext -------------------------------- //
 
+/// The possible actions that can be performed related to the caller context
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum CallerContextAction {
+    GetCallerPublicKey,
+    GetComponentAddress,
+}
+
 /// A caller context operation argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CallerContextInvokeArg {
@@ -511,12 +523,37 @@ pub struct CallerContextInvokeArg {
     pub args: Vec<Vec<u8>>,
 }
 
+/// Possible substate types
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SubstateType {
+    Component,
+    Resource,
+    Vault,
+    UnclaimedConfidentialOutput,
+    NonFungible,
+    TransactionReceipt,
+    NonFungibleIndex,
+    ValidatorFeePool,
+    Template,
+}
+
+// -------------------------------- AddressAllocation -------------------------------- //
+
 /// The possible actions that can be performed related to the caller context
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum CallerContextAction {
-    GetCallerPublicKey,
-    GetComponentAddress,
-    AllocateNewComponentAddress,
+pub enum AddressAllocationInvokeArg {
+    GetAddress(AddressAllocationId),
+    CreateComponentAllocation {
+        public_key_address: Option<RistrettoPublicKeyBytes>,
+    },
+    CreateResourceAllocation,
+}
+
+/// Result af an address allocation based on the input substate type
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum AllocateAddressResult {
+    ComponentAddress(ComponentAddressAllocation),
+    ResourceAddress(ResourceAddressAllocation),
 }
 
 // -------------------------------- CallInvoke -------------------------------- //

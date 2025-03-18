@@ -39,7 +39,7 @@ import { useTheme } from "@mui/material/styles";
 import { TariPermission, TariPermissionKeyList, TariPermissionTransactionGet, TariPermissionTransactionSend } from "../../utils/tari_permissions";
 import { Core } from '@walletconnect/core'
 import { Web3Wallet } from '@walletconnect/web3wallet'
-import { accountsCreateFreeTestCoins, accountsGetBalances, accountsGetDefault, confidentialViewVaultBalance, keysCreate, substatesGet, substatesList, templatesGet, transactionsGetResult, transactionsSubmit } from "../../utils/json_rpc";
+import { accountsCreateFreeTestCoins, accountsGetBalances, accountsGetDefault, confidentialViewVaultBalance, keysCreate, nftList, substatesGet, substatesList, templatesGet, transactionsGetResult, transactionsSubmit } from "../../utils/json_rpc";
 
 const projectId: string = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || "78f3485d08b9640a087cbcea000e1f8b";
 
@@ -147,6 +147,8 @@ const ConnectorDialog = () => {
         return accountsCreateFreeTestCoins(params);
       case "tari_listSubstates":
         return substatesList(params);
+      case "tari_getNftsList":
+        return nftList(params);
       default:
         throw new Error("Invalid method")
     }

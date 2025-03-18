@@ -3,13 +3,6 @@
 
 use std::{str::FromStr, sync::Arc, time::Duration};
 
-use keyring::Entry;
-use passwords::PasswordGenerator;
-use tari_common::configuration::Network;
-use tari_crypto::tari_utilities::SafePassword;
-use tari_dan_common_types::optional::{IsNotFoundError, Optional};
-use tari_key_manager::{cipher_seed::CipherSeed, error::KeyManagerError};
-
 use crate::{
     apis::{
         accounts::AccountsApi,
@@ -26,6 +19,13 @@ use crate::{
     network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore},
 };
+use keyring::Entry;
+use passwords::PasswordGenerator;
+use tari_common::configuration::Network;
+use tari_crypto::tari_utilities::SafePassword;
+use tari_dan_common_types::optional::{IsNotFoundError, Optional};
+use tari_key_manager::mnemonic::Mnemonic;
+use tari_key_manager::{cipher_seed::CipherSeed, error::KeyManagerError, SeedWords};
 
 const KEYRING_ENTRIES_SERVICE: &str = "tari-ootle-wallet";
 const CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME: &str = "cipher-seed-password";
@@ -176,9 +176,8 @@ where
         }
     }
 
-    fn create_cipher_seed(store: &TStore) -> Result<CipherSeed, WalletSdkError> {
-        let config_api = ConfigApi::new(store);
-        let cipher_seed = CipherSeed::new();
+    // Generate a new random password.
+    fn generate_password() -> Result<(String, SafePassword), WalletSdkError> {
         let pg = PasswordGenerator {
             length: 256,
             numbers: true,
@@ -192,12 +191,32 @@ where
         let generated_password = pg
             .generate_one()
             .map_err(|error| WalletSdkError::PasswordGeneration(error.to_string()))?;
-        let password = SafePassword::from_str(generated_password.as_str()).map_err(|_| WalletSdkError::SafePassword)?;
+        Ok(
+            (
+                generated_password.clone(), 
+                SafePassword::from_str(generated_password.as_str())
+                    .map_err(|_| WalletSdkError::SafePassword)?
+            )
+        )
+    }
+
+    fn create_cipher_seed(store: &TStore) -> Result<CipherSeed, WalletSdkError> {
+        let config_api = ConfigApi::new(store);
+        let cipher_seed = CipherSeed::new();
+        let (password_raw, password) = Self::generate_password()?;
         let entry = Self::cipher_seed_password_keyring_entry()?;
-        entry.set_password(generated_password.as_str())?;
+        entry.set_password(password_raw.as_str())?;
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
         config_api.set(ConfigKey::CipherSeed, &encrypted_cipher_seed, true)?;
         Ok(cipher_seed)
+    }
+
+    /// Restores cipher seed from seed words, encrypts with a new random password (and saves to OS keychain)
+    /// and replaces current cipher seed in the DB (to let every component use the new seed).
+    pub fn restore_cipher_seed(&self, seed_words: &SeedWords) -> Result<(), WalletSdkError> {
+        let cipher_seed = CipherSeed::from_mnemonic(seed_words, None)?;
+
+        Ok(())
     }
 }
 

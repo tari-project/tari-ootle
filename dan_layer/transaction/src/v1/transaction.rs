@@ -305,6 +305,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::AssertBucketContains { .. } => 1,
         Instruction::PublishTemplate { binary } => binary.len() as u64 / BINARY_WEIGHT_DIVISOR,
+        Instruction::AllocateAddress { .. } => 1,
     }
 }
 

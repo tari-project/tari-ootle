@@ -51,6 +51,8 @@ use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRE
 use tari_template_lib::{
     args,
     args::{
+        AddressAllocationInvokeArg,
+        AllocateAddressResult,
         Arg,
         BucketAction,
         BucketRef,
@@ -78,6 +80,7 @@ use tari_template_lib::{
         ResourceGetNonFungibleArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
+        SubstateType,
         VaultAction,
         VaultCreateProofByFungibleAmountArg,
         VaultCreateProofByNonFungiblesArg,
@@ -91,12 +94,14 @@ use tari_template_lib::{
         Amount,
         BucketId,
         ComponentAddress,
+        ComponentAddressAllocation,
         EntityId,
         Metadata,
         NonFungible,
         NonFungibleAddress,
         NotAuthorized,
         ResourceAddress,
+        ResourceAddressAllocation,
         VaultId,
         VaultRef,
     },
@@ -486,27 +491,54 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     .map(|l| l.address().as_component_address().unwrap());
                 Ok(InvokeResult::encode(&maybe_address)?)
             }),
-            CallerContextAction::AllocateNewComponentAddress => self.tracker.write_with(|state| {
-                let public_key_address: Option<RistrettoPublicKeyBytes> = args.assert_one_arg()?;
-                let public_key_address = public_key_address
-                    .map(|pk| {
-                        RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| {
-                            RuntimeError::InvalidArgument {
-                                argument: "public_key_address",
-                                reason: "Invalid RistrettoPublicKeyBytes".to_string(),
-                            }
-                        })
-                    })
-                    .transpose()?;
-
-                let (template, _) = state.current_template()?;
-                let address = state
-                    .id_provider()?
-                    .new_component_address(*template, public_key_address)?;
-                let allocation = state.new_address_allocation(address)?;
-                Ok(InvokeResult::encode(&allocation)?)
-            }),
         }
+    }
+
+    fn allocate_address_invoke(&self, action: AddressAllocationInvokeArg) -> Result<InvokeResult, RuntimeError> {
+        self.invoke_modules_on_runtime_call("allocate_address_invoke")?;
+
+        self.tracker.write_with(|state| {
+            match action {
+                AddressAllocationInvokeArg::GetAddress(id) => {
+                    let allocation = state.get_allocated_address(id)?;
+                    match allocation.substate_id() {
+                        SubstateId::Component(addr) => Ok(InvokeResult::encode(&addr)?),
+                        SubstateId::Resource(addr) => Ok(InvokeResult::encode(&addr)?),
+                        // Engine creates the allocations, so never creates other unsupported variants
+                        _ => unreachable!("Invalid SubstateId variant. Allocation created for unsupported substate"),
+                    }
+                },
+                AddressAllocationInvokeArg::CreateComponentAllocation { public_key_address } => {
+                    let public_key_address = public_key_address
+                        .map(|pk| {
+                            RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| {
+                                RuntimeError::InvalidArgument {
+                                    argument: "public_key_address",
+                                    reason: "Invalid RistrettoPublicKeyBytes".to_string(),
+                                }
+                            })
+                        })
+                        .transpose()?;
+
+                    let (template, _) = state.current_template()?;
+                    let id_provider = state.id_provider()?;
+                    let address = public_key_address
+                        .as_ref()
+                        .map(|public_key_address| {
+                            id_provider.derive_new_component_address(template, public_key_address)
+                        })
+                        .unwrap_or_else(|| id_provider.new_component_address())?;
+
+                    let id = state.new_address_allocation(address)?;
+                    Ok(InvokeResult::encode(&ComponentAddressAllocation::new(id))?)
+                },
+                AddressAllocationInvokeArg::CreateResourceAllocation => {
+                    let address = state.id_provider()?.new_resource_address()?;
+                    let id = state.new_address_allocation(address)?;
+                    Ok(InvokeResult::encode(&ResourceAddressAllocation::new(id))?)
+                },
+            }
+        })
     }
 
     fn get_substate(&self, lock: &LockedSubstate) -> Result<SubstateValue, RuntimeError> {
@@ -794,7 +826,19 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         arg.authorize_hook,
                     );
 
-                    let resource_address = state.id_provider()?.new_resource_address()?;
+                    let resource_address = match arg.address_allocation {
+                        Some(allocation) => {
+                            let alloc = state.take_allocated_address(allocation.id())?;
+                            alloc.substate_id().as_resource_address().ok_or_else(|| {
+                                RuntimeError::AddressAllocationTypeMismatch {
+                                    id: alloc.substate_id().clone(),
+                                    expected: "ResourceAddress",
+                                }
+                            })?
+                        },
+                        None => state.id_provider()?.new_resource_address()?,
+                    };
+
                     state.new_substate(resource_address, resource)?;
                     let resource_lock =
                         state.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Write)?;
@@ -2361,6 +2405,40 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             ));
 
             Ok(())
+        })
+    }
+
+    /// Create a new address allocations for the provided substate type and entity id
+    fn allocate_address(
+        &self,
+        substate_type: SubstateType,
+        entity_id: EntityId,
+        workspace_key: Vec<u8>,
+    ) -> Result<AllocateAddressResult, RuntimeError> {
+        self.tracker.write_with(|state| {
+            let id_provider = state.id_provider_for_entity(entity_id);
+
+            match substate_type {
+                SubstateType::Component => {
+                    let address = id_provider.new_component_address()?;
+                    let id = state.new_address_allocation(address)?;
+                    let value = IndexedValue::from_type(&ComponentAddressAllocation::new(id))?;
+                    state.workspace_mut().insert(workspace_key, value)?;
+                    Ok(AllocateAddressResult::ComponentAddress(
+                        ComponentAddressAllocation::new(id),
+                    ))
+                },
+                SubstateType::Resource => {
+                    let address = id_provider.new_resource_address()?;
+                    let id = state.new_address_allocation(address)?;
+                    let value = IndexedValue::from_type(&ResourceAddressAllocation::new(id))?;
+                    state.workspace_mut().insert(workspace_key, value)?;
+                    Ok(AllocateAddressResult::ResourceAddress(ResourceAddressAllocation::new(
+                        id,
+                    )))
+                },
+                _ => Err(RuntimeError::AddressAllocationUnsupportedSubstateType { substate_type }),
+            }
         })
     }
 }

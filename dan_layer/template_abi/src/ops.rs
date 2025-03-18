@@ -40,6 +40,7 @@ pub enum EngineOp {
     CallInvoke = 0x0C,
     ProofInvoke = 0x0D,
     BuiltinTemplateInvoke = 0x0E,
+    AddressAllocationInvoke = 0x0F,
 }
 
 impl EngineOp {
@@ -60,6 +61,7 @@ impl EngineOp {
             0x0C => Some(EngineOp::CallInvoke),
             0x0D => Some(EngineOp::ProofInvoke),
             0x0E => Some(EngineOp::BuiltinTemplateInvoke),
+            0x0F => Some(EngineOp::AddressAllocationInvoke),
             _ => None,
         }
     }

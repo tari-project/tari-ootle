@@ -21,6 +21,19 @@ message Transaction {
   bytes bor_encoded = 1;
 }
 
+enum SubstateType {
+  UNKNOWN = 0;
+  COMPONENT = 1;
+  RESOURCE = 2;
+  VAULT = 3;
+  UNCLAIMED_CONFIDENTIAL_OUTPUT = 4;
+  NON_FUNGIBLE = 5;
+  TRANSACTION_RECEIPT = 6;
+  NON_FUNGIBLE_INDEX = 7;
+  VALIDATOR_FEE_POOL = 8;
+  TEMPLATE = 9;
+}
+
 message Instruction {
   enum InstructionType {
     FUNCTION = 0;
@@ -33,6 +46,7 @@ message Instruction {
     CREATE_ACCOUNT = 7;
     ASSERT_BUCKET_CONTAINS = 8;
     PUBLISH_TEMPLATE = 9;
+    ALLOCATE_ADDRESS = 10;
   }
   InstructionType instruction_type = 1;
 
@@ -72,6 +86,10 @@ message Instruction {
 
   // PublishTemplate
   bytes template_binary = 22;
+
+  // AllocateAddress
+  SubstateType substate_type = 23;
+  string workspace_id = 24;
 }
 
 

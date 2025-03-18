@@ -35,10 +35,11 @@ use tari_template_lib::{
     args::{MintArg, ResourceDiscriminator},
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::{
-        AddressAllocation,
+        AddressAllocationId,
         Amount,
         BucketId,
         ComponentAddress,
+        EntityId,
         NonFungibleAddress,
         ProofId,
         UnclaimedConfidentialOutputAddress,
@@ -73,7 +74,7 @@ pub(super) struct WorkingState {
     events: Vec<Event>,
     logs: Vec<LogEntry>,
     buckets: HashMap<BucketId, Bucket>,
-    address_allocations: HashMap<u32, AllocatedAddress>,
+    address_allocations: HashMap<AddressAllocationId, AllocatedAddress>,
     address_allocation_id: u32,
     proofs: HashMap<ProofId, Proof>,
     object_ids: ObjectIds,
@@ -703,22 +704,20 @@ impl WorkingState {
     pub fn new_address_allocation<T: Into<SubstateId> + Clone>(
         &mut self,
         address: T,
-    ) -> Result<AddressAllocation<T>, RuntimeError> {
+    ) -> Result<AddressAllocationId, RuntimeError> {
         let id = self.address_allocation_id;
         self.address_allocation_id += 1;
-        let (current_template, _) = self.current_template()?;
-        let current_template = *current_template;
+        let current_template = self.current_template().ok().map(|(template_addr, _)| *template_addr);
         self.address_allocations
-            .insert(id, AllocatedAddress::new(current_template, address.clone().into()));
-        let allocation = AddressAllocation::new(id, address);
-        Ok(allocation)
+            .insert(id, AllocatedAddress::new(address.into(), current_template));
+        Ok(id)
     }
 
-    pub fn get_allocated_address_by_address<T: Into<SubstateId>>(&mut self, address: T) -> Option<&AllocatedAddress> {
+    pub fn get_allocated_address_by_address<T: Into<SubstateId>>(&self, address: T) -> Option<&AllocatedAddress> {
         let substate_id = address.into();
         self.address_allocations
             .values()
-            .find(|alloc| *alloc.address() == substate_id)
+            .find(|alloc| *alloc.substate_id() == substate_id)
     }
 
     pub fn get_template_for_component(
@@ -726,7 +725,9 @@ impl WorkingState {
         component_address: &ComponentAddress,
     ) -> Result<TemplateAddress, RuntimeError> {
         match self.get_allocated_address_by_address(*component_address) {
-            Some(alloc) => Ok(*alloc.template_address()),
+            Some(alloc) => Ok(*alloc
+                .template_address()
+                .ok_or(RuntimeError::AddressAllocationNoTemplate)?),
             None => {
                 let component = self.store.load_component(component_address)?;
                 Ok(component.template_address)
@@ -734,9 +735,15 @@ impl WorkingState {
         }
     }
 
-    pub fn take_allocated_address(&mut self, id: u32) -> Result<AllocatedAddress, RuntimeError> {
+    pub fn take_allocated_address(&mut self, id: AddressAllocationId) -> Result<AllocatedAddress, RuntimeError> {
         self.address_allocations
             .remove(&id)
+            .ok_or(RuntimeError::AddressAllocationNotFound { id })
+    }
+
+    pub fn get_allocated_address(&self, id: AddressAllocationId) -> Result<&AllocatedAddress, RuntimeError> {
+        self.address_allocations
+            .get(&id)
             .ok_or(RuntimeError::AddressAllocationNotFound { id })
     }
 
@@ -941,6 +948,10 @@ impl WorkingState {
             .ok_or(RuntimeError::NoActiveCallFrame)
     }
 
+    pub fn id_provider_for_entity(&self, entity_id: EntityId) -> IdProvider<'_> {
+        IdProvider::new(entity_id, self.transaction_hash, &self.object_ids)
+    }
+
     pub fn new_bucket_id(&mut self) -> BucketId {
         self.object_ids.next_bucket_id()
     }
@@ -1061,6 +1072,16 @@ impl WorkingState {
                 return Err(RuntimeError::ValidationFailedProofNotInScope { proof_id: *proof_id });
             }
         }
+        for allocation in value.component_address_allocations() {
+            if !self.address_allocations.contains_key(&allocation.id()) {
+                return Err(RuntimeError::ValidationFailedAddressAllocationNotInScope { id: allocation.id() });
+            }
+        }
+        for allocation in value.resource_address_allocations() {
+            if !self.address_allocations.contains_key(&allocation.id()) {
+                return Err(RuntimeError::ValidationFailedAddressAllocationNotInScope { id: allocation.id() });
+            }
+        }
 
         Ok(())
     }
@@ -1072,9 +1093,15 @@ impl WorkingState {
             // You are allowed to reference existing root substates
             if id.is_root() {
                 if !self.substate_exists(&id)? {
-                    return Err(RuntimeError::RootSubstateNotFound { id: id.clone() });
+                    // The substate could be an allocated address
+                    if self.get_allocated_address_by_address(id.clone()).is_none() {
+                        return Err(RuntimeError::RootSubstateNotFound { id });
+                    }
                 }
-            } else if !scope.is_substate_in_scope(&id) {
+            } else if !scope.is_substate_in_scope(&id) &&
+                // The substate could be an allocated address
+                self.get_allocated_address_by_address(id.clone()).is_none()
+            {
                 if !self.substate_exists(&id)? {
                     return Err(RuntimeError::ReferencedSubstateNotFound { id: id.clone() });
                 }
@@ -1093,6 +1120,7 @@ impl WorkingState {
                 return Err(RuntimeError::ValidationFailedProofNotInScope { proof_id: *proof_id });
             }
         }
+        // TODO: should we scope address allocations?
 
         Ok(())
     }

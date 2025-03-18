@@ -50,6 +50,7 @@ use crate::{
         NonFungible,
         NonFungibleId,
         ResourceAddress,
+        ResourceAddressAllocation,
         VaultId,
     },
     prelude::{AuthHook, ResourceType},
@@ -113,6 +114,7 @@ impl ResourceManager {
         mint_arg: Option<MintArg>,
         view_key: Option<RistrettoPublicKeyBytes>,
         authorize_hook: Option<AuthHook>,
+        address_allocation: Option<ResourceAddressAllocation>,
     ) -> (ResourceAddress, Option<Bucket>) {
         let resp: InvokeResult = call_engine(EngineOp::ResourceInvoke, &ResourceInvokeArg {
             resource_ref: ResourceRef::Resource,
@@ -125,6 +127,7 @@ impl ResourceManager {
                 mint_arg,
                 view_key,
                 authorize_hook,
+                address_allocation,
             }],
         });
 

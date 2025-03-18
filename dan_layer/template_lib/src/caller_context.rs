@@ -6,9 +6,9 @@
 use tari_template_abi::{call_engine, EngineOp};
 
 use crate::{
-    args::{CallerContextAction, CallerContextInvokeArg, InvokeResult},
+    args::{AddressAllocationInvokeArg, CallerContextAction, CallerContextInvokeArg, InvokeResult},
     crypto::RistrettoPublicKeyBytes,
-    models::{AddressAllocation, ComponentAddress},
+    models::{ComponentAddress, ComponentAddressAllocation, ResourceAddressAllocation},
 };
 
 /// Allows a template to access information about the current instruction's caller
@@ -38,15 +38,24 @@ impl CallerContext {
             .expect("Not in a component instance context")
     }
 
+    /// Alias function to allocate component address
     pub fn allocate_component_address(
         public_key_address: Option<RistrettoPublicKeyBytes>,
-    ) -> AddressAllocation<ComponentAddress> {
-        let resp: InvokeResult = call_engine(EngineOp::CallerContextInvoke, &CallerContextInvokeArg {
-            action: CallerContextAction::AllocateNewComponentAddress,
-            args: invoke_args![public_key_address],
-        });
+    ) -> ComponentAddressAllocation {
+        let resp: InvokeResult = call_engine(
+            EngineOp::AddressAllocationInvoke,
+            &AddressAllocationInvokeArg::CreateComponentAllocation { public_key_address },
+        );
 
-        resp.decode()
-            .expect("Failed to decode AddressAllocation<ComponentAddress>")
+        resp.decode().expect("Failed to decode ComponentAddressAllocation ")
+    }
+
+    pub fn allocate_resource_address() -> ResourceAddressAllocation {
+        let resp: InvokeResult = call_engine(
+            EngineOp::AddressAllocationInvoke,
+            &AddressAllocationInvokeArg::CreateResourceAllocation,
+        );
+
+        resp.decode().expect("Failed to decode ResourceAddressAllocation ")
     }
 }

@@ -53,17 +53,7 @@ impl<'a> IdProvider<'a> {
         Ok(ResourceAddress::new(key))
     }
 
-    pub fn new_component_address(
-        &self,
-        template_address: TemplateAddress,
-        public_key_address: Option<RistrettoPublicKey>,
-    ) -> Result<ComponentAddress, IdProviderError> {
-        if let Some(key) = public_key_address {
-            // if a public key address is specified, then it will derive the address from the
-            // template hash and public key
-            return Ok(new_component_address_from_public_key(&template_address, &key));
-        }
-
+    pub fn new_component_address(&self) -> Result<ComponentAddress, IdProviderError> {
         let component_id = hasher32(EngineHashDomainLabel::ComponentAddress)
             .chain(&self.transaction_hash)
             .chain(&self.next()?)
@@ -71,6 +61,17 @@ impl<'a> IdProvider<'a> {
 
         let object_key = ObjectKey::new(self.entity_id, ComponentKey::new(component_id.trailing_bytes()));
         Ok(ComponentAddress::new(object_key))
+    }
+
+    pub fn derive_new_component_address(
+        &self,
+        template_address: &TemplateAddress,
+        public_key_address: &RistrettoPublicKey,
+    ) -> Result<ComponentAddress, IdProviderError> {
+        Ok(new_component_address_from_public_key(
+            template_address,
+            public_key_address,
+        ))
     }
 
     pub fn new_vault_id(&self) -> Result<VaultId, IdProviderError> {

@@ -1,6 +1,6 @@
 # NOTE: When editing this version, also edit the versions in template_built_in/templates/account and account_nft
 [workspace.package]
-version = "0.8.2"
+version = "0.9.0"
 edition = "2021"
 authors = ["The Tari Development Community"]
 repository = "https://github.com/tari-project/tari-dan"
@@ -79,7 +79,7 @@ tari_base_node_client = { path = "clients/base_node_client" }
 tari_rpc_state_sync = { path = "dan_layer/rpc_state_sync" }
 tari_consensus = { path = "dan_layer/consensus" }
 tari_epoch_oracles = { path = "dan_layer/epoch_oracles" }
-tari_bor = { version = "0.8", path = "dan_layer/tari_bor", default-features = false } # avoid including default features so each crate can choose which ones to importlibp2p-messaging = { path = "networking/libp2p-messaging" }
+tari_bor = { path = "dan_layer/tari_bor", default-features = false } # avoid including default features so each crate can choose which ones to import
 tari_dan_app_utilities = { path = "applications/tari_dan_app_utilities" }
 tari_dan_common_types = { path = "dan_layer/common_types" }
 tari_dan_engine = { path = "dan_layer/engine" }
@@ -102,11 +102,11 @@ tari_state_store_sqlite = { path = "dan_layer/state_store_sqlite" }
 tari_state_store_rocksdb = { path = "dan_layer/state_store_rocksdb" }
 tari_state_tree = { path = "dan_layer/state_tree" }
 tari_swarm = { path = "networking/swarm" }
-tari_template_abi = { version = "0.8.2", path = "dan_layer/template_abi" }
+tari_template_abi = { version = "0.9.0", path = "dan_layer/template_abi" }
 tari_template_builtin = { path = "dan_layer/template_builtin" }
 tari_template_lib = { path = "dan_layer/template_lib" }
-tari_template_macros = { version = "0.8", path = "dan_layer/template_macros" }
-tari_template_manager = { version = "0.8", path = "dan_layer/template_manager" }
+tari_template_macros = { version = "0.9", path = "dan_layer/template_macros" }
+tari_template_manager = { path = "dan_layer/template_manager" }
 tari_template_test_tooling = { path = "dan_layer/template_test_tooling" }
 tari_transaction = { path = "dan_layer/transaction" }
 tari_transaction_manifest = { path = "dan_layer/transaction_manifest" }

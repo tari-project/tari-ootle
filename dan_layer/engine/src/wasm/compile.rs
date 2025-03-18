@@ -71,6 +71,13 @@ crate-type = ["cdylib", "lib"]
 }
 
 pub fn compile_template<P: AsRef<Path>>(package_dir: P, features: &[&str]) -> io::Result<WasmModule> {
+    if !package_dir.as_ref().exists() {
+        return Err(io::Error::new(
+            ErrorKind::NotFound,
+            format!("Package directory not found: {}", package_dir.as_ref().display(),),
+        ));
+    }
+
     let mut args = ["build", "--target", "wasm32-unknown-unknown", "--release"]
         .iter()
         .map(ToString::to_string)

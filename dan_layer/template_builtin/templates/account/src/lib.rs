@@ -33,16 +33,19 @@ mod account_template {
     }
 
     impl Account {
-        pub fn create(public_key_token: NonFungibleAddress, owner_rule: Option<OwnerRule>, access_rules: Option<AccessRules>, bucket: Option<Bucket>) -> Component<Account> {
+        pub fn create(
+            public_key_token: NonFungibleAddress,
+            owner_rule: Option<OwnerRule>,
+            access_rules: Option<AccessRules>,
+            bucket: Option<Bucket>,
+        ) -> Component<Account> {
             // extract the public key from the token
             // we only allow tokens that correspond to public keys
             let public_key = public_key_token
                 .to_public_key()
                 .unwrap_or_else(|| panic!("public_key_token is not a valid public key: {}", public_key_token));
 
-            let owner_rule = owner_rule.unwrap_or(
-                OwnerRule::ByPublicKey(public_key)
-            );
+            let owner_rule = owner_rule.unwrap_or(OwnerRule::ByPublicKey(public_key));
 
             let access_rules = access_rules.unwrap_or(
                 AccessRules::new()
@@ -51,8 +54,8 @@ mod account_template {
                     .add_method_rule("deposit", rule!(allow_all))
                     .add_method_rule("deposit_all", rule!(allow_all))
                     .add_method_rule("get_non_fungible_ids", rule!(allow_all))
-                    // By defaul, only the owner of the token will be able to withdraw funds from the account
-                    .default(rule!(non_fungible(public_key_token)))
+                    // By default, only the owner of the token will be able to withdraw funds from the account
+                    .default(rule!(non_fungible(public_key_token))),
             );
 
             // add the funds from the (optional) bucket
@@ -82,7 +85,6 @@ mod account_template {
 
         // #[access_rule(requires(owner_badge))]
         pub fn withdraw(&mut self, resource: ResourceAddress, amount: Amount) -> Bucket {
-            // TODO: clean up hashmap api in emit_event
             emit_event("withdraw", [
                 ("amount", amount.to_string()),
                 ("resource", resource.to_string()),

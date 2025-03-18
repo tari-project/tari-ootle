@@ -8,7 +8,7 @@ use crate::{
     caller_context::CallerContext,
     crypto::RistrettoPublicKeyBytes,
     engine,
-    models::{AddressAllocation, ComponentAddress},
+    models::{ComponentAddress, ComponentAddressAllocation},
 };
 
 /// Utility for building components inside templates
@@ -16,8 +16,7 @@ pub struct ComponentBuilder<T> {
     component: T,
     owner_rule: OwnerRule,
     access_rules: ComponentAccessRules,
-    public_key_address: Option<RistrettoPublicKeyBytes>,
-    address_allocation: Option<AddressAllocation<ComponentAddress>>,
+    address_allocation: Option<ComponentAddressAllocation>,
 }
 
 impl<T> ComponentBuilder<T> {
@@ -27,19 +26,26 @@ impl<T> ComponentBuilder<T> {
             component,
             owner_rule: OwnerRule::default(),
             access_rules: ComponentAccessRules::new(),
-            public_key_address: None,
             address_allocation: None,
         }
     }
 
     /// Use an allocated address for the component.
-    pub fn with_address_allocation(mut self, allocation: AddressAllocation<ComponentAddress>) -> Self {
+    pub fn with_address_allocation(mut self, allocation: ComponentAddressAllocation) -> Self {
+        assert!(self.address_allocation.is_none(), "Address allocation already set");
         self.address_allocation = Some(allocation);
         self
     }
 
+    /// Equivalent to :
+    /// ```rust,ignore
+    /// let allocation = CallerContext::allocate_component_address(Some(pk));
+    /// Component::new(..)
+    /// .with_address_allocation(allocation)
+    /// ```
+    /// Calling this followed by `with_address_allocation` will cause the transaction to fail
     pub fn with_public_key_address(mut self, public_key: RistrettoPublicKeyBytes) -> Self {
-        self.public_key_address = Some(public_key);
+        self.address_allocation = Some(CallerContext::allocate_component_address(Some(public_key)));
         self
     }
 
@@ -60,17 +66,12 @@ impl<T> ComponentBuilder<T> {
 impl<T: serde::Serialize> ComponentBuilder<T> {
     /// Creates the new component and returns it
     pub fn create(self) -> Component<T> {
-        if self.public_key_address.is_some() && self.address_allocation.is_some() {
-            panic!("Cannot specify both a public key address and an address allocation");
-        }
-
-        let address_allocation = self
-            .public_key_address
-            // Allocate public key address is necessary
-            .map(|pk| CallerContext::allocate_component_address(Some(pk)))
-            .or(self.address_allocation);
-
-        let address = engine().create_component(self.component, self.owner_rule, self.access_rules, address_allocation);
+        let address = engine().create_component(
+            self.component,
+            self.owner_rule,
+            self.access_rules,
+            self.address_allocation,
+        );
         Component::from_address(address)
     }
 }

@@ -11,7 +11,7 @@ use tari_engine_types::{
 };
 use tari_template_lib::{
     args,
-    args::Arg,
+    args::{Arg, SubstateType},
     auth::OwnerRule,
     models::{Amount, ComponentAddress, ConfidentialWithdrawProof, ResourceAddress},
     prelude::AccessRules,
@@ -239,6 +239,14 @@ impl TransactionBuilder {
         // Reset the signatures as they are no longer valid
         self.clear_signatures();
         self
+    }
+
+    /// Add address allocation instruction with a custom ID that can be referenced later as a standard argument.
+    pub fn allocate_address<T: Into<String>>(self, substate_type: SubstateType, workspace_id: T) -> Self {
+        self.add_instruction(Instruction::AllocateAddress {
+            substate_type,
+            workspace_id: workspace_id.into(),
+        })
     }
 
     pub fn build_unsigned_transaction(self) -> UnsignedTransaction {

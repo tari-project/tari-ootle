@@ -9,10 +9,12 @@ use tari_template_lib::{
     models::{
         BinaryTag,
         BucketId,
+        ComponentAddressAllocation,
         NonFungibleAddressContents,
         ObjectKey,
         ProofId,
         ResourceAddress,
+        ResourceAddressAllocation,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
@@ -112,6 +114,11 @@ impl IndexedValue {
         self.value
     }
 
+    pub fn decoded<T>(&self) -> Result<T, IndexedValueError>
+    where for<'a> T: serde::Deserialize<'a> {
+        tari_bor::from_value(&self.value).map_err(Into::into)
+    }
+
     pub fn get_value<T>(&self, path: &str) -> Result<Option<T>, IndexedValueError>
     where for<'a> T: serde::Deserialize<'a> {
         decode_value_at_path(&self.value, path)
@@ -150,6 +157,10 @@ pub struct IndexedWellKnownTypes {
     unclaimed_confidential_output_address: Vec<UnclaimedConfidentialOutputAddress>,
     published_template_addresses: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
+    #[cfg_attr(feature = "ts", ts(type = "[number]"))]
+    component_address_allocations: Vec<ComponentAddressAllocation>,
+    #[cfg_attr(feature = "ts", ts(type = "[number]"))]
+    resource_address_allocations: Vec<ResourceAddressAllocation>,
 }
 
 impl IndexedWellKnownTypes {
@@ -166,6 +177,8 @@ impl IndexedWellKnownTypes {
             unclaimed_confidential_output_address: vec![],
             published_template_addresses: vec![],
             validator_node_fee_pools: vec![],
+            component_address_allocations: vec![],
+            resource_address_allocations: vec![],
         }
     }
 
@@ -189,6 +202,8 @@ impl IndexedWellKnownTypes {
             unclaimed_confidential_output_address: visitor.unclaimed_confidential_output_addresses,
             published_template_addresses: visitor.published_templates,
             validator_node_fee_pools: visitor.validator_node_fee_pools,
+            component_address_allocations: visitor.component_address_allocations,
+            resource_address_allocations: visitor.resource_address_allocations,
         })
     }
 
@@ -225,6 +240,8 @@ impl IndexedWellKnownTypes {
                     },
                     WellKnownTariValue::BucketId(_) |
                     WellKnownTariValue::Metadata(_) |
+                    WellKnownTariValue::ComponentAddressAllocation(_) |
+                    WellKnownTariValue::ResourceAddressAllocation(_) |
                     WellKnownTariValue::ProofId(_) => {},
                 }
 
@@ -244,9 +261,11 @@ impl IndexedWellKnownTypes {
             .iter()
             .map(|a| (*a).into())
             .chain(self.resource_addresses.iter().map(|a| (*a).into()))
+            .chain(self.transaction_receipt_addresses.iter().map(|a| (*a).into()))
             .chain(self.non_fungible_addresses.iter().map(|a| a.clone().into()))
             .chain(self.vault_ids.iter().map(|a| (*a).into()))
             .chain(self.unclaimed_confidential_output_address.iter().map(|a| (*a).into()))
+            .chain(self.published_template_addresses.iter().map(|a| (*a).into()))
             .chain(self.validator_node_fee_pools.iter().map(|a| (*a).into()))
     }
 
@@ -278,6 +297,14 @@ impl IndexedWellKnownTypes {
         &self.metadata
     }
 
+    pub fn component_address_allocations(&self) -> &[ComponentAddressAllocation] {
+        &self.component_address_allocations
+    }
+
+    pub fn resource_address_allocations(&self) -> &[ResourceAddressAllocation] {
+        &self.resource_address_allocations
+    }
+
     pub fn diff(&self, other: &Self) -> Self {
         Self {
             bucket_ids: diff_vec(&self.bucket_ids, &other.bucket_ids),
@@ -300,6 +327,14 @@ impl IndexedWellKnownTypes {
                 &other.published_template_addresses,
             ),
             validator_node_fee_pools: diff_vec(&self.validator_node_fee_pools, &other.validator_node_fee_pools),
+            component_address_allocations: diff_vec(
+                &self.component_address_allocations,
+                &other.component_address_allocations,
+            ),
+            resource_address_allocations: diff_vec(
+                &self.resource_address_allocations,
+                &other.resource_address_allocations,
+            ),
         }
     }
 }
@@ -342,6 +377,8 @@ pub enum WellKnownTariValue {
     UnclaimedConfidentialOutputAddress(UnclaimedConfidentialOutputAddress),
     PublishedTemplateAddress(PublishedTemplateAddress),
     ValidatorNodeFeePool(ValidatorFeePoolAddress),
+    ComponentAddressAllocation(ComponentAddressAllocation),
+    ResourceAddressAllocation(ResourceAddressAllocation),
 }
 
 impl FromTagAndValue for WellKnownTariValue {
@@ -395,6 +432,14 @@ impl FromTagAndValue for WellKnownTariValue {
                 let value: [u8; 32] = value.deserialized().map_err(BorError::from)?;
                 Ok(Self::ValidatorNodeFeePool(value.into()))
             },
+            BinaryTag::AllocatedComponentAddress => {
+                let value = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::ComponentAddressAllocation(ComponentAddressAllocation::new(value)))
+            },
+            BinaryTag::AllocatedResourceAddress => {
+                let value = value.deserialized().map_err(BorError::from)?;
+                Ok(Self::ResourceAddressAllocation(ResourceAddressAllocation::new(value)))
+            },
         }
     }
 }
@@ -412,6 +457,8 @@ pub struct IndexedValueVisitor {
     unclaimed_confidential_output_addresses: Vec<UnclaimedConfidentialOutputAddress>,
     published_templates: Vec<PublishedTemplateAddress>,
     validator_node_fee_pools: Vec<ValidatorFeePoolAddress>,
+    component_address_allocations: Vec<ComponentAddressAllocation>,
+    resource_address_allocations: Vec<ResourceAddressAllocation>,
 }
 
 impl IndexedValueVisitor {
@@ -428,6 +475,8 @@ impl IndexedValueVisitor {
             unclaimed_confidential_output_addresses: vec![],
             published_templates: vec![],
             validator_node_fee_pools: vec![],
+            component_address_allocations: vec![],
+            resource_address_allocations: vec![],
         }
     }
 }
@@ -469,6 +518,12 @@ impl ValueVisitor<WellKnownTariValue> for IndexedValueVisitor {
             },
             WellKnownTariValue::ValidatorNodeFeePool(address) => {
                 self.validator_node_fee_pools.push(address);
+            },
+            WellKnownTariValue::ComponentAddressAllocation(allocation) => {
+                self.component_address_allocations.push(allocation);
+            },
+            WellKnownTariValue::ResourceAddressAllocation(allocation) => {
+                self.resource_address_allocations.push(allocation);
             },
         }
         Ok(ControlFlow::Continue(()))

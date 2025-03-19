@@ -58,6 +58,11 @@ pub struct DanWalletSdk<TStore, TNetworkInterface> {
     cipher_seed: Arc<CipherSeed>,
 }
 
+pub struct DanWalletSdkInitResult<TStore, TNetworkInterface> {
+    pub sdk: DanWalletSdk<TStore, TNetworkInterface>,
+    pub needs_resource_sync: bool,
+}
+
 impl<TStore, TNetworkInterface> DanWalletSdk<TStore, TNetworkInterface>
 where
     TStore: WalletStore,
@@ -71,7 +76,7 @@ where
         config: WalletSdkConfig,
         seed_words: Option<SeedWords>,
         wallet_secret: Option<String>,
-    ) -> Result<Self, WalletSdkError> {
+    ) -> Result<DanWalletSdkInitResult<TStore, TNetworkInterface>, WalletSdkError> {
         // initialize network
         let config_api = ConfigApi::new(&store);
         if !config_api.exists(ConfigKey::Network)? {
@@ -79,6 +84,7 @@ where
         }
 
         // initialize cipher seed
+        let mut needs_resource_sync = false;
         let cipher_seed = match Self::cipher_seed(&store)? {
             Some(cipher_seed) => {
                 if seed_words.is_some() {
@@ -92,7 +98,7 @@ where
                     let result = Self::restore_cipher_seed(&store, &seed_words, wallet_secret);
                     if result.is_ok() {
                         info!(target: LOG_TARGET, "🔑 Successfully restored wallet seed key!");
-                        // TODO: trigger/return indicator that scan is needed for resources (account etc...)
+                        needs_resource_sync = true;
                     }
                     result
                 } else {
@@ -101,11 +107,14 @@ where
             },
         }?;
 
-        Ok(Self {
-            store,
-            network_interface: indexer,
-            config,
-            cipher_seed: Arc::new(cipher_seed),
+        Ok(DanWalletSdkInitResult{
+            sdk: Self {
+                store,
+                network_interface: indexer,
+                config,
+                cipher_seed: Arc::new(cipher_seed),
+            },
+            needs_resource_sync,
         })
     }
 

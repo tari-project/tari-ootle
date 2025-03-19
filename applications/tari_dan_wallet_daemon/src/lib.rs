@@ -35,20 +35,17 @@ use std::{fs, panic, process};
 use log::*;
 use tari_crypto::tari_utilities::Hidden;
 use tari_dan_common_types::{optional::Optional, NumPreshards};
-use tari_dan_wallet_sdk::{
-    apis::{
-        config::{ConfigApi, ConfigKey},
-        key_manager,
-    },
-    DanWalletSdk,
-    WalletSdkConfig,
-};
+use tari_dan_wallet_sdk::{apis::{
+    config::{ConfigApi, ConfigKey},
+    key_manager,
+}, DanWalletSdk, DanWalletSdkInitResult, WalletSdkConfig};
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_key_manager::SeedWords;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::models::Amount;
 use tokio::task;
 
+use crate::services::resource_scanner;
 use crate::{
     cli::{Cli, WalletRestoreArgs},
     config::ApplicationConfig,
@@ -74,14 +71,25 @@ pub async fn run_tari_dan_wallet_daemon(
     // console_subscriber::init();
 
     let wallet_store = init_wallet_store(&config)?;
-
-    let wallet_sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store.clone())?;
+    let wallet_sdk_init_result = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store.clone())?;
+    let wallet_sdk = wallet_sdk_init_result.sdk;
     wallet_sdk
         .key_manager_api()
         .get_or_create_initial(key_manager::TRANSACTION_BRANCH)?;
     let notify = Notify::new(100);
 
     let services = spawn_services(shutdown_signal.clone(), notify.clone(), wallet_sdk.clone());
+
+    // trigger resource scanning if needed
+    if wallet_sdk_init_result.needs_resource_sync {
+        let scanner = resource_scanner::Service::new(
+            wallet_sdk.clone(), 
+            shutdown_signal.clone(),
+        );
+        tokio::spawn(async move {
+            scanner.scan().await;
+        });
+    }
 
     let jrpc_address = config.dan_wallet_daemon.json_rpc_address.unwrap();
     let signaling_server_address = config.dan_wallet_daemon.signaling_server_address.unwrap();
@@ -145,7 +153,7 @@ pub fn initialize_wallet_sdk(
     wallet_restore_args: &WalletRestoreArgs,
     config: &ApplicationConfig,
     store: SqliteWalletStore,
-) -> anyhow::Result<DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
+) -> anyhow::Result<DanWalletSdkInitResult<SqliteWalletStore, IndexerJsonRpcNetworkInterface>> {
     let sdk_config = WalletSdkConfig {
         // TODO: Configure
         password: None,
@@ -167,7 +175,7 @@ pub fn initialize_wallet_sdk(
                 .collect(),
         )
     });
-    let wallet_sdk = DanWalletSdk::initialize(
+    let wallet_sdk_init_result = DanWalletSdk::initialize(
         config.dan_wallet_daemon.network,
         store,
         indexer,
@@ -176,7 +184,5 @@ pub fn initialize_wallet_sdk(
         wallet_restore_args.wallet_secret.clone(),
     )?;
 
-    // TODO: if we need to scan the network, just use indexer client and go through all substates using a scan service
-
-    Ok(wallet_sdk)
+    Ok(wallet_sdk_init_result)
 }

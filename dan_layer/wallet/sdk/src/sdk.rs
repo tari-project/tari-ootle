@@ -175,7 +175,7 @@ where
     fn cipher_seed_password_keyring_entry(network: Network) -> Result<Entry, keyring::Error> {
         Entry::new(
             KEYRING_ENTRIES_SERVICE,
-            format!("{}-{}", network.to_string(), CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME).as_str(),
+            format!("{}-{}", network, CIPHER_SEED_PASSWORD_KEYRING_ENTRY_NAME).as_str(),
         )
     }
 

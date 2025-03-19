@@ -479,9 +479,9 @@ fn forward_logs<R: AsyncRead + Unpin + Send + 'static>(path: PathBuf, reader: R,
         let mut log_file = File::create(path).await.unwrap();
         while let Some(output) = lines.next_line().await.unwrap() {
             log::debug!(target: "swarm", "[{target}] {output}");
-            log_file.write_all(output.as_bytes()).await.unwrap();
-            log_file.write_all(b"\n").await.unwrap();
-            log_file.flush().await.unwrap();
+            let _ignore = log_file.write_all(output.as_bytes()).await;
+            let _ignore = log_file.write_all(b"\n").await;
+            let _ignore = log_file.flush().await;
         }
         log::debug!(target: "swarm", "Process exited ({target})");
     });

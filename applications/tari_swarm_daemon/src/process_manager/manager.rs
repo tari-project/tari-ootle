@@ -213,6 +213,10 @@ impl ProcessManager {
     fn clear_terminated_instances(&mut self) -> anyhow::Result<()> {
         let mut instances_to_remove = vec![];
         for instance in self.instance_manager.instances_mut() {
+            if !instance.is_running() {
+                // Already been checked
+                continue;
+            }
             if let Some(status) = instance.check_running()? {
                 if status.success() {
                     info!(

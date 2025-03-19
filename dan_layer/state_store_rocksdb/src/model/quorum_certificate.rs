@@ -20,80 +20,44 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
-
-use rocksdb::{Transaction, TransactionDB};
 use tari_dan_storage::consensus_models::{BlockId, QcId, QuorumCertificate};
 
-use super::traits::ModelColumnFamily;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel};
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, FixedBytesCodec32, UnitCodec},
+    traits::{Cf, QueryCf},
+};
 
-pub struct QuorumCertificateModel {}
+pub struct QuorumCertificateModel;
 
-impl QuorumCertificateModel {
-    pub fn key_from_qc_id(qc_id: &QcId) -> String {
-        format!("{}_{}", Self::key_prefix(), qc_id)
-    }
-}
-
-impl RocksdbModel for QuorumCertificateModel {
-    type Item = QuorumCertificate;
-
-    fn key_prefix() -> &'static str {
-        "quorumcertificates"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        Self::key_from_qc_id(value.id())
-    }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![BlockColumnFamily::name()]
-    }
-
-    fn put_in_cfs(
-        db: Arc<TransactionDB>,
-        tx: &mut Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        value: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        // In each CF value We store the key to the main collection, so we can retrieve the actual value
-        let main_key = Self::key(value);
-        let main_key_bytes = main_key.as_bytes();
-
-        BlockColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
-
-        Ok(())
-    }
-
-    fn delete_from_cfs(
-        db: Arc<TransactionDB>,
-        tx: &Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        item: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        BlockColumnFamily::delete(db.clone(), tx, operation, item)?;
-
-        Ok(())
-    }
-}
-
-pub struct BlockColumnFamily {}
-
-impl BlockColumnFamily {
-    pub fn key_from_block_id(block_id: &BlockId) -> String {
-        format!("{}_{}", QuorumCertificateModel::key_prefix(), block_id)
-    }
-}
-
-impl ModelColumnFamily for BlockColumnFamily {
-    type Item = QuorumCertificate;
+impl Cf for QuorumCertificateModel {
+    type Key = QcId;
+    type KeyCodec = FixedBytesCodec32;
+    type Value = QuorumCertificate;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "quorumcertificates_block"
+        "quorumcertificates"
     }
+}
 
-    fn build_key(value: &Self::Item) -> String {
-        Self::key_from_block_id(value.block_id())
+pub struct QuorumCertificateBlockIndex;
+
+impl Cf for QuorumCertificateBlockIndex {
+    type Key = (BlockId, QcId);
+    type KeyCodec = (BlockIdCodec, FixedBytesCodec32);
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        // Re-used cf
+        QuorumCertificateModel::name()
     }
+}
+
+pub struct ByBlockIdQuery;
+
+impl QueryCf for ByBlockIdQuery {
+    type Cf = QuorumCertificateBlockIndex;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
 }

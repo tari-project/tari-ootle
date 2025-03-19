@@ -89,13 +89,6 @@ impl ValidatorNodeClient {
         self.send_request("get_substate", request).await
     }
 
-    pub async fn get_fees(
-        &mut self,
-        request: GetValidatorFeesRequest,
-    ) -> Result<GetValidatorFeesResponse, ValidatorNodeClientError> {
-        self.send_request("get_fees", request).await
-    }
-
     pub async fn get_template(
         &mut self,
         request: GetTemplateRequest,

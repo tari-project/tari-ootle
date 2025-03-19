@@ -25,23 +25,24 @@ use tari_consensus::hotstuff::HotstuffEvent;
 use tari_dan_storage::{consensus_models::Block, StateStore};
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
-use tari_shutdown::ShutdownSignal;
+use tari_shutdown::Shutdown;
 use tari_template_manager::interface::TemplateExecutable;
+use tokio::signal::unix::{signal, SignalKind};
 
-use crate::Services;
+use crate::{Services, ValidatorNodeStateStore};
 
 const LOG_TARGET: &str = "tari::validator_node::dan_node";
 
 pub struct DanNode {
-    services: Services,
+    services: Services<ValidatorNodeStateStore>,
 }
 
 impl DanNode {
-    pub fn new(services: Services) -> Self {
+    pub fn new(services: Services<ValidatorNodeStateStore>) -> Self {
         Self { services }
     }
 
-    pub async fn start(mut self, mut shutdown: ShutdownSignal) -> Result<(), anyhow::Error> {
+    pub async fn start(mut self, mut shutdown: Shutdown) -> Result<(), anyhow::Error> {
         let mut hotstuff_events = self.services.consensus_handle.subscribe_to_hotstuff_events();
         let mut epoch_manager_events = self.services.epoch_manager.subscribe();
 
@@ -49,11 +50,20 @@ impl DanNode {
         //     error!(target: LOG_TARGET, "Failed to dial local shard peers: {}", err);
         // }
 
+        let mut sigint = signal(SignalKind::interrupt())?;
+        let mut sigterm = signal(SignalKind::terminate())?;
+
         loop {
             tokio::select! {
-                // Wait until killed
-                _ = shutdown.wait() => {
-                     break;
+                _ = sigint.recv() => {
+                    info!(target: LOG_TARGET, "💤 Received SIGINT");
+                    shutdown.trigger();
+                },
+
+                // Wait for SIGTERM
+                _ = sigterm.recv() => {
+                    info!(target: LOG_TARGET, "🛑 Received SIGTERM");
+                    shutdown.trigger();
                 },
 
                 Ok(event) = hotstuff_events.recv() => if let Err(err) = self.handle_hotstuff_event(event).await {
@@ -64,9 +74,21 @@ impl DanNode {
                     error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
                 },
 
-                Err(err) = self.services.on_any_exit() => {
-                    error!(target: LOG_TARGET, "Error in service: {}", err);
-                    return Err(err);
+                result = self.services.on_any_exit() => {
+                    match result {
+                        Ok(_) => {
+                            if shutdown.is_triggered() {
+                                info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
+                            } else {
+                                warn!(target: LOG_TARGET, "❓️ A service has exited unexpectedly. Shutting down...");
+                            }
+                            break;
+                        },
+                        Err(err) => {
+                            error!(target: LOG_TARGET, "Error in service: {}", err);
+                            return Err(err);
+                        }
+                    }
                 }
 
             }

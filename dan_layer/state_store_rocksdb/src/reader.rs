@@ -24,23 +24,19 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
     marker::PhantomData,
-    ops::RangeInclusive,
-    sync::Arc,
 };
 
-use indexmap::IndexMap;
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_common_types::types::{FixedHash, PublicKey};
 use tari_dan_common_types::{
+    optional::Optional,
     shard::Shard,
     Epoch,
     NodeAddressable,
     NodeHeight,
-    ShardGroup,
     SubstateAddress,
-    SubstateRequirement,
     ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
@@ -51,11 +47,8 @@ use tari_dan_storage::{
         BlockDiff,
         BlockId,
         BlockTransactionExecution,
-        BurntUtxo,
         EpochCheckpoint,
         ForeignProposal,
-        ForeignProposalAtom,
-        ForeignProposalStatus,
         ForeignReceiveCounters,
         ForeignSendCounters,
         HighQc,
@@ -72,10 +65,14 @@ use tari_dan_storage::{
         StateTransition,
         StateTransitionId,
         SubstateChange,
+        SubstateCreatedProof,
+        SubstateData,
+        SubstateDestroyedProof,
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
-        TransactionPoolConfirmedStage,
+        SubstateUpdate,
+        SubstateValueOrHash,
         TransactionPoolRecord,
         TransactionPoolStage,
         TransactionRecord,
@@ -86,61 +83,70 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
+use tari_engine_types::{
+    confidential::UnclaimedConfidentialOutput,
+    substate::SubstateId,
+    template_models::UnclaimedConfidentialOutputAddress,
+};
 use tari_state_tree::{Node, NodeKey, Version};
 use tari_transaction::TransactionId;
-use tari_utilities::hex::Hex;
 
 use crate::{
+    cf_api::DbContext,
     error::RocksDbStorageError,
     model::{
-        self,
+        block,
         block::BlockModel,
-        block_diff::{BlockDiffData, BlockDiffModel},
-        block_transaction_execution::{BlockTransactionExecutionModel, BlockTransactionExecutionModelData},
+        block_diff,
+        block_diff::{BlockDiffKey, BlockDiffModel},
+        block_transaction_execution,
+        block_transaction_execution::BlockTransactionExecutionModel,
+        bookkeeping,
+        bookkeeping::{BookkeepingKey, BookkeepingModel},
+        burnt_utxo,
         burnt_utxo::BurntUtxoModel,
+        chain,
         epoch_checkpoint::EpochCheckpointModel,
+        evicted_node,
         evicted_node::EvictedNodeModel,
         foreign_parked_blocks::ForeignParkedBlockModel,
+        foreign_proposal,
         foreign_proposal::ForeignProposalModel,
         foreign_receive_counter::ForeignReceiveCounterModel,
         foreign_send_counter::ForeignSendCounterModel,
+        foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeModel,
-        high_qc::HighQcModel,
-        last_executed::LastExecutedModel,
-        last_proposed::LastProposedModel,
-        last_sent_vote::LastSentVoteModel,
-        last_voted::LastVotedModel,
-        leaf_block::LeafBlockModel,
-        locked_block::LockedBlockModel,
-        missing_transactions::MissingTransactionModel,
-        pending_state_tree_diff::PendingStateTreeDiffModel,
+        lock_conflict,
+        pending_state_tree_diff,
+        quorum_certificate,
         quorum_certificate::QuorumCertificateModel,
-        state_tree::StateTreeModel,
+        state_transition,
+        state_transition::{StateTransitionModel, StateTransitionType},
+        state_tree::StateTreeModelRef,
         state_tree_shard_versions::StateTreeShardVersionModel,
+        substate,
         substate::SubstateModel,
+        substate_locks,
         substate_locks::SubstateLockModel,
-        traits::{ModelColumnFamily, RocksdbModel},
         transaction::TransactionModel,
         transaction_pool::TransactionPoolModel,
-        transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData},
-        vote::VoteModel,
+        transaction_pool_state_update,
+        validator_node_epoch_stats,
+        validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
+        vote,
     },
 };
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
 
 pub struct RocksDbStateStoreReadTransaction<'a, TAddr> {
-    // transaction: RocksDbTransaction<'a>,
-    // db: MutexGuard<'a, TransactionDB>,
-    // tx: UnsafeCell<MutexGuard<'a, Transaction<'a, TransactionDB>>>,
     tx: Transaction<'a, TransactionDB>,
-    db: Arc<TransactionDB>,
+    db: &'a TransactionDB,
     _addr: PhantomData<TAddr>,
 }
 
 impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
-    pub(crate) fn new(db: Arc<TransactionDB>, tx: Transaction<'a, TransactionDB>) -> Self {
+    pub(crate) fn new(db: &'a TransactionDB, tx: Transaction<'a, TransactionDB>) -> Self {
         Self {
             tx,
             db,
@@ -148,8 +154,12 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
         }
     }
 
-    pub(crate) fn rocksdb_transaction(&mut self) -> &mut Transaction<'a, TransactionDB> {
-        &mut self.tx
+    fn db(&self) -> DbContext<'_> {
+        DbContext::new(self.db, &self.tx)
+    }
+
+    pub(crate) fn rocksdb_transaction(&self) -> &Transaction<'a, TransactionDB> {
+        &self.tx
     }
 
     pub(crate) fn commit(self) -> Result<(), RocksDbStorageError> {
@@ -170,137 +180,179 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
 }
 
 impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStateStoreReadTransaction<'a, TAddr> {
-    pub(crate) fn get_transaction_atom_state_updates_between_blocks<'i, ITx>(
-        &self,
-        from_block_id: &BlockId,
-        to_block_id: &BlockId,
-        transaction_ids: ITx,
-    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModelData>, RocksDbStorageError>
-    where
-        ITx: Iterator<Item = &'i str> + ExactSizeIterator,
-    {
-        if transaction_ids.len() == 0 {
-            return Ok(IndexMap::new());
+    /// Returns the blocks until the end_block (inclusive). NOTE: there is no specific order in the returned blocks
+    /// (HashSet) so this should only be used to determine ex/inclusion in the set. The end_block should be a block
+    /// in the pending chain, if not an empty list is returned.
+    fn get_pending_chain_until(&self, end_block: &BlockId) -> Result<HashSet<BlockId>, RocksDbStorageError> {
+        const OPERATION: &str = "get_pending_chain_until";
+        debug!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
+
+        let chain_cf = self.db().cf(chain::PendingChainIndex)?;
+        if !chain_cf.exists(end_block, OPERATION)? {
+            return Ok(HashSet::new());
         }
 
-        // Blocks without commands may change pending transaction state because they justify a
-        // block that proposes a change. So we cannot only use blocks that have commands.
-        let applicable_block_ids = self.get_block_ids_between(from_block_id, to_block_id)?;
-
-        debug!(
-            target: LOG_TARGET,
-            "get_transaction_atom_state_updates_between_blocks: from_block_id={}, to_block_id={}, len(applicable_block_ids)={}",
-            from_block_id,
-            to_block_id,
-            applicable_block_ids.len());
-
-        if applicable_block_ids.is_empty() {
-            return Ok(IndexMap::new());
-        }
-
-        let block_ids = applicable_block_ids.iter().map(|s| s.as_str());
-        self.get_ranked_transaction_atom_updates(transaction_ids, block_ids)
-    }
-
-    /// Creates a query to select the latest transaction pool state updates for the given transaction ids and block ids.
-    /// If no transaction ids are provided, all updates for the given block ids are returned.
-    fn get_ranked_transaction_atom_updates<
-        'i1,
-        'i2,
-        IBlk: Iterator<Item = &'i1 str> + ExactSizeIterator,
-        ITx: Iterator<Item = &'i2 str> + ExactSizeIterator,
-    >(
-        &self,
-        transaction_ids: ITx,
-        block_ids: IBlk,
-    ) -> Result<IndexMap<String, TransactionPoolStateUpdateModelData>, RocksDbStorageError> {
-        // TODO: optimize this query in RocksDB
-        let transaction_ids: Vec<String> = transaction_ids.map(|id| id.to_string()).collect();
-        let mut res = IndexMap::new();
-        for block_id in block_ids {
-            let key_value = TransactionPoolStateUpdateModel::key_prefix_by_block_id_str(block_id);
-            let updates = TransactionPoolStateUpdateModel::multi_get(&self.tx, Some(&key_value), Ordering::Ascending)?;
-            updates
-                .iter()
-                .filter(|u| {
-                    if !transaction_ids.is_empty() && !transaction_ids.contains(&u.transaction_id.to_string()) {
-                        return false;
-                    }
-                    !u.is_applied
-                })
-                .for_each(|u| {
-                    res.insert(u.transaction_id.to_string(), u.clone());
-                });
-        }
-
-        Ok(res)
-    }
-
-    /// Returns the blocks from the start_block (inclusive) to the end_block (inclusive).
-    fn get_block_ids_between(
-        &self,
-        start_block: &BlockId,
-        end_block: &BlockId,
-    ) -> Result<Vec<String>, RocksDbStorageError> {
-        debug!(target: LOG_TARGET, "get_block_ids_between: start: {start_block}, end: {end_block}");
-
-        let mut block_ids = vec![];
-
+        let mut block_ids = HashSet::new();
+        block_ids.insert(*end_block);
         let mut block_id = *end_block;
-        while block_id != *start_block && block_id != BlockId::genesis() {
-            let key: String = BlockModel::key_from_block_id(&block_id);
-            let block = BlockModel::get(&self.tx, "get_block_ids_between", &key)?;
-            block_ids.push(block.id().to_string());
-            block_id = *block.parent();
+
+        while let Some(parent_id) = chain_cf.get(&block_id, OPERATION).optional()? {
+            block_ids.insert(parent_id);
+            block_id = parent_id;
+            if parent_id == BlockId::zero() {
+                break;
+            }
         }
 
         Ok(block_ids)
     }
 
-    pub(crate) fn get_block_ids_with_commands_between(
+    /// Returns the blocks until the end_block (inclusive) ordered from the end_block to the commit block (height
+    /// descending).
+    fn get_pending_chain_ordered(&self, end_block: &BlockId) -> Result<Vec<BlockId>, RocksDbStorageError> {
+        // TODO: only difference between get_pending_chain_until is that this returns a Vec - worth DRYing up
+        const OPERATION: &str = "get_pending_block_ids_until";
+        debug!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
+
+        let chain_cf = self.db().cf(chain::PendingChainIndex)?;
+        if !chain_cf.exists(end_block, OPERATION)? {
+            debug!(
+                target: LOG_TARGET,
+                "{OPERATION}: end block {end_block} not in pending chain",
+            );
+            return Ok(Vec::new());
+        }
+
+        let mut block_ids = Vec::new();
+        block_ids.push(*end_block);
+        let mut block_id = *end_block;
+        debug!(
+            target: LOG_TARGET,
+            "{OPERATION}: end block {end_block} is in pending chain",
+        );
+
+        let (commit_block, _) = self.get_commit_block_id()?;
+
+        while let Some(parent_id) = chain_cf.get(&block_id, OPERATION).optional()? {
+            debug!(
+                target: LOG_TARGET,
+                "{OPERATION}: {block_id} parent_id: {parent_id}",
+            );
+
+            // The commit block is the parent of the final block, don't include it
+            if parent_id == BlockId::zero() || parent_id == commit_block {
+                break;
+            }
+
+            block_ids.push(parent_id);
+            block_id = parent_id;
+        }
+
+        debug!(
+            target: LOG_TARGET,
+            "{OPERATION}: block_ids.len(): {}",
+            block_ids.len()
+        );
+
+        Ok(block_ids)
+    }
+
+    fn get_pending_chain_with_commands_between(
         &self,
-        _start_block: &BlockId,
-        _end_block: &BlockId,
-    ) -> Result<Vec<String>, RocksDbStorageError> {
-        todo!()
+        end_block: &BlockId,
+    ) -> Result<HashSet<BlockId>, RocksDbStorageError> {
+        // TODO: This is just an optimisation that returns less blocks, for now we just return all pending chain blocks
+        self.get_pending_chain_until(end_block)
     }
 
     /// Used in tests, therefore not used in consensus and not part of the trait
     pub fn transactions_count(&self) -> Result<u64, RocksDbStorageError> {
-        todo!()
-    }
-
-    pub(crate) fn get_commit_block_id(&self) -> Result<BlockId, StorageError> {
-        let block_opt = BlockModel::get_cf(
-            self.db.clone(),
-            &self.tx,
-            model::block::IsCommittedColumnFamily::NAME,
-            "get_commit_block_id",
-            None,
-            Ordering::Descending,
-        )?;
-        match block_opt {
-            Some(block) => Ok(*block.id()),
-            None => Err(StorageError::General {
-                details: "get_commit_block_id: no commited block found".to_string(),
-            }),
-        }
+        const OPERATION: &str = "transactions_count";
+        self.db().cf(TransactionModel)?.count(OPERATION).map(|c| c as u64)
     }
 
     pub fn substates_count(&self) -> Result<u64, RocksDbStorageError> {
-        SubstateModel::count(&self.tx, None)
-    }
-
-    pub fn blocks_get_tip(&self, _epoch: Epoch, _shard_group: ShardGroup) -> Result<Block, StorageError> {
-        todo!()
+        const OPERATION: &str = "substates_count";
+        self.db().cf(SubstateModel)?.count(OPERATION).map(|c| c as u64)
     }
 
     fn get_current_locked_block(&self) -> Result<LockedBlock, StorageError> {
-        let value = LockedBlockModel::get_first(&self.tx, "get_current_locked_block", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General {
-                details: "No locked block stored in database".to_string(),
-            })?;
-        Ok(value.locked_block)
+        let key = BookkeepingKey::LockedBlock(Epoch::zero());
+        let cf = self.db().cf(bookkeeping::ByKeyByteQuery)?;
+        let mut iter = cf.prefix_range_iterator(Ordering::Descending, &key.as_byte());
+        let (_, value) = iter.next().transpose()?.ok_or_else(|| StorageError::QueryError {
+            reason: "get_current_locked_block: No locked block found".to_string(),
+        })?;
+        Ok(value.try_into().expect("get_current_locked_block"))
+    }
+
+    /// Used for tests
+    pub fn transactions_get_paginated(
+        &self,
+        limit: u64,
+        offset: u64,
+        _asc_desc_created_at: Option<Ordering>,
+    ) -> Result<Vec<TransactionRecord>, StorageError> {
+        const OPERATION: &str = "transactions_get_paginated";
+
+        let cf = self.db().cf(TransactionModel)?;
+        let iter = cf.value_iterator(Ordering::Ascending, OPERATION);
+
+        // pagination - not super efficient but since this is just used in tests, optimising is not important
+        let transactions = iter
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect::<Result<_, _>>()?;
+
+        Ok(transactions)
+    }
+
+    pub fn blocks_get_parent_chain(&self, start_block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError> {
+        // Only used for JSON-RPC - not optimised
+        const OPERATION: &str = "blocks_get_parent_chain";
+
+        let Some(locked_block) = self.get_current_locked_block().optional()? else {
+            return Err(StorageError::QueryError {
+                reason: format!("{OPERATION}: No locked block found"),
+            });
+        };
+
+        let cf = self.db().cf(BlockModel)?;
+
+        let query = self.db().cf(block::ByEpochQuery)?;
+        let iter = query.query_prefix_range_key_iterator(Ordering::Descending, &locked_block.epoch());
+
+        let mut blocks = vec![];
+        let mut is_found = false;
+        for result in iter {
+            let (_, _, block_id) = result?;
+            // "Scan" for the start block
+            if !is_found {
+                if block_id == *start_block_id {
+                    is_found = true;
+                } else {
+                    continue;
+                }
+            }
+            let block = cf.get(&block_id, OPERATION)?;
+            blocks.push(block);
+            if blocks.len() == limit {
+                break;
+            }
+        }
+
+        Ok(blocks)
+    }
+
+    pub fn get_commit_block_id(&self) -> Result<(BlockId, BlockId), RocksDbStorageError> {
+        let key = BookkeepingKey::CommitBlock;
+        let cf = self.db().cf(BookkeepingModel)?;
+        let value = cf.get(&key, "get_commit_block")?;
+        let (child, parent) = value
+            .clone()
+            .into_commit_block()
+            .unwrap_or_else(|| panic!("get_commit_block: invalid BookkeepingValue {:?}", value));
+        Ok((child, parent))
     }
 }
 
@@ -310,287 +362,180 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     type Addr = TAddr;
 
     fn last_sent_vote_get(&self) -> Result<LastSentVote, StorageError> {
-        let value = LastSentVoteModel::get_first(&self.tx, "last_sent_vote_get", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General {
-                details: "No last sent vote stored in database".to_string(),
-            })?;
-        Ok(value)
+        let last_voted = self
+            .db()
+            .cf(BookkeepingModel)?
+            .get(&BookkeepingKey::LastSentVote, "last_sent_vote_get")?;
+        Ok(last_voted.try_into().expect("last_sent_vote_get"))
     }
 
     fn last_voted_get(&self) -> Result<LastVoted, StorageError> {
-        type Cf = crate::model::last_voted::TimestampColumnFamily;
-        let cf = Cf::name();
-
-        let value = LastVotedModel::get_cf(
-            self.db.clone(),
-            &self.tx,
-            cf,
-            "last_voted_get",
-            None,
-            Ordering::Descending,
-        )?
-        .ok_or_else(|| StorageError::General {
-            details: "No last voted stored in database".to_string(),
-        })?;
-
-        Ok(value.last_voted)
+        let last_voted = self
+            .db()
+            .cf(BookkeepingModel)?
+            .get(&BookkeepingKey::LastVoted, "last_voted_get")?;
+        Ok(last_voted.try_into().expect("last_voted_get"))
     }
 
     fn last_executed_get(&self) -> Result<LastExecuted, StorageError> {
-        let value = LastExecutedModel::get_first(&self.tx, "last_executed_get", None, Ordering::Descending)?
-            .ok_or_else(|| StorageError::General {
-                details: "No last executed stored in database".to_string(),
-            })?;
-        Ok(value)
+        let last_executed = self
+            .db()
+            .cf(BookkeepingModel)?
+            .get(&BookkeepingKey::LastExecuted, "last_executed_get")?;
+        Ok(last_executed.try_into().expect("last_executed_get"))
     }
 
     fn last_proposed_get(&self) -> Result<LastProposed, StorageError> {
-        type Cf = crate::model::last_proposed::TimestampColumnFamily;
-        let cf = Cf::name();
-
-        let value = LastProposedModel::get_cf(
-            self.db.clone(),
-            &self.tx,
-            cf,
-            "last_proposed_get",
-            None,
-            Ordering::Descending,
-        )?
-        .ok_or_else(|| StorageError::General {
-            details: "No last executed stored in database".to_string(),
-        })?;
-
-        Ok(value.last_proposed)
+        let last_proposed = self
+            .db()
+            .cf(BookkeepingModel)?
+            .get(&BookkeepingKey::LastProposed, "last_proposed_get")?;
+        Ok(last_proposed.try_into().expect("last_proposed_get"))
     }
 
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError> {
-        let key_prefix = LockedBlockModel::key_prefix_by_epoch(epoch);
-        let value = LockedBlockModel::get_first(&self.tx, "locked_block_get", Some(&key_prefix), Ordering::Descending)?
-            .ok_or_else(|| StorageError::General {
-                details: "No locked block stored in database".to_string(),
-            })?;
-        Ok(value.locked_block)
+        let locked_block = self
+            .db()
+            .cf(BookkeepingModel)?
+            .get(&BookkeepingKey::LockedBlock(epoch), "locked_block_get")?;
+        Ok(locked_block.try_into().expect("locked_block_get"))
     }
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
-        let key_prefix = LeafBlockModel::key_prefix_by_epoch(epoch);
-        let value = LeafBlockModel::get_first(&self.tx, "leaf_block_get", Some(&key_prefix), Ordering::Descending)?
-            .ok_or_else(|| StorageError::General {
-                details: "No leaf block stored in database".to_string(),
-            })?;
-        Ok(value.leaf_block)
+        let leaf_block = self
+            .db()
+            .cf(BookkeepingModel)?
+            .get(&BookkeepingKey::LeafBlock(epoch), "leaf_block_get")?;
+        Ok(leaf_block.try_into().expect("leaf_block_get"))
     }
 
     fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError> {
-        let key_prefix = HighQcModel::key_prefix_by_epoch(epoch);
-        let value = HighQcModel::get_first(&self.tx, "high_qc_get", Some(&key_prefix), Ordering::Descending)?
-            .ok_or_else(|| StorageError::General {
-                details: "No high qc stored in database".to_string(),
-            })?;
-        Ok(value.high_qc)
+        let high_qc = self
+            .db()
+            .cf(BookkeepingModel)?
+            .get(&BookkeepingKey::HighQc(epoch), "high_qc_get")?;
+        Ok(high_qc.try_into().expect("high_qc_get"))
     }
 
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
     ) -> Result<Vec<ForeignProposal>, StorageError> {
-        let mut proposals = vec![];
-
-        for block_id in block_ids {
-            let key = ForeignProposalModel::key_from_block_id(block_id);
-            let res = ForeignProposalModel::get_first(
-                &self.tx,
-                "foreign_proposals_get_any",
-                Some(&key),
-                Ordering::Descending,
-            )?;
-            if let Some(proposal) = res {
-                proposals.push(proposal);
-            }
+        const OPERATION: &str = "foreign_proposals_get_any";
+        let mut block_ids = block_ids.into_iter().peekable();
+        if block_ids.peek().is_none() {
+            return Ok(vec![]);
         }
 
-        // TODO: should we fetch the related quorum certificate like the sqlite implementation does?
+        let proposals = self.db().cf(ForeignProposalModel)?.multi_get(block_ids, OPERATION)?;
 
         Ok(proposals)
     }
 
     fn foreign_proposals_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
-        let key = ForeignProposalModel::key_from_block_id(block_id);
-        let proposal_exists = ForeignProposalModel::key_exists(&self.tx, "foreign_proposals_exists", &key)?;
-        Ok(proposal_exists)
+        let exists = self
+            .db()
+            .cf(ForeignProposalModel)?
+            .exists(block_id, "foreign_proposals_exists")?;
+        Ok(exists)
     }
 
     fn foreign_proposals_has_unconfirmed(&self, epoch: Epoch) -> Result<bool, StorageError> {
-        type Cf = crate::model::foreign_proposal::UnconfirmedColumnFamily;
-        let cf = Cf::name();
-        let key_prefix = Cf::key_prefix_by_epoch(epoch);
-        let res = ForeignProposalModel::get_cf(
-            self.db.clone(),
-            &self.tx,
-            cf,
-            "foreign_proposals_has_unconfirmed",
-            Some(&key_prefix),
-            Ordering::Ascending,
-        )?;
+        let exists = self
+            .db()
+            .cf(foreign_proposal::UnconfirmedIndexEpochQuery)?
+            .any_exists_within_range(..(epoch.as_u64() + 1).to_be_bytes())?;
 
-        Ok(res.is_some())
+        Ok(exists)
     }
 
     fn foreign_proposals_get_all_new(
         &self,
         block_id: &BlockId,
-        _limit: usize,
+        limit: usize,
     ) -> Result<Vec<ForeignProposal>, StorageError> {
-        let operation = "foreign_proposals_get_all_new";
+        const OPERATION: &str = "foreign_proposals_get_all_new";
 
         if !self.blocks_exists(block_id)? {
-            return Err(StorageError::NotFound {
-                item: "foreign_proposals_get_all_new: Block",
-                key: block_id.to_string(),
+            return Err(StorageError::QueryError {
+                reason: format!("{OPERATION}: Block {} does not exist", block_id),
             });
         }
 
         let locked = self.get_current_locked_block()?;
-        let pending_block_ids = self.get_block_ids_with_commands_between(&locked.block_id, block_id)?;
+        let pending_block_ids = self.get_pending_chain_with_commands_between(block_id)?;
 
-        type Cf = crate::model::foreign_proposal::EpochStatusColumnFamily;
-        let cf = Cf::name();
+        let cf = self.db().cf(ForeignProposalModel)?;
+        let unconfirmed_cf = self.db().cf(foreign_proposal::UnconfirmedIndex)?;
+        let proposed_in_block_cf = self.db().cf(foreign_proposal::ProposedInBlockIndex)?;
+        let iter = unconfirmed_cf.key_iterator(Ordering::Ascending, OPERATION);
 
-        let mut proposals = HashMap::new();
+        let mut proposals = vec![];
 
-        // get all proposals with status "New"
-        let key_prefix = Cf::key_prefix_from_epoch_and_status(locked.epoch, ForeignProposalStatus::New);
-        let new_proposals = ForeignProposalModel::multi_get_cf(
-            self.db.clone(),
-            &self.tx,
-            operation,
-            cf,
-            &key_prefix,
-            Ordering::Ascending,
-        )?;
-        proposals.extend(new_proposals.into_iter().map(|f| (*f.block.id(), f)));
+        for result in iter {
+            let (epoch, block_id) = result?;
+            // Since the iterator is ordered by epoch, we're done since
+            // we don't want to propose FPs from future epochs until we've progressed to that epoch
+            if epoch > locked.epoch {
+                break;
+            }
 
-        // get all proposals with status "Proposed"
-        let key_prefix = Cf::key_prefix_from_epoch_and_status(locked.epoch, ForeignProposalStatus::Proposed);
-        let proposed_proposals = ForeignProposalModel::multi_get_cf(
-            self.db.clone(),
-            &self.tx,
-            operation,
-            cf,
-            &key_prefix,
-            Ordering::Ascending,
-        )?;
-        proposals.extend(proposed_proposals.into_iter().map(|f| (*f.block.id(), f)));
+            // Any pending proposed this block?
+            let mut already_proposed_in_chain = false;
+            for pending_block_id in &pending_block_ids {
+                if proposed_in_block_cf.exists(&(*pending_block_id, block_id), OPERATION)? {
+                    already_proposed_in_chain = true;
+                    break;
+                }
+            }
+            if already_proposed_in_chain {
+                continue;
+            }
 
-        let proposals: Vec<ForeignProposal> = proposals
-            .into_values()
-            // we don't want proposals that are proposed in pending blocks 
-            .filter(|p| {
-                let Some(proposed_by) = p.proposed_by_block  else {
-                    return true;
-                };
-                !pending_block_ids.contains(&proposed_by.to_string())
-            })
-            // TODO: do we need to filter by proposal.proposed_in_block_height > locked.height?. We will need to store proposed_in_block_height field
-            .collect();
-
-        // TODO: use "limit" in rocksdb
+            let proposal = cf.get(&block_id, OPERATION)?;
+            proposals.push(proposal);
+            if proposals.len() >= limit {
+                break;
+            }
+        }
 
         Ok(proposals)
     }
 
-    fn foreign_proposal_get_all_pending(
-        &self,
-        from_block_id: &BlockId,
-        to_block_id: &BlockId,
-    ) -> Result<Vec<ForeignProposalAtom>, StorageError> {
-        let operation = "foreign_proposal_get_all_pending";
-
-        let mut all_commands = vec![];
-
-        let block_ids = self.get_block_ids_with_commands_between(from_block_id, to_block_id)?;
-        for block_id in block_ids {
-            let key = BlockModel::key_from_block_id_str(&block_id);
-            let block = BlockModel::get(&self.tx, operation, &key)?;
-
-            if block.command_count() > 0 {
-                for command in block.commands() {
-                    all_commands.push(command.clone());
-                }
-            }
-        }
-
-        all_commands.dedup();
-
-        Ok(all_commands
-            .into_iter()
-            .filter_map(|command| command.foreign_proposal().cloned())
-            .collect::<Vec<ForeignProposalAtom>>())
-    }
-
     fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {
-        let key_prefix = ForeignSendCounterModel::key_prefix_by_block_id(block_id);
-        let value = ForeignSendCounterModel::get_first(
-            &self.tx,
-            "foreign_send_counters_get",
-            Some(&key_prefix),
-            Ordering::Descending,
-        )?
-        .ok_or_else(|| StorageError::General {
-            details: "No foreign send counter in database".to_string(),
-        })?;
-        Ok(value.counters)
+        const OPERATION: &str = "foreign_send_counters_get";
+        let counters = self.db().cf(ForeignSendCounterModel)?.get(block_id, OPERATION)?;
+
+        Ok(counters)
     }
 
     fn foreign_receive_counters_get(&self) -> Result<ForeignReceiveCounters, StorageError> {
-        let value =
-            ForeignReceiveCounterModel::get_first(&self.tx, "foreign_send_counters_get", None, Ordering::Descending)?
-                .ok_or_else(|| StorageError::General {
-                details: "No foreign receive counter in database".to_string(),
-            })?;
-        Ok(value.counters)
+        const OPERATION: &str = "foreign_receive_counters_get";
+        let cf = self.db().cf(ForeignReceiveCounterModel)?;
+        let iter = cf.iterator(Ordering::Ascending, OPERATION);
+        let counters = iter.collect::<Result<_, _>>()?;
+        Ok(ForeignReceiveCounters { counters })
     }
 
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError> {
-        let key = TransactionModel::key_from_transaction_id(tx_id);
-        Ok(TransactionModel::get(&self.tx, "transactions_get", &key)?)
+        const OPERATION: &str = "transactions_get";
+        let tx = self.db().cf(TransactionModel)?.get(tx_id, OPERATION)?;
+        Ok(tx)
     }
 
     fn transactions_exists(&self, tx_id: &TransactionId) -> Result<bool, StorageError> {
-        let key = TransactionModel::key_from_transaction_id(tx_id);
-        Ok(TransactionModel::key_exists(&self.tx, "transactions_exists", &key)?)
+        const OPERATION: &str = "transactions_exists";
+        let exists = self.db().cf(TransactionModel)?.exists(tx_id, OPERATION)?;
+        Ok(exists)
     }
 
     fn transactions_get_any<'a, I: IntoIterator<Item = &'a TransactionId>>(
         &self,
         tx_ids: I,
     ) -> Result<Vec<TransactionRecord>, StorageError> {
-        let tx_ids = tx_ids.into_iter().collect();
-        Ok(TransactionModel::get_any(&self.tx, "transactions_get_any", tx_ids)?)
-    }
-
-    fn transactions_get_paginated(
-        &self,
-        limit: u64,
-        offset: u64,
-        _asc_desc_created_at: Option<Ordering>,
-    ) -> Result<Vec<TransactionRecord>, StorageError> {
-        // This operation is implemented in a naive way, by manually looping all transactions in the database.
-        // As this method is only used for testing, further RocksDb database optimizations are probably not worth it
-
-        let mut transactions: Vec<TransactionRecord> =
-            TransactionModel::multi_get(&self.tx, None, Ordering::Ascending)?
-                .into_iter()
-                .collect();
-
-        // pagination
-        transactions = transactions
-            .into_iter()
-            .skip(offset as usize)
-            .take(limit as usize)
-            .collect();
-
-        Ok(transactions)
+        const OPERATION: &str = "transactions_get_any";
+        let txs = self.db().cf(TransactionModel)?.multi_get(tx_ids, OPERATION)?;
+        Ok(txs)
     }
 
     fn transaction_executions_get(
@@ -598,363 +543,249 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         tx_id: &TransactionId,
         block: &BlockId,
     ) -> Result<BlockTransactionExecution, StorageError> {
-        let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, Some(block));
-        let executions = BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
+        const OPERATION: &str = "transaction_executions_get";
 
-        match executions.first() {
-            Some(execution) => Ok(execution.transaction_execution.clone()),
-            None => Err(StorageError::NotFound {
-                item: "transaction_execution",
-                key: format!("tx_id={}, block={}", tx_id, block),
-            }),
-        }
+        let value = self
+            .db()
+            .cf(BlockTransactionExecutionModel)?
+            .get(&(*block, *tx_id), OPERATION)?;
+
+        Ok(value)
     }
 
     fn transaction_executions_get_pending_for_block(
         &self,
-        tx_id: &TransactionId,
+        transaction_id: &TransactionId,
         from_block_id: &BlockId,
     ) -> Result<BlockTransactionExecution, StorageError> {
-        let operation = "transaction_executions_get_pending_for_block";
+        const OPERATION: &str = "transaction_executions_get_pending_for_block";
 
         if !self.blocks_exists(from_block_id)? {
             return Err(StorageError::QueryError {
-                reason: format!(
-                    "transaction_executions_get_pending_for_block: Block {} does not exist",
-                    from_block_id
-                ),
+                reason: format!("{OPERATION}: Block {from_block_id} does not exist",),
             });
         }
 
-        let commit_block = self.get_commit_block_id()?;
-        let block_ids = self.get_block_ids_between(&commit_block, from_block_id)?;
+        let block_ids = self.get_pending_chain_ordered(from_block_id)?;
 
-        // get the most recent escution of the transaction for every block in the range
-        let mut executions: Vec<BlockTransactionExecutionModelData> = vec![];
-        for block_id in block_ids {
-            let block_id = BlockId::new(FixedHash::from_hex(&block_id).unwrap());
-            let key_prefix =
-                BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, Some(&block_id));
-            let block_executions =
-                BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
-            if let Some(exec) = block_executions.first() {
-                executions.push(exec.clone());
+        let cf = self.db().cf(BlockTransactionExecutionModel)?;
+        let query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
+
+        // Find any in pending chain?
+        for block_id in &block_ids {
+            if let Some(execution) = cf.get(&(*block_id, *transaction_id), OPERATION).optional()? {
+                return Ok(execution);
             }
         }
-        // get the latest execution
-        executions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        let execution = executions.first();
 
-        if let Some(execution) = execution {
-            return Ok(execution.transaction_execution.clone());
-        }
+        info!(
+            target: LOG_TARGET,
+            "{OPERATION}: No execution found for {transaction_id} in pending chain ({} blocks)",
+            block_ids.len(),
+        );
 
         // Otherwise look for executions after the commit block
-        let key_prefix = BlockTransactionExecutionModel::key_prefix_by_transaction_and_block(tx_id, None);
-        let executions = BlockTransactionExecutionModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
-        for execution in executions {
-            let key = BlockModel::key_from_block_id(execution.transaction_execution.block_id());
-            let block = BlockModel::get(&self.tx, operation, &key)?;
-            if block.is_committed() {
-                return Ok(execution.transaction_execution);
+        let iter = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
+
+        // TODO: optimise
+        let chain_cf = self.db().cf(chain::CommittedParentChildChainIndex)?;
+        let (commit_block, _) = self.get_commit_block_id()?;
+
+        for result in iter {
+            let (tx_id, block_id) = result?;
+            // Still need to check if the block is committed and not a fork
+            if block_id != commit_block && !chain_cf.exists(&block_id, OPERATION)? {
+                debug!(
+                    target: LOG_TARGET,
+                    "{OPERATION}: Block {block_id} is not committed, skipping",
+                );
+                continue;
             }
+            info!(
+                target: LOG_TARGET,
+                "{OPERATION}: Found execution for {transaction_id} in {block_id}",
+            );
+            let execution = cf.get(&(block_id, tx_id), OPERATION)?;
+            return Ok(execution);
         }
 
-        // No execution found
-        Err(StorageError::QueryError {
-            reason: format!(
-                "transaction_executions_get_pending_for_block: no execution found for transaction_id {}",
-                tx_id
-            ),
+        Err(StorageError::NotFound {
+            item: "TransactionExecution",
+            key: format!("{transaction_id} in {from_block_id}"),
         })
     }
 
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError> {
-        let key = BlockModel::key_from_block_id(block_id);
-        Ok(BlockModel::get(&self.tx, "blocks_get", &key)?)
+        const OPERATION: &str = "blocks_get";
+
+        let block = self.db().cf(BlockModel)?.get(block_id, OPERATION)?;
+        Ok(block)
     }
 
     fn blocks_get_all_ids_by_height(&self, epoch: Epoch, height: NodeHeight) -> Result<Vec<BlockId>, StorageError> {
-        type Cf = crate::model::block::EpochHeightColumnFamily;
-        let cf = Cf::name();
-        let key_prefix = Cf::build_key_prefix(epoch, Some(height));
+        // const OPERATION: &str = "blocks_get_all_ids_by_height";
 
-        let block_ids = BlockModel::multi_get_ids_by_cf(
-            self.db.clone(),
-            &self.tx,
-            "blocks_get_all_ids_by_height",
-            cf,
-            &key_prefix,
-        )?
-        .into_iter()
-        .collect();
+        let query = self.db().cf(block::ByEpochHeightQuery)?;
+        let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, &(epoch, height));
+
+        let block_ids = iter
+            .map(|r| r.map(|(_, _, block_id)| block_id))
+            .collect::<Result<_, _>>()?;
 
         Ok(block_ids)
     }
 
     fn blocks_get_genesis_for_epoch(&self, epoch: Epoch) -> Result<Block, StorageError> {
-        type Cf = crate::model::block::EpochHeightColumnFamily;
-        let cf = Cf::name();
-        let key_prefix = Cf::build_key_prefix(epoch, Some(NodeHeight(0)));
+        // const OPERATION: &str = "blocks_get_genesis_for_epoch";
 
-        let block_id = BlockModel::multi_get_ids_by_cf(
-            self.db.clone(),
-            &self.tx,
-            "blocks_get_genesis_for_epoch",
-            cf,
-            &key_prefix,
-        )?
-        .into_iter()
-        .next();
+        let query = self.db().cf(block::ByEpochHeightQuery)?;
+        let mut iter = query.query_prefix_range_key_iterator(Ordering::Ascending, &(epoch, NodeHeight::zero()));
 
-        if let Some(block_id) = block_id {
-            let key = BlockModel::key_from_block_id(&block_id);
-            let block = BlockModel::get(&self.tx, "blocks_get_genesis_for_epoch", &key)?;
-            Ok(block)
-        } else {
-            Err(RocksDbStorageError::GeneralError {
-                message: "Genesis block not found".to_owned(),
-            }
-            .into())
-        }
+        let key = iter.next().ok_or_else(|| StorageError::NotFound {
+            item: "Block",
+            key: format!("Genesis block for epoch {epoch}"),
+        })??;
+
+        let (_, _, block_id) = key;
+        let block = self.blocks_get(&block_id)?;
+        Ok(block)
     }
 
     fn blocks_get_last_n_in_epoch(&self, n: usize, epoch: Epoch) -> Result<Vec<Block>, StorageError> {
-        // TODO: this could be optimized by a new column familiy with the height reversed
-        //       so we could avoid fetching the ids for all the blocks in the epoch
-
-        type Cf = crate::model::block::EpochHeightColumnFamily;
-        let cf = Cf::name();
-        let key_prefix = Cf::build_key_prefix(epoch, None);
-
-        let block_ids: Vec<BlockId> =
-            BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_last_n_in_epoch", cf, &key_prefix)?
-                .into_iter()
-                .collect();
+        const OPERATION: &str = "blocks_get_last_n_in_epoch";
+        let query = self.db().cf(block::ByEpochQuery)?;
+        let block_cf = self.db().cf(BlockModel)?;
+        let iter = query.query_prefix_range_key_iterator(Ordering::Descending, &epoch);
 
         let mut blocks = vec![];
-        for block_id in block_ids {
-            let key = BlockModel::key_from_block_id(&block_id);
-            let block = BlockModel::get(&self.tx, "blocks_get_last_n_in_epoch", &key)?;
-            if block.is_committed() {
-                blocks.push(block);
-            }
+        for iter in iter.take(n) {
+            let (_, _, block_id) = iter?;
+            let block = block_cf.get(&block_id, OPERATION)?;
+            blocks.push(block);
         }
-        // order by descending height
-        blocks.sort_by_key(|b| std::cmp::Reverse(b.height()));
 
-        let last_n = blocks.into_iter().take(n).collect();
-
-        Ok(last_n)
+        Ok(blocks)
     }
 
     fn blocks_get_all_between(
         &self,
-        epoch: Epoch,
-        shard_group: ShardGroup,
+        query_epoch: Epoch,
         start_block_height: NodeHeight,
         end_block_height: NodeHeight,
         include_dummy_blocks: bool,
-        limit: u64,
+        limit: usize,
     ) -> Result<Vec<Block>, StorageError> {
-        // TODO: this operation could be optimized by creating a new column family that includes shard_group as part of
-        // the key
+        const OPERATION: &str = "blocks_get_all_between";
 
-        let operation = "blocks_get_all_between";
+        // Prevent possibility of memory exhaustion (defensive, not in response to an observed bug)
+        if limit > 1_000_000 {
+            return Err(StorageError::QueryError {
+                reason: format!("{OPERATION}: limit {limit} is too large"),
+            });
+        }
 
         if start_block_height > end_block_height {
             return Err(StorageError::QueryError {
                 reason: format!(
-                    "Start block height {start_block_height} must be less than end block height {end_block_height}"
+                    "{OPERATION}: Start block height {start_block_height} must be less than end block height \
+                     {end_block_height}"
                 ),
             });
         }
 
-        type Cf = crate::model::block::EpochHeightColumnFamily;
-        let cf = Cf::name();
-        let lower_prefix = Cf::build_key_prefix(epoch, Some(start_block_height));
-        // in rocksdb, the upper bound of a range is not included, and we want the blocks with the end height
-        let upper_prefix = Cf::build_key_prefix(epoch, Some(end_block_height + NodeHeight(1)));
+        let query = self.db().cf(block::ByEpochHeightQuery)?;
 
-        let block_ids: Vec<BlockId> = BlockModel::multi_get_ids_by_cf_range(
-            self.db.clone(),
-            &self.tx,
-            operation,
-            cf,
-            &lower_prefix,
-            &upper_prefix,
-        )?
-        .into_iter()
-        .collect();
+        let iter = query.query_start_range_key_iterator(Ordering::Ascending, &(query_epoch, start_block_height));
 
-        let mut blocks = vec![];
-        for block_id in block_ids {
-            let key = BlockModel::key_from_block_id(&block_id);
-            let block = BlockModel::get(&self.tx, operation, &key)?;
-
+        // Almost always, the limit will be reached so allocate the full size vector once.
+        let mut blocks = Vec::with_capacity(limit);
+        for result in iter {
+            let (epoch, height, block_id) = result?;
+            if epoch != query_epoch {
+                break;
+            }
+            if height > end_block_height {
+                break;
+            }
+            let block = self.blocks_get(&block_id)?;
             if !include_dummy_blocks && block.is_dummy() {
                 continue;
             }
-
-            if block.shard_group() == shard_group {
-                blocks.push(block);
+            blocks.push(block);
+            if blocks.len() == limit {
+                break;
             }
         }
-        // order by ascending height
-        blocks.sort_by_key(|a| a.height());
 
-        let first_n = blocks.into_iter().take(limit.try_into().unwrap()).collect();
-
-        Ok(first_n)
+        Ok(blocks)
     }
 
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
-        let key = BlockModel::key_from_block_id(block_id);
-        Ok(BlockModel::key_exists(&self.tx, "blocks_exists", &key)?)
+        let exists = self.db().cf(BlockModel)?.exists(block_id, "blocks_exists")?;
+        Ok(exists)
     }
 
     fn blocks_is_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError> {
+        const OPERATION: &str = "blocks_is_ancestor";
+        // Defensive checks, technically not needed as this will return false if the blocks do not exist.
+        // We could remove them to save some reads on the blocks CF.
         if !self.blocks_exists(descendant)? {
             return Err(StorageError::QueryError {
-                reason: format!("blocks_is_ancestor: descendant block {} does not exist", descendant),
+                reason: format!("{OPERATION}: descendant block {} does not exist", descendant),
             });
         }
 
         if !self.blocks_exists(ancestor)? {
             return Err(StorageError::QueryError {
-                reason: format!("blocks_is_ancestor: ancestor block {} does not exist", ancestor),
+                reason: format!("{OPERATION}: ancestor block {} does not exist", ancestor),
             });
         }
 
-        // TODO: could this be optimized in RocksDB?
-        let mut block_id = *descendant;
-        while block_id != BlockId::genesis() {
-            let key = BlockModel::key_from_block_id(&block_id);
-            let block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;
+        // TODO: This only works for non-committed/pending blocks - we only use this for the safenode predicate where
+        // the ancestor block is the locked block and so is in the pending chain. Therefore, the pending chain
+        // index is sufficient. This differs from the Sqlite implementation which provides the correct result
+        // for any block. Changing the trait method name and SQLite impl to reflect that this only returns the
+        // result for pending blocks would be a good idea.
 
-            if block.parent() == ancestor {
+        let chain_cf = self.db().cf(chain::PendingChainIndex)?;
+
+        let mut block_id = *descendant;
+        while let Some(parent) = chain_cf.get(&block_id, OPERATION).optional()? {
+            if parent == *ancestor {
                 return Ok(true);
             }
 
-            block_id = *block.parent();
+            // The zero block has itself as a parent,which would cause an infinite loop, exit the loop
+            if parent == block_id {
+                break;
+            }
+            block_id = parent;
         }
 
         Ok(false)
     }
 
-    fn blocks_get_ids_by_parent(&self, parent_id: &BlockId) -> Result<Vec<BlockId>, StorageError> {
-        type Cf = crate::model::block::ParentIdColumnFamily;
-        let cf = Cf::name();
-        let key_prefix = Cf::build_key_prefix(parent_id);
+    fn blocks_get_committed_by_parent(&self, parent_id: &BlockId) -> Result<Block, StorageError> {
+        const OPERATION: &str = "blocks_get_all_by_parent";
+        // TODO: this is the only use of the chain index- change block sync to not need this
+        let chain_cf = self.db().cf(chain::CommittedParentChildChainIndex)?;
+        let child = chain_cf.get(parent_id, OPERATION)?;
+        self.blocks_get(&child)
+    }
 
-        let block_ids = BlockModel::multi_get_ids_by_cf(self.db.clone(), &self.tx, "blocks_get_ids_by_parent",  cf, &key_prefix)?
-            .into_iter()
-            // Exclude the genesis block
-            .filter(|block_id| block_id != parent_id)
-            .collect();
+    fn blocks_get_pending_ids_by_parent(&self, parent_id: &BlockId) -> Result<Vec<BlockId>, StorageError> {
+        // const OPERATION: &str = "blocks_get_pending_ids_by_parent";
+
+        let chain_cf = self.db().cf(chain::ByParentIdQuery)?;
+        let iter = chain_cf.query_prefix_range_key_iterator(Ordering::default(), parent_id);
+
+        let mut block_ids = vec![];
+        for result in iter {
+            let (_, child) = result?;
+            block_ids.push(child);
+        }
 
         Ok(block_ids)
-    }
-
-    fn blocks_get_all_by_parent(&self, parent_id: &BlockId) -> Result<Vec<Block>, StorageError> {
-        // get all the block ids first
-        let block_ids = self.blocks_get_ids_by_parent(parent_id)?;
-
-        // fetch each child by id
-        let mut blocks = vec![];
-        for block_id in block_ids {
-            let key = BlockModel::key_from_block_id(&block_id);
-            let block = BlockModel::get(&self.tx, "blocks_get_all_by_parent", &key)?;
-            blocks.push(block);
-        }
-
-        Ok(blocks)
-    }
-
-    fn blocks_get_parent_chain(&self, block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError> {
-        if !self.blocks_exists(block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("blocks_get_parent_chain: descendant block {} does not exist", block_id),
-            });
-        }
-
-        let mut blocks = vec![];
-        let mut i = 0;
-        let key = BlockModel::key_from_block_id(block_id);
-        let initial_block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;
-        let mut current_block_id = *initial_block.parent();
-        while i < limit && current_block_id != BlockId::genesis() {
-            let key = BlockModel::key_from_block_id(&current_block_id);
-            let block = BlockModel::get(&self.tx, "blocks_is_ancestor", &key)?;
-            current_block_id = *block.parent();
-            blocks.push(block);
-            i += 1;
-        }
-
-        Ok(blocks)
-    }
-
-    fn blocks_get_pending_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError> {
-        type Cf = crate::model::missing_transactions::BlockIdColumnFamily;
-        let cf = Cf::name();
-        let key_prefix = Cf::build_key_prefix_by_block(block_id);
-
-        let transaction_ids = MissingTransactionModel::multi_get_cf(
-            self.db.clone(),
-            &self.tx,
-            "blocks_get_pending_transactions",
-            cf,
-            &key_prefix,
-            Ordering::Ascending,
-        )?
-        .into_iter()
-        .map(|value| value.transaction_id)
-        .collect();
-
-        Ok(transaction_ids)
-    }
-
-    fn blocks_get_any_with_epoch_range(
-        &self,
-        epoch_range: RangeInclusive<Epoch>,
-        validator_public_key: Option<&PublicKey>,
-    ) -> Result<Vec<Block>, StorageError> {
-        // TODO: this could be optimized by creating a new rocksdb column family for vn keys
-
-        let operation = "blocks_get_any_with_epoch_range";
-
-        type Cf = crate::model::block::EpochHeightColumnFamily;
-        let cf = Cf::name();
-        let lower_prefix = Cf::build_key_prefix(*epoch_range.start(), None);
-        // in rocksdb, the upper bound of a range is not included, and we want the blocks with the end epoch
-        let upper_prefix = Cf::build_key_prefix(epoch_range.end() + &Epoch(1), None);
-
-        let block_ids: Vec<BlockId> = BlockModel::multi_get_ids_by_cf_range(
-            self.db.clone(),
-            &self.tx,
-            operation,
-            cf,
-            &lower_prefix,
-            &upper_prefix,
-        )?
-        .into_iter()
-        .collect();
-
-        let mut blocks = vec![];
-        for block_id in block_ids {
-            let key = BlockModel::key_from_block_id(&block_id);
-            let block = BlockModel::get(&self.tx, "blocks_get_any_with_epoch_range", &key)?;
-
-            if let Some(vn) = validator_public_key {
-                if block.proposed_by() != vn {
-                    continue;
-                }
-            }
-
-            blocks.push(block);
-        }
-
-        Ok(blocks)
     }
 
     fn blocks_get_paginated(
@@ -966,83 +797,130 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         ordering_index: Option<usize>,
         ordering: Option<Ordering>,
     ) -> Result<Vec<Block>, StorageError> {
+        const OPERATION: &str = "blocks_get_paginated";
         // This operation is implemented in a naive way, by manually looping all blocks in the database.
-        // As this is only used for VN testing, further RocksDb database optimizations are probably not worth it
+        // This is only used for JSON-RPC get_blocks. This does not scale well.
 
         let block_filter = |block: &Block| {
-            let mut res = true;
-            if let Some(filter) = &filter {
-                if !filter.is_empty() {
-                    if let Some(filter_index) = filter_index {
-                        match filter_index {
-                            0 => res = block.id().to_string().contains(filter),
-                            1 => {
-                                let epoch_number = filter.parse::<u64>().unwrap();
-                                res = block.epoch() == Epoch(epoch_number);
-                            },
-                            2 => {
-                                let height_number = filter.parse::<u64>().unwrap();
-                                res = block.height() == NodeHeight(height_number);
-                            },
-                            4 => {
-                                let cmd_number = filter.parse::<usize>().unwrap();
-                                res = block.command_count() >= cmd_number;
-                            },
-                            5 => {
-                                let fee = filter.parse::<u64>().unwrap();
-                                res = block.total_leader_fee() >= fee;
-                            },
-                            7 => res = block.proposed_by().to_string().contains(filter),
-                            _ => (),
-                        }
-                    }
-                }
+            let Some(filter) = &filter else {
+                return true;
+            };
+            if filter.is_empty() {
+                return true;
             }
-            res
+            let Some(filter_index) = filter_index else {
+                return true;
+            };
+            match filter_index {
+                0 => block.id().to_string().contains(filter),
+                1 => {
+                    let Ok(epoch_number) = filter.parse::<u64>() else {
+                        return false;
+                    };
+                    block.epoch() == Epoch(epoch_number)
+                },
+                2 => {
+                    let Ok(height_number) = filter.parse::<u64>() else {
+                        return false;
+                    };
+                    block.height() == NodeHeight(height_number)
+                },
+                4 => {
+                    let Ok(cmd_number) = filter.parse::<usize>() else {
+                        return false;
+                    };
+                    block.command_count() >= cmd_number
+                },
+                5 => {
+                    let Ok(fee) = filter.parse::<u64>() else {
+                        return false;
+                    };
+                    block.total_leader_fee() >= fee
+                },
+                7 => block.proposed_by().to_string().contains(filter),
+                _ => true,
+            }
         };
 
-        // list all the blocks
-        let mut blocks: Vec<Block> = BlockModel::multi_get(&self.tx, None, Ordering::Ascending)?
-            .into_iter()
-            .filter(block_filter)
-            .collect();
+        let Some(locked) = self.get_current_locked_block().optional()? else {
+            return Ok(vec![]);
+        };
+
+        let cf = self.db().cf(BlockModel)?;
+        let query = self.db().cf(block::ByEpochHeightQuery)?;
+        // TODO: this only fetches for current epoch
+
+        let ordering = ordering.unwrap_or(Ordering::Ascending);
+        let iter: Box<dyn Iterator<Item = Result<_, _>>> = if ordering.is_ascending() {
+            Box::new(query.query_start_range_key_iterator(ordering, &(locked.epoch, NodeHeight(offset))))
+        } else {
+            // TODO: remove the epoch from leaf block, making it much easier to fetch the leaf block
+            let bk_cf = self.db().cf(bookkeeping::ByKeyByteQuery)?;
+            let mut leaf_block =
+                bk_cf.query_prefix_range_iterator(Ordering::Descending, &BookkeepingKey::LeafBlock(Epoch(0)).as_byte());
+            let leaf_block = leaf_block
+                .next()
+                .transpose()?
+                .and_then(|(_, value)| value.into_leaf_block())
+                .ok_or_else(|| StorageError::QueryError {
+                    reason: format!("{OPERATION}: No leaf block found"),
+                })?;
+
+            Box::new(query.query_end_range_key_iterator(
+                ordering,
+                &(
+                    locked.epoch,
+                    NodeHeight(leaf_block.height.as_u64().saturating_sub(offset)),
+                ),
+            ))
+        };
+
+        let mut blocks = vec![];
+        for result in iter {
+            let (epoch, _, block_id) = result?;
+            if epoch != locked.epoch {
+                break;
+            }
+
+            let block = cf.get(&block_id, OPERATION)?;
+
+            if block_filter(&block) {
+                blocks.push(block);
+                if blocks.len() >= limit as usize {
+                    break;
+                }
+            }
+        }
 
         // ordering
         match ordering_index {
             Some(0) => blocks.sort_by(|a, b| a.id().cmp(b.id())),
             Some(1) => blocks.sort_by_key(|a| a.epoch()),
-            Some(2) => blocks.sort_by_key(|a| (a.epoch(), a.height())),
+            // Natural sorting
+            Some(2) => {}, // blocks.sort_by_key(|a| (a.epoch(), a.height())),
             Some(4) => blocks.sort_by_key(|a| a.command_count()),
             Some(5) => blocks.sort_by_key(|a| a.total_leader_fee()),
             Some(6) => blocks.sort_by_key(|a| a.block_time()),
-            // TODO: This filter is by creation time, but we don't have a created_at field yet in the corresponding
-            // RocksDB values
+            // TODO: This filter is by creation time, but we don't have a created_at field
             Some(7) => (),
             Some(8) => blocks.sort_by(|a, b| a.proposed_by().cmp(b.proposed_by())),
             _ => blocks.sort_by_key(|a| (a.epoch(), a.height())),
         }
 
-        if let Some(Ordering::Descending) = ordering {
+        // Rocks will already order by (epoch, height)
+        if ordering_index.is_some_and(|i| i != 2) && ordering.is_descending() {
             blocks.reverse();
         }
 
-        // pagination
-        blocks = blocks.into_iter().skip(offset as usize).take(limit as usize).collect();
-
         Ok(blocks)
-    }
-
-    fn blocks_get_count(&self) -> Result<i64, StorageError> {
-        let count = BlockModel::count(&self.tx, None)? as i64;
-        Ok(count)
     }
 
     fn filtered_blocks_get_count(
         &self,
         filter_index: Option<usize>,
         filter: Option<String>,
-    ) -> Result<i64, StorageError> {
-        // TODO: this operation could be optimized by creating column families for all filtering fields
+    ) -> Result<u64, StorageError> {
+        const OPERATION: &str = "filtered_blocks_get_count";
 
         let block_filter = |block: &Block| {
             let mut res = true;
@@ -1076,25 +954,39 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             res
         };
 
-        let count = BlockModel::multi_get(&self.tx, None, Ordering::Ascending)?
-            .into_iter()
-            .filter(block_filter)
-            .count() as i64;
+        let cf = self.db().cf(BlockModel)?;
+
+        let no_filters = filter_index.is_none() || filter.as_ref().is_none_or(|x| x.is_empty());
+        if no_filters {
+            let count = cf.count(OPERATION)?;
+            return Ok(count as u64);
+        }
+
+        let iter = cf.value_iterator(Ordering::Ascending, OPERATION);
+
+        let mut count = 0;
+        for result in iter {
+            let block = result?;
+            if block_filter(&block) {
+                count += 1;
+            }
+        }
 
         Ok(count)
     }
 
-    fn blocks_max_height(&self) -> Result<NodeHeight, StorageError> {
-        // This method is not used
-        // TODO: remove it from the state store trait
-        todo!()
-    }
-
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError> {
-        let key_prefix = BlockDiffModel::build_key_prefix(*block_id, None);
-        let values = BlockDiffModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?;
+        // const OPERATION: &str = "block_diffs_get";
+        let cf = self.db().cf(block_diff::ByBlockIdQuery)?;
+        let iter = cf.query_prefix_range_iterator(Ordering::default(), block_id);
+        let mut changes = vec![];
+        for result in iter {
+            let (_, change) = result?;
+            changes.push(change);
+        }
 
-        Ok(BlockDiffData::load(*block_id, values))
+        let diff = BlockDiff::new(*block_id, changes);
+        Ok(diff)
     }
 
     fn block_diffs_get_last_change_for_substate(
@@ -1102,27 +994,73 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         block_id: &BlockId,
         substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError> {
-        let commit_block = self.get_commit_block_id()?;
-        let block_ids = self.get_block_ids_with_commands_between(&commit_block, block_id)?;
-
-        let mut diffs = vec![];
-        for block_id in block_ids {
-            let key_prefix = BlockDiffModel::build_key_prefix_str(&block_id, Some(substate_id));
-            let values = BlockDiffModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
-            diffs.extend(values);
+        const OPERATION: &str = "block_diffs_get_last_change_for_substate";
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("{OPERATION}: Block {} does not exist", block_id),
+            });
         }
 
-        // we want the most recent change
-        diffs.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-        let most_recent_diff = diffs.first().ok_or_else(|| StorageError::General {
-            details: "No block_diffs found".to_string(),
+        let applicable_blocks = self.get_pending_chain_until(block_id)?;
+
+        let cf = self.db().cf(BlockDiffModel)?;
+        let query = self.db().cf(block_diff::BySubstateIdQuery)?;
+        let iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
+
+        let mut max_change = None::<BlockDiffKey>;
+        for result in iter {
+            let key = result?;
+            if max_change.as_ref().is_none_or(|c| c.version < key.version) && applicable_blocks.contains(block_id) {
+                max_change = Some(key);
+            }
+        }
+
+        let key = max_change.ok_or_else(|| StorageError::NotFound {
+            item: "SubstateChange",
+            key: format!("{substate_id} in {block_id}"),
         })?;
-        Ok(most_recent_diff.change.clone())
+
+        let change = cf.get(&key, OPERATION)?;
+        Ok(change)
+    }
+
+    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        block_id: &BlockId,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        const OPERATION: &str = "block_diffs_get_change_for_versioned_substate";
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("{OPERATION}: Block {} does not exist", block_id),
+            });
+        }
+
+        let versioned = substate_id.into();
+
+        let applicable_blocks = self.get_pending_chain_until(block_id)?;
+
+        let cf = self.db().cf(BlockDiffModel)?;
+        let query = self.db().cf(block_diff::BySubstateIdQuery)?;
+        let iter = query.query_prefix_range_key_iterator(Ordering::default(), versioned.substate_id());
+
+        for result in iter {
+            let key = result?;
+            if versioned.version() == key.version && applicable_blocks.contains(block_id) {
+                let change = cf.get(&key, OPERATION)?;
+                return Ok(change);
+            }
+        }
+
+        Err(StorageError::NotFound {
+            item: "SubstateChange",
+            key: format!("{versioned} in {block_id}"),
+        })
     }
 
     fn quorum_certificates_get(&self, qc_id: &QcId) -> Result<QuorumCertificate, StorageError> {
-        let key = QuorumCertificateModel::key_from_qc_id(qc_id);
-        let qc = QuorumCertificateModel::get(&self.tx, "quorum_certificates_get", &key)?;
+        const OPERATION: &str = "quorum_certificates_get";
+        let qc = self.db().cf(QuorumCertificateModel)?.get(qc_id, OPERATION)?;
         Ok(qc)
     }
 
@@ -1130,116 +1068,206 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         qc_ids: I,
     ) -> Result<Vec<QuorumCertificate>, StorageError> {
-        let mut qcs = vec![];
-
-        for qc_id in qc_ids {
-            let qc = self.quorum_certificates_get(qc_id)?;
-            qcs.push(qc);
-        }
-
+        const OPERATION: &str = "quorum_certificates_get_all";
+        let qcs = self.db().cf(QuorumCertificateModel)?.multi_get(qc_ids, OPERATION)?;
         Ok(qcs)
     }
 
     fn quorum_certificates_get_by_block_id(&self, block_id: &BlockId) -> Result<QuorumCertificate, StorageError> {
-        let operation = "quorum_certificates_get_by_block_id";
+        const OPERATION: &str = "quorum_certificates_get_by_block_id";
+        let cf = self.db().cf(QuorumCertificateModel)?;
+        let query = self.db().cf(quorum_certificate::ByBlockIdQuery)?;
 
-        type Cf = crate::model::quorum_certificate::BlockColumnFamily;
-        let cf = Cf::name();
+        let mut iter = query.query_prefix_range_iterator(Ordering::default(), block_id);
 
-        let key_prefix = Cf::key_from_block_id(block_id);
-        let ordering = Ordering::Ascending;
+        let ((_, qc_id), _) = iter.next().transpose()?.ok_or_else(|| StorageError::NotFound {
+            item: "QuorumCertificate",
+            key: format!("{block_id}"),
+        })?;
 
-        let res =
-            QuorumCertificateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?;
-
-        let Some(qc) = res else {
-            return Err(StorageError::NotFound {
-                item: "quorum_certificate",
-                key: format!("block_id={block_id}"),
-            });
-        };
-
+        let qc = cf.get(&qc_id, OPERATION)?;
         Ok(qc)
     }
 
     fn transaction_pool_get_for_blocks(
         &self,
-        from_block_id: &BlockId,
         to_block_id: &BlockId,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, StorageError> {
-        if !self.blocks_exists(from_block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "transaction_pool_get_for_blocks: Block {} does not exist",
-                    from_block_id
-                ),
-            });
-        }
-
+        const OPERATION: &str = "transaction_pool_get_for_blocks";
         if !self.blocks_exists(to_block_id)? {
             return Err(StorageError::QueryError {
                 reason: format!("transaction_pool_get_for_blocks: Block {} does not exist", to_block_id),
             });
         }
 
-        let mut updates = self.get_transaction_atom_state_updates_between_blocks(
-            from_block_id,
-            to_block_id,
-            std::iter::once(transaction_id.to_string().as_str()),
-        )?;
+        let cf = self.db().cf(TransactionPoolModel)?;
+        let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
 
-        debug!(
-            target: LOG_TARGET,
-            "transaction_pool_get: from_block_id={}, to_block_id={}, transaction_id={}, updates={} [{:?}]",
-            from_block_id,
-            to_block_id,
-            transaction_id,
-            updates.len(),
-            updates.values().map(|v| v.block_id).collect::<Vec<_>>(),
-        );
+        let mut transaction = cf.get(transaction_id, OPERATION)?;
 
-        let key = TransactionPoolModel::key_from_transaction_id(transaction_id);
-        let rec = TransactionPoolModel::get(&self.tx, "transaction_pool_get_for_blocks", &key)?;
-        let rec = TransactionPoolModel::try_convert(&rec, updates.swap_remove(&transaction_id.to_string()))?;
+        let pending_chain = self.get_pending_chain_ordered(to_block_id)?;
 
-        Ok(rec)
+        // TODO: optimise
+        for block_id in pending_chain.into_iter().rev() {
+            let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
+            for result in iter {
+                let ((_, tx_id), update) = result?;
+                if tx_id == *transaction_id {
+                    update.merge_into(&mut transaction);
+                }
+            }
+        }
+
+        Ok(transaction)
     }
 
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
-        let key = TransactionPoolModel::key_from_transaction_id(transaction_id);
-        let key_exists = TransactionPoolModel::key_exists(&self.tx, "transaction_pool_exists", &key)?;
-        Ok(key_exists)
+        let exists = self
+            .db()
+            .cf(TransactionPoolModel)?
+            .exists(transaction_id, "transaction_pool_exists")?;
+        Ok(exists)
     }
 
     fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError> {
-        let txs = TransactionPoolModel::multi_get(&self.tx, None, Ordering::Ascending)?;
-        Ok(txs)
+        // TODO: Only used in tests
+        const OPERATION: &str = "transaction_pool_get_all";
+        let cf = self.db().cf(TransactionPoolModel)?;
+
+        let (block_id, _) = self.get_commit_block_id()?;
+        let pending_chain = self.get_pending_chain_ordered(&block_id)?;
+        let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+        let mut updates = HashMap::new();
+        for block_id in pending_chain.into_iter().rev() {
+            let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
+            for result in iter {
+                let ((_, tx_id), update) = result?;
+                updates.insert(tx_id, update);
+            }
+        }
+
+        let n = cf.count(OPERATION)?;
+        let iter = cf.value_iterator(Ordering::Ascending, OPERATION);
+        let mut transactions = Vec::with_capacity(n);
+        for result in iter {
+            let mut tx = result?;
+            if let Some(update) = updates.remove(tx.transaction_id()) {
+                update.merge_into(&mut tx);
+            }
+            transactions.push(tx);
+        }
+        Ok(transactions)
     }
 
     fn transaction_pool_get_many_ready(
         &self,
-        _max_txs: usize,
-        _block_id: &BlockId,
+        max_txs: usize,
+        block_id: &BlockId,
     ) -> Result<Vec<TransactionPoolRecord>, StorageError> {
-        todo!()
+        const OPERATION: &str = "transaction_pool_get_many_ready";
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("transaction_pool_get_for_blocks: Block {} does not exist", block_id),
+            });
+        }
+
+        let cf = self.db().cf(TransactionPoolModel)?;
+
+        let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+
+        let pending_chain = self.get_pending_chain_ordered(block_id)?;
+
+        // TODO: optimise
+        let mut updates = HashMap::new();
+        for block_id in pending_chain.into_iter().rev() {
+            let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
+            for result in iter {
+                let ((_, tx_id), update) = result?;
+                updates.insert(tx_id, update);
+            }
+        }
+
+        let mut transactions = Vec::new();
+        let iter = cf.value_iterator(Ordering::default(), OPERATION);
+
+        for result in iter {
+            let mut tx = result?;
+            if let Some(update) = updates.remove(tx.transaction_id()) {
+                update.merge_into(&mut tx);
+            }
+            if tx.is_ready() {
+                transactions.push(tx);
+
+                if transactions.len() >= max_txs {
+                    break;
+                }
+            }
+        }
+
+        Ok(transactions)
+    }
+
+    fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, StorageError> {
+        // const OPERATION: &str = "transaction_pool_has_pending_state_updates";
+        let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+        let mut iter = query.prefix_range_key_iterator(Ordering::default(), block_id);
+        Ok(iter.next().transpose()?.is_some())
     }
 
     fn transaction_pool_count(
         &self,
-        _stage: Option<TransactionPoolStage>,
-        _is_ready: Option<bool>,
-        _confirmed_stage: Option<Option<TransactionPoolConfirmedStage>>,
-        _skip_lock_conflicted: bool,
+        stage: Option<TransactionPoolStage>,
+        is_ready: Option<bool>,
+        skip_lock_conflicted: bool,
     ) -> Result<usize, StorageError> {
-        todo!()
-    }
+        const OPERATION: &str = "transaction_pool_count";
 
-    fn transactions_fetch_involved_shards(
-        &self,
-        _transaction_ids: HashSet<TransactionId>,
-    ) -> Result<HashSet<SubstateAddress>, StorageError> {
-        todo!()
+        let cf = self.db().cf(TransactionPoolModel)?;
+
+        let lock_conflict_query = self.db().cf(lock_conflict::ByTransactionIdQuery)?;
+        let iter = cf.key_iterator(Ordering::default(), OPERATION);
+        let mut count = 0;
+
+        let must_query = stage.is_some() || is_ready.is_some() || skip_lock_conflicted;
+
+        for result in iter {
+            let tx_id = result?;
+            // It's possible that the transaction has been removed from the pool in another thread 😱 - observed in
+            // consensus_tests
+            if must_query {
+                let Some(tx_pool_rec) = cf.get(&tx_id, OPERATION).optional()? else {
+                    continue;
+                };
+
+                if let Some(stage) = stage {
+                    if tx_pool_rec.pending_stage() != Some(stage) {
+                        continue;
+                    }
+                }
+
+                if let Some(is_ready) = is_ready {
+                    if tx_pool_rec.is_ready() != is_ready {
+                        continue;
+                    }
+                }
+
+                if skip_lock_conflicted {
+                    let iter = lock_conflict_query.query_prefix_range_iterator(Ordering::default(), &tx_id);
+                    for result in iter {
+                        let (_, value) = result?;
+                        if !value.is_local_only {
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // TODO: we can return here if we just check for existence
+            count += 1;
+        }
+
+        Ok(count)
     }
 
     fn votes_get_by_block_and_sender(
@@ -1247,51 +1275,52 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         block_id: &BlockId,
         sender_leaf_hash: &FixedHash,
     ) -> Result<Vote, StorageError> {
-        let key = VoteModel::key_from_block_and_sender(block_id, Some(sender_leaf_hash));
-        let vote = VoteModel::get(&self.tx, "votes_get_by_block_and_sender", &key)?;
-        Ok(vote)
+        // const OPERATION: &str = "votes_get_by_block_and_sender";
+        let cf = self.db().cf(vote::ByBlockId)?;
+        let iter = cf.query_prefix_range_iterator(Ordering::default(), block_id);
+
+        for result in iter {
+            let (_, vote) = result?;
+            if vote.sender_leaf_hash == *sender_leaf_hash {
+                return Ok(vote);
+            }
+        }
+
+        Err(StorageError::NotFound {
+            item: "Vote",
+            key: format!("{block_id} by {sender_leaf_hash}"),
+        })
     }
 
     fn votes_count_for_block(&self, block_id: &BlockId) -> Result<u64, StorageError> {
-        let key_prefix = VoteModel::key_from_block_and_sender(block_id, None);
-        let count = VoteModel::count(&self.tx, Some(&key_prefix))?;
-        Ok(count)
+        let cf = self.db().cf(vote::ByBlockId)?;
+        let count = cf.count_prefix(block_id)?;
+        Ok(count as u64)
     }
 
     fn votes_get_for_block(&self, block_id: &BlockId) -> Result<Vec<Vote>, StorageError> {
-        let key_prefix = VoteModel::key_from_block_and_sender(block_id, None);
-        let votes = VoteModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Descending)?;
+        let cf = self.db().cf(vote::ByBlockId)?;
+        let iter = cf.query_prefix_range_iterator(Ordering::default(), block_id);
+        let votes = iter.map(|r| r.map(|(_, vote)| vote)).collect::<Result<_, _>>()?;
         Ok(votes)
     }
 
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError> {
-        let key = SubstateModel::key_from_address(address);
-        Ok(SubstateModel::get(&self.tx, "substates_get", &key)?)
+        const OPERATION: &str = "substates_get";
+        let substate = self.db().cf(SubstateModel)?.get(address, OPERATION)?;
+        Ok(substate)
     }
 
     fn substates_get_any<'a, I: IntoIterator<Item = &'a VersionedSubstateIdRef<'a>>>(
         &self,
         substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
-        type Cf = crate::model::substate::VersionColumnFamily;
+        const OPERATION: &str = "substates_get_any";
 
-        let operation = "substates_get_any";
-        // we want descending key order to get the highest version of each substate, because rocksdb orders
-        // incrementally by key
-        let ordering = Ordering::Descending;
-
-        let cf = Cf::name();
-        let mut substates = vec![];
-
-        for req in substate_ids {
-            let requirement = SubstateRequirement::new(req.substate_id.clone(), Some(req.version));
-            let key_prefix = Cf::build_key_from_requirement(&requirement);
-            if let Some(substate) =
-                SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?
-            {
-                substates.push(substate);
-            }
-        }
+        let substates = self
+            .db()
+            .cf(SubstateModel)?
+            .multi_get(substate_ids.into_iter().map(|id| id.to_substate_address()), OPERATION)?;
 
         Ok(substates)
     }
@@ -1300,208 +1329,162 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         substate_ids: I,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
-        type Cf = crate::model::substate::VersionColumnFamily;
+        const OPERATION: &str = "substates_get_any_max_version";
 
-        let operation = "substates_get_any_max_version";
-        let cf = Cf::name();
-        // we want descending key order to get the highest version of each substate, because rocksdb orders
-        // incrementally by key
-        let ordering = Ordering::Descending;
+        let index_cf = self.db().cf(substate::HeadIndex)?;
+        let cf = self.db().cf(SubstateModel)?;
 
         let mut substates = vec![];
-
         for substate_id in substate_ids {
-            let req = SubstateRequirement::new(substate_id.clone(), None);
-            let key_prefix = Cf::build_key_from_requirement(&req);
-            if let Some(substate) =
-                SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?
-            {
-                substates.push(substate);
-            }
+            let head = index_cf.get(substate_id, OPERATION)?;
+            let address = SubstateAddress::from_substate_id(substate_id, head.version);
+            let substate = cf.get(&address, OPERATION)?;
+            substates.push(substate);
         }
 
         Ok(substates)
     }
 
     fn substates_get_max_version_for_substate(&self, substate_id: &SubstateId) -> Result<(u32, bool), StorageError> {
-        type Cf = crate::model::substate::VersionColumnFamily;
-
-        let operation = "substates_get_max_version_for_substate";
-        let cf = Cf::name();
-        // we want descending key order to get the highest version of the substate, because rocksdb orders incrementally
-        // by key
-        let ordering = Ordering::Descending;
-
-        let req = SubstateRequirement::new(substate_id.clone(), None);
-        let key_prefix = Cf::build_key_from_requirement(&req);
-
-        let res = SubstateModel::get_cf(self.db.clone(), &self.tx, cf, operation, Some(&key_prefix), ordering)?;
-
-        match res {
-            Some(substate) => Ok((substate.version, substate.destroyed.is_some())),
-            None => Err(StorageError::NotFound {
-                item: "Substate (substates_get_max_version_for_substate)",
-                key: substate_id.to_string(),
-            }),
-        }
+        const OPERATION: &str = "substates_get_max_version_for_substate";
+        let index_cf = self.db().cf(substate::HeadIndex)?;
+        let data = index_cf.get(substate_id, OPERATION)?;
+        Ok((data.version, data.is_up))
     }
 
     fn substates_any_exist<I: IntoIterator<Item = S>, S: Borrow<VersionedSubstateId>>(
         &self,
-        addresses: I,
+        ids: I,
     ) -> Result<bool, StorageError> {
-        let operation = "substates_any_exist";
+        const OPERATION: &str = "substates_any_exist";
 
-        for address in addresses {
-            let key = SubstateModel::key_from_address(&address.borrow().to_substate_address());
-            let res = SubstateModel::get(&self.tx, operation, &key);
-            match res {
-                Ok(_) => return Ok(true),
-                Err(e) => match e {
-                    RocksDbStorageError::NotFound { .. } => continue,
-                    _ => return Err(e.into()),
-                },
+        let cf = self.db().cf(SubstateModel)?;
+
+        for id in ids {
+            if cf.exists(&id.borrow().to_substate_address(), OPERATION)? {
+                return Ok(true);
             }
         }
 
         Ok(false)
     }
 
-    fn substates_exists_for_transaction(&self, _transaction_id: &TransactionId) -> Result<bool, StorageError> {
-        // This function is not used anywhere, so we skip implementation
-        todo!()
+    fn substates_exists_for_transaction(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
+        // const OPERATION: &str = "substates_exists_for_transaction";
+        // TODO: only used in tests. Remove this call and ideally the index
+
+        let index = self.db().cf(substate::ByTransactionIdIndex)?;
+        let mut iter = index.query_prefix_range_key_iterator(Ordering::Ascending, transaction_id);
+        Ok(iter.next().transpose()?.is_some())
     }
 
-    fn substates_get_n_after(&self, _n: usize, _after: &SubstateAddress) -> Result<Vec<SubstateRecord>, StorageError> {
-        // This function is not used anywhere, so we skip implementation
-        todo!()
-    }
-
-    fn substates_get_many_within_range(
+    fn substates_get_all_for_transaction(
         &self,
-        _start: &SubstateAddress,
-        _end: &SubstateAddress,
-        _exclude: &[SubstateAddress],
+        transaction_id: &TransactionId,
     ) -> Result<Vec<SubstateRecord>, StorageError> {
-        // This function is not used anywhere, so we skip implementation
-        todo!()
-    }
+        // TODO: used to enable indexer event scanning - find a way to remove this index by changing the way event
+        // scanning works
+        const OPERATION: &str = "substates_get_all_for_transaction";
+        let cf = self.db().cf(SubstateModel)?;
+        let query = self.db().cf(substate::ByTransactionIdIndex)?;
+        let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, transaction_id);
 
-    fn substates_get_many_by_created_transaction(
-        &self,
-        tx_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        type Cf = crate::model::substate::CreatedByTxColumnFamily;
+        let mut substates = vec![];
 
-        let operation = "substates_get_many_by_created_transaction";
-        let cf = Cf::name();
-        let ordering = Ordering::Ascending; // order does not matter here
-        let key_prefix = Cf::build_key_by_transaction(tx_id, None);
-
-        let substates = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
-
-        Ok(substates)
-    }
-
-    fn substates_get_many_by_destroyed_transaction(
-        &self,
-        tx_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        type Cf = crate::model::substate::DestroyedByTxColumnFamily;
-
-        let operation = "substates_get_many_by_destroyed_transaction";
-        let cf = Cf::name();
-        let ordering = Ordering::Ascending; // order does not matter here
-        let key_prefix = Cf::build_key_by_transaction(tx_id, None);
-
-        let substates = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
-
-        Ok(substates)
-    }
-
-    fn substates_get_all_for_transaction(&self, tx_id: &TransactionId) -> Result<Vec<SubstateRecord>, StorageError> {
-        let operation = "substates_get_all_for_transaction";
-        let ordering = Ordering::Ascending;
-
-        // get all created by transaction
-        type CreatedCf = crate::model::substate::CreatedByTxColumnFamily;
-        let cf = CreatedCf::name();
-        let key_prefix = CreatedCf::build_key_by_transaction(tx_id, None);
-        let created_by = SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
-        let mut substates = created_by
-            .into_iter()
-            .map(|s| (s.to_substate_address(), s))
-            .collect::<HashMap<_, _>>();
-
-        // get all destroyed by transaction
-        type DestroyedCf = crate::model::substate::DestroyedByTxColumnFamily;
-        let cf = DestroyedCf::name();
-        let key_prefix = DestroyedCf::build_key_by_transaction(tx_id, None);
-        let destroyed_by =
-            SubstateModel::multi_get_cf(self.db.clone(), &self.tx, operation, cf, &key_prefix, ordering)?;
-        for substate in destroyed_by {
-            substates.insert(substate.to_substate_address(), substate);
+        // TODO: not correct, but hopefully we can remove this
+        for result in iter {
+            let key = result?;
+            let substate = cf.get(&key.versioned_substate_id.to_substate_address(), OPERATION)?;
+            substates.push(substate);
         }
 
-        Ok(substates.into_values().collect())
+        Ok(substates)
     }
 
+    /// Returns all substates that have been locked by a transaction.
+    ///
+    ///  # Used for:
+    /// - fetching the local pledges for a transaction, so that they can be sent as a foreign proposal to the network
     fn substate_locks_get_locked_substates_for_transaction(
         &self,
         transaction_id: &TransactionId,
     ) -> Result<Vec<LockedSubstateValue>, StorageError> {
-        let operation = "substate_locks_get_locked_substates_for_transaction";
+        const OPERATION: &str = "substate_locks_get_locked_substates_for_transaction";
 
-        type Cf = crate::model::substate_locks::TransactionIdColumnFamily;
-        let key_prefix = Cf::build_key_prefix_by_transaction(transaction_id);
-        let locks = SubstateLockModel::multi_get_cf(
-            self.db.clone(),
-            &self.tx,
-            Cf::name(),
-            operation,
-            &key_prefix,
-            Ordering::Ascending,
-        )?;
+        let substates_cf = self.db().cf(SubstateModel)?;
+        let query = self.db().cf(substate_locks::ByTransactionIdQuery)?;
 
-        let mut locked_substates = vec![];
-        for lock in locks {
-            let address = SubstateAddress::from_substate_id(&lock.substate_id, lock.lock.version());
-            let key = SubstateModel::key_from_address(&address);
-            if SubstateModel::key_exists(&self.tx, operation, &key)? {
-                let substate = SubstateModel::get(&self.tx, operation, &key)?;
+        let num_items = query.count_prefix(transaction_id)?;
+        let mut locked_substates = Vec::with_capacity(num_items);
 
-                let locked_substate = LockedSubstateValue {
-                    substate_id: lock.substate_id,
-                    lock: lock.lock,
-                    value: substate.substate_value,
-                };
-                locked_substates.push(locked_substate);
-            }
+        let iter = query.query_prefix_range_iterator(Ordering::default(), transaction_id);
+
+        for result in iter {
+            let (key, lock) = result?;
+            let substate = substates_cf
+                .get(
+                    &SubstateAddress::from_substate_id(&key.substate_id, lock.version()),
+                    OPERATION,
+                )
+                .optional()?;
+            locked_substates.push(LockedSubstateValue {
+                substate_id: key.substate_id,
+                lock,
+                value: substate.and_then(|s| s.into_substate_value()),
+            });
         }
 
         Ok(locked_substates)
     }
 
+    fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        exclude_transaction_id: Option<&TransactionId>,
+        substate_ids: I,
+    ) -> Result<Option<TransactionId>, StorageError> {
+        // const OPERATION: &str = "substate_locks_has_any_write_locks_for_substates";
+        let mut substate_ids = substate_ids.into_iter().peekable();
+        if substate_ids.peek().is_none() {
+            return Ok(None);
+        }
+
+        let query = self.db().cf(substate_locks::BySubstateIdQuery)?;
+
+        for substate_id in substate_ids {
+            let iter = query.query_prefix_range_iterator(Ordering::default(), substate_id);
+            for result in iter {
+                let (key, lock_type) = result?;
+                if !lock_type.is_write() {
+                    continue;
+                }
+                if let Some(exclude_transaction_id) = exclude_transaction_id {
+                    if key.transaction_id == *exclude_transaction_id {
+                        continue;
+                    }
+                }
+
+                return Ok(Some(key.transaction_id));
+            }
+        }
+
+        Ok(None)
+    }
+
     fn substate_locks_get_latest_for_substate(&self, substate_id: &SubstateId) -> Result<SubstateLock, StorageError> {
-        let key_prefix = SubstateLockModel::key_prefix_by_substate_id(substate_id);
+        const OPERATION: &str = "substate_locks_get_latest_for_substate";
 
-        let lock = SubstateLockModel::get_first(
-            &self.tx,
-            "substate_locks_get_latest_for_substate",
-            Some(&key_prefix),
-            Ordering::Descending,
-        )?
-        .ok_or_else(|| StorageError::General {
-            details: "No locked substate found".to_string(),
-        })?;
-
-        Ok(lock.lock)
+        let cf = self.db().cf(SubstateLockModel)?;
+        let index = self.db().cf(substate_locks::HeadIndex)?;
+        let key = index.get(substate_id, OPERATION)?;
+        let lock = cf.get(&key, OPERATION)?;
+        Ok(lock)
     }
 
     fn pending_state_tree_diffs_get_all_up_to_commit_block(
         &self,
         block_id: &BlockId,
     ) -> Result<HashMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError> {
+        const OPERATION: &str = "pending_state_tree_diffs_get_all_up_to_commit_block";
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::NotFound {
                 item: "pending_state_tree_diffs_get_all_up_to_commit_block: Block",
@@ -1509,31 +1492,33 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        // Get the last committed block
-        let committed_block_id = self.get_commit_block_id()?;
-
-        // Block may modify state with zero commands because the justify a block that changes state
-        let block_ids = self.get_block_ids_between(&committed_block_id, block_id)?;
-
+        // Block may modify state with zero commands because the justify block changes state
+        let block_ids = self.get_pending_chain_ordered(block_id)?;
         if block_ids.is_empty() {
             return Ok(HashMap::new());
         }
 
-        let mut diff_recs = vec![];
-        for block_id in block_ids {
-            let key_prefix = PendingStateTreeDiffModel::key_from_block_str_and_height(&block_id, None);
-            let diffs = PendingStateTreeDiffModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?;
-            diff_recs.extend(diffs);
-        }
+        let query = self.db().cf(pending_state_tree_diff::ByBlockIdQuery)?;
 
         let mut diffs = HashMap::new();
-        for diff in diff_recs {
-            let shard = diff.shard;
-            let diff = PendingShardStateTreeDiff::from(diff);
-            diffs
-                .entry(shard)
-                .or_insert_with(Vec::new) //PendingStateTreeDiff::default)
-                .push(diff);
+        // Load diffs in from earliest to latest
+        for block_id in block_ids.iter().rev() {
+            debug!(
+                target: LOG_TARGET,
+                "{OPERATION}: diffs for block {}",
+                block_id
+            );
+            let iter = query.query_prefix_range_iterator(Ordering::default(), block_id);
+            for result in iter {
+                let ((_, shard), diff) = result?;
+                debug!(
+                    target: LOG_TARGET,
+                    "{OPERATION}: got diff for shard {} (v{}, new={}, stale={})",
+                    shard, diff.version, diff.diff.new_nodes.len(), diff.diff.stale_tree_nodes.len()
+                );
+                let diff_mut = diffs.entry(shard).or_insert_with(Vec::new);
+                diff_mut.push(diff);
+            }
         }
 
         Ok(diffs)
@@ -1541,67 +1526,192 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn state_transitions_get_n_after(
         &self,
-        _n: usize,
-        _id: StateTransitionId,
-        _end_epoch: Epoch,
+        n: usize,
+        id: StateTransitionId,
+        end_epoch: Epoch,
     ) -> Result<Vec<StateTransition>, StorageError> {
-        todo!()
+        const OPERATION: &str = "state_transitions_get_n_after";
+        // The StateTransitionId may not exist and is used to find subsequent state transitions
+
+        let cf = self.db().cf(StateTransitionModel)?;
+        let query = self.db().cf(state_transition::ByShardAndIdQuery)?;
+        let iter = query.query_start_range_key_iterator(Ordering::Ascending, &(id.shard(), id.seq() + 1));
+        let substate_cf = self.db().cf(SubstateModel)?;
+
+        let mut transitions = Vec::with_capacity(n);
+        // TODO: this loads and searches a lot of keys which are not applicable to the end epoch. We'll need to use an
+        // epoch prefixed index (maybe only tracking the last transition with a (shard, epoch) key), or figure out some
+        // other way to get state transitions (e.g can we iterate the JMT?)
+        for result in iter {
+            let key = result?;
+
+            if key.shard() > id.shard() {
+                // We're done when we move to the next shard
+                break;
+            }
+
+            if key.epoch() >= end_epoch {
+                // We are not ordering by Epoch, so subsequent epochs could be in range, so we have to continue.
+                // TODO(perf): consider an epoch ordered index
+                continue;
+            }
+
+            // We could also get this from the iterator - if this doesn't require a drive seek then it seems better to
+            // only deserialize when needed
+            let value = cf.get(&key, OPERATION)?;
+
+            let substate = substate_cf.get(&value.substate_address, OPERATION)?;
+
+            let update = match value.transition {
+                StateTransitionType::Up => {
+                    let value = substate.substate_value.map_or_else(
+                        || SubstateValueOrHash::Hash(substate.state_hash),
+                        SubstateValueOrHash::Value,
+                    );
+                    SubstateUpdate::Create(SubstateCreatedProof {
+                        substate: SubstateData {
+                            substate_id: substate.substate_id,
+                            version: substate.version,
+                            value,
+                            created_by_transaction: substate.created_by_transaction,
+                        },
+                    })
+                },
+                StateTransitionType::Down => {
+                    let destroyed_by_transaction = substate.destroyed.map(|d| d.by_transaction).unwrap_or_else(|| {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Substate {} DOWN in transition but substate.destroyed_by_transaction is None",
+                            substate.substate_id
+                        );
+                        // TODO: this doesnt matter really since this is just used for debugging
+                        Default::default()
+                    });
+                    SubstateUpdate::Destroy(SubstateDestroyedProof {
+                        substate_id: substate.substate_id,
+                        version: substate.version,
+                        // TODO: remove this and created_by_transaction fields - use just for debugging, but is sent
+                        // over the wire etc therefore incurs a cost O(n) where n is number of
+                        // substates being synced (e.g a billion substates = 32Gb useless data)
+                        destroyed_by_transaction,
+                    })
+                },
+            };
+
+            transitions.push(StateTransition { id: key, update });
+            if transitions.len() == n {
+                break;
+            }
+        }
+
+        Ok(transitions)
     }
 
-    fn state_transitions_get_last_id(&self, _shard: Shard) -> Result<StateTransitionId, StorageError> {
-        todo!()
+    fn state_transitions_get_last_id(&self, shard: Shard) -> Result<StateTransitionId, StorageError> {
+        // const OPERATION: &str = "state_transitions_get_last_id";
+        let query = self.db().cf(state_transition::ByShardQuery)?;
+        let mut iter = query.query_prefix_range_key_iterator(Ordering::Descending, &shard);
+
+        let key = iter.next().transpose()?.ok_or_else(|| StorageError::NotFound {
+            item: "StateTransition",
+            key: format!("last id in shard {}", shard),
+        })?;
+
+        Ok(key)
     }
 
     fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<Version>, StorageError> {
-        let operation = "state_tree_nodes_get";
-        let key = StateTreeModel::key_from_shard_and_node(shard, key);
-        let value = StateTreeModel::get(&self.tx, operation, &key)?;
-
-        Ok(value.node)
+        const OPERATION: &str = "state_tree_nodes_get";
+        let cf = self.db().cf(StateTreeModelRef::default())?;
+        let node = cf.get(&(shard, key), OPERATION)?;
+        Ok(node)
     }
 
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError> {
-        let operation = "state_tree_versions_get_latest";
-        let key = StateTreeShardVersionModel::key_from_shard(shard);
-
-        if !StateTreeShardVersionModel::key_exists(&self.tx, operation, &key)? {
-            return Ok(None);
-        }
-
-        let value = StateTreeShardVersionModel::get(&self.tx, operation, &key)?;
-        Ok(Some(value.version))
+        const OPERATION: &str = "state_tree_versions_get_latest";
+        let query = self.db().cf(StateTreeShardVersionModel)?;
+        let version = query.get(&shard, OPERATION).optional()?;
+        Ok(version)
     }
 
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError> {
-        let operation = "epoch_checkpoint_get";
-        let key = EpochCheckpointModel::key_from_epoch(epoch);
-        let value = EpochCheckpointModel::get(&self.tx, operation, &key)?;
-        Ok(value)
+        const OPERATION: &str = "epoch_checkpoint_get";
+        let cf = self.db().cf(EpochCheckpointModel)?;
+        let checkpoint = cf.get(&epoch, OPERATION)?;
+        Ok(checkpoint)
+    }
+
+    fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
+        &self,
+        transaction_id: &TransactionId,
+        address: T,
+    ) -> Result<bool, StorageError> {
+        const OPERATION: &str = "foreign_substate_pledges_exists_for_transaction_and_address";
+        let cf = self.db().cf(ForeignSubstatePledgeModel)?;
+        let exists = cf.exists(&(*transaction_id, address.to_substate_address()), OPERATION)?;
+        Ok(exists)
+    }
+
+    fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I: IntoIterator<Item = &'a SubstateId>>(
+        &self,
+        transaction_id: &TransactionId,
+        substate_ids: I,
+    ) -> Result<SubstatePledges, StorageError> {
+        // const OPERATION: &str = "foreign_substate_pledges_get_write_pledges_to_transaction";
+
+        let query = self.db().cf(foreign_substate_pledge::ByTransactionIdQuery)?;
+
+        let mut pledges = SubstatePledges::new();
+        let iter = query.query_prefix_range_iterator(Ordering::default(), transaction_id);
+        let substate_ids = substate_ids.into_iter().collect::<HashSet<_>>();
+
+        for result in iter {
+            let (_, pledge) = result?;
+            if !pledge.is_write() {
+                continue;
+            }
+            if substate_ids.contains(pledge.substate_id()) {
+                pledges.push(pledge);
+            }
+        }
+
+        Ok(pledges)
     }
 
     fn foreign_substate_pledges_get_all_by_transaction_id(
         &self,
         transaction_id: &TransactionId,
     ) -> Result<SubstatePledges, StorageError> {
-        let key_prefix = ForeignSubstatePledgeModel::key_from_transaction_and_address(transaction_id, None);
-        let foreign_pledges = ForeignSubstatePledgeModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?;
-        let substate_pledges = foreign_pledges.into_iter().map(|p| p.pledge).collect();
+        // const OPERATION: &str = "foreign_substate_pledges_get_all_by_transaction_id";
 
-        Ok(substate_pledges)
+        let query = self.db().cf(foreign_substate_pledge::ByTransactionIdQuery)?;
+
+        let mut pledges = SubstatePledges::new();
+        let iter = query.query_prefix_range_iterator(Ordering::default(), transaction_id);
+        for result in iter {
+            let (_, pledge) = result?;
+            pledges.push(pledge);
+        }
+
+        Ok(pledges)
     }
 
-    fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError> {
-        let operation = "burnt_utxos_get";
-        let key = BurntUtxoModel::key_from_commitment(commitment);
-        let value = BurntUtxoModel::get(&self.tx, operation, &key)?;
-        Ok(value)
+    fn burnt_utxos_get(
+        &self,
+        commitment: &UnclaimedConfidentialOutputAddress,
+    ) -> Result<UnclaimedConfidentialOutput, StorageError> {
+        const OPERATION: &str = "burnt_utxos_get";
+        let cf = self.db().cf(BurntUtxoModel)?;
+        let output = cf.get(commitment, OPERATION)?;
+        Ok(output)
     }
 
     fn burnt_utxos_get_all_unproposed(
         &self,
         leaf_block: &BlockId,
         limit: usize,
-    ) -> Result<Vec<BurntUtxo>, StorageError> {
+    ) -> Result<HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>, StorageError> {
+        const OPERATION: &str = "burnt_utxos_get_all_unproposed";
         if !self.blocks_exists(leaf_block)? {
             return Err(StorageError::NotFound {
                 item: "Block",
@@ -1610,126 +1720,153 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         if limit == 0 {
-            return Ok(Vec::new());
+            return Ok(HashMap::new());
         }
 
-        let locked_block = self.get_current_locked_block()?;
-        let exclude_block_ids = self.get_block_ids_with_commands_between(&locked_block.block_id, leaf_block)?;
+        let exclude_block_ids = self.get_pending_chain_with_commands_between(leaf_block)?;
 
-        // TODO: optimize this query in RocksDB
-        // TODO: implement limit in RocksDB model
-        let utxos = BurntUtxoModel::multi_get(&self.tx, None, Ordering::Ascending)?;
-        Ok(utxos
-            .into_iter()
-            .filter(|u| {
-                let Some(proposed_in_block) = u.proposed_in_block else {
-                    return true;
-                };
+        let cf = self.db().cf(BurntUtxoModel)?;
+        let index_cf = self.db().cf(burnt_utxo::ProposedInBlockIndex)?;
 
-                let is_excluded = exclude_block_ids.contains(&proposed_in_block.to_string());
+        let iter = cf.iterator(Ordering::default(), OPERATION);
 
-                !is_excluded
-            })
-            .collect())
+        let mut outputs = HashMap::new();
+        for result in iter {
+            let (commitment, output) = result?;
+            // TODO: consider optimising
+            let mut is_proposed = false;
+            for excluded_block_id in &exclude_block_ids {
+                if index_cf.exists_prefix(&(*excluded_block_id, commitment))? {
+                    is_proposed = true;
+                    break;
+                }
+            }
+            if is_proposed {
+                continue;
+            }
+
+            outputs.insert(commitment, output);
+            if outputs.len() == limit {
+                break;
+            }
+        }
+
+        Ok(outputs)
     }
 
     fn burnt_utxos_count(&self) -> Result<u64, StorageError> {
-        let count = BurntUtxoModel::count(&self.tx, None)?;
-        Ok(count)
+        const OPERATION: &str = "burnt_utxos_count";
+        let count = self.db().cf(BurntUtxoModel)?.count(OPERATION)?;
+        Ok(count as u64)
     }
 
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
-        let key = ForeignParkedBlockModel::key_from_block_id(block_id);
-        let block_exists = ForeignParkedBlockModel::key_exists(&self.tx, "foreign_parked_blocks_exists", &key)?;
-        Ok(block_exists)
+        const OPERATION: &str = "foreign_parked_blocks_exists";
+        let cf = self.db().cf(ForeignParkedBlockModel)?;
+        let exists = cf.exists(block_id, OPERATION)?;
+        Ok(exists)
     }
 
     fn validator_epoch_stats_get(
         &self,
-        _epoch: Epoch,
-        _public_key: &PublicKey,
+        epoch: Epoch,
+        public_key: &PublicKey,
     ) -> Result<ValidatorConsensusStats, StorageError> {
-        todo!()
+        const OPERATION: &str = "validator_epoch_stats_get";
+        let cf = self.db().cf(ValidatorNodeEpochStatsModel)?;
+        let stats = cf.get(&(epoch, public_key.clone()), OPERATION)?;
+        Ok(stats)
     }
 
     fn validator_epoch_stats_get_nodes_to_evict(
         &self,
-        _block_id: &BlockId,
-        _threshold: u64,
-        _limit: u64,
+        block_id: &BlockId,
+        threshold: u64,
+        limit: u64,
     ) -> Result<Vec<PublicKey>, StorageError> {
-        todo!()
+        const OPERATION: &str = "validator_epoch_stats_get_nodes_to_evict";
+        if limit == 0 {
+            return Ok(vec![]);
+        }
+
+        let query = self.db().cf(evicted_node::ByPublicKeyQuery)?;
+        let stats_cf = self.db().cf(validator_node_epoch_stats::ByEpochQuery)?;
+
+        let block = self.blocks_get(block_id)?;
+        let chain = self.get_pending_chain_until(block_id)?;
+
+        let iter = stats_cf.query_prefix_range_iterator(Ordering::default(), &block.epoch());
+
+        let mut nodes_to_evict = vec![];
+        for result in iter {
+            let ((_, public_key), stats) = result?;
+            if stats.missed_proposals < threshold {
+                continue;
+            }
+            let iter = query.query_prefix_range_iterator(Ordering::default(), &public_key);
+            let mut has_proposed = false;
+            for result in iter {
+                let ((_, block_id), data) = result?;
+                if data.is_committed || chain.contains(&block_id) {
+                    // Already proposed - so we don't want to evict again
+                    has_proposed = true;
+                    break;
+                }
+            }
+            if has_proposed {
+                continue;
+            }
+
+            debug!(
+                target: LOG_TARGET,
+                "{OPERATION}: Evicting node {} with missed proposals {}",
+                public_key,
+                stats.missed_proposals
+            );
+            nodes_to_evict.push(public_key);
+        }
+
+        Ok(nodes_to_evict)
     }
 
     fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
+        const OPERATION: &str = "suspended_nodes_is_evicted";
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::QueryError {
-                reason: format!("block {} not found", block_id),
+                reason: format!("{OPERATION}: block {} not found", block_id),
             });
         }
 
-        let operation = "suspended_nodes_is_evicted";
+        let query = self.db().cf(evicted_node::ByPublicKeyQuery)?;
+        let pending_chain = self.get_pending_chain_until(block_id)?;
 
-        let commit_block_id = self.get_commit_block_id()?;
-        let block_key = BlockModel::key_from_block_id(&commit_block_id);
-        let commit_block = BlockModel::get(&self.tx, operation, &block_key)?;
+        let iter = query.query_prefix_range_iterator(Ordering::default(), public_key);
 
-        let block_ids = self.get_block_ids_between(&commit_block_id, block_id)?;
+        for result in iter {
+            let ((_, block_id), value) = result?;
+            if !value.is_committed && !pending_chain.contains(&block_id) {
+                continue;
+            }
+            return Ok(true);
+        }
 
-        let key_prefix = EvictedNodeModel::key_prefix_by_public_key(public_key);
-        let count = EvictedNodeModel::multi_get(&self.tx, Some(&key_prefix), Ordering::Ascending)?
-            .into_iter()
-            .filter(|n| {
-                !block_ids.contains(&n.evicted_in_block.to_string()) ||
-                    n.evicted_in_block_height <= commit_block.height()
-            })
-            .count();
-
-        Ok(count > 0)
+        Ok(false)
     }
 
     fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError> {
-        type Cf = crate::model::evicted_node::EvictionCommittedColumnFamily;
-        let key_prefix = Cf::key_prefix_by_epoch(epoch);
-        let count = MissingTransactionModel::count_cf(self.db.clone(), &self.tx, Cf::name(), Some(&key_prefix))?;
+        const OPERATION: &str = "evicted_nodes_count";
+
+        // TODO: we'll need an index just to optimise this query.
+        let cf = self.db().cf(EvictedNodeModel)?;
+        let iter = cf.value_iterator(Ordering::default(), OPERATION);
+        let mut count = 0;
+        for result in iter {
+            let value = result?;
+            if value.epoch == epoch {
+                count += 1;
+            }
+        }
 
         Ok(count)
-    }
-
-    fn transaction_pool_has_pending_state_updates(&self, _block_id: &BlockId) -> Result<bool, StorageError> {
-        todo!()
-    }
-
-    fn block_diffs_get_change_for_versioned_substate<'a, T: Into<VersionedSubstateIdRef<'a>>>(
-        &self,
-        _block_id: &BlockId,
-        _substate_id: T,
-    ) -> Result<SubstateChange, StorageError> {
-        todo!()
-    }
-
-    fn substate_locks_has_any_write_locks_for_substates<'a, I: IntoIterator<Item = &'a SubstateId>>(
-        &self,
-        _exclude_transaction_id: Option<&TransactionId>,
-        _substate_ids: I,
-        _exclude_local_only: bool,
-    ) -> Result<Option<TransactionId>, StorageError> {
-        todo!()
-    }
-
-    fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
-        &self,
-        _transaction_id: &TransactionId,
-        _address: T,
-    ) -> Result<bool, StorageError> {
-        todo!()
-    }
-
-    fn foreign_substate_pledges_get_write_pledges_to_transaction<'a, I: IntoIterator<Item = &'a SubstateId>>(
-        &self,
-        _transaction_id: &TransactionId,
-        _substate_ids: I,
-    ) -> Result<SubstatePledges, StorageError> {
-        todo!()
     }
 }

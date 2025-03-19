@@ -68,7 +68,6 @@ use tari_dan_storage::{
         TransactionPoolStatusUpdate,
         TransactionRecord,
         ValidatorStatsUpdate,
-        VersionedStateHashTreeDiff,
         Vote,
     },
     StateStoreReadTransaction,
@@ -488,21 +487,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn last_votes_unset(&mut self, last_voted: &LastVoted) -> Result<(), StorageError> {
-        use crate::schema::last_voted;
-
-        diesel::delete(last_voted::table)
-            .filter(last_voted::block_id.eq(serialize_hex(last_voted.block_id)))
-            .filter(last_voted::height.eq(last_voted.height.as_u64() as i64))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_votes_unset",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
     fn last_executed_set(&mut self, last_exec: &LastExecuted) -> Result<(), StorageError> {
         use crate::schema::last_executed;
 
@@ -537,21 +521,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "last_proposed_set",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
-    fn last_proposed_unset(&mut self, last_proposed: &LastProposed) -> Result<(), StorageError> {
-        use crate::schema::last_proposed;
-
-        diesel::delete(last_proposed::table)
-            .filter(last_proposed::block_id.eq(serialize_hex(last_proposed.block_id)))
-            .filter(last_proposed::height.eq(last_proposed.height.as_u64() as i64))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "last_proposed_unset",
                 source: e,
             })?;
 
@@ -619,11 +588,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn foreign_proposals_upsert(
-        &mut self,
-        foreign_proposal: &ForeignProposal,
-        proposed_in_block: Option<BlockId>,
-    ) -> Result<(), StorageError> {
+    fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposal) -> Result<(), StorageError> {
         use crate::schema::foreign_proposals;
         let block = foreign_proposal.block();
 
@@ -706,10 +671,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 })?;
         }
 
-        if let Some(proposed_in_block) = proposed_in_block {
-            self.foreign_proposals_set_proposed_in(block.id(), &proposed_in_block)?;
-        }
-
         Ok(())
     }
 
@@ -745,43 +706,40 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         &mut self,
         block_id: &BlockId,
         status: ForeignProposalStatus,
+        set_proposed_in_block: Option<&LeafBlock>,
     ) -> Result<(), StorageError> {
         use crate::schema::foreign_proposals;
 
-        diesel::update(foreign_proposals::table)
-            .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
-            .set(foreign_proposals::status.eq(status.to_string()))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_set_status",
-                source: e,
-            })?;
+        let num_affected = if let Some(proposed_in_block) = set_proposed_in_block {
+            diesel::update(foreign_proposals::table)
+                .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
+                .set((
+                    foreign_proposals::status.eq(status.to_string()),
+                    foreign_proposals::proposed_in_block.eq(serialize_hex(proposed_in_block.block_id())),
+                    foreign_proposals::proposed_in_block_height.eq(proposed_in_block.height().as_u64() as i64),
+                ))
+                .execute(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "foreign_proposals_set_status",
+                    source: e,
+                })?
+        } else {
+            diesel::update(foreign_proposals::table)
+                .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
+                .set((foreign_proposals::status.eq(status.to_string()),))
+                .execute(self.connection())
+                .map_err(|e| SqliteStorageError::DieselError {
+                    operation: "foreign_proposals_set_status",
+                    source: e,
+                })?
+        };
 
-        Ok(())
-    }
-
-    fn foreign_proposals_set_proposed_in(
-        &mut self,
-        block_id: &BlockId,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError> {
-        use crate::schema::{blocks, foreign_proposals};
-
-        diesel::update(foreign_proposals::table)
-            .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
-            .set((
-                foreign_proposals::proposed_in_block.eq(serialize_hex(proposed_in_block)),
-                foreign_proposals::proposed_in_block_height.eq(blocks::table
-                    .select(blocks::height)
-                    .filter(blocks::block_id.eq(serialize_hex(proposed_in_block)))
-                    .single_value()),
-                foreign_proposals::status.eq(ForeignProposalStatus::Proposed.to_string()),
-            ))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposals_set_proposed_in",
-                source: e,
-            })?;
+        if num_affected == 0 {
+            return Err(StorageError::NotFound {
+                item: "foreign_proposals",
+                key: serialize_hex(block_id),
+            });
+        }
 
         Ok(())
     }
@@ -789,7 +747,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
     fn foreign_proposals_clear_proposed_in(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError> {
         use crate::schema::foreign_proposals;
 
-        diesel::update(foreign_proposals::table)
+        let rows_affected = diesel::update(foreign_proposals::table)
             .filter(foreign_proposals::proposed_in_block.eq(serialize_hex(proposed_in_block)))
             .set((
                 foreign_proposals::proposed_in_block.eq(None::<String>),
@@ -801,6 +759,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 operation: "foreign_proposals_clear_proposed_in",
                 source: e,
             })?;
+
+        if rows_affected == 0 {
+            return Err(StorageError::NotFound {
+                item: "foreign_proposals",
+                key: serialize_hex(proposed_in_block),
+            });
+        }
 
         Ok(())
     }
@@ -885,99 +850,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         );
 
         diesel::insert_into(transactions::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_insert",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
-    fn transactions_update(&mut self, transaction_rec: &TransactionRecord) -> Result<(), StorageError> {
-        use crate::schema::transactions;
-
-        let transaction = transaction_rec.transaction();
-
-        #[derive(AsChangeset)]
-        #[diesel(table_name = transactions)]
-        struct Changes {
-            result: Option<String>,
-            filled_inputs: String,
-            resulting_outputs: Option<String>,
-            resolved_inputs: Option<String>,
-            execution_time_ms: Option<i64>,
-            final_decision: Option<String>,
-            finalized_at: Option<PrimitiveDateTime>,
-            abort_details: Option<String>,
-        }
-
-        let change_set = Changes {
-            result: transaction_rec.execution_result().map(serialize_json).transpose()?,
-            filled_inputs: serialize_json(transaction.filled_inputs())?,
-            resulting_outputs: transaction_rec.resulting_outputs().map(serialize_json).transpose()?,
-            resolved_inputs: transaction_rec.resolved_inputs().map(serialize_json).transpose()?,
-            execution_time_ms: transaction_rec
-                .execution_time()
-                .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX)),
-
-            final_decision: transaction_rec.final_decision().map(|d| d.to_string()),
-            finalized_at: transaction_rec.final_decision().map(|_| {
-                let now = OffsetDateTime::now_utc();
-                PrimitiveDateTime::new(now.date(), now.time())
-            }),
-            abort_details: transaction_rec.abort_reason.as_ref().map(serialize_json).transpose()?,
-        };
-
-        let num_affected = diesel::update(transactions::table)
-            .filter(transactions::transaction_id.eq(serialize_hex(transaction.id())))
-            .set(change_set)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_update",
-                source: e,
-            })?;
-
-        if num_affected == 0 {
-            return Err(StorageError::NotFound {
-                item: "transaction",
-                key: transaction.id().to_string(),
-            });
-        }
-
-        Ok(())
-    }
-
-    fn transactions_save_all<'a, I: IntoIterator<Item = &'a TransactionRecord>>(
-        &mut self,
-        txs: I,
-    ) -> Result<(), StorageError> {
-        use crate::schema::transactions;
-
-        let insert = txs
-            .into_iter()
-            .map(|rec| {
-                let transaction = rec.transaction();
-                Ok((
-                    transactions::transaction_id.eq(serialize_hex(transaction.id())),
-                    transactions::fee_instructions.eq(serialize_json(transaction.fee_instructions())?),
-                    transactions::instructions.eq(serialize_json(transaction.instructions())?),
-                    transactions::signatures.eq(serialize_json(transaction.signatures())?),
-                    transactions::inputs.eq(serialize_json(transaction.inputs())?),
-                    transactions::resolved_inputs.eq(rec.resolved_inputs().map(serialize_json).transpose()?),
-                    transactions::filled_inputs.eq(serialize_json(transaction.filled_inputs())?),
-                    transactions::resulting_outputs.eq(rec.resulting_outputs().map(serialize_json).transpose()?),
-                    transactions::result.eq(rec.execution_result().map(serialize_json).transpose()?),
-                ))
-            })
-            .collect::<Result<Vec<_>, StorageError>>()?;
-
-        if insert.is_empty() {
-            return Ok(());
-        }
-
-        diesel::insert_or_ignore_into(transactions::table)
             .values(insert)
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -1124,21 +996,17 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
     fn transaction_pool_add_pending_update(
         &mut self,
-        block_id: &BlockId,
+        block: &LeafBlock,
         update: &TransactionPoolStatusUpdate,
     ) -> Result<(), StorageError> {
-        use crate::schema::{blocks, transaction_pool, transaction_pool_state_updates};
+        use crate::schema::{transaction_pool, transaction_pool_state_updates};
 
         let transaction_id = serialize_hex(update.transaction_id());
-        let block_id = serialize_hex(block_id);
+        let block_id = serialize_hex(block.block_id());
 
         let values = (
             transaction_pool_state_updates::block_id.eq(&block_id),
-            transaction_pool_state_updates::block_height.eq(blocks::table
-                .select(blocks::height)
-                .filter(blocks::block_id.eq(&block_id))
-                .single_value()
-                .assume_not_null()),
+            transaction_pool_state_updates::block_height.eq(block.height().as_u64() as i64),
             transaction_pool_state_updates::transaction_id.eq(&transaction_id),
             transaction_pool_state_updates::evidence.eq(serialize_json(update.evidence())?),
             transaction_pool_state_updates::stage.eq(update.stage().to_string()),
@@ -1168,36 +1036,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "transaction_pool_add_pending_update",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
-    fn transaction_pool_remove(&mut self, transaction_id: &TransactionId) -> Result<(), StorageError> {
-        use crate::schema::{transaction_pool, transaction_pool_state_updates};
-
-        let transaction_id = serialize_hex(transaction_id);
-        let num_affected = diesel::delete(transaction_pool::table)
-            .filter(transaction_pool::transaction_id.eq(&transaction_id))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_remove",
-                source: e,
-            })?;
-
-        if num_affected == 0 {
-            return Err(StorageError::NotFound {
-                item: "transaction",
-                key: transaction_id,
-            });
-        }
-
-        diesel::delete(transaction_pool_state_updates::table)
-            .filter(transaction_pool_state_updates::transaction_id.eq(transaction_id))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pool_remove",
                 source: e,
             })?;
 
@@ -1634,13 +1472,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn substate_locks_remove_many_for_transactions<'a, I: Iterator<Item = &'a TransactionId>>(
+    fn substate_locks_remove_many_for_transactions<'a, I: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         transaction_ids: I,
     ) -> Result<(), StorageError> {
         use crate::schema::substate_locks;
 
-        let mut transaction_ids = transaction_ids.peekable();
+        let mut transaction_ids = transaction_ids.into_iter().peekable();
         // NOTE: looked at the diesel code and if the iterator is empty, this executes WHERE 0=1 which is fine, but
         // let's check the peekable iterator to save an OP.
         if transaction_ids.peek().is_none() {
@@ -1684,11 +1522,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             });
         }
 
-        let shard = if substate.substate_id.is_global() {
-            Shard::global()
-        } else {
-            substate.created_by_shard
-        };
+        let shard = substate.created_by_shard;
 
         let values = (
             substates::address.eq(serialize_hex(substate.to_substate_address())),
@@ -1915,7 +1749,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         &mut self,
         block_id: BlockId,
         shard: Shard,
-        diff: &VersionedStateHashTreeDiff,
+        diff: &PendingShardStateTreeDiff,
     ) -> Result<(), StorageError> {
         use crate::schema::{blocks, pending_state_tree_diffs};
 
@@ -2050,6 +1884,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
+    fn state_tree_nodes_clear_stale(&mut self, _limit: usize) -> Result<(), StorageError> {
+        // Already deleted in state_tree_nodes_record_stale_tree_node
+        Ok(())
+    }
+
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError> {
         use crate::schema::state_tree_shard_versions;
 
@@ -2165,7 +2004,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn burnt_utxos_delete(&mut self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<(), StorageError> {
+    fn burnt_utxos_delete(
+        &mut self,
+        commitment: &UnclaimedConfidentialOutputAddress,
+        _proposed_in_block: &BlockId,
+    ) -> Result<(), StorageError> {
         use crate::schema::burnt_utxos;
 
         let num_affected = diesel::delete(burnt_utxos::table)
@@ -2260,59 +2103,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "lock_conflicts_remove_by_block_id",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
-    fn validator_epoch_stats_add_participation_share(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
-        use crate::schema::{quorum_certificates, validator_epoch_stats};
-
-        let qc_id = serialize_hex(qc_id);
-        let qc_json = quorum_certificates::table
-            .select(quorum_certificates::json)
-            .filter(quorum_certificates::qc_id.eq(&qc_id))
-            .filter(quorum_certificates::is_shares_processed.eq(false))
-            .first::<String>(self.connection())
-            .optional()
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_add_participation_share",
-                source: e,
-            })?;
-        let Some(qc_json) = qc_json else {
-            return Ok(());
-        };
-
-        let qc = deserialize_json::<QuorumCertificate>(&qc_json)?;
-        let epoch = qc.epoch().as_u64() as i64;
-
-        for sig in qc.signatures() {
-            let values = (
-                validator_epoch_stats::epoch.eq(epoch),
-                validator_epoch_stats::public_key.eq(serialize_hex(sig.public_key().as_bytes())),
-                validator_epoch_stats::participation_shares.eq(1),
-            );
-
-            diesel::insert_into(validator_epoch_stats::table)
-                .values(values)
-                .on_conflict((validator_epoch_stats::epoch, validator_epoch_stats::public_key))
-                .do_update()
-                .set(validator_epoch_stats::participation_shares.eq(validator_epoch_stats::participation_shares + 1))
-                .execute(self.connection())
-                .map_err(|e| SqliteStorageError::DieselError {
-                    operation: "validator_epoch_stats_add_participation_share",
-                    source: e,
-                })?;
-        }
-
-        // Mark QC shares as processed
-        diesel::update(quorum_certificates::table)
-            .filter(quorum_certificates::qc_id.eq(qc_id))
-            .set(quorum_certificates::is_shares_processed.eq(true))
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_epoch_stats_add_participation_share",
                 source: e,
             })?;
 

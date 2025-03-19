@@ -119,6 +119,7 @@ where TConsensusSpec: ConsensusSpec
         self.store.with_write_tx(|tx| {
             let sender_leaf_hash = sender_vn.get_node_hash(self.network);
 
+            // TODO: rather collect these in memory
             let exists = Vote {
                 epoch: message.epoch,
                 block_id: message.block_id,

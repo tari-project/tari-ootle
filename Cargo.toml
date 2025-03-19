@@ -36,7 +36,7 @@ members = [
     "dan_layer/state_tree",
     "dan_layer/storage_sqlite",
     "dan_layer/storage",
-    "dan_layer/storage_tests",
+    "dan_layer/state_store_tests",
     "dan_layer/tari_bor",
     "dan_layer/template_abi",
     "dan_layer/template_builtin",
@@ -85,6 +85,7 @@ tari_dan_common_types = { path = "dan_layer/common_types" }
 tari_dan_engine = { path = "dan_layer/engine" }
 tari_dan_storage = { path = "dan_layer/storage" }
 tari_dan_storage_sqlite = { path = "dan_layer/storage_sqlite" }
+tari_state_store_rocksdb = { path = "dan_layer/state_store_rocksdb" }
 tari_dan_wallet_daemon = { path = "applications/tari_dan_wallet_daemon" }
 tari_dan_wallet_sdk = { path = "dan_layer/wallet/sdk" }
 tari_dan_wallet_crypto = { path = "dan_layer/wallet/crypto" }
@@ -99,7 +100,6 @@ tari_networking = { path = "networking/core" }
 tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }
 tari_state_store_sqlite = { path = "dan_layer/state_store_sqlite" }
-tari_state_store_rocksdb = { path = "dan_layer/state_store_rocksdb" }
 tari_state_tree = { path = "dan_layer/state_tree" }
 tari_swarm = { path = "networking/swarm" }
 tari_template_abi = { version = "0.9.0", path = "dan_layer/template_abi" }
@@ -160,8 +160,8 @@ borsh = "1.5"
 bytes = "1.10.0"
 cacache = "12.0.0"
 cargo_toml = "0.20.5"
-ciborium = { git = "https://github.com/enarx/ciborium.git", rev = "114614d2a61102eb2321c68e53799d1e6f087aef", default-features = false }
-ciborium-io = { git = "https://github.com/enarx/ciborium.git", rev = "114614d2a61102eb2321c68e53799d1e6f087aef", default-features = false }
+ciborium = { version = "0.2.2", default-features = false }
+ciborium-io = { version = "0.2.2", default-features = false }
 clap = "3.2.25"
 chacha20poly1305 = "0.10.1"
 chrono = "0.4.24"
@@ -220,9 +220,7 @@ quote = "1.0.7"
 rand = "0.8.5"
 rayon = "1.7.0"
 reqwest = "0.11.16"
-# TODO: use the next release (the one after 0.22.0) when available
-# https://github.com/rust-rocksdb/rust-rocksdb/issues/881
-rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb", rev = "1cf906dc4087f06631820f13855e6b27bd21b972" }
+rocksdb = "0.23.0"
 semver = "1.0"
 serde = { version = "1.0", default-features = false }
 serde_json = "1.0"

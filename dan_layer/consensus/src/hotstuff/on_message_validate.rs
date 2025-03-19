@@ -194,7 +194,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         self.handle_missing_transactions_local_block(from, local_committee_info, proposal)
     }
 
-    pub fn update_local_parked_blocks<'a, I: IntoIterator<Item = &'a TransactionId> + ExactSizeIterator>(
+    pub fn update_parked_blocks<'a, I: IntoIterator<Item = &'a TransactionId> + ExactSizeIterator>(
         &self,
         current_height: NodeHeight,
         transaction_ids: I,
@@ -205,6 +205,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             let mut unparked_blocks = Vec::new();
             let mut foreign_unparked_blocks = Vec::new();
             for transaction_id in transaction_ids {
+                debug!(target: LOG_TARGET, "🔍 Checking if transaction {} unparks any blocks", transaction_id);
                 if let Some((unparked_block, foreign_proposals)) =
                     tx.missing_transactions_remove(current_height + NodeHeight(1), transaction_id)?
                 {
@@ -218,10 +219,14 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                         block: unparked_block,
                         foreign_proposals,
                     });
+                } else {
+                    debug!(target: LOG_TARGET, "🔍 Transaction {} did not unpark any blocks", transaction_id);
                 }
 
                 let foreign_unparked = ForeignParkedProposal::remove_by_transaction_id(tx, transaction_id)?;
-                if !foreign_unparked.is_empty() {
+                if foreign_unparked.is_empty() {
+                    debug!(target: LOG_TARGET, "🔍 Transaction {} did not unpark any foreign blocks", transaction_id);
+                }else{
                     info!(target: LOG_TARGET, "♻️ all transactions for {} foreign block(s) are ready for consensus", foreign_unparked.len());
                     foreign_unparked_blocks.extend(foreign_unparked.into_iter().map(Into::into));
                 }
@@ -432,7 +437,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         proposal: &ForeignProposal,
     ) -> Result<HashSet<TransactionId>, HotStuffError> {
         let mut all_involved_transactions = proposal
-            .block
+            .block()
             .all_transaction_ids_in_committee(local_committee_info)
             .peekable();
 

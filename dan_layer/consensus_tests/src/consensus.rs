@@ -29,7 +29,7 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_dan_storage::{
-    consensus_models::{AbortReason, BlockId, Command, Decision, SubstateRecord, TransactionRecord},
+    consensus_models::{AbortReason, Command, Decision, SubstateRecord, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
 };
@@ -75,6 +75,7 @@ async fn single_transaction() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx1.id());
 
@@ -82,7 +83,7 @@ async fn single_transaction() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let mut block = tx.blocks_get_tip(Epoch(1), test.get_validator(&TestAddress::new("1")).shard_group)?;
+            let mut block = tx.leaf_block_get(Epoch(1))?.get_block(tx)?;
             loop {
                 block = block.get_parent(tx)?;
                 if block.id().is_zero() {
@@ -121,6 +122,7 @@ async fn single_transaction_multi_vn() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx1.id());
 
@@ -128,7 +130,7 @@ async fn single_transaction_multi_vn() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let mut block = tx.blocks_get_tip(Epoch(1), test.get_validator(&TestAddress::new("1")).shard_group)?;
+            let mut block = tx.leaf_block_get(Epoch(1))?.get_block(tx)?;
             loop {
                 block = block.get_parent(tx)?;
                 if block.id().is_zero() {
@@ -170,6 +172,7 @@ async fn single_transaction_abort() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx1.id(), Decision::Abort(AbortReason::ExecutionFailure))
         .await;
@@ -202,6 +205,7 @@ async fn propose_blocks_with_queued_up_transactions_until_all_committed() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_clean_shutdown().await;
 }
@@ -228,6 +232,7 @@ async fn propose_blocks_with_new_transactions_until_all_committed() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_clean_shutdown().await;
 }
@@ -265,35 +270,13 @@ async fn node_requests_missing_transaction_from_local_leader() {
             break;
         }
         if committed_height >= NodeHeight(10) {
+            test.dump_pool_info();
+            test.dump_blocks(&TestAddress::new("1"));
             panic!("Not all transaction committed after {} blocks", committed_height);
         }
     }
 
-    // Check if we clean the missing transactions table in the DB once the transactions are committed
-    test.get_validator(&TestAddress::new("2"))
-        .state_store
-        .with_read_tx(|tx| {
-            let mut block_id = BlockId::zero();
-            loop {
-                let children = tx.blocks_get_all_by_parent(&block_id).unwrap();
-                if block_id.is_zero() {
-                    break;
-                }
-
-                assert_eq!(children.len(), 1);
-                for block in children {
-                    if block.is_genesis() {
-                        continue;
-                    }
-                    let missing = tx.blocks_get_pending_transactions(block.id()).unwrap();
-                    assert!(missing.is_empty());
-                    block_id = *block.id();
-                }
-            }
-            Ok::<_, HotStuffError>(())
-        })
-        .unwrap();
-
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(&tx_ids[0]);
     test.assert_clean_shutdown().await;
@@ -329,6 +312,7 @@ async fn multi_shard_single_transaction() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx.id(), Decision::Commit)
         .await;
@@ -364,6 +348,7 @@ async fn multi_validator_propose_blocks_with_new_transactions_until_all_committe
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
@@ -406,6 +391,7 @@ async fn multi_shard_propose_blocks_with_new_transactions_until_all_committed() 
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(&tx_ids[0]);
 
@@ -475,6 +461,7 @@ async fn foreign_shard_group_decides_to_abort() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx2.id(), Decision::Abort(AbortReason::ExecutionFailure))
         .await;
@@ -535,6 +522,7 @@ async fn multishard_local_inputs_foreign_outputs() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
@@ -605,6 +593,7 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx.id(), Decision::Abort(AbortReason::ExecutionFailure))
         .await;
@@ -671,6 +660,7 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
@@ -744,6 +734,7 @@ async fn multishard_output_conflict_abort() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     // Currently not deterministic (test harness) which transaction will arrive first so we check that one transaction
     // is committed and the other is aborted. TODO: It is also possible that both are aborted.
@@ -811,6 +802,7 @@ async fn single_shard_inputs_from_previous_outputs() {
         );
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     // Assert that the decision matches for all validators. If tx2 is sequenced first, then it will be aborted due to
     // the input not existing
@@ -880,6 +872,7 @@ async fn multishard_inputs_from_previous_outputs() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
@@ -964,6 +957,7 @@ async fn single_shard_input_conflict() {
         test.assert_all_validators_committed(tx2.id());
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
 
     test.assert_clean_shutdown().await;
@@ -1006,7 +1000,7 @@ async fn epoch_change() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let mut block = tx.blocks_get_tip(Epoch(1), test.get_validator(&TestAddress::new("1")).shard_group)?;
+            let mut block = tx.leaf_block_get(Epoch(1))?.get_block(tx)?;
             loop {
                 block = block.get_parent(tx)?;
                 if block.id().is_zero() {
@@ -1021,6 +1015,7 @@ async fn epoch_change() {
         })
         .unwrap();
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     // test.assert_all_validators_committed();
 
@@ -1083,6 +1078,7 @@ async fn leader_failure_node_goes_down() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height_except(&[failure_node.clone()])
         .await;
 
@@ -1151,6 +1147,7 @@ async fn foreign_block_distribution() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
@@ -1203,6 +1200,7 @@ async fn single_shard_unversioned_inputs() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx.id());
 
@@ -1210,7 +1208,7 @@ async fn single_shard_unversioned_inputs() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let mut block = Some(tx.blocks_get_tip(Epoch(1), test.get_validator(&TestAddress::new("1")).shard_group)?);
+            let mut block = Some(tx.leaf_block_get(Epoch(1))?.get_block(tx)?);
             loop {
                 block = block.as_ref().unwrap().get_parent(tx).optional()?;
                 let Some(b) = block.as_ref() else {
@@ -1305,6 +1303,9 @@ async fn multishard_unversioned_input_conflict() {
         let leaf1 = test.get_validator(&TestAddress::new("1")).get_leaf_block();
         let leaf2 = test.get_validator(&TestAddress::new("3")).get_leaf_block();
         if leaf1.height > NodeHeight(60) && leaf2.height > NodeHeight(60) {
+            test.dump_pool_info();
+            test.dump_blocks(&TestAddress::new("1"));
+            test.dump_blocks(&TestAddress::new("3"));
             panic!(
                 "Not all transaction committed after {}/{} blocks",
                 leaf1.height, leaf2.height
@@ -1312,7 +1313,7 @@ async fn multishard_unversioned_input_conflict() {
         }
     }
 
-    test.assert_all_validators_at_same_height().await;
+    test.stop();
 
     test.assert_all_validators_have_decision(tx1.id(), Decision::Abort(AbortReason::ForeignPledgeInputConflict))
         .await;
@@ -1403,7 +1404,10 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
 
         let leaf1 = test.get_validator(&TestAddress::new("1")).get_leaf_block();
         let leaf2 = test.get_validator(&TestAddress::new("3")).get_leaf_block();
-        if leaf1.height > NodeHeight(60) && leaf2.height > NodeHeight(60) {
+        if leaf1.height > NodeHeight(60) || leaf2.height > NodeHeight(60) {
+            test.dump_pool_info();
+            test.dump_blocks(&TestAddress::new("1"));
+            test.dump_blocks(&TestAddress::new("3"));
             panic!(
                 "Not all transaction committed after {}/{} blocks",
                 leaf1.height, leaf2.height
@@ -1411,6 +1415,7 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
 
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
@@ -1480,6 +1485,7 @@ async fn leader_failure_node_goes_down_and_gets_evicted() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height_except(&[failure_node.clone()])
         .await;
 
@@ -1574,6 +1580,7 @@ async fn multishard_publish_template() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx.id());
 
@@ -1667,6 +1674,7 @@ async fn multishard_validator_fee_claim() {
         }
     }
 
+    test.stop();
     test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(claim_tx.id());
 

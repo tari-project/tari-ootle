@@ -203,6 +203,7 @@ impl EventScanner {
                             .substate
                             .substate_id()
                             .as_template()
+                            // TODO: this should be an error - a VN could send invalid data
                             .expect("Expected template substate ID");
 
                         Some(TemplateChange::Add {

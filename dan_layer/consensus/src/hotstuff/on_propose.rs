@@ -35,7 +35,7 @@ use tari_dan_storage::{
         HighQc,
         LastProposed,
         LeafBlock,
-        LockedBlock,
+        MintConfidentialOutputAtom,
         PendingShardStateTreeDiff,
         QcId,
         QuorumCertificate,
@@ -50,7 +50,12 @@ use tari_dan_storage::{
     },
     StateStore,
 };
-use tari_engine_types::{commit_result::RejectReason, substate::Substate};
+use tari_engine_types::{
+    commit_result::RejectReason,
+    confidential::UnclaimedConfidentialOutput,
+    substate::Substate,
+    template_models::UnclaimedConfidentialOutputAddress,
+};
 use tari_epoch_manager::EpochManagerReader;
 use tari_transaction::TransactionId;
 use tokio::task;
@@ -335,7 +340,6 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
-        let locked_block = LockedBlock::get(tx, new_leaf_block.epoch())?;
         info!(
             target: LOG_TARGET,
             "✅ New leaf block {} is justified. Updating evidence for transactions",
@@ -350,10 +354,7 @@ where TConsensusSpec: ConsensusSpec
 
             let atom = cmd.transaction().expect("Command must be a transaction");
 
-            let Some(mut pool_tx) = change_set
-                .get_transaction(tx, &locked_block, &leaf, atom.id())
-                .optional()?
-            else {
+            let Some(mut pool_tx) = change_set.get_transaction(tx, &leaf, atom.id()).optional()? else {
                 return Err(HotStuffError::InvariantError(format!(
                     "Transaction {} in newly justified block {} not found in the pool",
                     atom.id(),
@@ -450,12 +451,11 @@ where TConsensusSpec: ConsensusSpec
                     .foreign_proposals
                     .iter()
                     .map(|fp| Command::ForeignProposal(fp.to_atom()))
-                    .chain(
-                        batch
-                            .burnt_utxos
-                            .iter()
-                            .map(|bu| Command::MintConfidentialOutput(bu.to_atom())),
-                    )
+                    .chain(batch.burnt_utxos.keys().map(|commitment| {
+                        Command::MintConfidentialOutput(MintConfidentialOutputAtom {
+                            commitment: *commitment,
+                        })
+                    }))
                     .chain(
                         batch
                             .evict_nodes
@@ -542,15 +542,15 @@ where TConsensusSpec: ConsensusSpec
         timer.done();
 
         // This relies on the UTXO commands being ordered after transaction commands
-        for utxo in batch.burnt_utxos {
-            let id = VersionedSubstateId::new(utxo.commitment, 0);
+        for (commitment, output) in batch.burnt_utxos {
+            let id = VersionedSubstateId::new(commitment, 0);
             let shard = id.to_shard(local_committee_info.num_preshards());
             let change = SubstateChange::Up {
                 id,
                 shard,
                 // N/A
                 transaction_id: Default::default(),
-                substate: Substate::new(0, utxo.output),
+                substate: Substate::new(0, output),
             };
 
             substate_store.put(change)?;
@@ -589,7 +589,10 @@ where TConsensusSpec: ConsensusSpec
             tx,
             local_committee_info.shard_group(),
             pending_tree_diffs,
-            substate_store.diff(),
+            substate_store.diff()
+                .iter()
+                // Calculate for local shards only and the global shard
+                .filter(|ch| local_committee_info.shard_group().contains_or_global(&ch.shard())),
         )?;
         timer.done();
 
@@ -950,7 +953,7 @@ where TConsensusSpec: ConsensusSpec
         if !transaction.has_all_required_input_pledges(tx, local_committee_info)? {
             // TODO: investigate - this case does occur when all_input_shard_groups_prepared is used vs
             //       all_shard_groups_prepared in can_continue_to, not sure why.
-            // Once case where this can happen if we received a LocalAccept pledge, which will skip sending the substate
+            // One case where this can happen if we received a LocalAccept pledge, which will skip sending the substate
             // values, but not LocalPrepare (which contains substate values). This could be solved by
             // (re-)requesting the LocalPrepare pledge.
             error!(
@@ -1113,7 +1116,7 @@ pub fn get_non_local_shards<'a, I: IntoIterator<Item = &'a SubstateChange>>(
 #[derive(Default)]
 struct ProposalBatch {
     pub foreign_proposals: Vec<ForeignProposal>,
-    pub burnt_utxos: Vec<BurntUtxo>,
+    pub burnt_utxos: HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>,
     pub transactions: Vec<TransactionPoolRecord>,
     pub evict_nodes: Vec<PublicKey>,
     pub commands: Vec<Command>,

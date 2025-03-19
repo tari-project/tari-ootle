@@ -21,36 +21,40 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::{Deserialize, Serialize};
+use tari_dan_common_types::shard::Shard;
 use tari_dan_storage::consensus_models::ForeignReceiveCounters;
 
-use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
+use crate::{
+    codecs::{NumberCodec, ShardCodec},
+    traits::Cf,
+    utils::RocksDbTimestamp,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignReceiveCounterData {
     pub counters: ForeignReceiveCounters,
     // we need this field to keep track of insertion order
-    pub created_at: RocksdbTimestamp,
+    pub created_at: RocksDbTimestamp,
 }
 
 impl From<&ForeignReceiveCounters> for ForeignReceiveCounterData {
     fn from(value: &ForeignReceiveCounters) -> Self {
         Self {
             counters: value.clone(),
-            created_at: RocksdbTimestamp::now(),
+            created_at: RocksDbTimestamp::now(),
         }
     }
 }
 
-pub struct ForeignReceiveCounterModel {}
+pub struct ForeignReceiveCounterModel;
 
-impl RocksdbModel for ForeignReceiveCounterModel {
-    type Item = ForeignReceiveCounterData;
+impl Cf for ForeignReceiveCounterModel {
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
+    type Value = u64;
+    type ValueCodec = NumberCodec<Self::Value>;
 
-    fn key_prefix() -> &'static str {
+    fn name() -> &'static str {
         "foreignreceivecounters"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        format!("{}_{}", Self::key_prefix(), value.created_at)
     }
 }

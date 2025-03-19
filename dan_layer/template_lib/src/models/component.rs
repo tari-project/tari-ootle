@@ -107,8 +107,21 @@ impl AsRef<[u8]> for ComponentAddress {
 newtype_struct_serde_impl!(ComponentAddress, BorTag<ObjectKey, TAG>);
 
 #[cfg(feature = "borsh")]
-impl borsh::BorshSerialize for ComponentAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        self.as_object_key().array().serialize(writer)
+mod borsh {
+    use std::io::Read;
+
+    use super::*;
+
+    impl ::borsh::BorshSerialize for ComponentAddress {
+        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+            self.as_object_key().array().serialize(writer)
+        }
+    }
+
+    impl ::borsh::BorshDeserialize for ComponentAddress {
+        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+            let key = ::borsh::BorshDeserialize::deserialize_reader(reader)?;
+            Ok(Self::new(ObjectKey::from_array(key)))
+        }
     }
 }

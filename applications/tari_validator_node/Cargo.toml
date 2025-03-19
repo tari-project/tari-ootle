@@ -10,15 +10,14 @@ license.workspace = true
 [features]
 default = ["metrics"]
 metrics = ["prometheus"]
+sqlite_backend = ["tari_state_store_sqlite"]
 ts = []                  # this is just for the build script to skip the build
 
 [dependencies]
 minotari_app_utilities = { workspace = true }
 tari_common = { workspace = true }
 tari_common_types = { workspace = true }
-tari_core = { workspace = true, default-features = false, features = [
-    "transactions",
-] }
+tari_core = { workspace = true, default-features = false, features = ["transactions"] }
 tari_crypto = { workspace = true }
 tari_epoch_oracles = { workspace = true, features = ["base_layer"] }
 tari_validator_node_rpc = { workspace = true }
@@ -28,6 +27,8 @@ tari_dan_p2p = { workspace = true }
 tari_dan_engine = { workspace = true }
 tari_dan_storage = { workspace = true }
 tari_dan_storage_sqlite = { workspace = true }
+tari_state_store_sqlite = { workspace = true, optional = true }
+tari_state_store_rocksdb = { workspace = true }
 tari_engine_types = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_template_lib = { workspace = true }
@@ -40,7 +41,6 @@ tari_indexer_lib = { workspace = true }
 tari_rpc_state_sync = { workspace = true }
 tari_bor = { workspace = true, default-features = true }
 tari_consensus = { workspace = true }
-tari_state_store_sqlite = { workspace = true }
 tari_networking = { workspace = true }
 tari_rpc_framework = { workspace = true }
 tari_template_builtin = { workspace = true }
@@ -74,14 +74,7 @@ reqwest = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = [
-    "default",
-    "macros",
-    "time",
-    "sync",
-    "rt-multi-thread",
-    "fs"
-] }
+tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread", "fs", "signal"] }
 tower-http = { workspace = true, features = ["default", "cors"] }
 
 [build-dependencies]

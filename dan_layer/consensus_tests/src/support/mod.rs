@@ -4,7 +4,7 @@
 // TODO: use all functions
 // #![allow(dead_code)]
 
-pub const TEST_NUM_PRESHARDS: NumPreshards = NumPreshards::P64;
+pub const TEST_NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 
 mod address;
 mod epoch_manager;
@@ -19,6 +19,7 @@ mod network;
 mod signing_service;
 mod spec;
 mod sync;
+mod table;
 mod transaction;
 mod transaction_executor;
 mod validator;

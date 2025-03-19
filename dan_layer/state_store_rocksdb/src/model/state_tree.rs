@@ -20,35 +20,91 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
-use tari_state_tree::{Node, NodeKey, Version};
+use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 
-use crate::model::traits::RocksdbModel;
+use crate::{
+    codecs::{DefaultCodec, NodeKeyCodec, ShardCodec},
+    traits::{Cf, QueryCf},
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateTreeModelData {
-    pub shard: Shard,
-    pub key: NodeKey,
-    pub node: Node<Version>,
-}
+pub struct StateTreeModel;
 
-pub struct StateTreeModel {}
+impl Cf for StateTreeModel {
+    type Key = (Shard, NodeKey);
+    type KeyCodec = (ShardCodec, NodeKeyCodec);
+    type Value = Node<Version>;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
-impl StateTreeModel {
-    pub fn key_from_shard_and_node(shard: Shard, node: &NodeKey) -> String {
-        format!("{}_{}_{}", Self::key_prefix(), shard, node)
-    }
-}
-
-impl RocksdbModel for StateTreeModel {
-    type Item = StateTreeModelData;
-
-    fn key_prefix() -> &'static str {
+    fn name() -> &'static str {
         "statetree"
     }
+}
 
-    fn key(value: &Self::Item) -> String {
-        Self::key_from_shard_and_node(value.shard, &value.key)
+pub struct StateTreeModelRef<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> Cf for StateTreeModelRef<'a> {
+    type Key = (Shard, &'a NodeKey);
+    type KeyCodec = (ShardCodec, NodeKeyCodec);
+    type Value = Node<Version>;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        "statetree"
+    }
+}
+
+impl Default for StateTreeModelRef<'_> {
+    fn default() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+pub struct ByShardQuery;
+
+impl QueryCf for ByShardQuery {
+    type Cf = StateTreeModel;
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
+}
+
+pub struct StateTreeStaleNodesModel;
+
+impl Cf for StateTreeStaleNodesModel {
+    // Must be the same key as the StateTreeModel
+    type Key = (Shard, NodeKey);
+    type KeyCodec = (ShardCodec, NodeKeyCodec);
+    type Value = StaleTreeNode;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        "statetree_stale_nodes"
+    }
+}
+
+pub struct StateTreeStaleNodesModelRef<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> Cf for StateTreeStaleNodesModelRef<'a> {
+    type Key = (Shard, &'a NodeKey);
+    type KeyCodec = (ShardCodec, NodeKeyCodec);
+    type Value = StaleTreeNode;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        StateTreeStaleNodesModel::name()
+    }
+}
+
+impl Default for StateTreeStaleNodesModelRef<'_> {
+    fn default() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
     }
 }

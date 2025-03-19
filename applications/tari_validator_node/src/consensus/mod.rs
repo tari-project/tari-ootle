@@ -1,6 +1,8 @@
 //    Copyright 2023 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
+use std::time::Duration;
+
 use tari_common::configuration::Network;
 use tari_consensus::{
     hotstuff::{ConsensusWorker, ConsensusWorkerContext, HotstuffConfig, HotstuffWorker},
@@ -13,7 +15,6 @@ use tari_dan_storage::consensus_models::TransactionPool;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
 use tari_shutdown::ShutdownSignal;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -36,7 +37,7 @@ mod leader_selection;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 mod signature_service;
-mod spec;
+pub(crate) mod spec;
 
 pub use block_transaction_executor::*;
 pub use handle::*;
@@ -44,14 +45,14 @@ pub use signature_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
 use tari_template_manager::interface::TemplateManagerHandle;
 
-use crate::p2p::NopLogger;
+use crate::{consensus::spec::ValidatorNodeStateStore, p2p::NopLogger};
 
 pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Transaction, TransactionValidationError>;
 
 pub async fn spawn(
     network: Network,
     sidechain_id: Option<RistrettoPublicKey>,
-    store: SqliteStateStore<PeerAddress>,
+    store: ValidatorNodeStateStore,
     local_addr: PeerAddress,
     signing_service: TariSignatureService,
     epoch_manager: EpochManagerHandle<PeerAddress>,
@@ -77,6 +78,7 @@ pub async fn spawn(
         network,
         sidechain_id,
         consensus_constants: consensus_constants.clone(),
+        cleanup_interval: Duration::from_secs(60),
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

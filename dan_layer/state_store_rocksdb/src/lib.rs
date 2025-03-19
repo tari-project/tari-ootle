@@ -20,11 +20,17 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+mod cf_api;
+mod codecs;
 mod error;
 mod model;
 mod reader;
 mod store;
+pub mod traits;
 mod utils;
 mod writer;
 
 pub use store::RocksDbStateStore;
+
+#[cfg(test)]
+mod tests;

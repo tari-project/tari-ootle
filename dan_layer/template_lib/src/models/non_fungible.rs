@@ -28,13 +28,14 @@ use crate::{
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub enum NonFungibleId {
     U256(
         #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
         #[serde_as(as = "serde_with::Bytes")]
         [u8; 32],
     ),
+    // TODO: limit size
     String(String),
     Uint32(u32),
     Uint64(#[cfg_attr(feature = "ts", ts(type = "number"))] u64),
@@ -216,9 +217,21 @@ const TAG: u64 = BinaryTag::NonFungibleAddress.as_u64();
 pub struct NonFungibleAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<NonFungibleAddressContents, TAG>);
 
 #[cfg(feature = "borsh")]
-impl borsh::BorshSerialize for NonFungibleAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.0.inner(), writer)
+mod borsh_impl {
+    use std::io::Read;
+
+    use super::*;
+
+    impl borsh::BorshSerialize for NonFungibleAddress {
+        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+            ::borsh::BorshSerialize::serialize(self.0.inner(), writer)
+        }
+    }
+
+    impl borsh::BorshDeserialize for NonFungibleAddress {
+        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+            Ok(Self(BorTag::new(borsh::BorshDeserialize::deserialize_reader(reader)?)))
+        }
     }
 }
 
@@ -229,7 +242,7 @@ impl borsh::BorshSerialize for NonFungibleAddress {
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct NonFungibleAddressContents {
     resource_address: ResourceAddress,
     id: NonFungibleId,

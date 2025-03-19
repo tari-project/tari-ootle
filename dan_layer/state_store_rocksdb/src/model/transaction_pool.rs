@@ -23,62 +23,20 @@
 use tari_dan_storage::consensus_models::TransactionPoolRecord;
 use tari_transaction::TransactionId;
 
-use super::{traits::RocksdbModel, transaction_pool_state_update::TransactionPoolStateUpdateModelData};
-use crate::error::RocksDbStorageError;
+use crate::{
+    codecs::{DefaultCodec, TransactionIdCodec},
+    traits::Cf,
+};
 
-pub struct TransactionPoolModel {}
+pub struct TransactionPoolModel;
 
-impl TransactionPoolModel {
-    pub fn key_from_transaction_id(tx_id: &TransactionId) -> String {
-        format!("{}_{}", Self::key_prefix(), tx_id)
-    }
+impl Cf for TransactionPoolModel {
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
+    type Value = TransactionPoolRecord;
+    type ValueCodec = DefaultCodec<TransactionPoolRecord>;
 
-    pub fn try_convert(
-        value: &TransactionPoolRecord,
-        update: Option<TransactionPoolStateUpdateModelData>,
-    ) -> Result<TransactionPoolRecord, RocksDbStorageError> {
-        let mut evidence = value.evidence().clone();
-        let mut pending_stage = None;
-        let mut local_decision = value.local_decision();
-        let mut is_ready = value.is_ready();
-        let mut remote_decision = value.remote_decision();
-        let mut leader_fee = value.leader_fee().cloned();
-        let mut transaction_fee = value.transaction_fee();
-
-        if let Some(update) = update {
-            evidence = update.evidence;
-            is_ready = update.is_ready;
-            pending_stage = Some(update.stage);
-            local_decision = Some(update.local_decision);
-            remote_decision = update.remote_decision;
-            leader_fee = update.leader_fee;
-            transaction_fee = update.transaction_fee;
-        }
-
-        Ok(TransactionPoolRecord::load(
-            *value.transaction_id(),
-            evidence,
-            value.is_global(),
-            transaction_fee,
-            leader_fee,
-            value.stage(),
-            pending_stage,
-            value.original_decision(),
-            local_decision,
-            remote_decision,
-            is_ready,
-        ))
-    }
-}
-
-impl RocksdbModel for TransactionPoolModel {
-    type Item = TransactionPoolRecord;
-
-    fn key_prefix() -> &'static str {
-        "transactionpool"
-    }
-
-    fn key(item: &Self::Item) -> String {
-        Self::key_from_transaction_id(item.transaction_id())
+    fn name() -> &'static str {
+        "transaction_pool"
     }
 }

@@ -53,7 +53,6 @@ use tari_dan_storage::{
 use tari_engine_types::TemplateAddress;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::HashParseError;
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction::{Transaction, TransactionId};
@@ -70,26 +69,26 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";
 
-pub struct ValidatorNodeRpcServiceImpl {
+pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     template_manager: TemplateManagerHandle,
-    shard_state_store: SqliteStateStore<PeerAddress>,
+    state_store: TStateStore,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
 }
 
-impl ValidatorNodeRpcServiceImpl {
+impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
         template_manager: TemplateManagerHandle,
-        shard_state_store: SqliteStateStore<PeerAddress>,
+        state_store: TStateStore,
         mempool: MempoolHandle,
         consensus: ConsensusHandle,
     ) -> Self {
         Self {
             epoch_manager,
             template_manager,
-            shard_state_store,
+            state_store,
             mempool,
             consensus,
         }
@@ -97,7 +96,9 @@ impl ValidatorNodeRpcServiceImpl {
 }
 
 #[tari_rpc_framework::async_trait]
-impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
+impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcService
+    for ValidatorNodeRpcServiceImpl<TStateStore>
+{
     async fn submit_transaction(
         &self,
         request: Request<proto::rpc::SubmitTransactionRequest>,
@@ -159,7 +160,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
             "Querying substate {substate_requirement} from the state store"
         );
         let tx = self
-            .shard_state_store
+            .state_store
             .create_read_tx()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
@@ -226,7 +227,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
     ) -> Result<Response<GetTransactionResultResponse>, RpcStatus> {
         let req = req.into_message();
         let tx = self
-            .shard_state_store
+            .state_store
             .create_read_tx()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
         let tx_id = TransactionId::try_from(req.transaction_id)
@@ -274,7 +275,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         request: Request<SyncBlocksRequest>,
     ) -> Result<Streaming<SyncBlocksResponse>, RpcStatus> {
         let req = request.into_message();
-        let store = self.shard_state_store.clone();
+        let store = self.state_store.clone();
 
         if proto::rpc::StreamSubstateSelection::try_from(req.stream_substates).is_err() {
             return Err(RpcStatus::bad_request("StreamSubstateSelection is invalid"));
@@ -333,7 +334,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         };
 
         let (sender, receiver) = mpsc::channel(10);
-        task::spawn(BlockSyncTask::new(self.shard_state_store.clone(), start_block_id, None, sender).run(req));
+        task::spawn(BlockSyncTask::new(store, start_block_id, None, sender).run(req));
 
         Ok(Streaming::new(receiver))
     }
@@ -341,7 +342,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
     async fn get_high_qc(&self, _request: Request<GetHighQcRequest>) -> Result<Response<GetHighQcResponse>, RpcStatus> {
         let current_epoch = self.consensus.current_epoch();
         let high_qc = self
-            .shard_state_store
+            .state_store
             .with_read_tx(|tx| {
                 HighQc::get(tx, current_epoch)
                     .optional()?
@@ -376,7 +377,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         }
 
         let checkpoint = self
-            .shard_state_store
+            .state_store
             .with_read_tx(|tx| EpochCheckpoint::get(tx, prev_epoch))
             .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
@@ -400,7 +401,7 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
 
         task::spawn(
             StateSyncTask::new(
-                self.shard_state_store.clone(),
+                self.state_store.clone(),
                 sender,
                 last_state_transition_for_chain,
                 end_epoch,

@@ -27,6 +27,10 @@ const TAG: u64 = BinaryTag::TemplateAddress.as_u64();
 pub struct PublishedTemplateAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl PublishedTemplateAddress {
+    const fn new(key: ObjectKey) -> Self {
+        Self(BorTag::new(key))
+    }
+
     pub const fn from_hash(hash: Hash) -> Self {
         let key = ObjectKey::from_array(hash.into_array());
         Self(BorTag::new(key))
@@ -77,6 +81,13 @@ impl FromStr for PublishedTemplateAddress {
 impl borsh::BorshSerialize for PublishedTemplateAddress {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+    }
+}
+
+impl borsh::BorshDeserialize for PublishedTemplateAddress {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
+        Ok(Self::new(ObjectKey::from_array(key)))
     }
 }
 

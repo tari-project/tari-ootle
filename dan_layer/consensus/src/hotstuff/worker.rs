@@ -28,6 +28,7 @@ use tari_dan_storage::{
         TransactionRecord,
     },
     StateStore,
+    StateStoreWriteTransaction,
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
@@ -254,6 +255,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn run(
         &mut self,
         mut local_committee_info: CommitteeInfo,
@@ -279,6 +281,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .get_our_validator_node(current_epoch)
             .await?
             .fee_claim_public_key;
+
+        let mut cleanup_task = tokio::time::interval(self.config.cleanup_interval);
 
         loop {
             let current_height = self.pacemaker.current_view().get_height();
@@ -359,8 +363,17 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     }
                 },
 
+                    // TODO: put this in a separate periodic task
+                _ = cleanup_task.tick() => {
+                    if let Err(err) = self.state_store.with_write_tx(|tx|     {
+                        tx.state_tree_nodes_clear_stale(1000)
+                    }) {
+                        error!(target: LOG_TARGET, "Error clearing stale nodes: {}", err);
+                    }
+                },
+
                 _ = self.shutdown.wait() => {
-                    info!(target: LOG_TARGET, "💤 Shutting down");
+                    info!(target: LOG_TARGET, "💤 Consensus shutting down");
                     break;
                 }
             }
@@ -538,7 +551,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     ) -> Result<bool, HotStuffError> {
         let (local_proposals, foreign_proposals) = self
             .on_message_validate
-            .update_local_parked_blocks(current_height, transaction_ids)?;
+            .update_parked_blocks(current_height, transaction_ids)?;
 
         let is_any_block_unparked = !local_proposals.is_empty() || !foreign_proposals.is_empty();
 
@@ -822,6 +835,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             }
         }
 
+        // TODO: suggest adding self.epoch_manager.did_epoch_change_recently() and only propose when that is not the
+        // case - allow some arb time for the network to recognise the new epoch. Currently we often get leader failures
+        // due to quick end epoch proposals
         let current_epoch = self.epoch_manager.current_epoch().await?;
         let propose_epoch_end = current_epoch > epoch;
 
@@ -907,8 +923,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     .await,
             ),
             HotstuffMessage::CatchUpSyncRequest(msg) => {
-                self.on_sync_request
-                    .handle(from, *local_committee_info, current_epoch, msg);
+                self.on_sync_request.handle(from, current_epoch, msg);
                 Ok(())
             },
             HotstuffMessage::SyncResponse(_) => {

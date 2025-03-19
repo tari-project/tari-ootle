@@ -10,16 +10,13 @@ license.workspace = true
 [dependencies]
 ciborium = { workspace = true }
 ciborium-io = { workspace = true }
-serde = { workspace = true, default-features = false, features = [
-  "alloc",
-  "derive",
-] }
+serde = { workspace = true, default-features = false }
 
 [dev-dependencies]
 serde_json = { workspace = true }
 
 [features]
 default = ["std"]
-std = ["ciborium/std", "serde/std"]
+std = ["serde/std", "ciborium/std", "ciborium-io/std"]
 alloc = ["serde/alloc", "ciborium-io/alloc"]
 json_encoding = []

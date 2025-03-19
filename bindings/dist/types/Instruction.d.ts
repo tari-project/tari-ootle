@@ -52,4 +52,9 @@ export type Instruction = {
     PublishTemplate: {
         binary: Array<number>;
     };
+} | {
+    AllocateAddress: {
+        substate_type: string;
+        workspace_id: string;
+    };
 };

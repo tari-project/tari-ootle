@@ -150,6 +150,13 @@ impl SubstatePledge {
         matches!(self, Self::Input { .. })
     }
 
+    pub fn is_write(&self) -> bool {
+        match self {
+            Self::Input { is_write, .. } => *is_write,
+            _ => false,
+        }
+    }
+
     pub fn versioned_substate_id(&self) -> &VersionedSubstateId {
         match self {
             Self::Input { substate_id, .. } => substate_id,

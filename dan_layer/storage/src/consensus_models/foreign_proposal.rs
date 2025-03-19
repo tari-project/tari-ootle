@@ -12,7 +12,7 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{Epoch, ShardGroup};
 
-use super::{Block, BlockId, BlockPledge, QuorumCertificate};
+use super::{Block, BlockId, BlockPledge, LeafBlock, QuorumCertificate};
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -54,32 +54,41 @@ impl ForeignProposal {
         &self.justify_qc
     }
 
-    pub fn proposed_by_block(&self) -> Option<&BlockId> {
-        self.proposed_by_block.as_ref()
-    }
-
     pub fn status(&self) -> ForeignProposalStatus {
         self.status
     }
 }
 
 impl ForeignProposal {
-    pub fn upsert<TTx>(&self, tx: &mut TTx, proposed_in_block: Option<BlockId>) -> Result<(), StorageError>
+    pub fn save<TTx>(&self, tx: &mut TTx) -> Result<(), StorageError>
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
     {
         self.justify_qc().save(tx)?;
-        tx.foreign_proposals_upsert(self, proposed_in_block)
+        tx.foreign_proposals_save(self)
     }
 
     pub fn set_status<TTx: StateStoreWriteTransaction>(
         &mut self,
         tx: &mut TTx,
         status: ForeignProposalStatus,
+        set_proposed_in_block: Option<&LeafBlock>,
     ) -> Result<(), StorageError> {
         self.status = status;
-        tx.foreign_proposals_set_status(self.block.id(), status)
+        if let Some(proposed_in_block) = set_proposed_in_block {
+            self.proposed_by_block = Some(proposed_in_block.block_id);
+        }
+        tx.foreign_proposals_set_status(self.block.id(), status, set_proposed_in_block)
+    }
+
+    pub fn set_status_by_id<TTx: StateStoreWriteTransaction>(
+        tx: &mut TTx,
+        block_id: &BlockId,
+        status: ForeignProposalStatus,
+        set_proposed_in_block: Option<&LeafBlock>,
+    ) -> Result<(), StorageError> {
+        tx.foreign_proposals_set_status(block_id, status, set_proposed_in_block)
     }
 
     pub fn delete<TTx: StateStoreWriteTransaction>(tx: &mut TTx, block_id: &BlockId) -> Result<(), StorageError> {
@@ -111,14 +120,6 @@ impl ForeignProposal {
         limit: usize,
     ) -> Result<Vec<Self>, StorageError> {
         tx.foreign_proposals_get_all_new(block_id, limit)
-    }
-
-    pub fn set_proposed_in<TTx: StateStoreWriteTransaction>(
-        tx: &mut TTx,
-        block_id: &BlockId,
-        proposed_in_block: &BlockId,
-    ) -> Result<(), StorageError> {
-        tx.foreign_proposals_set_proposed_in(block_id, proposed_in_block)
     }
 
     pub fn has_unconfirmed<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch) -> Result<bool, StorageError> {
@@ -161,8 +162,9 @@ impl ForeignProposalAtom {
         &self,
         tx: &mut TTx,
         status: ForeignProposalStatus,
+        set_proposed_in: Option<&LeafBlock>,
     ) -> Result<(), StorageError> {
-        tx.foreign_proposals_set_status(&self.block_id, status)
+        tx.foreign_proposals_set_status(&self.block_id, status, set_proposed_in)
     }
 }
 
@@ -177,6 +179,28 @@ pub enum ForeignProposalStatus {
     Confirmed,
     /// Foreign proposal has been rejected.
     Invalid,
+}
+
+impl ForeignProposalStatus {
+    pub fn is_new(&self) -> bool {
+        matches!(self, ForeignProposalStatus::New)
+    }
+
+    pub fn is_proposed(&self) -> bool {
+        matches!(self, ForeignProposalStatus::Proposed)
+    }
+
+    pub fn is_confirmed(&self) -> bool {
+        matches!(self, ForeignProposalStatus::Confirmed)
+    }
+
+    pub fn is_invalid(&self) -> bool {
+        matches!(self, ForeignProposalStatus::Invalid)
+    }
+
+    pub fn is_unconfirmed(&self) -> bool {
+        matches!(self, ForeignProposalStatus::New | ForeignProposalStatus::Proposed)
+    }
 }
 
 impl Display for ForeignProposalStatus {

@@ -72,13 +72,10 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "get_transaction_result" => handlers.get_transaction_result(value).await,
         "get_state" => handlers.get_state(value).await,
         "get_substate" => handlers.get_substate(value).await,
-        "get_substates_created_by_transaction" => handlers.get_substates_created_by_transaction(value).await,
-        "get_substates_destroyed_by_transaction" => handlers.get_substates_destroyed_by_transaction(value).await,
         "list_blocks" => handlers.list_blocks(value).await,
         "get_tx_pool" => handlers.get_tx_pool(value).await,
         // Blocks
         "get_block" => handlers.get_block(value).await,
-        "get_blocks_count" => handlers.get_blocks_count(value).await,
         "get_blocks" => handlers.get_blocks(value).await,
         "get_filtered_blocks_count" => handlers.get_filtered_blocks_count(value).await,
         // Template
@@ -93,7 +90,6 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "get_all_vns" => handlers.get_all_vns(value).await,
         "get_consensus_status" => handlers.get_consensus_status(value).await,
         // "get_network_committees" => handlers.get_network_committees(value).await,
-        "get_fees" => handlers.get_validator_fees(value).await,
         // Comms
         "add_peer" => handlers.add_peer(value).await,
         "get_comms_stats" => handlers.get_comms_stats(value).await,

@@ -9,6 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, Epoch};
+use tari_state_tree::SubstateTreeChange;
 
 use crate::{consensus_models::SubstateUpdate, StateStoreReadTransaction, StorageError};
 
@@ -16,6 +17,23 @@ use crate::{consensus_models::SubstateUpdate, StateStoreReadTransaction, Storage
 pub struct StateTransition {
     pub id: StateTransitionId,
     pub update: SubstateUpdate,
+}
+
+impl StateTransition {
+    pub fn to_tree_change(&self) -> SubstateTreeChange {
+        match &self.update {
+            SubstateUpdate::Create(create) => {
+                let id = create.substate.as_versioned_substate_id_ref();
+                SubstateTreeChange::Up {
+                    id: id.to_owned(),
+                    value_hash: create.substate.to_value_hash(),
+                }
+            },
+            SubstateUpdate::Destroy(destroy) => SubstateTreeChange::Down {
+                id: destroy.to_versioned_substate_id(),
+            },
+        }
+    }
 }
 
 impl StateTransition {
@@ -73,7 +91,7 @@ impl StateTransitionId {
     pub fn as_bytes(&self) -> [u8; Self::BYTE_SIZE] {
         let mut buf = [0u8; Self::BYTE_SIZE];
         let buf_mut = &mut buf.as_mut_slice();
-        write_fixed(self.epoch.to_le_bytes(), buf_mut);
+        write_fixed(self.epoch.to_be_bytes(), buf_mut);
         write_fixed(self.shard.as_u32().to_le_bytes(), buf_mut);
         write_fixed(self.seq.to_le_bytes(), buf_mut);
         buf

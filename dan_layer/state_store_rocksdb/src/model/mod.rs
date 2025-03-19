@@ -20,12 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod traits;
-
 pub mod block;
 pub mod block_diff;
 pub mod block_transaction_execution;
+pub mod bookkeeping;
 pub mod burnt_utxo;
+pub mod chain;
 pub mod epoch_checkpoint;
 pub mod evicted_node;
 pub mod foreign_parked_blocks;
@@ -33,14 +33,8 @@ pub mod foreign_proposal;
 pub mod foreign_receive_counter;
 pub mod foreign_send_counter;
 pub mod foreign_substate_pledge;
-pub mod high_qc;
-pub mod last_executed;
-pub mod last_proposed;
-pub mod last_sent_vote;
-pub mod last_voted;
-pub mod leaf_block;
+
 pub mod lock_conflict;
-pub mod locked_block;
 pub mod missing_transactions;
 pub mod parked_block;
 pub mod pending_state_tree_diff;
@@ -53,4 +47,5 @@ pub mod substate_locks;
 pub mod transaction;
 pub mod transaction_pool;
 pub mod transaction_pool_state_update;
+pub mod validator_node_epoch_stats;
 pub mod vote;

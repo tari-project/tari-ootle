@@ -36,6 +36,7 @@ function Fees() {
   useEffect(() => {
     if (epoch !== undefined && identity !== undefined) {
       // console.log(identity)
+      // TODO: broken
       getFees({ epoch_range: { start: 0, end: epoch.current_epoch }, validator_public_key: identity.public_key }).then(
         (resp) => {
           let min_epoch = epoch.current_epoch;

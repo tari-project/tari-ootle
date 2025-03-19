@@ -23,42 +23,45 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{BlockId, ForeignSendCounters};
 
-use crate::{model::traits::RocksdbModel, utils::RocksdbTimestamp};
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, DefaultCodecRef},
+    traits::Cf,
+    utils::RocksDbTimestamp,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignSendCounterData {
     pub block_id: BlockId,
     pub counters: ForeignSendCounters,
     // we need this field to keep track of insertion order
-    pub created_at: RocksdbTimestamp,
+    pub created_at: RocksDbTimestamp,
 }
 
-impl ForeignSendCounterData {
-    pub fn new(block_id: BlockId, counters: ForeignSendCounters) -> Self {
-        Self {
-            block_id,
-            counters,
-            created_at: RocksdbTimestamp::now(),
-        }
+pub struct ForeignSendCounterModel;
+
+impl Cf for ForeignSendCounterModel {
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
+    type Value = ForeignSendCounters;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        "foreign_send_counters"
     }
 }
 
-pub struct ForeignSendCounterModel {}
-
-impl ForeignSendCounterModel {
-    pub fn key_prefix_by_block_id(block: &BlockId) -> String {
-        format!("{}_{}_", Self::key_prefix(), block)
-    }
+#[derive(Debug, Default)]
+pub struct ForeignSendCounterModelRef<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
 }
 
-impl RocksdbModel for ForeignSendCounterModel {
-    type Item = ForeignSendCounterData;
+impl<'a> Cf for ForeignSendCounterModelRef<'a> {
+    type Key = <ForeignSendCounterModel as Cf>::Key;
+    type KeyCodec = <ForeignSendCounterModel as Cf>::KeyCodec;
+    type Value = &'a ForeignSendCounters;
+    type ValueCodec = DefaultCodecRef<Self::Value>;
 
-    fn key_prefix() -> &'static str {
-        "foreignsendcounters"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", Self::key_prefix(), value.block_id, value.created_at)
+    fn name() -> &'static str {
+        ForeignSendCounterModel::name()
     }
 }

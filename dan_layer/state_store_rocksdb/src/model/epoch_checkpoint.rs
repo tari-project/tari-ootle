@@ -23,24 +23,20 @@
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::consensus_models::EpochCheckpoint;
 
-use crate::model::traits::RocksdbModel;
+use crate::{
+    codecs::{DefaultCodec, EpochCodec},
+    traits::Cf,
+};
 
-pub struct EpochCheckpointModel {}
+pub struct EpochCheckpointModel;
 
-impl EpochCheckpointModel {
-    pub fn key_from_epoch(epoch: Epoch) -> String {
-        format!("{}_{}", Self::key_prefix(), epoch)
-    }
-}
+impl Cf for EpochCheckpointModel {
+    type Key = Epoch;
+    type KeyCodec = EpochCodec;
+    type Value = EpochCheckpoint;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
-impl RocksdbModel for EpochCheckpointModel {
-    type Item = EpochCheckpoint;
-
-    fn key_prefix() -> &'static str {
-        "epochcheckpoints"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        Self::key_from_epoch(value.block().epoch())
+    fn name() -> &'static str {
+        "epoch_checkpoints"
     }
 }

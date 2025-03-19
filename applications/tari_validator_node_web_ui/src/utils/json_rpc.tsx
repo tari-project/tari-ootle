@@ -127,7 +127,6 @@ export const getTxPool = (): Promise<GetTxPoolResponse> => jsonRpc("get_tx_pool"
 
 // Blocks
 export const getBlock = (request: GetBlockRequest): Promise<GetBlockResponse> => jsonRpc("get_block", request);
-export const getBlocksCount = (): Promise<GetBlocksCountResponse> => jsonRpc("get_blocks_count");
 export const getBlocks = (request: GetBlocksRequest): Promise<GetBlocksResponse> => jsonRpc("get_blocks", request);
 export const getFilteredBlocksCount = (request: GetFilteredBlocksCountRequest): Promise<GetBlocksCountResponse> =>
   jsonRpc("get_filtered_blocks_count", request);

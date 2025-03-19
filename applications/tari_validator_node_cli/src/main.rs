@@ -59,7 +59,6 @@ async fn main() -> Result<(), anyhow::Error> {
 
 async fn handle_command(command: Command, base_dir: PathBuf, client: ValidatorNodeClient) -> anyhow::Result<()> {
     match command {
-        Command::Vn(cmd) => cmd.handle(client).await?,
         Command::Templates(cmd) => cmd.handle(client).await?,
         Command::Keys(cmd) => cmd.handle(base_dir).await?,
         Command::Transactions(cmd) => cmd.handle(base_dir, client).await?,

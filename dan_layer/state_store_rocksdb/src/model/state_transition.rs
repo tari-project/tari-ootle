@@ -20,104 +20,65 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
-
-use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::shard::Shard;
-use tari_dan_storage::consensus_models::{StateTransition, StateTransitionId};
+use tari_dan_common_types::{shard::Shard, SubstateAddress};
+use tari_dan_storage::consensus_models::StateTransitionId;
 
-use super::{
-    super::utils::bor_encode,
-    traits::{ModelColumnFamily, RocksdbModel},
+use crate::{
+    codecs::{DefaultCodec, EpochCodec, NumberCodec, ShardCodec, StateTransitionIdCodec},
+    traits::{Cf, QueryCf},
 };
-use crate::{error::RocksDbStorageError, utils::RocksdbSeq};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateTransitionModelData {
-    pub data: Vec<u8>,
-    pub id: StateTransitionId,
-    pub shard: Shard,
-    pub seq: RocksdbSeq,
+    pub substate_address: SubstateAddress,
+    pub transition: StateTransitionType,
 }
 
-impl StateTransitionModelData {
-    pub fn new(data: StateTransition, shard: Shard, seq: u64) -> Result<Self, RocksDbStorageError> {
-        let id = data.id;
-        // we need to encode this field to bor due to incompatiblities between a inner SubstateValue field and bincode
-        let data = bor_encode(&data)?;
-
-        Ok(Self {
-            data,
-            id,
-            shard,
-            seq: RocksdbSeq(seq),
-        })
-    }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum StateTransitionType {
+    Up,
+    Down,
 }
 
-pub struct StateTransitionModel {}
+pub struct StateTransitionModel;
 
-impl RocksdbModel for StateTransitionModel {
-    type Item = StateTransitionModelData;
-
-    fn key_prefix() -> &'static str {
-        "statetransitions"
-    }
-
-    fn key(item: &Self::Item) -> String {
-        format!("{}_{}", Self::key_prefix(), item.id)
-    }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![ShardColumnFamily::name()]
-    }
-
-    fn put_in_cfs(
-        db: Arc<TransactionDB>,
-        tx: &mut Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        value: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        // In each CF value We store the key to the main collection, so we can retrieve the actual value
-        let main_key = Self::key(value);
-        let main_key_bytes = main_key.as_bytes();
-
-        ShardColumnFamily::put(db, tx, operation, value, main_key_bytes)?;
-
-        Ok(())
-    }
-
-    fn delete_from_cfs(
-        db: Arc<TransactionDB>,
-        tx: &Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        item: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        ShardColumnFamily::delete(db.clone(), tx, operation, item)?;
-
-        Ok(())
-    }
-}
-
-pub struct ShardColumnFamily {}
-
-impl ShardColumnFamily {
-    pub const NAME: &str = "statetransitions_shard_seq";
-
-    pub fn build_key_prefix_by_shard(shard: Shard) -> String {
-        format!("{}_{}_", StateTransitionModel::key_prefix(), shard)
-    }
-}
-
-impl ModelColumnFamily for ShardColumnFamily {
-    type Item = StateTransitionModelData;
+impl Cf for StateTransitionModel {
+    type Key = StateTransitionId;
+    type KeyCodec = StateTransitionIdCodec<ShardCodec, NumberCodec<u64>, EpochCodec>;
+    type Value = StateTransitionModelData;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        Self::NAME
+        "state_transitions"
     }
+}
 
-    fn build_key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", StateTransitionModel::key_prefix(), value.shard, value.seq)
+pub struct ByShardQuery;
+
+impl QueryCf for ByShardQuery {
+    type Cf = StateTransitionModel;
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
+}
+
+pub struct ByShardAndIdQuery;
+
+impl QueryCf for ByShardAndIdQuery {
+    type Cf = StateTransitionModel;
+    type Key = (Shard, u64);
+    type KeyCodec = (ShardCodec, NumberCodec<u64>);
+}
+
+pub struct ShardSeqIndex;
+
+impl Cf for ShardSeqIndex {
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
+    type Value = u64;
+    type ValueCodec = NumberCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        "state_transition_shard_seq_idx"
     }
 }

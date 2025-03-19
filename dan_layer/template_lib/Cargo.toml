@@ -16,7 +16,7 @@ newtype-ops = { workspace = true }
 serde = { workspace = true, default-features = false, features = ["derive", "alloc"] }
 serde_with = { workspace = true }
 ts-rs = { workspace = true, optional = true }
-borsh = { workspace = true, optional = true }
+borsh = { workspace = true, optional = true, features = ["derive"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

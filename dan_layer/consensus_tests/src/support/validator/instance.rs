@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus::{
-    hotstuff::{ConsensusCurrentState, HotstuffEvent},
+    hotstuff::{ConsensusCurrentState, CurrentView, HotstuffEvent},
     messages::HotstuffMessage,
 };
 use tari_dan_common_types::{optional::Optional, NodeHeight, ShardGroup, SubstateAddress};
@@ -11,7 +11,6 @@ use tari_dan_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{broadcast, mpsc, watch},
@@ -22,6 +21,7 @@ use crate::support::{
     address::TestAddress,
     epoch_manager::TestEpochManager,
     executions_store::TestExecutionSpecStore,
+    TestStore,
     ValidatorBuilder,
 };
 
@@ -29,7 +29,7 @@ pub struct ValidatorChannels {
     pub address: TestAddress,
     pub shard_group: ShardGroup,
     pub num_committees: u32,
-    pub state_store: SqliteStateStore<TestAddress>,
+    pub state_store: TestStore,
 
     pub tx_new_transactions: mpsc::Sender<(Transaction, usize)>,
     pub tx_hs_message: mpsc::Sender<(TestAddress, HotstuffMessage)>,
@@ -43,7 +43,8 @@ pub struct Validator {
     pub shard_group: ShardGroup,
     pub num_committees: u32,
 
-    pub state_store: SqliteStateStore<TestAddress>,
+    pub current_view: CurrentView,
+    pub state_store: TestStore,
     pub transaction_executions: TestExecutionSpecStore,
     pub epoch_manager: TestEpochManager,
     pub events: broadcast::Receiver<HotstuffEvent>,
@@ -57,7 +58,7 @@ impl Validator {
         ValidatorBuilder::new()
     }
 
-    pub fn state_store(&self) -> &SqliteStateStore<TestAddress> {
+    pub fn state_store(&self) -> &TestStore {
         &self.state_store
     }
 
@@ -67,7 +68,7 @@ impl Validator {
 
     pub fn get_transaction_pool_count(&self) -> usize {
         self.state_store
-            .with_read_tx(|tx| tx.transaction_pool_count(None, None, None, false))
+            .with_read_tx(|tx| tx.transaction_pool_count(None, None, false))
             .unwrap()
     }
 

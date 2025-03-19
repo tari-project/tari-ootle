@@ -21,13 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    fmt::{self, Display},
     net::SocketAddr,
     path::{Path, PathBuf},
-    str::FromStr,
 };
 
-use anyhow::anyhow;
 use config::Config;
 use serde::{Deserialize, Serialize};
 use tari_common::{
@@ -85,8 +82,10 @@ pub struct ValidatorNodeConfig {
     pub identity_file: PathBuf,
     /// The relative path to store persistent data
     pub data_dir: PathBuf,
-    /// The type of database to use
-    pub database_type: DatabaseType,
+    /// An absolute or relative (to data_dir) path to the state database
+    pub state_db_path: PathBuf,
+    /// Database config
+    // pub database: tari_any_state_store::Config,
     /// The p2p configuration settings
     pub p2p: P2pConfig,
     /// P2P RPC configuration
@@ -114,10 +113,6 @@ pub struct ValidatorNodeConfig {
 }
 
 impl ValidatorNodeConfig {
-    pub fn state_db_path(&self) -> PathBuf {
-        self.data_dir.join("state.db")
-    }
-
     pub fn set_base_path<P: AsRef<Path>>(&mut self, base_path: P) {
         if !self.shard_key_file.is_absolute() {
             self.shard_key_file = base_path.as_ref().join(&self.shard_key_file);
@@ -128,6 +123,15 @@ impl ValidatorNodeConfig {
         if !self.data_dir.is_absolute() {
             self.data_dir = base_path.as_ref().join(&self.data_dir);
         }
+        if !self.state_db_path.is_absolute() {
+            self.state_db_path = self.data_dir.join(&self.state_db_path);
+        }
+        // if !self.database.rocks_db.path.is_absolute() {
+        //     self.database.rocks_db.path = self.data_dir.as_ref().join(&self.database.rocks_db.path);
+        // }
+        // if !self.database.sqlite.path.is_absolute() {
+        //     self.database.sqlite.path = self.data_dir.as_ref().join(&self.database.sqlite.path);
+        // }
     }
 }
 
@@ -138,7 +142,17 @@ impl Default for ValidatorNodeConfig {
             shard_key_file: PathBuf::from("shard_key.json"),
             identity_file: PathBuf::from("validator_node_id.json"),
             data_dir: PathBuf::from("data/validator_node"),
-            database_type: DatabaseType::default(),
+            #[cfg(feature = "sqlite_backend")]
+            state_db_path: PathBuf::from("state.db"),
+            #[cfg(not(feature = "sqlite_backend"))]
+            state_db_path: PathBuf::from("rocksdb"),
+            // database: tari_any_state_store::Config {
+            //     database_type: AnyDatabaseType::Sqlite,
+            //     rocks_db: RocksConfig { path: "rocksdb".into() },
+            //     sqlite: SqliteConfig {
+            //         path: "state.db".into(),
+            //     },
+            // },
             p2p: P2pConfig::default(),
             rpc: RpcConfig::default(),
             json_rpc_listener_address: Some("127.0.0.1:18200".parse().unwrap()),
@@ -159,33 +173,5 @@ impl Default for ValidatorNodeConfig {
 impl SubConfigPath for ValidatorNodeConfig {
     fn main_key_prefix() -> &'static str {
         "validator_node"
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DatabaseType {
-    #[default]
-    Sqlite,
-    Rocksdb,
-}
-
-impl FromStr for DatabaseType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "rocksdb" => Ok(DatabaseType::Rocksdb),
-            "sqlite" => Ok(DatabaseType::Sqlite),
-            _ => Err(anyhow!("Invalid database type '{}'", s)),
-        }
-    }
-}
-
-impl Display for DatabaseType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DatabaseType::Rocksdb => write!(f, "rocksdb"),
-            DatabaseType::Sqlite => write!(f, "sqlite"),
-        }
     }
 }

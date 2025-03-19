@@ -56,14 +56,14 @@ use tari_dan_storage::global::{DbFactory, GlobalDb};
 use tari_dan_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
-use tari_shutdown::ShutdownSignal;
-use tari_state_store_sqlite::SqliteStateStore;
+use tari_shutdown::Shutdown;
 use tokio::task;
 pub use validator_registration_file::ValidatorRegistrationFile;
 
 pub use crate::config::{ApplicationConfig, ValidatorNodeConfig};
 use crate::{
     bootstrap::{spawn_services, Services},
+    consensus::spec::ValidatorNodeStateStore,
     dan_node::DanNode,
     file_l1_submitter::FileLayerOneSubmitter,
     http_ui::server::run_http_ui_server,
@@ -94,10 +94,7 @@ pub struct ShardKey {
     substate_address: Option<SubstateAddress>,
 }
 
-pub async fn run_validator_node(
-    config: &ApplicationConfig,
-    shutdown_signal: ShutdownSignal,
-) -> Result<(), anyhow::Error> {
+pub async fn run_validator_node(config: &ApplicationConfig, shutdown: Shutdown) -> Result<(), anyhow::Error> {
     info!(target: LOG_TARGET, "Starting validator node on network {}", config.network);
     let keypair = setup_keypair_prompt(
         &config.validator_node.identity_file,
@@ -124,7 +121,7 @@ pub async fn run_validator_node(
     let consensus_constants = ConsensusConstants::from(config.network);
     let services = spawn_services(
         config,
-        shutdown_signal.clone(),
+        shutdown.to_signal(),
         keypair.clone(),
         global_db,
         consensus_constants,
@@ -163,7 +160,7 @@ pub async fn run_validator_node(
         .map_err(|e| ExitError::new(ExitCode::UnknownError, e))?;
     let node = DanNode::new(services);
     info!(target: LOG_TARGET, "🚀 Validator node started!");
-    node.start(shutdown_signal)
+    node.start(shutdown)
         .await
         .map_err(|e| ExitError::new(ExitCode::UnknownError, e))?;
 
@@ -185,5 +182,5 @@ impl EpochManagerSpec for ValidatorNodeEpochManagerSpec {
     type EpochEventOracle = EpochOracle<GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>>;
     type LayerOneSubmitter = FileLayerOneSubmitter;
     type TemplateDownloader = TemplateDownloadQueue;
-    type UtxoStore = StateUtxoStore<SqliteStateStore<PeerAddress>>;
+    type UtxoStore = StateUtxoStore<ValidatorNodeStateStore>;
 }

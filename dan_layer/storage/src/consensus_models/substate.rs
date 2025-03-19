@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display, iter, ops::RangeInclusive};
+use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
@@ -114,6 +114,10 @@ impl SubstateRecord {
         self.substate_value.as_ref()
     }
 
+    pub fn clear_substate_value(&mut self) {
+        self.substate_value = None;
+    }
+
     pub fn into_substate_value(self) -> Option<SubstateValue> {
         self.substate_value
     }
@@ -153,6 +157,10 @@ impl SubstateRecord {
     pub fn is_up(&self) -> bool {
         !self.is_destroyed()
     }
+
+    pub fn state_hash(&self) -> &FixedHash {
+        &self.state_hash
+    }
 }
 
 impl SubstateRecord {
@@ -189,13 +197,6 @@ impl SubstateRecord {
         substates: I,
     ) -> Result<bool, StorageError> {
         tx.substates_any_exist(substates)
-    }
-
-    pub fn exists_for_transaction<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        transaction_id: &TransactionId,
-    ) -> Result<bool, StorageError> {
-        tx.substates_exists_for_transaction(transaction_id)
     }
 
     pub fn get<TTx: StateStoreReadTransaction>(
@@ -254,6 +255,7 @@ impl SubstateRecord {
         Ok((found, substate_ids))
     }
 
+    /// Returns (version, is_up)
     pub fn get_latest_version<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         substate_id: &SubstateId,
@@ -265,46 +267,9 @@ impl SubstateRecord {
         tx: &TTx,
         substate_id: &SubstateId,
     ) -> Result<SubstateRecord, StorageError> {
-        // TODO: consider optimising
-        let (mut found, _) = Self::get_any_max_version(tx, iter::once(substate_id))?;
-        let Some(found) = found.pop() else {
-            return Err(StorageError::NotFound {
-                item: "SubstateRecord::get_latest",
-                key: substate_id.to_string(),
-            });
-        };
-
-        Ok(found)
-    }
-
-    pub fn get_n_after<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        n: usize,
-        after: &SubstateAddress,
-    ) -> Result<Vec<Self>, StorageError> {
-        tx.substates_get_n_after(n, after)
-    }
-
-    pub fn get_many_within_range<TTx: StateStoreReadTransaction, B: Borrow<RangeInclusive<SubstateAddress>>>(
-        tx: &TTx,
-        bounds: B,
-        excluded_shards: &[SubstateAddress],
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        tx.substates_get_many_within_range(bounds.borrow().start(), bounds.borrow().end(), excluded_shards)
-    }
-
-    pub fn get_many_by_created_transaction<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        transaction_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        tx.substates_get_many_by_created_transaction(transaction_id)
-    }
-
-    pub fn get_many_by_destroyed_transaction<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        transaction_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        tx.substates_get_many_by_destroyed_transaction(transaction_id)
+        let (max_version, _) = Self::get_latest_version(tx, substate_id)?;
+        let rec = Self::get(tx, &SubstateAddress::from_substate_id(substate_id, max_version))?;
+        Ok(rec)
     }
 
     pub fn get_created_quorum_certificate<TTx: StateStoreReadTransaction>(

@@ -7,14 +7,13 @@ use indexmap::IndexMap;
 use log::debug;
 use tari_dan_common_types::{shard::Shard, ShardGroup};
 use tari_dan_storage::{
-    consensus_models::{PendingShardStateTreeDiff, VersionedStateHashTreeDiff},
+    consensus_models::PendingShardStateTreeDiff,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
 use tari_state_tree::{
-    memory_store::MemoryTreeStore,
+    compute_merkle_root_for_hashes,
     JmtStorageError,
-    RootStateTree,
     SpreadPrefixStateTree,
     StagedTreeStore,
     StateHashTreeDiff,
@@ -33,7 +32,7 @@ const LOG_TARGET: &str = "tari::dan::consensus::sharded_state_tree";
 pub struct ShardedStateTree<TTx> {
     tx: TTx,
     pending_diffs: HashMap<Shard, Vec<PendingShardStateTreeDiff>>,
-    shard_tree_diffs: IndexMap<Shard, VersionedStateHashTreeDiff>,
+    shard_tree_diffs: IndexMap<Shard, PendingShardStateTreeDiff>,
 }
 
 impl<TTx> ShardedStateTree<TTx> {
@@ -76,7 +75,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         Ok(maybe_version)
     }
 
-    pub fn into_shard_tree_diffs(self) -> IndexMap<Shard, VersionedStateHashTreeDiff> {
+    pub fn into_shard_tree_diffs(self) -> IndexMap<Shard, PendingShardStateTreeDiff> {
         self.shard_tree_diffs
     }
 
@@ -95,27 +94,27 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
             // Staged store that tracks changes to the state tree
             let mut store = StagedTreeStore::new(&scoped_store);
             // Apply pending (not yet committed) diffs to the staged store
-            if let Some(diffs) = self.pending_diffs.get(&shard) {
+            if let Some(diffs) = self.pending_diffs.remove(&shard) {
                 let mut num_changes = 0usize;
+                let num_diffs = diffs.len();
+                let last_version = diffs.last().map(|d| d.version).unwrap_or(0);
                 for diff in diffs {
                     num_changes += diff.diff.new_nodes.len() + diff.diff.stale_tree_nodes.len();
-                    store.apply_pending_diff(diff.diff.clone());
+                    store.apply_pending_diff(diff.diff);
                 }
                 debug!(
                     target: LOG_TARGET,
-                    "Applied {num_diffs} pending diff(s) ({num_changes} change(s)) to shard {shard} (version={version})",
-                    num_diffs = diffs.len(),
-                    version = diffs.last().map(|d| d.version).unwrap_or(0)
+                    "Applied {num_diffs} pending diff(s) ({num_changes} change(s)) to shard {shard} (version={last_version})",
                 );
             }
 
             // Apply state updates to the state tree that is backed by the staged shard-scoped store
             let mut state_tree = SpreadPrefixStateTree::new(&mut store);
-            debug!(target: LOG_TARGET, "v{next_version} contains {} tree change(s) for shard {shard}", changes.len());
+            debug!(target: LOG_TARGET, "v{next_version} contains {} new tree change(s) for shard {shard}", changes.len());
             let shard_state_hash = state_tree.put_substate_changes(current_version, next_version, changes)?;
             shard_state_roots.insert(shard, shard_state_hash);
             self.shard_tree_diffs
-                .insert(shard, VersionedStateHashTreeDiff::new(next_version, store.into_diff()));
+                .insert(shard, PendingShardStateTreeDiff::new(next_version, store.into_diff()));
         }
 
         let root_hash = self.get_shard_group_root(shard_group, shard_state_roots)?;
@@ -127,9 +126,14 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
         shard_group: ShardGroup,
         mut shard_state_roots: HashMap<Shard, TreeHash>,
     ) -> Result<TreeHash, StateTreeError> {
-        let mut mem_store = MemoryTreeStore::new();
-        let mut root_tree = RootStateTree::new(&mut mem_store);
-        let mut hashes = Vec::with_capacity(shard_group.len());
+        let mut hashes = Vec::with_capacity(shard_group.len() + 1);
+        match shard_state_roots.remove(&Shard::global()) {
+            Some(r) => hashes.push(r),
+            None => {
+                let hash = self.get_state_root_for_shard(Shard::global())?;
+                hashes.push(hash);
+            },
+        }
         for shard in shard_group.shard_iter() {
             match shard_state_roots.remove(&shard) {
                 Some(r) => hashes.push(r),
@@ -139,7 +143,7 @@ impl<TTx: StateStoreReadTransaction> ShardedStateTree<&TTx> {
                 },
             };
         }
-        let (hash, _) = root_tree.compute_update_batch(None, 1, hashes)?;
+        let hash = compute_merkle_root_for_hashes(hashes)?;
         Ok(hash)
     }
 
@@ -183,6 +187,8 @@ impl<TTx: StateStoreWriteTransaction> ShardedStateTree<&mut TTx> {
         version: Version,
         diff: StateHashTreeDiff<Version>,
     ) -> Result<(), StateTreeError> {
+        // TODO: committing the entire diff in one go is more efficient at the db level
+        // e.g. self.tx.state_tree_nodes_commit_diff(shard, version, diff)?;
         let mut store = ShardScopedTreeStoreWriter::new(self.tx, shard);
 
         for stale_tree_node in diff.stale_tree_nodes {

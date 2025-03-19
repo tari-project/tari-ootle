@@ -28,15 +28,15 @@ impl ForeignParkedProposal {
     }
 
     pub fn block(&self) -> &Block {
-        &self.proposal.block
+        self.proposal.block()
     }
 
     pub fn block_pledge(&self) -> &BlockPledge {
-        &self.proposal.block_pledge
+        self.proposal.block_pledge()
     }
 
     pub fn justify_qc(&self) -> &QuorumCertificate {
-        &self.proposal.justify_qc
+        self.proposal.justify_qc()
     }
 }
 

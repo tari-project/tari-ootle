@@ -47,7 +47,8 @@ impl Vote {
 }
 
 impl Vote {
-    pub fn exists<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
+    pub fn exists_for_sender<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
+        // TODO: consider optimizing to just a check for existence
         Ok(tx
             .votes_get_by_block_and_sender(&self.block_id, &self.sender_leaf_hash)
             .optional()?
@@ -59,7 +60,7 @@ impl Vote {
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
     {
-        let exists = self.exists(&**tx)?;
+        let exists = self.exists_for_sender(&**tx)?;
         if !exists {
             self.insert(tx)?;
         }

@@ -167,8 +167,14 @@ pub fn initialize_wallet_sdk(
                 .collect(),
         )
     });
-    let wallet_sdk =
-        DanWalletSdk::initialize(config.dan_wallet_daemon.network, store, indexer, sdk_config, seed_words)?;
+    let wallet_sdk = DanWalletSdk::initialize(
+        config.dan_wallet_daemon.network,
+        store,
+        indexer,
+        sdk_config,
+        seed_words,
+        wallet_restore_args.wallet_secret.clone(),
+    )?;
 
     // TODO: if we need to scan the network, just use indexer client and go through all substates using a scan service
 

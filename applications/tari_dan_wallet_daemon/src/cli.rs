@@ -33,6 +33,11 @@ pub struct WalletRestoreArgs {
     /// Seed words of a wallet to be restored.
     /// If set, wallet daemon tries to restore your wallet based on these seed words.
     pub seed_words: Option<String>,
+
+    #[clap(long)]
+    /// Secret key to be used to encrypt wallet seed key.
+    /// If set this will be used instead an auto generated one.
+    pub wallet_secret: Option<String>,
 }
 
 #[derive(Parser, Debug)]

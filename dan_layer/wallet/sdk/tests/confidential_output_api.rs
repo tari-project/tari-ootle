@@ -151,6 +151,7 @@ impl Test {
                 jwt_secret_key: "secret_key".to_string(),
             },
             None,
+            None,
         )
         .unwrap();
         let accounts_api = sdk.accounts_api();

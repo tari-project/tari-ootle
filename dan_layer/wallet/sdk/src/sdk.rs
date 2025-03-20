@@ -178,7 +178,6 @@ where
         TemplateApi::new(&self.store, &self.network_interface)
     }
 
-    fn get_or_create_cipher_seed(store: &TStore) -> Result<CipherSeed, WalletSdkError> {
     fn cipher_seed_password_keyring_entry(network: Network) -> Result<Entry, keyring::Error> {
         Entry::new(
             KEYRING_ENTRIES_SERVICE,

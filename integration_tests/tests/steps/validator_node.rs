@@ -553,7 +553,7 @@ async fn when_block_height(world: &mut TariWorld, vn_name: String, height: u64) 
     panic!("Block height on VN {vn_name} is less than {height}");
 }
 
-#[then(expr = "the validator node {word} has ended epoch {int}")]
+#[then(expr = "the validator node {word} has started epoch {int}")]
 async fn then_validator_node_switches_epoch(world: &mut TariWorld, vn_name: String, epoch: u64) {
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
@@ -571,10 +571,10 @@ async fn then_validator_node_switches_epoch(world: &mut TariWorld, vn_name: Stri
             .unwrap();
         let blocks = list_block.blocks;
         assert!(
-            blocks.iter().all(|b| b.epoch().as_u64() <= epoch + 1),
+            blocks.iter().all(|b| b.epoch().as_u64() <= epoch),
             "Epoch is greater than expected"
         );
-        if blocks.iter().any(|b| b.epoch().as_u64() == epoch && b.is_epoch_end()) {
+        if blocks.iter().any(|b| b.epoch().as_u64() == epoch) {
             return;
         }
 

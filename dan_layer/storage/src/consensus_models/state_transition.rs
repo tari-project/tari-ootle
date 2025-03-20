@@ -82,9 +82,9 @@ impl StateTransitionId {
             return None;
         }
         let bytes_mut = &mut bytes;
-        let epoch = Epoch(u64::from_le_bytes(copy_fixed(bytes_mut)));
-        let shard = Shard::from(u32::from_le_bytes(copy_fixed(bytes_mut)));
-        let seq = u64::from_le_bytes(copy_fixed(bytes_mut));
+        let epoch = Epoch(u64::from_be_bytes(copy_fixed(bytes_mut)));
+        let shard = Shard::from(u32::from_be_bytes(copy_fixed(bytes_mut)));
+        let seq = u64::from_be_bytes(copy_fixed(bytes_mut));
         Some(Self::new(epoch, shard, seq))
     }
 
@@ -92,8 +92,8 @@ impl StateTransitionId {
         let mut buf = [0u8; Self::BYTE_SIZE];
         let buf_mut = &mut buf.as_mut_slice();
         write_fixed(self.epoch.to_be_bytes(), buf_mut);
-        write_fixed(self.shard.as_u32().to_le_bytes(), buf_mut);
-        write_fixed(self.seq.to_le_bytes(), buf_mut);
+        write_fixed(self.shard.as_u32().to_be_bytes(), buf_mut);
+        write_fixed(self.seq.to_be_bytes(), buf_mut);
         buf
     }
 

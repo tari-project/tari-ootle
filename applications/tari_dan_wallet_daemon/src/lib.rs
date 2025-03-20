@@ -162,19 +162,14 @@ pub fn initialize_wallet_sdk(
     let seed_words = wallet_restore_args.seed_words.clone().map(|seed_words| {
         SeedWords::new(
             seed_words
-                .split(" ")
+                .split_whitespace()
+                .filter(|word| !word.is_empty())
                 .map(|word| Hidden::hide(word.to_string()))
                 .collect(),
         )
     });
-    let wallet_sdk = DanWalletSdk::initialize(
-        config.dan_wallet_daemon.network,
-        store,
-        indexer,
-        sdk_config,
-        seed_words,
-        wallet_restore_args.wallet_secret.clone(),
-    )?;
+    let wallet_sdk =
+        DanWalletSdk::initialize(config.dan_wallet_daemon.network, store, indexer, sdk_config, seed_words)?;
 
     // TODO: if we need to scan the network, just use indexer client and go through all substates using a scan service
 

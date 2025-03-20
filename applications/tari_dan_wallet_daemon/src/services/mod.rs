@@ -12,6 +12,8 @@ mod webauthn;
 pub use webauthn::*;
 
 mod session_store;
+mod template_monitor;
+
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;
 use futures::{future, future::BoxFuture, FutureExt};
@@ -23,7 +25,10 @@ use tokio::{sync::oneshot, task::JoinHandle};
 use transaction_service::TransactionService;
 pub use transaction_service::TransactionServiceHandle;
 
-use crate::{notify::Notify, services::account_monitor::AccountMonitor};
+use crate::{
+    notify::Notify,
+    services::{account_monitor::AccountMonitor, template_monitor::TemplateMonitor},
+};
 
 type Reply<T> = oneshot::Sender<T>;
 
@@ -40,13 +45,20 @@ where
     let (transaction_service, transaction_service_handle) =
         TransactionService::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());
     let transaction_service_join_handle = tokio::spawn(transaction_service.run());
+    let template_monitor = TemplateMonitor::new(notify.clone(), wallet_sdk.clone(), shutdown_signal.clone());
+    let template_monitor_join_handle = tokio::spawn(template_monitor.run());
     let (account_monitor, account_monitor_handle) = AccountMonitor::new(notify, wallet_sdk, shutdown_signal);
     let account_monitor_join_handle = tokio::spawn(account_monitor.run());
 
     Services {
         account_monitor_handle,
         transaction_service_handle,
-        services_fut: try_select_any([transaction_service_join_handle, account_monitor_join_handle]).boxed(),
+        services_fut: try_select_any([
+            transaction_service_join_handle,
+            account_monitor_join_handle,
+            template_monitor_join_handle,
+        ])
+        .boxed(),
     }
 }
 

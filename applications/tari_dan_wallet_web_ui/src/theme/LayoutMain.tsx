@@ -20,34 +20,34 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {useState} from "react";
-import {createTheme, styled} from "@mui/material/styles";
+import { useState } from "react";
+import { createTheme, styled } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import MuiDrawer from "@mui/material/Drawer";
 import Box from "@mui/material/Box";
-import MuiAppBar, {AppBarProps as MuiAppBarProps} from "@mui/material/AppBar";
+import MuiAppBar, { AppBarProps as MuiAppBarProps } from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import List from "@mui/material/List";
 import IconButton from "@mui/material/IconButton";
 import MenuOpenOutlinedIcon from "@mui/icons-material/MenuOpenOutlined";
 import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
 import MenuItems from "../Components/MenuItems";
-import {Dialog, Stack, ThemeProvider} from "@mui/material";
-import {Link, Outlet} from "react-router-dom";
+import { Dialog, Stack, ThemeProvider } from "@mui/material";
+import { Link, Outlet } from "react-router-dom";
 import Logo from "../assets/Logo";
 import Container from "@mui/material/Container";
 import ConnectorLink from "../Components/ConnectorLink";
 import Breadcrumbs from "../Components/Breadcrumbs";
-import {breadcrumbRoutes} from "../App";
+import { breadcrumbRoutes } from "../App";
 import Grid from "@mui/material/Grid";
 import useThemeStore from "../store/themeStore";
-import {componentSettings, dark, light} from "./tokens";
-import {lightAlpha} from "./colors";
+import { componentSettings, dark, light } from "./tokens";
+import { lightAlpha } from "./colors";
 import WalletConnectLink from "../Components/WalletConnectLink";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import useAccountStore from "../store/accountStore";
-import {Check} from "@mui/icons-material";
+import { Check } from "@mui/icons-material";
 import useAuthStore from "../store/authStore";
 
 const drawerWidth = 300;

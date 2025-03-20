@@ -177,7 +177,11 @@ async fn handler(
             "list" => call_handler(context, value, token, substates::handle_list).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
-        Some(("templates", "get")) => call_handler(context, value, token, templates::handle_get).await,
+        Some(("templates", method)) => match method {
+            "get" => call_handler(context, value, token, templates::handle_get).await,
+            "list_authored" => call_handler(context, value, token, templates::handle_list_owned).await,
+            _ => Ok(value.method_not_found(&value.method)),
+        },
         Some(("nfts", method)) => match method {
             "mint_account_nft" => call_handler(context, value, token, nfts::handle_mint_account_nft).await,
             "get" => call_handler(context, value, token, nfts::handle_get_nft).await,

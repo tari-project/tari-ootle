@@ -87,6 +87,8 @@ import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import {
   GetValidatorFeesRequest,
   GetValidatorFeesResponse,
+  TemplatesListAuthoredRequest,
+  TemplatesListAuthoredResponse,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
@@ -303,3 +305,6 @@ export const substatesList = (request: SubstatesListRequest): Promise<SubstatesL
 // templates
 export const templatesGet = (request: TemplatesGetRequest): Promise<TemplatesGetResponse> =>
   client().then((c) => c.templatesGet(request));
+
+export const templatesListAuthored = (request: TemplatesListAuthoredRequest): Promise<TemplatesListAuthoredResponse> =>
+  client().then((c) => c.templatesListAuthored(request));

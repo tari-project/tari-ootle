@@ -10,4 +10,5 @@ pub mod jwt;
 pub mod key_manager;
 pub mod non_fungible_tokens;
 pub mod substate;
+pub mod template;
 pub mod transaction;

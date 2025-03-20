@@ -713,7 +713,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
                     .map_err(|e| StorageError::QueryError {
                         reason: format!("Update leaf node: {}", e),
                     })?;
-                info!(
+                debug!(
                     target: LOG_TARGET,
                     "Updated substate {} version to {}", address, new_substate.version
                 );

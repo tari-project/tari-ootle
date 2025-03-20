@@ -30,7 +30,7 @@ use crate::{
         block_diff::BlockDiffModel,
         block_transaction_execution,
         block_transaction_execution::BlockTransactionExecutionModel,
-        bookkeeping::BookkeepingModel,
+        bookkeeping,
         burnt_utxo,
         burnt_utxo::BurntUtxoModel,
         chain,
@@ -108,11 +108,11 @@ impl<TAddr> RocksDbStateStore<TAddr> {
 
     fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
         [
+            bookkeeping::CF_NAME,
             VoteModel::name(),
             chain::PendingChainIndex::name(),
             chain::CommittedParentChildChainIndex::name(),
             chain::PendingParentChildIndex::name(),
-            BookkeepingModel::name(),
             ForeignProposalModel::name(),
             foreign_proposal::ProposedInBlockIndex::name(),
             foreign_proposal::EpochIndex::name(),

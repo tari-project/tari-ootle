@@ -3,7 +3,6 @@
 
 pub use bincode::*;
 pub use block_diff::*;
-pub use bookkeeping::*;
 pub use bytes::*;
 pub use column::*;
 pub use misc::*;
@@ -19,7 +18,6 @@ use crate::error::RocksDbStorageError;
 
 mod bincode;
 mod block_diff;
-mod bookkeeping;
 mod bytes;
 mod column;
 mod misc;

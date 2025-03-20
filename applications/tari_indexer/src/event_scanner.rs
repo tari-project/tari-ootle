@@ -183,7 +183,7 @@ impl EventScanner {
 
                 // only keep the events specified by the indexer filter
                 let filtered_events: Vec<_> = events.filter(|ev| self.should_persist_event(ev)).collect();
-                info!(
+                debug!(
                     target: LOG_TARGET,
                     "Filtered events in epoch {}: {}",
                     epoch,

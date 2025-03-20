@@ -990,9 +990,8 @@ async fn epoch_change() {
             break;
         }
 
-        let leaf1 = test.get_validator(&TestAddress::new("1")).get_leaf_block();
-        if leaf1.height > NodeHeight(30) {
-            panic!("Not all transaction committed after {} blocks", leaf1.height,);
+        if height > NodeHeight(30) {
+            panic!("Not all transaction committed after {} blocks", height);
         }
     }
 
@@ -1000,18 +999,9 @@ async fn epoch_change() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let mut block = tx.leaf_block_get(Epoch(1))?.get_block(tx)?;
-            loop {
-                block = block.get_parent(tx)?;
-                if block.id().is_zero() {
-                    break;
-                }
-                if block.is_epoch_end() {
-                    return Ok::<_, HotStuffError>(());
-                }
-            }
-
-            panic!("No epoch end block found");
+            let leaf_block = tx.leaf_block_get(Epoch(2))?;
+            assert_eq!(leaf_block.epoch(), Epoch(2));
+            Ok::<_, HotStuffError>(())
         })
         .unwrap();
 

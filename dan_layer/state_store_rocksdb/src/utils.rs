@@ -90,16 +90,6 @@ impl Display for RocksDbTimestamp {
     }
 }
 
-pub(crate) fn checked_copy_fixed<const SZ: usize, T>(mut bytes: &[u8]) -> Option<T>
-where [u8; SZ]: Into<T> {
-    let fixed = read_to_fixed::<SZ, [u8; SZ], _>(&mut bytes)?;
-    // If any bytes are left, the size was incorrect
-    if !bytes.is_empty() {
-        return None;
-    }
-    Some(fixed.into())
-}
-
 pub(crate) fn read_to_fixed<const SZ: usize, T, R>(reader: &mut R) -> Option<T>
 where
     [u8; SZ]: Into<T>,

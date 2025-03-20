@@ -91,6 +91,7 @@ use tari_transaction::TransactionId;
 
 use crate::{
     cf_api::DbContext,
+    codecs::ByteColumn,
     model::{
         block,
         block::BlockModel,
@@ -98,7 +99,17 @@ use crate::{
         block_diff::{BlockDiffKey, BlockDiffModel, BlockDiffModelRef, BlockDiffRef},
         block_transaction_execution,
         block_transaction_execution::BlockTransactionExecutionModel,
-        bookkeeping::{BookkeepingKey, BookkeepingModelRef, BookkeepingValueRef},
+        bookkeeping::{
+            CommitBlock,
+            CommitBlockModel,
+            HighQcModel,
+            LastExecutedModel,
+            LastProposedModel,
+            LastSentVoteModel,
+            LastVotedModel,
+            LeafBlockModel,
+            LockedBlockModel,
+        },
         burnt_utxo,
         burnt_utxo::BurntUtxoModel,
         chain,
@@ -320,11 +331,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 self.db()
                     .cf(chain::CommittedParentChildChainIndex)?
                     .put(block.parent(), block_id, OPERATION)?;
-                self.db().cf(BookkeepingModelRef::default())?.put(
-                    &BookkeepingKey::CommitBlock,
-                    &BookkeepingValueRef::CommitBlock {
-                        block_id: block.id(),
-                        parent_id: block.parent(),
+                self.db().cf(CommitBlockModel)?.put(
+                    &ByteColumn,
+                    &CommitBlock {
+                        block_id: *block.id(),
+                        parent_id: *block.parent(),
                     },
                     OPERATION,
                 )?;
@@ -397,69 +408,53 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn last_sent_vote_set(&mut self, last_sent_vote: &LastSentVote) -> Result<(), StorageError> {
-        self.db().cf(BookkeepingModelRef::default())?.put(
-            &BookkeepingKey::LastSentVote,
-            &last_sent_vote.into(),
-            "last_sent_vote_set",
-        )?;
+        self.db()
+            .cf(LastSentVoteModel)?
+            .put(&ByteColumn, last_sent_vote, "last_sent_vote_set")?;
         Ok(())
     }
 
     fn last_voted_set(&mut self, last_voted: &LastVoted) -> Result<(), StorageError> {
-        self.db().cf(BookkeepingModelRef::default())?.put(
-            &BookkeepingKey::LastVoted,
-            &last_voted.into(),
-            "last_voted_set",
-        )?;
+        self.db()
+            .cf(LastVotedModel)?
+            .put(&ByteColumn, last_voted, "last_voted_set")?;
         Ok(())
     }
 
     fn last_executed_set(&mut self, last_exec: &LastExecuted) -> Result<(), StorageError> {
-        self.db().cf(BookkeepingModelRef::default())?.put(
-            &BookkeepingKey::LastExecuted,
-            &last_exec.into(),
-            "last_executed_set",
-        )?;
+        self.db()
+            .cf(LastExecutedModel)?
+            .put(&ByteColumn, last_exec, "last_executed_set")?;
 
         Ok(())
     }
 
     fn last_proposed_set(&mut self, last_proposed: &LastProposed) -> Result<(), StorageError> {
-        self.db().cf(BookkeepingModelRef::default())?.put(
-            &BookkeepingKey::LastProposed,
-            &last_proposed.into(),
-            "last_proposed_set",
-        )?;
+        self.db()
+            .cf(LastProposedModel)?
+            .put(&ByteColumn, last_proposed, "last_proposed_set")?;
 
         Ok(())
     }
 
     fn leaf_block_set(&mut self, leaf_node: &LeafBlock) -> Result<(), StorageError> {
-        self.db().cf(BookkeepingModelRef::default())?.put(
-            &BookkeepingKey::LeafBlock(leaf_node.epoch),
-            &leaf_node.into(),
-            "leaf_block_set",
-        )?;
+        self.db()
+            .cf(LeafBlockModel)?
+            .put(&ByteColumn, leaf_node, "leaf_block_set")?;
 
         Ok(())
     }
 
     fn locked_block_set(&mut self, locked_block: &LockedBlock) -> Result<(), StorageError> {
-        self.db().cf(BookkeepingModelRef::default())?.put(
-            &BookkeepingKey::LockedBlock(locked_block.epoch),
-            &locked_block.into(),
-            "locked_block_set",
-        )?;
+        self.db()
+            .cf(LockedBlockModel)?
+            .put(&ByteColumn, locked_block, "locked_block_set")?;
 
         Ok(())
     }
 
     fn high_qc_set(&mut self, high_qc: &HighQc) -> Result<(), StorageError> {
-        self.db().cf(BookkeepingModelRef::default())?.put(
-            &BookkeepingKey::HighQc(high_qc.epoch),
-            &high_qc.into(),
-            "high_qc_set",
-        )?;
+        self.db().cf(HighQcModel)?.put(&ByteColumn, high_qc, "high_qc_set")?;
 
         Ok(())
     }

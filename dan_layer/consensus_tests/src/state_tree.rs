@@ -40,14 +40,13 @@ async fn check_state_transitions() {
     }
     test.start_epoch(Epoch(2)).await;
     loop {
-        let (_, _, epoch, _) = test.on_block_committed().await;
+        let (_, _, epoch, height) = test.on_block_committed().await;
 
         if epoch == Epoch(2) {
             break;
         }
-        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
-        if leaf.height >= NodeHeight(20) {
-            panic!("Not all transaction committed after {} blocks", leaf.height);
+        if height >= NodeHeight(10) {
+            panic!("Not all transaction committed after {} blocks", height);
         }
     }
 

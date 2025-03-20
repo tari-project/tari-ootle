@@ -93,6 +93,7 @@ use tari_transaction::TransactionId;
 
 use crate::{
     cf_api::DbContext,
+    codecs::ByteColumn,
     error::RocksDbStorageError,
     model::{
         block,
@@ -101,8 +102,17 @@ use crate::{
         block_diff::{BlockDiffKey, BlockDiffModel},
         block_transaction_execution,
         block_transaction_execution::BlockTransactionExecutionModel,
-        bookkeeping,
-        bookkeeping::{BookkeepingKey, BookkeepingModel},
+        bookkeeping::{
+            CommitBlock,
+            CommitBlockModel,
+            HighQcModel,
+            LastExecutedModel,
+            LastProposedModel,
+            LastSentVoteModel,
+            LastVotedModel,
+            LeafBlockModel,
+            LockedBlockModel,
+        },
         burnt_utxo,
         burnt_utxo::BurntUtxoModel,
         chain,
@@ -231,7 +241,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
             "{OPERATION}: end block {end_block} is in pending chain",
         );
 
-        let (commit_block, _) = self.get_commit_block_id()?;
+        let commit_block = self.get_commit_block_id()?;
 
         while let Some(parent_id) = chain_cf.get(&block_id, OPERATION).optional()? {
             trace!(
@@ -240,7 +250,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
             );
 
             // The commit block is the parent of the final block, don't include it
-            if parent_id == BlockId::zero() || parent_id == commit_block {
+            if parent_id == BlockId::zero() || parent_id == commit_block.block_id {
                 break;
             }
 
@@ -277,13 +287,9 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     fn get_current_locked_block(&self) -> Result<LockedBlock, StorageError> {
-        let key = BookkeepingKey::LockedBlock(Epoch::zero());
-        let cf = self.db().cf(bookkeeping::ByKeyByteQuery)?;
-        let mut iter = cf.prefix_range_iterator(Ordering::Descending, &key.as_byte());
-        let (_, value) = iter.next().transpose()?.ok_or_else(|| StorageError::QueryError {
-            reason: "get_current_locked_block: No locked block found".to_string(),
-        })?;
-        Ok(value.try_into().expect("get_current_locked_block"))
+        let cf = self.db().cf(LockedBlockModel)?;
+        let value = cf.get(&ByteColumn, "get_current_locked_block")?;
+        Ok(value)
     }
 
     /// Used for tests
@@ -344,15 +350,10 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         Ok(blocks)
     }
 
-    pub fn get_commit_block_id(&self) -> Result<(BlockId, BlockId), RocksDbStorageError> {
-        let key = BookkeepingKey::CommitBlock;
-        let cf = self.db().cf(BookkeepingModel)?;
-        let value = cf.get(&key, "get_commit_block")?;
-        let (child, parent) = value
-            .clone()
-            .into_commit_block()
-            .unwrap_or_else(|| panic!("get_commit_block: invalid BookkeepingValue {:?}", value));
-        Ok((child, parent))
+    pub fn get_commit_block_id(&self) -> Result<CommitBlock, RocksDbStorageError> {
+        let cf = self.db().cf(CommitBlockModel)?;
+        let value = cf.get(&ByteColumn, "get_commit_block")?;
+        Ok(value)
     }
 }
 
@@ -364,57 +365,63 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn last_sent_vote_get(&self) -> Result<LastSentVote, StorageError> {
         let last_voted = self
             .db()
-            .cf(BookkeepingModel)?
-            .get(&BookkeepingKey::LastSentVote, "last_sent_vote_get")?;
-        Ok(last_voted.try_into().expect("last_sent_vote_get"))
+            .cf(LastSentVoteModel)?
+            .get(&ByteColumn, "last_sent_vote_get")?;
+        Ok(last_voted)
     }
 
     fn last_voted_get(&self) -> Result<LastVoted, StorageError> {
-        let last_voted = self
-            .db()
-            .cf(BookkeepingModel)?
-            .get(&BookkeepingKey::LastVoted, "last_voted_get")?;
-        Ok(last_voted.try_into().expect("last_voted_get"))
+        let last_voted = self.db().cf(LastVotedModel)?.get(&ByteColumn, "last_voted_get")?;
+        Ok(last_voted)
     }
 
     fn last_executed_get(&self) -> Result<LastExecuted, StorageError> {
-        let last_executed = self
-            .db()
-            .cf(BookkeepingModel)?
-            .get(&BookkeepingKey::LastExecuted, "last_executed_get")?;
-        Ok(last_executed.try_into().expect("last_executed_get"))
+        let last_executed = self.db().cf(LastExecutedModel)?.get(&ByteColumn, "last_executed_get")?;
+        Ok(last_executed)
     }
 
     fn last_proposed_get(&self) -> Result<LastProposed, StorageError> {
-        let last_proposed = self
-            .db()
-            .cf(BookkeepingModel)?
-            .get(&BookkeepingKey::LastProposed, "last_proposed_get")?;
-        Ok(last_proposed.try_into().expect("last_proposed_get"))
+        let last_proposed = self.db().cf(LastProposedModel)?.get(&ByteColumn, "last_proposed_get")?;
+        Ok(last_proposed)
     }
 
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError> {
-        let locked_block = self
-            .db()
-            .cf(BookkeepingModel)?
-            .get(&BookkeepingKey::LockedBlock(epoch), "locked_block_get")?;
-        Ok(locked_block.try_into().expect("locked_block_get"))
+        let locked_block = self.db().cf(LockedBlockModel)?.get(&ByteColumn, "locked_block_get")?;
+        if locked_block.epoch != epoch {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "locked_block_get: Locked block epoch {} does not match requested epoch {}",
+                    locked_block.epoch, epoch
+                ),
+            });
+        }
+        Ok(locked_block)
     }
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
-        let leaf_block = self
-            .db()
-            .cf(BookkeepingModel)?
-            .get(&BookkeepingKey::LeafBlock(epoch), "leaf_block_get")?;
-        Ok(leaf_block.try_into().expect("leaf_block_get"))
+        let leaf_block = self.db().cf(LeafBlockModel)?.get(&ByteColumn, "leaf_block_get")?;
+        if leaf_block.epoch != epoch {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "leaf_block_get: Leaf block epoch {} does not match requested epoch {}",
+                    leaf_block.epoch, epoch
+                ),
+            });
+        }
+        Ok(leaf_block)
     }
 
     fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError> {
-        let high_qc = self
-            .db()
-            .cf(BookkeepingModel)?
-            .get(&BookkeepingKey::HighQc(epoch), "high_qc_get")?;
-        Ok(high_qc.try_into().expect("high_qc_get"))
+        let high_qc = self.db().cf(HighQcModel)?.get(&ByteColumn, "high_qc_get")?;
+        if high_qc.epoch != epoch {
+            return Err(StorageError::QueryError {
+                reason: format!(
+                    "high_qc_get: High QC epoch {} does not match requested epoch {}",
+                    high_qc.epoch, epoch
+                ),
+            });
+        }
+        Ok(high_qc)
     }
 
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
@@ -589,12 +596,12 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         // TODO: optimise
         let chain_cf = self.db().cf(chain::CommittedParentChildChainIndex)?;
-        let (commit_block, _) = self.get_commit_block_id()?;
+        let commit_block = self.get_commit_block_id()?;
 
         for result in iter {
             let (tx_id, block_id) = result?;
             // Still need to check if the block is committed and not a fork
-            if block_id != commit_block && !chain_cf.exists(&block_id, OPERATION)? {
+            if block_id != commit_block.block_id && !chain_cf.exists(&block_id, OPERATION)? {
                 debug!(
                     target: LOG_TARGET,
                     "{OPERATION}: Block {block_id} is not committed, skipping",
@@ -848,24 +855,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let cf = self.db().cf(BlockModel)?;
         let query = self.db().cf(block::ByEpochHeightQuery)?;
-        // TODO: this only fetches for current epoch
 
+        // NOTE: this only fetches for current epoch
         let ordering = ordering.unwrap_or(Ordering::Ascending);
         let iter: Box<dyn Iterator<Item = Result<_, _>>> = if ordering.is_ascending() {
             Box::new(query.query_start_range_key_iterator(ordering, &(locked.epoch, NodeHeight(offset))))
         } else {
-            // TODO: remove the epoch from leaf block, making it much easier to fetch the leaf block
-            let bk_cf = self.db().cf(bookkeeping::ByKeyByteQuery)?;
-            let mut leaf_block =
-                bk_cf.query_prefix_range_iterator(Ordering::Descending, &BookkeepingKey::LeafBlock(Epoch(0)).as_byte());
-            let leaf_block = leaf_block
-                .next()
-                .transpose()?
-                .and_then(|(_, value)| value.into_leaf_block())
-                .ok_or_else(|| StorageError::QueryError {
-                    reason: format!("{OPERATION}: No leaf block found"),
-                })?;
-
+            let leaf_block = self.db().cf(LeafBlockModel)?.get(&ByteColumn, OPERATION)?;
             Box::new(query.query_end_range_key_iterator(
                 ordering,
                 &(
@@ -1135,8 +1131,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "transaction_pool_get_all";
         let cf = self.db().cf(TransactionPoolModel)?;
 
-        let (block_id, _) = self.get_commit_block_id()?;
-        let pending_chain = self.get_pending_chain_ordered(&block_id)?;
+        let commit_block = self.get_commit_block_id()?;
+        let pending_chain = self.get_pending_chain_ordered(&commit_block.block_id)?;
         let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
         let mut updates = HashMap::new();
         for block_id in pending_chain.into_iter().rev() {

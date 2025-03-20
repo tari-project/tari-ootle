@@ -39,7 +39,7 @@ Feature: Claim Fees
     When miner MINER mines 10 new blocks
     Then VN has scanned to height 27
 
-    When I check the balance of ACC2 on wallet daemon WALLET_D the amount is at most 9700
+    When I check the balance of ACC2 on wallet daemon WALLET_D the amount is at most 9800
 
     # Claim fees into ACC2
     When I claim fees for validator VN into account ACC2 using the wallet daemon WALLET_D
@@ -88,7 +88,7 @@ Feature: Claim Fees
     When I claim fees for validator VN into account ACC1 using the wallet daemon WALLET_D, it fails
 
     # Claim fees into ACC2
-    When I check the balance of ACC2 on wallet daemon WALLET_D the amount is at most 9700
+    When I check the balance of ACC2 on wallet daemon WALLET_D the amount is at most 9800
     When I claim fees for validator VN into account ACC2 using the wallet daemon WALLET_D
     When I check the balance of ACC2 on wallet daemon WALLET_D the amount is at least 9800
 

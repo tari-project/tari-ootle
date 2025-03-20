@@ -1,32 +1,24 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_common_types::optional::IsNotFoundError;
 use tari_engine_types::TemplateAddress;
+use tari_template_abi::TemplateDef;
 
 use crate::{
     apis::transaction::TransactionApiError,
     models::AuthoredTemplateModel,
-    network::WalletNetworkInterface,
     storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
-pub struct TemplateApi<'a, TStore, TNetworkInterface> {
+pub struct TemplateApi<'a, TStore> {
     store: &'a TStore,
-    network_interface: &'a TNetworkInterface,
 }
 
-impl<'a, TStore, TNetworkInterface> TemplateApi<'a, TStore, TNetworkInterface>
-where
-    TStore: WalletStore,
-    TNetworkInterface: WalletNetworkInterface,
-    TNetworkInterface::Error: IsNotFoundError,
+impl<'a, TStore> TemplateApi<'a, TStore>
+where TStore: WalletStore
 {
-    pub fn new(store: &'a TStore, network_interface: &'a TNetworkInterface) -> Self {
-        Self {
-            store,
-            network_interface,
-        }
+    pub fn new(store: &'a TStore) -> Self {
+        Self { store }
     }
 
     /// Adds a new template to the list of known templates authored by an owned account.
@@ -35,6 +27,7 @@ where
         &self,
         key_index: u64,
         template_address: TemplateAddress,
+        template_definition: TemplateDef,
     ) -> Result<(), TransactionApiError> {
         // check if we already have this template
         if self.store.with_read_tx(|tx| {
@@ -46,12 +39,6 @@ where
             return Ok(());
         };
 
-        // save new template
-        let template_definition = self
-            .network_interface
-            .fetch_template_definition(template_address)
-            .await
-            .map_err(|error| TransactionApiError::NetworkInterfaceError(format!("{}", error)))?;
         self.store.with_write_tx(|tx| {
             tx.authored_templates_insert(AuthoredTemplateModel::new(
                 key_index,

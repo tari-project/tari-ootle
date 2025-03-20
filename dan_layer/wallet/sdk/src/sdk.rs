@@ -137,8 +137,8 @@ where
         NonFungibleTokensApi::new(&self.store)
     }
 
-    pub fn template_api(&self) -> TemplateApi<'_, TStore, TNetworkInterface> {
-        TemplateApi::new(&self.store, &self.network_interface)
+    pub fn template_api(&self) -> TemplateApi<'_, TStore> {
+        TemplateApi::new(&self.store)
     }
 
     fn get_or_create_cipher_seed(store: &TStore) -> Result<CipherSeed, WalletSdkError> {

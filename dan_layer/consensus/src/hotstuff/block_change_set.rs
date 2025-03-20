@@ -266,6 +266,12 @@ impl ProposedBlockChangeSet {
         self.quorum_decision
     }
 
+    pub fn take_transaction_execution(&mut self, transaction_id: &TransactionId) -> Option<BlockTransactionExecution> {
+        self.transaction_changes
+            .get_mut(transaction_id)
+            .and_then(|change| change.execution.take())
+    }
+
     pub fn add_transaction_execution(
         &mut self,
         execution: TransactionExecution,

@@ -327,6 +327,9 @@ impl Test {
     }
 
     pub fn dump_blocks(&self, addr: &TestAddress) {
+        println!("====================");
+        println!("Blocks for {}", addr);
+        println!("====================");
         let v = self
             .validators
             .get(addr)

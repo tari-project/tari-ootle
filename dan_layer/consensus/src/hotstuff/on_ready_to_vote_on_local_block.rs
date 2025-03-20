@@ -50,7 +50,7 @@ use crate::{
         event::HotstuffEvent,
         filter_diff_for_committee,
         foreign_proposal_processor::process_foreign_block,
-        substate_store::{PendingSubstateStore, ShardedStateTree},
+        substate_store::{LockStatus, PendingSubstateStore, ShardedStateTree},
         transaction_manager::{
             ConsensusTransactionManager,
             EvidenceOrExecution,
@@ -764,10 +764,21 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
-        let prepared = self
-            .transaction_manager
-            .prepare(substate_store, local_committee_info, block.epoch(), tx_rec, block.id())
-            .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?;
+        // Foreign block could have already resulted in an ABORT execution
+        let prepared =
+            if let Some(execution) = proposed_block_change_set.take_transaction_execution(tx_rec.transaction_id()) {
+                info!(
+                    target: LOG_TARGET,
+                    "👨‍🔧 PREPARE: Transaction {} in block {} is already ABORTED by foreign block",
+                    tx_rec.transaction_id(),
+                    execution.block_id()
+                );
+                PreparedTransaction::new_multishard_executed(execution.into_transaction_execution(), LockStatus::new())
+            } else {
+                self.transaction_manager
+                    .prepare(substate_store, local_committee_info, block.epoch(), tx_rec, block.id())
+                    .map_err(|e| HotStuffError::TransactionExecutorError(e.to_string()))?
+            };
 
         if !prepared.is_involved(local_committee_info) {
             warn!(

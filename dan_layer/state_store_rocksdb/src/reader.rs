@@ -211,7 +211,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     /// descending).
     fn get_pending_chain_ordered(&self, end_block: &BlockId) -> Result<Vec<BlockId>, RocksDbStorageError> {
         // TODO: only difference between get_pending_chain_until is that this returns a Vec - worth DRYing up
-        const OPERATION: &str = "get_pending_block_ids_until";
+        const OPERATION: &str = "get_pending_chain_ordered";
         debug!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
 
         let chain_cf = self.db().cf(chain::PendingChainIndex)?;
@@ -234,7 +234,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         let (commit_block, _) = self.get_commit_block_id()?;
 
         while let Some(parent_id) = chain_cf.get(&block_id, OPERATION).optional()? {
-            debug!(
+            trace!(
                 target: LOG_TARGET,
                 "{OPERATION}: {block_id} parent_id: {parent_id}",
             );
@@ -578,7 +578,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             }
         }
 
-        info!(
+        debug!(
             target: LOG_TARGET,
             "{OPERATION}: No execution found for {transaction_id} in pending chain ({} blocks)",
             block_ids.len(),
@@ -601,7 +601,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 );
                 continue;
             }
-            info!(
+            debug!(
                 target: LOG_TARGET,
                 "{OPERATION}: Found execution for {transaction_id} in {block_id}",
             );

@@ -266,7 +266,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             pm.spawn();
         }
 
-        let mut on_beat = self.pacemaker.get_on_beat();
         let mut on_force_beat = self.pacemaker.get_on_force_beat();
         let mut on_leader_timeout = self.pacemaker.get_on_leader_timeout();
 
@@ -324,7 +323,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     }
                 },
 
-                _ = on_beat.wait() => {
+                _ = self.pacemaker.on_beat() => {
                     if let Err(e) = self.on_beat(current_epoch,  &local_committee_info, &local_committee, &local_claim_public_key).await {
                         self.on_failure("on_beat", &e).await;
                         return Err(e);

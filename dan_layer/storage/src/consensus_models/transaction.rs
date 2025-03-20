@@ -174,6 +174,11 @@ impl TransactionRecord {
         self
     }
 
+    pub fn into_abort_execution(mut self, reason: RejectReason) -> TransactionExecution {
+        self.abort(reason);
+        self.into_execution().expect("aborted above")
+    }
+
     pub fn abort_and_finalize(&mut self, reason: RejectReason) -> &mut Self {
         self.abort(reason.clone());
         let exec_result = self.execution_result.as_ref().filter(|r| r.finalize.result.is_reject());

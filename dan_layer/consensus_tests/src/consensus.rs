@@ -1233,8 +1233,8 @@ async fn multishard_unversioned_input_conflict() {
     // propose to abort.
     setup_logger();
     let mut test = Test::builder()
-        .add_committee(0, vec!["1", "2"])
-        .add_committee(1, vec!["3", "4"])
+        .add_committee(0, vec!["1"])
+        .add_committee(1, vec!["3"])
         .start()
         .await;
 

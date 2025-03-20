@@ -717,7 +717,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
     }
 
     fn assert_is_up(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "assert_is_up: id: {}, pending: {}, head: {}",
             id,
@@ -731,7 +731,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             return Ok(());
         }
 
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "assert_is_up id: {} not found in pending",
             id,
@@ -746,7 +746,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             return Err(SubstateStoreError::SubstateIsDown { id: id.clone() });
         }
 
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "assert_is_up: id: {} not found in block diff",
             id,

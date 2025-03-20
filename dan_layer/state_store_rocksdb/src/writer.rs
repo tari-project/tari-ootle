@@ -1452,12 +1452,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 .delete(&(shard, &key), OPERATION)?;
             match node {
                 StaleTreeNode::Node(key) => {
-                    debug!( target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
+                    trace!( target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
                     cf.delete(&(shard, key), OPERATION)?;
                     num_deleted += 1;
                 },
                 StaleTreeNode::Subtree(key) => {
-                    debug!( target: LOG_TARGET, "Deleting stale substree {key} from shard {shard}", );
+                    trace!( target: LOG_TARGET, "Deleting stale substree {key} from shard {shard}", );
                     let mut queue = VecDeque::new();
                     queue.push_back(key);
                     while let Some(node_key) = queue.pop_front() {

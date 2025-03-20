@@ -61,10 +61,9 @@ impl PaceMaker {
     }
 
     pub fn spawn(mut self) {
-        let handle = self.clone_handle();
-        let on_beat = handle.get_on_beat();
-        let on_force_beat = handle.get_on_force_beat();
-        let on_leader_timeout = handle.get_on_leader_timeout();
+        let on_beat = self.pace_maker_handle.get_on_beat();
+        let on_force_beat = self.pace_maker_handle.get_on_force_beat();
+        let on_leader_timeout = self.pace_maker_handle.get_on_leader_timeout();
 
         tokio::spawn(async move {
             if let Err(e) = self.run(on_beat, on_force_beat, on_leader_timeout).await {

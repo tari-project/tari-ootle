@@ -870,7 +870,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 ordering,
                 &(
                     locked.epoch,
-                    NodeHeight(leaf_block.height.as_u64().saturating_sub(offset)),
+                    NodeHeight(leaf_block.height.as_u64().saturating_sub(offset).saturating_add(1)),
                 ),
             ))
         };

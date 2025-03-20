@@ -9,8 +9,8 @@ pub fn serialize<S: Serializer>(v: &tari_bor::Value, s: S) -> Result<S::Ok, S::E
         CborValueJsonSerializeWrapper(v).serialize(s)
     } else {
         // This is to support bincode - unfortunately, when using CBOR, it will be represented as
-        // Value::Bytes instead of the cbor representation.
-        // Other solutions include:
+        // Value::Bytes instead of the cbor representation. NOTE: this increases fees (see
+        // FeeModule::on_before_finalize) Other solutions include:
         // - switching to cbor4ii, implementing to_value and from_value and a serializer that supports bincode
         // - adding a derived Serialize/Deserialize trait to ciborium::Value that encodes the enum directly
         // - storing a Vec<u8> and incurring the extra encode/decode steps (basically what this does)

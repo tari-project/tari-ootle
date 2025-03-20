@@ -24,7 +24,13 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, SubstateAddress};
 use tari_engine_types::substate::SubstateId;
 use tari_sidechain::EvictionProof;
-use tari_validator_node_client::types::{AddPeerRequest, GetBlocksRequest, GetStateRequest, GetTemplateRequest};
+use tari_validator_node_client::types::{
+    AddPeerRequest,
+    GetBlocksRequest,
+    GetStateRequest,
+    GetTemplateRequest,
+    ListBlocksRequest,
+};
 use tokio::{sync::mpsc, time::timeout};
 
 #[given(expr = "a validator node {word} connected to base node {word} and wallet daemon {word}")]
@@ -523,17 +529,28 @@ async fn when_i_wait_for_validator_leaf_block_at_least(world: &mut TariWorld, na
     }
 }
 
-#[when(expr = "Block count on VN {word} is at least {int}")]
-async fn when_count(world: &mut TariWorld, vn_name: String, count: u64) {
+#[when(expr = "Block height on VN {word} is at least {int}")]
+async fn when_block_height(world: &mut TariWorld, vn_name: String, height: u64) {
     let vn = world.get_validator_node(&vn_name);
     let mut client = vn.create_client();
     for _ in 0..20 {
-        if client.get_blocks_count().await.unwrap().count as u64 >= count {
+        if client
+            .list_blocks(ListBlocksRequest {
+                from_id: None,
+                limit: 1,
+            })
+            .await
+            .unwrap()
+            .blocks[0]
+            .height()
+            .as_u64() >=
+            height
+        {
             return;
         }
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
-    panic!("Block count on VN {vn_name} is less than {count}");
+    panic!("Block height on VN {vn_name} is less than {height}");
 }
 
 #[then(expr = "the validator node {word} has ended epoch {int}")]

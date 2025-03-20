@@ -142,10 +142,6 @@ impl ValidatorNodeClient {
         self.send_request("add_peer", request).await
     }
 
-    pub async fn get_blocks_count(&mut self) -> Result<GetBlocksCountResponse, ValidatorNodeClientError> {
-        self.send_request("get_blocks_count", json!({})).await
-    }
-
     pub async fn get_block(&mut self, request: GetBlockRequest) -> Result<GetBlockResponse, ValidatorNodeClientError> {
         self.send_request("get_block", request).await
     }

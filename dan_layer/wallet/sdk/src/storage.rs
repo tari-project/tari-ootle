@@ -25,6 +25,7 @@ use webauthn_rs::prelude::Passkey;
 
 use crate::models::{
     Account,
+    AuthoredTemplateModel,
     ConfidentialOutputModel,
     ConfidentialProofId,
     Config,
@@ -207,6 +208,15 @@ pub trait WalletStoreReader {
     // Webauthn registration
     fn webauthn_is_user_registered(&mut self, username: &str) -> Result<bool, WalletStorageError>;
     fn webauthn_reg_fetch_passkeys(&mut self, username: String) -> Result<Vec<Passkey>, WalletStorageError>;
+
+    // Authored templates
+    fn authored_templates_exists_by_address(&mut self, address: &TemplateAddress) -> Result<bool, WalletStorageError>;
+    fn authored_templates_fetch_by_key_index(
+        &mut self,
+        key_index: u64,
+        page: u64,
+        page_size: u64,
+    ) -> Result<(Vec<AuthoredTemplateModel>, u64), WalletStorageError>;
 }
 
 pub trait WalletStoreWriter {
@@ -325,4 +335,7 @@ pub trait WalletStoreWriter {
 
     // Webauthn registrations
     fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError>;
+
+    // Authored templates
+    fn authored_templates_insert(&mut self, model: AuthoredTemplateModel) -> Result<(), WalletStorageError>;
 }

@@ -19,6 +19,7 @@ use crate::{
         key_manager::KeyManagerApi,
         non_fungible_tokens::NonFungibleTokensApi,
         substate::SubstatesApi,
+        template::TemplateApi,
         transaction::TransactionApi,
     },
     network::WalletNetworkInterface,
@@ -134,6 +135,10 @@ where
 
     pub fn non_fungible_api(&self) -> NonFungibleTokensApi<'_, TStore> {
         NonFungibleTokensApi::new(&self.store)
+    }
+
+    pub fn template_api(&self) -> TemplateApi<'_, TStore, TNetworkInterface> {
+        TemplateApi::new(&self.store, &self.network_interface)
     }
 
     fn get_or_create_cipher_seed(store: &TStore) -> Result<CipherSeed, WalletSdkError> {

@@ -22,7 +22,9 @@ pub use substate::*;
 mod vault;
 pub use vault::*;
 
+mod authored_template;
 mod non_fungible_tokens;
 mod webauthn_registration;
+pub use authored_template::*;
 pub use non_fungible_tokens::*;
 pub use webauthn_registration::*;

@@ -70,6 +70,8 @@ import {
   TemplateDef,
   TemplatesGetRequest,
   TemplatesGetResponse,
+  TemplatesListAuthoredRequest,
+  TemplatesListAuthoredResponse,
   TransactionGetAllRequest,
   TransactionGetAllResponse,
   TransactionGetRequest,
@@ -81,7 +83,8 @@ import {
   TransactionSubmitResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
-  Type, WebauthnAlreadyRegisteredRequest,
+  Type,
+  WebauthnAlreadyRegisteredRequest,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
@@ -93,7 +96,7 @@ import {
   WebRtcStartRequest,
   WebRtcStartResponse,
 } from "@tari-project/typescript-bindings";
-import { FetchRpcTransport, RpcTransport } from "./transports";
+import {FetchRpcTransport, RpcTransport} from "./transports";
 
 export * as transports from "./transports";
 
@@ -315,6 +318,10 @@ export class WalletDaemonClient {
 
   public templatesGet(params: TemplatesGetRequest): Promise<TemplatesGetResponse> {
     return this.__invokeRpc("templates.get", params);
+  }
+
+  public templatesListAuthored(params: TemplatesListAuthoredRequest): Promise<TemplatesListAuthoredResponse> {
+    return this.__invokeRpc("templates.list_authored", params);
   }
 
   public createFreeTestCoins(params: AccountsCreateFreeTestCoinsRequest): Promise<AccountsCreateFreeTestCoinsResponse> {

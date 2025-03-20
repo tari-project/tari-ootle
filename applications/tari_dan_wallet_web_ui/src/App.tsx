@@ -39,6 +39,7 @@ import { useEffect } from "react";
 import { useAuthMethod } from "./api/hooks/useAuth";
 import AccessToken from "./routes/AccessToken/AccessToken";
 import { jwtDecode } from "jwt-decode";
+import Templates from "./routes/Templates/Templates";
 
 export const breadcrumbRoutes = [
   {
@@ -99,6 +100,11 @@ export const breadcrumbRoutes = [
   {
     label: "Settings",
     path: "/settings",
+    dynamic: false,
+  },
+  {
+    label: "Templates",
+    path: "/templates",
     dynamic: false,
   },
 ];
@@ -228,6 +234,10 @@ function App() {
           <Route
             path="settings"
             element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/settings" component={SettingsPage} />}
+          />
+          <Route
+            path="templates"
+            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/templates" component={Templates} />}
           />
           <Route path="*" element={<ErrorPage />} />
         </Route>

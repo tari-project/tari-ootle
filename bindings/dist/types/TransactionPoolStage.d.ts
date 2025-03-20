@@ -1,1 +1,1 @@
-export type TransactionPoolStage = "New" | "Prepared" | "LocalPrepared" | "AllPrepared" | "SomePrepared" | "LocalAccepted" | "AllAccepted" | "SomeAccepted" | "LocalOnly";
+export type TransactionPoolStage = "New" | "LocalPrepared" | "LocalAccepted" | "AllAccepted" | "SomeAccepted" | "LocalOnly";

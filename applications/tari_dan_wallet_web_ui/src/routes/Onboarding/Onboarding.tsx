@@ -20,16 +20,16 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {FormEvent, useState} from "react";
-import {Form} from "react-router-dom";
+import { FormEvent, useState } from "react";
+import { Form } from "react-router-dom";
 import TextField from "@mui/material/TextField/TextField";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
-import {useTheme} from "@mui/material/styles";
+import { useTheme } from "@mui/material/styles";
 import Loading from "../../Components/Loading";
-import {useAccountsCreateFreeTestCoins} from "../../api/hooks/useAccounts";
+import { useAccountsCreateFreeTestCoins } from "../../api/hooks/useAccounts";
 import useAccountStore from "../../store/accountStore";
 
 function Onboarding() {

@@ -25,15 +25,8 @@ import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
 import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
-import { useEffect } from "react";
 import { InnerHeading, StyledPaper } from "../../../Components/StyledComponents";
-import {
-  refreshAccountsBalances,
-  useAccountNFTsList,
-  useAccountsGet,
-  useAccountsGetBalances,
-  useAccountsGetDefault,
-} from "../../../api/hooks/useAccounts";
+import { refreshAccountsBalances } from "../../../api/hooks/useAccounts";
 import useAccountStore from "../../../store/accountStore";
 import Transactions from "../../Transactions/Transactions";
 import AccountBalance from "./AccountBalance";
@@ -41,7 +34,6 @@ import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
 import SelectAccount from "./SelectAccount";
-import FetchStatusCheck from "../../../Components/FetchStatusCheck";
 import { substateIdToString } from "@tari-project/typescript-bindings";
 import { Button } from "@mui/material";
 import { Refresh } from "@mui/icons-material";

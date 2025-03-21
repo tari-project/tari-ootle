@@ -65,6 +65,11 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(key)
     }
 
+    pub fn last_index(&self, branch: &str) -> Result<u64, KeyManagerApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        Ok(tx.key_manager_get_last_index(branch).optional()?.unwrap_or(0))
+    }
+
     pub fn next_key(&self, branch: &str) -> Result<DerivedKey<RistrettoPublicKey>, KeyManagerApiError> {
         let mut tx = self.store.create_write_tx()?;
         let index = tx.key_manager_get_last_index(branch).optional()?.unwrap_or(0);
@@ -105,12 +110,12 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         }
     }
 
-    pub fn get_key_for_public_key(
+    pub fn get_key_for_public_key_with_max_index(
         &self,
         branch: &str,
         public_key: &PublicKey,
+        max_index: u64,
     ) -> Result<(u64, DerivedKey<RistrettoPublicKey>), KeyManagerApiError> {
-        let max_index = self.store.with_read_tx(|tx| tx.key_manager_get_last_index(branch))?;
         for index in 0..=max_index {
             let key = self.derive_key(branch, index)?;
             if &PublicKey::from_secret_key(&key.key) == public_key {
@@ -121,6 +126,15 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
             key: public_key.clone(),
             branch: branch.to_string(),
         })
+    }
+
+    pub fn get_key_for_public_key(
+        &self,
+        branch: &str,
+        public_key: &PublicKey,
+    ) -> Result<(u64, DerivedKey<RistrettoPublicKey>), KeyManagerApiError> {
+        let max_index = self.store.with_read_tx(|tx| tx.key_manager_get_last_index(branch))?;
+        self.get_key_for_public_key_with_max_index(branch, public_key, max_index)
     }
 
     pub fn get_public_key(&self, branch: &str, key_index: Option<u64>) -> Result<PublicKey, KeyManagerApiError> {

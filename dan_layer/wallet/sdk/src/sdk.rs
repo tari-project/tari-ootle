@@ -95,19 +95,19 @@ where
             },
             None => {
                 if let Some(seed_words) = seed_words {
-                    let result = Self::restore_cipher_seed(&store, &seed_words, wallet_secret);
+                    let result = Self::restore_cipher_seed(&store, &seed_words);
                     if result.is_ok() {
                         info!(target: LOG_TARGET, "🔑 Successfully restored wallet seed key!");
                         needs_resource_sync = true;
                     }
                     result
                 } else {
-                    Self::create_cipher_seed(&store, wallet_secret)
+                    Self::create_cipher_seed(&store)
                 }
             },
         }?;
 
-        Ok(DanWalletSdkInitResult{
+        Ok(DanWalletSdkInitResult {
             sdk: Self {
                 store,
                 network_interface: indexer,
@@ -240,18 +240,11 @@ where
         ))
     }
 
-    fn create_cipher_seed(store: &TStore, password_opt: Option<String>) -> Result<CipherSeed, WalletSdkError> {
+    fn create_cipher_seed(store: &TStore) -> Result<CipherSeed, WalletSdkError> {
         let config_api = ConfigApi::new(store);
         let network = Network::from_str(config_api.get::<String>(ConfigKey::Network)?.as_str())?;
         let cipher_seed = CipherSeed::new();
-        let (password_raw, password) = if let Some(pass) = password_opt {
-            (
-                pass.clone(),
-                SafePassword::from_str(pass.as_str()).map_err(|_| WalletSdkError::SafePassword)?,
-            )
-        } else {
-            Self::generate_password()?
-        };
+        let (password_raw, password) = Self::generate_password()?;
         let entry = Self::cipher_seed_password_keyring_entry(network)?;
         entry.set_password(password_raw.as_str())?;
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;
@@ -261,22 +254,11 @@ where
 
     /// Restores cipher seed from seed words, encrypts with a new random password (and saves to OS keychain)
     /// and replaces current cipher seed in the DB (to let every component use the new seed).
-    pub fn restore_cipher_seed(
-        store: &TStore,
-        seed_words: &SeedWords,
-        password_opt: Option<String>,
-    ) -> Result<CipherSeed, WalletSdkError> {
+    pub fn restore_cipher_seed(store: &TStore, seed_words: &SeedWords) -> Result<CipherSeed, WalletSdkError> {
         let cipher_seed = CipherSeed::from_mnemonic(seed_words, None)?;
         let config_api = ConfigApi::new(store);
         let network = Network::from_str(config_api.get::<String>(ConfigKey::Network)?.as_str())?;
-        let (password_raw, password) = if let Some(pass) = password_opt {
-            (
-                pass.clone(),
-                SafePassword::from_str(pass.as_str()).map_err(|_| WalletSdkError::SafePassword)?,
-            )
-        } else {
-            Self::generate_password()?
-        };
+        let (password_raw, password) = Self::generate_password()?;
         let entry = Self::cipher_seed_password_keyring_entry(network)?;
         entry.set_password(password_raw.as_str())?;
         let encrypted_cipher_seed = cipher_seed.encipher(Some(password))?;

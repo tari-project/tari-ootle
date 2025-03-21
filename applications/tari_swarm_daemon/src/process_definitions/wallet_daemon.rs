@@ -10,6 +10,7 @@ use tokio::process::Command;
 use crate::process_definitions::{ProcessContext, ProcessDefinition};
 
 pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
+pub const WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY: &str = "wallet_daemon_seed_words";
 const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
 
 #[derive(Debug, Default)]
@@ -62,6 +63,10 @@ impl ProcessDefinition for WalletDaemon {
             .arg(format!("--web-ui-public-json-rpc-url={json_rpc_public_url}"))
             .arg(format!("-pdan_wallet_daemon.web_ui_address={web_ui_address}"))
             .arg(format!("-pdan_wallet_daemon.authentication={auth}"));
+
+        if let Some(seed_words) = context.get_setting(WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY) {
+            command.arg(format!("--seed-words={seed_words}"));
+        }
 
         // A signaling server is not required for startup of the wallet daemon,
         // but if it is available we want to set it up

@@ -35,17 +35,21 @@ use std::{fs, panic, process};
 use log::*;
 use tari_crypto::tari_utilities::Hidden;
 use tari_dan_common_types::{optional::Optional, NumPreshards};
-use tari_dan_wallet_sdk::{apis::{
-    config::{ConfigApi, ConfigKey},
-    key_manager,
-}, DanWalletSdk, DanWalletSdkInitResult, WalletSdkConfig};
+use tari_dan_wallet_sdk::{
+    apis::{
+        config::{ConfigApi, ConfigKey},
+        key_manager,
+    },
+    DanWalletSdk,
+    DanWalletSdkInitResult,
+    WalletSdkConfig,
+};
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_key_manager::SeedWords;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::models::Amount;
 use tokio::task;
 
-use crate::services::resource_scanner;
 use crate::{
     cli::{Cli, WalletRestoreArgs},
     config::ApplicationConfig,
@@ -53,7 +57,7 @@ use crate::{
     http_ui::server::run_http_ui_server,
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
-    services::spawn_services,
+    services::{resource_scanner, spawn_services},
 };
 
 const LOG_TARGET: &str = "tari::dan::wallet_daemon";
@@ -82,10 +86,7 @@ pub async fn run_tari_dan_wallet_daemon(
 
     // trigger resource scanning if needed
     if wallet_sdk_init_result.needs_resource_sync {
-        let scanner = resource_scanner::Service::new(
-            wallet_sdk.clone(),
-            shutdown_signal.clone(),
-        );
+        let scanner = resource_scanner::Service::new(wallet_sdk.clone(), shutdown_signal.clone());
         tokio::spawn(async move {
             scanner.scan().await;
         });
@@ -176,13 +177,8 @@ pub fn initialize_wallet_sdk(
                 .collect(),
         )
     });
-    let wallet_sdk_init_result = DanWalletSdk::initialize(
-        config.dan_wallet_daemon.network,
-        store,
-        indexer,
-        sdk_config,
-        seed_words,
-    )?;
+    let wallet_sdk_init_result =
+        DanWalletSdk::initialize(config.dan_wallet_daemon.network, store, indexer, sdk_config, seed_words)?;
 
     Ok(wallet_sdk_init_result)
 }

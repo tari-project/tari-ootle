@@ -9,7 +9,7 @@ use tari_common::configuration::Network;
 
 use crate::{
     config::{Config, InstanceType},
-    process_definitions::WALLET_DAEMON_AUTH_SETTINGS_KEY,
+    process_definitions::{WALLET_DAEMON_AUTH_SETTINGS_KEY, WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -78,6 +78,9 @@ pub struct Overrides {
     pub disable_template_auto_register: bool,
     #[clap(long, value_enum)]
     pub wallet_daemon_auth: Option<WalletDaemonAuth>,
+    #[clap(long)]
+    /// Seed words use to restore wallet
+    pub wallet_seed_words: Option<String>,
 }
 
 impl Overrides {
@@ -125,6 +128,16 @@ impl Overrides {
                         .insert(WALLET_DAEMON_AUTH_SETTINGS_KEY.to_string(), auth.to_string());
                 }
             });
+        }
+
+        if let Some(seed_words) = &self.wallet_seed_words {
+            config.processes.instances.iter_mut().for_each(|instance| {
+                if instance.instance_type.is_wallet_daemon() {
+                    instance
+                        .settings
+                        .insert(WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY.to_string(), seed_words.clone());
+                }
+            })
         }
 
         Ok(())

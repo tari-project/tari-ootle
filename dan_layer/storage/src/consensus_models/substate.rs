@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Borrow, collections::HashSet, fmt, fmt::Display};
+use std::{collections::HashSet, fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
@@ -38,12 +38,9 @@ pub struct SubstateRecord {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub state_hash: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub created_by_transaction: TransactionId,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_justify: QcId,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_block: BlockId,
-    pub created_height: NodeHeight,
     pub created_by_shard: Shard,
     pub created_at_epoch: Epoch,
     pub destroyed: Option<SubstateDestroyed>,
@@ -56,8 +53,6 @@ pub struct SubstateRecord {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct SubstateDestroyed {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub by_transaction: TransactionId,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub justify: QcId,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -73,9 +68,7 @@ impl SubstateRecord {
         value: V,
         created_by_shard: Shard,
         created_at_epoch: Epoch,
-        created_height: NodeHeight,
         created_block: BlockId,
-        created_by_transaction: TransactionId,
         created_justify: QcId,
     ) -> Self {
         let value = value.into();
@@ -84,11 +77,9 @@ impl SubstateRecord {
             version,
             state_hash: value.to_value_hash(version),
             substate_value: value.into_value(),
-            created_height,
             created_justify,
             created_by_shard,
             created_at_epoch,
-            created_by_transaction,
             created_block,
             destroyed: None,
         }
@@ -130,16 +121,8 @@ impl SubstateRecord {
         self.version
     }
 
-    pub fn created_height(&self) -> NodeHeight {
-        self.created_height
-    }
-
     pub fn created_block(&self) -> BlockId {
         self.created_block
-    }
-
-    pub fn created_by_transaction(&self) -> TransactionId {
-        self.created_by_transaction
     }
 
     pub fn created_justify(&self) -> &QcId {
@@ -189,10 +172,10 @@ impl SubstateRecord {
     }
 
     pub fn exists<TTx: StateStoreReadTransaction>(tx: &TTx, id: &VersionedSubstateId) -> Result<bool, StorageError> {
-        Self::any_exist(tx, Some(id))
+        Self::any_exist(tx, Some(id.as_ref()))
     }
 
-    pub fn any_exist<TTx: StateStoreReadTransaction, I: IntoIterator<Item = S>, S: Borrow<VersionedSubstateId>>(
+    pub fn any_exist<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = VersionedSubstateIdRef<'a>>>(
         tx: &TTx,
         substates: I,
     ) -> Result<bool, StorageError> {
@@ -295,14 +278,12 @@ impl SubstateRecord {
         epoch: Epoch,
         destroyed_by_block: NodeHeight,
         destroyed_justify: &QcId,
-        destroyed_by_transaction: &TransactionId,
     ) -> Result<(), StorageError> {
         tx.substates_down(
             versioned_substate_id,
             shard,
             epoch,
             destroyed_by_block,
-            destroyed_by_transaction,
             destroyed_justify,
         )
     }
@@ -326,7 +307,6 @@ pub struct SubstateDestroyedProof {
     pub substate_id: SubstateId,
     pub version: u32,
     // TODO: proof that data was destroyed
-    pub destroyed_by_transaction: TransactionId,
 }
 
 impl SubstateDestroyedProof {
@@ -388,7 +368,6 @@ pub struct SubstateData {
     pub substate_id: SubstateId,
     pub version: u32,
     pub value: SubstateValueOrHash,
-    pub created_by_transaction: TransactionId,
 }
 
 impl SubstateData {
@@ -418,7 +397,6 @@ impl From<SubstateRecord> for SubstateData {
                 .unwrap_or_else(|| value.state_hash.into()),
             substate_id: value.substate_id,
             version: value.version,
-            created_by_transaction: value.created_by_transaction,
         }
     }
 }

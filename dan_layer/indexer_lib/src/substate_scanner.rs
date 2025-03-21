@@ -21,16 +21,10 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use rand::{prelude::*, rngs::OsRng};
-use tari_dan_common_types::{displayable::Displayable, NodeAddressable, SubstateRequirement};
-use tari_dan_storage::consensus_models::BlockId;
-use tari_engine_types::{
-    events::Event,
-    substate::{SubstateId, SubstateValue},
-};
+use tari_dan_common_types::{displayable::Displayable, NodeAddressable, SubstateRequirementRef, ToSubstateAddress};
+use tari_engine_types::substate::SubstateId;
 use tari_epoch_manager::EpochManagerReader;
 use tari_template_lib::{models::NonFungibleIndexAddress, prelude::ResourceAddress};
-use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::{SubstateResult, ValidatorNodeClientFactory, ValidatorNodeRpcClient};
 
 use crate::{
@@ -84,7 +78,7 @@ where
             // get the nft index substate from the network
             // nft index substates are immutable, so they are always on version 0
             let index_substate_result = self
-                .get_specific_substate_from_committee(index_substate_address, 0)
+                .get_specific_substate_from_committee(SubstateRequirementRef::versioned(&index_substate_address, 0))
                 .await?;
             let index_substate = match index_substate_result {
                 SubstateResult::Up { substate, .. } => substate.into_substate_value(),
@@ -95,7 +89,10 @@ where
             let nft_address = match index_substate.into_non_fungible_index() {
                 Some(idx) => idx.referenced_address().clone(),
                 // the protocol should never produce this scenario, we stop querying for more indexes if it happens
-                None => break,
+                None => {
+                    error!(target: LOG_TARGET, "NonFungibleIndex substate {} does not contain a referenced address", index_substate_address);
+                    break;
+                },
             };
             let nft_id = SubstateId::NonFungible(nft_address);
             let SubstateResult::Up { substate, .. } = self.get_latest_substate_from_committee(&nft_id, None).await?
@@ -151,9 +148,9 @@ where
             }
         }
 
-        let requirement = SubstateRequirement::new(substate_id.clone(), specific_version);
+        let requirement = SubstateRequirementRef::new(substate_id, specific_version);
 
-        let substate_result = self.get_substate_from_committee_by_requirement(&requirement).await?;
+        let substate_result = self.get_specific_substate_from_committee(requirement).await?;
         debug!(target: LOG_TARGET, "Substate result for {} with version {}: {:?}", substate_id.to_address_string(), specific_version.display(), substate_result);
         if let Some(version) = substate_result.version() {
             let should_update_cache = cached_version.is_none_or(|v| v < version);
@@ -175,23 +172,13 @@ where
     /// Returns a specific version. If this is not found an error is returned.
     pub async fn get_specific_substate_from_committee(
         &self,
-        substate_id: SubstateId,
-        version: u32,
+        substate_req: SubstateRequirementRef<'_>,
     ) -> Result<SubstateResult, IndexerError> {
-        let substate_req = SubstateRequirement::versioned(substate_id, version);
         debug!(target: LOG_TARGET, "get_specific_substate_from_committee: {substate_req}");
-        self.get_substate_from_committee_by_requirement(&substate_req).await
-    }
-
-    /// Returns a specific version. If this is not found an error is returned.
-    pub async fn get_substate_from_committee_by_requirement(
-        &self,
-        substate_req: &SubstateRequirement,
-    ) -> Result<SubstateResult, IndexerError> {
         let epoch = self.committee_provider.current_epoch().await?;
         let mut committee = self
             .committee_provider
-            .get_committee_for_substate(epoch, substate_req.to_substate_address_zero_version())
+            .get_committee_for_substate(epoch, substate_req.or_zero_version().to_substate_address())
             .await?;
 
         committee.shuffle();
@@ -200,7 +187,6 @@ where
         let mut num_nexist_substate_results = 0;
         let mut last_error = None;
         for vn_addr in committee.addresses() {
-            // TODO: we cannot request data from ourselves via p2p rpc - so we should exclude ourselves from requests
             debug!(target: LOG_TARGET, "Getting substate {} from vn {}", substate_req, vn_addr);
 
             match self.get_substate_from_vn(vn_addr, substate_req).await {
@@ -242,7 +228,7 @@ where
     async fn get_substate_from_vn(
         &self,
         vn_addr: &TAddr,
-        substate_requirement: &SubstateRequirement,
+        substate_requirement: SubstateRequirementRef<'_>,
     ) -> Result<SubstateResult, IndexerError> {
         // build a client with the VN
         let mut client = self.validator_node_client_factory.create_client(vn_addr);
@@ -253,135 +239,79 @@ where
         Ok(result)
     }
 
-    /// Queries the network to obtain events emitted in a single transaction
-    pub async fn get_events_for_transaction(&self, transaction_id: TransactionId) -> Result<Vec<Event>, IndexerError> {
-        let substate_id = SubstateId::TransactionReceipt(transaction_id.into_array().into());
-        let substate = self.get_specific_substate_from_committee(substate_id, 0).await?;
-        let substate_value = if let SubstateResult::Up { substate, .. } = substate {
-            substate.substate_value().clone()
-        } else {
-            return Err(IndexerError::InvalidSubstateState);
-        };
-        let events = if let SubstateValue::TransactionReceipt(tx_receipt) = substate_value {
-            tx_receipt.events
-        } else {
-            return Err(IndexerError::InvalidSubstateValue);
-        };
+    // /// Queries the network to obtain events emitted in a single transaction
+    // pub async fn get_events_for_transaction(
+    //     &self,
+    //     substate_req: SubstateRequirementRef<'_>,
+    // ) -> Result<Vec<Event>, IndexerError> {
+    //     if !substate_req.substate_id().is_transaction_receipt() {
+    //         // TODO
+    //         return Err(IndexerError::InvalidSubstateValue);
+    //     }
+    //
+    //     let substate = self.get_specific_substate_from_committee(substate_req).await?;
+    //     let substate_value = if let SubstateResult::Up { substate, .. } = substate {
+    //         substate.substate_value()
+    //     } else {
+    //         return Err(IndexerError::InvalidSubstateState);
+    //     };
+    //     let events = if let SubstateValue::TransactionReceipt(tx_receipt) = substate_value {
+    //         tx_receipt.events.clone()
+    //     } else {
+    //         return Err(IndexerError::InvalidSubstateValue);
+    //     };
+    //
+    //     Ok(events)
+    // }
 
-        Ok(events)
-    }
+    // /// Queries the network to obtain all the events associated with a substate and
+    // /// a specific version.
+    // pub async fn get_events_for_substate_and_version(
+    //     &self,
+    //     substate_req: SubstateRequirementRef<'_>,
+    // ) -> Result<Vec<Event>, IndexerError> {
+    //     let result = self.get_specific_substate_from_committee(substate_req).await?;
+    //     let substate = result.up().ok_or_else(|| IndexerError::InvalidSubstateState)?;
+    //     let events = if let SubstateValue::TransactionReceipt(tx_receipt) = substate_value {
+    //         tx_receipt.events.clone()
+    //     } else {
+    //         return Err(IndexerError::InvalidSubstateValue);
+    //     };
+    //
+    //     Ok(events)
+    //     // match self.get_events_for_transaction(substate_req).await {
+    //     //     Ok(tx_events) => {
+    //     //         // we need to filter all transaction events, by those corresponding
+    //     //         // to the current component address
+    //     //         let component_tx_events = tx_events
+    //     //             .into_iter()
+    //     //             .filter(|e| e.substate_id() == Some(substate_req.substate_id()))
+    //     //             .collect();
+    //     //         Ok(component_tx_events)
+    //     //     },
+    //     //     Err(e) => Err(e),
+    //     // }
+    // }
 
-    /// Queries the network to obtain a transaction hash from a given substate id and version
-    async fn get_transaction_hash_from_substate_address(
-        &self,
-        substate_req: &SubstateRequirement,
-    ) -> Result<TransactionId, IndexerError> {
-        let epoch = self.committee_provider.current_epoch().await?;
-        let mut committee = self
-            .committee_provider
-            .get_committee_for_substate(epoch, substate_req.to_substate_address_zero_version())
-            .await?;
-
-        committee.members.shuffle(&mut OsRng);
-
-        let mut transaction_hash = None;
-        for member in committee.addresses() {
-            match self.get_substate_from_vn(member, substate_req).await {
-                Ok(substate_result) => match substate_result {
-                    SubstateResult::Up {
-                        created_by_tx: tx_hash, ..
-                    } |
-                    SubstateResult::Down {
-                        created_by_tx: tx_hash, ..
-                    } => {
-                        transaction_hash = Some(tx_hash);
-                        break;
-                    },
-                    SubstateResult::DoesNotExist => {
-                        warn!(
-                            target: LOG_TARGET,
-                            "validator node: {} does not have state for {}",
-                            member,
-                            substate_req,
-                        );
-                        continue;
-                    },
-                },
-                Err(e) => {
-                    warn!(
-                        target: LOG_TARGET,
-                        "Could not find substate result for {substate_req}, with error = {e}",
-                    );
-                    continue;
-                },
-            }
-        }
-
-        transaction_hash.ok_or_else(|| {
-            IndexerError::NotFoundTransaction(
-                substate_req.substate_id().clone(),
-                substate_req.version().unwrap_or_default(),
-            )
-        })
-    }
-
-    /// Queries the network to obtain all the events associated with a substate and
-    /// a specific version.
-    pub async fn get_events_for_substate_and_version(
-        &self,
-        substate_req: &SubstateRequirement,
-    ) -> Result<Vec<Event>, IndexerError> {
-        let transaction_id = self.get_transaction_hash_from_substate_address(substate_req).await?;
-
-        match self.get_events_for_transaction(transaction_id).await {
-            Ok(tx_events) => {
-                // we need to filter all transaction events, by those corresponding
-                // to the current component address
-                let component_tx_events = tx_events
-                    .into_iter()
-                    .filter(|e| e.substate_id() == Some(substate_req.substate_id()))
-                    .collect();
-                Ok(component_tx_events)
-            },
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Queries the network to obtain all the events associated with a component,
-    /// starting at an optional version (if `None`, starts from `0`).
-    pub async fn get_events_for_substate(
-        &self,
-        substate_id: &SubstateId,
-        version: Option<u32>,
-    ) -> Result<Vec<Event>, IndexerError> {
-        let mut events = vec![];
-        let mut version = version.unwrap_or_default();
-
-        loop {
-            let substate_req = SubstateRequirement::versioned(substate_id.clone(), version);
-            match self.get_events_for_substate_and_version(&substate_req).await {
-                Ok(component_tx_events) => events.extend(component_tx_events),
-                Err(IndexerError::NotFoundTransaction(..)) => return Ok(events),
-                Err(e) => return Err(e),
-            }
-
-            version += 1;
-        }
-    }
-
-    pub async fn scan_events(
-        &self,
-        start_block: Option<BlockId>,
-        topic: Option<String>,
-        substate_id: Option<SubstateId>,
-    ) -> Result<Vec<Event>, IndexerError> {
-        warn!(
-            target: LOG_TARGET,
-            "scan_events: start_block={:?}, topic={:?}, substate_id={:?}",
-            start_block,
-            topic,
-            substate_id
-        );
-        Ok(vec![])
-    }
+    // /// Queries the network to obtain all the events associated with a component,
+    // /// starting at an optional version (if `None`, starts from `0`).
+    // pub async fn get_events_for_substate(
+    //     &self,
+    //     substate_id: &SubstateId,
+    //     version: Option<u32>,
+    // ) -> Result<Vec<Event>, IndexerError> {
+    //     let mut events = vec![];
+    //     let mut version = version.unwrap_or_default();
+    //
+    //     loop {
+    //         let substate_req = SubstateRequirementRef::versioned(substate_id, version);
+    //         match self.get_events_for_substate_and_version(substate_req).await {
+    //             Ok(component_tx_events) => events.extend(component_tx_events),
+    //             Err(IndexerError::NotFoundTransaction(..)) => return Ok(events),
+    //             Err(e) => return Err(e),
+    //         }
+    //
+    //         version += 1;
+    //     }
+    // }
 }

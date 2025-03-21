@@ -416,9 +416,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     }
 
     fn emit_event(&self, topic: String, payload: Metadata) -> Result<(), RuntimeError> {
-        // forbid template users to emit events that can be confused with the ones emitted by the engine
-        if Event::topic_has_std_prefix(&topic) {
-            return Err(RuntimeError::InvalidEventTopicStdPrefix { topic });
+        if let Err(reason) = Event::validate_custom_topic(&topic) {
+            return Err(RuntimeError::InvalidEventTopic { topic, reason });
         }
 
         self.invoke_modules_on_runtime_call("emit_event")?;
@@ -434,9 +433,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         let substate_id = component_address_option.map(SubstateId::Component);
         let tx_hash = self.entity_id_provider.transaction_hash();
         let template_address = self.tracker.get_template_address()?;
+        let module = self.tracker.get_template_module_name()?;
+        let topic = format!("{module}.{topic}");
 
         self.tracker
-            .add_event(Event::new(substate_id, template_address, tx_hash, topic, payload));
+            .add_event(Event::custom(substate_id, template_address, tx_hash, topic, payload));
         Ok(())
     }
 

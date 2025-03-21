@@ -59,7 +59,6 @@ pub struct SubstateQueryResult {
     pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
-    pub created_by_transaction: TransactionId,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

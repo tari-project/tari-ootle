@@ -124,19 +124,18 @@ CREATE INDEX leaf_blocks_idx_epoch ON leaf_blocks (epoch);
 
 create table block_diffs
 (
-    id             integer   NOT NULL primary key AUTOINCREMENT,
-    block_id       text      NOT NULL,
-    transaction_id text      NOT NULL,
-    substate_id    text      NOT NULL,
-    version        int       NOT NULL,
-    shard          int       NOT NULL,
+    id          integer   NOT NULL primary key AUTOINCREMENT,
+    block_id    text      NOT NULL,
+    substate_id text      NOT NULL,
+    version     int       NOT NULL,
+    shard       int       NOT NULL,
     -- Up or Down
-    change         text      NOT NULL,
+    change      text      NOT NULL,
     -- NULL for Down
-    state          text      NULL,
+    state       text      NULL,
     -- state_hash is to aid in debugging
-    state_hash     text      NULL,
-    created_at     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    state_hash  text      NULL,
+    created_at  timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 --    FOREIGN KEY (transaction_id) REFERENCES transactions (transaction_id),
     FOREIGN KEY (block_id) REFERENCES blocks (block_id)
 );
@@ -144,36 +143,31 @@ create index block_diffs_idx_block_id_substate_id_version on block_diffs (block_
 
 create table substates
 (
-    id                       integer   not NULL primary key AUTOINCREMENT,
-    address                  text      not NULL,
-    substate_id              text      not NULL,
-    version                  integer   not NULL,
-    data                     text      NULL,
-    state_hash               text      not NULL,
-    created_by_transaction   text      not NULL,
-    created_justify          text      not NULL,
-    created_block            text      not NULL,
-    created_height           bigint    not NULL,
+    id                 integer   not NULL primary key AUTOINCREMENT,
+    address            text      not NULL,
+    substate_id        text      not NULL,
+    version            integer   not NULL,
+    data               text      NULL,
+    state_hash         text      not NULL,
+    created_justify    text      not NULL,
+    created_block      text      not NULL,
+    created_height     bigint    not NULL,
     -- <epoch, shard> uniquely identifies the chain
-    created_at_epoch         bigint    not NULL,
-    created_by_shard         int       not NULL,
-    destroyed_by_transaction text      NULL,
-    destroyed_justify        text      NULL,
-    destroyed_by_block       bigint    NULL,
+    created_at_epoch   bigint    not NULL,
+    created_by_shard   int       not NULL,
+    destroyed_justify  text      NULL,
+    destroyed_by_block bigint    NULL,
     -- <epoch, shard> uniquely identifies the chain
-    destroyed_at_epoch       bigint    NULL,
-    destroyed_by_shard       int       NULL,
-    created_at               timestamp not NULL DEFAULT CURRENT_TIMESTAMP,
-    destroyed_at             timestamp NULL
+    destroyed_at_epoch bigint    NULL,
+    destroyed_by_shard int       NULL,
+    created_at         timestamp not NULL DEFAULT CURRENT_TIMESTAMP,
+    destroyed_at       timestamp NULL
 );
 
 -- All addresses are unique
 create unique index substates_uniq_address on substates (address);
 -- All substate_id, version pairs are unique. This is a common query
 create unique index substates_uniq_substate_id_and_version on substates (substate_id, version);
--- querying for transaction ids that either Upd or Downd a substate
-create index substates_idx_created_by_transaction on substates (created_by_transaction);
-create index substates_idx_destroyed_by_transaction on substates (destroyed_by_transaction) where destroyed_by_transaction is not null;
 
 create table foreign_substate_pledges
 (

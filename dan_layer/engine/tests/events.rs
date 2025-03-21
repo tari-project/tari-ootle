@@ -49,8 +49,9 @@ fn cannot_use_standard_topic() {
             .build_and_seal(&private_key),
         [].into(),
     );
-    assert_reject_reason(reason, RuntimeError::InvalidEventTopicStdPrefix {
+    assert_reject_reason(reason, RuntimeError::InvalidEventTopic {
         topic: invalid_topic.to_owned(),
+        reason: "topics starting with 'std.' are reserved for standard events".to_owned(),
     });
 }
 

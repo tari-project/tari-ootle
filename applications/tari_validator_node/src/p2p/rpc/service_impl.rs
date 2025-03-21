@@ -191,11 +191,6 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 status: SubstateStatus::Down as i32,
                 address: substate.substate_id().to_bytes(),
                 version: substate.version(),
-                created_transaction_hash: substate.created_by_transaction().into_array().to_vec(),
-                destroyed_transaction_hash: substate
-                    .destroyed()
-                    .map(|destroyed| destroyed.by_transaction.as_bytes().to_vec())
-                    .unwrap_or_default(),
                 quorum_certificates: Some(created_qc)
                     .into_iter()
                     .chain(destroyed_qc)
@@ -212,8 +207,6 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                     .substate_value()
                     .map(|v| v.to_bytes())
                     .ok_or_else(|| RpcStatus::general("NEVER HAPPEN: UP substate has no value"))?,
-                created_transaction_hash: substate.created_by_transaction().into_array().to_vec(),
-                destroyed_transaction_hash: vec![],
                 quorum_certificates: vec![(&created_qc).into()],
             }
         };

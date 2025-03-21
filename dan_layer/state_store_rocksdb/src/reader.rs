@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
-    borrow::Borrow,
     collections::{HashMap, HashSet},
     marker::PhantomData,
 };
@@ -38,7 +37,6 @@ use tari_dan_common_types::{
     NodeHeight,
     SubstateAddress,
     ToSubstateAddress,
-    VersionedSubstateId,
     VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
@@ -1348,53 +1346,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok((data.version, data.is_up))
     }
 
-    fn substates_any_exist<I: IntoIterator<Item = S>, S: Borrow<VersionedSubstateId>>(
-        &self,
-        ids: I,
-    ) -> Result<bool, StorageError> {
+    fn substates_any_exist<'a, I>(&self, substates: I) -> Result<bool, StorageError>
+    where I: IntoIterator<Item = VersionedSubstateIdRef<'a>> {
         const OPERATION: &str = "substates_any_exist";
 
         let cf = self.db().cf(SubstateModel)?;
 
-        for id in ids {
-            if cf.exists(&id.borrow().to_substate_address(), OPERATION)? {
+        for id in substates {
+            if cf.exists(&id.to_substate_address(), OPERATION)? {
                 return Ok(true);
             }
         }
 
         Ok(false)
-    }
-
-    fn substates_exists_for_transaction(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
-        // const OPERATION: &str = "substates_exists_for_transaction";
-        // TODO: only used in tests. Remove this call and ideally the index
-
-        let index = self.db().cf(substate::ByTransactionIdIndex)?;
-        let mut iter = index.query_prefix_range_key_iterator(Ordering::Ascending, transaction_id);
-        Ok(iter.next().transpose()?.is_some())
-    }
-
-    fn substates_get_all_for_transaction(
-        &self,
-        transaction_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        // TODO: used to enable indexer event scanning - find a way to remove this index by changing the way event
-        // scanning works
-        const OPERATION: &str = "substates_get_all_for_transaction";
-        let cf = self.db().cf(SubstateModel)?;
-        let query = self.db().cf(substate::ByTransactionIdIndex)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, transaction_id);
-
-        let mut substates = vec![];
-
-        // TODO: not correct, but hopefully we can remove this
-        for result in iter {
-            let key = result?;
-            let substate = cf.get(&key.versioned_substate_id.to_substate_address(), OPERATION)?;
-            substates.push(substate);
-        }
-
-        Ok(substates)
     }
 
     /// Returns all substates that have been locked by a transaction.
@@ -1569,29 +1533,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                             substate_id: substate.substate_id,
                             version: substate.version,
                             value,
-                            created_by_transaction: substate.created_by_transaction,
                         },
                     })
                 },
-                StateTransitionType::Down => {
-                    let destroyed_by_transaction = substate.destroyed.map(|d| d.by_transaction).unwrap_or_else(|| {
-                        warn!(
-                            target: LOG_TARGET,
-                            "Substate {} DOWN in transition but substate.destroyed_by_transaction is None",
-                            substate.substate_id
-                        );
-                        // TODO: this doesnt matter really since this is just used for debugging
-                        Default::default()
-                    });
-                    SubstateUpdate::Destroy(SubstateDestroyedProof {
-                        substate_id: substate.substate_id,
-                        version: substate.version,
-                        // TODO: remove this and created_by_transaction fields - use just for debugging, but is sent
-                        // over the wire etc therefore incurs a cost O(n) where n is number of
-                        // substates being synced (e.g a billion substates = 32Gb useless data)
-                        destroyed_by_transaction,
-                    })
-                },
+                StateTransitionType::Down => SubstateUpdate::Destroy(SubstateDestroyedProof {
+                    substate_id: substate.substate_id,
+                    version: substate.version,
+                }),
             };
 
             transitions.push(StateTransition { id: key, update });

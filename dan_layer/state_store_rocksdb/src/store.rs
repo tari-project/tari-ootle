@@ -140,7 +140,6 @@ impl<TAddr> RocksDbStateStore<TAddr> {
             substate_locks::SubstateIdIndex::name(),
             SubstateModel::name(),
             substate::HeadIndex::name(),
-            substate::TransactionIndex::name(),
             substate::UnprunedDownedValuesIndex::name(),
             StateTransitionModel::name(),
             state_transition::ShardSeqIndex::name(),

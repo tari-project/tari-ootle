@@ -16,7 +16,6 @@ use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
     Epoch,
-    NodeHeight,
     PeerAddress,
     ShardGroup,
     VersionedSubstateId,
@@ -344,20 +343,14 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     substate.value,
                     transition.id.shard(),
                     transition.id.epoch(),
-                    NodeHeight(0),
                     *checkpoint.block().id(),
-                    substate.created_by_transaction,
                     // TODO: correct QC ID
                     QcId::zero(),
                     // *created_qc.id(),
                 )
                 .create(tx)?;
             },
-            SubstateUpdate::Destroy(SubstateDestroyedProof {
-                substate_id,
-                version,
-                destroyed_by_transaction,
-            }) => {
+            SubstateUpdate::Destroy(SubstateDestroyedProof { substate_id, version }) => {
                 SubstateRecord::destroy(
                     tx,
                     VersionedSubstateId::new(substate_id, version),
@@ -366,7 +359,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     // TODO
                     checkpoint.block().height(),
                     &QcId::zero(),
-                    &destroyed_by_transaction,
                 )?;
             },
         }

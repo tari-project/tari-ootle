@@ -7,22 +7,17 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, SubstateAddress, ToSubstateAddress, VersionedSubstateId};
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_state_tree::SubstateTreeChange;
-use tari_transaction::TransactionId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateChange {
     Up {
         id: VersionedSubstateId,
         shard: Shard,
-        // TODO: determine if this is needed or if it can be removed
-        transaction_id: TransactionId,
         substate: Substate,
     },
     Down {
         id: VersionedSubstateId,
         shard: Shard,
-        // TODO: determine if this is needed or if it can be removed
-        transaction_id: TransactionId,
     },
 }
 
@@ -53,13 +48,6 @@ impl SubstateChange {
         match self {
             SubstateChange::Up { substate, .. } => Some(substate),
             _ => None,
-        }
-    }
-
-    pub fn transaction_id(&self) -> TransactionId {
-        match self {
-            SubstateChange::Up { transaction_id, .. } => *transaction_id,
-            SubstateChange::Down { transaction_id, .. } => *transaction_id,
         }
     }
 
@@ -103,24 +91,10 @@ impl SubstateChange {
 impl Display for SubstateChange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SubstateChange::Up {
-                id,
-                shard,
-                transaction_id,
-                substate,
-            } => write!(
-                f,
-                "Up: {}, {}, transaction_id: {}, substate hash: {}",
-                id,
-                shard,
-                transaction_id,
-                substate.to_value_hash()
-            ),
-            SubstateChange::Down {
-                id,
-                shard,
-                transaction_id,
-            } => write!(f, "Down: {}, {}, transaction_id: {}", id, shard, transaction_id),
+            SubstateChange::Up { id, shard, substate } => {
+                write!(f, "Up: {}, {}, substate hash: {}", id, shard, substate.to_value_hash())
+            },
+            SubstateChange::Down { id, shard } => write!(f, "Down: {}, {}", id, shard),
         }
     }
 }

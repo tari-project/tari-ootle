@@ -9,7 +9,6 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 use tari_engine_types::substate::{hash_substate, Substate};
-use tari_transaction::TransactionId;
 
 use crate::helper::{
     build_substate_record,
@@ -52,7 +51,6 @@ fn block_diffs_operations(db: impl StateStore) {
     let change = SubstateChange::Up {
         id: versioned_substate_id.clone(),
         shard: block9.shard_group().start(),
-        transaction_id: TransactionId::default(),
         substate: Substate::new(version, substate_record.substate_value.clone().unwrap()),
     };
     tx.block_diffs_insert(&block_id8, &[change]).unwrap();
@@ -63,12 +61,10 @@ fn block_diffs_operations(db: impl StateStore) {
         SubstateChange::Down {
             id: versioned_substate_id.clone(),
             shard: block9.shard_group().end(),
-            transaction_id: TransactionId::default(),
         },
         SubstateChange::Up {
             id: versioned_substate_id.to_next_version(),
             shard: block9.shard_group().end(),
-            transaction_id: TransactionId::default(),
             substate: Substate::new(version + 1, value2.clone()),
         },
     ];
@@ -82,15 +78,9 @@ fn block_diffs_operations(db: impl StateStore) {
         .block_diffs_get_last_change_for_substate(&block_id9, &substate_id)
         .unwrap();
     match &change {
-        SubstateChange::Up {
-            id,
-            shard,
-            transaction_id,
-            substate,
-        } => {
+        SubstateChange::Up { id, shard, substate } => {
             assert_eq!(*id, versioned_substate_id.to_next_version());
             assert_eq!(*shard, block9.shard_group().end());
-            assert_eq!(*transaction_id, TransactionId::default());
             assert_eq!(substate.version(), version + 1);
             assert_eq!(substate.to_value_hash(), hash_substate(&value2, version + 1));
         },

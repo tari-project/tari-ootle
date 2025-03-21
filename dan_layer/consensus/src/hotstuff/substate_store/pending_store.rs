@@ -80,13 +80,11 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
             return Ok(SubstateChange::Down {
                 id: VersionedSubstateId::new(id.clone(), substate.version()),
                 shard: destroyed.by_shard,
-                transaction_id: destroyed.by_transaction,
             });
         }
         Ok(SubstateChange::Up {
             id: VersionedSubstateId::new(id.clone(), substate.version()),
             shard: substate.created_by_shard,
-            transaction_id: substate.created_by_transaction,
             substate: substate
                 .into_substate()
                 .expect("PendingSubstateStore::get_latest_change: UP substate has no value"),
@@ -115,8 +113,6 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                     let next_id = id.to_next_version();
                     let up = SubstateChange::Up {
                         shard: id.to_shard(num_preshards),
-                        // TODO: determine if we can remove this field
-                        transaction_id: Default::default(),
                         substate: Substate::new(next_id.version(), value),
                         id: next_id,
                     };
@@ -131,7 +127,6 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
             let id = VersionedSubstateId::new(substate_id.clone(), 0);
             let up = SubstateChange::Up {
                 shard: id.to_shard(num_preshards),
-                transaction_id: Default::default(),
                 substate: Substate::new(id.version(), value),
                 id,
             };
@@ -146,15 +141,10 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                 ..
             } => {
                 updater(substate.substate_value_mut())?;
-                self.put(SubstateChange::Down {
-                    id: id.clone(),
-                    shard,
-                    transaction_id: Default::default(),
-                })?;
+                self.put(SubstateChange::Down { id: id.clone(), shard })?;
                 self.put(SubstateChange::Up {
                     id: id.to_next_version(),
                     shard,
-                    transaction_id: Default::default(),
                     substate,
                 })?;
             },
@@ -163,7 +153,6 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                 let next_id = id.to_next_version();
                 let up = SubstateChange::Up {
                     shard: id.to_shard(self.num_preshards),
-                    transaction_id: Default::default(),
                     substate: Substate::new(next_id.version(), value),
                     id: next_id,
                 };
@@ -228,7 +217,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
         Ok(())
     }
 
-    fn put_diff(&mut self, transaction_id: TransactionId, diff: &SubstateDiff) -> Result<(), Self::Error> {
+    fn put_diff(&mut self, diff: &SubstateDiff) -> Result<(), Self::Error> {
         for (id, version) in diff.down_iter() {
             // Handled by fee withdrawals below
             if id.is_validator_fee_pool() {
@@ -237,11 +226,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
             let id = VersionedSubstateId::new(id.clone(), *version);
             let shard = id.to_shard(self.num_preshards);
             debug!(target: LOG_TARGET, "🔽️ Down: {id} {shard}");
-            self.put(SubstateChange::Down {
-                id,
-                shard,
-                transaction_id,
-            })?;
+            self.put(SubstateChange::Down { id, shard })?;
         }
 
         for (id, substate) in diff.up_iter() {
@@ -256,7 +241,6 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
                 id,
                 shard,
                 substate: substate.clone(),
-                transaction_id,
             })?;
         }
 

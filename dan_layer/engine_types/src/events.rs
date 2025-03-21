@@ -70,6 +70,16 @@ impl Event {
         }
     }
 
+    pub fn custom(
+        substate_id: Option<SubstateId>,
+        template_address: TemplateAddress,
+        tx_hash: Hash,
+        topic: String,
+        payload: Metadata,
+    ) -> Self {
+        Self::new(substate_id, template_address, tx_hash, topic, payload)
+    }
+
     pub fn std(
         substate_id: Option<SubstateId>,
         template_address: TemplateAddress,
@@ -87,8 +97,22 @@ impl Event {
         )
     }
 
-    pub fn topic_has_std_prefix<T: AsRef<str>>(topic: T) -> bool {
-        topic.as_ref().starts_with(STANDARD_TOPIC_PREFIX)
+    pub fn validate_custom_topic<T: AsRef<str>>(topic: T) -> Result<(), String> {
+        let s = topic.as_ref();
+        if topic.as_ref().starts_with(STANDARD_TOPIC_PREFIX) {
+            return Err("topics starting with 'std.' are reserved for standard events".to_string());
+        }
+
+        if s.len() > 255 {
+            return Err("topic is too long".to_string());
+        }
+
+        // Check for only letters and numbers
+        if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
+            return Err("topic can only contain letters, numbers and underscores".to_string());
+        }
+
+        Ok(())
     }
 
     pub fn substate_id(&self) -> Option<&SubstateId> {

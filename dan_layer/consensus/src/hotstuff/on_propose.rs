@@ -548,8 +548,6 @@ where TConsensusSpec: ConsensusSpec
             let change = SubstateChange::Up {
                 id,
                 shard,
-                // N/A
-                transaction_id: Default::default(),
                 substate: Substate::new(0, output),
             };
 
@@ -810,7 +808,7 @@ where TConsensusSpec: ConsensusSpec
                             ))
                         })?;
 
-                        if let Err(err) = substate_store.put_diff(*tx_rec.transaction_id(), diff) {
+                        if let Err(err) = substate_store.put_diff(diff) {
                             error!(
                                 target: LOG_TARGET,
                                 "🔒 Failed to write to temporary state store for transaction {} for LocalOnly: {}. Skipping proposing this transaction...",
@@ -1030,7 +1028,7 @@ where TConsensusSpec: ConsensusSpec
             ))
         })?;
         let filtered_diff = filter_diff_for_committee(local_committee_info, diff);
-        if let Err(err) = substate_store.put_diff(*tx_rec.transaction_id(), &filtered_diff) {
+        if let Err(err) = substate_store.put_diff(&filtered_diff) {
             error!(
                 target: LOG_TARGET,
                 "🔒 Failed to write to temporary state store for transaction {} for Accept: {}. Skipping proposing this transaction...",

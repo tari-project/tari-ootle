@@ -648,7 +648,7 @@ where TConsensusSpec: ConsensusSpec
 
                         if tx_rec.current_decision().is_commit() {
                             if let Some(diff) = execution.result().finalize.accept() {
-                                substate_store.put_diff(atom.id, diff)?;
+                                substate_store.put_diff(diff)?;
                             }
 
                             if atom.leader_fee.is_none() {
@@ -1355,10 +1355,7 @@ where TConsensusSpec: ConsensusSpec
 
         *total_leader_fee += leader_fee.fee();
 
-        substate_store.put_diff(
-            *tx_rec.transaction_id(),
-            &filter_diff_for_committee(local_committee_info, diff),
-        )?;
+        substate_store.put_diff(&filter_diff_for_committee(local_committee_info, diff))?;
 
         tx_rec.set_next_stage(TransactionPoolStage::AllAccepted)?;
         proposed_block_change_set.set_next_transaction_update(tx_rec)?;
@@ -1536,8 +1533,6 @@ where TConsensusSpec: ConsensusSpec
         let change = SubstateChange::Up {
             id,
             shard,
-            // N/A
-            transaction_id: Default::default(),
             substate: Substate::new(0, output),
         };
 

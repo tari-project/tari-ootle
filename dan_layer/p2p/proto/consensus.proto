@@ -238,20 +238,17 @@ message Substate {
 
   uint64 created_epoch = 4;
   uint32 created_by_shard = 5;
-  uint64 created_height = 6;
-  bytes created_block = 7;
-  bytes created_transaction = 8;
-  bytes created_justify = 9;
+  bytes created_block = 6;
+  bytes created_justify = 7;
 
-  SubstateDestroyed destroyed = 10;
+  SubstateDestroyed destroyed = 8;
 }
 
 message SubstateDestroyed {
   tari.dan.common.Epoch epoch = 1;
   uint32 shard = 2;
   uint64 block_height = 3;
-  bytes transaction = 4;
-  bytes justify = 5;
+  bytes justify = 4;
 }
 
 message SyncRequest {

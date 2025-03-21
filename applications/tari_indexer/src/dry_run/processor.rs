@@ -180,7 +180,7 @@ where TSubstateCache: SubstateCache + 'static
             // build a client with the VN
             let mut client = self.client_provider.create_client(vn_addr);
 
-            match client.get_substate(substate_requirement).await {
+            match client.get_substate(substate_requirement.as_ref()).await {
                 Ok(SubstateResult::Up { substate, id, .. }) => {
                     return Ok((id, substate));
                 },

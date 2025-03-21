@@ -1,6 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-use std::{borrow::Borrow, collections::HashMap, marker::PhantomData};
+use std::{collections::HashMap, marker::PhantomData};
 
 use diesel::{
     query_builder::SqlQuery,
@@ -32,7 +32,6 @@ use tari_dan_common_types::{
     SubstateAddress,
     SubstateLockType,
     ToSubstateAddress,
-    VersionedSubstateId,
     VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
@@ -1947,20 +1946,18 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         ))
     }
 
-    fn substates_any_exist<I: IntoIterator<Item = S>, S: Borrow<VersionedSubstateId>>(
-        &self,
-        addresses: I,
-    ) -> Result<bool, StorageError> {
+    fn substates_any_exist<'a, I>(&self, substates: I) -> Result<bool, StorageError>
+    where I: IntoIterator<Item = VersionedSubstateIdRef<'a>> {
         use crate::schema::substates;
 
-        let mut addresses = addresses.into_iter().peekable();
+        let mut addresses = substates.into_iter().peekable();
         if addresses.peek().is_none() {
             return Ok(false);
         }
 
         let count = substates::table
             .count()
-            .filter(substates::address.eq_any(addresses.map(|v| v.borrow().to_substate_address()).map(serialize_hex)))
+            .filter(substates::address.eq_any(addresses.map(|v| v.to_substate_address()).map(serialize_hex)))
             .limit(1)
             .get_result::<i64>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -1969,54 +1966,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             })?;
 
         Ok(count > 0)
-    }
-
-    fn substates_exists_for_transaction(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
-        use crate::schema::substates;
-
-        let transaction_id = serialize_hex(transaction_id);
-
-        let count = substates::table
-            .count()
-            .filter(substates::created_by_transaction.eq(&transaction_id))
-            .or_filter(substates::destroyed_by_transaction.eq(&transaction_id))
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_exists_for_transaction",
-                source: e,
-            })?;
-
-        Ok(count > 0)
-    }
-
-    fn substates_get_all_for_transaction(
-        &self,
-        transaction_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        use crate::schema::substates;
-
-        let transaction_id_hex = serialize_hex(transaction_id);
-
-        let substates = substates::table
-            .filter(
-                substates::created_by_transaction
-                    .eq(&transaction_id_hex)
-                    .or(substates::destroyed_by_transaction.eq(Some(&transaction_id_hex))),
-            )
-            .order_by(substates::id.asc())
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_all_for_transaction",
-                source: e,
-            })?;
-
-        let substates = substates
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(substates)
     }
 
     fn substate_locks_get_locked_substates_for_transaction(

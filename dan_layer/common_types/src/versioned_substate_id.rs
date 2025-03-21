@@ -96,6 +96,13 @@ impl SubstateRequirement {
             substate_id: self.substate_id,
         }
     }
+
+    pub fn as_ref(&self) -> SubstateRequirementRef<'_> {
+        SubstateRequirementRef {
+            substate_id: &self.substate_id,
+            version: self.version,
+        }
+    }
 }
 
 impl FromStr for SubstateRequirement {
@@ -184,6 +191,14 @@ pub struct SubstateRequirementRef<'a> {
 impl<'a> SubstateRequirementRef<'a> {
     pub fn new(substate_id: &'a SubstateId, version: Option<u32>) -> Self {
         Self { substate_id, version }
+    }
+
+    pub fn versioned(substate_id: &'a SubstateId, version: u32) -> Self {
+        Self::new(substate_id, Some(version))
+    }
+
+    pub fn unversioned(substate_id: &'a SubstateId) -> Self {
+        Self::new(substate_id, None)
     }
 
     pub fn to_owned(&self) -> SubstateRequirement {

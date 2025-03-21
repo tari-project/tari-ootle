@@ -25,13 +25,12 @@ use std::{convert::TryInto, sync::Arc};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_dan_app_utilities::substate_file_cache::SubstateFileCache;
-use tari_dan_common_types::{substate_type::SubstateType, PeerAddress};
+use tari_dan_common_types::{substate_type::SubstateType, PeerAddress, VersionedSubstateIdRef};
 use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
 use tari_template_lib::models::TemplateAddress;
-use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::substate_storage_sqlite::sqlite_substate_store_factory::{
@@ -45,7 +44,6 @@ pub struct SubstateResponse {
     pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
-    pub created_by_transaction: TransactionId,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -116,15 +114,10 @@ impl SubstateManager {
         // the substate is not in db (or is not the requested version) so we fetch it from the dan layer committee
         let substate_result = self.substate_scanner.get_substate(substate_address, version).await?;
         match substate_result {
-            SubstateResult::Up {
-                id,
-                substate,
-                created_by_tx,
-            } => Ok(Some(SubstateResponse {
+            SubstateResult::Up { id, substate } => Ok(Some(SubstateResponse {
                 address: id,
                 version: substate.version(),
                 substate: substate.into_substate_value(),
-                created_by_transaction: created_by_tx,
             })),
             _ => Ok(None),
         }
@@ -148,12 +141,11 @@ impl SubstateManager {
 
     pub async fn get_specific_substate(
         &self,
-        substate_id: SubstateId,
-        version: u32,
+        versioned_id: VersionedSubstateIdRef<'_>,
     ) -> Result<SubstateResult, anyhow::Error> {
         let substate_result = self
             .substate_scanner
-            .get_specific_substate_from_committee(substate_id, version)
+            .get_specific_substate_from_committee(versioned_id.into())
             .await?;
         Ok(substate_result)
     }

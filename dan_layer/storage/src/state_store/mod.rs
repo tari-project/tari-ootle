@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{borrow::Borrow, collections::HashMap, ops::Deref};
+use std::{collections::HashMap, ops::Deref};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -245,17 +245,8 @@ pub trait StateStoreReadTransaction: Sized {
         I::IntoIter: ExactSizeIterator;
     /// Returns (version, is_up)
     fn substates_get_max_version_for_substate(&self, substate_id: &SubstateId) -> Result<(u32, bool), StorageError>;
-    fn substates_any_exist<I, S>(&self, substates: I) -> Result<bool, StorageError>
-    where
-        I: IntoIterator<Item = S>,
-        S: Borrow<VersionedSubstateId>;
-
-    fn substates_exists_for_transaction(&self, transaction_id: &TransactionId) -> Result<bool, StorageError>;
-
-    fn substates_get_all_for_transaction(
-        &self,
-        transaction_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError>;
+    fn substates_any_exist<'a, I>(&self, substates: I) -> Result<bool, StorageError>
+    where I: IntoIterator<Item = VersionedSubstateIdRef<'a>>;
 
     fn substate_locks_get_locked_substates_for_transaction(
         &self,
@@ -487,7 +478,6 @@ pub trait StateStoreWriteTransaction {
         shard: Shard,
         epoch: Epoch,
         destroyed_block_height: NodeHeight,
-        destroyed_transaction_id: &TransactionId,
         destroyed_qc_id: &QcId,
     ) -> Result<(), StorageError>;
     fn substates_prune_downed_values(&mut self, epoch: Epoch) -> Result<(), StorageError>;

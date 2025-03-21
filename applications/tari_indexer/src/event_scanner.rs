@@ -330,7 +330,7 @@ impl EventScanner {
                     .map(Self::encode_substate)
                     .transpose()?
                     .unwrap_or_default(),
-                tx_hash: create.substate.created_by_transaction.to_string(),
+                tx_hash: String::new(),
                 template_address: template_address.map(|s| s.to_string()),
                 module_name,
                 timestamp: timestamp as i64,

@@ -14,12 +14,10 @@ tari_engine_types = { workspace = true }
 tari_transaction = { workspace = true }
 tari_template_lib = { workspace = true }
 tari_validator_node_rpc = { workspace = true }
-tari_dan_storage = { workspace = true }
 
 async-trait = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
-rand = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["default", "macros", "time", "sync", "rt-multi-thread"] }

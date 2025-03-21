@@ -4,39 +4,48 @@
 use std::collections::HashSet;
 
 use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, VersionedSubstateId, VersionedSubstateIdRef};
-use tari_dan_storage::{consensus_models::QcId, StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
+use tari_dan_storage::{
+    consensus_models::{Block, QcId},
+    StateStore,
+    StateStoreReadTransaction,
+    StateStoreWriteTransaction,
+};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::models::{ComponentAddress, ObjectKey};
-use tari_transaction::TransactionId;
 
-use crate::helper::{assert_eq_debug, build_substate_record, create_rocksdb, create_sqlite};
+use crate::{
+    helper::{assert_eq_debug, build_substate_record, create_rocksdb, create_sqlite},
+    TEST_NUM_PRESHARDS,
+};
 
 fn substate_id(seed: u8) -> SubstateId {
     let address = ComponentAddress::from_array([seed; ObjectKey::LENGTH]);
     SubstateId::Component(address)
 }
 
-use crate::helper::transaction_id_from_seed;
-
 #[test]
-fn basic_substate_operations_sqlite() {
+fn sqlite() {
     let db = create_sqlite();
     db.foreign_keys_off().unwrap();
-    basic_substate_operations(db);
+    operations(db);
 }
 
 #[test]
-fn basic_substate_operations_rocksdb() {
+fn rocksdb() {
     let (db, _tmp) = create_rocksdb();
-    basic_substate_operations(db);
+    operations(db);
 }
 
-fn basic_substate_operations(db: impl StateStore) {
+fn operations(db: impl StateStore) {
     let mut tx = db.create_write_tx().unwrap();
+
+    let zero_block = Block::zero_block(Default::default(), TEST_NUM_PRESHARDS);
+    zero_block.insert(&mut tx).unwrap();
 
     // substate 1
     let substate1_id = substate_id(1);
-    let substate1 = build_substate_record(&substate1_id, 0);
+    let mut substate1 = build_substate_record(&substate1_id, 0);
+    substate1.created_block = *zero_block.id();
     let substate1_address = substate1.to_substate_address();
     tx.substates_create(&substate1).unwrap();
     tx.substates_down(
@@ -44,18 +53,19 @@ fn basic_substate_operations(db: impl StateStore) {
         Shard::first(),
         Epoch(123),
         NodeHeight(123),
-        &transaction_id_from_seed(10),
         &QcId::zero(),
     )
     .unwrap();
     // substate 1 (version 1)
-    let substate1b = build_substate_record(&substate1_id, 1);
+    let mut substate1b = build_substate_record(&substate1_id, 1);
+    substate1b.created_block = *zero_block.id();
     let substate1b_address = substate1b.to_substate_address();
     tx.substates_create(&substate1b).unwrap();
 
     // substate 2
     let substate2_id = substate_id(2);
-    let substate2 = build_substate_record(&substate2_id, 0);
+    let mut substate2 = build_substate_record(&substate2_id, 0);
+    substate2.created_block = *zero_block.id();
     let substate2_address = substate2.to_substate_address();
     tx.substates_create(&substate2).unwrap();
 
@@ -104,34 +114,34 @@ fn basic_substate_operations(db: impl StateStore) {
     assert_eq!(res, (0, true));
 
     // substates_any_exist (all exist)
-    let substate_ids = vec![
+    let substate_ids = [
         VersionedSubstateId::new(substate1_id.clone(), 0),
         VersionedSubstateId::new(substate2_id.clone(), 0),
     ];
-    let res = tx.substates_any_exist(substate_ids).unwrap();
+    let res = tx
+        .substates_any_exist(substate_ids.iter().map(|id| id.as_ref()))
+        .unwrap();
     assert!(res);
 
     // substates_any_exist (some do not exist)
-    let substate_ids = vec![
+    let substate_ids = [
         VersionedSubstateId::new(substate1_id.clone(), 100), // version should not exist
         VersionedSubstateId::new(substate2_id.clone(), 0),
     ];
-    let res = tx.substates_any_exist(substate_ids).unwrap();
+    let res = tx
+        .substates_any_exist(substate_ids.iter().map(|id| id.as_ref()))
+        .unwrap();
     assert!(res);
 
     // substates_any_exist (none exist)
-    let substate_ids = vec![
+    let substate_ids = [
         VersionedSubstateId::new(substate1_id, 100), // version should not exist
         VersionedSubstateId::new(substate2_id, 100), // version should not exist
     ];
-    let res = tx.substates_any_exist(substate_ids).unwrap();
-    assert!(!res);
-
-    // substates_get_all_for_transaction
     let res = tx
-        .substates_get_all_for_transaction(&substate1.created_by_transaction)
+        .substates_any_exist(substate_ids.iter().map(|id| id.as_ref()))
         .unwrap();
-    assert_eq!(res.len(), 2);
+    assert!(!res);
 
     // substates_down
     let res = tx.substates_get(&substate2_address).unwrap();
@@ -141,7 +151,6 @@ fn basic_substate_operations(db: impl StateStore) {
     let shard = Shard::first();
     let epoch = Epoch::zero();
     let destroyed_block_height = NodeHeight::zero();
-    let destroyed_transaction_id = TransactionId::default();
     let destroyed_qc_id = QcId::zero();
 
     tx.substates_down(
@@ -149,7 +158,6 @@ fn basic_substate_operations(db: impl StateStore) {
         shard,
         epoch,
         destroyed_block_height,
-        &destroyed_transaction_id,
         &destroyed_qc_id,
     )
     .unwrap();

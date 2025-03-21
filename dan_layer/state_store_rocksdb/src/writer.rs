@@ -139,7 +139,7 @@ use crate::{
         state_tree::{StateTreeModel, StateTreeStaleNodesModel, StateTreeStaleNodesModelRef},
         state_tree_shard_versions::StateTreeShardVersionModel,
         substate,
-        substate::{SubstateHeadData, SubstateModel, SubstateTransactionIndexKey},
+        substate::{SubstateHeadData, SubstateModel},
         substate_locks,
         substate_locks::{SubstateLockKey, SubstateLockModel},
         transaction,
@@ -1214,17 +1214,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             OPERATION,
         )?;
 
-        // TODO: ideally remove the need for this index
-        db.cf(substate::TransactionIndex)?.put(
-            &SubstateTransactionIndexKey {
-                transaction_id: substate.created_by_transaction,
-                versioned_substate_id: substate.to_versioned_substate_id(),
-                is_up: true,
-            },
-            &(),
-            OPERATION,
-        )?;
-
         let seq_index = db.cf(state_transition::ShardSeqIndex)?;
         let seq = seq_index.get(&substate.created_by_shard, OPERATION).optional()?;
         let next_seq = seq.map(|s| s + 1).unwrap_or(1);
@@ -1248,7 +1237,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         shard: Shard,
         epoch: Epoch,
         destroyed_block_height: NodeHeight,
-        destroyed_transaction_id: &TransactionId,
         destroyed_qc_id: &QcId,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "substates_down";
@@ -1259,7 +1247,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let address = versioned_substate_id.to_substate_address();
         let mut substate = cf.get(&address, OPERATION)?;
         substate.destroyed = Some(SubstateDestroyed {
-            by_transaction: *destroyed_transaction_id,
             justify: *destroyed_qc_id,
             by_block: destroyed_block_height,
             at_epoch: epoch,
@@ -1272,16 +1259,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 version: substate.version(),
                 is_up: false,
             },
-            OPERATION,
-        )?;
-        // TODO: ideally remove the need for this index
-        db.cf(substate::TransactionIndex)?.put(
-            &SubstateTransactionIndexKey {
-                transaction_id: *destroyed_transaction_id,
-                versioned_substate_id: substate.to_versioned_substate_id(),
-                is_up: false,
-            },
-            &(),
             OPERATION,
         )?;
 

@@ -9,7 +9,7 @@ use tari_dan_storage::{consensus_models, consensus_models::BlockId, StorageError
 use tari_engine_types::substate::SubstateId;
 use time::PrimitiveDateTime;
 
-use crate::serialization::{deserialize_hex_try_from, deserialize_json};
+use crate::serialization::deserialize_json;
 
 #[derive(Debug, Clone, Queryable)]
 pub struct BlockDiff {
@@ -17,7 +17,6 @@ pub struct BlockDiff {
     pub id: i32,
     #[allow(dead_code)]
     pub block_id: String,
-    pub transaction_id: String,
     pub substate_id: String,
     pub version: i32,
     pub shard: i32,
@@ -42,7 +41,6 @@ impl BlockDiff {
             details: format!("Invalid substate id {}: {}", d.substate_id, err),
         })?;
         let id = VersionedSubstateId::new(substate_id, d.version as u32);
-        let transaction_id = deserialize_hex_try_from(&d.transaction_id)?;
         let shard = Shard::from(d.shard as u32);
         match d.change.as_str() {
             "Up" => {
@@ -52,15 +50,10 @@ impl BlockDiff {
                 Ok(consensus_models::SubstateChange::Up {
                     id,
                     shard,
-                    transaction_id,
                     substate: deserialize_json(&state)?,
                 })
             },
-            "Down" => Ok(consensus_models::SubstateChange::Down {
-                id,
-                transaction_id,
-                shard,
-            }),
+            "Down" => Ok(consensus_models::SubstateChange::Down { id, shard }),
             _ => Err(StorageError::DataInconsistency {
                 details: format!("Invalid block diff change type: {}", d.change),
             }),

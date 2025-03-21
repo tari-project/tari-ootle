@@ -23,8 +23,6 @@
 
 use std::convert::{TryFrom, TryInto};
 
-use tari_transaction::TransactionId;
-
 use crate::{
     substate_manager::SubstateResponse,
     substate_storage_sqlite::{models::substate::Substate as SubstateRow, schema::*},
@@ -36,6 +34,7 @@ pub struct Substate {
     pub address: String,
     pub version: i64,
     pub data: String,
+    // TODO: unused
     pub tx_hash: String,
     pub template_address: Option<String>,
     pub module_name: Option<String>,
@@ -46,12 +45,10 @@ impl TryFrom<Substate> for SubstateResponse {
     type Error = anyhow::Error;
 
     fn try_from(row: SubstateRow) -> Result<Self, Self::Error> {
-        let created_by_transaction = TransactionId::from_hex(&row.tx_hash)?;
         Ok(SubstateResponse {
             address: row.address.parse()?,
             version: row.version.try_into()?,
             substate: serde_json::from_str(&row.data)?,
-            created_by_transaction,
         })
     }
 }
@@ -62,6 +59,7 @@ pub struct NewSubstate {
     pub address: String,
     pub version: i64,
     pub data: String,
+    // TODO: unused
     pub tx_hash: String,
     pub template_address: Option<String>,
     pub module_name: Option<String>,

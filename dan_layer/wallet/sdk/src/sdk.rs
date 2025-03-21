@@ -27,6 +27,7 @@ use crate::{
         key_manager::KeyManagerApi,
         non_fungible_tokens::NonFungibleTokensApi,
         substate::SubstatesApi,
+        template::TemplateApi,
         transaction::TransactionApi,
     },
     network::WalletNetworkInterface,
@@ -75,7 +76,6 @@ where
         indexer: TNetworkInterface,
         config: WalletSdkConfig,
         seed_words: Option<SeedWords>,
-        wallet_secret: Option<String>,
     ) -> Result<DanWalletSdkInitResult<TStore, TNetworkInterface>, WalletSdkError> {
         // initialize network
         let config_api = ConfigApi::new(&store);
@@ -180,6 +180,10 @@ where
 
     pub fn non_fungible_api(&self) -> NonFungibleTokensApi<'_, TStore> {
         NonFungibleTokensApi::new(&self.store)
+    }
+
+    pub fn template_api(&self) -> TemplateApi<'_, TStore> {
+        TemplateApi::new(&self.store)
     }
 
     fn cipher_seed_password_keyring_entry(network: Network) -> Result<Entry, keyring::Error> {

@@ -19,6 +19,7 @@ use tari_dan_common_types::{SubstateRequirement, VersionedSubstateId};
 use tari_dan_storage::consensus_models::QuorumCertificate;
 use tari_dan_wallet_sdk::{
     models::{
+        AuthoredTemplateModel,
         ConfidentialOutputModel,
         ConfidentialProofId,
         NewAccountInfo,
@@ -38,7 +39,10 @@ use webauthn_rs::prelude::Passkey;
 
 use crate::{
     diesel::ExpressionMethods,
-    models::{self},
+    models::{
+        AuthoredTemplate,
+        {self},
+    },
     reader::ReadTransaction,
     serialization::serialize_json,
 };
@@ -962,6 +966,28 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("webauthn_reg_passkeys_insert", e))?;
+
+        Ok(())
+    }
+
+    /// Inserting a new authored template.
+    fn authored_templates_insert(&mut self, model: AuthoredTemplateModel) -> Result<(), WalletStorageError> {
+        use crate::schema::authored_templates;
+        let entity = AuthoredTemplate::try_from(model).map_err(|error| WalletStorageError::DecodingError {
+            operation: "authored_templates_insert",
+            item: "authored_template_model",
+            details: error.to_string(),
+        })?;
+        diesel::insert_into(authored_templates::table)
+            .values((
+                authored_templates::key_index.eq(entity.key_index),
+                authored_templates::address.eq(entity.address),
+                authored_templates::name.eq(entity.name),
+                authored_templates::tari_version.eq(entity.tari_version),
+                authored_templates::functions.eq(entity.functions),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("authored_templates_insert", e))?;
 
         Ok(())
     }

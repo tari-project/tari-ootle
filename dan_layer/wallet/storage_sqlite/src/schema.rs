@@ -164,6 +164,19 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    authored_templates (id) {
+        id -> Integer,
+        key_index -> Integer,
+        address -> Text,
+        name -> Text,
+        tari_version -> Text,
+        functions -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
 diesel::joinable!(non_fungible_tokens -> vaults (vault_id));
 diesel::joinable!(outputs -> accounts (account_id));
 diesel::joinable!(outputs -> vaults (vault_id));

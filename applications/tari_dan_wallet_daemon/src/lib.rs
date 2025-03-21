@@ -83,7 +83,7 @@ pub async fn run_tari_dan_wallet_daemon(
     // trigger resource scanning if needed
     if wallet_sdk_init_result.needs_resource_sync {
         let scanner = resource_scanner::Service::new(
-            wallet_sdk.clone(), 
+            wallet_sdk.clone(),
             shutdown_signal.clone(),
         );
         tokio::spawn(async move {
@@ -170,7 +170,8 @@ pub fn initialize_wallet_sdk(
     let seed_words = wallet_restore_args.seed_words.clone().map(|seed_words| {
         SeedWords::new(
             seed_words
-                .split(" ")
+                .split_whitespace()
+                .filter(|word| !word.is_empty())
                 .map(|word| Hidden::hide(word.to_string()))
                 .collect(),
         )
@@ -181,7 +182,6 @@ pub fn initialize_wallet_sdk(
         indexer,
         sdk_config,
         seed_words,
-        wallet_restore_args.wallet_secret.clone(),
     )?;
 
     Ok(wallet_sdk_init_result)

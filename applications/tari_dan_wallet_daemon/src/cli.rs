@@ -22,10 +22,18 @@
 
 use std::{net::SocketAddr, path::PathBuf};
 
-use clap::Parser;
+use clap::{Args, Parser};
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::configuration::{ConfigOverrideProvider, Network};
 use url::Url;
+
+#[derive(Args, Debug)]
+pub struct WalletRestoreArgs {
+    #[clap(long)]
+    /// Seed words of a wallet to be restored.
+    /// If set, wallet daemon tries to restore your wallet based on these seed words.
+    pub seed_words: Option<String>,
+}
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -42,6 +50,8 @@ pub struct Cli {
     #[clap(long, short = 'i', alias = "indexer-url")]
     /// Indexer JSON-RPC url override
     pub indexer_json_rpc_url: Option<Url>,
+    #[clap(flatten)]
+    pub wallet_restore: WalletRestoreArgs,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }
@@ -97,4 +107,9 @@ pub enum Subcommand {
         #[clap(long, alias = "output", short = 'o')]
         output_path: Option<PathBuf>,
     },
+    #[clap(
+        name = "seed-words",
+        about = "Get current seed words of wallet (used for wallet retrieval)"
+    )]
+    SeedWords,
 }

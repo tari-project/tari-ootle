@@ -92,6 +92,7 @@ const ConnectorDialog = () => {
               'tari_viewConfidentialVaultBalance',
               'tari_createFreeTestCoins',
               'tari_listSubstates',
+              'tari_getNftsList'
             ],
             chains: [
               'tari:devnet',

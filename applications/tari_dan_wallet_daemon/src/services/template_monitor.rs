@@ -63,6 +63,9 @@ where
                 Ok(template_def) => Some(template_def),
                 Err(error) => {
                     error!(target: LOG_TARGET, "Failed to fetch template definition: {}, retry...", error);
+                    if self.shutdown_signal.is_triggered() {
+                        return Err(anyhow!("shutdown during fetch template definition"));
+                    }
                     tokio::time::sleep(current_wait_time).await;
                     if current_wait_time < max_wait_time {
                         current_wait_time = current_wait_time.add(wait_step);

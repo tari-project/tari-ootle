@@ -20,52 +20,31 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{shard::Shard, NodeHeight};
-use tari_dan_storage::consensus_models::{self, BlockId, VersionedStateHashTreeDiff};
+use tari_dan_common_types::shard::Shard;
+use tari_dan_storage::consensus_models::{BlockId, PendingShardStateTreeDiff};
 
-use crate::{model::traits::RocksdbModel, utils::RocksdbSeq};
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, ShardCodec},
+    traits::{Cf, QueryCf},
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingStateTreeDiffData {
-    pub block_id: BlockId,
-    pub block_height: NodeHeight,
-    pub shard: Shard,
-    pub diff: VersionedStateHashTreeDiff,
-}
+pub struct PendingStateTreeDiffModel;
 
-impl From<PendingStateTreeDiffData> for consensus_models::PendingShardStateTreeDiff {
-    fn from(value: PendingStateTreeDiffData) -> Self {
-        let version = value.diff.version;
-        Self::load(version, value.diff.diff)
+impl Cf for PendingStateTreeDiffModel {
+    type Key = (BlockId, Shard);
+    type KeyCodec = (BlockIdCodec, ShardCodec);
+    type Value = PendingShardStateTreeDiff;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        "pending_state_tree_diff"
     }
 }
 
-pub struct PendingStateTreeDiffModel {}
+pub struct ByBlockIdQuery;
 
-impl PendingStateTreeDiffModel {
-    pub fn key_from_block_str_and_height(block_id: &str, height: Option<&NodeHeight>) -> String {
-        let height = height
-            .map(|h|
-                // RocksdbSeq allows us to properly order keys by height
-                RocksdbSeq(h.as_u64()).to_string())
-            .unwrap_or_default();
-        format!("{}_{}_{}", Self::key_prefix(), block_id, height)
-    }
-
-    pub fn key_from_block_and_height(block_id: &BlockId, height: Option<&NodeHeight>) -> String {
-        Self::key_from_block_str_and_height(&block_id.to_string(), height)
-    }
-}
-
-impl RocksdbModel for PendingStateTreeDiffModel {
-    type Item = PendingStateTreeDiffData;
-
-    fn key_prefix() -> &'static str {
-        "pendingstatetreediff"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        Self::key_from_block_and_height(&value.block_id, Some(&value.block_height))
-    }
+impl QueryCf for ByBlockIdQuery {
+    type Cf = PendingStateTreeDiffModel;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
 }

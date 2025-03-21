@@ -411,6 +411,14 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 "Checkpoint block is not an Epoch End block"
             )));
         }
+        // 1 + for global shard
+        if checkpoint.shard_roots().len() > checkpoint.block().shard_group().len() + 1 {
+            return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
+                "Checkpoint has more shard root hashes ({}) than shards applicable to the block ({})",
+                checkpoint.shard_roots().len(),
+                checkpoint.block().shard_group().len() + 1
+            )));
+        }
 
         // Sanity check that the calculated merkle root matches the provided shard roots
         // Note this allows us to use each of the provided shard MRs assuming we trust the provided block that has been

@@ -65,7 +65,6 @@ use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -105,6 +104,7 @@ use crate::{
     validator_registration_file::ValidatorRegistrationFile,
     ApplicationConfig,
     ValidatorNodeEpochManagerSpec,
+    ValidatorNodeStateStore,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::bootstrap";
@@ -117,7 +117,7 @@ pub async fn spawn_services(
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     consensus_constants: ConsensusConstants,
     #[cfg(feature = "metrics")] metrics_registry: &prometheus::Registry,
-) -> Result<Services, anyhow::Error> {
+) -> Result<Services<ValidatorNodeStateStore>, anyhow::Error> {
     let mut handles = Vec::with_capacity(10);
 
     ensure_directories_exist(config)?;
@@ -184,9 +184,14 @@ pub async fn spawn_services(
 
     let sidechain_id = config.validator_node.validator_node_sidechain_id.clone();
 
-    // Connect to shard db
+    // Connect to state db
+    #[cfg(feature = "sqlite_backend")]
     let state_store =
-        SqliteStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path().display()))?;
+        ValidatorNodeStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path.display()))?;
+
+    #[cfg(not(feature = "sqlite_backend"))]
+    let state_store = ValidatorNodeStateStore::connect(&config.validator_node.state_db_path)?;
+
     state_store.with_write_tx(|tx| {
         bootstrap_state(
             tx,
@@ -457,8 +462,7 @@ fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {
     fs::create_dir_all(&config.validator_node.data_dir)?;
     Ok(())
 }
-
-pub struct Services {
+pub struct Services<TStore> {
     pub keypair: RistrettoKeypair,
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub mempool: MempoolHandle,
@@ -466,16 +470,16 @@ pub struct Services {
     pub template_manager: TemplateManagerHandle,
     pub consensus_handle: ConsensusHandle,
     // pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
-    pub dry_run_transaction_processor: DryRunTransactionProcessor,
+    pub dry_run_transaction_processor: DryRunTransactionProcessor<TStore>,
     // pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
     // pub consensus_gossip_service: ConsensusGossipHandle,
-    pub state_store: SqliteStateStore<PeerAddress>,
+    pub state_store: TStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
 
     pub handles: Vec<JoinHandle<Result<(), anyhow::Error>>>,
 }
 
-impl Services {
+impl<TStore> Services<TStore> {
     pub async fn on_any_exit(&mut self) -> Result<(), anyhow::Error> {
         // JoinHandler panics if polled again after reading the Result, we fuse the future to prevent this.
         let fused = self.handles.iter_mut().map(|h| h.fuse());
@@ -483,12 +487,37 @@ impl Services {
         res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
     }
 }
+// pub struct Services {
+//     pub keypair: RistrettoKeypair,
+//     pub networking: NetworkingHandle<TariMessagingSpec>,
+//     pub mempool: MempoolHandle,
+//     pub epoch_manager: EpochManagerHandle<PeerAddress>,
+//     pub template_manager: TemplateManagerHandle,
+//     pub consensus_handle: ConsensusHandle,
+//     // pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
+//     pub dry_run_transaction_processor: DryRunTransactionProcessor,
+//     // pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
+//     // pub consensus_gossip_service: ConsensusGossipHandle,
+//     pub state_store: SqliteStateStore<PeerAddress>,
+//     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
+//
+//     pub handles: Vec<JoinHandle<Result<(), anyhow::Error>>>,
+// }
+//
+// impl Services {
+//     pub async fn on_any_exit(&mut self) -> Result<(), anyhow::Error> {
+//         // JoinHandler panics if polled again after reading the Result, we fuse the future to prevent this.
+//         let fused = self.handles.iter_mut().map(|h| h.fuse());
+//         let (res, _, _) = future::select_all(fused).await;
+//         res.unwrap_or_else(|e| Err(anyhow!("Task panicked: {}", e)))
+//     }
+// }
 
-async fn spawn_p2p_rpc(
+async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     config: &ApplicationConfig,
     networking: &mut NetworkingHandle<TariMessagingSpec>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
-    shard_store_store: SqliteStateStore<PeerAddress>,
+    shard_store_store: TStateStore,
     mempool: MempoolHandle,
     consensus: ConsensusHandle,
     template_manager: TemplateManagerHandle,

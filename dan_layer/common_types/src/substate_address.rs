@@ -310,6 +310,12 @@ impl ToSubstateAddress for (&SubstateId, u32) {
     }
 }
 
+impl AsRef<SubstateAddress> for SubstateAddress {
+    fn as_ref(&self) -> &SubstateAddress {
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{

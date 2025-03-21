@@ -10,7 +10,7 @@ use tari_crypto::keys::PublicKey as _;
 use tari_dan_common_types::{ShardGroup, SubstateAddress};
 use tari_dan_storage::consensus_models::TransactionPool;
 use tari_shutdown::ShutdownSignal;
-use tari_state_store_sqlite::SqliteStateStore;
+use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::support::{
@@ -23,6 +23,7 @@ use crate::support::{
     RoundRobinLeaderStrategy,
     TestBlockTransactionProcessor,
     TestConsensusSpec,
+    TestStore,
     Validator,
     ValidatorChannels,
     TEST_NUM_PRESHARDS,
@@ -36,6 +37,8 @@ pub struct ValidatorBuilder {
     pub fee_claim_public_key: PublicKey,
     pub shard_group: ShardGroup,
     pub sql_url: String,
+    #[allow(dead_code)]
+    pub rocks_path: TempDir,
     pub leader_strategy: RoundRobinLeaderStrategy,
     pub num_committees: u32,
     pub epoch_manager: Option<TestEpochManager>,
@@ -54,6 +57,7 @@ impl ValidatorBuilder {
             num_committees: 0,
             shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
             sql_url: ":memory".to_string(),
+            rocks_path: tempfile::tempdir().unwrap(),
             leader_strategy: RoundRobinLeaderStrategy::new(),
             epoch_manager: None,
             transaction_executions: TestExecutionSpecStore::new(),
@@ -131,7 +135,10 @@ impl ValidatorBuilder {
             TestOutboundMessaging::create(epoch_manager.clone(), tx_leader, tx_broadcast);
         let inbound_messaging = TestInboundMessaging::new(self.address.clone(), rx_hs_message, rx_loopback);
 
-        let store = SqliteStateStore::connect(&self.sql_url).unwrap();
+        #[cfg(not(feature = "sqlite_backend"))]
+        let store = TestStore::connect(&self.rocks_path).unwrap();
+        #[cfg(feature = "sqlite_backend")]
+        let store = TestStore::connect(&self.sql_url).unwrap();
         let signing_service = TestVoteSignatureService::new(self.address.clone());
         let transaction_pool = TransactionPool::new();
         let (tx_events, _) = broadcast::channel(100);
@@ -156,6 +163,8 @@ impl ValidatorBuilder {
             NoopHooks,
             shutdown_signal.clone(),
         );
+
+        let current_view = worker.pacemaker().current_view().clone();
 
         let (tx_current_state, rx_current_state) = watch::channel(ConsensusCurrentState::default());
         let context = ConsensusWorkerContext {
@@ -186,6 +195,7 @@ impl ValidatorBuilder {
             num_committees: self.num_committees,
             transaction_executions: self.transaction_executions.clone(),
             state_store: store,
+            current_view,
             epoch_manager,
             events: tx_events.subscribe(),
             current_state_machine_state: rx_current_state,

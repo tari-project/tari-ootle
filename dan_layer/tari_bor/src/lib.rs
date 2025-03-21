@@ -16,7 +16,7 @@ mod tag;
 pub use tag::*;
 
 mod error;
-#[cfg(feature = "json_encoding")]
+#[cfg(all(feature = "std", feature = "json_encoding"))]
 pub mod json_encoding;
 mod walker;
 

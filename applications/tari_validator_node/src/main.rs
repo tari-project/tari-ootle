@@ -72,7 +72,6 @@ async fn main_inner() -> Result<(), ExitError> {
 
     // Remove the pid file if it exists
     let _file = fs::remove_file(config.common.base_path.join("pid"));
-    let mut shutdown = Shutdown::new();
     if let Err(e) = initialize_logging(
         &cli.common.log_config_path("validator"),
         &cli.common.get_base_path(),
@@ -81,7 +80,8 @@ async fn main_inner() -> Result<(), ExitError> {
         eprintln!("{}", e);
     }
 
-    match run_validator_node(&config, shutdown.to_signal()).await {
+    let shutdown = Shutdown::new();
+    match run_validator_node(&config, shutdown).await {
         Ok(_) => info!(target: LOG_TARGET, "Validator node shutdown successfully"),
         Err(e) => match e.downcast() {
             Ok(exit_error) => {
@@ -94,8 +94,6 @@ async fn main_inner() -> Result<(), ExitError> {
             },
         },
     }
-
-    shutdown.trigger();
 
     Ok(())
 }

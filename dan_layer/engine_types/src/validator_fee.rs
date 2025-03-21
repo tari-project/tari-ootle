@@ -94,6 +94,13 @@ impl borsh::BorshSerialize for ValidatorFeePoolAddress {
     }
 }
 
+impl borsh::BorshDeserialize for ValidatorFeePoolAddress {
+    fn deserialize_reader<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
+        Ok(Self::from_array(key))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",

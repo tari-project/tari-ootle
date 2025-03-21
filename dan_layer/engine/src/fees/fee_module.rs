@@ -47,8 +47,8 @@ impl RuntimeModule for FeeModule {
             Ok::<_, RuntimeModuleError>(counter.get())
         })?;
 
-        // TODO: Cost per byte of storage is reduced by a pretty arbitrarily chosen factor (floor(cost/0.333...))
-        const STORAGE_COST_REDUCTION_DIVISOR: u64 = 3;
+        // TODO: Cost per byte of storage is reduced by a pretty arbitrarily chosen factor (floor(cost*0.25))
+        const STORAGE_COST_REDUCTION_DIVISOR: u64 = 4;
         track.add_fee_charge(
             FeeSource::Storage,
             // Divide a storage cost reduction factor

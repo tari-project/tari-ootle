@@ -2,10 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     fmt::{Debug, Display, Formatter},
     iter,
-    ops::{Deref, RangeInclusive},
+    ops::Deref,
 };
 
 use borsh::BorshSerialize;
@@ -26,7 +26,6 @@ use tari_dan_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
-    SubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
@@ -525,20 +524,12 @@ impl Block {
     pub fn get_all_blocks_between<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         epoch: Epoch,
-        shard_group: ShardGroup,
         start_block_height: NodeHeight,
         end_block_height: NodeHeight,
         include_dummy_blocks: bool,
-        limit: u64,
+        limit: usize,
     ) -> Result<Vec<Self>, StorageError> {
-        tx.blocks_get_all_between(
-            epoch,
-            shard_group,
-            start_block_height,
-            end_block_height,
-            include_dummy_blocks,
-            limit,
-        )
+        tx.blocks_get_all_between(epoch, start_block_height, end_block_height, include_dummy_blocks, limit)
     }
 
     pub fn get_last_n_in_epoch<TTx: StateStoreReadTransaction>(
@@ -574,19 +565,6 @@ impl Block {
         tx.blocks_insert(self)
     }
 
-    // pub fn get_paginated<TTx: StateStoreReadTransaction>(
-    //     tx: &mut TTx,
-    //     limit: u64,
-    //     offset: u64,
-    //     ordering: Option<Ordering>,
-    // ) -> Result<Vec<Self>, StorageError> {
-    //     tx.blocks_get_paginated(limit, offset, ordering)
-    // }
-
-    pub fn get_count<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<i64, StorageError> {
-        tx.blocks_get_count()
-    }
-
     /// Inserts the block if it doesnt exist. Returns true if the block was saved and did not exist previously,
     /// otherwise false.
     pub fn save<TTx>(&self, tx: &mut TTx) -> Result<bool, StorageError>
@@ -602,7 +580,7 @@ impl Block {
         Ok(true)
     }
 
-    pub fn remove_parallel_chains<TTx>(&self, tx: &mut TTx) -> Result<(), StorageError>
+    pub fn remove_orphaned_blocks<TTx>(&self, tx: &mut TTx) -> Result<(), StorageError>
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
@@ -614,22 +592,18 @@ impl Block {
             }
             info!(
                 target: LOG_TARGET,
-                "❗️🔗 Removing parallel chain block {} from epoch {} height {}",
+                "❗️🔗 Removing orphaned block {} from epoch {} height {}",
                 block_id,
                 self.epoch(),
                 self.height()
             );
-            delete_block_and_children(tx, &block_id)?;
+            delete_orphaned_block_and_children(tx, &block_id)?;
         }
         Ok(())
     }
 
     pub fn remove_diff<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
         tx.block_diffs_remove(self.id())
-    }
-
-    pub fn remove_pending_tree_diff<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.pending_state_tree_diffs_remove_by_block(self.id())
     }
 
     pub fn remove_pending_tree_diff_and_return<TTx: StateStoreWriteTransaction>(
@@ -732,17 +706,6 @@ impl Block {
         tx.blocks_set_flags(self.id(), None, Some(true))
     }
 
-    pub fn find_involved_shards<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-    ) -> Result<HashSet<SubstateAddress>, StorageError> {
-        tx.transactions_fetch_involved_shards(self.all_transaction_ids().copied().collect())
-    }
-
-    pub fn max_height<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<NodeHeight, StorageError> {
-        tx.blocks_max_height()
-    }
-
     pub fn extends<TTx: StateStoreReadTransaction>(&self, tx: &TTx, ancestor: &BlockId) -> Result<bool, StorageError> {
         if self.id() == ancestor {
             return Ok(false);
@@ -769,28 +732,8 @@ impl Block {
         Block::get(tx, self.parent())
     }
 
-    pub fn get_parent_chain<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-        limit: usize,
-    ) -> Result<Vec<Block>, StorageError> {
-        tx.blocks_get_parent_chain(self.id(), limit)
-    }
-
     pub fn get_votes<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<Vec<Vote>, StorageError> {
         Vote::get_for_block(tx, self.id())
-    }
-
-    pub fn get_child_block_ids<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<Vec<BlockId>, StorageError> {
-        tx.blocks_get_ids_by_parent(self.id())
-    }
-
-    pub fn get_any_with_epoch_range_for_validator<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        range: RangeInclusive<Epoch>,
-        validator_public_key: Option<&PublicKey>,
-    ) -> Result<Vec<Self>, StorageError> {
-        tx.blocks_get_any_with_epoch_range(range, validator_public_key)
     }
 
     pub fn get_transactions<TTx: StateStoreReadTransaction>(
@@ -1185,10 +1128,6 @@ impl Display for Block {
 pub struct BlockId(#[serde(with = "serde_with::hex")] FixedHash);
 
 impl BlockId {
-    pub const fn genesis() -> Self {
-        Self(FixedHash::zero())
-    }
-
     pub const fn zero() -> Self {
         Self(FixedHash::zero())
     }
@@ -1203,6 +1142,10 @@ impl BlockId {
 
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_slice()
+    }
+
+    pub fn into_array(self) -> [u8; 32] {
+        self.0.into_array()
     }
 
     pub fn is_zero(&self) -> bool {
@@ -1254,6 +1197,12 @@ impl Display for BlockId {
     }
 }
 
+impl AsRef<BlockId> for BlockId {
+    fn as_ref(&self) -> &BlockId {
+        self
+    }
+}
+
 fn on_locked_block_recurse<TTx, F, E>(
     tx: &mut TTx,
     locked: &LockedBlock,
@@ -1297,21 +1246,21 @@ where
 }
 
 /// Deletes everything related to a block as well as any child blocks
-fn delete_block_and_children<TTx>(tx: &mut TTx, block_id: &BlockId) -> Result<(), StorageError>
+fn delete_orphaned_block_and_children<TTx>(tx: &mut TTx, block_id: &BlockId) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
 {
-    let children = tx.blocks_get_ids_by_parent(block_id)?;
+    let children = tx.blocks_get_pending_ids_by_parent(block_id)?;
     for child in children {
-        delete_block_and_children(tx, &child)?;
+        delete_orphaned_block_and_children(tx, &child)?;
     }
     tx.block_diffs_remove(block_id).optional()?;
     tx.pending_state_tree_diffs_remove_by_block(block_id).optional()?;
     tx.substate_locks_remove_any_by_block_id(block_id)?;
     tx.transaction_pool_state_updates_remove_any_by_block_id(block_id)?;
     tx.transaction_executions_remove_any_by_block_id(block_id)?;
-    tx.foreign_proposals_clear_proposed_in(block_id)?;
+    tx.foreign_proposals_clear_proposed_in(block_id).optional()?;
     tx.burnt_utxos_clear_proposed_block(block_id)?;
     tx.lock_conflicts_remove_by_block_id(block_id)?;
 

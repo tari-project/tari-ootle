@@ -65,6 +65,12 @@ impl AsRef<[u8]> for TransactionId {
     }
 }
 
+impl AsRef<TransactionId> for TransactionId {
+    fn as_ref(&self) -> &TransactionId {
+        self
+    }
+}
+
 impl Display for TransactionId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.id.to_hex())

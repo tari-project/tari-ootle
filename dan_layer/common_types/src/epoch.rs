@@ -45,8 +45,8 @@ impl Epoch {
         self.0 == 0
     }
 
-    pub fn to_le_bytes(self) -> [u8; 8] {
-        self.0.to_le_bytes()
+    pub fn to_be_bytes(self) -> [u8; 8] {
+        self.0.to_be_bytes()
     }
 
     pub fn saturating_sub<T: Into<Epoch>>(&self, other: T) -> Epoch {

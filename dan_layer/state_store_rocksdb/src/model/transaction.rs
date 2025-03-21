@@ -20,51 +20,37 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use rocksdb::{Transaction, TransactionDB};
 use tari_dan_storage::consensus_models::TransactionRecord;
 use tari_transaction::TransactionId;
 
-use super::traits::RocksdbModel;
-use crate::error::RocksDbStorageError;
+use crate::{
+    codecs::{DefaultCodec, TimestampCodec, TransactionIdCodec},
+    traits::Cf,
+    utils::RocksDbTimestamp,
+};
 
-pub struct TransactionModel {}
+pub struct TransactionModel;
 
-impl TransactionModel {
-    pub fn key_from_transaction_id(tx_id: &TransactionId) -> String {
-        format!("{}_{}", Self::key_prefix(), tx_id)
-    }
+impl Cf for TransactionModel {
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
+    type Value = TransactionRecord;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
-    pub fn get_any(
-        tx: &Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        tx_ids: Vec<&TransactionId>,
-    ) -> Result<Vec<TransactionRecord>, RocksDbStorageError> {
-        let keys: Vec<String> = tx_ids.iter().map(|id| Self::key_from_transaction_id(id)).collect();
-
-        let values = tx
-            .multi_get(keys)
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
-
-        let mut res = vec![];
-        for value in values.into_iter().flatten() {
-            let rec = Self::decode(value)?;
-            res.push(rec);
-        }
-
-        Ok(res)
+    fn name() -> &'static str {
+        "transactions"
     }
 }
 
-impl RocksdbModel for TransactionModel {
-    type Item = TransactionRecord;
+pub struct FinalizedAtIndex;
 
-    fn key_prefix() -> &'static str {
-        "transactions"
-    }
+impl Cf for FinalizedAtIndex {
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
+    type Value = RocksDbTimestamp;
+    type ValueCodec = TimestampCodec;
 
-    fn key(item: &Self::Item) -> String {
-        Self::key_from_transaction_id(item.id())
+    fn name() -> &'static str {
+        "transactions_finalized_idx"
     }
 }

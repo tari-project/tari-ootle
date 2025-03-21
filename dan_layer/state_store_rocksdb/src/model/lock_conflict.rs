@@ -20,98 +20,55 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
-
-use rocksdb::{Transaction, TransactionDB};
-use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{BlockId, LockConflict};
 use tari_transaction::TransactionId;
 
-use super::traits::ModelColumnFamily;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, TransactionIdCodec, TupleBytesCodec, UnitCodec},
+    traits::{Cf, QueryCf},
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LockConflictData {
-    pub block_id: BlockId,
-    pub conflict: LockConflict,
-    pub transaction_id: TransactionId,
-    pub depends_on_tx: TransactionId,
-    // we need this field to differentiate between conflicts of the same transaction
-    pub created_at: RocksdbTimestamp,
-}
+pub struct LockConflictModel;
 
-pub struct LockConflictModel {}
-
-impl RocksdbModel for LockConflictModel {
-    type Item = LockConflictData;
-
-    fn key_prefix() -> &'static str {
-        "lockconflicts"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        format!(
-            "{}_{}_{}",
-            Self::key_prefix(),
-            &value.conflict.transaction_id,
-            value.created_at
-        )
-    }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![BlockIdColumnFamily::name()]
-    }
-
-    fn put_in_cfs(
-        db: Arc<TransactionDB>,
-        tx: &mut Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        value: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        // In each CF value We store the key to the main collection, so we can retrieve the actual value
-        let main_key = Self::key(value);
-        let main_key_bytes = main_key.as_bytes();
-
-        BlockIdColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
-
-        Ok(())
-    }
-
-    fn delete_from_cfs(
-        db: Arc<TransactionDB>,
-        tx: &Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        item: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        BlockIdColumnFamily::delete(db.clone(), tx, operation, item)?;
-        Ok(())
-    }
-}
-
-// block id
-pub struct BlockIdColumnFamily {}
-
-impl BlockIdColumnFamily {
-    pub const NAME: &str = "lockconflicts_block_id";
-
-    pub fn build_key_prefix_by_block(block_id: &BlockId) -> String {
-        format!("{}_{}_", LockConflictModel::key_prefix(), block_id)
-    }
-}
-
-impl ModelColumnFamily for BlockIdColumnFamily {
-    type Item = LockConflictData;
+impl Cf for LockConflictModel {
+    // (transaction id, Block, depends_on_tx_id)
+    type Key = (TransactionId, BlockId, TransactionId);
+    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type Value = LockConflict;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        Self::NAME
+        "lockconflicts"
     }
+}
 
-    fn build_key(value: &Self::Item) -> String {
-        format!(
-            "{}_{}_{}",
-            LockConflictModel::key_prefix(),
-            value.block_id,
-            value.conflict.transaction_id
-        )
+pub struct ByTransactionIdQuery;
+
+impl QueryCf for ByTransactionIdQuery {
+    type Cf = LockConflictModel;
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
+}
+
+pub struct LockConflictBlockIdIndex;
+
+impl Cf for LockConflictBlockIdIndex {
+    // (block id, transaction id, depends_on_tx_id)
+    type Key = (BlockId, TransactionId, TransactionId);
+    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        // Same column family
+        "lockconflicts"
     }
+}
+
+pub struct ByBlockIdQuery;
+
+impl QueryCf for ByBlockIdQuery {
+    type Cf = LockConflictBlockIdIndex;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
 }

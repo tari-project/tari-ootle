@@ -3,9 +3,12 @@
 
 use std::ops::Deref;
 
+use log::*;
 use tari_dan_common_types::{optional::Optional, shard::Shard};
 use tari_dan_storage::{StateStoreReadTransaction, StateStoreWriteTransaction};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeStoreReader, TreeStoreWriter, Version};
+
+const LOG_TARGET: &str = "tari::dan::consensus::sharded_state_tree";
 
 /// Tree store that is scoped to a specific shard
 #[derive(Debug)]
@@ -26,7 +29,13 @@ impl<TTx: StateStoreReadTransaction> TreeStoreReader<Version> for ShardScopedTre
             .state_tree_nodes_get(self.shard, key)
             .optional()
             .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))?
-            .ok_or_else(|| tari_state_tree::JmtStorageError::NotFound(key.clone()))
+            .ok_or_else(|| {
+                warn!(
+                    target: LOG_TARGET,
+                    "ShardScopedTreeStoreReader: Node not found in shard {} with key: {}", self.shard, key
+                );
+                tari_state_tree::JmtStorageError::NotFound(key.clone())
+            })
     }
 }
 
@@ -62,7 +71,13 @@ where
             .state_tree_nodes_get(self.shard, key)
             .optional()
             .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))?
-            .ok_or_else(|| tari_state_tree::JmtStorageError::NotFound(key.clone()))
+            .ok_or_else(|| {
+                warn!(
+                    target: LOG_TARGET,
+                    "ShardScopedTreeStoreWriter: Node not found in shard {} with key: {}", self.shard, key
+                );
+                tari_state_tree::JmtStorageError::NotFound(key.clone())
+            })
     }
 }
 

@@ -124,17 +124,16 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                 // Find the next block in the database
                 let child = if current_block.is_epoch_end() {
                     // The current block is the last one in the epoch,
-                    // so we need to find the first block in the next expoch
+                    // so we need to find the first block in the next epoch
                     tx.blocks_get_genesis_for_epoch(current_block.epoch() + Epoch(1))
                         .optional()?
                 } else {
                     // The current block is NOT the last one in the epoch,
                     // so we need to find a child block
-                    let children = tx.blocks_get_all_by_parent(&current_block_id)?;
-                    children.into_iter().find(|b| b.is_committed())
+                    tx.blocks_get_committed_by_parent(&current_block_id).optional()?
                 };
 
-                // If there is not a new block then we stop streaming
+                // If there is no new block then we stop streaming
                 let Some(child) = child else {
                     break;
                 };

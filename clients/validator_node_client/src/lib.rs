@@ -89,13 +89,6 @@ impl ValidatorNodeClient {
         self.send_request("get_substate", request).await
     }
 
-    pub async fn get_fees(
-        &mut self,
-        request: GetValidatorFeesRequest,
-    ) -> Result<GetValidatorFeesResponse, ValidatorNodeClientError> {
-        self.send_request("get_fees", request).await
-    }
-
     pub async fn get_template(
         &mut self,
         request: GetTemplateRequest,
@@ -147,10 +140,6 @@ impl ValidatorNodeClient {
 
     pub async fn add_peer(&mut self, request: AddPeerRequest) -> Result<AddPeerResponse, ValidatorNodeClientError> {
         self.send_request("add_peer", request).await
-    }
-
-    pub async fn get_blocks_count(&mut self) -> Result<GetBlocksCountResponse, ValidatorNodeClientError> {
-        self.send_request("get_blocks_count", json!({})).await
     }
 
     pub async fn get_block(&mut self, request: GetBlockRequest) -> Result<GetBlockResponse, ValidatorNodeClientError> {

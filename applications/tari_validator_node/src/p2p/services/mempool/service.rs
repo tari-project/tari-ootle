@@ -31,7 +31,6 @@ use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
 use tari_engine_types::commit_result::RejectReason;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{mpsc, oneshot};
 
@@ -51,26 +50,28 @@ use crate::{
 const LOG_TARGET: &str = "tari::validator_node::mempool::service";
 
 #[derive(Debug)]
-pub struct MempoolService<TValidator> {
+pub struct MempoolService<TValidator, TStateStore> {
     transactions: HashSet<TransactionId>,
     mempool_requests: mpsc::Receiver<MempoolRequest>,
     epoch_manager: EpochManagerHandle<PeerAddress>,
     before_execute_validator: TValidator,
-    state_store: SqliteStateStore<PeerAddress>,
+    state_store: TStateStore,
     gossip: MempoolGossip<PeerAddress>,
     consensus_handle: ConsensusHandle,
     #[cfg(feature = "metrics")]
     metrics: PrometheusMempoolMetrics,
 }
 
-impl<TValidator> MempoolService<TValidator>
-where TValidator: Validator<Transaction, Context = (), Error = TransactionValidationError>
+impl<TValidator, TStateStore> MempoolService<TValidator, TStateStore>
+where
+    TValidator: Validator<Transaction, Context = (), Error = TransactionValidationError>,
+    TStateStore: StateStore,
 {
     pub(super) fn new(
         mempool_requests: mpsc::Receiver<MempoolRequest>,
         epoch_manager: EpochManagerHandle<PeerAddress>,
         before_execute_validator: TValidator,
-        state_store: SqliteStateStore<PeerAddress>,
+        state_store: TStateStore,
         consensus_handle: ConsensusHandle,
         networking: NetworkingHandle<TariMessagingSpec>,
         rx_gossip: mpsc::UnboundedReceiver<(PeerId, gossipsub::Message)>,

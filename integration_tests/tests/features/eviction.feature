@@ -58,4 +58,5 @@ Feature: Eviction scenarios
     When miner MINER mines 10 new blocks
     Then all validators have scanned to height 52
     When all validator nodes have started epoch 5
+    # TODO: this is flaky - the implementation of this step does not currently panic if this assertion fails
     Then validator VN5 is not a member of the current network according to BASE

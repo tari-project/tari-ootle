@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tari_transaction::TransactionId;
 
 use crate::{
-    consensus_models::{BlockId, Decision, Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage},
+    consensus_models::{Decision, Evidence, LeaderFee, LeafBlock, TransactionPoolRecord, TransactionPoolStage},
     StateStoreWriteTransaction,
 };
 
@@ -70,8 +70,8 @@ impl TransactionPoolStatusUpdate {
     pub fn insert_for_block<TTx: StateStoreWriteTransaction>(
         &self,
         tx: &mut TTx,
-        block_id: &BlockId,
+        block: &LeafBlock,
     ) -> Result<(), crate::StorageError> {
-        tx.transaction_pool_add_pending_update(block_id, self)
+        tx.transaction_pool_add_pending_update(block, self)
     }
 }

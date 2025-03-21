@@ -32,9 +32,9 @@ use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
         calculate_dummy_blocks_from_justify,
-        create_epoch_checkpoint,
         error::HotStuffError,
         eviction_proof::generate_eviction_proofs,
+        generate_epoch_checkpoint,
         get_next_block_height_and_leader,
         on_ready_to_vote_on_local_block::OnReadyToVoteOnLocalBlock,
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
@@ -194,8 +194,12 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     if let Some(err) = err.validation_error() {
                         warn!(target: LOG_TARGET, "⚠️❌ Validation failed for foreign proposal: {}", err);
                         // if a node sent us an invalid foreign proposal, we immediately reject the block
-                        foreign_proposal.upsert(tx, Some(*valid_block.id()))?;
-                        foreign_proposal.set_status(tx, ForeignProposalStatus::Invalid)?;
+                        foreign_proposal.save(tx)?;
+                        foreign_proposal.set_status(
+                            tx,
+                            ForeignProposalStatus::Invalid,
+                            Some(&valid_block.block().as_leaf_block()),
+                        )?;
                         return Ok(false);
                     }
                     error!(target: LOG_TARGET, "Error processing foreign proposal: {}", err);
@@ -369,7 +373,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 registered_shard_group = Some(next_shard_group);
                 self.store.with_write_tx(|tx| {
                     // Generate checkpoint
-                    create_epoch_checkpoint(tx, prev_epoch, local_committee_info.shard_group())?;
+                    let checkpoint = generate_epoch_checkpoint(&**tx, prev_epoch, local_committee_info.shard_group())?;
+                    checkpoint.save(tx)?;
                     // Prune all DOWNed values
                     // TODO: we cannot prune downed values during the epoch because nodes currently need to provide
                     // historical values for catch up, and for validator fees pledging as vnfp's are able to be downed

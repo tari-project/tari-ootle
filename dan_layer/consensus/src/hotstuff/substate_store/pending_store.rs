@@ -65,7 +65,9 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
     }
 
     fn get_latest_change_from_store(&self, id: &SubstateId) -> Result<SubstateChange, SubstateStoreError> {
-        if let Some(change) = BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, id).optional()? {
+        if let Some(change) =
+            BlockDiff::get_last_change_for_substate(self.read_transaction(), &self.parent_block, id).optional()?
+        {
             return Ok(change);
         }
 
@@ -307,7 +309,9 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             });
         }
 
-        if let Some(change) = BlockDiff::get_for_substate(self.read_transaction(), &self.parent_block, id).optional()? {
+        if let Some(change) =
+            BlockDiff::get_last_change_for_substate(self.read_transaction(), &self.parent_block, id).optional()?
+        {
             let version = change.versioned_substate_id().version();
             return Ok(LatestSubstateVersion {
                 version,
@@ -315,16 +319,13 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             });
         }
 
-        let (version, is_destroyed) = SubstateRecord::get_latest_version(self.read_transaction(), id)
+        let (version, is_up) = SubstateRecord::get_latest_version(self.read_transaction(), id)
             .optional()?
             .ok_or_else(|| SubstateStoreError::SubstateNotFound {
                 id: VersionedSubstateId::new(id.clone(), 0),
             })?;
 
-        Ok(LatestSubstateVersion {
-            version,
-            is_up: !is_destroyed,
-        })
+        Ok(LatestSubstateVersion { version, is_up })
     }
 
     pub fn get_many<I: IntoIterator<Item = (SubstateRequirement, u32)> + ExactSizeIterator>(
@@ -364,6 +365,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
     where
         I: IntoIterator<Item = &'a SubstateId>,
     {
+        // TODO(perf): consider optimizing
         let existing = self
             .store
             .foreign_substate_pledges_get_write_pledges_to_transaction(transaction_id, substate_ids)?;
@@ -715,7 +717,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
     }
 
     fn assert_is_up(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "assert_is_up: id: {}, pending: {}, head: {}",
             id,
@@ -729,7 +731,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             return Ok(());
         }
 
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "assert_is_up id: {} not found in pending",
             id,
@@ -744,7 +746,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             return Err(SubstateStoreError::SubstateIsDown { id: id.clone() });
         }
 
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "assert_is_up: id: {} not found in block diff",
             id,

@@ -22,10 +22,21 @@
 
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::NodeHeight;
-use tari_dan_storage::consensus_models::{BlockId, Decision, Evidence, LeaderFee, TransactionPoolStage};
+use tari_dan_storage::consensus_models::{
+    BlockId,
+    Decision,
+    Evidence,
+    LeaderFee,
+    TransactionPoolRecord,
+    TransactionPoolStage,
+};
 use tari_transaction::TransactionId;
 
-use super::traits::RocksdbModel;
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, TupleBytesCodec},
+    traits::{Cf, QueryCf},
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionPoolStateUpdateModelData {
     pub block_id: BlockId,
@@ -38,36 +49,41 @@ pub struct TransactionPoolStateUpdateModelData {
     pub local_decision: Decision,
     pub remote_decision: Option<Decision>,
     pub is_ready: bool,
-    pub is_applied: bool,
 }
 
-pub struct TransactionPoolStateUpdateModel {}
-
-impl TransactionPoolStateUpdateModel {
-    pub fn build_key(block_id: &BlockId, block_height: NodeHeight, tx_id: &TransactionId) -> String {
-        // the key format allows us to query all updates by block prefix, ordered by height DESC
-        // TODO: is there a cleaner way to implement desc key ordering in RocksDb?
-        let block_height_desc = NodeHeight(u64::MAX) - block_height;
-        format!("{}_{}_{}_{}", Self::key_prefix(), block_id, block_height_desc, tx_id)
-    }
-
-    pub fn key_prefix_by_block_id(block_id: &BlockId) -> String {
-        format!("{}_{}_", Self::key_prefix(), block_id)
-    }
-
-    pub fn key_prefix_by_block_id_str(block_id: &str) -> String {
-        format!("{}_{}_", Self::key_prefix(), block_id)
+impl TransactionPoolStateUpdateModelData {
+    pub fn merge_into(self, other: &mut TransactionPoolRecord) {
+        other.set_evidence(self.evidence);
+        other.set_transaction_fee(self.transaction_fee);
+        if let Some(leader_fee) = self.leader_fee {
+            other.set_leader_fee(leader_fee);
+        }
+        other.set_pending_stage(Some(self.stage));
+        other.set_local_decision(self.local_decision);
+        if let Some(remote_decision) = self.remote_decision {
+            other.set_remote_decision(remote_decision);
+        }
+        other.set_is_ready(self.is_ready);
     }
 }
 
-impl RocksdbModel for TransactionPoolStateUpdateModel {
-    type Item = TransactionPoolStateUpdateModelData;
+pub struct TransactionPoolStateUpdateModel;
 
-    fn key_prefix() -> &'static str {
-        "transactionpoolpendingupdate"
-    }
+impl Cf for TransactionPoolStateUpdateModel {
+    type Key = (BlockId, TransactionId);
+    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type Value = TransactionPoolStateUpdateModelData;
+    type ValueCodec = DefaultCodec<TransactionPoolStateUpdateModelData>;
 
-    fn key(value: &Self::Item) -> String {
-        Self::build_key(&value.block_id, value.block_height, &value.transaction_id)
+    fn name() -> &'static str {
+        "tx_pool_updates"
     }
+}
+
+pub struct ByBlockIdQuery;
+
+impl QueryCf for ByBlockIdQuery {
+    type Cf = TransactionPoolStateUpdateModel;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
 }

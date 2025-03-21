@@ -16,7 +16,6 @@ use tari_dan_storage::{
         Decision,
         ForeignProposal,
         LeafBlock,
-        LockedBlock,
         LockedSubstateValue,
         TransactionAtom,
         TransactionPoolRecord,
@@ -44,7 +43,6 @@ const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::foreign_proposal_proce
 pub fn process_foreign_block<TStore: StateStore>(
     tx: &TStore::ReadTransaction<'_>,
     local_leaf: &LeafBlock,
-    locked_block: &LockedBlock,
     proposal: &ForeignProposal,
     local_committee_info: &CommitteeInfo,
     substate_store: &mut PendingSubstateStore<TStore>,
@@ -96,7 +94,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 );
 
                 let Some(mut tx_rec) = proposed_block_change_set
-                    .get_transaction(tx, locked_block, local_leaf, &atom.id)
+                    .get_transaction(tx, local_leaf, &atom.id)
                     .optional()?
                 else {
                     // CASE: the transaction was already aborted by this node when locking outputs (LocalAccept) and
@@ -206,19 +204,14 @@ pub fn process_foreign_block<TStore: StateStore>(
                             substate_store.read_transaction(),
                             tx_rec.transaction_id(),
                             inputs,
-                            false,
                         )?
                     {
                         // Determine if we're the only conflicting shard group. If so, we can ignore this conflict
                         // and wait for the conflicting transaction to be finalised before pledging, using the outputs
                         // of this transaction. If not, resolving the conflict is more
                         // complex/unsafe, and we need to abort.
-                        let conflicting_tx = proposed_block_change_set.get_transaction(
-                            tx,
-                            locked_block,
-                            local_leaf,
-                            &conflicting_transaction_id,
-                        )?;
+                        let conflicting_tx =
+                            proposed_block_change_set.get_transaction(tx, local_leaf, &conflicting_transaction_id)?;
                         let has_conflicts = conflicting_tx
                             .evidence()
                             .iter()
@@ -371,7 +364,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 );
 
                 let Some(mut tx_rec) = proposed_block_change_set
-                    .get_transaction(tx, locked_block, local_leaf, &atom.id)
+                    .get_transaction(tx, local_leaf, &atom.id)
                     .optional()?
                 else {
                     if TransactionRecord::exists(tx, &atom.id)? {

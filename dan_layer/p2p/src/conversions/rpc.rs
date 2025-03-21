@@ -207,8 +207,9 @@ impl TryFrom<proto::rpc::EpochCheckpoint> for EpochCheckpoint {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::rpc::EpochCheckpoint) -> Result<Self, Self::Error> {
-        if value.shard_roots.len() > 256 {
-            return Err(anyhow!("too many shard roots"));
+        // Defensive check to mitigate DoS attacks
+        if value.shard_roots.len() > 100_000 {
+            return Err(anyhow!("too many shard roots (num={})", value.shard_roots.len()));
         }
 
         let shard_roots = value

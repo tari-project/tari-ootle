@@ -20,56 +20,32 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{Deserialize, Serialize};
 use tari_dan_common_types::SubstateAddress;
 use tari_dan_storage::consensus_models::SubstatePledge;
 use tari_transaction::TransactionId;
 
 use crate::{
-    error::RocksDbStorageError,
-    model::traits::RocksdbModel,
-    utils::{bor_decode, bor_encode},
+    codecs::{DefaultCodec, TransactionIdCodec, TupleBytesCodec},
+    traits::{Cf, QueryCf},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForeignSubstatePledgeData {
-    pub transaction_id: TransactionId,
-    pub substate_address: SubstateAddress,
-    pub pledge: SubstatePledge,
-}
+pub struct ForeignSubstatePledgeModel;
 
-pub struct ForeignSubstatePledgeModel {}
+impl Cf for ForeignSubstatePledgeModel {
+    type Key = (TransactionId, SubstateAddress);
+    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type Value = SubstatePledge;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
-impl ForeignSubstatePledgeModel {
-    pub fn key_from_transaction_and_address(
-        transaction_id: &TransactionId,
-        substate_address_opt: Option<&SubstateAddress>,
-    ) -> String {
-        let substate_address = substate_address_opt.map(|a| a.to_string()).unwrap_or_default();
-        format!("{}_{}_{}", Self::key_prefix(), transaction_id, substate_address)
+    fn name() -> &'static str {
+        "foreign_substate_pledges"
     }
 }
 
-impl RocksdbModel for ForeignSubstatePledgeModel {
-    type Item = ForeignSubstatePledgeData;
+pub struct ByTransactionIdQuery;
 
-    fn key_prefix() -> &'static str {
-        "foreignsubstatepledges"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        Self::key_from_transaction_and_address(&value.transaction_id, Some(&value.substate_address))
-    }
-
-    // We need to override the default trait implementations to encode with tari_bor to avoid a bincode conflict with
-    // SubstatePledge
-    fn encode(value: &Self::Item) -> Result<Vec<u8>, RocksDbStorageError> {
-        let bytes = bor_encode(value)?;
-        Ok(bytes)
-    }
-
-    fn decode(bytes: Vec<u8>) -> Result<Self::Item, RocksDbStorageError> {
-        let value: Self::Item = bor_decode(&bytes)?;
-        Ok(value)
-    }
+impl QueryCf for ByTransactionIdQuery {
+    type Cf = ForeignSubstatePledgeModel;
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
 }

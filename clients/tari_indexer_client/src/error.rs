@@ -6,8 +6,12 @@ use tari_dan_common_types::optional::IsNotFoundError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexerClientError {
-    #[error("Failed to deserialize response for method {method}: {source}")]
-    DeserializeResponse { source: serde_json::Error, method: String },
+    #[error("Failed to deserialize response for method {method}: {source} - response: {response}")]
+    DeserializeResponse {
+        source: serde_json::Error,
+        method: &'static str,
+        response: serde_json::Value,
+    },
     #[error("Failed to serialize request for method {method}: {source}")]
     SerializeRequest { method: String, source: serde_json::Error },
     #[error("Failed to send request: {source}")]

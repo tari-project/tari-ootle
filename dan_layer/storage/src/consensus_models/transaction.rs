@@ -37,7 +37,6 @@ use crate::{
         TransactionPoolRecord,
         VersionedSubstateIdLockIntent,
     },
-    Ordering,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
@@ -175,6 +174,11 @@ impl TransactionRecord {
         self
     }
 
+    pub fn into_abort_execution(mut self, reason: RejectReason) -> TransactionExecution {
+        self.abort(reason);
+        self.into_execution().expect("aborted above")
+    }
+
     pub fn abort_and_finalize(&mut self, reason: RejectReason) -> &mut Self {
         self.abort(reason.clone());
         let exec_result = self.execution_result.as_ref().filter(|r| r.finalize.result.is_reject());
@@ -298,31 +302,6 @@ impl TransactionRecord {
         Ok(())
     }
 
-    pub fn save_all<'a, TTx, I>(tx: &mut TTx, transactions: I) -> Result<(), StorageError>
-    where
-        TTx: StateStoreWriteTransaction + Deref,
-        TTx::Target: StateStoreReadTransaction,
-        I: IntoIterator<Item = &'a TransactionRecord>,
-    {
-        tx.transactions_save_all(transactions)
-    }
-
-    pub fn update<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.transactions_update(self)
-    }
-
-    pub fn upsert<TTx>(&self, tx: &mut TTx) -> Result<(), StorageError>
-    where
-        TTx: StateStoreWriteTransaction + Deref,
-        TTx::Target: StateStoreReadTransaction,
-    {
-        if TransactionRecord::exists(&**tx, self.id())? {
-            self.update(tx)
-        } else {
-            self.insert(tx)
-        }
-    }
-
     pub fn get<TTx: StateStoreReadTransaction>(tx: &TTx, tx_id: &TransactionId) -> Result<Self, StorageError> {
         tx.transactions_get(tx_id)
     }
@@ -385,15 +364,6 @@ impl TransactionRecord {
         // TODO(perf): optimise
         let (_, missing) = Self::get_any(tx, tx_ids)?;
         Ok(missing)
-    }
-
-    pub fn get_paginated<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        limit: u64,
-        offset: u64,
-        ordering: Option<Ordering>,
-    ) -> Result<Vec<Self>, StorageError> {
-        tx.transactions_get_paginated(limit, offset, ordering)
     }
 
     pub fn get_local_pledges<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<SubstatePledges, StorageError> {

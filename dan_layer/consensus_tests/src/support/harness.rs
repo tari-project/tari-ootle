@@ -18,6 +18,7 @@ use tari_consensus::{
 };
 use tari_dan_common_types::{
     committee::Committee,
+    displayable::Displayable,
     shard::Shard,
     Epoch,
     NodeHeight,
@@ -46,15 +47,19 @@ use super::{
     MessageFilter,
     TEST_NUM_PRESHARDS,
 };
-use crate::support::{
-    address::TestAddress,
-    epoch_manager::TestEpochManager,
-    executions_store::ExecuteSpec,
-    helpers::make_test_component,
-    network::{spawn_network, TestNetwork, TestVnDestination},
-    validator::Validator,
-    RoundRobinLeaderStrategy,
-    ValidatorChannels,
+use crate::{
+    support::{
+        address::TestAddress,
+        epoch_manager::TestEpochManager,
+        executions_store::ExecuteSpec,
+        helpers::make_test_component,
+        network::{spawn_network, TestNetwork, TestVnDestination},
+        table::Table,
+        validator::Validator,
+        RoundRobinLeaderStrategy,
+        ValidatorChannels,
+    },
+    table_row,
 };
 
 pub struct Test {
@@ -249,6 +254,8 @@ impl Test {
                     Ok(v) => v,
                     Err(_) => {
                         self.dump_pool_info();
+                        // We assume there is a "1" (hint: there always is)
+                        self.dump_blocks(&TestAddress::new("1"));
                         panic!("Timeout waiting for Hotstuff event");
                     },
                 }
@@ -278,23 +285,88 @@ impl Test {
     pub fn dump_pool_info(&self) {
         for v in self.validators.values().sorted_unstable_by_key(|a| &a.address) {
             let pool = v.state_store.with_read_tx(|tx| tx.transaction_pool_get_all()).unwrap();
+            println!("Validator {}", v.address);
+            let mut table = Table::new();
+            table
+                .set_titles(vec![
+                    "Address",
+                    "Stage",
+                    "PendingStage",
+                    "ID",
+                    "Decision",
+                    "Ready",
+                    "Evidence",
+                ])
+                .enable_row_count();
             for tx in pool {
-                eprintln!(
-                    "{}: {}->{:?} {}[{}, ready={}, {}]",
+                table.add_row(table_row![
                     v.address,
                     tx.current_stage(),
-                    tx.pending_stage(),
+                    tx.pending_stage().display(),
                     tx.transaction_id(),
                     tx.current_decision(),
                     tx.is_ready(),
-                    tx.evidence()
-                );
+                    format!(
+                        "A:{} P:{}",
+                        if tx.evidence().all_shard_groups_prepared() {
+                            "✅"
+                        } else {
+                            "❌"
+                        },
+                        if tx.evidence().all_shard_groups_accepted() {
+                            "✅"
+                        } else {
+                            "❌"
+                        }
+                    ),
+                ]);
             }
+
+            table.print_stdout();
         }
+    }
+
+    pub fn dump_blocks(&self, addr: &TestAddress) {
+        println!("====================");
+        println!("Blocks for {}", addr);
+        println!("====================");
+        let v = self
+            .validators
+            .get(addr)
+            .unwrap_or_else(|| panic!("dump_blocks: No validator with address {}", addr));
+        let blocks = v
+            .state_store
+            .with_read_tx(|tx| tx.blocks_get_paginated(1000, 0, None, None, None, None))
+            .unwrap();
+        let mut table = Table::new();
+        table
+            .set_titles(vec!["Block ID", "Epoch", "Height", "Parent", "Cmds"])
+            .enable_row_count();
+        for block in blocks {
+            table.add_row(table_row![
+                block.id(),
+                block.epoch().as_u64(),
+                block.height().as_u64(),
+                format!(
+                    "C: {}, J: {}, D: {}",
+                    block.is_committed(),
+                    block.is_justified(),
+                    block.is_dummy()
+                ),
+                block.commands().display()
+            ]);
+        }
+
+        table.print_stdout();
     }
 
     pub fn network(&mut self) -> &mut TestNetwork {
         &mut self.network
+    }
+
+    pub fn stop(&mut self) {
+        self.network.pause();
+        self.shutdown.trigger();
     }
 
     pub async fn start_epoch(&mut self, epoch: Epoch) {
@@ -417,39 +489,32 @@ impl Test {
     }
 
     pub async fn assert_all_validators_at_same_height_except(&self, except: &[TestAddress]) {
-        let current_epoch = self.epoch_manager.current_epoch().await.unwrap();
         let committees = self.epoch_manager.all_committees().await;
         let mut attempts = 0usize;
         'outer: loop {
-            for (shard_group, committee) in &committees {
-                let mut blocks = self
+            for committee in committees.values() {
+                let mut views = self
                     .validators
                     .values()
                     .filter(|vn| committee.contains(&vn.address))
                     .filter(|vn| !except.contains(&vn.address))
-                    .map(|v| {
-                        let block = v
-                            .state_store
-                            .with_read_tx(|tx| tx.blocks_get_tip(current_epoch, *shard_group))
-                            .unwrap();
-                        (v.address.clone(), block)
-                    });
-                let (first_addr, first) = blocks.next().unwrap();
-                for (addr, block) in blocks {
-                    if (first.epoch() != block.epoch() || first.height() != block.height()) && attempts < 5 {
+                    .map(|v| (v.address.clone(), v.current_view.clone()));
+                let (first_addr, first) = views.next().unwrap();
+                for (addr, view) in views {
+                    if (first.get_epoch() != view.get_epoch() || first.get_height() != view.get_height()) &&
+                        attempts < 5
+                    {
                         attempts += 1;
                         // Allow validators to catch up
                         tokio::time::sleep(Duration::from_millis(10)).await;
                         continue 'outer;
                     }
-                    assert_eq!(
-                        first.id(),
-                        block.id(),
+                    if first.get_epoch() == view.get_epoch() && first.get_height() == view.get_height() {
+                        continue;
+                    }
+                    panic!(
                         "Validator {} is at height {} but validator {} is at height {}",
-                        first_addr,
-                        first,
-                        addr,
-                        block
+                        first_addr, first, addr, view
                     );
                 }
             }
@@ -571,6 +636,7 @@ impl TestBuilder {
                     epochs_per_era: Epoch(10),
                     template_binary_max_size_bytes: 1000 * 1000 * 5,
                 },
+                cleanup_interval: Duration::from_secs(60),
             },
         }
     }

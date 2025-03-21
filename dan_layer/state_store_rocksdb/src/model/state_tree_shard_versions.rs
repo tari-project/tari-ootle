@@ -20,34 +20,23 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::{Deserialize, Serialize};
 use tari_dan_common_types::shard::Shard;
 use tari_state_tree::Version;
 
-use super::traits::RocksdbModel;
+use crate::{
+    codecs::{NumberCodec, ShardCodec},
+    traits::Cf,
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateTreeShardVersionModelData {
-    pub shard: Shard,
-    pub version: Version,
-}
+pub struct StateTreeShardVersionModel;
 
-pub struct StateTreeShardVersionModel {}
+impl Cf for StateTreeShardVersionModel {
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
+    type Value = Version;
+    type ValueCodec = NumberCodec<Self::Value>;
 
-impl StateTreeShardVersionModel {
-    pub fn key_from_shard(shard: Shard) -> String {
-        format!("{}_{}", Self::key_prefix(), shard)
-    }
-}
-
-impl RocksdbModel for StateTreeShardVersionModel {
-    type Item = StateTreeShardVersionModelData;
-
-    fn key_prefix() -> &'static str {
+    fn name() -> &'static str {
         "statetreeshardversions"
-    }
-
-    fn key(item: &Self::Item) -> String {
-        Self::key_from_shard(item.shard)
     }
 }

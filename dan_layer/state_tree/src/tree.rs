@@ -88,7 +88,7 @@ impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S
         Ok(root_hash)
     }
 
-    pub fn commit_diff(&mut self, diff: StateHashTreeDiff<Version>) -> Result<(), StateTreeError> {
+    fn commit_diff(&mut self, diff: StateHashTreeDiff<Version>) -> Result<(), StateTreeError> {
         for (key, node) in diff.new_nodes {
             log::debug!("Inserting node: {}", key);
             self.store.insert_node(key, node)?;
@@ -214,8 +214,8 @@ impl<P> From<TreeUpdateBatch<P>> for StateHashTreeDiff<P> {
     }
 }
 
-pub fn compute_merkle_root_for_hashes<I: Iterator<Item = TreeHash>>(hashes: I) -> Result<TreeHash, StateTreeError> {
-    let mut hashes = hashes.peekable();
+pub fn compute_merkle_root_for_hashes<I: IntoIterator<Item = TreeHash>>(hashes: I) -> Result<TreeHash, StateTreeError> {
+    let mut hashes = hashes.into_iter().peekable();
     if hashes.peek().is_none() {
         return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
     }

@@ -52,17 +52,25 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveRequestedTransactions");
-        info!(target: LOG_TARGET, "Receiving {} requested transactions for block {} from {:?}", msg.transactions.len(), msg.block_id, from);
+        info!(target: LOG_TARGET, "Received {} requested transaction(s) for block {} from {:?}", msg.transactions.len(), msg.block_id, from);
         self.store.with_write_tx(|tx| {
             let recs = TransactionRecord::get_any_or_build(&**tx, msg.transactions)?;
             let mut batch = Vec::with_capacity(recs.len());
+            debug!(target: LOG_TARGET, "Processing {} requested transactions", recs.len());
             for transaction in recs {
-                if let Some(transaction_and_is_ready) =
+                if let Some((rec, is_ready)) =
                     self.validate_new_transaction(tx, current_epoch, transaction, local_committee_info)?
                 {
-                    batch.push(transaction_and_is_ready);
+                    debug!(
+                        target: LOG_TARGET,
+                        "Transaction {} is ready: {}. Adding to pool",
+                        rec.id(),
+                        is_ready
+                    );
+                    batch.push((rec, is_ready));
                 }
             }
+            debug!(target: LOG_TARGET, "🎱 Adding {} transactions to pool", batch.len());
 
             self.transaction_pool.insert_new_batched(
                 tx,
@@ -71,7 +79,7 @@ where TConsensusSpec: ConsensusSpec
                 batch.iter().map(|(t, is_ready)| (t, *is_ready)),
             )?;
 
-            // TODO: Could this cause a race-condition? Transaction could be proposed as Prepare before the
+            // TODO: Could this cause a race-condition? Transaction could be proposed as LocalPrepare before the
             // unparked block is processed (however, if there's a parked block it's probably not our turn to
             // propose). Ideally we remove this channel because it's a work around
             self.tx_missing_transactions

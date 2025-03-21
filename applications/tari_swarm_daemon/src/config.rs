@@ -244,6 +244,8 @@ pub struct CompileConfig {
     pub working_dir: Option<PathBuf>,
     pub package_name: String,
     pub target_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub features: Vec<String>,
 }
 
 impl CompileConfig {

@@ -27,14 +27,13 @@ use tari_dan_app_utilities::{
 };
 use tari_dan_common_types::PeerAddress;
 use tari_dan_engine::state_store::{new_memory_store, StateStoreError};
-use tari_dan_storage::StorageError;
+use tari_dan_storage::{StateStore, StorageError};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::RpcStatus;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::implementation::TemplateManager;
 use tari_transaction::Transaction;
 use tari_validator_node_client::ValidatorNodeClientError;
@@ -70,9 +69,9 @@ pub enum DryRunTransactionProcessorError {
 }
 
 #[derive(Clone, Debug)]
-pub struct DryRunTransactionProcessor {
+pub struct DryRunTransactionProcessor<TStateStore> {
     substate_resolver: TariSubstateResolver<
-        SqliteStateStore<PeerAddress>,
+        TStateStore,
         EpochManagerHandle<PeerAddress>,
         TariValidatorNodeRpcClientFactory,
         SubstateFileCache,
@@ -81,12 +80,12 @@ pub struct DryRunTransactionProcessor {
     payload_processor: TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
 }
 
-impl DryRunTransactionProcessor {
+impl<TStateStore: StateStore<Addr = PeerAddress> + Send + Sync> DryRunTransactionProcessor<TStateStore> {
     pub fn new(
         epoch_manager: EpochManagerHandle<PeerAddress>,
         payload_processor: TariDanTransactionProcessor<TemplateManager<PeerAddress>>,
         substate_resolver: TariSubstateResolver<
-            SqliteStateStore<PeerAddress>,
+            TStateStore,
             EpochManagerHandle<PeerAddress>,
             TariValidatorNodeRpcClientFactory,
             SubstateFileCache,

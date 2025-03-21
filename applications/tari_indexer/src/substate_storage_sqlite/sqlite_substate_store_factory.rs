@@ -620,7 +620,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
 
         let oldest_epoch = res
             .map(|r| {
-                let epoch_as_u64 = r.try_into().map_err(|_| StorageError::InvalidIntegerCast)?;
+                let epoch_as_u64 = r as u64;
                 Ok::<Epoch, StorageError>(Epoch(epoch_as_u64))
             })
             .transpose()?;
@@ -713,7 +713,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
                     .map_err(|e| StorageError::QueryError {
                         reason: format!("Update leaf node: {}", e),
                     })?;
-                info!(
+                debug!(
                     target: LOG_TARGET,
                     "Updated substate {} version to {}", address, new_substate.version
                 );

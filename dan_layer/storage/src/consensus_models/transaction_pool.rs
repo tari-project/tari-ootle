@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
-    optional::{IsNotFoundError, Optional},
+    optional::IsNotFoundError,
     NumPreshards,
     SubstateAddress,
     SubstateLockType,
@@ -30,7 +30,6 @@ use crate::{
         Evidence,
         LeaderFee,
         LeafBlock,
-        LockedBlock,
         TransactionAtom,
         TransactionExecution,
         TransactionRecord,
@@ -51,25 +50,6 @@ pub struct TransactionPool<TStateStore> {
 impl<TStateStore: StateStore> TransactionPool<TStateStore> {
     pub fn new() -> Self {
         Self { _store: PhantomData }
-    }
-
-    pub fn get(
-        &self,
-        tx: &TStateStore::ReadTransaction<'_>,
-        leaf: &LeafBlock,
-        id: &TransactionId,
-    ) -> Result<TransactionPoolRecord, TransactionPoolError> {
-        // We always want to fetch the state at the current leaf block until the leaf block
-        let locked = LockedBlock::get(tx, leaf.epoch())?;
-        debug!(
-            target: LOG_TARGET,
-            "TransactionPool::get: transaction_id {}, leaf block {} and locked block {}",
-            id,
-            leaf,
-            locked,
-        );
-        let rec = tx.transaction_pool_get_for_blocks(locked.block_id(), leaf.block_id(), id)?;
-        Ok(rec)
     }
 
     pub fn exists(
@@ -146,7 +126,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         );
 
         // Check if any transactions are marked as ready to propose
-        let count = tx.transaction_pool_count(None, Some(true), None, true)?;
+        let count = tx.transaction_pool_count(None, Some(true), true)?;
         if count > 0 {
             debug!(
                 target: LOG_TARGET,
@@ -167,7 +147,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         //     return Ok(true);
         // }
 
-        let count = tx.transaction_pool_count(Some(TransactionPoolStage::LocalOnly), None, None, true)?;
+        let count = tx.transaction_pool_count(Some(TransactionPoolStage::LocalOnly), None, true)?;
         if count > 0 {
             debug!(
                 target: LOG_TARGET,
@@ -179,7 +159,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
 
         // Check if we have multishard transactions that need to be finalized. These checks apply to transactions that
         // have been locked but not committed.
-        let count = tx.transaction_pool_count(Some(TransactionPoolStage::AllAccepted), None, None, true)?;
+        let count = tx.transaction_pool_count(Some(TransactionPoolStage::AllAccepted), None, true)?;
         if count > 0 {
             debug!(
                 target: LOG_TARGET,
@@ -189,7 +169,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
             return Ok(true);
         }
 
-        let count = tx.transaction_pool_count(Some(TransactionPoolStage::SomeAccepted), None, None, true)?;
+        let count = tx.transaction_pool_count(Some(TransactionPoolStage::SomeAccepted), None, true)?;
         if count > 0 {
             debug!(
                 target: LOG_TARGET,
@@ -208,7 +188,7 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
     }
 
     pub fn count(&self, tx: &TStateStore::ReadTransaction<'_>) -> Result<usize, TransactionPoolError> {
-        let count = tx.transaction_pool_count(None, None, None, false)?;
+        let count = tx.transaction_pool_count(None, None, false)?;
         Ok(count)
     }
 
@@ -310,6 +290,7 @@ impl FromStr for TransactionPoolStage {
 #[error("Invalid TransactionPoolStage string '{0}'")]
 pub struct TransactionPoolStageFromStrErr(String);
 
+// TODO: remove
 #[derive(Debug, Clone)]
 pub enum TransactionPoolConfirmedStage {
     ConfirmedPrepared,
@@ -687,23 +668,6 @@ impl TransactionPoolRecord {
 }
 
 impl TransactionPoolRecord {
-    pub fn remove<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), TransactionPoolError> {
-        tx.transaction_pool_remove(&self.transaction_id)?;
-        Ok(())
-    }
-
-    pub fn remove_any<'a, TTx, I>(tx: &mut TTx, transaction_ids: I) -> Result<(), TransactionPoolError>
-    where
-        TTx: StateStoreWriteTransaction,
-        I: IntoIterator<Item = &'a TransactionId>,
-    {
-        // TODO(perf): n queries
-        for id in transaction_ids {
-            let _ = tx.transaction_pool_remove(id).optional()?;
-        }
-        Ok(())
-    }
-
     pub fn remove_all<'a, TTx, I>(
         tx: &mut TTx,
         transaction_ids: I,
@@ -723,11 +687,10 @@ impl TransactionPoolRecord {
 
     pub fn get<TTx: StateStoreReadTransaction>(
         tx: &TTx,
-        from_block_id: &BlockId,
         to_block_id: &BlockId,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, TransactionPoolError> {
-        let rec = tx.transaction_pool_get_for_blocks(from_block_id, to_block_id, transaction_id)?;
+        let rec = tx.transaction_pool_get_for_blocks(to_block_id, transaction_id)?;
         Ok(rec)
     }
 

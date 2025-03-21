@@ -12,7 +12,6 @@ use tari_consensus::messages::HotstuffMessage;
 use tari_dan_common_types::ShardGroup;
 use tari_dan_storage::consensus_models::TransactionRecord;
 use tari_shutdown::ShutdownSignal;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{
@@ -26,6 +25,7 @@ use tokio::{
 use crate::support::{
     address::TestAddress,
     committee_number_to_shard_group,
+    TestStore,
     Validator,
     ValidatorChannels,
     TEST_NUM_PRESHARDS,
@@ -147,8 +147,7 @@ impl TestNetwork {
         self._on_message.borrow().clone()
     }
 
-    #[allow(dead_code)]
-    pub async fn pause(&self) {
+    pub fn pause(&self) {
         self.network_status.send(NetworkStatus::Paused).unwrap();
     }
 
@@ -202,7 +201,7 @@ pub struct TestNetworkWorker {
             ShardGroup,
             u32, // num_committees
             mpsc::Sender<(Transaction, usize)>,
-            SqliteStateStore<TestAddress>,
+            TestStore,
         ),
     >,
     tx_hs_message: HashMap<TestAddress, mpsc::Sender<(TestAddress, HotstuffMessage)>>,

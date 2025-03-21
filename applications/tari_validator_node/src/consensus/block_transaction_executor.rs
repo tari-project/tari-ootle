@@ -96,7 +96,7 @@ where
 
         // Generate the resolved inputs to set the specific version and required lock flag, as we know it after
         // execution
-        let resolved_inputs = exec_output.resolve_inputs(resolved_inputs);
+        let resolved_inputs = exec_output.resolve_input_locks(resolved_inputs);
 
         let executed = ExecutedTransaction::new(exec_output.transaction, exec_output.result, resolved_inputs);
         info!(target: LOG_TARGET, "Transaction {} executed. {}", id,executed.result().finalize.result);

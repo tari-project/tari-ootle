@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{shard::Shard, SubstateAddress, ToSubstateAddress, VersionedSubstateId};
-use tari_engine_types::substate::Substate;
+use tari_engine_types::substate::{Substate, SubstateId};
 use tari_state_tree::SubstateTreeChange;
 use tari_transaction::TransactionId;
 
@@ -39,6 +39,14 @@ impl SubstateChange {
             SubstateChange::Up { id, .. } => id,
             SubstateChange::Down { id, .. } => id,
         }
+    }
+
+    pub fn substate_id(&self) -> &SubstateId {
+        self.versioned_substate_id().substate_id()
+    }
+
+    pub fn version(&self) -> u32 {
+        self.versioned_substate_id().version()
     }
 
     pub fn substate(&self) -> Option<&Substate> {

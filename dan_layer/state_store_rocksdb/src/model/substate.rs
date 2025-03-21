@@ -20,25 +20,31 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
-
-use rocksdb::{Transaction, TransactionDB};
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, SubstateAddress, SubstateRequirement};
+use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, SubstateAddress, VersionedSubstateId};
 use tari_dan_storage::consensus_models::{BlockId, QcId, SubstateDestroyed, SubstateRecord};
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_transaction::TransactionId;
 
-use super::{
-    super::utils::{bincode_decode, bincode_encode},
-    traits::{ModelColumnFamily, RocksdbModel},
+use crate::{
+    codecs::{
+        DefaultCodec,
+        EpochCodec,
+        FixedBytesCodec,
+        NumberCodec,
+        ShardCodec,
+        SubstateIdCodec,
+        SubstateTransactionKeyCodec,
+        TransactionIdCodec,
+        UnitCodec,
+    },
+    traits::{Cf, QueryCf},
 };
-use crate::error::RocksDbStorageError;
 
 // We need to reimplement the "SubstateRecord" struct because of a incompatiblity between bincode and ciborium Value,
 // which we use for the substate state.
-// The error is simply an obscure "Serde(AnyNotSupported)", probably due to some serde tag
+// The error "Serde(AnyNotSupported)", due to bincode not being a self-describing format
 // Ref: https://github.com/bincode-org/bincode/blob/trunk/src/features/serde/mod.rs
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SubstateModelData {
@@ -101,162 +107,84 @@ impl TryFrom<SubstateModelData> for SubstateRecord {
     }
 }
 
-pub struct SubstateModel {}
+pub struct SubstateModel;
 
-impl SubstateModel {
-    pub fn key_from_address(address: &SubstateAddress) -> String {
-        format!("{}_{}", Self::key_prefix(), address)
-    }
-}
+impl Cf for SubstateModel {
+    type Key = SubstateAddress;
+    type KeyCodec = FixedBytesCodec<{ SubstateAddress::LENGTH }>;
+    type Value = SubstateRecord;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
-impl RocksdbModel for SubstateModel {
-    type Item = SubstateRecord;
-
-    fn key_prefix() -> &'static str {
+    fn name() -> &'static str {
         "substates"
     }
-
-    fn key(item: &Self::Item) -> String {
-        let address = SubstateAddress::from_substate_id(item.substate_id(), item.version());
-        Self::key_from_address(&address)
-    }
-
-    // We need to override the default trait implementation to encode as SubstateModelData
-    fn encode(value: &Self::Item) -> Result<Vec<u8>, RocksDbStorageError> {
-        let value = SubstateModelData::from(value.clone());
-        let bytes = bincode_encode(&value)?;
-        Ok(bytes)
-    }
-
-    // We need to override the default trait implementation to decode as SubstateModelData
-    fn decode(bytes: Vec<u8>) -> Result<Self::Item, RocksDbStorageError> {
-        let value: SubstateModelData = bincode_decode(bytes)?;
-        let value: SubstateRecord = value
-            .try_into()
-            .map_err(|e| RocksDbStorageError::GeneralError { message: e })?;
-        Ok(value)
-    }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![
-            VersionColumnFamily::name(),
-            CreatedByTxColumnFamily::name(),
-            DestroyedByTxColumnFamily::name(),
-        ]
-    }
-
-    fn put_in_cfs(
-        db: Arc<TransactionDB>,
-        tx: &mut Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        value: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        // In each CF value We store the key to the main collection, so we can retrieve the actual value
-        let main_key = Self::key(value);
-        let main_key_bytes = main_key.as_bytes();
-
-        VersionColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
-        CreatedByTxColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
-        DestroyedByTxColumnFamily::put(db, tx, operation, value, main_key_bytes)?;
-
-        Ok(())
-    }
-
-    fn delete_from_cfs(
-        db: Arc<TransactionDB>,
-        tx: &Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        item: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        VersionColumnFamily::delete(db.clone(), tx, operation, item)?;
-        CreatedByTxColumnFamily::delete(db.clone(), tx, operation, item)?;
-        DestroyedByTxColumnFamily::delete(db, tx, operation, item)?;
-
-        Ok(())
-    }
 }
 
-// version
+pub struct HeadIndex;
 
-pub struct VersionColumnFamily {}
-
-impl VersionColumnFamily {
-    pub const NAME: &str = "substates_version";
-
-    pub fn build_key_from_requirement(req: &SubstateRequirement) -> String {
-        let version = req
-            .version()
-            .map(|version|
-                // hexadecimal endcoding with full 0 padding, so the key preserves ordering
-                format!{"{version:#018x}"})
-            .unwrap_or_default();
-
-        format!("{}_{}_{}", SubstateModel::key_prefix(), req.substate_id, version)
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubstateHeadData {
+    pub version: u32,
+    pub is_up: bool,
 }
 
-impl ModelColumnFamily for VersionColumnFamily {
-    type Item = SubstateRecord;
+impl Cf for HeadIndex {
+    type Key = SubstateId;
+    type KeyCodec = SubstateIdCodec;
+    type Value = SubstateHeadData;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        Self::NAME
-    }
-
-    fn build_key(value: &Self::Item) -> String {
-        let req = SubstateRequirement::new(value.substate_id.clone(), Some(value.version));
-        Self::build_key_from_requirement(&req)
+        "substate_head_idx"
     }
 }
 
-// created by transaction
-pub struct CreatedByTxColumnFamily {}
+pub struct TransactionIndex;
 
-impl CreatedByTxColumnFamily {
-    pub const NAME: &str = "substates_created_by_tx";
-
-    pub fn build_key_by_transaction(tx_id: &TransactionId, address_opt: Option<&SubstateAddress>) -> String {
-        key_cf_by_tx(tx_id, address_opt)
-    }
+#[derive(Debug, Clone)]
+pub struct SubstateTransactionIndexKey {
+    pub transaction_id: TransactionId,
+    pub versioned_substate_id: VersionedSubstateId,
+    pub is_up: bool,
 }
 
-impl ModelColumnFamily for CreatedByTxColumnFamily {
-    type Item = SubstateRecord;
+impl Cf for TransactionIndex {
+    // (TransactionId, VersionedSubstateId, IsUp) where IsUp is true if the substate was upped by the transaction
+    type Key = SubstateTransactionIndexKey;
+    type KeyCodec = SubstateTransactionKeyCodec;
+    type Value = ();
+    type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        Self::NAME
-    }
-
-    fn build_key(value: &Self::Item) -> String {
-        let address = value.to_substate_address();
-        Self::build_key_by_transaction(&value.created_by_transaction, Some(&address))
+        "substate_transaction_idx"
     }
 }
 
-// destroyed by transaction
-pub struct DestroyedByTxColumnFamily {}
+pub struct ByTransactionIdIndex;
 
-impl DestroyedByTxColumnFamily {
-    pub const NAME: &str = "substates_destroyed_by_tx";
-
-    pub fn build_key_by_transaction(tx_id: &TransactionId, address_opt: Option<&SubstateAddress>) -> String {
-        key_cf_by_tx(tx_id, address_opt)
-    }
+impl QueryCf for ByTransactionIdIndex {
+    type Cf = TransactionIndex;
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
 }
 
-impl ModelColumnFamily for DestroyedByTxColumnFamily {
-    type Item = SubstateRecord;
+pub struct UnprunedDownedValuesIndex;
+
+impl Cf for UnprunedDownedValuesIndex {
+    type Key = (Epoch, Shard, u64);
+    type KeyCodec = (EpochCodec, ShardCodec, NumberCodec<u64>);
+    type Value = <SubstateModel as Cf>::Key;
+    type ValueCodec = <SubstateModel as Cf>::KeyCodec;
 
     fn name() -> &'static str {
-        Self::NAME
-    }
-
-    fn build_key(value: &Self::Item) -> String {
-        let address = value.to_substate_address();
-        Self::build_key_by_transaction(&value.created_by_transaction, Some(&address))
+        "substates_unpruned_idx"
     }
 }
 
-fn key_cf_by_tx(tx_id: &TransactionId, address_opt: Option<&SubstateAddress>) -> String {
-    let address = address_opt.map(|s| s.to_string()).unwrap_or_default();
-    format!("{}_{}_{}", SubstateModel::key_prefix(), tx_id, address)
+pub struct UnprunedDownedValuesEpochQuery;
+
+impl QueryCf for UnprunedDownedValuesEpochQuery {
+    type Cf = UnprunedDownedValuesIndex;
+    type Key = Epoch;
+    type KeyCodec = EpochCodec;
 }

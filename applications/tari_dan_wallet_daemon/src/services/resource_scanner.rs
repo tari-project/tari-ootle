@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use log::{error, info};
+use std::time::Duration;
 use tari_common_types::types::PublicKey;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
-use tari_dan_common_types::{optional::IsNotFoundError, substate_type::SubstateType, VersionedSubstateId};
+use tari_dan_common_types::{optional::IsNotFoundError, substate_type::SubstateType, Epoch, VersionedSubstateId};
+use tari_dan_wallet_sdk::storage::WalletStorageError;
 use tari_dan_wallet_sdk::{
     apis::{
         accounts::AccountsApiError,
@@ -78,10 +80,12 @@ where
                                         error!(target: LOG_TARGET, "Failed to add account: {:?}", error);
                                     }
 
-                                    // set default account
-                                    if let Err(error) = self.wallet_sdk.accounts_api().set_default_account(substate_id)
-                                    {
-                                        error!(target: LOG_TARGET, "Failed to set default account: {:?}", error);
+                                    // set default account if not already set
+                                    if let Err(AccountsApiError::StoreError(WalletStorageError::NotFound { .. })) = self.wallet_sdk.accounts_api().get_default() {
+                                        if let Err(error) = self.wallet_sdk.accounts_api().set_default_account(substate_id)
+                                        {
+                                            error!(target: LOG_TARGET, "Failed to set default account: {:?}", error);
+                                        }
                                     }
 
                                     // add substate
@@ -93,7 +97,8 @@ where
                                         error!(target: LOG_TARGET, "Failed to save substate: {:?}", error);
                                     }
 
-                                    // TODO: get transactions
+                                    // TODO: get transactions by triggering indexer to scan for transactions 
+                                    // TODO: for specific accounts
                                 }
                             },
                             Err(error) => {
@@ -111,8 +116,26 @@ where
 
     // TODO: consider running periodically the scan (every couple of minutes)
     // TODO: to avoid missing something from indexer if it did not load something yet from VN
+    // TODO: if periodic scanning will happen, make sure we do not trigger scanning for events from epoch 0, only once!
     pub async fn scan(&self) {
         let network_interface = self.wallet_sdk.get_network_interface();
+        
+        // trigger a full network scan on indexer to make sure we have all the resources stored on indexer
+        let mut scan_success = false;
+        while !scan_success {
+            if self.shutdown_signal.is_triggered() {
+                break;
+            }
+            match network_interface.scan_events(Epoch::from(0)).await {
+                Ok(success) => {
+                    scan_success = success;
+                }
+                Err(error) => {
+                    error!(target: LOG_TARGET, "Error scanning events: {}", error);
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
 
         let mut components_offset = 0;
         loop {

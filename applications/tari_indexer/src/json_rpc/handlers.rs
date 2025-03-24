@@ -41,52 +41,12 @@ use tari_dan_storage::{consensus_models::Decision, global::GlobalDb};
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
-use tari_indexer_client::types::{
-    self,
-    AddPeerRequest,
-    AddPeerResponse,
-    ConnectionDirection,
-    GetCommsStatsResponse,
-    GetConnectionsResponse,
-    GetEpochManagerStatsResponse,
-    GetIdentityResponse,
-    GetNonFungibleCollectionsResponse,
-    GetNonFungibleCountRequest,
-    GetNonFungibleCountResponse,
-    GetNonFungiblesRequest,
-    GetNonFungiblesResponse,
-    GetRelatedTransactionsRequest,
-    GetRelatedTransactionsResponse,
-    GetSubstateRequest,
-    GetSubstateResponse,
-    GetTemplateDefinitionRequest,
-    GetTemplateDefinitionResponse,
-    GetTransactionResultRequest,
-    GetTransactionResultResponse,
-    IndexerTransactionFinalizedResult,
-    InspectSubstateRequest,
-    InspectSubstateResponse,
-    ListSubstatesRequest,
-    ListSubstatesResponse,
-    ListTemplatesRequest,
-    ListTemplatesResponse,
-    NonFungibleSubstate,
-    SubmitTransactionRequest,
-    SubmitTransactionResponse,
-    TemplateMetadata,
-};
+use tari_indexer_client::types::{self, AddPeerRequest, AddPeerResponse, ConnectionDirection, GetCommsStatsResponse, GetConnectionsResponse, GetEpochManagerStatsResponse, GetIdentityResponse, GetNonFungibleCollectionsResponse, GetNonFungibleCountRequest, GetNonFungibleCountResponse, GetNonFungiblesRequest, GetNonFungiblesResponse, GetRelatedTransactionsRequest, GetRelatedTransactionsResponse, GetSubstateRequest, GetSubstateResponse, GetTemplateDefinitionRequest, GetTemplateDefinitionResponse, GetTransactionResultRequest, GetTransactionResultResponse, IndexerTransactionFinalizedResult, InspectSubstateRequest, InspectSubstateResponse, ListSubstatesRequest, ListSubstatesResponse, ListTemplatesRequest, ListTemplatesResponse, NonFungibleSubstate, ScanEventsRequest, ScanEventsResponse, SubmitTransactionRequest, SubmitTransactionResponse, TemplateMetadata};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateExecutable};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory, TransactionResultStatus};
 
-use crate::{
-    bootstrap::Services,
-    dry_run::processor::DryRunTransactionProcessor,
-    json_rpc::error::internal_error,
-    network_client::NetworkClientError,
-    substate_manager::SubstateManager,
-    transaction_manager::{error::TransactionManagerError, TransactionManager},
-};
+use crate::{bootstrap::Services, dry_run::processor::DryRunTransactionProcessor, json_rpc::error::internal_error, network_client::NetworkClientError, substate_manager::SubstateManager, transaction_manager::{error::TransactionManagerError, TransactionManager}, EventScannerRequest};
 
 const LOG_TARGET: &str = "tari::indexer::json_rpc::handlers";
 
@@ -100,6 +60,7 @@ pub struct JsonRpcHandlers {
     template_manager: TemplateManager<PeerAddress>,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
+    scan_requests_tx: tokio::sync::mpsc::Sender<EventScannerRequest>,
 }
 
 impl JsonRpcHandlers {
@@ -114,6 +75,7 @@ impl JsonRpcHandlers {
         global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
         template_manager: TemplateManager<PeerAddress>,
         dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
+        scan_requests_tx: tokio::sync::mpsc::Sender<EventScannerRequest>,
     ) -> Self {
         Self {
             keypair: services.keypair.clone(),
@@ -124,6 +86,7 @@ impl JsonRpcHandlers {
             transaction_manager,
             template_manager,
             dry_run_transaction_processor,
+            scan_requests_tx,
         }
     }
 }
@@ -713,6 +676,38 @@ impl JsonRpcHandlers {
         let resp = GetRelatedTransactionsResponse { transaction_results };
 
         Ok(JsonRpcResponse::success(answer_id, resp))
+    }
+
+    pub async fn scan_events(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let request: ScanEventsRequest = value.parse_params()?;
+        let (scan_result_tx, scan_result_rx) = tokio::sync::oneshot::channel();
+        self.scan_requests_tx.send(EventScannerRequest{ request, response: scan_result_tx }).await
+            .map_err(|error| {
+                JsonRpcResponse::error(
+                    answer_id, 
+                    JsonRpcError::new(
+                        JsonRpcErrorReason::InternalError,
+                        format!("Failed to send scan request: {:?}", error).to_string(),
+                        Value::Null,
+                    ),
+                )
+            })?;
+
+        let success = scan_result_rx.await.map_err(|error| {
+            JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InternalError,
+                    format!("Failed to receive scan response: {:?}", error).to_string(),
+                    Value::Null,
+                ),
+            )
+        })?;
+        
+        Ok(JsonRpcResponse::success(answer_id, ScanEventsResponse {
+            success,
+        }))
     }
 
     fn error_response<T: Display>(answer_id: i64, reason: JsonRpcErrorReason, message: T) -> JsonRpcResponse {

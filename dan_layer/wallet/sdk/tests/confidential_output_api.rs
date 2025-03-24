@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use tari_common::configuration::Network;
 use tari_common_types::types::Commitment;
 use tari_crypto::commitment::HomomorphicCommitmentFactory;
-use tari_dan_common_types::{optional::Optional, SubstateRequirement};
+use tari_dan_common_types::{optional::Optional, Epoch, SubstateRequirement};
 use tari_dan_wallet_sdk::{
     models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
@@ -284,6 +284,10 @@ impl WalletNetworkInterface for PanicIndexer {
         _limit: Option<u64>,
         _offset: Option<u64>,
     ) -> Result<tari_dan_wallet_sdk::network::SubstateListResult, Self::Error> {
+        panic!("PanicIndexer called")
+    }
+
+    async fn scan_events(&self, start_epoch: Epoch) -> Result<bool, Self::Error> {
         panic!("PanicIndexer called")
     }
 }

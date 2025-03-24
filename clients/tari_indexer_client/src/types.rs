@@ -479,3 +479,23 @@ pub struct GetTemplateDefinitionResponse {
     pub name: String,
     pub definition: TemplateDef,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct ScanEventsRequest {
+    pub start_epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct ScanEventsResponse {
+    pub success: bool,
+}

@@ -20,10 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::str::FromStr;
-
 use futures::StreamExt;
 use log::*;
+use std::str::FromStr;
+use std::sync::mpsc;
 use tari_crypto::tari_utilities::message_format::MessageFormat;
 use tari_dan_common_types::{committee::Committee, Epoch, PeerAddress, ShardGroup};
 use tari_dan_p2p::{proto, proto::rpc::SyncBlocksRequest};
@@ -33,9 +33,11 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_indexer_client::types::ScanEventsRequest;
 use tari_template_lib::models::{EntityId, TemplateAddress};
 use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
+use tokio::sync::oneshot;
 
 use crate::{
     block_data::BlockData,
@@ -84,6 +86,8 @@ impl TryFrom<EventFilterConfig> for EventFilter {
     }
 }
 
+
+
 pub struct EventScanner {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_factory: TariValidatorNodeRpcClientFactory,
@@ -109,7 +113,7 @@ impl EventScanner {
         }
     }
 
-    pub async fn scan_events(&self) -> Result<usize, anyhow::Error> {
+    pub async fn scan_events(&self, start_epoch: Option<Epoch>) -> Result<usize, anyhow::Error> {
         info!(
             target: LOG_TARGET,
             "scan_events",
@@ -118,7 +122,11 @@ impl EventScanner {
         let mut event_count = 0;
 
         let newest_epoch = self.epoch_manager.current_epoch().await?;
-        let oldest_scanned_epoch = self.get_oldest_scanned_epoch().await?;
+        let oldest_scanned_epoch = if start_epoch.is_some() {
+            Ok(start_epoch)
+        } else {
+            self.get_oldest_scanned_epoch().await
+        }?;
 
         match oldest_scanned_epoch {
             Some(oldest_epoch) => {

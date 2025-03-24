@@ -42,12 +42,20 @@ mod substate_manager;
 mod substate_storage_sqlite;
 mod transaction_manager;
 
-use std::{convert::Infallible, fs, future, future::Future, sync::Arc};
-
+use crate::{
+    bootstrap::{spawn_services, Services},
+    config::ApplicationConfig,
+    dry_run::processor::DryRunTransactionProcessor,
+    event_manager::EventManager,
+    graphql::server::run_graphql,
+    json_rpc::{spawn_json_rpc, JsonRpcHandlers},
+    transaction_manager::TransactionManager,
+};
 use event_scanner::{EventFilter, EventScanner};
 use http_ui::server::run_http_ui_server;
 use log::*;
 use serde::Serialize;
+use std::{convert::Infallible, fs, future, future::Future, sync::Arc};
 use substate_manager::SubstateManager;
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
@@ -67,25 +75,25 @@ use tari_epoch_manager::{
     EpochManagerReader,
 };
 use tari_epoch_oracles::EpochOracle;
+use tari_indexer_client::types::ScanEventsRequest;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
+use tokio::sync::{mpsc, oneshot};
 use tokio::{task, time};
-
-use crate::{
-    bootstrap::{spawn_services, Services},
-    config::ApplicationConfig,
-    dry_run::processor::DryRunTransactionProcessor,
-    event_manager::EventManager,
-    graphql::server::run_graphql,
-    json_rpc::{spawn_json_rpc, JsonRpcHandlers},
-    transaction_manager::TransactionManager,
-};
 
 const LOG_TARGET: &str = "tari::indexer::app";
 
+pub struct EventScannerRequest {
+    pub request: ScanEventsRequest,
+    pub response: oneshot::Sender<bool>,
+}
+
 #[allow(clippy::too_many_lines)]
-pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: ShutdownSignal) -> Result<(), ExitError> {
+pub async fn run_indexer(
+    config: ApplicationConfig,
+    mut shutdown_signal: ShutdownSignal,
+) -> Result<(), ExitError> {
     info!(target: LOG_TARGET, "Starting indexer node on network {}", config.network);
     let keypair = setup_keypair_prompt(&config.indexer.identity_file, true)?;
 
@@ -149,6 +157,9 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         info!(target: LOG_TARGET, "🌐 Started GraphQL server on {}", address);
         task::spawn(run_graphql(address, substate_manager.clone(), event_manager.clone()));
     }
+    
+    // Event scanner requests channel
+    let (scan_requests_tx, mut scan_requests_rx) = mpsc::channel::<EventScannerRequest>(1);
 
     // Run the JSON-RPC API
     let jrpc_address = config.indexer.json_rpc_address;
@@ -161,6 +172,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             services.global_db.clone(),
             services.template_manager.clone(),
             dry_run_transaction_processor,
+            scan_requests_tx,
         );
         let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
         // Run the http ui
@@ -221,12 +233,32 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         tokio::select! {
             // keep scanning the dan layer for new events
             _ = time::sleep(config.indexer.dan_layer_scanning_internal) => {
-                match event_scanner.scan_events().await {
+                match event_scanner.scan_events(None).await {
                     Ok(0) => {},
                     Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} events(s) successfully", cnt),
                     Err(e) =>  error!(target: LOG_TARGET, "Event auto-scan failed: {}", e),
                 };
             },
+
+            Some(req) = scan_requests_rx.recv() => {
+                match event_scanner.scan_events(Some(Epoch::from(req.request.start_epoch))).await {
+                    Ok(0) => if req.response.send(true).is_err() {
+                        error!(target: LOG_TARGET, "Failed to send event scan response!");
+                    },
+                    Ok(cnt) => {
+                        info!(target: LOG_TARGET, "Scanned {} events(s) successfully", cnt);
+                        if req.response.send(true).is_err() {
+                            error!(target: LOG_TARGET, "Failed to send event scan response!");
+                        }
+                    }
+                    Err(e) => {
+                        error!(target: LOG_TARGET, "Event request-scan failed: {}", e);
+                        if req.response.send(false).is_err() {
+                            error!(target: LOG_TARGET, "Failed to send event scan response!");
+                        }
+                    },
+                };
+            }
 
             Ok(event) = epoch_manager_events.recv() => {
                 if let Err(err) = handle_epoch_manager_event(&services, event).await {

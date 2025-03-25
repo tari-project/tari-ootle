@@ -26,7 +26,6 @@ use serde_json as json;
 use serde_json::json;
 use tari_dan_common_types::substate_type::SubstateType;
 
-use crate::types::{ScanEventsRequest, ScanEventsResponse};
 use crate::{
     error::IndexerClientError,
     types::{
@@ -43,6 +42,8 @@ use crate::{
         GetTransactionResultResponse,
         ListSubstatesRequest,
         ListSubstatesResponse,
+        ScanEventsRequest,
+        ScanEventsResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
     },
@@ -140,10 +141,7 @@ impl IndexerJsonRpcClient {
         self.send_request("get_epoch_manager_stats", ()).await
     }
 
-    pub async fn scan_events(
-        &mut self,
-        req: ScanEventsRequest,
-    ) -> Result<ScanEventsResponse, IndexerClientError> {
+    pub async fn scan_events(&mut self, req: ScanEventsRequest) -> Result<ScanEventsResponse, IndexerClientError> {
         self.send_request("events.scan", req).await
     }
 

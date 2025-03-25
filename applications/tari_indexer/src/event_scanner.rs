@@ -20,10 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::{str::FromStr, sync::mpsc};
+
 use futures::StreamExt;
 use log::*;
-use std::str::FromStr;
-use std::sync::mpsc;
 use tari_crypto::tari_utilities::message_format::MessageFormat;
 use tari_dan_common_types::{committee::Committee, Epoch, PeerAddress, ShardGroup};
 use tari_dan_p2p::{proto, proto::rpc::SyncBlocksRequest};
@@ -86,8 +86,7 @@ impl TryFrom<EventFilterConfig> for EventFilter {
     }
 }
 
-
-
+#[derive(Clone)]
 pub struct EventScanner {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_factory: TariValidatorNodeRpcClientFactory,

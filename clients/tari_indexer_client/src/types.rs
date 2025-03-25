@@ -499,3 +499,23 @@ pub struct ScanEventsRequest {
 pub struct ScanEventsResponse {
     pub success: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct ScanTransactionsRequest {
+    pub start_epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct ScanTransactionsResponse {
+    pub success: bool,
+}

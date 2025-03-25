@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use tari_common_types::types::Commitment;
+use tari_common_types::types::{Commitment, PublicKey};
 use tari_dan_common_types::{
     optional::IsNotFoundError,
     substate_type::SubstateType,

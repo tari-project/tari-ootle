@@ -15,7 +15,6 @@ use tari_dan_wallet_sdk::network::{
     WalletNetworkInterface,
 };
 use tari_engine_types::substate::SubstateId;
-use tari_indexer_client::types::ScanEventsRequest;
 use tari_indexer_client::{
     error::IndexerClientError,
     json_rpc_client::IndexerJsonRpcClient,
@@ -25,6 +24,7 @@ use tari_indexer_client::{
         IndexerTransactionFinalizedResult,
         ListSubstateItem,
         ListSubstatesRequest,
+        ScanEventsRequest,
         SubmitTransactionRequest,
     },
 };
@@ -195,7 +195,9 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         let mut client = self.get_client()?;
 
         let resp = client
-            .scan_events(ScanEventsRequest { start_epoch: start_epoch.as_u64() })
+            .scan_events(ScanEventsRequest {
+                start_epoch: start_epoch.as_u64(),
+            })
             .await?;
 
         Ok(resp.success)

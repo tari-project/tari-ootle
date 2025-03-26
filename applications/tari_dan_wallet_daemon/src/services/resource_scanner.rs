@@ -20,6 +20,7 @@ use tari_dan_wallet_sdk::{
 use tari_engine_types::{published_template::PublishedTemplateAddress, substate::SubstateId};
 use tari_key_manager::key_manager::DerivedKey;
 use tari_shutdown::ShutdownSignal;
+use tari_template_abi::TemplateDef;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::{ComponentAddress, TemplateAddress};
 
@@ -49,42 +50,45 @@ where
         match network_interface.query_substate(substate_id, None, false).await {
             Ok(result) => {
                 if let Some(template) = result.substate.as_template() {
-                    // check if any account matches the author of the template
                     let key_manager = self.wallet_sdk.key_manager_api();
-                    let accounts = self.wallet_sdk.accounts_api();
-                    let limit = 10;
-                    let mut offset = 0;
-                    let mut found_account_key_index = None::<u64>;
-                    while let Ok(accounts) = accounts.get_many(offset, limit) {
-                        if accounts.is_empty() {
-                            break;
-                        }
-
-                        // check accounts
-                        found_account_key_index = accounts.iter().find_map(|account| {
-                            if key_manager
-                                .get_public_key(TRANSACTION_BRANCH, Some(account.key_index))
-                                .is_ok()
-                            {
-                                return Some(account.key_index);
-                            }
-                            None
-                        });
-                        if found_account_key_index.is_some() {
-                            break;
-                        }
-
-                        offset += limit;
-                    }
 
                     // save template
                     if let Some(template_address) = result.address.as_template() {
-                        if let Some(key_index) = found_account_key_index {
-                            self.wallet_sdk.template_api().add_authored_template(
-                                key_index,
-                                template_address.as_hash(),
-                                // TODO: get template definition here
-                            )
+                        if let Ok((key_index, _)) =
+                            key_manager.get_key_for_public_key(TRANSACTION_BRANCH, &template.author)
+                        {
+                            let mut template_definition = None::<TemplateDef>;
+                            loop {
+                                if self.shutdown_signal.is_triggered() {
+                                    break;
+                                }
+                                match network_interface
+                                    .fetch_template_definition(template_address.as_hash())
+                                    .await
+                                {
+                                    Ok(template_def) => {
+                                        template_definition = Some(template_def);
+                                        break;
+                                    },
+                                    Err(error) => {
+                                        error!(target: LOG_TARGET, "Failed to fetch template definition: {}", error);
+                                        tokio::time::sleep(Duration::from_secs(1)).await;
+                                    },
+                                }
+                            }
+                            if self.shutdown_signal.is_triggered() {
+                                return;
+                            }
+                            if let Some(template_definition) = template_definition {
+                                if let Err(error) = self
+                                    .wallet_sdk
+                                    .template_api()
+                                    .add_authored_template(key_index, template_address.as_hash(), template_definition)
+                                    .await
+                                {
+                                    error!(target: LOG_TARGET, "Failed to add authored template: {}", error);
+                                }
+                            }
                         }
                     }
                 }
@@ -197,6 +201,8 @@ where
         // Note: we can't be sure which resource related to an account should be saved, so thatswhy
         // the 2 round of iterations here (first get all accounts, then all related resources)
 
+        info!(target: LOG_TARGET, "Scanning accounts...");
+
         // scanning through all substates to collect all accounts first
         let mut components_offset = 0;
         loop {
@@ -226,11 +232,13 @@ where
             components_offset += 10;
         }
 
+        info!(target: LOG_TARGET, "Scanning accounts resources...");
+
         // scanning through again through all substates to collect all owned account related resources
         components_offset = 0;
         loop {
             match network_interface
-                .list_substates(None, Some(SubstateType::Component), Some(10), Some(components_offset))
+                .list_substates(None, None, Some(10), Some(components_offset))
                 .await
             {
                 Ok(substates) => {
@@ -260,5 +268,7 @@ where
             }
             components_offset += 10;
         }
+
+        info!(target: LOG_TARGET, "Scanning finished!");
     }
 }

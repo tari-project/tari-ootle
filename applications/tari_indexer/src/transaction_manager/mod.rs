@@ -103,6 +103,16 @@ where
             })
     }
 
+    pub async fn get_transaction(&self, transaction_id: TransactionId) -> Result<Transaction, TransactionManagerError> {
+        let transaction_substate_address = transaction_id.to_substate_address();
+        self.network_client
+            .try_with_committee(iter::once(transaction_substate_address), 1, |mut client| async move {
+                client.get_transaction(transaction_id).await
+            })
+            .await
+            .map_err(|e| e.into())
+    }
+
     pub async fn get_substate(
         &self,
         substate_requirement: &SubstateRequirement,

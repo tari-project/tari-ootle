@@ -11,9 +11,10 @@ use tari_dan_wallet_sdk::{
     apis::{
         accounts::AccountsApiError,
         key_manager::{KeyManagerApiError, TRANSACTION_BRANCH},
+        transaction::TransactionApiError,
     },
     models::Account,
-    network::{SubstateQueryResult, WalletNetworkInterface},
+    network::{SubstateQueryResult, TransactionFinalizedResult, WalletNetworkInterface},
     storage::{WalletStorageError, WalletStore},
     DanWalletSdk,
 };
@@ -23,6 +24,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_abi::TemplateDef;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::models::{ComponentAddress, TemplateAddress};
+use tari_transaction::{TransactionId, TransactionV1};
 
 const LOG_TARGET: &str = "tari::dan_wallet_daemon::resource_scanner";
 
@@ -42,6 +44,44 @@ where
         Self {
             wallet_sdk,
             shutdown_signal,
+        }
+    }
+
+    // TODO: somehow get timestamps of transactions right (or check if its possible)
+    // TODO: check if we will have transactions saved when other wallet daemons are transactioning
+    async fn handle_found_tx_receipt(&self, substate_id: &SubstateId) {
+        let network_interface = self.wallet_sdk.get_network_interface();
+        match network_interface.query_substate(substate_id, None, false).await {
+            Ok(result) => {
+                if let Some(receipt) = result.substate.as_transaction_receipt() {
+                    let transaction_id = TransactionId::new(receipt.transaction_hash.into_array());
+                    if let Ok(tx) = network_interface.get_transaction(transaction_id).await {
+                        match self
+                            .wallet_sdk
+                            .transaction_api()
+                            .insert_new_transaction(tx, vec![], None, false)
+                            .await
+                        {
+                            Ok(_) => {
+                                if let Err(error) = self
+                                    .wallet_sdk
+                                    .transaction_api()
+                                    .check_and_store_finalized_transaction(transaction_id)
+                                    .await
+                                {
+                                    error!(target: LOG_TARGET, "Failed to store transaction: {}", error);
+                                }
+                            },
+                            Err(error) => {
+                                error!(target: LOG_TARGET, "Failed to store transaction: {}", error);
+                            },
+                        }
+                    }
+                }
+            },
+            Err(error) => {
+                error!(target: LOG_TARGET, "Error getting transaction receipt substate: {}", error);
+            },
         }
     }
 
@@ -156,9 +196,6 @@ where
                                     ) {
                                         error!(target: LOG_TARGET, "Failed to save substate: {:?}", error);
                                     }
-
-                                    // TODO: get transactions by triggering indexer to scan for transactions
-                                    // TODO: for specific accounts
                                 }
                             },
                             Err(error) => {
@@ -253,7 +290,9 @@ where
                             SubstateId::UnclaimedConfidentialOutput(_) => {},
                             SubstateId::NonFungible(_) => {},
                             SubstateId::NonFungibleIndex(_) => {},
-                            SubstateId::TransactionReceipt(_) => {},
+                            SubstateId::TransactionReceipt(_) => {
+                                self.handle_found_tx_receipt(&substate.substate_id).await;
+                            },
                             SubstateId::Template(_) => {
                                 self.handle_found_template(&substate.substate_id).await;
                             },

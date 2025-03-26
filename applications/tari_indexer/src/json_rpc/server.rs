@@ -83,6 +83,7 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "get_template_definition" => handlers.get_template_definition(value).await,
         "list_templates" => handlers.list_templates(value).await,
         "events.scan" => handlers.scan_events(value).await,
+        "get_transaction" => handlers.get_transaction(value).await,
         method => Ok(value.method_not_found(method)),
     }
 }

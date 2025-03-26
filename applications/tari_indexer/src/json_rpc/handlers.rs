@@ -61,6 +61,8 @@ use tari_indexer_client::types::{
     GetSubstateResponse,
     GetTemplateDefinitionRequest,
     GetTemplateDefinitionResponse,
+    GetTransactionRequest,
+    GetTransactionResponse,
     GetTransactionResultRequest,
     GetTransactionResultResponse,
     IndexerTransactionFinalizedResult,
@@ -80,6 +82,7 @@ use tari_indexer_client::types::{
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateExecutable};
+use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory, TransactionResultStatus};
 
 use crate::{
@@ -755,6 +758,30 @@ impl JsonRpcHandlers {
         })?;
 
         Ok(JsonRpcResponse::success(answer_id, ScanEventsResponse { success }))
+    }
+
+    pub async fn get_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let request: GetTransactionRequest = value.parse_params()?;
+
+        let transaction = self
+            .transaction_manager
+            .get_transaction(TransactionId::from(request.transaction_id))
+            .await
+            .map_err(|error| {
+                JsonRpcResponse::error(
+                    answer_id,
+                    JsonRpcError::new(
+                        JsonRpcErrorReason::InternalError,
+                        format!("Failed to get transaction: {:?}", error).to_string(),
+                        Value::Null,
+                    ),
+                )
+            })?;
+
+        Ok(JsonRpcResponse::success(answer_id, GetTransactionResponse {
+            transaction,
+        }))
     }
 
     fn error_response<T: Display>(answer_id: i64, reason: JsonRpcErrorReason, message: T) -> JsonRpcResponse {

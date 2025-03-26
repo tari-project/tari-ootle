@@ -20,6 +20,7 @@ use tari_indexer_client::{
     json_rpc_client::IndexerJsonRpcClient,
     types::{
         GetSubstateRequest,
+        GetTransactionRequest,
         GetTransactionResultRequest,
         IndexerTransactionFinalizedResult,
         ListSubstateItem,
@@ -201,6 +202,17 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
             .await?;
 
         Ok(resp.success)
+    }
+
+    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<Transaction, Self::Error> {
+        let mut client = self.get_client()?;
+        let result = client
+            .get_transaction(GetTransactionRequest {
+                transaction_id: transaction_id.into_array(),
+            })
+            .await?;
+
+        Ok(result.transaction)
     }
 }
 

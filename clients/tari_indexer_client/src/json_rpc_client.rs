@@ -38,6 +38,8 @@ use crate::{
         GetSubstateResponse,
         GetTemplateDefinitionRequest,
         GetTemplateDefinitionResponse,
+        GetTransactionRequest,
+        GetTransactionResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
         ListSubstatesRequest,
@@ -84,6 +86,13 @@ impl IndexerJsonRpcClient {
 
     pub async fn get_substate(&mut self, req: GetSubstateRequest) -> Result<GetSubstateResponse, IndexerClientError> {
         self.send_request("get_substate", req).await
+    }
+
+    pub async fn get_transaction(
+        &mut self,
+        req: GetTransactionRequest,
+    ) -> Result<GetTransactionResponse, IndexerClientError> {
+        self.send_request("get_transaction", req).await
     }
 
     pub async fn list_substates(

@@ -54,6 +54,8 @@ pub trait WalletNetworkInterface {
     async fn fetch_template_definition(&self, template_address: TemplateAddress) -> Result<TemplateDef, Self::Error>;
 
     async fn scan_events(&self, start_epoch: Epoch) -> Result<bool, Self::Error>;
+
+    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<Transaction, Self::Error>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

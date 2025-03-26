@@ -519,3 +519,23 @@ pub struct ScanTransactionsRequest {
 pub struct ScanTransactionsResponse {
     pub success: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct GetTransactionRequest {
+    pub transaction_id: [u8; 32],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct GetTransactionResponse {
+    pub transaction: Transaction,
+}

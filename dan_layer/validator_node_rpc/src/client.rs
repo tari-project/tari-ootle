@@ -10,7 +10,13 @@ use tari_bor::decode;
 use tari_dan_common_types::{NodeAddressable, SubstateRequirement, ToPeerId};
 use tari_dan_p2p::{
     proto,
-    proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
+    proto::rpc::{
+        GetTransactionRequest,
+        GetTransactionResultRequest,
+        PayloadResultStatus,
+        SubmitTransactionRequest,
+        SubstateStatus,
+    },
     TariMessagingSpec,
 };
 use tari_dan_storage::consensus_models::Decision;
@@ -41,6 +47,8 @@ pub trait ValidatorNodeRpcClient<TAddr: NodeAddressable>: Send + Sync {
     ) -> Result<TransactionResultStatus, Self::Error>;
 
     async fn get_substate(&mut self, substate_req: &SubstateRequirement) -> Result<SubstateResult, Self::Error>;
+
+    async fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<Transaction, Self::Error>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -232,6 +240,24 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
             },
             SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
         }
+    }
+
+    async fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<Transaction, Self::Error> {
+        let mut client = self.client_connection().await?;
+        let result = client
+            .get_transaction(GetTransactionRequest {
+                transaction_id: transaction_id.into_array().to_vec(),
+            })
+            .await?;
+        result
+            .transaction
+            .map(|tx| decode::<Transaction>(tx.bor_encoded.as_slice()))
+            .ok_or(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                "Transaction not found"
+            )))?
+            .map_err(|error| {
+                ValidatorNodeRpcClientError::InvalidResponse(anyhow!("Transaction cannot be decoded: {:?}", error))
+            })
     }
 }
 

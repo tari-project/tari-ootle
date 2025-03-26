@@ -290,4 +290,8 @@ impl WalletNetworkInterface for PanicIndexer {
     async fn scan_events(&self, start_epoch: Epoch) -> Result<bool, Self::Error> {
         panic!("PanicIndexer called")
     }
+
+    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<Transaction, Self::Error> {
+        panic!("PanicIndexer called")
+    }
 }

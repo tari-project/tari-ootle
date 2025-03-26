@@ -27,8 +27,8 @@ use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_shutdown::Shutdown;
 use tari_template_manager::interface::TemplateExecutable;
-// use tokio::signal::unix::{signal, SignalKind};
 
+// use tokio::signal::unix::{signal, SignalKind};
 use crate::{Services, ValidatorNodeStateStore};
 
 const LOG_TARGET: &str = "tari::validator_node::dan_node";

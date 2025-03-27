@@ -27,8 +27,8 @@ use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_networking::NetworkingService;
 use tari_shutdown::Shutdown;
 use tari_template_manager::interface::TemplateExecutable;
-use tokio::signal::unix::{signal, SignalKind};
 
+// use tokio::signal::unix::{signal, SignalKind};
 use crate::{Services, ValidatorNodeStateStore};
 
 const LOG_TARGET: &str = "tari::validator_node::dan_node";
@@ -50,19 +50,13 @@ impl DanNode {
         //     error!(target: LOG_TARGET, "Failed to dial local shard peers: {}", err);
         // }
 
-        let mut sigint = signal(SignalKind::interrupt())?;
-        let mut sigterm = signal(SignalKind::terminate())?;
+        // let sigint = tokio::signal::ctrl_c();
+        // let mut sigterm = signal(SignalKind::terminate())?;
 
         loop {
             tokio::select! {
-                _ = sigint.recv() => {
+                _ = tokio::signal::ctrl_c() => {
                     info!(target: LOG_TARGET, "💤 Received SIGINT");
-                    shutdown.trigger();
-                },
-
-                // Wait for SIGTERM
-                _ = sigterm.recv() => {
-                    info!(target: LOG_TARGET, "🛑 Received SIGTERM");
                     shutdown.trigger();
                 },
 

@@ -1,7 +1,7 @@
 [workspace]
 [package]
 name = "account"
-version = "0.3.0"
+version = "0.9.1"
 edition = "2021"
 
 [dependencies]

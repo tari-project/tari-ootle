@@ -22,6 +22,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceiptAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
+use time::PrimitiveDateTime;
 
 use crate::{
     consensus_models::{
@@ -54,6 +55,8 @@ pub struct TransactionRecord {
     pub final_decision: Option<Decision>,
     pub finalized_time: Option<Duration>,
     pub abort_reason: Option<RejectReason>,
+    pub created_at: PrimitiveDateTime,
+    pub finalized_at: Option<PrimitiveDateTime>,
 }
 
 impl TransactionRecord {
@@ -66,6 +69,8 @@ impl TransactionRecord {
             finalized_time: None,
             resulting_outputs: None,
             abort_reason: None,
+            created_at: ,// TODO
+            finalized_at: None,
         }
     }
 
@@ -77,6 +82,7 @@ impl TransactionRecord {
         finalized_time: Option<Duration>,
         resulting_outputs: Option<Vec<VersionedSubstateIdLockIntent>>,
         abort_reason: Option<RejectReason>,
+        finalized_at: Option<PrimitiveDateTime>,
     ) -> Self {
         Self {
             transaction,
@@ -86,6 +92,7 @@ impl TransactionRecord {
             finalized_time,
             resulting_outputs,
             abort_reason,
+            finalized_at,
         }
     }
 
@@ -161,6 +168,10 @@ impl TransactionRecord {
 
     pub fn abort_reason(&self) -> Option<&RejectReason> {
         self.abort_reason.as_ref()
+    }
+
+    pub fn finalized_at(&self) -> Option<PrimitiveDateTime> {
+        self.finalized_at
     }
 
     pub fn abort(&mut self, reason: RejectReason) -> &mut Self {
@@ -532,6 +543,7 @@ impl From<ExecutedTransaction> for TransactionRecord {
             finalized_time,
             resulting_outputs: Some(resulting_outputs),
             abort_reason: abort_details,
+            finalized_at: None, // TODO: check if its fine
         }
     }
 }

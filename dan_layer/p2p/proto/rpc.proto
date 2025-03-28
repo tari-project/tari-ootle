@@ -287,4 +287,5 @@ message GetTransactionRequest {
 
 message GetTransactionResponse {
   tari.dan.transaction.Transaction transaction = 1;
+  optional uint64 finalized_at_timestamp = 2;
 }

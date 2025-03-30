@@ -1,1 +1,0 @@
-export type Shard = number;

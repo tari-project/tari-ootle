@@ -312,7 +312,7 @@ jobs:
           echo "cross flag: ${{ matrix.builds.cross }}"
 
       - name: Build release binaries
-        timeout-minutes: 30
+        timeout-minutes: 60
         shell: bash
         run: |
           ${{ env.CARGO }} build ${{ env.CARGO_OPTIONS }} \
@@ -591,7 +591,7 @@ jobs:
           path: "${{ github.workspace }}/buildtools/Output/*"
 
       - name: Audit tree and feedback for binaries
-        # if: ${{ ( ! matrix.builds.cross ) }}
+        if: ${{ ( ! matrix.builds.cross ) }}
         continue-on-error: true
         shell: bash
         run: |

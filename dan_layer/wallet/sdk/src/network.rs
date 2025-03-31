@@ -55,7 +55,14 @@ pub trait WalletNetworkInterface {
 
     async fn scan_events(&self, start_epoch: Epoch) -> Result<bool, Self::Error>;
 
-    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<Transaction, Self::Error>;
+    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<TransactionResponse, Self::Error>;
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TransactionResponse {
+    pub transaction: Transaction,
+    pub created_at_timestamp: u64,
+    pub finalized_at_timestamp: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

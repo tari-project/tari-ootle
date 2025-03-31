@@ -12,6 +12,7 @@ use tari_dan_wallet_sdk::network::{
     SubstateQueryResult,
     TransactionFinalizedResult,
     TransactionQueryResult,
+    TransactionResponse,
     WalletNetworkInterface,
 };
 use tari_engine_types::substate::SubstateId;
@@ -204,7 +205,7 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         Ok(resp.success)
     }
 
-    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<Transaction, Self::Error> {
+    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<TransactionResponse, Self::Error> {
         let mut client = self.get_client()?;
         let result = client
             .get_transaction(GetTransactionRequest {
@@ -212,7 +213,11 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
             })
             .await?;
 
-        Ok(result.transaction)
+        Ok(TransactionResponse {
+            transaction: result.transaction,
+            created_at_timestamp: result.created_at_timestamp,
+            finalized_at_timestamp: result.finalized_at_timestamp,
+        })
     }
 }
 

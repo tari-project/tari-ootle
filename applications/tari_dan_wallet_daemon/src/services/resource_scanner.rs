@@ -55,11 +55,18 @@ where
             Ok(result) => {
                 if let Some(receipt) = result.substate.as_transaction_receipt() {
                     let transaction_id = TransactionId::new(receipt.transaction_hash.into_array());
-                    if let Ok(tx) = network_interface.get_transaction(transaction_id).await {
+                    if let Ok(tx_resp) = network_interface.get_transaction(transaction_id).await {
                         match self
                             .wallet_sdk
                             .transaction_api()
-                            .insert_new_transaction(tx, vec![], None, false)
+                            .insert_new_transaction(
+                                tx_resp.transaction,
+                                vec![],
+                                None,
+                                false,
+                                Some(tx_resp.created_at_timestamp),
+                                tx_resp.finalized_at_timestamp,
+                            )
                             .await
                         {
                             Ok(_) => {

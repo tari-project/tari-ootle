@@ -4,9 +4,10 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
+use chrono::{Date, NaiveDate};
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{
@@ -22,7 +23,7 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceiptAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
-use time::PrimitiveDateTime;
+use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::{
     consensus_models::{
@@ -61,6 +62,8 @@ pub struct TransactionRecord {
 
 impl TransactionRecord {
     pub fn new(transaction: Transaction) -> Self {
+        let datetime = OffsetDateTime::now_utc();
+        let now = PrimitiveDateTime::new(datetime.date(), datetime.time());
         Self {
             transaction,
             execution_result: None,
@@ -69,7 +72,7 @@ impl TransactionRecord {
             finalized_time: None,
             resulting_outputs: None,
             abort_reason: None,
-            created_at: ,// TODO
+            created_at: now,
             finalized_at: None,
         }
     }
@@ -82,6 +85,7 @@ impl TransactionRecord {
         finalized_time: Option<Duration>,
         resulting_outputs: Option<Vec<VersionedSubstateIdLockIntent>>,
         abort_reason: Option<RejectReason>,
+        created_at: PrimitiveDateTime,
         finalized_at: Option<PrimitiveDateTime>,
     ) -> Self {
         Self {
@@ -92,6 +96,7 @@ impl TransactionRecord {
             finalized_time,
             resulting_outputs,
             abort_reason,
+            created_at,
             finalized_at,
         }
     }
@@ -534,6 +539,8 @@ impl From<ExecutedTransaction> for TransactionRecord {
         let finalized_time = tx.finalized_time();
         let abort_details = tx.abort_reason().cloned();
         let (transaction, result, resolved_inputs, resulting_outputs) = tx.dissolve();
+        let datetime = OffsetDateTime::now_utc();
+        let now = PrimitiveDateTime::new(datetime.date(), datetime.time());
 
         Self {
             transaction,
@@ -543,6 +550,7 @@ impl From<ExecutedTransaction> for TransactionRecord {
             finalized_time,
             resulting_outputs: Some(resulting_outputs),
             abort_reason: abort_details,
+            created_at: now,    // TODO: check if its fine
             finalized_at: None, // TODO: check if its fine
         }
     }

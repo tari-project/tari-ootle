@@ -764,7 +764,7 @@ impl JsonRpcHandlers {
         let answer_id = value.get_answer_id();
         let request: GetTransactionRequest = value.parse_params()?;
 
-        let transaction = self
+        let transaction_response = self
             .transaction_manager
             .get_transaction(TransactionId::from(request.transaction_id))
             .await
@@ -780,7 +780,9 @@ impl JsonRpcHandlers {
             })?;
 
         Ok(JsonRpcResponse::success(answer_id, GetTransactionResponse {
-            transaction,
+            transaction: transaction_response.transaction,
+            created_at_timestamp: transaction_response.created_at_timestamp,
+            finalized_at_timestamp: transaction_response.finalized_at_timestamp,
         }))
     }
 

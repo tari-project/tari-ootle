@@ -10,7 +10,14 @@ use std::{
 };
 
 use chrono::NaiveDateTime;
-use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
+use diesel::{
+    internal::derives::multiconnection::time::{OffsetDateTime, PrimitiveDateTime},
+    sql_types::Timestamp,
+    OptionalExtension,
+    QueryDsl,
+    RunQueryDsl,
+    SqliteConnection,
+};
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
@@ -279,8 +286,27 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         required_substates: &[SubstateRequirement],
         new_account_info: Option<&NewAccountInfo>,
         is_dry_run: bool,
+        created_at_timestamp: Option<u64>,
+        updated_at_timestamp: Option<u64>,
     ) -> Result<(), WalletStorageError> {
         use crate::schema::transactions;
+
+        let datetime = OffsetDateTime::now_utc();
+        let now = PrimitiveDateTime::new(datetime.date(), datetime.time());
+
+        let created_at = created_at_timestamp
+            .map(|ts| {
+                let datetime = OffsetDateTime::from_unix_timestamp(ts as i64).unwrap_or(OffsetDateTime::now_utc());
+                PrimitiveDateTime::new(datetime.date(), datetime.time())
+            })
+            .unwrap_or(now);
+
+        let updated_at = updated_at_timestamp
+            .map(|ts| {
+                let datetime = OffsetDateTime::from_unix_timestamp(ts as i64).unwrap_or(OffsetDateTime::now_utc());
+                PrimitiveDateTime::new(datetime.date(), datetime.time())
+            })
+            .unwrap_or(now);
 
         diesel::insert_into(transactions::table)
             .values((
@@ -296,6 +322,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 transactions::required_substates.eq(serialize_json(&required_substates)?),
                 transactions::new_account_info.eq(new_account_info.map(serialize_json).transpose()?),
                 transactions::dry_run.eq(is_dry_run),
+                transactions::created_at.eq(created_at),
+                transactions::updated_at.eq(updated_at),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("transactions_insert", e))?;

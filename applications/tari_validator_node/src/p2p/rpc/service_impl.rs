@@ -465,9 +465,10 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
 
         Ok(Response::new(GetTransactionResponse {
             transaction: Some(proto::transaction::Transaction { bor_encoded: raw }),
-            finalized_at_timestamp: transaction.finalized_at.map(|datetime| {
-                datetime.assume_utc().unix_timestamp() as u64
-            }),
+            created_at_timestamp: transaction.created_at.assume_utc().unix_timestamp() as u64,
+            finalized_at_timestamp: transaction
+                .finalized_at
+                .map(|datetime| datetime.assume_utc().unix_timestamp() as u64),
         }))
     }
 }

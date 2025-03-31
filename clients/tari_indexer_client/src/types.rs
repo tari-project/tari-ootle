@@ -538,4 +538,6 @@ pub struct GetTransactionRequest {
 )]
 pub struct GetTransactionResponse {
     pub transaction: Transaction,
+    pub created_at_timestamp: u64,
+    pub finalized_at_timestamp: Option<u64>,
 }

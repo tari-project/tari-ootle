@@ -39,6 +39,7 @@ use tari_indexer_lib::{
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::client::{
     SubstateResult,
+    TransactionResponse,
     TransactionResultStatus,
     ValidatorNodeClientFactory,
     ValidatorNodeRpcClient,
@@ -103,7 +104,10 @@ where
             })
     }
 
-    pub async fn get_transaction(&self, transaction_id: TransactionId) -> Result<Transaction, TransactionManagerError> {
+    pub async fn get_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<TransactionResponse, TransactionManagerError> {
         let transaction_substate_address = transaction_id.to_substate_address();
         self.network_client
             .try_with_committee(iter::once(transaction_substate_address), 1, |mut client| async move {

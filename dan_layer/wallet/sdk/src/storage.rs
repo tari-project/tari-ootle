@@ -248,6 +248,8 @@ pub trait WalletStoreWriter {
         required_substates: &[SubstateRequirement],
         new_account_info: Option<&NewAccountInfo>,
         is_dry_run: bool,
+        created_at_timestamp: Option<u64>,
+        updated_at_timestamp: Option<u64>,
     ) -> Result<(), WalletStorageError>;
     fn transactions_set_result_and_status(
         &mut self,

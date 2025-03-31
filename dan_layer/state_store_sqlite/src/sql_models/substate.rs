@@ -18,7 +18,7 @@ pub struct SubstateRecord {
     pub state_hash: String,
     pub created_justify: String,
     pub created_block: String,
-    pub _created_height: i64,
+    pub _created_height: Option<i64>,
     pub created_at_epoch: i64,
     pub created_by_shard: i32,
     pub destroyed_justify: Option<String>,

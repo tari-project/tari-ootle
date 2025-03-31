@@ -93,11 +93,12 @@ impl Validator {
         let tx = self.state_store().create_read_tx().unwrap();
         let tx_rec = tx.transactions_get(tx_id).unwrap();
         let exec_result = tx_rec.into_final_result().expect("transaction not finalized");
-        let diff = exec_result.expect_success();
-        for (substate_id, substate) in diff.up_iter() {
-            let id = VersionedSubstateIdRef::new(substate_id, substate.version());
-            if tx.substates_any_exist(Some(id)).unwrap() {
-                return true;
+        if let Some(diff) = exec_result.finalize.accept() {
+            for (substate_id, substate) in diff.up_iter() {
+                let id = VersionedSubstateIdRef::new(substate_id, substate.version());
+                if tx.substates_any_exist(Some(id)).unwrap() {
+                    return true;
+                }
             }
         }
         false

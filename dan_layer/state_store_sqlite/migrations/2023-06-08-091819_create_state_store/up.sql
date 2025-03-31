@@ -151,7 +151,8 @@ create table substates
     state_hash         text      not NULL,
     created_justify    text      not NULL,
     created_block      text      not NULL,
-    created_height     bigint    not NULL,
+    -- This is could be set to null if the block does not exist (happens in tests only). We'll accept this since this field is for debugging
+    created_height     bigint    NULL,
     -- <epoch, shard> uniquely identifies the chain
     created_at_epoch   bigint    not NULL,
     created_by_shard   int       not NULL,

@@ -15,7 +15,7 @@ use tari_transaction::Transaction;
 fn basic_emit_event() {
     let mut template_test = TemplateTest::new(vec!["tests/templates/events"]);
     let event_emitter_template = template_test.get_template_address("EventEmitter");
-    let topic = "Hello world !";
+    let topic = "Hello_world";
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
@@ -28,7 +28,7 @@ fn basic_emit_event() {
         .expect("Failed to emit test event");
     assert!(result.finalize.is_accept());
     assert_eq!(result.finalize.events.len(), 1);
-    assert_eq!(result.finalize.events[0].topic(), topic);
+    assert_eq!(result.finalize.events[0].topic(), format!("EventEmitter.{}", topic));
     assert_eq!(result.finalize.events[0].template_address(), event_emitter_template);
     assert_eq!(result.finalize.events[0].substate_id(), None);
     assert_eq!(

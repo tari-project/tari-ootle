@@ -409,7 +409,7 @@ diesel::table! {
         state_hash -> Text,
         created_justify -> Text,
         created_block -> Text,
-        created_height -> BigInt,
+        created_height -> Nullable<BigInt>,
         created_at_epoch -> BigInt,
         created_by_shard -> Integer,
         destroyed_justify -> Nullable<Text>,

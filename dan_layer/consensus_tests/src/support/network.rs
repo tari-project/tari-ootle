@@ -297,12 +297,16 @@ impl TestNetworkWorker {
                 }
 
                 Ok(_) = self.network_status.changed() => {
-                    if let NetworkStatus::Started = *self.network_status.borrow() {
+                    let status = *self.network_status.borrow() ;
+                    log::info!("Network status changed to {:?}", status);
+                    if let NetworkStatus::Started =  status {
                         continue;
                     }
-                    loop{
+                    loop {
                         self.network_status.changed().await.unwrap();
-                        if let NetworkStatus::Started = *self.network_status.borrow() {
+                        let status = *self.network_status.borrow() ;
+                        log::info!("Network status changed to {:?}", status);
+                        if let NetworkStatus::Started = status {
                             break;
                         }
                     }
@@ -334,12 +338,16 @@ impl TestNetworkWorker {
                 continue;
             }
 
-            self.tx_hs_message
+            if self
+                .tx_hs_message
                 .get(&to)
                 .unwrap()
                 .send((from.clone(), msg.clone()))
                 .await
-                .unwrap();
+                .is_err()
+            {
+                log::warn!("Unable to send message to {to} from {from}. channel is closed.");
+            }
             self.num_sent_messages
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }

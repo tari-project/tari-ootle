@@ -1535,8 +1535,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             substates::created_height.eq(blocks::table
                 .select(blocks::height)
                 .filter(blocks::block_id.eq(&created_block))
-                .single_value()
-                .assume_not_null()),
+                .single_value()),
             substates::created_at_epoch.eq(substate.created_at_epoch.as_u64() as i64),
             substates::created_by_shard.eq(shard.as_u32() as i32),
         );

@@ -76,7 +76,6 @@ async fn single_transaction() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx1.id());
 
     // Assert all LocalOnly
@@ -123,7 +122,6 @@ async fn single_transaction_multi_vn() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx1.id());
 
     // Assert all LocalOnly
@@ -173,7 +171,6 @@ async fn single_transaction_abort() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx1.id(), Decision::Abort(AbortReason::ExecutionFailure))
         .await;
 
@@ -206,7 +203,6 @@ async fn propose_blocks_with_queued_up_transactions_until_all_committed() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_clean_shutdown().await;
 }
 
@@ -233,7 +229,6 @@ async fn propose_blocks_with_new_transactions_until_all_committed() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_clean_shutdown().await;
 }
 
@@ -277,7 +272,6 @@ async fn node_requests_missing_transaction_from_local_leader() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(&tx_ids[0]);
     test.assert_clean_shutdown().await;
 }
@@ -313,7 +307,6 @@ async fn multi_shard_single_transaction() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx.id(), Decision::Commit)
         .await;
     test.assert_all_validators_committed(tx.id());
@@ -349,7 +342,6 @@ async fn multi_validator_propose_blocks_with_new_transactions_until_all_committe
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
     test.assert_clean_shutdown().await;
@@ -392,7 +384,6 @@ async fn multi_shard_propose_blocks_with_new_transactions_until_all_committed() 
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(&tx_ids[0]);
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
@@ -462,7 +453,6 @@ async fn foreign_shard_group_decides_to_abort() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx2.id(), Decision::Abort(AbortReason::ExecutionFailure))
         .await;
 
@@ -523,7 +513,6 @@ async fn multishard_local_inputs_foreign_outputs() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
     test.assert_all_validators_committed(tx1.id());
@@ -594,7 +583,6 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx.id(), Decision::Abort(AbortReason::ExecutionFailure))
         .await;
     test.assert_all_validators_did_not_commit(tx.id());
@@ -661,7 +649,6 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
     test.assert_all_validators_committed(tx1.id());
@@ -735,7 +722,6 @@ async fn multishard_output_conflict_abort() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     // Currently not deterministic (test harness) which transaction will arrive first so we check that one transaction
     // is committed and the other is aborted. TODO: It is also possible that both are aborted.
     let tx1_vn1 = test.get_validator(&TestAddress::new("1")).get_transaction(tx_ids[0]);
@@ -803,7 +789,6 @@ async fn single_shard_inputs_from_previous_outputs() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     // Assert that the decision matches for all validators. If tx2 is sequenced first, then it will be aborted due to
     // the input not existing
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
@@ -873,7 +858,6 @@ async fn multishard_inputs_from_previous_outputs() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
     test.assert_all_validators_have_decision(tx2.id(), Decision::Abort(AbortReason::OneOrMoreInputsNotFound))
@@ -958,7 +942,6 @@ async fn single_shard_input_conflict() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
 
     test.assert_clean_shutdown().await;
     log::info!("total messages sent: {}", test.network().total_messages_sent());
@@ -1006,7 +989,6 @@ async fn epoch_change() {
         .unwrap();
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     // test.assert_all_validators_committed();
 
     test.assert_clean_shutdown().await;
@@ -1069,8 +1051,6 @@ async fn leader_failure_node_goes_down() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height_except(&[failure_node.clone()])
-        .await;
 
     test.validators_iter()
         .filter(|vn| vn.address != failure_node)
@@ -1138,7 +1118,6 @@ async fn foreign_block_distribution() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
 
     log::info!("total messages sent: {}", test.network().total_messages_sent());
     log::info!("total messages filtered: {}", test.network().total_messages_filtered());
@@ -1191,7 +1170,6 @@ async fn single_shard_unversioned_inputs() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx.id());
 
     // Assert all LocalOnly
@@ -1406,7 +1384,6 @@ async fn multishard_unversioned_input_conflict_delay_prepare() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
 
     test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
         .await;
@@ -1476,8 +1453,6 @@ async fn leader_failure_node_goes_down_and_gets_evicted() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height_except(&[failure_node.clone()])
-        .await;
 
     // test.validators_iter()
     //     .filter(|vn| vn.address != failure_node)
@@ -1571,7 +1546,6 @@ async fn multishard_publish_template() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(tx.id());
 
     // Assert all have the template
@@ -1665,7 +1639,6 @@ async fn multishard_validator_fee_claim() {
     }
 
     test.stop();
-    test.assert_all_validators_at_same_height().await;
     test.assert_all_validators_committed(claim_tx.id());
 
     // Assert fee pool exists

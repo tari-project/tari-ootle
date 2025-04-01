@@ -61,7 +61,6 @@ impl TryFrom<proto::rpc::SubstateDestroyedProof> for SubstateDestroyedProof {
             //     .map(TryInto::try_into)
             //     .transpose()?
             //     .ok_or_else(|| anyhow!("destroyed_justify not provided"))?,
-            destroyed_by_transaction: value.destroyed_by_transaction.try_into()?,
         })
     }
 }
@@ -72,7 +71,6 @@ impl From<SubstateDestroyedProof> for proto::rpc::SubstateDestroyedProof {
             substate_id: value.substate_id.to_bytes(),
             version: value.version,
             // destroyed_justify: Some((&value.justify).into()),
-            destroyed_by_transaction: value.destroyed_by_transaction.as_bytes().to_vec(),
         }
     }
 }
@@ -111,7 +109,6 @@ impl TryFrom<proto::rpc::SubstateData> for SubstateData {
                 .substate_value_or_hash
                 .ok_or_else(|| anyhow!("substate_value_or_hash not provided"))?
                 .try_into()?,
-            created_by_transaction: value.created_transaction.try_into()?,
         })
     }
 }
@@ -122,7 +119,6 @@ impl From<SubstateData> for proto::rpc::SubstateData {
             substate_id: value.substate_id.to_bytes(),
             version: value.version,
             substate_value_or_hash: Some(value.value().into()),
-            created_transaction: value.created_by_transaction.as_bytes().to_vec(),
         }
     }
 }

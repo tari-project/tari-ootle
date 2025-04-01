@@ -620,8 +620,6 @@ pub struct GetSubstateRequest {
 )]
 pub struct GetSubstateResponse {
     pub value: Option<SubstateValue>,
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    pub created_by_tx: Option<TransactionId>,
     pub status: SubstateStatus,
 }
 

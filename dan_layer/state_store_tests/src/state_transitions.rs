@@ -3,13 +3,16 @@
 
 use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
 use tari_dan_storage::{
-    consensus_models::{BlockId, LeafBlock, StateTransitionId, SubstateRecord},
+    consensus_models::{Block, BlockId, LeafBlock, StateTransitionId, SubstateRecord},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
 
-use crate::helper::{create_block_with_qc, create_rocksdb, create_sqlite, gen_substates};
+use crate::{
+    helper::{create_block_with_qc, create_rocksdb, create_sqlite, gen_substates},
+    TEST_NUM_PRESHARDS,
+};
 
 #[test]
 fn sqlite() {
@@ -29,6 +32,9 @@ fn operations(db: impl StateStore) {
     const SHARD: Shard = Shard::first();
     let mut tx = db.create_write_tx().unwrap();
 
+    let zero_block = Block::zero_block(Default::default(), TEST_NUM_PRESHARDS);
+    zero_block.insert(&mut tx).unwrap();
+
     let substates = gen_substates(0..num_transitions, 0);
     let dummy_parent = LeafBlock {
         block_id: BlockId::zero(),
@@ -43,9 +49,7 @@ fn operations(db: impl StateStore) {
             value.into_substate_value(),
             SHARD,
             Epoch(0),
-            NodeHeight(0),
-            BlockId::zero(),
-            Default::default(),
+            *zero_block.id(),
             *block.justify().id(),
         ))
         .unwrap();
@@ -61,9 +65,7 @@ fn operations(db: impl StateStore) {
             value.into_substate_value(),
             Shard::from(2),
             Epoch(0),
-            NodeHeight(0),
-            BlockId::zero(),
-            Default::default(),
+            *zero_block.id(),
             *block.justify().id(),
         ))
         .unwrap();
@@ -83,9 +85,7 @@ fn operations(db: impl StateStore) {
             value.into_substate_value(),
             SHARD,
             Epoch(1000),
-            NodeHeight(10000),
-            BlockId::zero(),
-            Default::default(),
+            *zero_block.id(),
             *block.justify().id(),
         ))
         .unwrap();

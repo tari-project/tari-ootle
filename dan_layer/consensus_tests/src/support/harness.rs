@@ -183,9 +183,7 @@ impl Test {
                     value,
                     Shard::first(),
                     Epoch(0),
-                    NodeHeight(0),
                     BlockId::zero(),
-                    TransactionId::default(),
                     QcId::zero(),
                 )
             })

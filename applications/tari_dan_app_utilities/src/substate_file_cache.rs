@@ -53,15 +53,15 @@ impl SubstateCache for SubstateFileCache {
             Ok(value) => {
                 // cache hit
                 let entry = decode::<SubstateCacheEntry>(&value).map_err(|e| SubstateCacheError(e.to_string()))?;
-                return Ok(Some(entry));
+                Ok(Some(entry))
             },
             Err(e) => {
                 // cache miss
                 if let cacache::Error::EntryNotFound(_, _) = e {
-                    return Ok(None);
+                    Ok(None)
                 // cache error
                 } else {
-                    return Err(SubstateCacheError(format!("{}", e)));
+                    Err(SubstateCacheError(format!("{}", e)))
                 }
             },
         }

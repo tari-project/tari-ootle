@@ -49,7 +49,6 @@ impl StateTransition {
                         .unwrap_or_else(|| substate.state_hash.into()),
                     substate_id: substate.substate_id,
                     version: substate.version,
-                    created_by_transaction: substate.created_by_transaction,
                 },
             }),
             "DOWN" => {
@@ -63,7 +62,6 @@ impl StateTransition {
                 }
 
                 SubstateUpdate::Destroy(SubstateDestroyedProof {
-                    destroyed_by_transaction: substate.destroyed().unwrap().by_transaction,
                     substate_id: substate.substate_id,
                     version: substate.version,
                 })

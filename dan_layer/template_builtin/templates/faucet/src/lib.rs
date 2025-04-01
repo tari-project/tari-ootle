@@ -16,6 +16,8 @@ mod template {
     impl XtrFaucet {
         pub fn take(&self, amount: Amount) -> Bucket {
             debug!("Withdrawing {} coins from faucet", amount);
+            let signer = CallerContext::transaction_signer_public_key();
+            emit_event("take", [("amount", amount.to_string()), ("signer", signer.to_string())]);
             self.vault.withdraw(amount)
         }
 
@@ -28,6 +30,12 @@ mod template {
             // Withdraws revealed funds into the given confidential output
             let proof = ConfidentialWithdrawProof::revealed_to_confidential(amount, output, balance_proof);
             debug!("Withdrawing {} coins from faucet into confidential output", amount);
+            let signer = CallerContext::transaction_signer_public_key();
+            emit_event("take", [
+                ("amount", amount.to_string()),
+                ("confidential", "true".to_string()),
+                ("signer", signer.to_string()),
+            ]);
             self.vault.withdraw_confidential(proof)
         }
     }

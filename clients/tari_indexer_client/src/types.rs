@@ -91,8 +91,6 @@ pub struct GetSubstateResponse {
     pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub created_by_transaction: TransactionId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,8 +114,6 @@ pub struct InspectSubstateResponse {
     pub address: SubstateId,
     pub version: u32,
     pub substate: SubstateValue,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub created_by_transaction: TransactionId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -320,27 +316,6 @@ pub struct NonFungibleSubstate {
     pub index: u64,
     pub address: SubstateId,
     pub substate: Substate,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct GetRelatedTransactionsRequest {
-    pub address: SubstateId,
-    pub version: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct GetRelatedTransactionsResponse {
-    pub transaction_results: Vec<IndexerTransactionFinalizedResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

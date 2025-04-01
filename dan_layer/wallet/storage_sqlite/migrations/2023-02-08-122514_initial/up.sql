@@ -66,12 +66,10 @@ CREATE TABLE substates
     parent_address       TEXT     NULL,
     referenced_substates TEXT     NOT NULL,
     version              INTEGER  NOT NULL,
-    transaction_hash     TEXT     NOT NULL,
     template_address     TEXT     NULL,
     created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX substates_idx_transaction_hash ON substates (transaction_hash);
 CREATE UNIQUE INDEX substates_uniq_address ON substates (address);
 
 -- Accounts
@@ -166,3 +164,32 @@ CREATE TABLE non_fungible_tokens
 );
 
 CREATE UNIQUE INDEX nfts_uniq_address ON non_fungible_tokens (nft_id);
+
+CREATE TABLE authored_templates
+(
+    id           INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    key_index    INT      NOT NULL,
+    address      TEXT     NOT NULL,
+    name         TEXT     NOT NULL,
+    tari_version TEXT     NOT NULL,
+    functions    TEXT     NOT NULL,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE webauthn_registrations
+(
+    id         INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    username   TEXT     NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX webauthn_regs_usernames ON webauthn_registrations (username);
+
+CREATE TABLE webauthn_registration_passkeys
+(
+    id              INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    registration_id INTEGER  NOT NULL REFERENCES webauthn_registrations (id),
+    passkey         BLOB     NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

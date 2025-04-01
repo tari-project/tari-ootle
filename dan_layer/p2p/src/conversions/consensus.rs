@@ -911,10 +911,8 @@ impl TryFrom<proto::consensus::Substate> for SubstateRecord {
             state_hash: Default::default(),
 
             created_at_epoch: Epoch(value.created_epoch),
-            created_by_transaction: value.created_transaction.try_into()?,
             created_justify: value.created_justify.try_into()?,
             created_block: value.created_block.try_into()?,
-            created_height: NodeHeight(value.created_height),
 
             destroyed: value.destroyed.map(TryInto::try_into).transpose()?,
             created_by_shard: Shard::from(value.created_by_shard),
@@ -929,10 +927,8 @@ impl From<SubstateRecord> for proto::consensus::Substate {
             version: value.version,
             substate: value.substate_value.as_ref().map(|s| s.to_bytes()).unwrap_or_default(),
 
-            created_transaction: value.created_by_transaction.as_bytes().to_vec(),
             created_justify: value.created_justify.as_bytes().to_vec(),
             created_block: value.created_block.as_bytes().to_vec(),
-            created_height: value.created_height.as_u64(),
             created_epoch: value.created_at_epoch.as_u64(),
             created_by_shard: value.created_by_shard.as_u32(),
 
@@ -947,7 +943,6 @@ impl TryFrom<proto::consensus::SubstateDestroyed> for SubstateDestroyed {
 
     fn try_from(value: proto::consensus::SubstateDestroyed) -> Result<Self, Self::Error> {
         Ok(Self {
-            by_transaction: value.transaction.try_into()?,
             justify: value.justify.try_into()?,
             by_block: NodeHeight(value.block_height),
             at_epoch: value
@@ -962,7 +957,6 @@ impl TryFrom<proto::consensus::SubstateDestroyed> for SubstateDestroyed {
 impl From<SubstateDestroyed> for proto::consensus::SubstateDestroyed {
     fn from(value: SubstateDestroyed) -> Self {
         Self {
-            transaction: value.by_transaction.as_bytes().to_vec(),
             justify: value.justify.as_bytes().to_vec(),
             block_height: value.by_block.as_u64(),
             epoch: Some(value.at_epoch.into()),

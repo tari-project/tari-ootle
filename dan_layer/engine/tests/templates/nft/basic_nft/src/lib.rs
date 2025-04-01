@@ -113,7 +113,7 @@ mod sparkle_nft_template {
             self.vault.balance()
         }
 
-        pub fn burn(&mut self, mut bucket: Bucket) {
+        pub fn burn(&mut self, bucket: Bucket) {
             // this check is actually not needed, but with it we cover the "bucket.resource_type" method
             assert!(
                 bucket.resource_type() == ResourceType::NonFungible,

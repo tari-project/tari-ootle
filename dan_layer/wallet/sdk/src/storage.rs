@@ -12,7 +12,7 @@ use tari_dan_common_types::{
     optional::IsNotFoundError,
     substate_type::SubstateType,
     SubstateRequirement,
-    VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_dan_storage::consensus_models::QuorumCertificate;
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId, TemplateAddress};
@@ -263,17 +263,15 @@ pub trait WalletStoreWriter {
     // Substates
     fn substates_upsert_root(
         &mut self,
-        transaction_id: TransactionId,
-        address: VersionedSubstateId,
+        substate_id: VersionedSubstateIdRef<'_>,
         referenced_substates: HashSet<SubstateId>,
         module_name: Option<String>,
         template_addr: Option<TemplateAddress>,
     ) -> Result<(), WalletStorageError>;
     fn substates_upsert_child(
         &mut self,
-        transaction_id: TransactionId,
         parent: SubstateId,
-        address: VersionedSubstateId,
+        address: VersionedSubstateIdRef<'_>,
         referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError>;
     fn substates_remove(&mut self, substate: &SubstateId) -> Result<SubstateModel, WalletStorageError>;

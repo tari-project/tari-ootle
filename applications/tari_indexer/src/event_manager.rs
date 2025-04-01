@@ -25,7 +25,7 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use log::*;
 use tari_crypto::tari_utilities::message_format::MessageFormat;
 use tari_dan_app_utilities::substate_file_cache::SubstateFileCache;
-use tari_dan_common_types::{PeerAddress, SubstateRequirement};
+use tari_dan_common_types::PeerAddress;
 use tari_engine_types::{events::Event, substate::SubstateId};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
@@ -50,7 +50,7 @@ const LOG_TARGET: &str = "tari::indexer::event_manager";
 
 pub struct EventManager {
     substate_store: SqliteSubstateStore,
-    substate_scanner:
+    _substate_scanner:
         Arc<SubstateScanner<EpochManagerHandle<PeerAddress>, TariValidatorNodeRpcClientFactory, SubstateFileCache>>,
 }
 
@@ -63,7 +63,7 @@ impl EventManager {
     ) -> Self {
         Self {
             substate_store,
-            substate_scanner,
+            _substate_scanner: substate_scanner,
         }
     }
 
@@ -92,88 +92,75 @@ impl EventManager {
         Ok(())
     }
 
-    pub async fn scan_events_for_transaction(&self, tx_id: TransactionId) -> Result<Vec<Event>, anyhow::Error> {
-        let events = {
-            let mut tx = self.substate_store.create_read_tx()?;
-            tx.get_events_for_transaction(tx_id)?
-        };
+    // pub async fn scan_events_for_transaction(&self, tx_id: TransactionId) -> Result<Vec<Event>, anyhow::Error> {
+    //     let events = {
+    //         let mut tx = self.substate_store.create_read_tx()?;
+    //         tx.get_events_for_transaction(tx_id)?
+    //     };
+    //
+    //     let mut events = events
+    //         .iter()
+    //         .map(|e| Event::try_from(e.clone()))
+    //         .collect::<Result<Vec<Event>, anyhow::Error>>()?;
+    //
+    //     // If we have no events locally, fetch from the network if possible.
+    //     if events.is_empty() {
+    //         let network_events = self.substate_scanner.get_events_for_transaction(tx_id).await?;
+    //         events.extend(network_events);
+    //     }
+    //
+    //     Ok(events)
+    // }
 
-        let mut events = events
-            .iter()
-            .map(|e| Event::try_from(e.clone()))
-            .collect::<Result<Vec<Event>, anyhow::Error>>()?;
-
-        // If we have no events locally, fetch from the network if possible.
-        if events.is_empty() {
-            let network_events = self.substate_scanner.get_events_for_transaction(tx_id).await?;
-            events.extend(network_events);
-        }
-
-        Ok(events)
-    }
-
-    pub async fn scan_events_for_substate_from_network(
-        &self,
-        substate_id: SubstateId,
-        version: Option<u32>,
-    ) -> Result<Vec<Event>, anyhow::Error> {
-        let mut events = vec![];
-        let version = version.unwrap_or_default();
-
-        // check if database contains the events for this transaction, by querying
-        // what is the latest version for the given component_address
-        let stored_versions_in_db;
-        {
-            let mut tx = self.substate_store.create_read_tx()?;
-            stored_versions_in_db = tx.get_stored_versions_of_events(&substate_id, version)?;
-
-            let stored_events = match tx.get_all_events(&substate_id) {
-                Ok(events) => events,
-                Err(e) => {
-                    info!(
-                        target: LOG_TARGET,
-                        "Failed to get all events for substate_id = {}, version = {} with error = {}",
-                        substate_id,
-                        version,
-                        e
-                    );
-                    return Err(e.into());
-                },
-            };
-
-            let stored_events = stored_events
-                .iter()
-                .map(|e| e.clone().try_into())
-                .collect::<Result<Vec<_>, _>>()?;
-            events.extend(stored_events);
-        }
-
-        for v in 0..version {
-            if stored_versions_in_db.contains(&v) {
-                continue;
-            }
-            let network_version_events = self
-                .substate_scanner
-                .get_events_for_substate_and_version(&SubstateRequirement::versioned(substate_id.clone(), v))
-                .await?;
-            events.extend(network_version_events);
-        }
-
-        let latest_version_in_db = stored_versions_in_db.into_iter().max().unwrap_or_default();
-        let version = version.max(latest_version_in_db);
-
-        // check if there are newest events for this component address in the network
-        let network_events = self
-            .substate_scanner
-            .get_events_for_substate(&substate_id, Some(version))
-            .await?;
-        // because the same substate_id with different version
-        // can be processed in the same transaction, we need to avoid
-        // duplicates
-        events.extend(network_events);
-
-        Ok(events)
-    }
+    // pub async fn scan_events_for_substate_from_network(
+    //     &self,
+    //     substate_id: SubstateId,
+    //     version: Option<u32>,
+    // ) -> Result<Vec<Event>, anyhow::Error> {
+    //     let mut events = vec![];
+    //     let version = version.unwrap_or_default();
+    //
+    //     // check if database contains the events for this substate, by querying
+    //     // what is the latest version for the given substate
+    //     let stored_versions_in_db;
+    //     {
+    //         let mut tx = self.substate_store.create_read_tx()?;
+    //         stored_versions_in_db = tx.get_stored_versions_of_events(&substate_id, version)?;
+    //
+    //         let stored_events = tx.get_all_events(&substate_id)?;
+    //         let stored_events = stored_events
+    //             .into_iter()
+    //             .map(|e| e.try_into())
+    //             .collect::<Result<Vec<_>, _>>()?;
+    //         events.extend(stored_events);
+    //     }
+    //
+    //     for v in 0..version {
+    //         if stored_versions_in_db.contains(&v) {
+    //             continue;
+    //         }
+    //         let network_version_events = self
+    //             .substate_scanner
+    //             .get_events_for_substate_and_version(SubstateRequirementRef::versioned(&substate_id, v))
+    //             .await?;
+    //         events.extend(network_version_events);
+    //     }
+    //
+    //     let latest_version_in_db = stored_versions_in_db.into_iter().max().unwrap_or_default();
+    //     let min_version = version.max(latest_version_in_db);
+    //
+    //     // check if there are newer events for this component address in the network
+    //     let network_events = self
+    //         .substate_scanner
+    //         .get_events_for_substate(&substate_id, Some(min_version))
+    //         .await?;
+    //     // because the same substate_id with different version
+    //     // can be processed in the same transaction, we need to avoid
+    //     // duplicates
+    //     events.extend(network_events);
+    //
+    //     Ok(events)
+    // }
 
     pub async fn scan_events_by_payload(
         &self,
@@ -206,7 +193,9 @@ impl EventManager {
             .substate_store
             .with_read_tx(|tx| tx.get_events(substate_id, topic, offset, limit))?;
 
-        let mut events = vec![];
+        debug!(target: LOG_TARGET, "Found {} events", rows.len());
+
+        let mut events = Vec::with_capacity(rows.len());
         for row in rows {
             let substate_id = row.substate_id.map(|str| SubstateId::from_str(&str)).transpose()?;
             let template_address = Hash::from_hex(&row.template_address)?;

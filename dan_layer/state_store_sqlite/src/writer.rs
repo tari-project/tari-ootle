@@ -353,7 +353,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 .map(|ch| {
                     Ok((
                         block_diffs::block_id.eq(&block_id),
-                        block_diffs::transaction_id.eq(serialize_hex(ch.transaction_id())),
                         block_diffs::substate_id.eq(ch.versioned_substate_id().substate_id().to_string()),
                         block_diffs::version.eq(ch.versioned_substate_id().version() as i32),
                         block_diffs::shard.eq(ch.shard().as_u32() as i32),
@@ -1511,7 +1510,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
     }
 
     fn substates_create(&mut self, substate: &SubstateRecord) -> Result<(), StorageError> {
-        use crate::schema::{state_transitions, substates};
+        use crate::schema::{blocks, state_transitions, substates};
 
         if substate.is_destroyed() {
             return Err(StorageError::QueryError {
@@ -1524,16 +1523,19 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
         let shard = substate.created_by_shard;
 
+        let created_block = serialize_hex(substate.created_block);
         let values = (
             substates::address.eq(serialize_hex(substate.to_substate_address())),
             substates::substate_id.eq(substate.substate_id.to_string()),
             substates::version.eq(substate.version as i32),
             substates::data.eq(substate.substate_value.as_ref().map(serialize_json).transpose()?),
             substates::state_hash.eq(serialize_hex(substate.state_hash)),
-            substates::created_by_transaction.eq(serialize_hex(substate.created_by_transaction)),
             substates::created_justify.eq(serialize_hex(substate.created_justify)),
-            substates::created_block.eq(serialize_hex(substate.created_block)),
-            substates::created_height.eq(substate.created_height.as_u64() as i64),
+            substates::created_block.eq(&created_block),
+            substates::created_height.eq(blocks::table
+                .select(blocks::height)
+                .filter(blocks::block_id.eq(&created_block))
+                .single_value()),
             substates::created_at_epoch.eq(substate.created_at_epoch.as_u64() as i64),
             substates::created_by_shard.eq(shard.as_u32() as i32),
         );
@@ -1587,14 +1589,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         shard: Shard,
         epoch: Epoch,
         destroyed_block_height: NodeHeight,
-        destroyed_transaction_id: &TransactionId,
         destroyed_qc_id: &QcId,
     ) -> Result<(), StorageError> {
         use crate::schema::{state_transitions, substates};
 
         let changes = (
             substates::destroyed_at.eq(dsl::now),
-            substates::destroyed_by_transaction.eq(Some(serialize_hex(destroyed_transaction_id))),
             substates::destroyed_by_block.eq(Some(destroyed_block_height.as_u64() as i64)),
             substates::destroyed_at_epoch.eq(Some(epoch.as_u64() as i64)),
             substates::destroyed_by_shard.eq(Some(shard.as_u32() as i32)),

@@ -83,7 +83,7 @@ Feature: Indexer node
 
     # Scan the network for the event emitted on ACC creation
   # TODO: events dont seem deterministic
-#    When indexer IDX scans the network events for account ACC with topics std.component.created,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,pay_fee,std.component.created,pay_fee,pay_fee,deposit,std.component.updated,deposit,deposit,deposit,deposit,deposit
+#    When indexer IDX scans the network events for account ACC with topics std.component.created,Account.pay_fee,Account.pay_fee,Account.pay_fee,Account.pay_fee,Account.pay_fee,Account.pay_fee,std.component.created,Account.pay_fee,Account.pay_fee,deposit,std.component.updated,deposit,deposit,deposit,deposit,deposit
 
   Scenario: Indexer GraphQL requests work
     # Initialize a base node, wallet, miner and VN

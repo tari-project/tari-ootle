@@ -7,7 +7,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tari_bor::decode;
-use tari_dan_common_types::{NodeAddressable, SubstateRequirement, ToPeerId};
+use tari_dan_common_types::{NodeAddressable, SubstateRequirementRef, ToPeerId};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
@@ -40,7 +40,7 @@ pub trait ValidatorNodeRpcClient<TAddr: NodeAddressable>: Send + Sync {
         transaction_id: TransactionId,
     ) -> Result<TransactionResultStatus, Self::Error>;
 
-    async fn get_substate(&mut self, substate_req: &SubstateRequirement) -> Result<SubstateResult, Self::Error>;
+    async fn get_substate(&mut self, substate_req: SubstateRequirementRef<'_>) -> Result<SubstateResult, Self::Error>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -61,17 +61,8 @@ pub struct FinalizedResult {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum SubstateResult {
     DoesNotExist,
-    Up {
-        id: SubstateId,
-        substate: Substate,
-        created_by_tx: TransactionId,
-    },
-    Down {
-        id: SubstateId,
-        version: u32,
-        created_by_tx: TransactionId,
-        deleted_by_tx: TransactionId,
-    },
+    Up { id: SubstateId, substate: Substate },
+    Down { id: SubstateId, version: u32 },
 }
 
 impl SubstateResult {
@@ -80,6 +71,13 @@ impl SubstateResult {
             SubstateResult::Up { substate, .. } => Some(substate.version()),
             SubstateResult::Down { version, .. } => Some(*version),
             SubstateResult::DoesNotExist => None,
+        }
+    }
+
+    pub fn up(&self) -> Option<&Substate> {
+        match self {
+            SubstateResult::Up { substate, .. } => Some(substate),
+            _ => None,
         }
     }
 }
@@ -175,7 +173,7 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
         }
     }
 
-    async fn get_substate(&mut self, substate_req: &SubstateRequirement) -> Result<SubstateResult, Self::Error> {
+    async fn get_substate(&mut self, substate_req: SubstateRequirementRef<'_>) -> Result<SubstateResult, Self::Error> {
         let mut client = self.client_connection().await?;
 
         let request = proto::rpc::GetSubstateRequest {
@@ -197,39 +195,19 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
 
         match status {
             SubstateStatus::Up => {
-                let tx_hash = resp.created_transaction_hash.try_into().map_err(|_| {
-                    ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                        "Node returned an invalid or empty transaction hash"
-                    ))
-                })?;
                 let substate = SubstateValue::from_bytes(&resp.substate)
                     .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
                 Ok(SubstateResult::Up {
                     substate: Substate::new(resp.version, substate),
                     id: SubstateId::from_bytes(&resp.address)
                         .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?,
-                    created_by_tx: tx_hash,
                 })
             },
-            SubstateStatus::Down => {
-                let created_by_tx = resp.created_transaction_hash.try_into().map_err(|_| {
-                    ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                        "Node returned an invalid or empty created transaction hash"
-                    ))
-                })?;
-                let deleted_by_tx = resp.destroyed_transaction_hash.try_into().map_err(|_| {
-                    ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                        "Node returned an invalid or empty destroyed transaction hash"
-                    ))
-                })?;
-                Ok(SubstateResult::Down {
-                    id: SubstateId::from_bytes(&resp.address)
-                        .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?,
-                    version: resp.version,
-                    deleted_by_tx,
-                    created_by_tx,
-                })
-            },
+            SubstateStatus::Down => Ok(SubstateResult::Down {
+                id: SubstateId::from_bytes(&resp.address)
+                    .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?,
+                version: resp.version,
+            }),
             SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
         }
     }

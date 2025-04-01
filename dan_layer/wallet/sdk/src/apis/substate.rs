@@ -10,6 +10,7 @@ use tari_dan_common_types::{
     substate_type::SubstateType,
     SubstateRequirement,
     VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
@@ -18,7 +19,6 @@ use tari_engine_types::{
     TemplateAddress,
 };
 use tari_template_lib::constants::XTR;
-use tari_transaction::TransactionId;
 
 use crate::{
     models::SubstateModel,
@@ -217,22 +217,19 @@ where
         );
         Ok(ValidatorScanResult {
             address: VersionedSubstateId::new(address.clone(), resp.version),
-            created_by_tx: resp.created_by_transaction,
             substate: resp.substate,
         })
     }
 
     pub fn save_root<I: IntoIterator<Item = SubstateId>>(
         &self,
-        created_by_tx: TransactionId,
-        address: VersionedSubstateId,
+        id: VersionedSubstateIdRef<'_>,
         referenced_substates: I,
     ) -> Result<(), SubstateApiError> {
         self.store.with_write_tx(|tx| {
-            let maybe_removed = tx.substates_remove(address.substate_id()).optional()?;
+            let maybe_removed = tx.substates_remove(id.substate_id()).optional()?;
             tx.substates_upsert_root(
-                created_by_tx,
-                address,
+                id,
                 referenced_substates.into_iter().collect(),
                 maybe_removed.as_ref().and_then(|s| s.module_name.clone()),
                 maybe_removed.and_then(|s| s.template_address),
@@ -243,15 +240,13 @@ where
 
     pub fn save_child<I: IntoIterator<Item = SubstateId>>(
         &self,
-        created_by_tx: TransactionId,
         parent: SubstateId,
-        child: VersionedSubstateId,
+        child: VersionedSubstateIdRef<'_>,
         referenced_substates: I,
     ) -> Result<(), SubstateApiError> {
         self.store.with_write_tx(|tx| {
             let maybe_substate = tx.substates_remove(child.substate_id()).optional()?;
             tx.substates_upsert_child(
-                created_by_tx,
                 parent,
                 child,
                 maybe_substate
@@ -289,7 +284,6 @@ impl IsNotFoundError for SubstateApiError {
 
 pub struct ValidatorScanResult {
     pub address: VersionedSubstateId,
-    pub created_by_tx: TransactionId,
     pub substate: SubstateValue,
 }
 

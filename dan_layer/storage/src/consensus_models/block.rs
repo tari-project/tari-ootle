@@ -656,12 +656,7 @@ impl Block {
 
         for change in changes {
             match change {
-                SubstateChange::Up {
-                    id,
-                    shard,
-                    transaction_id,
-                    substate,
-                } => {
+                SubstateChange::Up { id, shard, substate } => {
                     let version = id.version();
                     SubstateRecord::new(
                         id.into_substate_id(),
@@ -669,27 +664,13 @@ impl Block {
                         substate.into_substate_value(),
                         shard,
                         self.epoch(),
-                        self.height(),
                         *self.id(),
-                        transaction_id,
                         *self.justify().id(),
                     )
                     .create(tx)?;
                 },
-                SubstateChange::Down {
-                    id,
-                    transaction_id,
-                    shard,
-                } => {
-                    SubstateRecord::destroy(
-                        tx,
-                        id,
-                        shard,
-                        self.epoch(),
-                        self.height(),
-                        self.justify().id(),
-                        &transaction_id,
-                    )?;
+                SubstateChange::Down { id, shard } => {
+                    SubstateRecord::destroy(tx, id, shard, self.epoch(), self.height(), self.justify().id())?;
                 },
             }
         }
@@ -790,9 +771,17 @@ impl Block {
 
         let mut updates = Vec::with_capacity(committed.len());
         for transaction in committed {
-            let substates = tx.substates_get_all_for_transaction(&transaction.id)?;
+            let tx_rec = transaction.get_transaction(tx)?;
+            // TODO: this is not completely correct but this is only used for block sync which is only used (for now) by
+            // the indexer, Returning substates like this is good enough.
+            let Some(outputs) = tx_rec.resulting_outputs() else {
+                continue;
+            };
+
+            let substates =
+                SubstateRecord::get_all(tx, outputs.iter().map(|lock| lock.versioned_substate_id().as_ref()))?;
             for substate in substates {
-                if let Some(destroyed) = substate.destroyed() {
+                if substate.is_destroyed() {
                     // This substate is destroyed. One of the following are possible:
                     // 1. The substate was destroyed by this transaction and created in an earlier transaction
                     // 2. The substate was created by this transaction and destroyed in a later transaction
@@ -810,9 +799,7 @@ impl Block {
                         substate_id: substate.substate_id.clone(),
                         version: substate.version,
                         // justify: QuorumCertificate::get(tx, &destroyed.justify)?,
-                        destroyed_by_transaction: destroyed.by_transaction,
                     }));
-                    // }
                 } else {
                     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
                         // created_qc: substate.get_created_quorum_certificate(tx)?,

@@ -5,7 +5,7 @@ use tari_consensus::{
     hotstuff::{ConsensusCurrentState, CurrentView, HotstuffEvent},
     messages::HotstuffMessage,
 };
-use tari_dan_common_types::{optional::Optional, NodeHeight, ShardGroup, SubstateAddress};
+use tari_dan_common_types::{optional::Optional, NodeHeight, ShardGroup, SubstateAddress, VersionedSubstateIdRef};
 use tari_dan_storage::{
     consensus_models::{BlockId, LeafBlock, TransactionRecord},
     StateStore,
@@ -91,7 +91,17 @@ impl Validator {
 
     pub fn has_committed_substates(&self, tx_id: &TransactionId) -> bool {
         let tx = self.state_store().create_read_tx().unwrap();
-        tx.substates_exists_for_transaction(tx_id).unwrap()
+        let tx_rec = tx.transactions_get(tx_id).unwrap();
+        let exec_result = tx_rec.into_final_result().expect("transaction not finalized");
+        if let Some(diff) = exec_result.finalize.accept() {
+            for (substate_id, substate) in diff.up_iter() {
+                let id = VersionedSubstateIdRef::new(substate_id, substate.version());
+                if tx.substates_any_exist(Some(id)).unwrap() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn get_transaction(&self, transaction_id: &TransactionId) -> TransactionRecord {

@@ -384,17 +384,14 @@ impl JsonRpcHandlers {
         match maybe_substate {
             Some(substate) if substate.is_destroyed() => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::Down,
-                created_by_tx: Some(substate.created_by_transaction),
                 value: None,
             })),
             Some(substate) => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::Up,
-                created_by_tx: Some(substate.created_by_transaction),
                 value: substate.into_substate_value(),
             })),
             None => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::DoesNotExist,
-                created_by_tx: None,
                 value: None,
             })),
         }

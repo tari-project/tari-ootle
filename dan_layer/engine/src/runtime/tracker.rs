@@ -137,6 +137,10 @@ impl StateTracker {
         self.read_with(|state| state.current_template().map(|(a, _)| *a))
     }
 
+    pub fn get_template_module_name(&self) -> Result<String, RuntimeError> {
+        self.read_with(|state| state.current_template().map(|(_, name)| name.to_string()))
+    }
+
     pub fn list_buckets(&self) -> Vec<BucketId> {
         self.read_with(|state| state.buckets().keys().copied().collect())
     }

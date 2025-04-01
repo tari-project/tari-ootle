@@ -26,7 +26,7 @@ use anyhow::anyhow;
 use tari_bor::{decode_exact, encode};
 use tari_common_types::types::{Commitment, PrivateKey, PublicKey};
 use tari_crypto::{ristretto::RistrettoComSig, tari_utilities::ByteArray};
-use tari_dan_common_types::{SubstateRequirement, VersionedSubstateId};
+use tari_dan_common_types::{SubstateRequirement, SubstateRequirementRef, VersionedSubstateId};
 use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
     args::{Arg, SubstateType},
@@ -430,6 +430,14 @@ impl From<SubstateRequirement> for proto::transaction::SubstateRequirement {
 
 impl From<&SubstateRequirement> for proto::transaction::SubstateRequirement {
     fn from(val: &SubstateRequirement) -> Self {
+        Self {
+            substate_id: val.substate_id().to_bytes(),
+            version: val.version().map(|v| OptionalVersion { version: v }),
+        }
+    }
+}
+impl From<SubstateRequirementRef<'_>> for proto::transaction::SubstateRequirement {
+    fn from(val: SubstateRequirementRef<'_>) -> Self {
         Self {
             substate_id: val.substate_id().to_bytes(),
             version: val.version().map(|v| OptionalVersion { version: v }),

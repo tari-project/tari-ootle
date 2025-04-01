@@ -23,19 +23,13 @@ diesel::table! {
 }
 
 diesel::table! {
-    webauthn_registrations (id) {
+    authored_templates (id) {
         id -> Integer,
-        username -> Text,
-        created_at -> Timestamp,
-        updated_at -> Timestamp,
-    }
-}
-
-diesel::table! {
-    webauthn_registration_passkeys (id) {
-        id -> Integer,
-        registration_id -> Integer,
-        passkey -> Binary,
+        key_index -> Integer,
+        address -> Text,
+        name -> Text,
+        tari_version -> Text,
+        functions -> Text,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -115,7 +109,6 @@ diesel::table! {
         parent_address -> Nullable<Text>,
         referenced_substates -> Text,
         version -> Integer,
-        transaction_hash -> Text,
         template_address -> Nullable<Text>,
         created_at -> Timestamp,
     }
@@ -165,13 +158,19 @@ diesel::table! {
 }
 
 diesel::table! {
-    authored_templates (id) {
+    webauthn_registration_passkeys (id) {
         id -> Integer,
-        key_index -> Integer,
-        address -> Text,
-        name -> Text,
-        tari_version -> Text,
-        functions -> Text,
+        registration_id -> Integer,
+        passkey -> Binary,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    webauthn_registrations (id) {
+        id -> Integer,
+        username -> Text,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -183,11 +182,12 @@ diesel::joinable!(outputs -> vaults (vault_id));
 diesel::joinable!(proofs -> accounts (account_id));
 diesel::joinable!(proofs -> vaults (vault_id));
 diesel::joinable!(vaults -> accounts (account_id));
-diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (id));
+diesel::joinable!(webauthn_registration_passkeys -> webauthn_registrations (registration_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     auth_status,
+    authored_templates,
     config,
     key_manager_states,
     non_fungible_tokens,
@@ -197,5 +197,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     transactions,
     vaults,
     webauthn_registration_passkeys,
-    webauthn_registrations
+    webauthn_registrations,
 );

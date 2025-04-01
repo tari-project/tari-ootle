@@ -10,7 +10,6 @@ pub use public_key::*;
 pub use state_tree::*;
 pub use substate_id::*;
 pub use substate_lock::*;
-pub use substate_transaction_index::*;
 pub use timestamp::*;
 pub use tuple::*;
 
@@ -26,7 +25,6 @@ mod small_bytes;
 mod state_tree;
 mod substate_id;
 mod substate_lock;
-mod substate_transaction_index;
 mod timestamp;
 mod tuple;
 

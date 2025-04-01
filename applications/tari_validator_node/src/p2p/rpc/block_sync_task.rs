@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use log::*;
-use tari_dan_common_types::{optional::Optional, Epoch};
+use tari_dan_common_types::{optional::Optional, Epoch, NumPreshards};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{sync_blocks_response::SyncData, QuorumCertificates, SyncBlocksResponse},
@@ -36,6 +36,7 @@ pub struct BlockSyncTask<TStateStore: StateStore> {
     start_block_id: BlockId,
     up_to_epoch: Option<Epoch>,
     sender: mpsc::Sender<Result<SyncBlocksResponse, RpcStatus>>,
+    num_preshards: NumPreshards,
 }
 
 impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
@@ -44,12 +45,14 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
         start_block_id: BlockId,
         up_to_epoch: Option<Epoch>,
         sender: mpsc::Sender<Result<SyncBlocksResponse, RpcStatus>>,
+        num_preshards: NumPreshards,
     ) -> Self {
         Self {
             store,
             start_block_id,
             up_to_epoch,
             sender,
+            num_preshards,
         }
     }
 
@@ -172,7 +175,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                     })?;
 
                 let updates = matches!(substates_selection, proto::rpc::StreamSubstateSelection::All)
-                    .then(|| child.get_substate_updates(tx))
+                    .then(|| child.get_substate_updates(tx, self.num_preshards))
                     .transpose()?
                     .unwrap_or_default();
                 let transaction_receipts = matches!(

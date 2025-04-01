@@ -66,7 +66,7 @@ pub async fn publish_template(
         response.transaction_id
     )))?;
 
-    if let Some(reason) = finalize_result.result.full_reject() {
+    if let Some(reason) = finalize_result.result.any_reject() {
         return Err(anyhow!(format!(
             "Invalid transaction {}: Status: {}, Reason: {}",
             response.transaction_id, tx_resp.status, reason

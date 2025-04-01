@@ -24,7 +24,7 @@ import { NavLink } from "react-router-dom";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
-import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline } from "react-icons/io5";
+import { IoHome, IoHomeOutline, IoSettings, IoSettingsOutline, IoTerminal, IoTerminalOutline } from "react-icons/io5";
 import Tooltip from "@mui/material/Tooltip";
 import Fade from "@mui/material/Fade";
 import ThemeSwitcher from "./ThemeSwitcher";
@@ -82,6 +82,12 @@ function MainListItems() {
       icon: <LuLayoutTemplate style={iconStyle} />,
       activeIcon: <LuLayoutTemplate style={activeIconStyle} />,
       link: "templates",
+    },
+    {
+      title: "Manifest",
+      icon: <IoTerminalOutline style={iconStyle} />,
+      activeIcon: <IoTerminal style={activeIconStyle} />,
+      link: "manifest",
     },
     {
       title: "Settings",

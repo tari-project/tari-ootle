@@ -134,6 +134,7 @@ async fn handler(
             "submit_instruction" => call_handler(context, value, token, transaction::handle_submit_instruction).await,
             "submit" => call_handler(context, value, token, transaction::handle_submit).await,
             "submit_dry_run" => call_handler(context, value, token, transaction::handle_submit_dry_run).await,
+            "submit_manifest" => call_handler(context, value, token, transaction::handle_submit_manifest).await,
             "publish_template" => call_handler(context, value, token, transaction::handle_publish_template).await,
             "get" => call_handler(context, value, token, transaction::handle_get).await,
             "get_result" => call_handler(context, value, token, transaction::handle_get_result).await,

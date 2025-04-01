@@ -1,4 +1,4 @@
-//  Copyright 2022. The Tari Project
+//  Copyright 2025. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,55 +20,47 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import React from "react";
-import ReactDOM from "react-dom/client";
-import "./theme/theme.css";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
-import App from "./App";
-import Connections from "./routes/Connections/Connections";
-import RecentTransactions from "./routes/RecentTransactions/RecentTransactions";
-import ErrorPage from "./routes/ErrorPage";
-import Events from "./routes/Events/Events";
-import Substates from "./routes/Substates/Substates";
-import ResourcesLayout from "./routes/Resources/Resources";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
-const router = createBrowserRouter([
-  {
-    path: "*",
-    element: <App />,
-    errorElement: <ErrorPage />,
-    children: [
-      {
-        path: "connections",
-        element: <Connections />,
-      },
-      {
-        path: "transactions",
-        element: <RecentTransactions />,
-      },
-      {
-        path: "events",
-        element: <Events />,
-      },
-      {
-        path: "substates",
-        element: <Substates />,
-      },
-      {
-        path: "resources",
-        element: <ResourcesLayout />,
-      },
-      {
-        path: "app",
-        element: <App />,
-      },
-    ],
-  },
-]);
+const DEFAULT_CODE = `
+// use template_xxx as TemplateName;
 
-const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
-root.render(
-  <React.StrictMode>
-    <RouterProvider router={router} />
-  </React.StrictMode>,
+fn main() {
+   // TemplateName::call_something();
+   // let account = var!["account"];
+   // let bucket = account.withdraw(1000);
+}`;
+
+interface Store {
+  code: string;
+  setCode: (code: string) => void;
+  variables: Record<string, string>;
+  addVariable: (key: string, value: string) => void;
+  removeVariable: (key: string) => void;
+}
+
+const useManifestCodeStore = create<Store>()(
+  persist<Store>(
+    (set) => ({
+      code: DEFAULT_CODE,
+      setCode: (code: string) => set(() => ({ code })),
+      variables: {},
+      addVariable: (key: string, value: string) =>
+        set((state) => ({
+          variables: {
+            ...state.variables,
+            [key]: value,
+          },
+        })),
+      removeVariable: (key: string) =>
+        set((state) => {
+          const { [key]: _, ...rest } = state.variables;
+          return { variables: rest };
+        }),
+    }),
+    { name: "manifest-code" },
+  ),
 );
+
+export default useManifestCodeStore;

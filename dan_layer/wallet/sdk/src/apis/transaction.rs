@@ -229,7 +229,7 @@ where
                             .ok_or_else(|| TransactionApiError::InvalidTransactionQueryResponse {
                                 details: format!(
                                     "NEVERHAPPEN: Finalize decision is COMMIT but transaction failed: {:?}",
-                                    execution_result.as_ref().and_then(|e| e.finalize.result.reject())
+                                    execution_result.as_ref().and_then(|e| e.finalize.result.fee_reject())
                                 ),
                             })?;
 

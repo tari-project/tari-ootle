@@ -47,14 +47,15 @@ import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import saveAs from "file-saver";
 import JsonDialog from "../../Components/JsonDialog";
-import { shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
+import { ListSubstateItem, shortenSubstateId, substateIdToString } from "@tari-project/typescript-bindings";
 import { listSubstates, getSubstate } from "../../utils/json_rpc";
+import { Link } from "react-router-dom";
 
 const PAGE_SIZE = 10;
-const SUBSTATE_TYPES = ["Component", "Resource", "Vault", "UnclaimedConfidentialOutput", "NonFungible", "TransactionReceipt", "ValidatorFeePool"] as const;
+const SUBSTATE_TYPES = ["Component", "Resource", "Vault", "UnclaimedConfidentialOutput", "NonFungible", "TransactionReceipt", "ValidatorFeePool", "Template"] as const;
 
 function SubstatesLayout() {
-  const [substates, setSubstates] = useState<any []>([]);
+  const [substates, setSubstates] = useState<ListSubstateItem []>([]);
   const [page, setPage] = useState(0);
   const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
   const [selectedContent, setSelectedContent] = useState({});
@@ -85,17 +86,9 @@ function SubstatesLayout() {
     // @ts-ignore
     let resp = await listSubstates(params);
 
-    console.log({ resp });
 
-    let substates = resp.substates.map((s) => {
-      return {
-        ...s,
-        timestamp: (new Date(Number(s.timestamp) * 1000)).toDateString(),
-      };
-    });
-
-    console.log({ substates });
-    setSubstates(substates);
+    console.log(resp);
+    setSubstates(resp.substates);
   }
 
   async function handleCopyClick(text: string) {
@@ -202,12 +195,16 @@ function SubstatesLayout() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {substates.map((row: any) => (
+              {substates.map((row) => (
                 <TableRow
                   sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
                 >
                   <TableCell>
-                    {shortenSubstateId(row.substate_id)}
+                    {substateIdToString(row.substate_id).startsWith("resource_") ?
+                      <Link
+                        to={`/resources/${substateIdToString(row.substate_id)}`}>{shortenSubstateId(row.substate_id)}</Link> :
+                      shortenSubstateId(row.substate_id)
+                    }
                     <IconButton aria-label="copy" onClick={() => handleCopyClick(substateIdToString(row.substate_id))}>
                       <ContentCopyIcon />
                     </IconButton>
@@ -216,24 +213,24 @@ function SubstatesLayout() {
                   <TableCell>{row.version}</TableCell>
 
                   <TableCell>
-                    {row.template_address != null &&
+                    {row.template_address !== null &&
                       <>
                         {truncateText(row.template_address, 20)}
-                        <IconButton aria-label="copy" onClick={() => handleCopyClick(row.template_address)}>
+                        <IconButton aria-label="copy" onClick={() => handleCopyClick(row.template_address!)}>
                           <ContentCopyIcon />
                         </IconButton>
                       </>
                     }
                   </TableCell>
 
-                  <TableCell>{row.timestamp}</TableCell>
+                  <TableCell>{new Date(Number(row.timestamp) * 1000).toDateString()}</TableCell>
 
                   <TableCell>
                     <Stack direction="row" spacing={2} alignItems="left">
-                      <Button variant="outlined" onClick={async () => handleContentView(row)}>
+                      <Button variant="outlined" onClick={() => handleContentView(row)}>
                         View
                       </Button>
-                      <Button variant="outlined" onClick={async () => handleContentDownload(row)}>
+                      <Button variant="outlined" onClick={() => handleContentDownload(row)}>
                         Download
                       </Button>
                     </Stack>

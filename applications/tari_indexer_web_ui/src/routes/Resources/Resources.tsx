@@ -23,21 +23,21 @@
 import PageHeading from "../../Components/PageHeading";
 import Grid from "@mui/material/Grid";
 import { StyledPaper } from "../../Components/StyledComponents";
-import NftGallery from "../VN/Components/NftGallery";
+import Resources from "../VN/Components/Resources";
 
-function NftGalleryLayout() {
+function ResourcesLayout() {
   return (
     <>
       <Grid item xs={12} md={12} lg={12}>
-        <PageHeading>NFT collection</PageHeading>
+        <PageHeading>Resource</PageHeading>
       </Grid>
       <Grid item xs={12} md={12} lg={12}>
         <StyledPaper>
-          <NftGallery />
+          <Resources />
         </StyledPaper>
       </Grid>
     </>
   );
 }
 
-export default NftGalleryLayout;
+export default ResourcesLayout;

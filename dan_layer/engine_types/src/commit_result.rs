@@ -59,7 +59,7 @@ impl ExecuteResult {
     pub fn expect_success(&self) -> &SubstateDiff {
         let diff = self.expect_finalization_success();
 
-        if let Some(reason) = self.finalize.full_reject() {
+        if let Some(reason) = self.finalize.any_reject() {
             panic!("Transaction failed: {}", reason);
         }
 
@@ -67,7 +67,7 @@ impl ExecuteResult {
     }
 
     pub fn expect_failure(&self) -> &RejectReason {
-        if let Some(reason) = self.finalize.result.full_reject() {
+        if let Some(reason) = self.finalize.result.any_reject() {
             reason
         } else {
             panic!("Transaction succeeded but it was expected to fail");
@@ -93,7 +93,7 @@ impl ExecuteResult {
     }
 
     pub fn expect_transaction_failure(&self) -> &RejectReason {
-        if let Some(reason) = self.finalize.full_reject() {
+        if let Some(reason) = self.finalize.any_reject() {
             reason
         } else {
             panic!("Transaction succeeded but it was expected to fail");
@@ -180,12 +180,12 @@ impl FinalizeResult {
         }
     }
 
-    pub fn reject(&self) -> Option<&RejectReason> {
-        self.result.reject()
+    pub fn fee_reject(&self) -> Option<&RejectReason> {
+        self.result.fee_reject()
     }
 
-    pub fn full_reject(&self) -> Option<&RejectReason> {
-        self.result.full_reject()
+    pub fn any_reject(&self) -> Option<&RejectReason> {
+        self.result.any_reject()
     }
 
     pub fn fee_accept_transaction_reject(&self) -> Option<(&SubstateDiff, &RejectReason)> {
@@ -242,7 +242,7 @@ impl TransactionResult {
         }
     }
 
-    pub fn reject(&self) -> Option<&RejectReason> {
+    pub fn fee_reject(&self) -> Option<&RejectReason> {
         match self {
             Self::Accept(_) => None,
             Self::AcceptFeeRejectRest(_, _) => None,
@@ -257,7 +257,7 @@ impl TransactionResult {
         }
     }
 
-    pub fn full_reject(&self) -> Option<&RejectReason> {
+    pub fn any_reject(&self) -> Option<&RejectReason> {
         match self {
             Self::Accept(_) => None,
             Self::AcceptFeeRejectRest(_, reject_result) => Some(reject_result),

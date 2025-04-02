@@ -5,14 +5,13 @@ use std::sync::{Arc, Mutex};
 
 use axum::async_trait;
 use reqwest::{IntoUrl, Url};
-use tari_dan_common_types::{optional::IsNotFoundError, substate_type::SubstateType, Epoch, SubstateRequirement};
+use tari_dan_common_types::{optional::IsNotFoundError, substate_type::SubstateType, SubstateRequirement};
 use tari_dan_wallet_sdk::network::{
     SubstateListItem,
     SubstateListResult,
     SubstateQueryResult,
     TransactionFinalizedResult,
     TransactionQueryResult,
-    TransactionResponse,
     WalletNetworkInterface,
 };
 use tari_engine_types::substate::SubstateId;
@@ -21,12 +20,10 @@ use tari_indexer_client::{
     json_rpc_client::IndexerJsonRpcClient,
     types::{
         GetSubstateRequest,
-        GetTransactionRequest,
         GetTransactionResultRequest,
         IndexerTransactionFinalizedResult,
         ListSubstateItem,
         ListSubstatesRequest,
-        ScanEventsRequest,
         SubmitTransactionRequest,
     },
 };
@@ -193,31 +190,12 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
         Ok(resp.definition)
     }
 
-    async fn scan_events(&self, start_epoch: Epoch) -> Result<bool, Self::Error> {
+    async fn indexer_ready(&self) -> Result<bool, Self::Error> {
         let mut client = self.get_client()?;
 
-        let resp = client
-            .scan_events(ScanEventsRequest {
-                start_epoch: start_epoch.as_u64(),
-            })
-            .await?;
+        let resp = client.indexer_ready().await?;
 
-        Ok(resp.success)
-    }
-
-    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<TransactionResponse, Self::Error> {
-        let mut client = self.get_client()?;
-        let result = client
-            .get_transaction(GetTransactionRequest {
-                transaction_id: transaction_id.into_array(),
-            })
-            .await?;
-
-        Ok(TransactionResponse {
-            transaction: result.transaction,
-            created_at_timestamp: result.created_at_timestamp,
-            finalized_at_timestamp: result.finalized_at_timestamp,
-        })
+        Ok(resp.ready)
     }
 }
 

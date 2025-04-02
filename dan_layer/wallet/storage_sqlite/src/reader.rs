@@ -18,7 +18,7 @@ use diesel::{
 };
 use log::{error, warn};
 use serde::de::DeserializeOwned;
-use tari_common_types::types::{Commitment, PublicKey};
+use tari_common_types::types::Commitment;
 use tari_dan_common_types::substate_type::SubstateType;
 use tari_dan_wallet_sdk::{
     models::{

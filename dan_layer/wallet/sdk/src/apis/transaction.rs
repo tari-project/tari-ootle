@@ -54,19 +54,10 @@ where
         required_substates: Vec<SubstateRequirement>,
         new_account_info: Option<NewAccountInfo>,
         is_dry_run: bool,
-        created_at_timestamp: Option<u64>,
-        updated_at_timestamp: Option<u64>,
     ) -> Result<TransactionId, TransactionApiError> {
         let tx_id = *transaction.id();
         self.store.with_write_tx(|tx| {
-            tx.transactions_insert(
-                &transaction,
-                &required_substates,
-                new_account_info.as_ref(),
-                is_dry_run,
-                created_at_timestamp,
-                updated_at_timestamp,
-            )
+            tx.transactions_insert(&transaction, &required_substates, new_account_info.as_ref(), is_dry_run)
         })?;
 
         Ok(tx_id)
@@ -108,7 +99,7 @@ where
         required_substates: Vec<SubstateRequirement>,
     ) -> Result<WalletTransaction, TransactionApiError> {
         self.store
-            .with_write_tx(|tx| tx.transactions_insert(&transaction, &required_substates, None, true, None, None))?;
+            .with_write_tx(|tx| tx.transactions_insert(&transaction, &required_substates, None, true))?;
 
         let tx_id = *transaction.id();
         let result = self

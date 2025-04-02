@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use tari_common::configuration::Network;
 use tari_common_types::types::Commitment;
 use tari_crypto::commitment::HomomorphicCommitmentFactory;
-use tari_dan_common_types::{optional::Optional, Epoch, SubstateRequirement};
+use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{
     models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
     network::{SubstateQueryResult, TransactionQueryResult, WalletNetworkInterface},
@@ -141,7 +141,7 @@ impl Test {
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
 
-        let sdk = DanWalletSdk::initialize(
+        let sdk_init_result = DanWalletSdk::initialize(
             Network::LocalNet,
             store.clone(),
             PanicIndexer,
@@ -153,7 +153,7 @@ impl Test {
             None,
         )
         .unwrap();
-        let accounts_api = sdk.accounts_api();
+        let accounts_api = sdk_init_result.sdk.accounts_api();
         accounts_api
             .add_account(Some("test"), &Test::test_account_address(), 0, true)
             .unwrap();
@@ -169,7 +169,7 @@ impl Test {
 
         Self {
             store,
-            sdk,
+            sdk: sdk_init_result.sdk,
             _temp: temp,
         }
     }
@@ -287,11 +287,7 @@ impl WalletNetworkInterface for PanicIndexer {
         panic!("PanicIndexer called")
     }
 
-    async fn scan_events(&self, start_epoch: Epoch) -> Result<bool, Self::Error> {
-        panic!("PanicIndexer called")
-    }
-
-    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<Transaction, Self::Error> {
+    async fn indexer_ready(&self) -> Result<bool, Self::Error> {
         panic!("PanicIndexer called")
     }
 }

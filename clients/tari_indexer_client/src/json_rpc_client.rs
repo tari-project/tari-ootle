@@ -38,14 +38,11 @@ use crate::{
         GetSubstateResponse,
         GetTemplateDefinitionRequest,
         GetTemplateDefinitionResponse,
-        GetTransactionRequest,
-        GetTransactionResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
+        IndexerReadyResponse,
         ListSubstatesRequest,
         ListSubstatesResponse,
-        ScanEventsRequest,
-        ScanEventsResponse,
         SubmitTransactionRequest,
         SubmitTransactionResponse,
     },
@@ -86,13 +83,6 @@ impl IndexerJsonRpcClient {
 
     pub async fn get_substate(&mut self, req: GetSubstateRequest) -> Result<GetSubstateResponse, IndexerClientError> {
         self.send_request("get_substate", req).await
-    }
-
-    pub async fn get_transaction(
-        &mut self,
-        req: GetTransactionRequest,
-    ) -> Result<GetTransactionResponse, IndexerClientError> {
-        self.send_request("get_transaction", req).await
     }
 
     pub async fn list_substates(
@@ -150,8 +140,8 @@ impl IndexerJsonRpcClient {
         self.send_request("get_epoch_manager_stats", ()).await
     }
 
-    pub async fn scan_events(&mut self, req: ScanEventsRequest) -> Result<ScanEventsResponse, IndexerClientError> {
-        self.send_request("events.scan", req).await
+    pub async fn indexer_ready(&mut self) -> Result<IndexerReadyResponse, IndexerClientError> {
+        self.send_request("ready", ()).await
     }
 
     async fn send_request<T: Serialize, R: DeserializeOwned>(

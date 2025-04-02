@@ -166,14 +166,7 @@ where
     ) -> Result<TransactionId, TransactionServiceError> {
         let transaction_api = self.wallet_sdk.transaction_api();
         let transaction_id = transaction_api
-            .insert_new_transaction(
-                transaction,
-                required_substates,
-                new_account_info.clone(),
-                false,
-                None,
-                None,
-            )
+            .insert_new_transaction(transaction, required_substates, new_account_info.clone(), false)
             .await?;
         transaction_api.submit_transaction(transaction_id).await?;
         self.notify.notify(TransactionSubmittedEvent {

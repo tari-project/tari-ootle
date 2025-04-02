@@ -486,58 +486,6 @@ pub struct GetTemplateDefinitionResponse {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
-pub struct ScanEventsRequest {
-    pub start_epoch: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct ScanEventsResponse {
-    pub success: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct ScanTransactionsRequest {
-    pub start_epoch: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct ScanTransactionsResponse {
-    pub success: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct GetTransactionRequest {
-    pub transaction_id: [u8; 32],
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct GetTransactionResponse {
-    pub transaction: Transaction,
-    pub created_at_timestamp: u64,
-    pub finalized_at_timestamp: Option<u64>,
+pub struct IndexerReadyResponse {
+    pub ready: bool,
 }

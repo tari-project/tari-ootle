@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use tari_common_types::types::{Commitment, PublicKey};
+use tari_common_types::types::Commitment;
 use tari_dan_common_types::{
     optional::IsNotFoundError,
     substate_type::SubstateType,
@@ -248,8 +248,6 @@ pub trait WalletStoreWriter {
         required_substates: &[SubstateRequirement],
         new_account_info: Option<&NewAccountInfo>,
         is_dry_run: bool,
-        created_at_timestamp: Option<u64>,
-        updated_at_timestamp: Option<u64>,
     ) -> Result<(), WalletStorageError>;
     fn transactions_set_result_and_status(
         &mut self,

@@ -67,12 +67,11 @@ use tari_epoch_manager::{
     EpochManagerReader,
 };
 use tari_epoch_oracles::EpochOracle;
-use tari_indexer_client::types::ScanEventsRequest;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex},
+    sync::{mpsc, oneshot},
     task,
     time,
 };
@@ -89,9 +88,8 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::indexer::app";
 
-pub struct EventScannerRequest {
-    pub request: ScanEventsRequest,
-    pub response: oneshot::Sender<bool>,
+pub struct IndexerReadyRequest {
+    response: oneshot::Sender<bool>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -160,8 +158,8 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         task::spawn(run_graphql(address, substate_manager.clone(), event_manager.clone()));
     }
 
-    // Event scanner requests channel
-    let (event_scan_requests_tx, mut event_scan_requests_rx) = mpsc::channel::<EventScannerRequest>(1);
+    // Indexer ready requests channel
+    let (indexer_ready_requests_tx, mut indexer_ready_requests_rx) = mpsc::channel::<IndexerReadyRequest>(1);
 
     // Run the JSON-RPC API
     let jrpc_address = config.indexer.json_rpc_address;
@@ -174,7 +172,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             services.global_db.clone(),
             services.template_manager.clone(),
             dry_run_transaction_processor,
-            event_scan_requests_tx,
+            indexer_ready_requests_tx,
         );
         let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
         // Run the http ui
@@ -235,17 +233,16 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         tokio::select! {
             // keep scanning the dan layer for new events
             _ = time::sleep(config.indexer.dan_layer_scanning_internal) => {
-                match event_scanner.scan_events(None).await {
+                match event_scanner.scan_events().await {
                     Ok(0) => {},
                     Ok(cnt) => info!(target: LOG_TARGET, "Scanned {} events(s) successfully", cnt),
                     Err(e) =>  error!(target: LOG_TARGET, "Event auto-scan failed: {}", e),
                 };
             },
 
-            Some(req) = event_scan_requests_rx.recv() => {
-                // start a task to not block other operations as this scan can take much longer
+            Some(req) = indexer_ready_requests_rx.recv() => {
+                // start a task to not block other operations
                 let epoch_manager = services.epoch_manager.clone();
-                let scanner = event_scanner.clone();
                 let shutdown = shutdown_signal.clone();
                 tokio::spawn(async move {
                     while let Err(error) = epoch_manager.wait_for_initial_scanning_to_complete().await {
@@ -254,23 +251,9 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
                         }
                         error!(target: LOG_TARGET, "Failed to wait for epoch manager initial scan: {error:?}");
                     }
-                    if shutdown.is_triggered() {
-                        return;
-                    }
-                    match scanner.scan_events(Some(Epoch::from(req.request.start_epoch))).await {
-                        Ok(cnt) => {
-                            info!(target: LOG_TARGET, "Scanned {} events(s)", cnt);
-                            if req.response.send(true).is_err() {
+                    if req.response.send(true).is_err() {
                                 error!(target: LOG_TARGET, "Failed to send event scan response!");
                             }
-                        }
-                        Err(e) => {
-                            error!(target: LOG_TARGET, "Event request-scan failed: {}", e);
-                            if req.response.send(false).is_err() {
-                                error!(target: LOG_TARGET, "Failed to send event scan response!");
-                            }
-                        },
-                    }
                 });
             }
 

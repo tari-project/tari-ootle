@@ -236,7 +236,7 @@ async fn create_account_nft(
 
     let tx_id = sdk
         .transaction_api()
-        .insert_new_transaction(transaction, vec![], None, false, None, None)
+        .insert_new_transaction(transaction, vec![], None, false)
         .await?;
     let mut events = context.notifier().subscribe();
     sdk.transaction_api().submit_transaction(tx_id).await?;

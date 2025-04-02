@@ -4,10 +4,9 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
-use chrono::{Date, NaiveDate};
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{

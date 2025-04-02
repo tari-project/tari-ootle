@@ -61,10 +61,9 @@ use tari_indexer_client::types::{
     GetSubstateResponse,
     GetTemplateDefinitionRequest,
     GetTemplateDefinitionResponse,
-    GetTransactionRequest,
-    GetTransactionResponse,
     GetTransactionResultRequest,
     GetTransactionResultResponse,
+    IndexerReadyResponse,
     IndexerTransactionFinalizedResult,
     InspectSubstateRequest,
     InspectSubstateResponse,
@@ -73,16 +72,12 @@ use tari_indexer_client::types::{
     ListTemplatesRequest,
     ListTemplatesResponse,
     NonFungibleSubstate,
-    ScanEventsRequest,
-    ScanEventsResponse,
-    ScanTransactionsRequest,
     SubmitTransactionRequest,
     SubmitTransactionResponse,
     TemplateMetadata,
 };
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateExecutable};
-use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory, TransactionResultStatus};
 
 use crate::{
@@ -92,7 +87,7 @@ use crate::{
     network_client::NetworkClientError,
     substate_manager::SubstateManager,
     transaction_manager::{error::TransactionManagerError, TransactionManager},
-    EventScannerRequest,
+    IndexerReadyRequest,
 };
 
 const LOG_TARGET: &str = "tari::indexer::json_rpc::handlers";
@@ -107,7 +102,7 @@ pub struct JsonRpcHandlers {
     template_manager: TemplateManager<PeerAddress>,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
-    events_scan_requests_tx: tokio::sync::mpsc::Sender<EventScannerRequest>,
+    indexer_ready_requests_tx: tokio::sync::mpsc::Sender<IndexerReadyRequest>,
 }
 
 impl JsonRpcHandlers {
@@ -122,7 +117,7 @@ impl JsonRpcHandlers {
         global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
         template_manager: TemplateManager<PeerAddress>,
         dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
-        events_scan_requests_tx: tokio::sync::mpsc::Sender<EventScannerRequest>,
+        indexer_ready_requests_tx: tokio::sync::mpsc::Sender<IndexerReadyRequest>,
     ) -> Self {
         Self {
             keypair: services.keypair.clone(),
@@ -133,7 +128,7 @@ impl JsonRpcHandlers {
             transaction_manager,
             template_manager,
             dry_run_transaction_processor,
-            events_scan_requests_tx,
+            indexer_ready_requests_tx,
         }
     }
 }
@@ -725,14 +720,12 @@ impl JsonRpcHandlers {
         Ok(JsonRpcResponse::success(answer_id, resp))
     }
 
-    pub async fn scan_events(&self, value: JsonRpcExtractor) -> JrpcResult {
+    pub async fn ready(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let request: ScanEventsRequest = value.parse_params()?;
-        let (scan_result_tx, scan_result_rx) = tokio::sync::oneshot::channel();
-        self.events_scan_requests_tx
-            .send(EventScannerRequest {
-                request,
-                response: scan_result_tx,
+        let (indexer_ready_result_tx, indexer_ready_result_rx) = tokio::sync::oneshot::channel();
+        self.indexer_ready_requests_tx
+            .send(IndexerReadyRequest {
+                response: indexer_ready_result_tx,
             })
             .await
             .map_err(|error| {
@@ -740,50 +733,24 @@ impl JsonRpcHandlers {
                     answer_id,
                     JsonRpcError::new(
                         JsonRpcErrorReason::InternalError,
-                        format!("Failed to send scan request: {:?}", error).to_string(),
+                        format!("Failed to send indexer ready request: {:?}", error).to_string(),
                         Value::Null,
                     ),
                 )
             })?;
 
-        let success = scan_result_rx.await.map_err(|error| {
+        let ready = indexer_ready_result_rx.await.map_err(|error| {
             JsonRpcResponse::error(
                 answer_id,
                 JsonRpcError::new(
                     JsonRpcErrorReason::InternalError,
-                    format!("Failed to receive scan response: {:?}", error).to_string(),
+                    format!("Failed to receive indexer ready response: {:?}", error).to_string(),
                     Value::Null,
                 ),
             )
         })?;
 
-        Ok(JsonRpcResponse::success(answer_id, ScanEventsResponse { success }))
-    }
-
-    pub async fn get_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let request: GetTransactionRequest = value.parse_params()?;
-
-        let transaction_response = self
-            .transaction_manager
-            .get_transaction(TransactionId::from(request.transaction_id))
-            .await
-            .map_err(|error| {
-                JsonRpcResponse::error(
-                    answer_id,
-                    JsonRpcError::new(
-                        JsonRpcErrorReason::InternalError,
-                        format!("Failed to get transaction: {:?}", error).to_string(),
-                        Value::Null,
-                    ),
-                )
-            })?;
-
-        Ok(JsonRpcResponse::success(answer_id, GetTransactionResponse {
-            transaction: transaction_response.transaction,
-            created_at_timestamp: transaction_response.created_at_timestamp,
-            finalized_at_timestamp: transaction_response.finalized_at_timestamp,
-        }))
+        Ok(JsonRpcResponse::success(answer_id, IndexerReadyResponse { ready }))
     }
 
     fn error_response<T: Display>(answer_id: i64, reason: JsonRpcErrorReason, message: T) -> JsonRpcResponse {

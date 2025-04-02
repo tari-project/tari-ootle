@@ -280,13 +280,3 @@ message SyncTemplatesResponse {
   string template_name = 4;
   bytes binary = 5;
 }
-
-message GetTransactionRequest {
-  bytes transaction_id = 1;
-}
-
-message GetTransactionResponse {
-  tari.dan.transaction.Transaction transaction = 1;
-  uint64 created_at_timestamp = 2;
-  optional uint64 finalized_at_timestamp = 3;
-}

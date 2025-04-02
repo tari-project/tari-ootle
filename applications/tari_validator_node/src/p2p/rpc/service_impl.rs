@@ -34,8 +34,6 @@ use tari_dan_p2p::{
         GetHighQcResponse,
         GetSubstateRequest,
         GetSubstateResponse,
-        GetTransactionRequest,
-        GetTransactionResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
         PayloadResultStatus,
@@ -442,33 +440,5 @@ impl ValidatorNodeRpcService for ValidatorNodeRpcServiceImpl {
         task::spawn(TemplateSyncTask::new(MAX_BATCH_SIZE, addresses, tx, self.template_manager.clone()).run());
 
         Ok(Streaming::new(rx))
-    }
-
-    async fn get_transaction(
-        &self,
-        request: Request<GetTransactionRequest>,
-    ) -> Result<Response<GetTransactionResponse>, RpcStatus> {
-        let req = request.into_message();
-        let tx = self
-            .shard_state_store
-            .create_read_tx()
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-        let tx_id = TransactionId::try_from(req.transaction_id)
-            .map_err(|_| RpcStatus::bad_request("Invalid transaction id"))?;
-        let transaction = TransactionRecord::get(&tx, &tx_id)
-            .optional()
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
-            .ok_or_else(|| RpcStatus::not_found("Transaction not found"))?;
-
-        let raw = encode(transaction.transaction())
-            .map_err(|error| RpcStatus::general(format!("Failed to encode transaction: {error:?}")))?;
-
-        Ok(Response::new(GetTransactionResponse {
-            transaction: Some(proto::transaction::Transaction { bor_encoded: raw }),
-            created_at_timestamp: transaction.created_at.assume_utc().unix_timestamp() as u64,
-            finalized_at_timestamp: transaction
-                .finalized_at
-                .map(|datetime| datetime.assume_utc().unix_timestamp() as u64),
-        }))
     }
 }

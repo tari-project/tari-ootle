@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{substate_type::SubstateType, Epoch, SubstateRequirement};
+use tari_dan_common_types::{substate_type::SubstateType, SubstateRequirement};
 use tari_dan_storage::consensus_models::Decision;
 use tari_engine_types::{
     commit_result::ExecuteResult,
@@ -53,16 +53,7 @@ pub trait WalletNetworkInterface {
 
     async fn fetch_template_definition(&self, template_address: TemplateAddress) -> Result<TemplateDef, Self::Error>;
 
-    async fn scan_events(&self, start_epoch: Epoch) -> Result<bool, Self::Error>;
-
-    async fn get_transaction(&self, transaction_id: TransactionId) -> Result<TransactionResponse, Self::Error>;
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TransactionResponse {
-    pub transaction: Transaction,
-    pub created_at_timestamp: u64,
-    pub finalized_at_timestamp: Option<u64>,
+    async fn indexer_ready(&self) -> Result<bool, Self::Error>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

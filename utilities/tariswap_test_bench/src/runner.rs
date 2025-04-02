@@ -121,5 +121,5 @@ fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result
     };
     let indexer = IndexerJsonRpcNetworkInterface::new(indexer_url);
     let wallet = DanWalletSdk::initialize(Network::LocalNet, store, indexer, sdk_config, None)?;
-    Ok(wallet)
+    Ok(wallet.sdk)
 }

@@ -10,13 +10,7 @@ use tari_bor::decode;
 use tari_dan_common_types::{NodeAddressable, SubstateRequirement, ToPeerId};
 use tari_dan_p2p::{
     proto,
-    proto::rpc::{
-        GetTransactionRequest,
-        GetTransactionResultRequest,
-        PayloadResultStatus,
-        SubmitTransactionRequest,
-        SubstateStatus,
-    },
+    proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
     TariMessagingSpec,
 };
 use tari_dan_storage::consensus_models::Decision;
@@ -47,8 +41,6 @@ pub trait ValidatorNodeRpcClient<TAddr: NodeAddressable>: Send + Sync {
     ) -> Result<TransactionResultStatus, Self::Error>;
 
     async fn get_substate(&mut self, substate_req: &SubstateRequirement) -> Result<SubstateResult, Self::Error>;
-
-    async fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<TransactionResponse, Self::Error>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -64,13 +56,6 @@ pub struct FinalizedResult {
     pub execution_time: Duration,
     pub finalized_time: Duration,
     pub abort_details: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TransactionResponse {
-    pub transaction: Transaction,
-    pub created_at_timestamp: u64,
-    pub finalized_at_timestamp: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -247,30 +232,6 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
             },
             SubstateStatus::DoesNotExist => Ok(SubstateResult::DoesNotExist),
         }
-    }
-
-    async fn get_transaction(&mut self, transaction_id: TransactionId) -> Result<TransactionResponse, Self::Error> {
-        let mut client = self.client_connection().await?;
-        let result = client
-            .get_transaction(GetTransactionRequest {
-                transaction_id: transaction_id.into_array().to_vec(),
-            })
-            .await?;
-        let tx = result
-            .transaction
-            .map(|tx| decode::<Transaction>(tx.bor_encoded.as_slice()))
-            .ok_or(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
-                "Transaction not found"
-            )))?
-            .map_err(|error| {
-                ValidatorNodeRpcClientError::InvalidResponse(anyhow!("Transaction cannot be decoded: {:?}", error))
-            })?;
-
-        Ok(TransactionResponse {
-            transaction: tx,
-            created_at_timestamp: result.created_at_timestamp,
-            finalized_at_timestamp: result.finalized_at_timestamp,
-        })
     }
 }
 

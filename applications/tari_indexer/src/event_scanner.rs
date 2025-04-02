@@ -184,7 +184,7 @@ impl EventScanner {
 
                 // only keep the events specified by the indexer filter
                 let filtered_events: Vec<_> = events.filter(|ev| self.should_persist_event(ev)).collect();
-                info!(
+                debug!(
                     target: LOG_TARGET,
                     "Filtered events in epoch {}: {}",
                     epoch,
@@ -204,6 +204,7 @@ impl EventScanner {
                             .substate
                             .substate_id()
                             .as_template()
+                            // TODO: this should be an error - a VN could send invalid data
                             .expect("Expected template substate ID");
 
                         Some(TemplateChange::Add {
@@ -330,7 +331,7 @@ impl EventScanner {
                     .map(Self::encode_substate)
                     .transpose()?
                     .unwrap_or_default(),
-                tx_hash: create.substate.created_by_transaction.to_string(),
+                tx_hash: String::new(),
                 template_address: template_address.map(|s| s.to_string()),
                 module_name,
                 timestamp: timestamp as i64,

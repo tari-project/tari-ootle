@@ -134,7 +134,7 @@ impl Runner {
                         SubstateRequirement::unversioned(XTR),
                     ])
                     .with_inputs(tariswap.vaults.values().map(|v| SubstateRequirement::unversioned(*v)))
-                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(1000))
+                    .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), Amount(2000))
                     .call_method(account.address.as_component_address().unwrap(), "withdraw", args![
                         XTR, amount_a
                     ])

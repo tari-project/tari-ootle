@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{hash::Hash, io::Write};
+use std::{collections::HashMap, hash::Hash, io::Write};
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,7 @@ pub struct BurntUtxo {
     pub commitment: UnclaimedConfidentialOutputAddress,
     pub output: UnclaimedConfidentialOutput,
     pub proposed_in_block: Option<BlockId>,
+    // TODO: remove not used - rockdb impl sets this to 0
     pub base_layer_block_height: u64,
 }
 
@@ -57,7 +58,7 @@ impl BurntUtxo {
         tx: &TTx,
         block_id: &BlockId,
         limit: usize,
-    ) -> Result<Vec<BurntUtxo>, StorageError> {
+    ) -> Result<HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>, StorageError> {
         tx.burnt_utxos_get_all_unproposed(block_id, limit)
     }
 
@@ -77,12 +78,16 @@ pub struct MintConfidentialOutputAtom {
 }
 
 impl MintConfidentialOutputAtom {
-    pub fn get<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<BurntUtxo, StorageError> {
+    pub fn get<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<UnclaimedConfidentialOutput, StorageError> {
         tx.burnt_utxos_get(&self.commitment)
     }
 
-    pub fn delete<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.burnt_utxos_delete(&self.commitment)
+    pub fn delete<TTx: StateStoreWriteTransaction>(
+        &self,
+        tx: &mut TTx,
+        proposed_in_block: &BlockId,
+    ) -> Result<(), StorageError> {
+        tx.burnt_utxos_delete(&self.commitment, proposed_in_block)
     }
 }
 

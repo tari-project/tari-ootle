@@ -257,8 +257,8 @@ pub enum RuntimeError {
     #[error("Allocated address does not have an associated template")]
     AddressAllocationNoTemplate,
 
-    #[error("Invalid event topic '{topic}': 'std' prefix is reserved for built-in events")]
-    InvalidEventTopicStdPrefix { topic: String },
+    #[error("Invalid event topic '{topic}': {reason}")]
+    InvalidEventTopic { topic: String, reason: String },
 
     #[error("Numeric conversion error: {details}")]
     NumericConversionError { details: String },

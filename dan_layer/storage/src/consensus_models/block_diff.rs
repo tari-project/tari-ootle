@@ -94,7 +94,7 @@ impl BlockDiff {
         Ok(removed)
     }
 
-    pub fn get_for_substate<TTx: StateStoreReadTransaction>(
+    pub fn get_last_change_for_substate<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         block_id: &BlockId,
         substate_id: &SubstateId,

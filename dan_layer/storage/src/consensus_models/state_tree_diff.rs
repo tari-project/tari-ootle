@@ -13,13 +13,17 @@ use tari_state_tree::{StateHashTreeDiff, Version};
 
 use crate::{consensus_models::BlockId, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PendingShardStateTreeDiff {
     pub version: Version,
     pub diff: StateHashTreeDiff<Version>,
 }
 
 impl PendingShardStateTreeDiff {
+    pub fn new(version: Version, diff: StateHashTreeDiff<Version>) -> Self {
+        Self { version, diff }
+    }
+
     pub fn load(version: Version, diff: StateHashTreeDiff<Version>) -> Self {
         Self { version, diff }
     }
@@ -49,7 +53,7 @@ impl PendingShardStateTreeDiff {
         tx: &mut TTx,
         block_id: BlockId,
         shard: Shard,
-        diff: &VersionedStateHashTreeDiff,
+        diff: &PendingShardStateTreeDiff,
     ) -> Result<(), StorageError>
     where
         TTx: Deref + StateStoreWriteTransaction,
@@ -59,23 +63,11 @@ impl PendingShardStateTreeDiff {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VersionedStateHashTreeDiff {
-    pub version: Version,
-    pub diff: StateHashTreeDiff<Version>,
-}
-
-impl VersionedStateHashTreeDiff {
-    pub fn new(version: Version, diff: StateHashTreeDiff<Version>) -> Self {
-        Self { version, diff }
-    }
-}
-
-impl Display for VersionedStateHashTreeDiff {
+impl Display for PendingShardStateTreeDiff {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "VersionedStateHashTreeDiff(v{}, {} new node(s), {} stale node(s))",
+            "PendingShardStateTreeDiff(v{}, {} new node(s), {} stale node(s))",
             self.version,
             self.diff.new_nodes.len(),
             self.diff.stale_tree_nodes.len()

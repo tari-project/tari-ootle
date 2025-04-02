@@ -20,9 +20,12 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use rocksdb::ErrorKind;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_storage::StorageError;
 use thiserror::Error;
+
+use crate::codecs::EncodeVec;
 
 #[derive(Debug, Error)]
 pub enum RocksDbStorageError {
@@ -31,43 +34,69 @@ pub enum RocksDbStorageError {
         source: rocksdb::Error,
         operation: &'static str,
     },
-    #[error("Entry {key} not found during operation {operation}")]
-    NotFound { key: String, operation: &'static str },
+    #[error("Entry {key:#} not found during operation {operation}")]
+    NotFound { key: EncodeVec, operation: &'static str },
     #[error("Encode error: {source}")]
-    EncodeError {
-        #[from]
-        source: bincode::error::EncodeError,
-    },
+    EncodeError { source: anyhow::Error },
     #[error("Encode error: {source}")]
-    DecodeError {
-        #[from]
-        source: bincode::error::DecodeError,
-    },
+    DecodeError { source: anyhow::Error },
+    #[error("Malformed data: {operation}: {details}")]
+    MalformedData { operation: &'static str, details: String },
     #[error("General error: {message}")]
     GeneralError { message: String },
-    #[error("[{operation}] Not all queried transactions were found: {details}")]
-    NotAllTransactionsFound { operation: &'static str, details: String },
+    #[error("Conflicting insert: {details}")]
+    ConflictingInsert { key: EncodeVec, details: String },
+    #[error("[{operation}] Query error: {details}")]
+    QueryError { operation: &'static str, details: String },
+    #[error("[{operation}] Column family not found: {cf}")]
+    ColumnFamilyNotFound { operation: &'static str, cf: String },
 }
 
 impl From<RocksDbStorageError> for StorageError {
     fn from(source: RocksDbStorageError) -> Self {
         match source {
-            RocksDbStorageError::RocksDbError { .. } => StorageError::QueryError {
-                reason: source.to_string(),
+            RocksDbStorageError::RocksDbError { source, operation } => match source.kind() {
+                ErrorKind::NotFound => StorageError::NotFoundDbAdapter {
+                    operation,
+                    source: source.into(),
+                },
+                ErrorKind::Corruption |
+                ErrorKind::NotSupported |
+                ErrorKind::InvalidArgument |
+                ErrorKind::IOError |
+                ErrorKind::MergeInProgress |
+                ErrorKind::Incomplete |
+                ErrorKind::ShutdownInProgress |
+                ErrorKind::TimedOut |
+                ErrorKind::Aborted |
+                ErrorKind::Busy |
+                ErrorKind::Expired |
+                ErrorKind::TryAgain |
+                ErrorKind::CompactionTooLarge |
+                ErrorKind::ColumnFamilyDropped |
+                ErrorKind::Unknown => StorageError::General {
+                    details: format!("{operation}: {source}"),
+                },
             },
-            RocksDbStorageError::NotFound { key, operation } => StorageError::NotFound { item: operation, key },
+            RocksDbStorageError::NotFound { key, operation } => StorageError::NotFound {
+                item: operation,
+                key: format!("{:#}", key),
+            },
             RocksDbStorageError::EncodeError { source } => StorageError::EncodingError {
                 operation: "",
                 item: "",
                 details: source.to_string(),
             },
             RocksDbStorageError::DecodeError { source } => StorageError::DecodingError {
-                operation: "",
-                item: "",
+                operation: "unknown - rocks",
+                item: "unknown",
                 details: source.to_string(),
             },
-            RocksDbStorageError::GeneralError { .. } => StorageError::General {
-                details: source.to_string(),
+            RocksDbStorageError::MalformedData { details, operation } => StorageError::DataInconsistency {
+                details: format!("{operation}: {details}"),
+            },
+            RocksDbStorageError::QueryError { operation, details } => StorageError::QueryError {
+                reason: format!("[{operation}] {details}"),
             },
             other => StorageError::General {
                 details: other.to_string(),
@@ -78,6 +107,10 @@ impl From<RocksDbStorageError> for StorageError {
 
 impl IsNotFoundError for RocksDbStorageError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, RocksDbStorageError::NotFound { .. })
+        match self {
+            RocksDbStorageError::RocksDbError { source, .. } if source.kind() == ErrorKind::NotFound => true,
+            RocksDbStorageError::NotFound { .. } => true,
+            _ => false,
+        }
     }
 }

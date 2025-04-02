@@ -4,6 +4,7 @@
 use std::{
     fmt,
     fmt::{Display, Formatter},
+    io::Read,
     str::FromStr,
 };
 
@@ -27,6 +28,10 @@ const TAG: u64 = BinaryTag::TransactionReceipt.as_u64();
 pub struct TransactionReceiptAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl TransactionReceiptAddress {
+    const fn new(key: ObjectKey) -> Self {
+        Self(BorTag::new(key))
+    }
+
     pub const fn from_hash(hash: Hash) -> Self {
         Self::from_array(hash.into_array())
     }
@@ -69,6 +74,13 @@ impl FromStr for TransactionReceiptAddress {
 impl borsh::BorshSerialize for TransactionReceiptAddress {
     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+    }
+}
+
+impl borsh::BorshDeserialize for TransactionReceiptAddress {
+    fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+        let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
+        Ok(Self::new(ObjectKey::from_array(key)))
     }
 }
 

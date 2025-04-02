@@ -15,7 +15,7 @@ use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
 use tari_common_types::types::{Commitment, PublicKey};
-use tari_dan_common_types::{SubstateRequirement, VersionedSubstateId};
+use tari_dan_common_types::{SubstateRequirement, VersionedSubstateIdRef};
 use tari_dan_storage::consensus_models::QuorumCertificate;
 use tari_dan_wallet_sdk::{
     models::{
@@ -345,8 +345,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     // -------------------------------- Substates -------------------------------- //
     fn substates_upsert_root(
         &mut self,
-        transaction_id: TransactionId,
-        address: VersionedSubstateId,
+        substate_id: VersionedSubstateIdRef<'_>,
         referenced_substates: HashSet<SubstateId>,
         module_name: Option<String>,
         template_addr: Option<TemplateAddress>,
@@ -355,21 +354,19 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
         diesel::insert_into(substates::table)
             .values((
-                substates::address.eq(address.substate_id().to_string()),
-                substates::transaction_hash.eq(transaction_id.to_string()),
+                substates::address.eq(substate_id.substate_id().to_string()),
                 substates::module_name.eq(&module_name),
                 substates::template_address.eq(template_addr.map(|a| a.to_string())),
                 substates::referenced_substates.eq(serialize_json(&referenced_substates)?),
-                substates::version.eq(address.version() as i32),
+                substates::version.eq(substate_id.version() as i32),
             ))
             .on_conflict(substates::address)
             .do_update()
             .set((
-                substates::transaction_hash.eq(transaction_id.to_string()),
                 substates::module_name.eq(&module_name),
                 substates::template_address.eq(template_addr.map(|a| a.to_string())),
                 substates::referenced_substates.eq(serialize_json(&referenced_substates)?),
-                substates::version.eq(address.version() as i32),
+                substates::version.eq(substate_id.version() as i32),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("substates_upsert_root", e))?;
@@ -379,28 +376,25 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
     fn substates_upsert_child(
         &mut self,
-        transaction_id: TransactionId,
         parent: SubstateId,
-        child: VersionedSubstateId,
+        address: VersionedSubstateIdRef<'_>,
         referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError> {
         use crate::schema::substates;
 
         diesel::insert_into(substates::table)
             .values((
-                substates::address.eq(child.substate_id().to_string()),
-                substates::transaction_hash.eq(transaction_id.to_string()),
+                substates::address.eq(address.substate_id().to_string()),
                 substates::parent_address.eq(Some(parent.to_string())),
                 substates::referenced_substates.eq(serialize_json(&referenced_substates)?),
-                substates::version.eq(child.version() as i32),
+                substates::version.eq(address.version() as i32),
             ))
             .on_conflict(substates::address)
             .do_update()
             .set((
-                substates::transaction_hash.eq(transaction_id.to_string()),
                 substates::parent_address.eq(Some(parent.to_string())),
                 substates::referenced_substates.eq(serialize_json(&referenced_substates)?),
-                substates::version.eq(child.version() as i32),
+                substates::version.eq(address.version() as i32),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("substates_upsert_child", e))?;

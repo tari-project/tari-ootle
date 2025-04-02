@@ -69,7 +69,7 @@ where
 
     pub async fn run(mut self) -> Result<(), anyhow::Error> {
         let mut events_subscription = self.notify.subscribe();
-        let mut poll_interval = time::interval(Duration::from_secs(10));
+        let mut poll_interval = time::interval(Duration::from_secs(5));
         poll_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
@@ -90,7 +90,10 @@ where
 
                 Ok(_) = self.rx_trigger.changed() => {
                     trace!(target: LOG_TARGET, "Polling for transactions");
-                    self.on_poll().await?;
+                    // Wait a tick for the transaction to be processed. If we poll immediately, the transaction is very likely not
+                    // to be finalised yet, then we have to wait for the next tick. This improves the perception of the finalisation time
+                    // if the transaction is finalised within 750ms.
+                    poll_interval.reset_after(Duration::from_millis(750));
                 }
 
                 _ = poll_interval.tick() => {

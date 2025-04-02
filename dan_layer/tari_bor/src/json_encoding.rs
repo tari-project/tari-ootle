@@ -1,6 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+//! This module provides a wrapper for serializing and deserializing `Value`. This is "generated" from the serde derive
+//! macros and copied here. This allows the enum to be encoded as JSON representation of the ciborium::Value enum
+//! as if the derive macros were used, instead of the de/serializers implemented with CBOT in mind.
+
 use core::{fmt, fmt::Formatter, marker::PhantomData};
 
 use ciborium::{value::Integer, Value};
@@ -48,15 +52,15 @@ impl serde::Serialize for CborValueJsonSerializeWrapper<'_> {
     }
 }
 
-pub struct CborValueJsonDeserializeWrapper(pub Value);
+pub struct CiboruimValueDeserializeFixWrapper(pub Value);
 
-impl CborValueJsonDeserializeWrapper {
+impl CiboruimValueDeserializeFixWrapper {
     pub fn into_inner(self) -> Value {
         self.0
     }
 }
 
-impl<'de> serde::Deserialize<'de> for CborValueJsonDeserializeWrapper {
+impl<'de> serde::Deserialize<'de> for CiboruimValueDeserializeFixWrapper {
     #[allow(clippy::too_many_lines)]
     fn deserialize<__D>(__deserializer: __D) -> Result<Self, __D::Error>
     where __D: serde::Deserializer<'de> {
@@ -145,11 +149,11 @@ impl<'de> serde::Deserialize<'de> for CborValueJsonDeserializeWrapper {
         }
         #[doc(hidden)]
         struct __Visitor<'de> {
-            marker: PhantomData<CborValueJsonDeserializeWrapper>,
+            marker: PhantomData<CiboruimValueDeserializeFixWrapper>,
             lifetime: PhantomData<&'de ()>,
         }
         impl<'de> serde::de::Visitor<'de> for __Visitor<'de> {
-            type Value = CborValueJsonDeserializeWrapper;
+            type Value = CiboruimValueDeserializeFixWrapper;
 
             fn expecting(&self, __formatter: &mut Formatter) -> fmt::Result {
                 Formatter::write_str(__formatter, "enum Value")
@@ -160,38 +164,38 @@ impl<'de> serde::Deserialize<'de> for CborValueJsonDeserializeWrapper {
                 match serde::de::EnumAccess::variant(__data)? {
                     (__Field::Integer, __variant) => {
                         let a = __variant.newtype_variant::<i128>()?;
-                        Ok(CborValueJsonDeserializeWrapper(Value::Integer(
+                        Ok(CiboruimValueDeserializeFixWrapper(Value::Integer(
                             Integer::try_from(a).map_err(serde::de::Error::custom)?,
                         )))
                     },
                     (__Field::Bytes, __variant) => __variant
                         .newtype_variant()
                         .map(Value::Bytes)
-                        .map(CborValueJsonDeserializeWrapper),
+                        .map(CiboruimValueDeserializeFixWrapper),
                     (__Field::Float, __variant) => __variant
                         .newtype_variant()
                         .map(Value::Float)
-                        .map(CborValueJsonDeserializeWrapper),
+                        .map(CiboruimValueDeserializeFixWrapper),
                     (__Field::Text, __variant) => __variant
                         .newtype_variant()
                         .map(Value::Text)
-                        .map(CborValueJsonDeserializeWrapper),
+                        .map(CiboruimValueDeserializeFixWrapper),
                     (__Field::Bool, __variant) => __variant
                         .newtype_variant()
                         .map(Value::Bool)
-                        .map(CborValueJsonDeserializeWrapper),
+                        .map(CiboruimValueDeserializeFixWrapper),
                     (__Field::Null, __variant) => {
                         __variant.unit_variant()?;
-                        Ok(CborValueJsonDeserializeWrapper(Value::Null))
+                        Ok(CiboruimValueDeserializeFixWrapper(Value::Null))
                     },
                     (__Field::Tag, __variant) => {
                         #[doc(hidden)]
                         struct __Visitor<'de> {
-                            marker: PhantomData<CborValueJsonDeserializeWrapper>,
+                            marker: PhantomData<CiboruimValueDeserializeFixWrapper>,
                             lifetime: PhantomData<&'de ()>,
                         }
                         impl<'de> serde::de::Visitor<'de> for __Visitor<'de> {
-                            type Value = CborValueJsonDeserializeWrapper;
+                            type Value = CiboruimValueDeserializeFixWrapper;
 
                             fn expecting(&self, __formatter: &mut Formatter) -> fmt::Result {
                                 Formatter::write_str(__formatter, "tuple variant Value::Tag")
@@ -209,15 +213,16 @@ impl<'de> serde::Deserialize<'de> for CborValueJsonDeserializeWrapper {
                                         ))
                                     },
                                 };
-                                let wrapped =
-                                    serde::de::SeqAccess::next_element::<CborValueJsonDeserializeWrapper>(&mut __seq)?
-                                        .ok_or_else(|| {
-                                            serde::de::Error::invalid_length(
-                                                1usize,
-                                                &"tuple variant Value::Tag with 2 elements",
-                                            )
-                                        })?;
-                                Ok(CborValueJsonDeserializeWrapper(Value::Tag(
+                                let wrapped = serde::de::SeqAccess::next_element::<CiboruimValueDeserializeFixWrapper>(
+                                    &mut __seq,
+                                )?
+                                .ok_or_else(|| {
+                                    serde::de::Error::invalid_length(
+                                        1usize,
+                                        &"tuple variant Value::Tag with 2 elements",
+                                    )
+                                })?;
+                                Ok(CiboruimValueDeserializeFixWrapper(Value::Tag(
                                     __field0,
                                     Box::new(wrapped.0),
                                 )))
@@ -229,16 +234,15 @@ impl<'de> serde::Deserialize<'de> for CborValueJsonDeserializeWrapper {
                         })
                     },
                     (__Field::Array, __variant) => {
-                        let values = __variant.newtype_variant::<Vec<CborValueJsonDeserializeWrapper>>()?;
-                        Ok(CborValueJsonDeserializeWrapper(Value::Array(
+                        let values = __variant.newtype_variant::<Vec<CiboruimValueDeserializeFixWrapper>>()?;
+                        Ok(CiboruimValueDeserializeFixWrapper(Value::Array(
                             values.into_iter().map(|v| v.0).collect(),
                         )))
                     },
                     (__Field::Map, __variant) => {
                         let values = __variant
-                            .newtype_variant::<Vec<(CborValueJsonDeserializeWrapper, CborValueJsonDeserializeWrapper)>>(
-                            )?;
-                        Ok(CborValueJsonDeserializeWrapper(Value::Map(
+                            .newtype_variant::<Vec<(CiboruimValueDeserializeFixWrapper, CiboruimValueDeserializeFixWrapper)>>()?;
+                        Ok(CiboruimValueDeserializeFixWrapper(Value::Map(
                             values.into_iter().map(|(k, v)| (k.0, v.0)).collect(),
                         )))
                     },
@@ -276,7 +280,7 @@ mod tests {
         })
         .unwrap();
         let s1 = serde_json::to_string(&CborValueJsonSerializeWrapper(&sample)).unwrap();
-        let decoded = serde_json::from_str::<CborValueJsonDeserializeWrapper>(&s1).unwrap();
+        let decoded = serde_json::from_str::<CiboruimValueDeserializeFixWrapper>(&s1).unwrap();
         // Decoded value matches original
         assert_eq!(sample, decoded.0);
         let s2 = serde_json::to_string(&CborValueJsonSerializeWrapper(&decoded.0)).unwrap();

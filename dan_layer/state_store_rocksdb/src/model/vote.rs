@@ -20,28 +20,30 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::FixedHash;
 use tari_dan_storage::consensus_models::{BlockId, Vote};
 
-use crate::model::traits::RocksdbModel;
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, NumberCodec},
+    traits::{Cf, QueryCf},
+};
 
-pub struct VoteModel {}
+pub struct VoteModel;
 
-impl VoteModel {
-    pub fn key_from_block_and_sender(block_id: &BlockId, sender_leaf_hash_opt: Option<&FixedHash>) -> String {
-        let sender_leaf_hash = sender_leaf_hash_opt.map(|h| h.to_string()).unwrap_or_default();
-        format!("{}_{}_{}", Self::key_prefix(), block_id, sender_leaf_hash)
+impl Cf for VoteModel {
+    type Key = (BlockId, u64);
+    type KeyCodec = (BlockIdCodec, NumberCodec<u64>);
+    type Value = Vote;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        "votes"
     }
 }
 
-impl RocksdbModel for VoteModel {
-    type Item = Vote;
+pub struct ByBlockId;
 
-    fn key_prefix() -> &'static str {
-        "votes"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        Self::key_from_block_and_sender(&value.block_id, Some(&value.sender_leaf_hash))
-    }
+impl QueryCf for ByBlockId {
+    type Cf = VoteModel;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
 }

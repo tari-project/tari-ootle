@@ -8,7 +8,6 @@ use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
 use tari_dan_common_types::PeerAddress;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_rpc_state_sync::RpcStateSyncClientProtocol;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::implementation::TemplateManager;
 
 #[cfg(feature = "metrics")]
@@ -26,6 +25,10 @@ use crate::{
     },
 };
 
+#[cfg(not(feature = "sqlite_backend"))]
+pub type ValidatorNodeStateStore = tari_state_store_rocksdb::RocksDbStateStore<PeerAddress>;
+#[cfg(feature = "sqlite_backend")]
+pub type ValidatorNodeStateStore = tari_state_store_sqlite::SqliteStateStore<PeerAddress>;
 #[derive(Clone)]
 pub struct TariConsensusSpec;
 
@@ -35,12 +38,12 @@ impl ConsensusSpec for TariConsensusSpec {
     #[cfg(not(feature = "metrics"))]
     type Hooks = NoopHooks;
     #[cfg(feature = "metrics")]
-    type Hooks = PrometheusConsensusMetrics;
+    type Hooks = PrometheusConsensusMetrics<Self::StateStore>;
     type InboundMessaging = ConsensusInboundMessaging<NopLogger>;
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
     type SignatureService = TariSignatureService;
-    type StateStore = SqliteStateStore<PeerAddress>;
+    type StateStore = ValidatorNodeStateStore;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
     type TransactionExecutor = TariDanBlockTransactionExecutor<
         TariDanTransactionProcessor<TemplateManager<PeerAddress>>,

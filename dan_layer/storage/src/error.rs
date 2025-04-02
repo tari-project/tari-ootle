@@ -33,7 +33,7 @@ pub enum StorageError {
     QueryError { reason: String },
     #[error("Migration error: {reason}")]
     MigrationError { reason: String },
-    #[error("Not found: item: {item}, key: {key}")]
+    #[error("Not found: {item}, key: {key}")]
     NotFound { item: &'static str, key: String },
     #[error("Not found in operation {operation}: {source}")]
     NotFoundDbAdapter {
@@ -56,8 +56,6 @@ pub enum StorageError {
     },
     #[error("Fixed hash size error: {0}")]
     FixedHashSizeError(#[from] FixedHashSizeError),
-    #[error("Invalid integer cast")]
-    InvalidIntegerCast,
     #[error("Data inconsistency: {details}")]
     DataInconsistency { details: String },
     #[error("General storage error: {details}")]

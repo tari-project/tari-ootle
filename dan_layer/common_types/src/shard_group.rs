@@ -39,7 +39,7 @@ impl ShardGroup {
     }
 
     pub fn all_shards(num_preshards: NumPreshards) -> Self {
-        Self::new(Shard::first(), Shard::from(num_preshards.as_u32() - 1))
+        Self::new(Shard::first(), Shard::from(num_preshards.as_u32()))
     }
 
     pub const fn len(&self) -> usize {
@@ -216,5 +216,13 @@ mod tests {
         // Test with a non-contained shard
         let non_contained_shard = Shard::from(30);
         assert!(!sg.contains_or_global(&non_contained_shard));
+    }
+
+    #[test]
+    fn all_shards() {
+        let sg = ShardGroup::all_shards(NumPreshards::P1);
+        assert_eq!(sg, ShardGroup::new(1, 1));
+        let sg = ShardGroup::all_shards(NumPreshards::P64);
+        assert_eq!(sg, ShardGroup::new(1, 64));
     }
 }

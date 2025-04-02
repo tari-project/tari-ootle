@@ -3,7 +3,7 @@
 
 use std::{borrow::Borrow, fmt::Display, str::FromStr};
 
-use borsh::BorshSerialize;
+use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
 
@@ -96,6 +96,13 @@ impl SubstateRequirement {
             substate_id: self.substate_id,
         }
     }
+
+    pub fn as_ref(&self) -> SubstateRequirementRef<'_> {
+        SubstateRequirementRef {
+            substate_id: &self.substate_id,
+            version: self.version,
+        }
+    }
 }
 
 impl FromStr for SubstateRequirement {
@@ -186,6 +193,14 @@ impl<'a> SubstateRequirementRef<'a> {
         Self { substate_id, version }
     }
 
+    pub fn versioned(substate_id: &'a SubstateId, version: u32) -> Self {
+        Self::new(substate_id, Some(version))
+    }
+
+    pub fn unversioned(substate_id: &'a SubstateId) -> Self {
+        Self::new(substate_id, None)
+    }
+
     pub fn to_owned(&self) -> SubstateRequirement {
         SubstateRequirement::new(self.substate_id.clone(), self.version)
     }
@@ -261,8 +276,8 @@ impl AsRef<SubstateId> for SubstateRequirementRef<'_> {
     }
 }
 
-// Only consider the substate id in maps. This means that duplicates found if the substate id is the same regardless of
-// the version.
+// Only consider the substate id in maps. This means that duplicates are found if the substate id is the same regardless
+// of the version.
 impl std::hash::Hash for SubstateRequirementRef<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.substate_id.hash(state);
@@ -279,7 +294,7 @@ impl Display for SubstateRequirementRef<'_> {
 #[error("Failed to parse substate requirement {0}")]
 pub struct SubstateRequirementParseError(String);
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize, BorshSerialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

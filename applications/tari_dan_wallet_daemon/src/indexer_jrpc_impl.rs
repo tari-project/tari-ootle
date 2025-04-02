@@ -84,7 +84,6 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
             address: result.address,
             version: result.version,
             substate: result.substate,
-            created_by_transaction: result.created_by_transaction,
         })
     }
 

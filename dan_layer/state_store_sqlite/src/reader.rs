@@ -1,11 +1,6 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-use std::{
-    borrow::Borrow,
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-    ops::RangeInclusive,
-};
+use std::{collections::HashMap, marker::PhantomData};
 
 use diesel::{
     query_builder::SqlQuery,
@@ -37,7 +32,6 @@ use tari_dan_common_types::{
     SubstateAddress,
     SubstateLockType,
     ToSubstateAddress,
-    VersionedSubstateId,
     VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
@@ -47,10 +41,8 @@ use tari_dan_storage::{
         BlockId,
         BlockTransactionExecution,
         BurntUtxo,
-        Command,
         EpochCheckpoint,
         ForeignProposal,
-        ForeignProposalAtom,
         ForeignProposalStatus,
         ForeignReceiveCounters,
         ForeignSendCounters,
@@ -71,7 +63,6 @@ use tari_dan_storage::{
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
-        TransactionPoolConfirmedStage,
         TransactionPoolRecord,
         TransactionPoolStage,
         TransactionRecord,
@@ -82,10 +73,14 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
+use tari_engine_types::{
+    confidential::UnclaimedConfidentialOutput,
+    substate::SubstateId,
+    template_models::UnclaimedConfidentialOutputAddress,
+};
 use tari_state_tree::{Node, NodeKey, TreeNode, Version};
 use tari_transaction::TransactionId;
-use tari_utilities::{hex::Hex, ByteArray};
+use tari_utilities::hex::Hex;
 
 use crate::{
     error::SqliteStorageError,
@@ -246,7 +241,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> SqliteState
 
     /// Returns the blocks from the start_block (inclusive) to the end_block (inclusive).
     /// It is the callers responsibility to ensure that start/end block IDs exist and start block is before end block.
-    /// Failing this, the result if this function is undefined but typically results in an empty Vec or returning all
+    /// Failing this, the result of this function is undefined but typically results in an empty Vec or returning all
     /// block ids from genesis.
     fn get_block_ids_between(
         &self,
@@ -413,6 +408,97 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> SqliteState
             })?;
 
         locked_block.try_into()
+    }
+
+    pub fn blocks_get_pending_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError> {
+        use crate::schema::missing_transactions;
+
+        let txs = missing_transactions::table
+            .select(missing_transactions::transaction_id)
+            .filter(missing_transactions::block_id.eq(serialize_hex(block_id)))
+            .get_results::<String>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "blocks_get_missing_transactions",
+                source: e,
+            })?;
+        txs.into_iter().map(|s| deserialize_hex_try_from(&s)).collect()
+    }
+
+    pub fn transactions_get_paginated(
+        &self,
+        limit: u64,
+        offset: u64,
+        asc_desc_created_at: Option<Ordering>,
+    ) -> Result<Vec<TransactionRecord>, StorageError> {
+        use crate::schema::transactions;
+
+        let mut query = transactions::table.into_boxed();
+
+        if let Some(ordering) = asc_desc_created_at {
+            match ordering {
+                Ordering::Ascending => query = query.order_by(transactions::created_at.asc()),
+                Ordering::Descending => query = query.order_by(transactions::created_at.desc()),
+            }
+        }
+
+        let transactions = query
+            .limit(limit as i64)
+            .offset(offset as i64)
+            .get_results::<sql_models::Transaction>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "transactions_get_paginated",
+                source: e,
+            })?;
+
+        transactions
+            .into_iter()
+            .map(|transaction| transaction.try_into())
+            .collect()
+    }
+
+    pub fn blocks_get_parent_chain(&self, block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError> {
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("blocks_get_parent_chain: descendant block {} does not exist", block_id),
+            });
+        }
+        let blocks = sql_query(
+            r#"
+            WITH RECURSIVE tree(bid, parent) AS (
+                  SELECT block_id, parent_block_id FROM blocks where block_id = ?
+                UNION ALL
+                  SELECT block_id, parent_block_id
+                    FROM blocks JOIN tree ON block_id = tree.parent AND tree.bid != tree.parent
+                    LIMIT ?
+            )
+            SELECT blocks.*, quorum_certificates.* FROM tree
+                INNER JOIN blocks ON blocks.block_id = tree.bid
+                LEFT JOIN quorum_certificates ON blocks.qc_id = quorum_certificates.qc_id
+                ORDER BY height desc
+        "#,
+        )
+        .bind::<Text, _>(serialize_hex(block_id))
+        .bind::<BigInt, _>(limit as i64)
+        .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
+        .map_err(|e| SqliteStorageError::DieselError {
+            operation: "blocks_get_parent_chain",
+            source: e,
+        })?;
+
+        blocks
+            .into_iter()
+            .map(|(b, qc)| {
+                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
+                    operation: "blocks_get_by_parent",
+                    details: format!(
+                        "block {} references non-existent quorum certificate {}",
+                        block_id, b.qc_id
+                    ),
+                })?;
+
+                b.try_convert(qc)
+            })
+            .collect()
     }
 }
 
@@ -602,9 +688,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         use crate::schema::{foreign_proposals, quorum_certificates};
 
         if !self.blocks_exists(block_id)? {
-            return Err(StorageError::NotFound {
-                item: "foreign_proposals_get_all_new: Block",
-                key: block_id.to_string(),
+            return Err(StorageError::QueryError {
+                reason: format!("foreign_proposals_get_all_new: Block {} does not exist", block_id),
             });
         }
 
@@ -613,6 +698,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let foreign_proposals = foreign_proposals::table
             .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
+            // We don't want to propose fps from future epochs until we've progressed to that epoch
             .filter(foreign_proposals::epoch.le(locked.epoch.as_u64() as i64))
             .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
             .filter(foreign_proposals::status.ne(ForeignProposalStatus::Invalid.to_string()))
@@ -643,35 +729,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 proposal.try_convert(justify_qc)
             })
             .collect()
-    }
-
-    fn foreign_proposal_get_all_pending(
-        &self,
-        from_block_id: &BlockId,
-        to_block_id: &BlockId,
-    ) -> Result<Vec<ForeignProposalAtom>, StorageError> {
-        use crate::schema::blocks;
-
-        let blocks = self.get_block_ids_with_commands_between(from_block_id, to_block_id)?;
-
-        let all_commands: Vec<String> = blocks::table
-            .select(blocks::commands)
-            .filter(blocks::command_count.gt(0)) // if there is no command, then there is definitely no foreign proposal command
-            .filter(blocks::block_id.eq_any(blocks))
-            .load::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_proposal_get_all",
-                source: e,
-            })?;
-        let all_commands = all_commands
-            .into_iter()
-            .map(|commands| deserialize_json(commands.as_str()))
-            .collect::<Result<Vec<Vec<Command>>, _>>()?;
-        let all_commands = all_commands.into_iter().flatten().collect::<Vec<_>>();
-        Ok(all_commands
-            .into_iter()
-            .filter_map(|command| command.foreign_proposal().cloned())
-            .collect::<Vec<ForeignProposalAtom>>())
     }
 
     fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {
@@ -758,38 +815,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
-    fn transactions_get_paginated(
-        &self,
-        limit: u64,
-        offset: u64,
-        asc_desc_created_at: Option<Ordering>,
-    ) -> Result<Vec<TransactionRecord>, StorageError> {
-        use crate::schema::transactions;
-
-        let mut query = transactions::table.into_boxed();
-
-        if let Some(ordering) = asc_desc_created_at {
-            match ordering {
-                Ordering::Ascending => query = query.order_by(transactions::created_at.asc()),
-                Ordering::Descending => query = query.order_by(transactions::created_at.desc()),
-            }
-        }
-
-        let transactions = query
-            .limit(limit as i64)
-            .offset(offset as i64)
-            .get_results::<sql_models::Transaction>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transactions_get_paginated",
-                source: e,
-            })?;
-
-        transactions
-            .into_iter()
-            .map(|transaction| transaction.try_into())
-            .collect()
-    }
-
     fn transaction_executions_get(
         &self,
         tx_id: &TransactionId,
@@ -814,7 +839,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         tx_id: &TransactionId,
         from_block_id: &BlockId,
     ) -> Result<BlockTransactionExecution, StorageError> {
-        use crate::schema::{blocks, transaction_executions};
+        use crate::schema::{blocks, transaction_executions, transactions};
 
         if !self.blocks_exists(from_block_id)? {
             return Err(StorageError::QueryError {
@@ -830,8 +855,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let tx_id = serialize_hex(tx_id);
 
         let execution = transaction_executions::table
+            .select(transaction_executions::all_columns)
             .filter(transaction_executions::transaction_id.eq(&tx_id))
             .filter(transaction_executions::block_id.eq_any(block_ids))
+            .inner_join(
+                transactions::table.on(transactions::transaction_id
+                    .eq(transaction_executions::transaction_id))
+            )
+            // We don't delete the transaction_executions after finalizing the transaction for debugging purposes.
+            // So we exclude finalized transactions here
+            .filter(transactions::final_decision.is_null())
             // Get last execution
             .order_by(transaction_executions::id.desc())
             .first::<sql_models::TransactionExecution>(self.connection())
@@ -853,6 +886,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     .eq(blocks::block_id)
                     .and(blocks::is_committed.eq(true))),
             )
+            .inner_join(
+                transactions::table.on(transactions::transaction_id
+                    .eq(transaction_executions::transaction_id))
+            )
+            // We don't delete the transaction_executions after finalizing the transaction for debugging purposes.
+            // So we exclude finalized transactions here
+            .filter(transactions::final_decision.is_null())
             .filter(transaction_executions::transaction_id.eq(&tx_id))
             .order_by(transaction_executions::id.desc())
             .first::<sql_models::TransactionExecution>(self.connection())
@@ -967,11 +1007,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn blocks_get_all_between(
         &self,
         epoch: Epoch,
-        shard_group: ShardGroup,
         start_block_height: NodeHeight,
         end_block_height: NodeHeight,
         include_dummy_blocks: bool,
-        limit: u64,
+        limit: usize,
     ) -> Result<Vec<Block>, StorageError> {
         use crate::schema::{blocks, quorum_certificates};
 
@@ -994,7 +1033,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let results = query
             .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::shard_group.eq(shard_group.encode_as_u32() as i32))
             .filter(blocks::height.ge(start_block_height.as_u64() as i64))
             .filter(blocks::height.le(end_block_height.as_u64() as i64))
             .order_by(blocks::height.asc())
@@ -1076,12 +1114,39 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(is_ancestor.count > 0)
     }
 
-    fn blocks_get_ids_by_parent(&self, parent_id: &BlockId) -> Result<Vec<BlockId>, StorageError> {
+    fn blocks_get_committed_by_parent(&self, parent_id: &BlockId) -> Result<Block, StorageError> {
+        use crate::schema::{blocks, quorum_certificates};
+
+        let (block, qc) = blocks::table
+            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
+            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
+            .filter(blocks::parent_block_id.eq(serialize_hex(parent_id)))
+            .filter(blocks::block_id.ne(blocks::parent_block_id)) // Exclude the genesis block
+            .filter(blocks::is_committed.eq(true))
+            .first::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
+            .map_err(|e| SqliteStorageError::DieselError {
+                operation: "blocks_get_by_parent",
+                source: e,
+            })?;
+
+        let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
+            operation: "blocks_get_by_parent",
+            details: format!(
+                "block {} references non-existent quorum certificate {}",
+                parent_id, block.qc_id
+            ),
+        })?;
+
+        block.try_convert(qc)
+    }
+
+    fn blocks_get_pending_ids_by_parent(&self, parent_id: &BlockId) -> Result<Vec<BlockId>, StorageError> {
         use crate::schema::blocks;
 
         let results = blocks::table
             .select(blocks::block_id)
             .filter(blocks::parent_block_id.eq(serialize_hex(parent_id)))
+            .filter(blocks::is_committed.eq(false))
             .filter(blocks::block_id.ne(blocks::parent_block_id)) // Exclude the genesis block
             .get_results::<String>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -1092,135 +1157,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         results
             .into_iter()
             .map(|block_id| deserialize_hex_try_from(&block_id))
-            .collect()
-    }
-
-    fn blocks_get_all_by_parent(&self, parent_id: &BlockId) -> Result<Vec<Block>, StorageError> {
-        use crate::schema::{blocks, quorum_certificates};
-
-        let results = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::parent_block_id.eq(serialize_hex(parent_id)))
-            .filter(blocks::block_id.ne(blocks::parent_block_id)) // Exclude the genesis block
-            .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_by_parent",
-                source: e,
-            })?;
-
-        results
-            .into_iter()
-            .map(|(block, qc)| {
-                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "blocks_get_by_parent",
-                    details: format!(
-                        "block {} references non-existent quorum certificate {}",
-                        parent_id, block.qc_id
-                    ),
-                })?;
-
-                block.try_convert(qc)
-            })
-            .collect()
-    }
-
-    fn blocks_get_parent_chain(&self, block_id: &BlockId, limit: usize) -> Result<Vec<Block>, StorageError> {
-        if !self.blocks_exists(block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!("blocks_get_parent_chain: descendant block {} does not exist", block_id),
-            });
-        }
-        let blocks = sql_query(
-            r#"
-            WITH RECURSIVE tree(bid, parent) AS (
-                  SELECT block_id, parent_block_id FROM blocks where block_id = ?
-                UNION ALL
-                  SELECT block_id, parent_block_id
-                    FROM blocks JOIN tree ON block_id = tree.parent AND tree.bid != tree.parent
-                    LIMIT ?
-            )
-            SELECT blocks.*, quorum_certificates.* FROM tree
-                INNER JOIN blocks ON blocks.block_id = tree.bid
-                LEFT JOIN quorum_certificates ON blocks.qc_id = quorum_certificates.qc_id
-                ORDER BY height desc
-        "#,
-        )
-        .bind::<Text, _>(serialize_hex(block_id))
-        .bind::<BigInt, _>(limit as i64)
-        .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-        .map_err(|e| SqliteStorageError::DieselError {
-            operation: "blocks_get_parent_chain",
-            source: e,
-        })?;
-
-        blocks
-            .into_iter()
-            .map(|(b, qc)| {
-                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "blocks_get_by_parent",
-                    details: format!(
-                        "block {} references non-existent quorum certificate {}",
-                        block_id, b.qc_id
-                    ),
-                })?;
-
-                b.try_convert(qc)
-            })
-            .collect()
-    }
-
-    fn blocks_get_pending_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError> {
-        use crate::schema::missing_transactions;
-
-        let txs = missing_transactions::table
-            .select(missing_transactions::transaction_id)
-            .filter(missing_transactions::block_id.eq(serialize_hex(block_id)))
-            .get_results::<String>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_missing_transactions",
-                source: e,
-            })?;
-        txs.into_iter().map(|s| deserialize_hex_try_from(&s)).collect()
-    }
-
-    fn blocks_get_any_with_epoch_range(
-        &self,
-        epoch_range: RangeInclusive<Epoch>,
-        validator_public_key: Option<&PublicKey>,
-    ) -> Result<Vec<Block>, StorageError> {
-        use crate::schema::{blocks, quorum_certificates};
-
-        let mut query = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::epoch.between(epoch_range.start().as_u64() as i64, epoch_range.end().as_u64() as i64))
-            .into_boxed();
-
-        if let Some(vn) = validator_public_key {
-            query = query.filter(blocks::proposed_by.eq(serialize_hex(vn.as_bytes())));
-        }
-
-        let blocks_and_qcs = query
-            .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "validator_fees_get_any_with_epoch_range_for_validator",
-                source: e,
-            })?;
-
-        blocks_and_qcs
-            .into_iter()
-            .map(|(block, qc)| {
-                let qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "blocks_get_by_parent",
-                    details: format!(
-                        "block {} references non-existent quorum certificate {}",
-                        block.id, block.qc_id
-                    ),
-                })?;
-
-                block.try_convert(qc)
-            })
             .collect()
     }
 
@@ -1275,28 +1211,32 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     match filter_index {
                         0 => query = query.filter(blocks::block_id.like(format!("%{filter}%"))),
                         1 => {
-                            query = query.filter(
-                                blocks::epoch
-                                    .eq(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
+                            query = query.filter(blocks::epoch.eq(filter.parse::<i64>().map_err(|_| {
+                                StorageError::QueryError {
+                                    reason: format!("Failed to parse integer for epoch filter: {}", filter),
+                                }
+                            })?))
                         },
                         2 => {
-                            query = query.filter(
-                                blocks::height
-                                    .eq(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
+                            query = query.filter(blocks::height.eq(filter.parse::<i64>().map_err(|_| {
+                                StorageError::QueryError {
+                                    reason: format!("Failed to parse integer for height filter: {}", filter),
+                                }
+                            })?))
                         },
                         4 => {
-                            query = query.filter(
-                                blocks::command_count
-                                    .ge(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
+                            query = query.filter(blocks::command_count.ge(filter.parse::<i64>().map_err(|_| {
+                                StorageError::QueryError {
+                                    reason: format!("Failed to parse integer for command count filter: {}", filter),
+                                }
+                            })?))
                         },
                         5 => {
-                            query = query.filter(
-                                blocks::total_leader_fee
-                                    .ge(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
+                            query = query.filter(blocks::total_leader_fee.ge(filter.parse::<i64>().map_err(|_| {
+                                StorageError::QueryError {
+                                    reason: format!("Failed to parse integer for total leader fee filter: {}", filter),
+                                }
+                            })?))
                         },
                         7 => query = query.filter(blocks::proposed_by.like(format!("%{filter}%"))),
                         _ => (),
@@ -1330,24 +1270,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
-    fn blocks_get_count(&self) -> Result<i64, StorageError> {
-        use crate::schema::{blocks, quorum_certificates};
-        let count = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select(diesel::dsl::count(blocks::id))
-            .first::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_count",
-                source: e,
-            })?;
-        Ok(count)
-    }
-
     fn filtered_blocks_get_count(
         &self,
         filter_index: Option<usize>,
         filter: Option<String>,
-    ) -> Result<i64, StorageError> {
+    ) -> Result<u64, StorageError> {
         use crate::schema::{blocks, quorum_certificates};
 
         let mut query = blocks::table
@@ -1361,28 +1288,32 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                     match filter_index {
                         0 => query = query.filter(blocks::block_id.like(format!("%{filter}%"))),
                         1 => {
-                            query = query.filter(
-                                blocks::epoch
-                                    .eq(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
+                            query = query.filter(blocks::epoch.eq(filter.parse::<i64>().map_err(|_| {
+                                StorageError::QueryError {
+                                    reason: format!("Failed to parse integer for epoch filter: {}", filter),
+                                }
+                            })?))
                         },
                         2 => {
-                            query = query.filter(
-                                blocks::height
-                                    .eq(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
+                            query = query.filter(blocks::height.eq(filter.parse::<i64>().map_err(|_| {
+                                StorageError::QueryError {
+                                    reason: format!("Failed to parse integer for height filter: {}", filter),
+                                }
+                            })?))
                         },
                         4 => {
-                            query = query.filter(
-                                blocks::command_count
-                                    .ge(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
+                            query = query.filter(blocks::command_count.ge(filter.parse::<i64>().map_err(|_| {
+                                StorageError::QueryError {
+                                    reason: format!("Failed to parse integer for command count filter: {}", filter),
+                                }
+                            })?))
                         },
                         5 => {
-                            query = query.filter(
-                                blocks::total_leader_fee
-                                    .ge(filter.parse::<i64>().map_err(|_| StorageError::InvalidIntegerCast)?),
-                            )
+                            query = query.filter(blocks::total_leader_fee.ge(filter.parse::<i64>().map_err(|_| {
+                                StorageError::QueryError {
+                                    reason: format!("Failed to parse integer for total leader fee filter: {}", filter),
+                                }
+                            })?))
                         },
                         7 => query = query.filter(blocks::proposed_by.like(format!("%{filter}%"))),
                         _ => (),
@@ -1398,26 +1329,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 operation: "filtered_blocks_get_count",
                 source: e,
             })?;
-        Ok(count)
-    }
-
-    fn blocks_max_height(&self) -> Result<NodeHeight, StorageError> {
-        use crate::schema::blocks;
-
-        let height = blocks::table
-            .select(diesel::dsl::max(blocks::height))
-            .first::<Option<i64>>(self.connection())
-            .map(|height| NodeHeight(height.unwrap_or(0) as u64))
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_max_height",
-                source: e,
-            })?;
-
-        Ok(height)
+        Ok(count as u64)
     }
 
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError> {
         use crate::schema::block_diffs;
+
+        if !self.blocks_exists(block_id)? {
+            return Err(StorageError::QueryError {
+                reason: format!("block_diffs_get: Block {} does not exist", block_id),
+            });
+        }
 
         let block_diff = block_diffs::table
             .filter(block_diffs::block_id.eq(serialize_hex(block_id)))
@@ -1436,7 +1358,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         substate_id: &SubstateId,
     ) -> Result<SubstateChange, StorageError> {
         use crate::schema::block_diffs;
-        if !Block::record_exists(self, block_id)? {
+        if !self.blocks_exists(block_id)? {
             return Err(StorageError::QueryError {
                 reason: format!(
                     "block_diffs_get_last_change_for_substate: Block {} does not exist",
@@ -1564,20 +1486,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn transaction_pool_get_for_blocks(
         &self,
-        from_block_id: &BlockId,
         to_block_id: &BlockId,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, StorageError> {
         use crate::schema::transaction_pool;
-
-        if !self.blocks_exists(from_block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "transaction_pool_get_for_blocks: Block {} does not exist",
-                    from_block_id
-                ),
-            });
-        }
 
         if !self.blocks_exists(to_block_id)? {
             return Err(StorageError::QueryError {
@@ -1585,17 +1497,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
+        let from_block = self.get_current_locked_block()?;
+
         let transaction_id = serialize_hex(transaction_id);
         let mut updates = self.get_transaction_atom_state_updates_between_blocks(
-            from_block_id,
+            from_block.block_id(),
             to_block_id,
             std::iter::once(transaction_id.as_str()),
         )?;
 
         debug!(
             target: LOG_TARGET,
-            "transaction_pool_get: from_block_id={}, to_block_id={}, transaction_id={}, updates={} [{:?}]",
-            from_block_id,
+            "transaction_pool_get: from_block={}, to_block_id={}, transaction_id={}, updates={} [{:?}]",
+            from_block,
             to_block_id,
             transaction_id,
             updates.len(),
@@ -1812,7 +1726,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         stage: Option<TransactionPoolStage>,
         is_ready: Option<bool>,
-        confirmed_stage: Option<Option<TransactionPoolConfirmedStage>>,
         skip_lock_conflicted: bool,
     ) -> Result<usize, StorageError> {
         use crate::schema::{lock_conflicts, transaction_pool};
@@ -1842,16 +1755,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             )
         }
 
-        match confirmed_stage {
-            Some(Some(stage)) => {
-                query = query.filter(transaction_pool::confirm_stage.eq(stage.to_string()));
-            },
-            Some(None) => {
-                query = query.filter(transaction_pool::confirm_stage.is_null());
-            },
-            None => {},
-        }
-
         let count =
             query
                 .count()
@@ -1862,51 +1765,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 })?;
 
         Ok(count as usize)
-    }
-
-    fn transactions_fetch_involved_shards(
-        &self,
-        transaction_ids: HashSet<TransactionId>,
-    ) -> Result<HashSet<SubstateAddress>, StorageError> {
-        use crate::schema::transactions;
-
-        let tx_ids = transaction_ids.into_iter().map(serialize_hex).collect::<Vec<_>>();
-
-        let inputs_per_tx = transactions::table
-            .select(transactions::resolved_inputs)
-            .filter(transactions::transaction_id.eq_any(&tx_ids))
-            .load::<Option<String>>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "transaction_pools_fetch_involved_shards",
-                source: e,
-            })?;
-
-        if inputs_per_tx.len() != tx_ids.len() {
-            return Err(SqliteStorageError::NotAllItemsFound {
-                items: "Transactions",
-                operation: "transactions_fetch_involved_shards",
-                details: format!(
-                    "transactions_fetch_involved_shards: expected {} transactions, got {}",
-                    tx_ids.len(),
-                    inputs_per_tx.len()
-                ),
-            }
-            .into());
-        }
-
-        let shards = inputs_per_tx
-            .into_iter()
-            .filter_map(|inputs| {
-                // a Result is very inconvenient with flat_map
-                inputs.map(|inputs| {
-                    deserialize_json::<HashSet<SubstateAddress>>(&inputs)
-                        .expect("[transactions_fetch_involved_shards] Failed to deserialize involved shards")
-                })
-            })
-            .flatten()
-            .collect();
-
-        Ok(shards)
     }
 
     fn votes_get_by_block_and_sender(
@@ -2084,24 +1942,22 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         Ok((
             max_version as u32,
-            max_version_and_destroyed.destroyed_by_shard.is_some(),
+            max_version_and_destroyed.destroyed_by_shard.is_none(),
         ))
     }
 
-    fn substates_any_exist<I: IntoIterator<Item = S>, S: Borrow<VersionedSubstateId>>(
-        &self,
-        addresses: I,
-    ) -> Result<bool, StorageError> {
+    fn substates_any_exist<'a, I>(&self, substates: I) -> Result<bool, StorageError>
+    where I: IntoIterator<Item = VersionedSubstateIdRef<'a>> {
         use crate::schema::substates;
 
-        let mut addresses = addresses.into_iter().peekable();
+        let mut addresses = substates.into_iter().peekable();
         if addresses.peek().is_none() {
             return Ok(false);
         }
 
         let count = substates::table
             .count()
-            .filter(substates::address.eq_any(addresses.map(|v| v.borrow().to_substate_address()).map(serialize_hex)))
+            .filter(substates::address.eq_any(addresses.map(|v| v.to_substate_address()).map(serialize_hex)))
             .limit(1)
             .get_result::<i64>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -2110,133 +1966,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             })?;
 
         Ok(count > 0)
-    }
-
-    fn substates_exists_for_transaction(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
-        use crate::schema::substates;
-
-        let transaction_id = serialize_hex(transaction_id);
-
-        let count = substates::table
-            .count()
-            .filter(substates::created_by_transaction.eq(&transaction_id))
-            .or_filter(substates::destroyed_by_transaction.eq(&transaction_id))
-            .limit(1)
-            .get_result::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_exists_for_transaction",
-                source: e,
-            })?;
-
-        Ok(count > 0)
-    }
-
-    fn substates_get_n_after(&self, n: usize, after: &SubstateAddress) -> Result<Vec<SubstateRecord>, StorageError> {
-        use crate::schema::substates;
-
-        let start_id = substates::table
-            .select(substates::id)
-            .filter(substates::address.eq(after.to_string()))
-            .get_result::<i32>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_n_after",
-                source: e,
-            })?;
-
-        let substates = substates::table
-            .filter(substates::id.gt(start_id))
-            .limit(n as i64)
-            .order_by(substates::id.asc())
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_n_after",
-                source: e,
-            })?;
-
-        substates.into_iter().map(TryInto::try_into).collect()
-    }
-
-    fn substates_get_many_within_range(
-        &self,
-        start: &SubstateAddress,
-        end: &SubstateAddress,
-        exclude: &[SubstateAddress],
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        use crate::schema::substates;
-
-        let substates = substates::table
-            .filter(substates::address.between(serialize_hex(start), serialize_hex(end)))
-            .filter(substates::address.ne_all(exclude.iter().map(serialize_hex)))
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_many_within_range",
-                source: e,
-            })?;
-
-        substates.into_iter().map(TryInto::try_into).collect()
-    }
-
-    fn substates_get_many_by_created_transaction(
-        &self,
-        tx_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        use crate::schema::substates;
-
-        let substates = substates::table
-            .filter(substates::created_by_transaction.eq(serialize_hex(tx_id)))
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_many_by_created_transaction",
-                source: e,
-            })?;
-
-        substates.into_iter().map(TryInto::try_into).collect()
-    }
-
-    fn substates_get_many_by_destroyed_transaction(
-        &self,
-        tx_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        use crate::schema::substates;
-
-        let substates = substates::table
-            .filter(substates::destroyed_by_transaction.eq(serialize_hex(tx_id)))
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_many_by_destroyed_transaction",
-                source: e,
-            })?;
-
-        substates.into_iter().map(TryInto::try_into).collect()
-    }
-
-    fn substates_get_all_for_transaction(
-        &self,
-        transaction_id: &TransactionId,
-    ) -> Result<Vec<SubstateRecord>, StorageError> {
-        use crate::schema::substates;
-
-        let transaction_id_hex = serialize_hex(transaction_id);
-
-        let substates = substates::table
-            .filter(
-                substates::created_by_transaction
-                    .eq(&transaction_id_hex)
-                    .or(substates::destroyed_by_transaction.eq(Some(&transaction_id_hex))),
-            )
-            .order_by(substates::id.asc())
-            .get_results::<sql_models::SubstateRecord>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "substates_get_all_for_transaction",
-                source: e,
-            })?;
-
-        let substates = substates
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(substates)
     }
 
     fn substate_locks_get_locked_substates_for_transaction(
@@ -2268,7 +1997,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         exclude_transaction_id: Option<&TransactionId>,
         substate_ids: I,
-        exclude_local_only: bool,
     ) -> Result<Option<TransactionId>, StorageError> {
         use crate::schema::substate_locks;
 
@@ -2285,10 +2013,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         if let Some(exclude_transaction_id) = exclude_transaction_id {
             query = query.filter(substate_locks::transaction_id.ne(serialize_hex(exclude_transaction_id)));
-        }
-
-        if exclude_local_only {
-            query = query.filter(substate_locks::is_local_only.eq(false));
         }
 
         let transaction_id = query
@@ -2541,7 +2265,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         recs.into_iter().map(TryInto::try_into).collect()
     }
 
-    fn burnt_utxos_get(&self, commitment: &UnclaimedConfidentialOutputAddress) -> Result<BurntUtxo, StorageError> {
+    fn burnt_utxos_get(
+        &self,
+        commitment: &UnclaimedConfidentialOutputAddress,
+    ) -> Result<UnclaimedConfidentialOutput, StorageError> {
         use crate::schema::burnt_utxos;
 
         let burnt_utxo = burnt_utxos::table
@@ -2552,14 +2279,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 source: e,
             })?;
 
-        burnt_utxo.try_into()
+        let utxo = BurntUtxo::try_from(burnt_utxo)?;
+        Ok(utxo.output)
     }
 
     fn burnt_utxos_get_all_unproposed(
         &self,
         leaf_block: &BlockId,
         limit: usize,
-    ) -> Result<Vec<BurntUtxo>, StorageError> {
+    ) -> Result<HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>, StorageError> {
         use crate::schema::burnt_utxos;
         if !self.blocks_exists(leaf_block)? {
             return Err(StorageError::NotFound {
@@ -2569,7 +2297,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         if limit == 0 {
-            return Ok(Vec::new());
+            return Ok(HashMap::new());
         }
 
         let locked_block = self.get_current_locked_block()?;
@@ -2590,7 +2318,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 source: e,
             })?;
 
-        burnt_utxos.into_iter().map(TryInto::try_into).collect()
+        burnt_utxos
+            .into_iter()
+            .map(BurntUtxo::try_from)
+            .map(|result| result.map(|o| (o.commitment, o.output)))
+            .collect()
     }
 
     fn burnt_utxos_count(&self) -> Result<u64, StorageError> {

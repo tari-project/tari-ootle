@@ -146,7 +146,7 @@ impl IndexerJsonRpcClient {
 
     async fn send_request<T: Serialize, R: DeserializeOwned>(
         &mut self,
-        method: &str,
+        method: &'static str,
         params: T,
     ) -> Result<R, IndexerClientError> {
         let params = json::to_value(params).map_err(|e| IndexerClientError::SerializeRequest {
@@ -159,7 +159,7 @@ impl IndexerJsonRpcClient {
                 "jsonrpc": "2.0",
                 "id": self.next_request_id(),
                 "method": method,
-                "params": params,
+                "params": &params,
             }
         );
         let resp = self
@@ -168,20 +168,21 @@ impl IndexerJsonRpcClient {
             .body(request_json.to_string())
             .send()
             .await?;
-        let val = resp.json().await?;
-        let resp = jsonrpc_result(val)?;
+        let json = resp.json().await?;
+        let resp = jsonrpc_result(&json)?;
         // Response might not deserialize to R....
         match serde_json::from_value(resp) {
             Ok(r) => Ok(r),
             Err(e) => Err(IndexerClientError::DeserializeResponse {
-                method: method.to_string(),
+                method,
                 source: e,
+                response: json,
             }),
         }
     }
 }
 
-fn jsonrpc_result(val: json::Value) -> Result<json::Value, IndexerClientError> {
+fn jsonrpc_result(val: &json::Value) -> Result<json::Value, IndexerClientError> {
     if let Some(err) = val.get("error") {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         let message = err.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");

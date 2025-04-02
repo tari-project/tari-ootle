@@ -105,9 +105,22 @@ impl TryFrom<&[u8]> for ResourceAddress {
 newtype_struct_serde_impl!(ResourceAddress, BorTag<ObjectKey, TAG>);
 
 #[cfg(feature = "borsh")]
-impl borsh::BorshSerialize for ResourceAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+mod borsh_impl {
+    use std::io::Read;
+
+    use super::*;
+
+    impl borsh::BorshSerialize for ResourceAddress {
+        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+            borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+        }
+    }
+
+    impl borsh::BorshDeserialize for ResourceAddress {
+        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+            let key = borsh::BorshDeserialize::deserialize_reader(reader)?;
+            Ok(ResourceAddress::new(ObjectKey::from_array(key)))
+        }
     }
 }
 

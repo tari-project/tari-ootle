@@ -78,8 +78,8 @@ where TConsensusSpec: ConsensusSpec
             if let Err(err) = self.validate_and_save(tx, &proposal, local_committee_info) {
                 error!(target: LOG_TARGET, "❌ Error validating and saving foreign proposal: {}", err);
                 // Should not cause consensus to crash and should commit the Invalid proposal status
-                proposal.upsert(tx, None)?;
-                proposal.set_status(tx, ForeignProposalStatus::Invalid)?;
+                proposal.save(tx)?;
+                proposal.set_status(tx, ForeignProposalStatus::Invalid, None)?;
                 // TODO: reattempt from different node? and then abort on persistent failure
                 // If we miss a foreign proposal, we want to implement the ability to request it - so we could just rely
                 // on that functionality without doing anything extra here
@@ -306,7 +306,7 @@ where TConsensusSpec: ConsensusSpec
         );
 
         foreign_receive_counter.save(tx)?;
-        proposal.upsert(tx, None)?;
+        proposal.save(tx)?;
 
         Ok(())
     }
@@ -442,7 +442,7 @@ fn validate_evidence_and_pledges_match(
                 })?;
 
         if !proposal
-            .block_pledge
+            .block_pledge()
             .has_all_input_substate_values_for(shard_group_evidence)
         {
             warn!(
@@ -451,7 +451,7 @@ fn validate_evidence_and_pledges_match(
                 if is_local_accept { "LocalAccept" } else { "LocalPrepare" },
                 atom.id,
                 local_shard_group,
-                proposal.block_pledge,
+                proposal.block_pledge(),
             );
             return Err(ProposalValidationError::ForeignInvalidPledge {
                 transaction_id: atom.id,

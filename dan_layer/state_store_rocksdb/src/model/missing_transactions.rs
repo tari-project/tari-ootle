@@ -20,127 +20,55 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
-
-use rocksdb::{Transaction, TransactionDB};
-use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::BlockId;
 use tari_transaction::TransactionId;
 
-use super::traits::ModelColumnFamily;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbSeq};
+use crate::{
+    codecs::{BlockIdCodec, TransactionIdCodec, TupleBytesCodec, UnitCodec},
+    traits::{Cf, QueryCf},
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MissingTransaction {
-    pub block_id: BlockId,
-    pub block_height: RocksdbSeq,
-    pub transaction_id: TransactionId,
-}
+pub struct MissingTransactionModel;
 
-pub struct MissingTransactionModel {}
-
-impl MissingTransactionModel {
-    pub fn key_prefix_from_transaction_and_height(
-        transaction_id: &TransactionId,
-        height: Option<RocksdbSeq>,
-    ) -> String {
-        let height = height.unwrap_or_default();
-        format!("{}_{}_{}", Self::key_prefix(), transaction_id, height)
-    }
-}
-
-impl RocksdbModel for MissingTransactionModel {
-    type Item = MissingTransaction;
-
-    fn key_prefix() -> &'static str {
-        "missingtransactions"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        Self::key_prefix_from_transaction_and_height(&value.transaction_id, Some(value.block_height))
-    }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![BlockIdColumnFamily::name(), BlockHeightColumnFamily::name()]
-    }
-
-    fn put_in_cfs(
-        db: Arc<TransactionDB>,
-        tx: &mut Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        value: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        // In each CF value We store the key to the main collection, so we can retrieve the actual value
-        let main_key = Self::key(value);
-        let main_key_bytes = main_key.as_bytes();
-
-        BlockIdColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
-        BlockHeightColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
-
-        Ok(())
-    }
-
-    fn delete_from_cfs(
-        db: Arc<TransactionDB>,
-        tx: &Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        item: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        BlockIdColumnFamily::delete(db.clone(), tx, operation, item)?;
-        BlockHeightColumnFamily::delete(db.clone(), tx, operation, item)?;
-        Ok(())
-    }
-}
-
-// block id
-pub struct BlockIdColumnFamily {}
-
-impl BlockIdColumnFamily {
-    pub const NAME: &str = "missingtransactions_block_id";
-
-    pub fn build_key_prefix_by_block(block_id: &BlockId) -> String {
-        format!("{}_{}_", MissingTransactionModel::key_prefix(), block_id)
-    }
-}
-
-impl ModelColumnFamily for BlockIdColumnFamily {
-    type Item = MissingTransaction;
+impl Cf for MissingTransactionModel {
+    type Key = (TransactionId, BlockId);
+    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type Value = ();
+    type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        Self::NAME
-    }
-
-    fn build_key(value: &Self::Item) -> String {
-        format!(
-            "{}_{}_{}",
-            MissingTransactionModel::key_prefix(),
-            value.block_id,
-            value.transaction_id
-        )
+        "missing_transactions"
     }
 }
 
-// block height
-pub struct BlockHeightColumnFamily {}
+pub struct ByTransactionIdQuery;
 
-impl BlockHeightColumnFamily {
-    pub const NAME: &str = "missingtransactions_block_height";
+impl QueryCf for ByTransactionIdQuery {
+    type Cf = MissingTransactionModel;
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
 }
 
-impl ModelColumnFamily for BlockHeightColumnFamily {
-    type Item = MissingTransaction;
+pub struct MissingTransactionBlockIdIndex;
+
+impl Cf for MissingTransactionBlockIdIndex {
+    type Key = (BlockId, TransactionId);
+    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type Value = ();
+    type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        Self::NAME
+        // NOTE: we use the same name as the main CF.
+        // Collisions between BlockId and TransactionId are extremely unlikely if not impossible.
+        // If this is a concern, we can add append some hardcoded bytes to the key.
+        MissingTransactionModel::name()
     }
+}
 
-    fn build_key(value: &Self::Item) -> String {
-        let height = value.block_height;
-        format!(
-            "{}_{}_{}",
-            MissingTransactionModel::key_prefix(),
-            height,
-            value.transaction_id
-        )
-    }
+pub struct ByBlockIdQuery;
+
+impl QueryCf for ByBlockIdQuery {
+    type Cf = MissingTransactionBlockIdIndex;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
 }

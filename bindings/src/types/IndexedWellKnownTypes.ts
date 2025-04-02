@@ -23,4 +23,6 @@ export interface IndexedWellKnownTypes {
   unclaimed_confidential_output_address: Array<UnclaimedConfidentialOutputAddress>;
   published_template_addresses: Array<PublishedTemplateAddress>;
   validator_node_fee_pools: Array<ValidatorFeePoolAddress>;
+  component_address_allocations: [number];
+  resource_address_allocations: [number];
 }

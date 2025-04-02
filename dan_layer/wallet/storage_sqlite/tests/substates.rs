@@ -3,11 +3,10 @@
 
 use std::{collections::HashSet, str::FromStr};
 
-use tari_dan_common_types::{optional::Optional, VersionedSubstateId};
+use tari_dan_common_types::{optional::Optional, VersionedSubstateIdRef};
 use tari_dan_wallet_sdk::storage::{WalletStore, WalletStoreReader, WalletStoreWriter};
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_engine_types::substate::SubstateId;
-use tari_transaction::TransactionId;
 
 #[test]
 fn get_and_insert_substates() {
@@ -20,24 +19,16 @@ fn get_and_insert_substates() {
     let mut tx = db.create_write_tx().unwrap();
     let substate = tx.substates_get(&example_addr).optional().unwrap();
     assert!(substate.is_none());
-    let hash = TransactionId::default();
     let address =
         SubstateId::from_str("component_1f019e4d434cbf2b99c0af89ee212f422af86de7280a169d2e392dfbffffffff").unwrap();
-    tx.substates_upsert_root(
-        hash,
-        VersionedSubstateId::new(address.clone(), 0),
-        HashSet::new(),
-        None,
-        None,
-    )
-    .unwrap();
+    tx.substates_upsert_root(VersionedSubstateIdRef::new(&address, 0), HashSet::new(), None, None)
+        .unwrap();
 
     let child_address =
         SubstateId::from_str("component_d9e4a7ce7dbaa73ce10aabf309dd702054756a813f454ef13564f298ffffffff").unwrap();
     tx.substates_upsert_child(
-        hash,
         address.clone(),
-        VersionedSubstateId::new(child_address.clone(), 0),
+        VersionedSubstateIdRef::new(&child_address, 0),
         HashSet::new(),
     )
     .unwrap();

@@ -46,7 +46,7 @@ impl Validator {
         hasher.write(&self.shard_group.encode_as_u32().to_be_bytes());
         hasher.write(self.public_key.as_bytes());
         hasher.write(self.claim_key.as_bytes());
-        hasher.write(&self.registration_epoch.as_u64().to_be_bytes());
+        hasher.write(&self.registration_epoch.to_be_bytes());
         let hash = hasher.finish();
 
         let start = range.start();

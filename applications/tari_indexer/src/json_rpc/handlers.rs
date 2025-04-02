@@ -55,8 +55,6 @@ use tari_indexer_client::types::{
     GetNonFungibleCountResponse,
     GetNonFungiblesRequest,
     GetNonFungiblesResponse,
-    GetRelatedTransactionsRequest,
-    GetRelatedTransactionsResponse,
     GetSubstateRequest,
     GetSubstateResponse,
     GetTemplateDefinitionRequest,
@@ -285,7 +283,6 @@ impl JsonRpcHandlers {
                 address: substate_resp.address,
                 version: substate_resp.version,
                 substate: substate_resp.substate,
-                created_by_transaction: substate_resp.created_by_transaction,
             })),
             None => {
                 if request.local_search_only {
@@ -331,16 +328,13 @@ impl JsonRpcHandlers {
                                 Value::Null,
                             ),
                         )),
-                        SubstateResult::Up {
-                            id,
-                            substate,
-                            created_by_tx,
-                        } => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
-                            address: id,
-                            version: substate.version(),
-                            substate: substate.into_substate_value(),
-                            created_by_transaction: created_by_tx,
-                        })),
+                        SubstateResult::Up { id, substate } => {
+                            Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
+                                address: id,
+                                version: substate.version(),
+                                substate: substate.into_substate_value(),
+                            }))
+                        },
                         SubstateResult::Down { version, .. } => Err(JsonRpcResponse::error(
                             answer_id,
                             JsonRpcError::new(
@@ -392,7 +386,6 @@ impl JsonRpcHandlers {
             address: resp.address,
             version: resp.version,
             substate: resp.substate,
-            created_by_transaction: resp.created_by_transaction,
         }))
     }
 
@@ -660,62 +653,6 @@ impl JsonRpcHandlers {
                 },
             },
         };
-
-        Ok(JsonRpcResponse::success(answer_id, resp))
-    }
-
-    pub async fn get_substate_transactions(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let request: GetRelatedTransactionsRequest = value.parse_params()?;
-
-        let mut version = request.version.unwrap_or(0);
-        let mut transaction_ids = vec![];
-
-        loop {
-            let res = self
-                .substate_manager
-                .get_specific_substate(request.address.clone(), version)
-                .await;
-
-            if let Ok(substate_result) = res {
-                let transaction_id = match substate_result {
-                    SubstateResult::DoesNotExist => break,
-                    SubstateResult::Up { created_by_tx, .. } => created_by_tx,
-                    SubstateResult::Down { deleted_by_tx, .. } => deleted_by_tx,
-                };
-                transaction_ids.push(transaction_id);
-                version += 1;
-            } else {
-                break;
-            }
-        }
-
-        // the last transaction may both down and up a substate
-        transaction_ids.dedup();
-
-        let mut transaction_results = vec![];
-        for transaction_id in transaction_ids {
-            let transaction_result = self
-                .transaction_manager
-                .get_transaction_result(transaction_id)
-                .await
-                .map_err(|e| Self::internal_error(answer_id, e))?;
-
-            let indexer_transaction_result = match transaction_result {
-                TransactionResultStatus::Pending => IndexerTransactionFinalizedResult::Pending,
-                TransactionResultStatus::Finalized(finalized) => IndexerTransactionFinalizedResult::Finalized {
-                    final_decision: finalized.final_decision,
-                    execution_result: finalized.execute_result.map(Box::new),
-                    execution_time: finalized.execution_time,
-                    finalized_time: finalized.finalized_time,
-                    abort_details: finalized.abort_details,
-                },
-            };
-
-            transaction_results.push(indexer_transaction_result);
-        }
-
-        let resp = GetRelatedTransactionsResponse { transaction_results };
 
         Ok(JsonRpcResponse::success(answer_id, resp))
     }

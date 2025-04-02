@@ -19,13 +19,8 @@
 # automatically configured (default = )
 #public_address =
 
-
-
 # The relative path to store persistent data (default = "data/validator_node")
 #data_dir = "data/validator_node"
-
-# The type of database ("rocksdb" or "sqlite") to use (default = "sqlite")
-#database_type = "sqlite"
 
 # JSON-RPC listener address (default = "127.0.0.1:18200")
 #json_rpc_address = "127.0.0.1:18200"
@@ -35,6 +30,16 @@
 
 # Set to true to enable auto registration for each epoch (default = true)
 #auto_register = true
+
+#[validator_node.database]
+## The type of database ("rocksdb" or "sqlite") to use (default = "sqlite")
+#type = "sqlite"
+#
+#[validator_node.database.sqlite]
+#path = "state.db"
+#
+#[validator_node.database.rocksdb]
+#path = "rocksdb"
 
 [validator_node.p2p]
 #enable_mdns = true

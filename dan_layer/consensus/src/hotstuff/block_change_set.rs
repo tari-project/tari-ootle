@@ -19,9 +19,9 @@ use tari_dan_storage::{
         BlockTransactionExecution,
         BurntUtxo,
         ForeignProposal,
+        ForeignProposalStatus,
         HighQc,
         LeafBlock,
-        LockedBlock,
         NoVoteReason,
         PendingShardStateTreeDiff,
         QuorumDecision,
@@ -35,7 +35,6 @@ use tari_dan_storage::{
         TransactionPoolRecord,
         TransactionPoolStatusUpdate,
         ValidatorConsensusStats,
-        VersionedStateHashTreeDiff,
     },
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -77,7 +76,7 @@ pub struct ProposedBlockChangeSet {
     block: LeafBlock,
     quorum_decision: Option<QuorumDecision>,
     substate_changes: Vec<SubstateChange>,
-    state_tree_diffs: IndexMap<Shard, VersionedStateHashTreeDiff>,
+    state_tree_diffs: IndexMap<Shard, PendingShardStateTreeDiff>,
     substate_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
     transaction_changes: IndexMap<TransactionId, TransactionChangeSet>,
     proposed_foreign_proposals: Vec<BlockId>,
@@ -181,7 +180,7 @@ impl ProposedBlockChangeSet {
         self.no_vote_reason = None;
     }
 
-    pub fn set_state_tree_diffs(&mut self, diffs: IndexMap<Shard, VersionedStateHashTreeDiff>) -> &mut Self {
+    pub fn set_state_tree_diffs(&mut self, diffs: IndexMap<Shard, PendingShardStateTreeDiff>) -> &mut Self {
         self.state_tree_diffs = diffs;
         self
     }
@@ -267,6 +266,12 @@ impl ProposedBlockChangeSet {
         self.quorum_decision
     }
 
+    pub fn take_transaction_execution(&mut self, transaction_id: &TransactionId) -> Option<BlockTransactionExecution> {
+        self.transaction_changes
+            .get_mut(transaction_id)
+            .and_then(|change| change.execution.take())
+    }
+
     pub fn add_transaction_execution(
         &mut self,
         execution: TransactionExecution,
@@ -287,7 +292,6 @@ impl ProposedBlockChangeSet {
     pub fn get_transaction<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
-        locked_block: &LockedBlock,
         leaf_block: &LeafBlock,
         transaction_id: &TransactionId,
     ) -> Result<TransactionPoolRecord, TransactionPoolError> {
@@ -298,7 +302,7 @@ impl ProposedBlockChangeSet {
             .cloned()
             .map(Ok)
             .or_else(|| {
-                TransactionPoolRecord::get(tx, locked_block.block_id(), leaf_block.block_id(), transaction_id)
+                TransactionPoolRecord::get(tx, leaf_block.block_id(), transaction_id)
                     .optional()
                     .transpose()
             })
@@ -395,7 +399,7 @@ impl ProposedBlockChangeSet {
                     // Remove lock conflicts for this transaction. This allows other transactions to be proposed.
                     TransactionLockConflicts::remove_for_transactions(tx, Some(update.transaction_id()))?;
                 }
-                update.insert_for_block(tx, self.block.block_id())?;
+                update.insert_for_block(tx, &self.block)?;
             }
 
             for (shard_group, pledges) in &change.foreign_pledges {
@@ -404,7 +408,7 @@ impl ProposedBlockChangeSet {
         }
 
         for block_id in &self.proposed_foreign_proposals {
-            ForeignProposal::set_proposed_in(tx, block_id, &self.block.block_id)?;
+            ForeignProposal::set_status_by_id(tx, block_id, ForeignProposalStatus::Proposed, Some(&self.block))?;
         }
 
         for mint in &self.proposed_utxo_mints {
@@ -531,11 +535,11 @@ mod tests {
     fn check_max_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 22_136_000;
+        const TARGET_MAX_MEM_USAGE: usize = 21_816_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
         eprintln!("mem_block_diff: {}MiB", mem_block_diff / 1024 / 1024);
         let mem_state_tree_diffs =
-            size_of::<Shard>() * size_of::<VersionedStateHashTreeDiff>() * MEM_MAX_STATE_TREE_DIFF_SIZE;
+            size_of::<Shard>() * size_of::<PendingShardStateTreeDiff>() * MEM_MAX_STATE_TREE_DIFF_SIZE;
         eprintln!("mem_state_tree_diffs: {}", mem_state_tree_diffs);
         let mem_substate_locks = (size_of::<SubstateId>() + size_of::<SubstateLock>()) * MEM_MAX_SUBSTATE_LOCK_SIZE;
         eprintln!("mem_substate_locks: {}", mem_substate_locks);

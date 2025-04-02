@@ -111,7 +111,7 @@ where
         let result = self
             .network_client
             .try_with_committee(iter::once(address), 1, |mut client| async move {
-                client.get_substate(substate_requirement).await
+                client.get_substate(substate_requirement.as_ref()).await
             })
             .await?;
         Ok(result)

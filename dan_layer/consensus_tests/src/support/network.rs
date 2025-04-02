@@ -12,7 +12,6 @@ use tari_consensus::messages::HotstuffMessage;
 use tari_dan_common_types::ShardGroup;
 use tari_dan_storage::consensus_models::TransactionRecord;
 use tari_shutdown::ShutdownSignal;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{
@@ -26,6 +25,7 @@ use tokio::{
 use crate::support::{
     address::TestAddress,
     committee_number_to_shard_group,
+    TestStore,
     Validator,
     ValidatorChannels,
     TEST_NUM_PRESHARDS,
@@ -147,8 +147,7 @@ impl TestNetwork {
         self._on_message.borrow().clone()
     }
 
-    #[allow(dead_code)]
-    pub async fn pause(&self) {
+    pub fn pause(&self) {
         self.network_status.send(NetworkStatus::Paused).unwrap();
     }
 
@@ -202,7 +201,7 @@ pub struct TestNetworkWorker {
             ShardGroup,
             u32, // num_committees
             mpsc::Sender<(Transaction, usize)>,
-            SqliteStateStore<TestAddress>,
+            TestStore,
         ),
     >,
     tx_hs_message: HashMap<TestAddress, mpsc::Sender<(TestAddress, HotstuffMessage)>>,
@@ -298,12 +297,16 @@ impl TestNetworkWorker {
                 }
 
                 Ok(_) = self.network_status.changed() => {
-                    if let NetworkStatus::Started = *self.network_status.borrow() {
+                    let status = *self.network_status.borrow() ;
+                    log::info!("Network status changed to {:?}", status);
+                    if let NetworkStatus::Started =  status {
                         continue;
                     }
-                    loop{
+                    loop {
                         self.network_status.changed().await.unwrap();
-                        if let NetworkStatus::Started = *self.network_status.borrow() {
+                        let status = *self.network_status.borrow() ;
+                        log::info!("Network status changed to {:?}", status);
+                        if let NetworkStatus::Started = status {
                             break;
                         }
                     }
@@ -335,12 +338,16 @@ impl TestNetworkWorker {
                 continue;
             }
 
-            self.tx_hs_message
+            if self
+                .tx_hs_message
                 .get(&to)
                 .unwrap()
                 .send((from.clone(), msg.clone()))
                 .await
-                .unwrap();
+                .is_err()
+            {
+                log::warn!("Unable to send message to {to} from {from}. channel is closed.");
+            }
             self.num_sent_messages
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }

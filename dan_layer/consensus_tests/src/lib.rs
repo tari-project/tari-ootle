@@ -7,6 +7,8 @@ mod dummy_blocks;
 #[cfg(test)]
 mod eviction_proof;
 #[cfg(test)]
+mod state_tree;
+#[cfg(test)]
 mod substate_store;
 #[cfg(test)]
 mod support;

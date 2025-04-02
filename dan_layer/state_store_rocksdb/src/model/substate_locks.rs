@@ -20,130 +20,107 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::Arc;
+use std::fmt::Display;
 
-use rocksdb::{Transaction, TransactionDB};
-use serde::{Deserialize, Serialize};
+use tari_dan_common_types::SubstateLockType;
 use tari_dan_storage::consensus_models::{BlockId, SubstateLock};
 use tari_engine_types::substate::SubstateId;
 use tari_transaction::TransactionId;
 
-use super::traits::ModelColumnFamily;
-use crate::{error::RocksDbStorageError, model::traits::RocksdbModel, utils::RocksdbTimestamp};
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, SubstateIdCodec, SubstateLockKeyCodec, TransactionIdCodec, UnitCodec},
+    traits::{Cf, QueryCf},
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubstateLockData {
-    pub substate_id: SubstateId,
+#[derive(Debug, PartialEq, Eq)]
+pub struct SubstateLockKey {
     pub block_id: BlockId,
-    pub lock: SubstateLock,
-    // we need this field to keep track of insertion order
-    pub created_at: RocksdbTimestamp,
+    pub substate_id: SubstateId,
+    pub transaction_id: TransactionId,
 }
 
-pub struct SubstateLockModel {}
-
-impl SubstateLockModel {
-    pub fn key_prefix_by_substate_id(substate_id: &SubstateId) -> String {
-        format!("{}_{}_", Self::key_prefix(), substate_id)
-    }
-}
-
-impl RocksdbModel for SubstateLockModel {
-    type Item = SubstateLockData;
-
-    fn key_prefix() -> &'static str {
-        "substatelocks"
-    }
-
-    fn key(value: &Self::Item) -> String {
-        format!("{}_{}_{}", Self::key_prefix(), value.substate_id, value.created_at)
-    }
-
-    fn column_families() -> Vec<&'static str> {
-        vec![BlockIdColumnFamily::name(), TransactionIdColumnFamily::name()]
-    }
-
-    fn put_in_cfs(
-        db: Arc<TransactionDB>,
-        tx: &mut Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        value: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        // In each CF value We store the key to the main collection, so we can retrieve the actual value
-        let main_key = Self::key(value);
-        let main_key_bytes = main_key.as_bytes();
-
-        BlockIdColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
-        TransactionIdColumnFamily::put(db.clone(), tx, operation, value, main_key_bytes)?;
-
-        Ok(())
-    }
-
-    fn delete_from_cfs(
-        db: Arc<TransactionDB>,
-        tx: &Transaction<'_, TransactionDB>,
-        operation: &'static str,
-        item: &Self::Item,
-    ) -> Result<(), RocksDbStorageError> {
-        BlockIdColumnFamily::delete(db.clone(), tx, operation, item)?;
-        TransactionIdColumnFamily::delete(db.clone(), tx, operation, item)?;
-        Ok(())
-    }
-}
-
-// block id
-pub struct BlockIdColumnFamily {}
-
-impl BlockIdColumnFamily {
-    pub const NAME: &str = "substatelocks_block_id";
-
-    pub fn build_key_prefix_by_block(block_id: &BlockId) -> String {
-        format!("{}_{}_", SubstateLockModel::key_prefix(), block_id)
-    }
-}
-
-impl ModelColumnFamily for BlockIdColumnFamily {
-    type Item = SubstateLockData;
-
-    fn name() -> &'static str {
-        Self::NAME
-    }
-
-    fn build_key(value: &Self::Item) -> String {
-        format!(
-            "{}_{}_{}_{}",
-            SubstateLockModel::key_prefix(),
-            value.block_id,
-            value.substate_id,
-            value.lock.transaction_id()
+impl Display for SubstateLockKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SubstateLockKey {{ block_id: {}, substate_id: {}, transaction_id: {} }}",
+            self.block_id, self.substate_id, self.transaction_id
         )
     }
 }
 
-// block height
-pub struct TransactionIdColumnFamily {}
+pub struct SubstateLockModel;
 
-impl TransactionIdColumnFamily {
-    pub const NAME: &str = "substatelocks_transaction_id";
+impl Cf for SubstateLockModel {
+    type Key = SubstateLockKey;
+    type KeyCodec = SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId)>;
+    type Value = SubstateLock;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
-    pub fn build_key_prefix_by_transaction(transaction_id: &TransactionId) -> String {
-        format!("{}_{}_", SubstateLockModel::key_prefix(), transaction_id)
+    fn name() -> &'static str {
+        "locks"
     }
 }
 
-impl ModelColumnFamily for TransactionIdColumnFamily {
-    type Item = SubstateLockData;
+pub struct HeadIndex;
+
+impl Cf for HeadIndex {
+    type Key = SubstateId;
+    type KeyCodec = SubstateIdCodec;
+    type Value = SubstateLockKey;
+    type ValueCodec = SubstateLockKeyCodec<(TransactionId, SubstateId, BlockId)>;
 
     fn name() -> &'static str {
-        Self::NAME
+        "locks_head_idx"
     }
+}
 
-    fn build_key(value: &Self::Item) -> String {
-        format!(
-            "{}_{}_{}",
-            SubstateLockModel::key_prefix(),
-            value.lock.transaction_id(),
-            value.block_id
-        )
+pub struct ByTransactionIdQuery;
+
+impl QueryCf for ByTransactionIdQuery {
+    type Cf = SubstateLockModel;
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
+}
+
+pub struct BlockIdIndex;
+
+impl Cf for BlockIdIndex {
+    type Key = SubstateLockKey;
+    type KeyCodec = SubstateLockKeyCodec<(BlockId, SubstateId, TransactionId)>;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        "locks_block_id_idx"
     }
+}
+
+pub struct ByBlockIdQuery;
+
+impl QueryCf for ByBlockIdQuery {
+    type Cf = BlockIdIndex;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
+}
+
+pub struct SubstateIdIndex;
+
+impl Cf for SubstateIdIndex {
+    type Key = SubstateLockKey;
+    type KeyCodec = SubstateLockKeyCodec<(SubstateId, TransactionId, BlockId)>;
+    type Value = SubstateLockType;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        "locks_substate_id_idx"
+    }
+}
+
+pub struct BySubstateIdQuery;
+
+impl QueryCf for BySubstateIdQuery {
+    type Cf = SubstateIdIndex;
+    type Key = SubstateId;
+    type KeyCodec = SubstateIdCodec;
 }

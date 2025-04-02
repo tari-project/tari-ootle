@@ -45,7 +45,6 @@ use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbA
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_client::types::{
     self,
@@ -76,8 +75,6 @@ use tari_validator_node_client::types::{
     GetStateResponse,
     GetSubstateRequest,
     GetSubstateResponse,
-    GetSubstatesByTransactionRequest,
-    GetSubstatesByTransactionResponse,
     GetTemplateRequest,
     GetTemplateResponse,
     GetTemplatesRequest,
@@ -86,8 +83,6 @@ use tari_validator_node_client::types::{
     GetTransactionResponse,
     GetTransactionResultRequest,
     GetTransactionResultResponse,
-    GetValidatorFeesRequest,
-    GetValidatorFeesResponse,
     ListBlocksRequest,
     ListBlocksResponse,
     SubmitTransactionRequest,
@@ -98,7 +93,7 @@ use tari_validator_node_client::types::{
 
 use crate::{
     bootstrap::Services,
-    consensus::ConsensusHandle,
+    consensus::{spec::ValidatorNodeStateStore, ConsensusHandle},
     dry_run_transaction_processor::DryRunTransactionProcessor,
     json_rpc::jrpc_errors::{internal_error, not_found},
     p2p::services::mempool::MempoolHandle,
@@ -114,12 +109,12 @@ pub struct JsonRpcHandlers {
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     consensus: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
-    state_store: SqliteStateStore<PeerAddress>,
-    dry_run_transaction_processor: DryRunTransactionProcessor,
+    state_store: ValidatorNodeStateStore,
+    dry_run_transaction_processor: DryRunTransactionProcessor<ValidatorNodeStateStore>,
 }
 
 impl JsonRpcHandlers {
-    pub fn new(services: &Services) -> Self {
+    pub fn new(services: &Services<ValidatorNodeStateStore>) -> Self {
         Self {
             keypair: services.keypair.clone(),
             mempool: services.mempool.clone(),
@@ -268,7 +263,7 @@ impl JsonRpcHandlers {
     pub async fn get_recent_transactions(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let tx = self.state_store.create_read_tx().map_err(internal_error(answer_id))?;
-        match TransactionRecord::get_paginated(&tx, 1000, 0, Some(Ordering::Descending)) {
+        match tx.transactions_get_paginated(1000, 0, Some(Ordering::Descending)) {
             Ok(recent_transactions) => {
                 let res = GetRecentTransactionsResponse {
                     transactions: recent_transactions.into_iter().map(|t| t.transaction).collect(),
@@ -310,8 +305,8 @@ impl JsonRpcHandlers {
                 .get_block(&tx)
                 .map_err(internal_error(answer_id))?,
         };
-        let blocks = start_block
-            .get_parent_chain(&tx, req.limit)
+        let blocks = tx
+            .blocks_get_parent_chain(start_block.id(), req.limit)
             .map_err(internal_error(answer_id))?;
 
         let res = ListBlocksResponse { blocks };
@@ -320,6 +315,17 @@ impl JsonRpcHandlers {
 
     pub async fn get_tx_pool(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
+        if !self.consensus.get_current_state().is_running() {
+            // Describe better why the following call may fail
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::ApplicationError(100),
+                    "Consensus is not running. Please try again later".to_string(),
+                    json::Value::Null,
+                ),
+            ));
+        }
         let tx_pool = self
             .state_store
             .with_read_tx(|tx| tx.transaction_pool_get_all())
@@ -378,46 +384,17 @@ impl JsonRpcHandlers {
         match maybe_substate {
             Some(substate) if substate.is_destroyed() => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::Down,
-                created_by_tx: Some(substate.created_by_transaction),
                 value: None,
             })),
             Some(substate) => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::Up,
-                created_by_tx: Some(substate.created_by_transaction),
                 value: substate.into_substate_value(),
             })),
             None => Ok(JsonRpcResponse::success(answer_id, GetSubstateResponse {
                 status: SubstateStatus::DoesNotExist,
-                created_by_tx: None,
                 value: None,
             })),
         }
-    }
-
-    pub async fn get_substates_created_by_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let data: GetSubstatesByTransactionRequest = value.parse_params()?;
-        let substates = self
-            .state_store
-            .with_read_tx(|tx| SubstateRecord::get_many_by_created_transaction(tx, &data.transaction_id))
-            .map_err(internal_error(answer_id))?;
-
-        Ok(JsonRpcResponse::success(answer_id, GetSubstatesByTransactionResponse {
-            substates,
-        }))
-    }
-
-    pub async fn get_substates_destroyed_by_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let data: GetSubstatesByTransactionRequest = value.parse_params()?;
-        let substates = self
-            .state_store
-            .with_read_tx(|tx| SubstateRecord::get_many_by_destroyed_transaction(tx, &data.transaction_id))
-            .map_err(internal_error(answer_id))?;
-
-        Ok(JsonRpcResponse::success(answer_id, GetSubstatesByTransactionResponse {
-            substates,
-        }))
     }
 
     pub async fn get_block(&self, value: JsonRpcExtractor) -> JrpcResult {
@@ -430,17 +407,6 @@ impl JsonRpcHandlers {
             .ok_or_else(|| not_found(answer_id, format!("Block {} not found", data.block_id)))?;
 
         let res = GetBlockResponse { block };
-        Ok(JsonRpcResponse::success(answer_id, res))
-    }
-
-    pub async fn get_blocks_count(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let count = self
-            .state_store
-            .with_read_tx(|tx| Block::get_count(tx))
-            .map_err(internal_error(answer_id))?;
-
-        let res = GetBlocksCountResponse { count };
         Ok(JsonRpcResponse::success(answer_id, res))
     }
 
@@ -458,6 +424,7 @@ impl JsonRpcHandlers {
     pub async fn get_blocks(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let req: GetBlocksRequest = value.parse_params()?;
+        // TODO: use a snapshot to prevent locking up the DB
         let blocks = self
             .state_store
             .with_read_tx(|tx| {
@@ -791,28 +758,6 @@ impl JsonRpcHandlers {
             epoch,
             height,
             state: format!("{:?}", state),
-        }))
-    }
-
-    pub async fn get_validator_fees(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let request = value.parse_params::<GetValidatorFeesRequest>()?;
-
-        let maybe_validator_addr = request.validator_public_key.as_ref();
-
-        let blocks = self
-            .state_store
-            .with_read_tx(|tx| {
-                Block::get_any_with_epoch_range_for_validator(tx, request.epoch_range, maybe_validator_addr)
-            })
-            .map_err(internal_error(answer_id))?;
-
-        Ok(JsonRpcResponse::success(answer_id, GetValidatorFeesResponse {
-            fees: blocks
-                .into_iter()
-                .filter(|b| b.total_leader_fee() > 0)
-                .map(Into::into)
-                .collect(),
         }))
     }
 }

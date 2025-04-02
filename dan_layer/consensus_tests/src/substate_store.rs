@@ -43,7 +43,6 @@ fn it_allows_substate_up_for_v0() {
         .put(SubstateChange::Up {
             id: VersionedSubstateId::new(id.clone(), 1),
             shard: Shard::first(),
-            transaction_id: tx_id(0),
             substate: Substate::new(1, value.clone()),
         })
         .unwrap_err();
@@ -51,7 +50,6 @@ fn it_allows_substate_up_for_v0() {
     store
         .put(SubstateChange::Up {
             id: VersionedSubstateId::new(id.clone(), 0),
-            transaction_id: tx_id(0),
             shard: Shard::first(),
             substate: Substate::new(0, value),
         })
@@ -78,7 +76,6 @@ fn it_allows_down_then_up() {
         .put(SubstateChange::Down {
             id: id.clone(),
             shard: Shard::first(),
-            transaction_id: Default::default(),
         })
         .unwrap();
 
@@ -86,7 +83,6 @@ fn it_allows_down_then_up() {
         .put(SubstateChange::Up {
             id: id.to_next_version(),
             shard: Shard::first(),
-            transaction_id: Default::default(),
             substate: new_substate(1, 1),
         })
         .unwrap();
@@ -109,7 +105,6 @@ fn it_fails_if_previous_version_is_not_down() {
         .put(SubstateChange::Up {
             id: id.to_next_version(),
             shard: Shard::first(),
-            transaction_id: Default::default(),
             substate: new_substate(1, 1),
         })
         .unwrap_err();
@@ -212,10 +207,8 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
                 version,
                 substate_value: Some(value),
                 state_hash: [seed; 32].into(),
-                created_by_transaction: Default::default(),
                 created_justify: QcId::zero(),
                 created_block: BlockId::zero(),
-                created_height: 0.into(),
                 created_by_shard: Shard::first(),
                 created_at_epoch: 0.into(),
                 destroyed: None,

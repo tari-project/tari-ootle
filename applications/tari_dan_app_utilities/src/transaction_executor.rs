@@ -44,7 +44,7 @@ pub struct ExecutionOutput {
 }
 
 impl ExecutionOutput {
-    pub fn resolve_inputs<'a, I: IntoIterator<Item = (&'a SubstateRequirement, &'a Substate)>>(
+    pub fn resolve_input_locks<'a, I: IntoIterator<Item = (&'a SubstateRequirement, &'a Substate)>>(
         &self,
         inputs: I,
     ) -> Vec<VersionedSubstateIdLockIntent> {

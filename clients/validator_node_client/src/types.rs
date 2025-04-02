@@ -35,15 +35,7 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_storage::{
-    consensus_models::{
-        Block,
-        BlockId,
-        Decision,
-        ExecutedTransaction,
-        QuorumDecision,
-        SubstateRecord,
-        TransactionPoolRecord,
-    },
+    consensus_models::{Block, BlockId, Decision, ExecutedTransaction, QuorumDecision, TransactionPoolRecord},
     global::models,
     Ordering,
 };
@@ -334,27 +326,6 @@ pub struct GetTransactionResponse {
 #[cfg_attr(
     feature = "ts",
     derive(TS),
-    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
-)]
-pub struct GetSubstatesByTransactionRequest {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub transaction_id: TransactionId,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
-)]
-pub struct GetSubstatesByTransactionResponse {
-    pub substates: Vec<SubstateRecord>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
     ts(
         export,
         export_to = "../../bindings/src/types/validator-node-client/",
@@ -465,7 +436,7 @@ pub struct GetBlocksResponse {
 )]
 pub struct GetBlocksCountResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub count: i64,
+    pub count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -649,8 +620,6 @@ pub struct GetSubstateRequest {
 )]
 pub struct GetSubstateResponse {
     pub value: Option<SubstateValue>,
-    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    pub created_by_tx: Option<TransactionId>,
     pub status: SubstateStatus,
 }
 
@@ -725,71 +694,6 @@ pub struct GetEpochManagerStatsResponse {
     pub is_valid: bool,
     pub start_epoch: Option<Epoch>,
     pub committee_info: Option<CommitteeInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(
-        export,
-        export_to = "../../bindings/src/types/validator-node-client/VNGetValidatorFeesRequest.ts"
-    ),
-    ts(rename = "VNGetValidatorFeesRequest")
-)]
-pub struct GetValidatorFeesRequest {
-    pub epoch_range: RangeInclusive<Epoch>,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub validator_public_key: Option<PublicKey>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(
-        export,
-        export_to = "../../bindings/src/types/validator-node-client/VNGetValidatorFeesResponse.ts"
-    ),
-    ts(rename = "VNGetValidatorFeesResponse")
-)]
-pub struct GetValidatorFeesResponse {
-    pub fees: Vec<ValidatorFee>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
-)]
-pub struct ValidatorFee {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub validator_public_key: PublicKey,
-    pub epoch: Epoch,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub block_id: BlockId,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub total_fee_due: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub total_transaction_fee: u64,
-}
-
-impl From<Block> for ValidatorFee {
-    fn from(value: Block) -> Self {
-        Self {
-            validator_public_key: value.proposed_by().clone(),
-            epoch: value.epoch(),
-            block_id: *value.id(),
-            total_fee_due: value.total_leader_fee(),
-            total_transaction_fee: value
-                .commands()
-                .iter()
-                .filter_map(|c| c.committing())
-                .map(|t| t.transaction_fee)
-                .sum(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useEffect, useState } from "react";
-import { listBlocks, getBlocksCount, getIdentity, getBlocks, getFilteredBlocksCount } from "../../../utils/json_rpc";
+import { getIdentity, getBlocks, getFilteredBlocksCount } from "../../../utils/json_rpc";
 import { Link } from "react-router-dom";
 import { emptyRows, primitiveDateTimeToDate, primitiveDateTimeToSecs } from "../../../utils/helpers";
 import Table from "@mui/material/Table";

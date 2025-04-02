@@ -161,17 +161,12 @@ where
         let ValidatorScanResult {
             address: versioned_account_address,
             substate: account_value,
-            created_by_tx,
         } = substate_api
             .scan_for_substate(account_substate.substate_id.substate_id(), None)
             .await?;
 
         let indexed_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
-        substate_api.save_root(
-            created_by_tx,
-            versioned_account_address.clone(),
-            indexed_value.referenced_substates(),
-        )?;
+        substate_api.save_root(versioned_account_address.as_ref(), indexed_value.referenced_substates())?;
         let known_child_vaults = substate_api
             .load_dependent_substates(&[account_substate.substate_id.substate_id()])?
             .into_iter()
@@ -216,15 +211,12 @@ where
             let mut nfts = HashMap::with_capacity(vault.get_non_fungible_ids().len());
             for nft in vault.get_non_fungible_ids() {
                 let addr = NonFungibleAddress::new(*vault.resource_address(), nft.clone());
-                let ValidatorScanResult {
-                    address,
-                    created_by_tx,
-                    substate,
-                } = substate_api.scan_for_substate(&addr.into(), None).await?;
+                let ValidatorScanResult { address, substate } =
+                    substate_api.scan_for_substate(&addr.into(), None).await?;
                 let nft_container = substate.into_non_fungible().ok_or_else(|| {
                     AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a non-fungible token.", nft))
                 })?;
-                substate_api.save_child(created_by_tx, versioned_addr.substate_id().clone(), address, [(*vault
+                substate_api.save_child(versioned_addr.substate_id().clone(), address.as_ref(), [(*vault
                     .resource_address())
                 .into()])?;
                 nfts.insert(nft.clone(), nft_container);
@@ -234,9 +226,8 @@ where
 
             // Save the vault substate
             substate_api.save_child(
-                created_by_tx,
                 versioned_account_address.substate_id().clone(),
-                versioned_addr,
+                versioned_addr.as_ref(),
                 [SubstateId::from(*vault.resource_address())],
             )?;
 

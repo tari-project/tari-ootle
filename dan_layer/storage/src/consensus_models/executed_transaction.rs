@@ -4,7 +4,6 @@
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
-    ops::Deref,
     time::Duration,
 };
 
@@ -201,22 +200,6 @@ impl ExecutedTransaction {
 impl ExecutedTransaction {
     pub fn insert<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
         TransactionRecord::from(self.clone()).insert(tx)
-    }
-
-    pub fn update<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        TransactionRecord::from(self.clone()).update(tx)
-    }
-
-    pub fn upsert<TTx>(&self, tx: &mut TTx) -> Result<(), StorageError>
-    where
-        TTx: StateStoreWriteTransaction + Deref,
-        TTx::Target: StateStoreReadTransaction,
-    {
-        if Self::exists(&**tx, self.id())? {
-            self.update(tx)
-        } else {
-            self.insert(tx)
-        }
     }
 
     pub fn get<TTx: StateStoreReadTransaction>(tx: &TTx, tx_id: &TransactionId) -> Result<Self, StorageError> {

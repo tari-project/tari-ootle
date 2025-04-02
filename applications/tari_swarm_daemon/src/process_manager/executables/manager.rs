@@ -66,7 +66,7 @@ impl ExecutableManager {
                 exec.instance_type,
                 compile.working_dir().display()
             );
-            let mut child = cargo_build(compile.working_dir(), &compile.package_name)?;
+            let mut child = cargo_build(compile.working_dir(), &compile.package_name, &compile.features)?;
             tasks.push(async move {
                 let status = child.wait().await?;
                 Ok::<_, anyhow::Error>((status, exec))
@@ -126,7 +126,7 @@ impl ExecutableManager {
                 .context("working_dir does not exist")?;
             let package = &compile.package_name;
 
-            let mut child = cargo_build(&working_dir, package)?;
+            let mut child = cargo_build(&working_dir, package, &compile.features)?;
             let status = child.wait().await?;
 
             if !status.success() {
@@ -172,9 +172,14 @@ impl ExecutableManager {
     }
 }
 
-fn cargo_build<P: AsRef<Path>>(working_dir: P, package: &str) -> io::Result<Child> {
-    Command::new("cargo")
-        .args(["build", "--release", "--bin", package])
+fn cargo_build<P: AsRef<Path>>(working_dir: P, package: &str, features: &[String]) -> io::Result<Child> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["build", "--release", "--bin", package]);
+    for feature in features {
+        cmd.arg("--features");
+        cmd.arg(feature);
+    }
+    cmd
         // Ensure host environment vars are available
         .envs(env::vars())
         .current_dir(working_dir)

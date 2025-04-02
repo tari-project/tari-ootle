@@ -22,9 +22,11 @@
 
 use std::{
     fmt::{self, Display},
+    io,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::anyhow;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::error::RocksDbStorageError;
@@ -32,49 +34,74 @@ use crate::error::RocksDbStorageError;
 const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
 pub fn bincode_encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RocksDbStorageError> {
-    let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)?;
+    let bytes = bincode::serde::encode_to_vec(value, BINCODE_CONFIG)
+        .map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
     Ok(bytes)
 }
 
-pub fn bincode_decode<T: DeserializeOwned>(bytes: Vec<u8>) -> Result<T, RocksDbStorageError> {
-    let (value, _): (T, usize) = bincode::serde::decode_from_slice(&bytes, BINCODE_CONFIG)?;
+pub fn bincode_decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RocksDbStorageError> {
+    let (value, bytes_read) =
+        bincode::serde::decode_from_slice(bytes, BINCODE_CONFIG).map_err(|e| RocksDbStorageError::DecodeError {
+            source: anyhow!(
+                "Bincode deserialization failed for type:{}: {}",
+                std::any::type_name::<T>(),
+                e,
+            ),
+        })?;
+    if bytes_read != bytes.len() {
+        return Err(RocksDbStorageError::DecodeError {
+            source: anyhow!(
+                "Bincode deserialization failed for type {}. Bytes read: {}. Bytes length: {}",
+                std::any::type_name::<T>(),
+                bytes_read,
+                bytes.len()
+            ),
+        });
+    }
     Ok(value)
 }
 
-pub fn bor_encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RocksDbStorageError> {
-    tari_bor::encode(value).map_err(|e| RocksDbStorageError::GeneralError {
-        message: e.into_string(),
-    })
-}
-
-pub fn bor_decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RocksDbStorageError> {
-    tari_bor::decode_exact(bytes).map_err(|e| RocksDbStorageError::GeneralError {
-        message: e.into_string(),
-    })
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord)]
-pub struct RocksdbTimestamp(u128);
+pub struct RocksDbTimestamp(u128);
 
-impl RocksdbTimestamp {
+impl RocksDbTimestamp {
+    pub fn from_millis(millis: u128) -> Self {
+        Self(millis)
+    }
+
     pub fn now() -> Self {
-        Self(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis())
+        Self(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("RocksDbTimestamp::now()")
+                .as_millis(),
+        )
+    }
+
+    pub fn as_millis(&self) -> u128 {
+        self.0
     }
 }
 
-impl Display for RocksdbTimestamp {
+impl Display for RocksDbTimestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // displayed as binary to order if the value is used in a RocksDB key
         write!(f, "{:b}", self.0)
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord)]
-pub struct RocksdbSeq(pub u64);
+pub(crate) fn read_to_fixed<const SZ: usize, T, R>(reader: &mut R) -> Option<T>
+where
+    [u8; SZ]: Into<T>,
+    R: io::Read,
+{
+    let mut array = [0u8; SZ];
+    reader.read_exact(&mut array).ok()?;
+    Some(array.into())
+}
 
-impl Display for RocksdbSeq {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // hexadecimal endcoding with full 0 padding, so the key preserves ordering
-        write!(f, "{:#018x}", self.0)
-    }
+pub(crate) fn read_n_bytes<R: io::Read>(reader: &mut R, n: usize) -> Option<Vec<u8>> {
+    let mut vec = vec![0u8; n];
+    reader.read_exact(&mut vec[..]).ok()?;
+    Some(vec)
 }

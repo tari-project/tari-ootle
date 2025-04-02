@@ -116,7 +116,5 @@ export const submitTransaction = (request: GetNonFungiblesRequest): Promise<Inde
   jsonRpc("submit_transaction", request);
 export const getTransactionResult = (request: IndexerGetTransactionResultRequest): Promise<IndexerGetTransactionResultResponse> =>
   jsonRpc("get_transaction_result", request);
-export const getSubstateTransactions = (
-  request: GetRelatedTransactionsRequest,
-): Promise<GetRelatedTransactionsResponse> => jsonRpc("get_substate_transactions", request);
+
 export const getEpochManagerStats = (): Promise<GetEpochManagerStatsResponse> => jsonRpc("get_epoch_manager_stats");

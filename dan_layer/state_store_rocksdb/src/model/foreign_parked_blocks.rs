@@ -21,25 +21,43 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_dan_storage::consensus_models::{BlockId, ForeignParkedProposal};
+use tari_transaction::TransactionId;
 
-use crate::model::traits::RocksdbModel;
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, TransactionIdCodec, TupleBytesCodec, UnitCodec},
+    traits::{Cf, QueryCf},
+};
 
-pub struct ForeignParkedBlockModel {}
+pub struct ForeignParkedBlockModel;
 
-impl ForeignParkedBlockModel {
-    pub fn key_from_block_id(block_id: &BlockId) -> String {
-        format!("{}_{}", Self::key_prefix(), block_id)
+impl Cf for ForeignParkedBlockModel {
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
+    type Value = ForeignParkedProposal;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        "foreign_parked_blocks"
     }
 }
 
-impl RocksdbModel for ForeignParkedBlockModel {
-    type Item = ForeignParkedProposal;
+pub struct MissingTransactionsModel;
 
-    fn key_prefix() -> &'static str {
-        "foreignparkedblocks"
-    }
+impl Cf for MissingTransactionsModel {
+    type Key = (TransactionId, BlockId);
+    type KeyCodec = TupleBytesCodec<Self::Key>;
+    type Value = ();
+    type ValueCodec = UnitCodec;
 
-    fn key(value: &Self::Item) -> String {
-        Self::key_from_block_id(value.block().id())
+    fn name() -> &'static str {
+        "foreign_missing_transactions"
     }
+}
+
+pub struct ByTransactionIdQuery;
+
+impl QueryCf for ByTransactionIdQuery {
+    type Cf = MissingTransactionsModel;
+    type Key = TransactionId;
+    type KeyCodec = TransactionIdCodec;
 }

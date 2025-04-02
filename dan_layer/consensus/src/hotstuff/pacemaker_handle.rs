@@ -78,6 +78,10 @@ impl PaceMakerHandle {
         self.on_beat.beat();
     }
 
+    pub async fn on_beat(&mut self) {
+        self.on_beat.wait().await
+    }
+
     /// Signal the pacemaker trigger a forced beat. If the pacemaker has not been started, this is a no-op
     pub fn force_beat(&self, forced_height: NodeHeight) {
         self.on_force_beat.beat(Some(forced_height));

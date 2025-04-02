@@ -23,7 +23,10 @@
 use serde::{Deserialize, Serialize};
 use tari_dan_storage::consensus_models::{Block, BlockId, ForeignProposal};
 
-use crate::model::traits::RocksdbModel;
+use crate::{
+    codecs::{BlockIdCodec, DefaultCodec, DefaultCodecRef},
+    traits::Cf,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParkedBlockData {
@@ -31,26 +34,37 @@ pub struct ParkedBlockData {
     pub foreign_proposals: Vec<ForeignProposal>,
 }
 
-pub struct ParkedBlockModel {}
+pub struct ParkedBlockModel;
 
-impl ParkedBlockModel {
-    pub fn key_from_block_id_str(block_id_str: &str) -> String {
-        format!("{}_{}", Self::key_prefix(), block_id_str)
-    }
+impl Cf for ParkedBlockModel {
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
+    type Value = ParkedBlockData;
+    type ValueCodec = DefaultCodec<Self::Value>;
 
-    pub fn key_from_block_id(block_id: &BlockId) -> String {
-        Self::key_from_block_id_str(&block_id.to_string())
+    fn name() -> &'static str {
+        "parked_blocks"
     }
 }
 
-impl RocksdbModel for ParkedBlockModel {
-    type Item = ParkedBlockData;
+#[derive(Debug, Clone, Serialize)]
+pub struct ParkedBlockDataRef<'a> {
+    pub block: &'a Block,
+    pub foreign_proposals: &'a [ForeignProposal],
+}
 
-    fn key_prefix() -> &'static str {
-        "parkedblocks"
-    }
+#[derive(Debug, Default)]
+pub struct ParkedBlockModelRef<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
 
-    fn key(value: &Self::Item) -> String {
-        Self::key_from_block_id(value.block.id())
+impl<'a> Cf for ParkedBlockModelRef<'a> {
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
+    type Value = ParkedBlockDataRef<'a>;
+    type ValueCodec = DefaultCodecRef<Self::Value>;
+
+    fn name() -> &'static str {
+        ParkedBlockModel::name()
     }
 }

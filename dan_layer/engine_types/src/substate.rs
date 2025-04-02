@@ -26,7 +26,7 @@ use std::{
     str::FromStr,
 };
 
-use borsh::BorshSerialize;
+use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, decode_exact, encode, BorError};
 use tari_common_types::types::FixedHash;
@@ -116,8 +116,9 @@ pub fn hash_substate(substate: &SubstateValue, version: u32) -> FixedHash {
         .into()
 }
 
+// BorshDeserialize is implemented for this struct because we de/encode keys in the database using this format
 /// Base object address, version tuples
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize, BorshDeserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),

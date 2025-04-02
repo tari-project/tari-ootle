@@ -112,33 +112,16 @@ impl LockedSubstateValue {
         tx.substate_locks_get_locked_substates_for_transaction(transaction_id)
     }
 
-    pub fn get_transaction_id_that_has_any_write_locks_for_substates<'a, TTx, I>(
-        tx: &TTx,
-        substate_ids: I,
-        exclude_local_only: bool,
-    ) -> Result<Option<TransactionId>, StorageError>
-    where
-        TTx: StateStoreReadTransaction,
-        I: IntoIterator<Item = &'a SubstateId>,
-    {
-        tx.substate_locks_has_any_write_locks_for_substates(None, substate_ids, exclude_local_only)
-    }
-
     pub fn get_transaction_id_that_conflicts_with_write_locks<'a, TTx, I>(
         tx: &TTx,
         exclude_transaction_id: &TransactionId,
         substate_ids: I,
-        exclude_local_only: bool,
     ) -> Result<Option<TransactionId>, StorageError>
     where
         TTx: StateStoreReadTransaction,
         I: IntoIterator<Item = &'a SubstateId>,
     {
-        tx.substate_locks_has_any_write_locks_for_substates(
-            Some(exclude_transaction_id),
-            substate_ids,
-            exclude_local_only,
-        )
+        tx.substate_locks_has_any_write_locks_for_substates(Some(exclude_transaction_id), substate_ids)
     }
 }
 

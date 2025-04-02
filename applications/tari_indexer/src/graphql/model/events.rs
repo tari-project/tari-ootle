@@ -63,52 +63,53 @@ pub struct EventQuery;
 impl EventQuery {
     pub async fn get_events_for_transaction(
         &self,
-        ctx: &Context<'_>,
-        tx_hash: String,
+        _ctx: &Context<'_>,
+        _tx_hash: String,
     ) -> Result<Vec<Event>, anyhow::Error> {
-        info!(target: LOG_TARGET, "Querying events for transaction hash = {}", tx_hash);
-        let event_manager = ctx.data_unchecked::<Arc<EventManager>>();
-        let tx_id = TransactionId::from_hex(&tx_hash)?;
-        let events = match event_manager.scan_events_for_transaction(tx_id).await {
-            Ok(events) => events,
-            Err(e) => {
-                info!(
-                    target: LOG_TARGET,
-                    "Failed to scan events for transaction {} with error {}", tx_hash, e
-                );
-                return Err(e);
-            },
-        };
-
-        let events = events
-            .iter()
-            .map(|e| Event::from_engine_event(e.clone()))
-            .collect::<Result<Vec<Event>, _>>()?;
-
-        Ok(events)
+        Err(anyhow::anyhow!("Not implemented - may be removed in future"))
+        // info!(target: LOG_TARGET, "Querying events for transaction hash = {}", tx_hash);
+        // let event_manager = ctx.data_unchecked::<Arc<EventManager>>();
+        // let tx_id = TransactionId::from_hex(&tx_hash)?;
+        // let events = match event_manager.scan_events_for_transaction(tx_id).await {
+        //     Ok(events) => events,
+        //     Err(e) => {
+        //         info!(
+        //             target: LOG_TARGET,
+        //             "Failed to scan events for transaction {} with error {}", tx_hash, e
+        //         );
+        //         return Err(e);
+        //     },
+        // };
+        //
+        // let events = events
+        //     .iter()
+        //     .map(|e| Event::from_engine_event(e.clone()))
+        //     .collect::<Result<Vec<Event>, _>>()?;
+        //
+        // Ok(events)
     }
 
-    pub async fn get_events_for_substate(
-        &self,
-        ctx: &Context<'_>,
-        substate_id: String,
-        version: Option<u32>,
-    ) -> Result<Vec<Event>, anyhow::Error> {
-        let version = version.unwrap_or_default();
-        info!(
-            target: LOG_TARGET,
-            "Querying events for substate_id = {}, starting from version = {}", substate_id, version
-        );
-        let event_manager = ctx.data_unchecked::<Arc<EventManager>>();
-        let events = event_manager
-            .scan_events_for_substate_from_network(SubstateId::from_str(&substate_id)?, Some(version))
-            .await?
-            .iter()
-            .map(|e| Event::from_engine_event(e.clone()))
-            .collect::<Result<Vec<Event>, anyhow::Error>>()?;
-
-        Ok(events)
-    }
+    // pub async fn get_events_for_substate(
+    //     &self,
+    //     ctx: &Context<'_>,
+    //     substate_id: String,
+    //     version: Option<u32>,
+    // ) -> Result<Vec<Event>, anyhow::Error> {
+    //     let version = version.unwrap_or_default();
+    //     info!(
+    //         target: LOG_TARGET,
+    //         "Querying events for substate_id = {}, starting from version = {}", substate_id, version
+    //     );
+    //     let event_manager = ctx.data_unchecked::<Arc<EventManager>>();
+    //     let events = event_manager
+    //         .scan_events_for_substate_from_network(SubstateId::from_str(&substate_id)?, Some(version))
+    //         .await?
+    //         .iter()
+    //         .map(|e| Event::from_engine_event(e.clone()))
+    //         .collect::<Result<Vec<Event>, anyhow::Error>>()?;
+    //
+    //     Ok(events)
+    // }
 
     pub async fn get_events_by_payload(
         &self,

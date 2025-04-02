@@ -1,59 +1,85 @@
-//  Copyright 2024. The Tari Project
-//
-//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
-//  following conditions are met:
-//
-//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
-//  disclaimer.
-//
-//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
-//  following disclaimer in the documentation and/or other materials provided with the distribution.
-//
-//  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
-//  products derived from this software without specific prior written permission.
-//
-//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
-//  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-//  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-//  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-//  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
-//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
     fmt,
     marker::PhantomData,
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use log::log;
-use rocksdb::{SingleThreaded, TransactionDB, TransactionDBOptions};
+use rocksdb::{
+    SingleThreaded,
+    SnapshotWithThreadMode,
+    TransactionDB,
+    TransactionDBOptions,
+    TransactionOptions,
+    WriteOptions,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use tari_dan_common_types::NodeAddressable;
 use tari_dan_storage::{StateStore, StorageError};
 
 use crate::{
     model::{
+        block,
         block::BlockModel,
+        block_diff,
+        block_diff::BlockDiffModel,
+        block_transaction_execution,
         block_transaction_execution::BlockTransactionExecutionModel,
+        bookkeeping,
+        burnt_utxo,
         burnt_utxo::BurntUtxoModel,
+        chain,
+        epoch_checkpoint::EpochCheckpointModel,
         evicted_node::EvictedNodeModel,
+        foreign_parked_blocks,
+        foreign_parked_blocks::ForeignParkedBlockModel,
+        foreign_proposal,
         foreign_proposal::ForeignProposalModel,
-        last_voted::LastVotedModel,
+        foreign_receive_counter::ForeignReceiveCounterModel,
+        foreign_send_counter::ForeignSendCounterModel,
+        foreign_substate_pledge::ForeignSubstatePledgeModel,
+        lock_conflict,
         lock_conflict::LockConflictModel,
         missing_transactions::MissingTransactionModel,
+        parked_block::ParkedBlockModel,
+        pending_state_tree_diff::PendingStateTreeDiffModel,
         quorum_certificate::QuorumCertificateModel,
+        state_transition,
         state_transition::StateTransitionModel,
+        state_tree::{StateTreeModel, StateTreeStaleNodesModelRef},
+        state_tree_shard_versions::StateTreeShardVersionModel,
+        substate,
         substate::SubstateModel,
+        substate_locks,
         substate_locks::SubstateLockModel,
-        traits::RocksdbModel,
+        transaction,
+        transaction::TransactionModel,
+        transaction_pool::TransactionPoolModel,
+        transaction_pool_state_update::TransactionPoolStateUpdateModel,
+        validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
+        vote::VoteModel,
     },
     reader::RocksDbStateStoreReadTransaction,
+    traits::Cf,
     writer::RocksDbStateStoreWriteTransaction,
 };
 
 const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
+
+fn build_default_store_opts() -> rocksdb::Options {
+    let mut opts = rocksdb::Options::default();
+    opts.set_error_if_exists(false);
+    opts.create_if_missing(true);
+    opts.create_missing_column_families(true);
+    // TODO: evaluate - might depend on cores?
+    opts.set_avoid_unnecessary_blocking_io(true);
+    opts
+}
 
 pub struct RocksDbStateStore<TAddr> {
     db: Arc<TransactionDB>,
@@ -61,35 +87,12 @@ pub struct RocksDbStateStore<TAddr> {
 }
 
 impl<TAddr> RocksDbStateStore<TAddr> {
-    pub fn connect(path: &str) -> Result<Self, StorageError> {
-        let mut options = rocksdb::Options::default();
-        options.set_error_if_exists(false);
-        options.create_if_missing(true);
-        options.create_missing_column_families(true);
+    pub fn connect<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
+        let options = build_default_store_opts();
 
-        let cf_names = [
-            BlockModel::column_families(),
-            BlockTransactionExecutionModel::column_families(),
-            BurntUtxoModel::column_families(),
-            EvictedNodeModel::column_families(),
-            ForeignProposalModel::column_families(),
-            LastVotedModel::column_families(),
-            LockConflictModel::column_families(),
-            MissingTransactionModel::column_families(),
-            QuorumCertificateModel::column_families(),
-            StateTransitionModel::column_families(),
-            SubstateModel::column_families(),
-            SubstateLockModel::column_families(),
-        ]
-        .concat();
-
-        let db = TransactionDB::<SingleThreaded>::open_cf(
-            &options,
-            &TransactionDBOptions::default(),
-            path,
-            cf_names.clone(),
-        )
-        .map_err(|e| StorageError::ConnectionError {
+        let cf_names = Self::all_column_families_iter();
+        let db = TransactionDB::<SingleThreaded>::open_cf(&options, &TransactionDBOptions::default(), path, cf_names)
+            .map_err(|e| StorageError::ConnectionError {
             reason: e.into_string(),
         })?;
 
@@ -97,6 +100,63 @@ impl<TAddr> RocksDbStateStore<TAddr> {
             db: Arc::new(db),
             _addr: PhantomData,
         })
+    }
+
+    pub fn snapshot(&self) -> SnapshotWithThreadMode<'_, TransactionDB> {
+        self.db.snapshot()
+    }
+
+    fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
+        [
+            bookkeeping::CF_NAME,
+            VoteModel::name(),
+            chain::PendingChainIndex::name(),
+            chain::CommittedParentChildChainIndex::name(),
+            chain::PendingParentChildIndex::name(),
+            ForeignProposalModel::name(),
+            foreign_proposal::ProposedInBlockIndex::name(),
+            foreign_proposal::EpochIndex::name(),
+            foreign_proposal::UnconfirmedIndex::name(),
+            BlockModel::name(),
+            block::EpochHeightIndex::name(),
+            BlockDiffModel::name(),
+            block_diff::SubstateIdIndex::name(),
+            QuorumCertificateModel::name(),
+            BlockTransactionExecutionModel::name(),
+            block_transaction_execution::TransactionIndex::name(),
+            TransactionModel::name(),
+            transaction::FinalizedAtIndex::name(),
+            TransactionPoolModel::name(),
+            TransactionPoolStateUpdateModel::name(),
+            MissingTransactionModel::name(),
+            ParkedBlockModel::name(),
+            ForeignParkedBlockModel::name(),
+            foreign_parked_blocks::MissingTransactionsModel::name(),
+            ForeignSendCounterModel::name(),
+            ForeignReceiveCounterModel::name(),
+            SubstateLockModel::name(),
+            substate_locks::HeadIndex::name(),
+            substate_locks::BlockIdIndex::name(),
+            substate_locks::SubstateIdIndex::name(),
+            SubstateModel::name(),
+            substate::HeadIndex::name(),
+            substate::UnprunedDownedValuesIndex::name(),
+            StateTransitionModel::name(),
+            state_transition::ShardSeqIndex::name(),
+            ForeignSubstatePledgeModel::name(),
+            PendingStateTreeDiffModel::name(),
+            StateTreeModel::name(),
+            StateTreeStaleNodesModelRef::name(),
+            StateTreeShardVersionModel::name(),
+            EpochCheckpointModel::name(),
+            BurntUtxoModel::name(),
+            burnt_utxo::ProposedInBlockIndex::name(),
+            LockConflictModel::name(),
+            lock_conflict::ByBlockIdQuery::name(),
+            EvictedNodeModel::name(),
+            ValidatorNodeEpochStatsModel::name(),
+        ]
+        .into_iter()
     }
 }
 
@@ -117,14 +177,21 @@ impl<TAddr: NodeAddressable + Serialize + DeserializeOwned> StateStore for Rocks
     where TAddr: 'a;
 
     fn create_read_tx(&self) -> Result<Self::ReadTransaction<'_>, StorageError> {
-        let tx = self.db.transaction();
-        Ok(RocksDbStateStoreReadTransaction::new(self.db.clone(), tx))
+        let mut opts = TransactionOptions::default();
+        let mut write_opts = WriteOptions::new();
+        // NOTE: these options are provided because I assume that they have a smaller footprint and
+        // (almost) prevent writes. If there are any issues these options, or if the assumptions
+        // are incorrect, they can be simply be defaulted.
+        opts.set_max_write_batch_size(1);
+        write_opts.disable_wal(true);
+        let tx = self.db.transaction_opt(&write_opts, &opts);
+        Ok(RocksDbStateStoreReadTransaction::new(&self.db, tx))
     }
 
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
         let timer = Instant::now();
         let tx = self.db.transaction();
-        let tx = RocksDbStateStoreWriteTransaction::new(self.db.clone(), tx);
+        let tx = RocksDbStateStoreWriteTransaction::new(&self.db, tx);
         let elapsed = timer.elapsed();
         let level = if elapsed > Duration::from_secs(1) {
             log::Level::Warn

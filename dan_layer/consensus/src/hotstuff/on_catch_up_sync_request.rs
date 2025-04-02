@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch};
+use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_storage::{
     consensus_models::{Block, LastProposed, LastSentVote, LeafBlock},
     StateStore,
@@ -32,13 +32,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
     }
 
     #[allow(clippy::too_many_lines)]
-    pub fn handle(
-        &self,
-        from: TConsensusSpec::Addr,
-        local_committee_info: CommitteeInfo,
-        epoch: Epoch,
-        msg: SyncRequestMessage,
-    ) {
+    pub fn handle(&self, from: TConsensusSpec::Addr, epoch: Epoch, msg: SyncRequestMessage) {
         if msg.high_qc.epoch() != epoch {
             warn!(
                 target: LOG_TARGET,
@@ -89,7 +83,6 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                 let blocks = Block::get_all_blocks_between(
                     tx,
                     leaf_block.epoch(),
-                    local_committee_info.shard_group(),
                     msg.high_qc.block_height(),
                     leaf_block.height(),
                     true,

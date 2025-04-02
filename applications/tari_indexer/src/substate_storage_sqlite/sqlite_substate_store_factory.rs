@@ -45,7 +45,6 @@ use tari_dan_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_template_lib::models::TemplateAddress;
-use tari_transaction::TransactionId;
 use thiserror::Error;
 
 use super::models::{
@@ -205,16 +204,16 @@ pub trait SubstateStoreReadTransaction {
         start_idx: i32,
         end_idx: i32,
     ) -> Result<Vec<IndexedNftSubstate>, StorageError>;
-    fn get_events_for_transaction(&mut self, tx_id: TransactionId) -> Result<Vec<EventData>, StorageError>;
-    fn get_stored_versions_of_events(
-        &mut self,
-        substate_id: &SubstateId,
-        start_version: u32,
-    ) -> Result<Vec<u32>, StorageError>;
+    // fn get_events_for_transaction(&mut self, tx_id: TransactionId) -> Result<Vec<EventData>, StorageError>;
+    // fn get_stored_versions_of_events(
+    //     &mut self,
+    //     substate_id: &SubstateId,
+    //     start_version: u32,
+    // ) -> Result<Vec<u32>, StorageError>;
     #[allow(dead_code)]
     fn get_events_by_version(&mut self, substate_id: &SubstateId, version: u32)
         -> Result<Vec<EventData>, StorageError>;
-    fn get_all_events(&mut self, substate_id: &SubstateId) -> Result<Vec<EventData>, StorageError>;
+    // fn get_all_events(&mut self, substate_id: &SubstateId) -> Result<Vec<EventData>, StorageError>;
     fn get_events_by_payload(
         &mut self,
         payload_key: String,
@@ -431,52 +430,52 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         Ok(res)
     }
 
-    fn get_events_for_transaction(&mut self, tx_id: TransactionId) -> Result<Vec<EventData>, StorageError> {
-        info!(
-            target: LOG_TARGET,
-            "Querying substate scanner database: get_events_for_transaction with tx_hash = {}", tx_id
-        );
-        let res = sql_query(
-            "SELECT substate_id, template_address, tx_hash, topic, payload, version FROM events WHERE tx_hash = ?",
-        )
-        .bind::<Text, _>(tx_id.to_string())
-        .get_results::<EventData>(self.connection())
-        .map_err(|e| StorageError::QueryError {
-            reason: format!("get_events_for_transaction: {}", e),
-        })?;
-
-        Ok(res)
-    }
-
-    fn get_stored_versions_of_events(
-        &mut self,
-        substate_id: &SubstateId,
-        start_version: u32,
-    ) -> Result<Vec<u32>, StorageError> {
-        info!(
-            target: LOG_TARGET,
-            "Querying substate scanner database: get_stored_versions_of_events with substate_id = {} and \
-             start_version = {}",
-             substate_id,
-            start_version
-        );
-        use crate::substate_storage_sqlite::schema::events;
-        let res: Vec<i32> = events::table
-            .filter(
-                events::substate_id
-                    .eq(&substate_id.to_string())
-                    .and(events::version.gt(start_version as i32)),
-            )
-            .select(events::version)
-            .get_results(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_last_version_of_events: {}", e),
-            })?;
-
-        // for our purposes, a non-existing version in the db, means we have
-        // to scan the network from res = 0
-        Ok(res.into_iter().map(|v| v as u32).collect::<Vec<_>>())
-    }
+    // fn get_events_for_transaction(&mut self, tx_id: TransactionId) -> Result<Vec<EventData>, StorageError> {
+    //     info!(
+    //         target: LOG_TARGET,
+    //         "Querying substate scanner database: get_events_for_transaction with tx_hash = {}", tx_id
+    //     );
+    //     let res = sql_query(
+    //         "SELECT substate_id, template_address, tx_hash, topic, payload, version FROM events WHERE tx_hash = ?",
+    //     )
+    //     .bind::<Text, _>(tx_id.to_string())
+    //     .get_results::<EventData>(self.connection())
+    //     .map_err(|e| StorageError::QueryError {
+    //         reason: format!("get_events_for_transaction: {}", e),
+    //     })?;
+    //
+    //     Ok(res)
+    // }
+    //
+    // fn get_stored_versions_of_events(
+    //     &mut self,
+    //     substate_id: &SubstateId,
+    //     start_version: u32,
+    // ) -> Result<Vec<u32>, StorageError> {
+    //     info!(
+    //         target: LOG_TARGET,
+    //         "Querying substate scanner database: get_stored_versions_of_events with substate_id = {} and \
+    //          start_version = {}",
+    //          substate_id,
+    //         start_version
+    //     );
+    //     use crate::substate_storage_sqlite::schema::events;
+    //     let res: Vec<i32> = events::table
+    //         .filter(
+    //             events::substate_id
+    //                 .eq(&substate_id.to_string())
+    //                 .and(events::version.gt(start_version as i32)),
+    //         )
+    //         .select(events::version)
+    //         .get_results(self.connection())
+    //         .map_err(|e| StorageError::QueryError {
+    //             reason: format!("get_last_version_of_events: {}", e),
+    //         })?;
+    //
+    //     // for our purposes, a non-existing version in the db, means we have
+    //     // to scan the network from res = 0
+    //     Ok(res.into_iter().map(|v| v as u32).collect::<Vec<_>>())
+    // }
 
     fn get_events_by_version(
         &mut self,
@@ -532,17 +531,17 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         Ok(res)
     }
 
-    fn get_all_events(&mut self, substate_id: &SubstateId) -> Result<Vec<EventData>, StorageError> {
-        let res = sql_query(
-            "SELECT substate_id, template_address, tx_hash, topic, payload, version FROM events WHERE substate_id = ?",
-        )
-        .bind::<Text, _>(substate_id.to_string())
-        .get_results::<EventData>(self.connection())
-        .map_err(|e| StorageError::QueryError {
-            reason: format!("get_all_events: {}", e),
-        })?;
-        Ok(res)
-    }
+    // fn get_all_events(&mut self, substate_id: &SubstateId) -> Result<Vec<EventData>, StorageError> {
+    //     let res = sql_query(
+    //         "SELECT substate_id, template_address, tx_hash, topic, payload, version FROM events WHERE substate_id =
+    // ?",     )
+    //     .bind::<Text, _>(substate_id.to_string())
+    //     .get_results::<EventData>(self.connection())
+    //     .map_err(|e| StorageError::QueryError {
+    //         reason: format!("get_all_events: {}", e),
+    //     })?;
+    //     Ok(res)
+    // }
 
     fn get_events(
         &mut self,
@@ -577,6 +576,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         }
 
         let events = query
+            .order(events::id.desc())
             .get_results::<Event>(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_events: {}", e),
@@ -620,7 +620,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
 
         let oldest_epoch = res
             .map(|r| {
-                let epoch_as_u64 = r.try_into().map_err(|_| StorageError::InvalidIntegerCast)?;
+                let epoch_as_u64 = r as u64;
                 Ok::<Epoch, StorageError>(Epoch(epoch_as_u64))
             })
             .transpose()?;
@@ -713,7 +713,7 @@ impl SubstateStoreWriteTransaction for SqliteSubstateStoreWriteTransaction<'_> {
                     .map_err(|e| StorageError::QueryError {
                         reason: format!("Update leaf node: {}", e),
                     })?;
-                info!(
+                debug!(
                     target: LOG_TARGET,
                     "Updated substate {} version to {}", address, new_substate.version
                 );

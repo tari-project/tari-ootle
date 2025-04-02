@@ -176,7 +176,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         block_id: &BlockId,
     ) -> Result<PreparedTransaction, BlockTransactionExecutorError> {
         let _timer = TraceTimer::info(LOG_TARGET, "prepare");
-        let mut transaction = tx_rec.get_transaction(store.read_transaction())?;
+        let transaction = tx_rec.get_transaction(store.read_transaction())?;
         let transaction_id = *transaction.id();
         let mut outputs = IndexSet::new();
         outputs.insert(VersionedSubstateId::new(
@@ -199,20 +199,15 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 let is_local_only = local_committee_info.is_all_local(transaction.transaction.all_inputs_iter());
                 // Currently this message will differ depending on which involved shard is asked.
                 // e.g. local nodes will say "failed to lock inputs", foreign nodes will say "foreign shard abort"
-                transaction.abort(RejectReason::OneOrMoreInputsNotFound(err.to_string()));
+                let execution =
+                    transaction.into_abort_execution(RejectReason::OneOrMoreInputsNotFound(err.to_string()));
                 if is_local_only {
                     warn!(target: LOG_TARGET, "⚠️ PREPARE: transaction {} only contains local inputs. Will abort locally", transaction_id);
-                    return Ok(PreparedTransaction::new_local_early_abort(
-                        transaction
-                            .into_execution()
-                            .expect("invariant: abort reason is set but into_execution is None"),
-                    ));
+                    return Ok(PreparedTransaction::new_local_early_abort(execution));
                 } else {
                     warn!(target: LOG_TARGET, "⚠️ PREPARE: transaction {} has foreign inputs. Will prepare ABORT", transaction_id);
                     return Ok(PreparedTransaction::new_multishard_executed(
-                        transaction
-                            .into_execution()
-                            .expect("invariant: abort reason is set but into_execution is None"),
+                        execution,
                         LockStatus::default(),
                     ));
                 }
@@ -356,10 +351,8 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         let lock_status = store.try_lock_all(transaction_id, requested_locks, false)?;
                         if let Some(err) = lock_status.hard_conflict() {
                             warn!(target: LOG_TARGET, "⚠️ PREPARE: Hard conflict when locking inputs: {err}");
-                            transaction.abort(RejectReason::FailedToLockInputs(err.to_string()));
-                            let execution = transaction
-                                .into_execution()
-                                .expect("invariant: abort reason is set but into_execution is None");
+                            let execution =
+                                transaction.into_abort_execution(RejectReason::FailedToLockInputs(err.to_string()));
                             Ok(PreparedTransaction::new_multishard_executed(execution, lock_status))
                         } else {
                             // CASE: Multishard transaction, not executed

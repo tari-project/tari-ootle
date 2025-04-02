@@ -116,8 +116,6 @@ pub async fn spawn_validator_node(
         .map(|vn| format!("{}::/ip4/127.0.0.1/tcp/{}", vn.public_key, vn.port))
         .collect();
 
-    let shutdown = Shutdown::new();
-    let shutdown_signal = shutdown.to_signal();
     let temp_dir = get_base_dir_for_scenario(
         "validator_node",
         world.current_scenario_name.as_ref().unwrap(),
@@ -125,37 +123,42 @@ pub async fn spawn_validator_node(
     );
     // Connect to shard db
     let temp_dir_path = temp_dir.clone();
-    let handle = task::spawn(async move {
-        let mut config = ApplicationConfig {
-            common: CommonConfig::default(),
-            validator_node: ValidatorNodeConfig::default(),
-            epoch_oracle: EpochOracleConfig::default(),
-            peer_seeds: PeerSeedsConfig::default(),
-            network: Network::LocalNet,
-        };
+    let shutdown = Shutdown::new();
+    let handle = task::spawn({
+        let shutdown = shutdown.clone();
+        async move {
+            let mut config = ApplicationConfig {
+                common: CommonConfig::default(),
+                validator_node: ValidatorNodeConfig::default(),
+                epoch_oracle: EpochOracleConfig::default(),
+                peer_seeds: PeerSeedsConfig::default(),
+                network: Network::LocalNet,
+            };
 
-        // temporal folder for the VN files (e.g. sqlite file, json files, etc.)
-        println!("Using validator_node temp_dir: {}", temp_dir.display());
-        config.common.base_path.clone_from(&temp_dir);
-        config.network = Network::LocalNet;
-        config.validator_node.data_dir = temp_dir.to_path_buf();
-        config.validator_node.shard_key_file = temp_dir.join("shard_key.json");
-        config.validator_node.identity_file = temp_dir.join("validator_node_id.json");
-        config.epoch_oracle.base_layer.base_node_grpc_url =
-            Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
+            // temporal folder for the VN files (e.g. sqlite file, json files, etc.)
+            println!("Using validator_node temp_dir: {}", temp_dir.display());
+            config.common.base_path.clone_from(&temp_dir);
+            config.network = Network::LocalNet;
+            config.validator_node.set_base_path(&temp_dir);
+            config.validator_node.shard_key_file = temp_dir.join("shard_key.json");
+            config.validator_node.identity_file = temp_dir.join("validator_node_id.json");
+            config.epoch_oracle.base_layer.base_node_grpc_url =
+                Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
 
-        // config.validator_node.public_address =
-        // Some(config.validator_node.p2p.transport.tcp.listener_address.clone());
-        config.validator_node.p2p.enable_mdns = false;
-        config.validator_node.json_rpc_listener_address = Some(format!("127.0.0.1:{}", json_rpc_port).parse().unwrap());
-        config.validator_node.web_ui_listener_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
-        config.validator_node.p2p.listener_port = port;
+            // config.validator_node.public_address =
+            // Some(config.validator_node.p2p.transport.tcp.listener_address.clone());
+            config.validator_node.p2p.enable_mdns = false;
+            config.validator_node.json_rpc_listener_address =
+                Some(format!("127.0.0.1:{}", json_rpc_port).parse().unwrap());
+            config.validator_node.web_ui_listener_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
+            config.validator_node.p2p.listener_port = port;
 
-        config.validator_node.fee_claim_public_key = key.public_key;
+            config.validator_node.fee_claim_public_key = key.public_key;
 
-        // Add all other VNs as peer seeds
-        config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
-        run_validator_node(&config, shutdown_signal).await
+            // Add all other VNs as peer seeds
+            config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
+            run_validator_node(&config, shutdown).await
+        }
     });
 
     // Wait for node to start up

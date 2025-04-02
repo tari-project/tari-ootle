@@ -1,10 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    collections::HashMap,
-    ops::{ControlFlow, Deref},
-};
+use std::{collections::HashMap, ops::ControlFlow};
 
 use indexmap::IndexMap;
 use log::*;
@@ -33,15 +30,13 @@ use tari_dan_storage::{
         QuorumCertificate,
         SubstateChange,
         ValidatorConsensusStats,
-        VersionedStateHashTreeDiff,
     },
     StateStore,
     StateStoreReadTransaction,
-    StateStoreWriteTransaction,
     StorageError,
 };
 use tari_engine_types::{substate::SubstateDiff, template_models::Amount, ValidatorFeePool};
-use tari_state_tree::{JellyfishMerkleTree, StateTreeError};
+use tari_state_tree::{JellyfishMerkleTree, StateTreeError, SPARSE_MERKLE_PLACEHOLDER_HASH};
 
 use crate::{
     hotstuff::{
@@ -239,7 +234,7 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
     shard_group: ShardGroup,
     pending_tree_diffs: HashMap<Shard, Vec<PendingShardStateTreeDiff>>,
     changes: I,
-) -> Result<(FixedHash, IndexMap<Shard, VersionedStateHashTreeDiff>), StateTreeError> {
+) -> Result<(FixedHash, IndexMap<Shard, PendingShardStateTreeDiff>), StateTreeError> {
     let mut change_map = IndexMap::new();
 
     changes.into_iter().for_each(|ch| {
@@ -255,17 +250,16 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
     ))
 }
 
-pub(crate) fn create_epoch_checkpoint<TTx>(
-    tx: &mut TTx,
+pub(crate) fn generate_epoch_checkpoint<TTx>(
+    tx: &TTx,
     epoch: Epoch,
     shard_group: ShardGroup,
 ) -> Result<EpochCheckpoint, HotStuffError>
 where
-    TTx: StateStoreWriteTransaction + Deref,
-    TTx::Target: StateStoreReadTransaction,
+    TTx: StateStoreReadTransaction,
 {
     // Get the last 3 blocks in the previous epoch. These blocks should end the epoch.
-    let mut blocks = Block::get_last_n_in_epoch(&**tx, 3, epoch)?;
+    let mut blocks = Block::get_last_n_in_epoch(tx, 3, epoch)?;
     if blocks.is_empty() {
         return Err(HotStuffError::StorageError(StorageError::NotFound {
             item: "Block::get_last_n_in_epoch",
@@ -281,22 +275,25 @@ where
 
     // adding global shard first
     if let Some(version) = tx.state_tree_versions_get_latest(Shard::global())? {
-        let scoped_store = ShardScopedTreeStoreReader::new(&**tx, Shard::global());
+        let scoped_store = ShardScopedTreeStoreReader::new(tx, Shard::global());
         let jmt = JellyfishMerkleTree::new(&scoped_store);
         let root_hash = jmt
             .get_root_hash(version)
             .map_err(|e| HotStuffError::StateTreeError(e.into()))?;
 
         shard_roots.insert(Shard::global(), root_hash);
+    } else {
+        shard_roots.insert(Shard::global(), SPARSE_MERKLE_PLACEHOLDER_HASH);
     }
 
     for shard in shard_group.shard_iter() {
         let Some(version) = tx.state_tree_versions_get_latest(shard)? else {
             // At v0 there have been no state changes
+            shard_roots.insert(shard, SPARSE_MERKLE_PLACEHOLDER_HASH);
             continue;
         };
 
-        let scoped_store = ShardScopedTreeStoreReader::new(&**tx, shard);
+        let scoped_store = ShardScopedTreeStoreReader::new(tx, shard);
         let jmt = JellyfishMerkleTree::new(&scoped_store);
         let root_hash = jmt
             .get_root_hash(version)
@@ -305,7 +302,15 @@ where
         shard_roots.insert(shard, root_hash);
     }
     let checkpoint = EpochCheckpoint::new(commit_block, qcs, shard_roots);
-    checkpoint.save(tx)?;
+    let calculated_mr = checkpoint.compute_state_merkle_root()?;
+    if calculated_mr != checkpoint.block().state_merkle_root() {
+        return Err(HotStuffError::InvariantError(format!(
+            "Epoch checkpoint state merkle root mismatch. Expected: {}, Calculated: {}, block: {}",
+            checkpoint.block().state_merkle_root(),
+            calculated_mr,
+            checkpoint.block()
+        )));
+    }
 
     Ok(checkpoint)
 }

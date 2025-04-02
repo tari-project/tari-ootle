@@ -7,7 +7,7 @@ use log::*;
 use tari_dan_common_types::{
     optional::{IsNotFoundError, Optional},
     SubstateRequirement,
-    VersionedSubstateId,
+    VersionedSubstateIdRef,
 };
 use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
@@ -233,7 +233,7 @@ where
                                 ),
                             })?;
 
-                        self.commit_result(tx, transaction_id, diff)?;
+                        self.commit_diff(tx, diff)?;
                     }
 
                     tx.transactions_set_result_and_status(
@@ -297,10 +297,9 @@ where
     }
 
     #[allow(clippy::too_many_lines)]
-    fn commit_result(
+    fn commit_diff(
         &self,
         tx: &mut TStore::WriteTransaction<'_>,
-        transaction_id: TransactionId,
         diff: &SubstateDiff,
     ) -> Result<(), TransactionApiError> {
         let mut downed_substates_with_parents = HashMap::with_capacity(diff.down_len());
@@ -328,8 +327,7 @@ where
 
             debug!(target: LOG_TARGET, "Substate {} up", component_addr);
             tx.substates_upsert_root(
-                transaction_id,
-                VersionedSubstateId::new(component_addr.clone(), substate.version()),
+                VersionedSubstateIdRef::new(component_addr, substate.version()),
                 indexed.referenced_substates().collect(),
                 Some(header.module_name.clone()),
                 Some(header.template_address),
@@ -351,23 +349,20 @@ where
                             // The vault for an account may have been mutated without mutating the account component
                             // If we know this vault, set it as a child of the account
                             tx.substates_upsert_child(
-                                transaction_id,
                                 vault.account_address.clone(),
-                                VersionedSubstateId::new(owned_id, child.version()),
+                                VersionedSubstateIdRef::new(&owned_id, child.version()),
                                 [vault.resource_address.into()].into_iter().collect(),
                             )?;
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                                 tx.substates_upsert_child(
-                                    transaction_id,
                                     vault.account_address,
-                                    resource.substate_id,
+                                    resource.substate_id.as_ref(),
                                     HashSet::new(),
                                 )?;
                             }
                         } else {
                             tx.substates_upsert_root(
-                                transaction_id,
-                                VersionedSubstateId::new(owned_id, child.version()),
+                                VersionedSubstateIdRef::new(&owned_id, child.version()),
                                 [(*child.substate_value().vault().unwrap().resource_address()).into()]
                                     .into_iter()
                                     .collect(),
@@ -380,9 +375,8 @@ where
 
                     let maybe_substate = tx.substates_get(&owned_id).optional()?;
                     tx.substates_upsert_child(
-                        transaction_id,
                         parent,
-                        VersionedSubstateId::new(owned_id, child.version()),
+                        VersionedSubstateIdRef::new(&owned_id, child.version()),
                         maybe_substate
                             .map(|s| s.referenced_substates.into_iter().collect())
                             .unwrap_or_default(),
@@ -397,23 +391,20 @@ where
                     // The vault for an account may have been mutated without mutating the account component
                     // If we know this vault, set it as a child of the account
                     tx.substates_upsert_child(
-                        transaction_id,
                         vault.account_address.clone(),
-                        VersionedSubstateId::new(id.clone(), substate.version()),
+                        VersionedSubstateIdRef::new(id, substate.version()),
                         [vault.resource_address.into()].into_iter().collect(),
                     )?;
                     if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                         tx.substates_upsert_child(
-                            transaction_id,
                             vault.account_address,
-                            resource.substate_id,
+                            resource.substate_id.as_ref(),
                             HashSet::new(),
                         )?;
                     }
                 } else {
                     tx.substates_upsert_root(
-                        transaction_id,
-                        VersionedSubstateId::new(id.clone(), substate.version()),
+                        VersionedSubstateIdRef::new(id, substate.version()),
                         [(*substate.substate_value().vault().unwrap().resource_address()).into()]
                             .into_iter()
                             .collect(),
@@ -431,8 +422,7 @@ where
 
             let maybe_obj = tx.substates_get(id).optional()?;
             tx.substates_upsert_root(
-                transaction_id,
-                VersionedSubstateId::new(id.clone(), substate.version()),
+                VersionedSubstateIdRef::new(id, substate.version()),
                 indexed.as_ref().iter().flat_map(|i| i.referenced_substates()).collect(),
                 maybe_obj.as_ref().and_then(|o| o.module_name.clone()),
                 maybe_obj.as_ref().and_then(|o| o.template_address),

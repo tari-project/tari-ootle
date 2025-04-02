@@ -378,3 +378,9 @@ impl Display for QcId {
         Display::fmt(&self.0, f)
     }
 }
+
+impl AsRef<QcId> for QcId {
+    fn as_ref(&self) -> &QcId {
+        self
+    }
+}

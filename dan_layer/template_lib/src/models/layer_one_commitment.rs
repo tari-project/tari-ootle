@@ -25,6 +25,10 @@ const TAG: u64 = BinaryTag::UnclaimedConfidentialOutputAddress.as_u64();
 pub struct UnclaimedConfidentialOutputAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl UnclaimedConfidentialOutputAddress {
+    pub fn new(key: ObjectKey) -> Self {
+        Self(BorTag::new(key))
+    }
+
     pub fn from_hex(hex: &str) -> Result<Self, KeyParseError> {
         Ok(Self(BorTag::new(ObjectKey::from_hex(hex)?)))
     }
@@ -74,9 +78,29 @@ impl FromStr for UnclaimedConfidentialOutputAddress {
         Self::from_hex(s)
     }
 }
+
+impl AsRef<[u8]> for UnclaimedConfidentialOutputAddress {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 #[cfg(feature = "borsh")]
-impl borsh::BorshSerialize for UnclaimedConfidentialOutputAddress {
-    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+mod borsh {
+    use std::io::Read;
+
+    use super::*;
+
+    impl ::borsh::BorshSerialize for UnclaimedConfidentialOutputAddress {
+        fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+            ::borsh::BorshSerialize::serialize(self.as_object_key().array(), writer)
+        }
+    }
+
+    impl ::borsh::BorshDeserialize for UnclaimedConfidentialOutputAddress {
+        fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+            let key = ::borsh::BorshDeserialize::deserialize_reader(reader)?;
+            Ok(UnclaimedConfidentialOutputAddress::new(ObjectKey::from_array(key)))
+        }
     }
 }

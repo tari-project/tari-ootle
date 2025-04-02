@@ -22,7 +22,6 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceiptAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
-use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::{
     consensus_models::{
@@ -54,14 +53,10 @@ pub struct TransactionRecord {
     pub final_decision: Option<Decision>,
     pub finalized_time: Option<Duration>,
     pub abort_reason: Option<RejectReason>,
-    pub created_at: PrimitiveDateTime,
-    pub finalized_at: Option<PrimitiveDateTime>,
 }
 
 impl TransactionRecord {
     pub fn new(transaction: Transaction) -> Self {
-        let datetime = OffsetDateTime::now_utc();
-        let now = PrimitiveDateTime::new(datetime.date(), datetime.time());
         Self {
             transaction,
             execution_result: None,
@@ -70,8 +65,6 @@ impl TransactionRecord {
             finalized_time: None,
             resulting_outputs: None,
             abort_reason: None,
-            created_at: now,
-            finalized_at: None,
         }
     }
 
@@ -83,8 +76,6 @@ impl TransactionRecord {
         finalized_time: Option<Duration>,
         resulting_outputs: Option<Vec<VersionedSubstateIdLockIntent>>,
         abort_reason: Option<RejectReason>,
-        created_at: PrimitiveDateTime,
-        finalized_at: Option<PrimitiveDateTime>,
     ) -> Self {
         Self {
             transaction,
@@ -94,8 +85,6 @@ impl TransactionRecord {
             finalized_time,
             resulting_outputs,
             abort_reason,
-            created_at,
-            finalized_at,
         }
     }
 
@@ -171,10 +160,6 @@ impl TransactionRecord {
 
     pub fn abort_reason(&self) -> Option<&RejectReason> {
         self.abort_reason.as_ref()
-    }
-
-    pub fn finalized_at(&self) -> Option<PrimitiveDateTime> {
-        self.finalized_at
     }
 
     pub fn abort(&mut self, reason: RejectReason) -> &mut Self {
@@ -508,8 +493,6 @@ impl From<ExecutedTransaction> for TransactionRecord {
         let finalized_time = tx.finalized_time();
         let abort_details = tx.abort_reason().cloned();
         let (transaction, result, resolved_inputs, resulting_outputs) = tx.dissolve();
-        let datetime = OffsetDateTime::now_utc();
-        let now = PrimitiveDateTime::new(datetime.date(), datetime.time());
 
         Self {
             transaction,
@@ -519,8 +502,6 @@ impl From<ExecutedTransaction> for TransactionRecord {
             finalized_time,
             resulting_outputs: Some(resulting_outputs),
             abort_reason: abort_details,
-            created_at: now,    // TODO: check if its fine
-            finalized_at: None, // TODO: check if its fine
         }
     }
 }

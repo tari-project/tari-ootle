@@ -106,9 +106,7 @@ impl TryFrom<Transaction> for consensus_models::TransactionRecord {
         let resulting_outputs = value.resulting_outputs.as_deref().map(deserialize_json).transpose()?;
         let resolved_inputs = value.resolved_inputs.as_deref().map(deserialize_json).transpose()?;
         let abort_details = value.abort_details.as_deref().map(deserialize_json).transpose()?;
-
-        let finalized_at = value.finalized_at;
-        let created_at = value.created_at;
+        
         let finalized_time = value
             .finalized_at
             .map(|t| t.assume_offset(time::UtcOffset::UTC) - value.created_at.assume_offset(time::UtcOffset::UTC))
@@ -122,8 +120,6 @@ impl TryFrom<Transaction> for consensus_models::TransactionRecord {
             finalized_time,
             resulting_outputs,
             abort_details,
-            created_at,
-            finalized_at,
         ))
     }
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 use log::{error, info, warn};
 use tari_common_types::types::PublicKey;
 use tari_crypto::tari_utilities::ByteArray;
-use tari_dan_common_types::{optional::IsNotFoundError, VersionedSubstateId};
+use tari_dan_common_types::{optional::IsNotFoundError, VersionedSubstateIdRef};
 use tari_dan_wallet_sdk::{
     apis::{accounts::AccountsApiError, key_manager::TRANSACTION_BRANCH},
     network::WalletNetworkInterface,
@@ -88,11 +88,11 @@ where
                                     }
 
                                     // add substate
-                                    if let Err(error) = self.wallet_sdk.substate_api().save_root(
-                                        result.created_by_transaction,
-                                        VersionedSubstateId::new(result.address, result.version),
-                                        vec![],
-                                    ) {
+                                    if let Err(error) = self
+                                        .wallet_sdk
+                                        .substate_api()
+                                        .save_root(VersionedSubstateIdRef::new(&result.address, result.version), vec![])
+                                    {
                                         error!(target: LOG_TARGET, "Failed to save substate: {:?}", error);
                                     }
 

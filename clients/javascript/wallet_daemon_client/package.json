@@ -25,7 +25,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@tari-project/typescript-bindings": "^1.5.3"
+    "@tari-project/typescript-bindings": "^1.5.4"
   },
   "devDependencies": {
     "typescript": "^5.8.2"

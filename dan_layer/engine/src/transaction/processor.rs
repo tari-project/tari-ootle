@@ -622,17 +622,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 let mut process = WasmProcess::init(&mut store, loaded, runtime)?;
                 process.invoke(&mut store, &function_def, args)?
             },
-            LoadedTemplate::Flow(flow_factory) => {
-                flow_factory.run_new_instance(
-                    Arc::new(template_provider.clone()),
-                    runtime,
-                    &function_def,
-                    args,
-                    // TODO
-                    0,
-                    MAX_CALL_DEPTH,
-                )?
-            },
         };
         Ok(result)
     }

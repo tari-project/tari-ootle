@@ -38,7 +38,6 @@ import { useFilePicker } from "use-file-picker";
 import { ResourceAddress, ResourceType, substateIdToString } from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
 import { usePublishTemplate } from "../../../api/hooks/useTransactions";
-import { Input } from "@mui/material";
 import { FileAmountLimitValidator, FileSizeValidator, FileTypeValidator } from "use-file-picker/validators";
 import { FileContent } from "use-file-picker/types";
 import { base64FromArrayBuffer } from "../../../utils/helpers";

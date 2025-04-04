@@ -649,7 +649,7 @@ impl JsonRpcHandlers {
                     answer_id,
                     JsonRpcError::new(
                         JsonRpcErrorReason::InternalError,
-                        format!("Failed to send indexer ready request: {:?}", error).to_string(),
+                        format!("Failed to send indexer ready request: {:?}", error),
                         Value::Null,
                     ),
                 )

@@ -13,6 +13,10 @@ Feature: Indexer node
     Given a wallet WALLET connected to base node BASE
     Given a miner MINER connected to base node BASE and wallet WALLET
 
+    # Initialize indexer and connect wallet daemon
+    Given an indexer IDX connected to base node BASE
+    Given a wallet daemon WALLET_D connected to indexer IDX
+
     # Initialize a validator node
     Given a validator node VN connected to base node BASE and wallet daemon WALLET_D
 
@@ -22,10 +26,6 @@ Feature: Indexer node
     When validator node VN sends a registration transaction to base wallet WALLET
     When miner MINER mines 26 new blocks
     Then the validator node VN is listed as registered
-
-    # Initialize indexer and connect wallet daemon
-    Given an indexer IDX connected to base node BASE
-    Given a wallet daemon WALLET_D connected to indexer IDX
 
     # Create the sender account
     When I create an account ACC via the wallet daemon WALLET_D with 2000000 free coins
@@ -82,8 +82,7 @@ Feature: Indexer node
 #    Then the indexer IDX returns 6 non fungibles for resource NFT/resources/0
 
     # Scan the network for the event emitted on ACC creation
-  # TODO: events dont seem deterministic
-#    When indexer IDX scans the network events for account ACC with topics std.component.created,Account.pay_fee,Account.pay_fee,Account.pay_fee,Account.pay_fee,Account.pay_fee,Account.pay_fee,std.component.created,Account.pay_fee,Account.pay_fee,deposit,std.component.updated,deposit,deposit,deposit,deposit,deposit
+    When indexer IDX scans the network events for account ACC has topics std.component.created,Account.pay_fee,Account.deposit,std.component.updated
 
   Scenario: Indexer GraphQL requests work
     # Initialize a base node, wallet, miner and VN

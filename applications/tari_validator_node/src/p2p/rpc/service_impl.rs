@@ -326,8 +326,14 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             }
         };
 
+        let committee_info = self
+            .epoch_manager
+            .get_local_committee_info(current_epoch)
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
         let (sender, receiver) = mpsc::channel(10);
-        task::spawn(BlockSyncTask::new(store, start_block_id, None, sender).run(req));
+        task::spawn(BlockSyncTask::new(store, start_block_id, None, sender, committee_info.num_preshards()).run(req));
 
         Ok(Streaming::new(receiver))
     }

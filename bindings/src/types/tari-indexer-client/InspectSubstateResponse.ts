@@ -6,5 +6,4 @@ export interface InspectSubstateResponse {
   address: SubstateId;
   version: number;
   substate: SubstateValue;
-  created_by_transaction: string;
 }

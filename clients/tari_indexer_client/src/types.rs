@@ -12,6 +12,7 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     serde_with as serde_tools,
     substate::{Substate, SubstateId, SubstateValue},
+    template_models::ResourceAddress,
     TemplateAddress,
 };
 use tari_template_abi::TemplateDef;
@@ -71,6 +72,7 @@ pub struct ListSubstateItem {
     )
 )]
 pub struct GetSubstateRequest {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: SubstateId,
     pub version: Option<u32>,
     #[serde(default)]
@@ -255,40 +257,8 @@ pub struct GetIdentityResponse {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
-pub struct GetNonFungibleCollectionsResponse {
-    #[cfg_attr(feature = "ts", ts(type = "Array<[string, number]>"))]
-    pub collections: Vec<(String, i64)>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct GetNonFungibleCountRequest {
-    pub address: SubstateId,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
-pub struct GetNonFungibleCountResponse {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub count: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(TS),
-    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
-)]
 pub struct GetNonFungiblesRequest {
-    pub address: SubstateId,
+    pub address: ResourceAddress,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub start_index: u64,
     #[cfg_attr(feature = "ts", ts(type = "number"))]

@@ -21,7 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 
 use crate::{
     substate_manager::SubstateResponse,
@@ -32,7 +32,7 @@ use crate::{
 pub struct Substate {
     pub id: i32,
     pub address: String,
-    pub version: i64,
+    pub version: i32,
     pub data: String,
     // TODO: unused
     pub tx_hash: String,
@@ -47,7 +47,7 @@ impl TryFrom<Substate> for SubstateResponse {
     fn try_from(row: SubstateRow) -> Result<Self, Self::Error> {
         Ok(SubstateResponse {
             address: row.address.parse()?,
-            version: row.version.try_into()?,
+            version: row.version as u32,
             substate: serde_json::from_str(&row.data)?,
         })
     }
@@ -57,7 +57,7 @@ impl TryFrom<Substate> for SubstateResponse {
 #[diesel(table_name = substates)]
 pub struct NewSubstate {
     pub address: String,
-    pub version: i64,
+    pub version: i32,
     pub data: String,
     // TODO: unused
     pub tx_hash: String,

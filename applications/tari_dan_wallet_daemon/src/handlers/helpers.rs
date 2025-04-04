@@ -35,7 +35,7 @@ pub async fn wait_for_result(
                     "Transaction invalid: {} [status: {}]",
                     event
                         .finalize
-                        .and_then(|finalize| finalize.reject().cloned())
+                        .and_then(|finalize| finalize.fee_reject().cloned())
                         .map(|f| f.to_string())
                         .unwrap_or_else(|| "Unknown".to_string()),
                     event.status,
@@ -64,7 +64,7 @@ pub async fn wait_for_result_and_account(
                     "Transaction invalid: {} [status: {}]",
                     event
                         .finalize
-                        .and_then(|finalize| finalize.reject().cloned())
+                        .and_then(|finalize| finalize.fee_reject().cloned())
                         .map(|f| f.to_string())
                         .unwrap_or_else(|| "Unknown".to_string()),
                     event.status,

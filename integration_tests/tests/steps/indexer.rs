@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     str::FromStr,
 };
 
@@ -13,6 +13,7 @@ use integration_tests::{
 };
 use libp2p::Multiaddr;
 use tari_crypto::tari_utilities::hex::Hex;
+use tari_dan_common_types::displayable::Displayable;
 use tari_indexer_client::types::AddPeerRequest;
 
 #[when(expr = "indexer {word} connects to all other validators")]
@@ -126,7 +127,7 @@ async fn works_indexer_graphql(world: &mut TariWorld, indexer_name: String) {
     );
 }
 
-#[when(expr = "indexer {word} scans the network events for account {word} with topics {word}")]
+#[when(expr = "indexer {word} scans the network events for account {word} has topics {word}")]
 async fn indexer_scans_network_events(
     world: &mut TariWorld,
     indexer_name: String,
@@ -144,59 +145,29 @@ async fn indexer_scans_network_events(
         .expect("Did not find component address");
 
     let mut graphql_client = indexer.get_graphql_indexer_client().await;
-    let query = format!(
-        r#"{{ getEventsForSubstate(substateId: "{}", version: {}) {{ substateId, templateAddress, txHash, topic, payload }} }}"#,
-        component_address.substate_id,
-        component_address.version.unwrap()
-    );
+    let query = r#"{{ getEvents() {{ substateId, templateAddress, txHash, topic, payload }} }}"#.to_string();
     let res = graphql_client
         .send_request::<HashMap<String, Vec<tari_indexer::graphql::model::events::Event>>>(&query, None, None)
         .await
-        .expect("Failed to obtain getEventsForSubstate query result");
+        .expect("Failed to obtain getEvents query result");
 
-    let topics = topics_str.split(',').collect::<Vec<_>>();
+    let events = res.get("getEvents").unwrap();
+    let topics_for_component = events
+        .iter()
+        .filter(|e| e.substate_id == Some(component_address.substate_id.to_string()))
+        .map(|e| e.topic.as_str())
+        .collect::<HashSet<_>>();
 
-    let events_for_component = res.get("getEventsForSubstate").unwrap();
-
-    for (ind, topic) in topics.iter().enumerate() {
-        let event = events_for_component.get(ind).unwrap_or_else(|| {
-            panic!(
-                "Too few events returned got {}, expected {}. Events emitted were {}",
-                events_for_component.len(),
-                topics.len(),
-                events_for_component
-                    .iter()
-                    .map(|e| e.topic.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )
-        });
-        assert_eq!(
-            event.topic,
-            *topic,
-            "Unexpected topic at index {}. Events emitted were {}. Expected {}",
+    let topics = topics_str.split(',');
+    for (ind, topic) in topics.enumerate() {
+        assert!(
+            topics_for_component.contains(topic),
+            "Unexpected topic at index {}. Events emitted were {}. Expected topic {}",
             ind,
-            events_for_component
-                .iter()
-                .map(|e| e.topic.as_str())
-                .collect::<Vec<_>>()
-                .join(","),
-            topics_str
+            topics_for_component.display(),
+            topic
         );
     }
-
-    assert_eq!(
-        events_for_component.len(),
-        topics.len(),
-        "Too many events returned got {}, expected {}. Events emitted were {}",
-        events_for_component.len(),
-        topics.len(),
-        events_for_component
-            .iter()
-            .map(|e| e.topic.as_str())
-            .collect::<Vec<_>>()
-            .join(","),
-    );
 }
 
 #[when(expr = "indexer {word} scans the network for events of resource {word}")]

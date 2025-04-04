@@ -302,6 +302,27 @@ pub enum ResourceDiscriminator {
     },
 }
 
+impl Display for ResourceDiscriminator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResourceDiscriminator::Everything => write!(f, "Everything"),
+            ResourceDiscriminator::Fungible { amount } => write!(f, "Fungible({})", amount),
+            ResourceDiscriminator::NonFungible { tokens } => write!(f, "NonFungible({} token(s))", tokens.len()),
+            ResourceDiscriminator::Confidential {
+                commitments,
+                revealed_amount,
+            } => {
+                write!(
+                    f,
+                    "Confidential({} commitment(s), {})",
+                    commitments.len(),
+                    revealed_amount
+                )
+            },
+        }
+    }
+}
+
 /// A resource recall operation argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecallResourceArg {

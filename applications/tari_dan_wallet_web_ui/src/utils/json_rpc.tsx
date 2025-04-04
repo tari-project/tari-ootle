@@ -89,6 +89,8 @@ import {
   GetValidatorFeesResponse,
   TemplatesListAuthoredRequest,
   TemplatesListAuthoredResponse,
+  TransactionSubmitManifestRequest,
+  TransactionSubmitManifestResponse,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
@@ -250,8 +252,12 @@ export const transactionsGetAll = (request: TransactionGetAllRequest): Promise<T
 
 export const transactionsPublishTemplate = (request: PublishTemplateRequest): Promise<PublishTemplateResponse> =>
   client().then((c) => c.publishTemplate(request));
-// accounts
 
+export const transactionsSubmitManifest = (
+  request: TransactionSubmitManifestRequest,
+): Promise<TransactionSubmitManifestResponse> => client().then((c) => c.submitTransactionManifest(request));
+
+// accounts
 export const accountsRevealFunds = (request: RevealFundsRequest): Promise<RevealFundsResponse> =>
   client().then((c) => c.accountsRevealFunds(request));
 export const accountsClaimBurn = (request: ClaimBurnRequest): Promise<ClaimBurnResponse> =>

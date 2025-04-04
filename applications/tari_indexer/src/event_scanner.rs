@@ -326,7 +326,7 @@ impl EventScanner {
             let module_name = maybe_substate_value.and_then(Self::extract_module_name_from_substate);
             let substate_row = NewSubstate {
                 address: create.substate.substate_id.to_string(),
-                version: i64::from(create.substate.version),
+                version: create.substate.version as i32,
                 data: maybe_substate_value
                     .map(Self::encode_substate)
                     .transpose()?
@@ -372,7 +372,6 @@ impl EventScanner {
             .map_err(|e| e.into())
     }
 
-    #[allow(unused_assignments)]
     async fn get_new_blocks_from_committee(
         &self,
         shard_group: ShardGroup,
@@ -385,12 +384,11 @@ impl EventScanner {
             .with_read_tx(|tx| tx.get_last_scanned_block_id(epoch, shard_group))?;
 
         committee.shuffle();
-        let mut last_block_id = start_block_id;
 
         info!(
             target: LOG_TARGET,
             "Scanning new blocks from (start_id={}, epoch={}, shard={})",
-            last_block_id.map(|id| id.to_string()).unwrap_or_else(|| "None".to_string()),
+            start_block_id.map(|id| id.to_string()).unwrap_or_else(|| "None".to_string()),
             epoch,
             shard_group
         );
@@ -403,11 +401,11 @@ impl EventScanner {
                 epoch,
                 shard_group
             );
-            let resp = self.get_block_data_from_vn(member, last_block_id, epoch).await;
+            let resp = self.get_block_data_from_vn(member, start_block_id, epoch).await;
 
             match resp {
                 Ok(block_data) => {
-                    // TODO: try more than 1 VN per commitee
+                    // TODO: try more than 1 VN per committee
                     info!(
                         target: LOG_TARGET,
                         "Got {} blocks from VN {} (epoch={}, shard_group={})",
@@ -424,7 +422,6 @@ impl EventScanner {
                         .map(|data| &data.block);
 
                     if let Some(block) = last_block {
-                        last_block_id = Some(*block.id());
                         // Store the latest scanned block id in the database for future scans
                         self.save_scanned_block_id(epoch, shard_group, *block.id())?;
                     }

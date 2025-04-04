@@ -81,6 +81,8 @@ import {
   TransactionStatus,
   TransactionSubmitRequest,
   TransactionSubmitResponse,
+  TransactionSubmitManifestRequest,
+  TransactionSubmitManifestResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
   Type,
@@ -96,7 +98,7 @@ import {
   WebRtcStartRequest,
   WebRtcStartResponse,
 } from "@tari-project/typescript-bindings";
-import {FetchRpcTransport, RpcTransport} from "./transports";
+import { FetchRpcTransport, RpcTransport } from "./transports";
 
 export * as transports from "./transports";
 
@@ -282,6 +284,10 @@ export class WalletDaemonClient {
 
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {
     return this.__invokeRpc("transactions.submit", params);
+  }
+
+  public submitTransactionManifest(params: TransactionSubmitManifestRequest): Promise<TransactionSubmitManifestResponse> {
+    return this.__invokeRpc("transactions.submit_manifest", params);
   }
 
   public publishTemplate(params: PublishTemplateRequest): Promise<PublishTemplateResponse> {

@@ -140,11 +140,7 @@ pub async fn handle_create(
         .await?;
 
     let event = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = event.finalize.result.reject() {
-        return Err(anyhow!("Create account transaction rejected: {}", reject));
-    }
-
-    if let Some(reason) = event.finalize.reject() {
+    if let Some(reason) = event.finalize.any_reject() {
         return Err(anyhow!("Create account transaction failed: {}", reason));
     }
 
@@ -232,10 +228,7 @@ pub async fn handle_invoke(
         .await?;
 
     let mut finalized = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = finalized.finalize.result.reject() {
-        return Err(anyhow!("Fee transaction rejected: {}", reject));
-    }
-    if let Some(reject) = finalized.finalize.reject() {
+    if let Some(reject) = finalized.finalize.any_reject() {
         return Err(anyhow!("Transaction rejected: {}", reject));
     }
 
@@ -435,7 +428,7 @@ pub async fn handle_reveal_funds(
         let tx_id = transaction_service.submit_transaction(transaction, vec![]).await?;
 
         let finalized = wait_for_result(&mut events, tx_id).await?;
-        if let Some(reason) = finalized.finalize.reject() {
+        if let Some(reason) = finalized.finalize.fee_reject() {
             return Err(anyhow::anyhow!("Transaction failed: {}", reason));
         }
 
@@ -710,10 +703,10 @@ async fn finish_claiming<T: WalletStore>(
     // Wait for the monitor to pick up the new or updated account
     let (finalized, _) = wait_for_result_and_account(&mut events, &tx_id, &account_address).await?;
     // let finalized = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = finalized.finalize.reject() {
+    if let Some(reject) = finalized.finalize.fee_reject() {
         return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
     }
-    if let Some(reason) = finalized.finalize.full_reject() {
+    if let Some(reason) = finalized.finalize.any_reject() {
         return Err(anyhow::anyhow!(
             "Fee transaction succeeded (fees charged) however the transaction failed: {}",
             reason
@@ -968,10 +961,10 @@ pub async fn handle_transfer(
 
     let finalized = wait_for_result(&mut events, tx_id).await?;
 
-    if let Some(reject) = finalized.finalize.result.reject() {
+    if let Some(reject) = finalized.finalize.result.fee_reject() {
         return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
     }
-    if let Some(reason) = finalized.finalize.full_reject() {
+    if let Some(reason) = finalized.finalize.any_reject() {
         return Err(anyhow::anyhow!(
             "Fee transaction succeeded (fees charged) however the transaction failed: {}",
             reason
@@ -1050,10 +1043,10 @@ pub async fn handle_confidential_transfer(
         });
 
         let finalized = wait_for_result(&mut events, tx_id).await?;
-        if let Some(reject) = finalized.finalize.result.reject() {
+        if let Some(reject) = finalized.finalize.result.fee_reject() {
             return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
         }
-        if let Some(reason) = finalized.finalize.reject() {
+        if let Some(reason) = finalized.finalize.fee_reject() {
             return Err(anyhow::anyhow!(
                 "Fee transaction succeeded (fees charged) however the transaction failed: {}",
                 reason

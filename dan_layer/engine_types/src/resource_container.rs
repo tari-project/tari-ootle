@@ -446,7 +446,7 @@ impl ResourceContainer {
 
     pub fn recall_confidential_commitments(
         &mut self,
-        commitments: BTreeSet<PedersonCommitmentBytes>,
+        commitments: &BTreeSet<PedersonCommitmentBytes>,
         revealed_amount: Amount,
     ) -> Result<ResourceContainer, ResourceError> {
         match self {

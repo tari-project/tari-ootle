@@ -50,7 +50,7 @@ impl TransactionBuilder {
     }
 
     pub fn with_authorized_seal_signer(mut self) -> Self {
-        self.unsigned_transaction.authorized_sealed_signer();
+        self.unsigned_transaction = self.unsigned_transaction.authorized_sealed_signer();
         self.clear_signatures();
         self
     }
@@ -221,7 +221,7 @@ impl TransactionBuilder {
     }
 
     pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
-        self.unsigned_transaction.inputs_mut().extend(inputs);
+        self.unsigned_transaction = self.unsigned_transaction.with_inputs(inputs);
         // Reset the signatures as they are no longer valid
         self.clear_signatures();
         self
@@ -261,15 +261,16 @@ impl TransactionBuilder {
         self
     }
 
+    pub fn signatures(&self) -> &[TransactionSignature] {
+        &self.signatures
+    }
+
     fn clear_signatures(&mut self) {
         self.signatures = vec![];
     }
 
     pub fn build(self) -> UnsealedTransactionV1 {
-        // Obviously this will not work if we have more than one version - dealing with that is left for another time
-        match self.unsigned_transaction {
-            UnsignedTransaction::V1(tx) => UnsealedTransactionV1::new(tx, self.signatures),
-        }
+        self.unsigned_transaction.build(self.signatures)
     }
 
     pub fn build_and_seal(self, secret_key: &PrivateKey) -> Transaction {

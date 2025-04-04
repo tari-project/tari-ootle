@@ -92,8 +92,12 @@ impl IndexerProcess {
     ) -> Vec<NonFungibleSubstate> {
         let address = get_address_from_output(world, output_ref);
 
+        let Some(resource) = address.as_resource_address() else {
+            panic!("get_non_fungibles: Substate_id {} is not a resource address", address);
+        };
+
         let params = GetNonFungiblesRequest {
-            address: address.clone(),
+            address: resource,
             start_index,
             end_index,
         };

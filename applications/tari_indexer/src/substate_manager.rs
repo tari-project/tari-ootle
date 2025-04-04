@@ -30,7 +30,7 @@ use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::models::{ResourceAddress, TemplateAddress};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::substate_storage_sqlite::sqlite_substate_store_factory::{
@@ -150,9 +150,15 @@ impl SubstateManager {
         Ok(substate_result)
     }
 
-    pub async fn get_non_fungible_collections(&self) -> Result<Vec<(String, i64)>, anyhow::Error> {
+    pub fn get_non_fungibles_by_resource_address(
+        &self,
+        address: ResourceAddress,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<NonFungibleSubstate>, anyhow::Error> {
         let mut tx = self.substate_store.create_read_tx()?;
-        tx.get_non_fungible_collections().map_err(|e| e.into())
+        let nfts = tx.get_non_fungibles_by_resource_address(address, limit, offset)?;
+        Ok(nfts)
     }
 
     pub async fn get_non_fungible_count(&self, substate_id: &SubstateId) -> Result<u64, anyhow::Error> {

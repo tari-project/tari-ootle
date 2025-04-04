@@ -64,7 +64,7 @@ pub async fn run_graphql(
         .layer(CorsLayer::permissive())
         .layer(Extension(schema));
 
-    axum::Server::try_bind(&preferred_address)
+    let server = axum::Server::try_bind(&preferred_address)
         .or_else(|_| {
             error!(
                 target: LOG_TARGET,
@@ -72,9 +72,11 @@ pub async fn run_graphql(
             );
             axum::Server::try_bind(&"127.0.0.1:0".parse().unwrap())
         })?
-        .serve(router.into_make_service())
-        .await
-        .unwrap();
+        .serve(router.into_make_service());
+    let bind_addr = server.local_addr();
+    info!(target: LOG_TARGET, "🌐 GraphQL listening on {bind_addr}");
+    server.await?;
+
     Ok(())
 }
 

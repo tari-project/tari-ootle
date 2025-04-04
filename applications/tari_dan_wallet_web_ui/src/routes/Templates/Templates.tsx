@@ -57,41 +57,31 @@ function getTypeAsString(funcType: FuncType): string {
   return "Unknown";
 }
 
-export interface TemplatesProps {
-  account?: Account;
-}
-
-function Templates(props: TemplatesProps) {
+function Templates() {
   const [page, setPage] = useState(0);
   const [templatesCount, setTemplatesCount] = useState(0);
-  const [keyIndex, setKeyIndex] = useState(0);
-  const [account, setAccount] = useState("");
+  const [account, setAccount] = useState<AccountInfo | undefined>(undefined);
   const [open, setOpen] = useState<boolean[]>([]);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const theme = useTheme();
   const { data: templatesResponse } = useListTemplatesAuthored({
-    key_index: keyIndex,
+    key_index: account?.account.key_index || 0,
     page: page,
     page_size: rowsPerPage,
   });
 
-  const { data: dataAccountsList } = useAccountsList(0, 10);
+  const { data: dataAccountsList, isLoading: isAccountsLoading } = useAccountsList(0, 10);
 
   useEffect(() => {
-    if (props?.account) {
-      setAccount(props.account.key_index.toString());
-      setKeyIndex(props.account.key_index);
-    }
-  }, [props]);
+    const defaultAcc = dataAccountsList?.accounts.find((account: AccountInfo) => account.account.is_default);
+    setAccount(defaultAcc);
+  }, [dataAccountsList]);
 
   const onAccountChange = (e: SelectChangeEvent<string>) => {
-    const newKeyIndex: number = parseInt(e.target.value, 10);
-    if (isNaN(newKeyIndex)) {
-      console.error("Invalid account key index:", e.target.value);
-      return;
-    }
-    setKeyIndex(newKeyIndex);
-    setAccount(e.target.value);
+    const selected = dataAccountsList?.accounts.find(
+      (account: AccountInfo) => substateIdToString(account.account.address) === e.target.value,
+    );
+    setAccount(selected);
   };
 
   useEffect(() => {
@@ -103,11 +93,15 @@ function Templates(props: TemplatesProps) {
     }
   }, [templatesResponse]);
 
+  if (isAccountsLoading) {
+    return <div>Loading...</div>;
+  }
+
   return (
     <Grid item xs={12} md={12} lg={12}>
-      {!props || !props.account ? <h2>Templates</h2> : null}
+      {<h2>Templates</h2>}
 
-      {!props || !props.account ? (
+      {account ? (
         <FormControl>
           <InputLabel id="account">Account</InputLabel>
           <Select
@@ -115,16 +109,16 @@ function Templates(props: TemplatesProps) {
             name="account"
             label="Account"
             style={{ flexGrow: 1, minWidth: "200px" }}
-            value={account}
+            value={substateIdToString(account.account.address)}
             onChange={onAccountChange}
           >
             {dataAccountsList?.accounts.map((account: AccountInfo, index: number) => {
               return (
                 <MenuItem
                   key={substateIdToString(account.account.address)}
-                  value={account.account.key_index.toString()}
+                  value={substateIdToString(account.account.address)}
                 >
-                  {account.account.name}
+                  {account.account.name || substateIdToString(account.account.address)}
                 </MenuItem>
               );
             })}

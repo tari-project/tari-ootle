@@ -93,23 +93,9 @@ async fn main() {
         .fail_on_skipped()
         .which_scenario(|feature, _, scenario| {
             let feature_has_concurrent_tag = feature.tags.iter().any(|tag| tag == "concurrent");
-            let feature_has_serial_tag = feature.tags.iter().any(|tag| tag == "serial");
             let scenario_has_concurrent_tag = scenario.tags.iter().any(|tag| tag == "concurrent");
-            let scenario_has_serial_tag = scenario.tags.iter().any(|tag| tag == "serial");
 
-            if scenario_has_serial_tag {
-                return ScenarioType::Serial;
-            }
-
-            if scenario_has_concurrent_tag {
-                return ScenarioType::Concurrent;
-            }
-
-            if feature_has_serial_tag {
-                return ScenarioType::Serial;
-            }
-
-            if feature_has_concurrent_tag {
+            if scenario_has_concurrent_tag || feature_has_concurrent_tag {
                 return ScenarioType::Concurrent;
             }
 

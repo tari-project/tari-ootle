@@ -84,6 +84,8 @@ import type {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
+  TransactionSubmitDryRunRequest,
+  TransactionSubmitDryRunResponse,
 } from "@tari-project/typescript-bindings";
 import { FetchRpcTransport, RpcTransport } from "./transports";
 
@@ -194,6 +196,10 @@ export class WalletDaemonClient {
 
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {
     return this.__invokeRpc("transactions.submit", params);
+  }
+
+  public submitTransactionDryRun(params: TransactionSubmitDryRunRequest): Promise<TransactionSubmitDryRunResponse> {
+    return this.__invokeRpc("transactions.submit_dry_run", params);
   }
 
   public submitTransactionManifest(params: TransactionSubmitManifestRequest): Promise<TransactionSubmitManifestResponse> {

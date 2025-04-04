@@ -174,7 +174,7 @@ impl Runner {
         info!("⏳️ Waiting for {} transactions to finalize", tariswaps.len());
         for (account, lp_resource, tx_id) in tx_ids.drain(..) {
             let result = self.wait_for_transaction(tx_id).await?;
-            if let Some(reject) = result.result.full_reject() {
+            if let Some(reject) = result.result.any_reject() {
                 return Err(anyhow::anyhow!("Transaction failed: {}", reject));
             }
             let diff = result.result.accept().unwrap();

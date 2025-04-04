@@ -84,7 +84,7 @@ impl Vault {
 
     pub fn recall_confidential(
         &mut self,
-        commitments: BTreeSet<PedersonCommitmentBytes>,
+        commitments: &BTreeSet<PedersonCommitmentBytes>,
         revealed_amount: Amount,
     ) -> Result<ResourceContainer, ResourceError> {
         self.resource_container

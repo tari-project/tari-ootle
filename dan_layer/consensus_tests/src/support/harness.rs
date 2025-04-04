@@ -66,7 +66,7 @@ pub struct Test {
     validators: HashMap<TestAddress, Validator>,
     network: TestNetwork,
     _leader_strategy: RoundRobinLeaderStrategy,
-    epoch_manager: TestEpochManager,
+    _epoch_manager: TestEpochManager,
     num_committees: u32,
     shutdown: Shutdown,
     timeout: Option<Duration>,
@@ -482,44 +482,6 @@ impl Test {
         }
     }
 
-    pub async fn assert_all_validators_at_same_height(&self) {
-        self.assert_all_validators_at_same_height_except(&[]).await;
-    }
-
-    pub async fn assert_all_validators_at_same_height_except(&self, except: &[TestAddress]) {
-        let committees = self.epoch_manager.all_committees().await;
-        let mut attempts = 0usize;
-        'outer: loop {
-            for committee in committees.values() {
-                let mut views = self
-                    .validators
-                    .values()
-                    .filter(|vn| committee.contains(&vn.address))
-                    .filter(|vn| !except.contains(&vn.address))
-                    .map(|v| (v.address.clone(), v.current_view.clone()));
-                let (first_addr, first) = views.next().unwrap();
-                for (addr, view) in views {
-                    if (first.get_epoch() != view.get_epoch() || first.get_height() != view.get_height()) &&
-                        attempts < 5
-                    {
-                        attempts += 1;
-                        // Allow validators to catch up
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                        continue 'outer;
-                    }
-                    if first.get_epoch() == view.get_epoch() && first.get_height() == view.get_height() {
-                        continue;
-                    }
-                    panic!(
-                        "Validator {} is at height {} but validator {} is at height {}",
-                        first_addr, first, addr, view
-                    );
-                }
-            }
-            break;
-        }
-    }
-
     pub async fn assert_all_validators_have_decision(
         &self,
         transaction_id: &TransactionId,
@@ -779,7 +741,7 @@ impl TestBuilder {
             num_committees,
 
             _leader_strategy: leader_strategy,
-            epoch_manager,
+            _epoch_manager: epoch_manager,
             shutdown,
             timeout: self.timeout,
         }

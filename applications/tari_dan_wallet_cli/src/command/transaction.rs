@@ -101,8 +101,6 @@ pub struct CommonSubmitArgs {
     /// Timeout in seconds
     #[clap(long, short = 't', alias = "wait-timeout")]
     pub wait_for_result_timeout_secs: Option<u64>,
-    #[clap(long, short = 'n')]
-    pub num_outputs: Option<u8>,
     #[clap(long, short = 'i')]
     pub inputs: Vec<SubstateRequirement>,
     #[clap(long, alias = "autofill")]
@@ -342,7 +340,7 @@ async fn handle_submit_manifest(
         let resp = client
             .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
                 transaction,
-                signing_key_index: None,
+                signing_key_index: Some(fee_account.key_index),
                 autofill_inputs: vec![],
                 detect_inputs: common.detect_inputs.unwrap_or(true),
                 detect_inputs_use_unversioned: true,
@@ -353,7 +351,7 @@ async fn handle_submit_manifest(
     } else {
         let request = TransactionSubmitRequest {
             transaction,
-            signing_key_index: None,
+            signing_key_index: Some(fee_account.key_index),
             autofill_inputs: vec![],
             detect_inputs: common.detect_inputs.unwrap_or(true),
             detect_inputs_use_unversioned: true,

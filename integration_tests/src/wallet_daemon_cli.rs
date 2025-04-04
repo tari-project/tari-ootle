@@ -493,7 +493,11 @@ pub async fn submit_manifest_with_signing_keys(
         timeout_secs: Some(120),
     };
     let wait_resp = client.wait_transaction_result(wait_req).await.unwrap();
-    if let Some(reason) = wait_resp.result.as_ref().and_then(|result| result.reject().cloned()) {
+    if let Some(reason) = wait_resp
+        .result
+        .as_ref()
+        .and_then(|result| result.fee_reject().cloned())
+    {
         panic!("Transaction failed: {}", reason);
     }
 
@@ -576,7 +580,11 @@ pub async fn submit_manifest(
     };
     let wait_resp = client.wait_transaction_result(wait_req).await.unwrap();
 
-    if let Some(reason) = wait_resp.result.clone().and_then(|finalize| finalize.reject().cloned()) {
+    if let Some(reason) = wait_resp
+        .result
+        .clone()
+        .and_then(|finalize| finalize.fee_reject().cloned())
+    {
         panic!("Transaction failed: {:?}", reason);
     }
     add_substate_ids(
@@ -689,7 +697,7 @@ pub async fn create_component(
         panic!("No result after 120s. Time out.");
     }
 
-    if let Some(reason) = wait_resp.result.as_ref().and_then(|finalize| finalize.full_reject()) {
+    if let Some(reason) = wait_resp.result.as_ref().and_then(|finalize| finalize.any_reject()) {
         panic!("Create component tx failed: {}", reason);
     }
 
@@ -962,7 +970,7 @@ async fn submit_unsigned_tx_and_wait_for_response(
         .await
         .map_err(|e| anyhow::Error::msg(e.to_string()))?;
 
-    if let Some(reason) = resp.result.as_ref().and_then(|finalize| finalize.reject()) {
+    if let Some(reason) = resp.result.as_ref().and_then(|finalize| finalize.fee_reject()) {
         bail!("Calling component result rejected: {}", reason);
     }
 

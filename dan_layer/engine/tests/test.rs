@@ -228,10 +228,10 @@ fn test_engine_errors() {
         )
         .unwrap();
 
-    let RejectReason::ExecutionFailure(reason) = result.finalize.result.full_reject().unwrap() else {
+    let RejectReason::ExecutionFailure(reason) = result.finalize.result.any_reject().unwrap() else {
         panic!(
             "Unexpected transaction reject reason: {}",
-            result.finalize.result.reject().unwrap()
+            result.finalize.result.fee_reject().unwrap()
         );
     };
 
@@ -351,7 +351,7 @@ mod errors {
                 vec![],
             )
             .unwrap();
-        match result.finalize.result.full_reject().unwrap() {
+        match result.finalize.result.any_reject().unwrap() {
             RejectReason::ExecutionFailure(message) => {
                 assert_eq!(
                     message,
@@ -379,7 +379,7 @@ mod errors {
             )
             .unwrap();
         println!("{:?}", result.finalize.result);
-        match result.finalize.result.full_reject().unwrap() {
+        match result.finalize.result.any_reject().unwrap() {
             RejectReason::ExecutionFailure(message) => {
                 assert!(message.starts_with(
                     "Panic! failed to decode argument at position 0 (tari_template_lib::models::amount::Amount) for \

@@ -13,7 +13,7 @@ use tari_engine_types::{
 };
 use tari_template_lib::models::ComponentAddress;
 
-use crate::UnsignedTransactionV1;
+use crate::{TransactionSignature, UnsealedTransactionV1, UnsignedTransactionV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -33,9 +33,9 @@ impl UnsignedTransaction {
         self
     }
 
-    pub fn authorized_sealed_signer(&mut self) -> &mut Self {
+    pub fn authorized_sealed_signer(mut self) -> Self {
         match self {
-            Self::V1(tx) => tx.is_seal_signer_authorized = true,
+            Self::V1(ref mut tx) => tx.is_seal_signer_authorized = true,
         }
         self
     }
@@ -150,6 +150,18 @@ impl UnsignedTransaction {
             Self::V1(tx) => tx.max_epoch = max_epoch,
         }
         self
+    }
+
+    pub fn with_inputs<I: IntoIterator<Item = SubstateRequirement>>(mut self, inputs: I) -> Self {
+        self.inputs_mut().extend(inputs);
+        self
+    }
+
+    pub fn build(self, signatures: Vec<TransactionSignature>) -> UnsealedTransactionV1 {
+        // Obviously this will not work if we have more than one version - dealing with that is left for another time
+        match self {
+            UnsignedTransaction::V1(tx) => UnsealedTransactionV1::new(tx, signatures),
+        }
     }
 
     pub(crate) fn inputs_mut(&mut self) -> &mut IndexSet<SubstateRequirement> {

@@ -29,27 +29,22 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use diesel::{
-    dsl::count,
-    prelude::*,
-    sql_query,
-    sql_types::{Integer, Nullable, Text},
-    SqliteConnection,
-};
+use diesel::{prelude::*, sql_query, SqliteConnection};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::*;
 use tari_crypto::tari_utilities::hex::to_hex;
 use tari_dan_common_types::{substate_type::SubstateType, Epoch, ShardGroup};
 use tari_dan_storage::{consensus_models::BlockId, StorageError};
 use tari_dan_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_indexer_client::types::ListSubstateItem;
-use tari_template_lib::models::TemplateAddress;
+use tari_indexer_lib::NonFungibleSubstate;
+use tari_template_lib::models::{ResourceAddress, TemplateAddress};
 use thiserror::Error;
 
 use super::models::{
-    events::{EventData, NewEvent, NewScannedBlockId},
-    non_fungible_index::{IndexedNftSubstate, NewNonFungibleIndex},
+    events::{NewEvent, NewScannedBlockId},
+    non_fungible_index::NewNonFungibleIndex,
 };
 use crate::substate_storage_sqlite::models::{
     events::{Event, NewEventPayloadField, ScannedBlockId},
@@ -177,7 +172,6 @@ impl<'a> SqliteSubstateStoreReadTransaction<'a> {
     }
 }
 
-// TODO: remove the allow dead_code attributes as these become used.
 pub trait SubstateStoreReadTransaction {
     fn list_substates(
         &mut self,
@@ -187,40 +181,14 @@ pub trait SubstateStoreReadTransaction {
         offset: Option<u64>,
     ) -> Result<Vec<ListSubstateItem>, StorageError>;
     fn get_substate(&mut self, address: &SubstateId, version: Option<u32>) -> Result<Option<Substate>, StorageError>;
-    #[allow(dead_code)]
-    fn get_latest_version_for_substate(&mut self, address: &SubstateId) -> Result<Option<i64>, StorageError>;
-    #[allow(dead_code)]
-    fn get_all_addresses(&mut self) -> Result<Vec<(String, i64)>, StorageError>;
-    #[allow(dead_code)]
-    fn get_all_substates(&mut self) -> Result<Vec<Substate>, StorageError>;
-    fn get_non_fungible_collections(&mut self) -> Result<Vec<(String, i64)>, StorageError>;
     fn get_non_fungible_count(&mut self, resource_address: String) -> Result<i64, StorageError>;
-    #[allow(dead_code)]
-    fn get_non_fungible_latest_index(&mut self, resource_address: String) -> Result<Option<i32>, StorageError>;
-    #[allow(dead_code)]
-    fn get_non_fungibles(
+    fn get_non_fungibles_by_resource_address(
         &mut self,
-        resource_address: String,
-        start_idx: i32,
-        end_idx: i32,
-    ) -> Result<Vec<IndexedNftSubstate>, StorageError>;
-    // fn get_events_for_transaction(&mut self, tx_id: TransactionId) -> Result<Vec<EventData>, StorageError>;
-    // fn get_stored_versions_of_events(
-    //     &mut self,
-    //     substate_id: &SubstateId,
-    //     start_version: u32,
-    // ) -> Result<Vec<u32>, StorageError>;
-    #[allow(dead_code)]
-    fn get_events_by_version(&mut self, substate_id: &SubstateId, version: u32)
-        -> Result<Vec<EventData>, StorageError>;
-    // fn get_all_events(&mut self, substate_id: &SubstateId) -> Result<Vec<EventData>, StorageError>;
-    fn get_events_by_payload(
-        &mut self,
-        payload_key: String,
-        payload_value: String,
-        offset: u32,
-        limit: u32,
-    ) -> Result<Vec<EventData>, StorageError>;
+        resource_address: ResourceAddress,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<NonFungibleSubstate>, StorageError>;
+
     fn get_events(
         &mut self,
         substate_id_filter: Option<SubstateId>,
@@ -266,6 +234,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         }
 
         let substates: Vec<Substate> = query
+            .order_by(substates::id.desc())
             .get_results(self.connection())
             .map_err(|e| StorageError::QueryError {
                 reason: format!("list_substates: {}", e),
@@ -301,7 +270,7 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
             .into_boxed()
             .filter(substates::address.eq(address.to_string()));
         if let Some(version) = version {
-            substate_query = substate_query.filter(substates::version.eq(i64::from(version)));
+            substate_query = substate_query.filter(substates::version.eq(version as i32));
         } else {
             substate_query = substate_query.order_by(substates::version.desc())
         }
@@ -313,71 +282,6 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
             .map_err(|e| StorageError::QueryError {
                 reason: format!("get_substate: {}", e),
             })
-    }
-
-    fn get_latest_version_for_substate(&mut self, address: &SubstateId) -> Result<Option<i64>, StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
-
-        let version = substates::table
-            .filter(substates::address.eq(address.to_string()))
-            .select(diesel::dsl::max(substates::version))
-            .get_result(self.connection())
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_latest_version_for_substate: {}", e),
-            })?;
-
-        Ok(version)
-    }
-
-    fn get_all_addresses(&mut self) -> Result<Vec<(String, i64)>, StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
-
-        let addresses = substates::table
-            .select((substates::address, substates::version))
-            .get_results(self.connection())
-            .optional()
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_all_addresses: {}", e),
-            })?;
-
-        match addresses {
-            Some(address_vec) => Ok(address_vec),
-            None => Ok(vec![]),
-        }
-    }
-
-    fn get_all_substates(&mut self) -> Result<Vec<Substate>, StorageError> {
-        use crate::substate_storage_sqlite::schema::substates;
-
-        let substates = substates::table
-            .get_results(self.connection())
-            .optional()
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_all_substates: {}", e),
-            })?;
-
-        match substates {
-            Some(substates_vec) => Ok(substates_vec),
-            None => Ok(vec![]),
-        }
-    }
-
-    fn get_non_fungible_collections(&mut self) -> Result<Vec<(String, i64)>, StorageError> {
-        use crate::substate_storage_sqlite::schema::non_fungible_indexes as nfts;
-
-        let collections = nfts::table
-            .group_by(nfts::resource_address)
-            .select((nfts::resource_address, count(nfts::id)))
-            .get_results(self.connection())
-            .optional()
-            .map_err(|e| StorageError::QueryError {
-                reason: format!("get_all_addresses: {}", e),
-            })?;
-
-        match collections {
-            Some(collections_vec) => Ok(collections_vec),
-            None => Ok(vec![]),
-        }
     }
 
     fn get_non_fungible_count(&mut self, resource_address: String) -> Result<i64, StorageError> {
@@ -394,154 +298,45 @@ impl SubstateStoreReadTransaction for SqliteSubstateStoreReadTransaction<'_> {
         Ok(count)
     }
 
-    fn get_non_fungible_latest_index(&mut self, resource_address: String) -> Result<Option<i32>, StorageError> {
-        use crate::substate_storage_sqlite::schema::non_fungible_indexes;
+    fn get_non_fungibles_by_resource_address(
+        &mut self,
+        resource_address: ResourceAddress,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<NonFungibleSubstate>, StorageError> {
+        use crate::substate_storage_sqlite::schema::substates;
 
-        let latest_index = non_fungible_indexes::table
-            .filter(non_fungible_indexes::resource_address.eq(resource_address))
-            .select(diesel::dsl::max(non_fungible_indexes::idx))
-            .get_result(self.connection())
+        let res = substates::table
+            .filter(substates::address.like(format!("nft_{}_%", resource_address.as_object_key())))
+            .limit(limit as i64)
+            .offset(offset as i64)
+            .get_results::<Substate>(self.connection())
             .map_err(|e| StorageError::QueryError {
-                reason: format!("get_non_fungible_latest_index: {}", e),
+                reason: format!("get_non_fungibles_by_resource_address: {}", e),
             })?;
 
-        Ok(latest_index)
+        res.into_iter()
+            .map(|row| {
+                let value: SubstateValue =
+                    serde_json::from_str(&row.data).map_err(|e| StorageError::DataInconsistency {
+                        details: format!("Failed to parse substate data: {}", e),
+                    })?;
+
+                let substate = tari_engine_types::substate::Substate::new(row.version as u32, value);
+
+                Ok(NonFungibleSubstate {
+                    address: row.address.parse().map_err(|e| StorageError::DataInconsistency {
+                        details: format!("Failed to parse address: {}", e),
+                    })?,
+                    // TODO: improve the indexer api. The index is not being used.
+                    index: row.version.try_into().map_err(|e| StorageError::DataInconsistency {
+                        details: format!("Version overflow {}", e),
+                    })?,
+                    substate,
+                })
+            })
+            .collect()
     }
-
-    fn get_non_fungibles(
-        &mut self,
-        resource_address: String,
-        start_idx: i32,
-        end_idx: i32,
-    ) -> Result<Vec<IndexedNftSubstate>, StorageError> {
-        let res = sql_query(
-            "SELECT s.address, s.version, s.data, n.idx FROM substates s INNER JOIN non_fungible_indexes n ON \
-             s.address = n.non_fungible_address WHERE n.resource_address = ? AND n.idx BETWEEN ? AND ? ORDER BY n.idx \
-             ASC",
-        )
-        .bind::<Text, _>(resource_address)
-        .bind::<Integer, _>(start_idx)
-        .bind::<Integer, _>(end_idx)
-        .get_results::<IndexedNftSubstate>(self.connection())
-        .map_err(|e| StorageError::QueryError {
-            reason: format!("get_non_fungibles: {}", e),
-        })?;
-
-        Ok(res)
-    }
-
-    // fn get_events_for_transaction(&mut self, tx_id: TransactionId) -> Result<Vec<EventData>, StorageError> {
-    //     info!(
-    //         target: LOG_TARGET,
-    //         "Querying substate scanner database: get_events_for_transaction with tx_hash = {}", tx_id
-    //     );
-    //     let res = sql_query(
-    //         "SELECT substate_id, template_address, tx_hash, topic, payload, version FROM events WHERE tx_hash = ?",
-    //     )
-    //     .bind::<Text, _>(tx_id.to_string())
-    //     .get_results::<EventData>(self.connection())
-    //     .map_err(|e| StorageError::QueryError {
-    //         reason: format!("get_events_for_transaction: {}", e),
-    //     })?;
-    //
-    //     Ok(res)
-    // }
-    //
-    // fn get_stored_versions_of_events(
-    //     &mut self,
-    //     substate_id: &SubstateId,
-    //     start_version: u32,
-    // ) -> Result<Vec<u32>, StorageError> {
-    //     info!(
-    //         target: LOG_TARGET,
-    //         "Querying substate scanner database: get_stored_versions_of_events with substate_id = {} and \
-    //          start_version = {}",
-    //          substate_id,
-    //         start_version
-    //     );
-    //     use crate::substate_storage_sqlite::schema::events;
-    //     let res: Vec<i32> = events::table
-    //         .filter(
-    //             events::substate_id
-    //                 .eq(&substate_id.to_string())
-    //                 .and(events::version.gt(start_version as i32)),
-    //         )
-    //         .select(events::version)
-    //         .get_results(self.connection())
-    //         .map_err(|e| StorageError::QueryError {
-    //             reason: format!("get_last_version_of_events: {}", e),
-    //         })?;
-    //
-    //     // for our purposes, a non-existing version in the db, means we have
-    //     // to scan the network from res = 0
-    //     Ok(res.into_iter().map(|v| v as u32).collect::<Vec<_>>())
-    // }
-
-    fn get_events_by_version(
-        &mut self,
-        substate_id: &SubstateId,
-        version: u32,
-    ) -> Result<Vec<EventData>, StorageError> {
-        info!(
-            target: LOG_TARGET,
-            "Querying substate scanner database: get_events_by_version with substate_id = {} and version = {}",
-            substate_id,
-            version
-        );
-        let res = sql_query(
-            "SELECT substate_id, template_address, tx_hash, topic, payload FROM events WHERE substate_id = ? AND \
-             version = ?",
-        )
-        .bind::<Nullable<Text>, _>(Some(substate_id.to_string()))
-        .bind::<Integer, _>(version as i32)
-        .get_results::<EventData>(self.connection())
-        .map_err(|e| StorageError::QueryError {
-            reason: format!("get_events_by_version: {}", e),
-        })?;
-
-        Ok(res)
-    }
-
-    fn get_events_by_payload(
-        &mut self,
-        payload_key: String,
-        payload_value: String,
-        offset: u32,
-        limit: u32,
-    ) -> Result<Vec<EventData>, StorageError> {
-        info!(
-            target: LOG_TARGET,
-            "Querying substate scanner database: get_events_by_payload with payload_key = {} and payload_value = {}",
-            payload_key,
-            payload_value
-        );
-        let res = sql_query(
-            "SELECT substate_id, template_address, tx_hash, topic, payload, version FROM events e INNER JOIN \
-             event_payloads p ON p.event_id = e.id WHERE p.payload_key = ? AND p.payload_value = ? LIMIT ?,?",
-        )
-        .bind::<Text, _>(payload_key)
-        .bind::<Text, _>(payload_value)
-        .bind::<Integer, _>(offset as i32)
-        .bind::<Integer, _>(limit as i32)
-        .get_results::<EventData>(self.connection())
-        .map_err(|e| StorageError::QueryError {
-            reason: format!("get_events_by_payload: {}", e),
-        })?;
-
-        Ok(res)
-    }
-
-    // fn get_all_events(&mut self, substate_id: &SubstateId) -> Result<Vec<EventData>, StorageError> {
-    //     let res = sql_query(
-    //         "SELECT substate_id, template_address, tx_hash, topic, payload, version FROM events WHERE substate_id =
-    // ?",     )
-    //     .bind::<Text, _>(substate_id.to_string())
-    //     .get_results::<EventData>(self.connection())
-    //     .map_err(|e| StorageError::QueryError {
-    //         reason: format!("get_all_events: {}", e),
-    //     })?;
-    //     Ok(res)
-    // }
 
     fn get_events(
         &mut self,

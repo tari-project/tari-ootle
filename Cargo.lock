@@ -10129,6 +10129,7 @@ dependencies = [
  "tari_template_builtin",
  "tari_template_lib",
  "tari_transaction",
+ "tari_transaction_manifest",
  "tari_utilities",
  "tari_wallet_daemon_client",
  "thiserror 1.0.68",

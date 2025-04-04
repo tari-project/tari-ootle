@@ -580,7 +580,7 @@ impl WorkingState {
     pub fn recall_resource_from_vault(
         &mut self,
         vault_lock: &LockedSubstate,
-        resource_discriminator: ResourceDiscriminator,
+        resource_discriminator: &ResourceDiscriminator,
     ) -> Result<ResourceContainer, RuntimeError> {
         let vault_id = vault_lock
             .address()
@@ -598,7 +598,7 @@ impl WorkingState {
             ResourceDiscriminator::Fungible { amount } => {
                 if amount.is_negative() {
                     return Err(RuntimeError::InvalidAmount {
-                        amount,
+                        amount: *amount,
                         reason: "Amount must be positive".to_string(),
                     });
                 }
@@ -618,7 +618,7 @@ impl WorkingState {
                     target: LOG_TARGET,
                     "Recalling {} fungible tokens on resource: {}", amount, resource_address
                 );
-                vault_mut.withdraw(amount)?
+                vault_mut.withdraw(*amount)?
             },
             ResourceDiscriminator::NonFungible { tokens } => {
                 debug!(
@@ -639,7 +639,7 @@ impl WorkingState {
                     });
                 }
 
-                vault_mut.withdraw_non_fungibles(&tokens)?
+                vault_mut.withdraw_non_fungibles(tokens)?
             },
             ResourceDiscriminator::Confidential {
                 commitments,
@@ -660,7 +660,7 @@ impl WorkingState {
                     });
                 }
 
-                vault_mut.recall_confidential(commitments, revealed_amount)?
+                vault_mut.recall_confidential(commitments, *revealed_amount)?
             },
         };
 

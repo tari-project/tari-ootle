@@ -135,10 +135,6 @@ impl TestEpochManager {
         self.state_lock().await.validator_nodes.values().cloned().collect()
     }
 
-    pub async fn all_committees(&self) -> HashMap<ShardGroup, Committee<TestAddress>> {
-        self.state_lock().await.committees.clone()
-    }
-
     pub fn get_current_epoch(&self) -> Epoch {
         self.current_epoch
     }

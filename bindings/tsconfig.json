@@ -2,10 +2,12 @@
   "compilerOptions": {
     "module": "ES2020",
     "target": "ESNext",
-    "moduleResolution": "Bundler",
+    "moduleResolution": "node",
     "declaration": true,
     "rootDir": "./src",
     "outDir": "./dist"
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

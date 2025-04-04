@@ -6,9 +6,15 @@ use anyhow::anyhow;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
+use tari_common::configuration::Network;
+use tari_common_types::types::PublicKey;
+use tari_crypto::keys::PublicKey as _;
 use tari_dan_common_types::{optional::Optional, Epoch};
-use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
+use tari_dan_wallet_sdk::apis::{config::ConfigKey, jwt::JrpcPermission, key_manager};
+use tari_engine_types::instruction::Instruction;
 use tari_template_lib::{args, models::Amount};
+use tari_transaction::Transaction;
+use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::types::{
     AccountGetRequest,
     AccountGetResponse,
@@ -23,6 +29,8 @@ use tari_wallet_daemon_client::types::{
     TransactionGetResultResponse,
     TransactionSubmitDryRunRequest,
     TransactionSubmitDryRunResponse,
+    TransactionSubmitManifestRequest,
+    TransactionSubmitManifestResponse,
     TransactionSubmitRequest,
     TransactionSubmitResponse,
     TransactionWaitResultRequest,
@@ -33,7 +41,7 @@ use tokio::time;
 use super::{accounts, context::HandlerContext};
 use crate::{
     handlers::{
-        helpers::{get_account_or_default, transaction_builder},
+        helpers::{get_account_or_default, invalid_params, transaction_builder},
         HandlerError,
     },
     services::WalletEvent,
@@ -231,6 +239,113 @@ pub async fn handle_submit_dry_run(
     })
 }
 
+pub async fn handle_submit_manifest(
+    context: &HandlerContext,
+    token: Option<String>,
+    req: TransactionSubmitManifestRequest,
+) -> Result<TransactionSubmitManifestResponse, anyhow::Error> {
+    let sdk = context.wallet_sdk();
+    sdk.jwt_api()
+        .check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+
+    let variables = req
+        .variables
+        .iter()
+        .map(|(name, value)| {
+            value.parse().map(|value| (name.to_string(), value)).map_err(|err| {
+                invalid_params(
+                    "variables",
+                    Some(format!("Failed to parse variable '{}': {}", name, err)),
+                )
+            })
+        })
+        .collect::<Result<_, _>>()?;
+
+    let instructions = parse_manifest(&req.manifest, variables, Default::default())
+        .map_err(|e| invalid_params("manifest", Some(format!("Failed to parse manifest: {}", e))))?;
+
+    let default_account = get_account_or_default(None, &sdk.accounts_api())?;
+
+    let signing_key_index = req.signing_key_index.unwrap_or(default_account.key_index);
+    let (_, key) = sdk
+        .key_manager_api()
+        .get_key_or_active(key_manager::TRANSACTION_BRANCH, Some(signing_key_index))?;
+    let seal_signer_pk = PublicKey::from_secret_key(&key.key);
+
+    let network = context.wallet_sdk().config_api().get::<Network>(ConfigKey::Network)?;
+
+    let fee_amount = Amount::try_from(req.max_fee)
+        .map_err(|_| invalid_params("max_fee", Some("Invalid max_fee value".to_string())))?;
+
+    let fee_instructions = Some(instructions.fee_instructions)
+        .filter(|i| !i.is_empty())
+        .unwrap_or_else(|| {
+            vec![Instruction::CallMethod {
+                component_address: default_account.address.as_component_address().unwrap(),
+                method: "pay_fee".to_string(),
+                args: args![fee_amount],
+            }]
+        });
+    let (_, acc_key) = sdk
+        .key_manager_api()
+        .get_key_or_active(key_manager::TRANSACTION_BRANCH, Some(default_account.key_index))?;
+    let builder = Transaction::builder()
+        .for_network(network.as_byte())
+        .with_fee_instructions(fee_instructions)
+        .with_instructions(instructions.instructions)
+        .then(|builder| {
+            if signing_key_index == default_account.key_index {
+                builder
+            } else {
+                builder.add_signature(&seal_signer_pk, &acc_key.key)
+            }
+        });
+    let signatures = builder.signatures().to_vec();
+    let transaction = builder.build_unsigned_transaction();
+
+    // Detect inputs
+    let substates = transaction.to_referenced_substates()?;
+    let substates = substates.into_iter().collect::<Vec<_>>();
+    let dependencies = sdk.substate_api().locate_dependent_substates(&substates).await?;
+    let inputs = dependencies.into_iter().map(|input| input.into_unversioned());
+
+    let transaction = transaction
+        .with_inputs(inputs)
+        .authorized_sealed_signer()
+        .build(signatures)
+        .seal(&key.key);
+
+    if req.dry_run {
+        let exec_result = context
+            .transaction_service()
+            .submit_dry_run_transaction(transaction, vec![])
+            .await?;
+
+        if let Some(reject) = exec_result.finalize.any_reject() {
+            return Err(JsonRpcError::new(
+                JsonRpcErrorReason::ApplicationError(5),
+                format!("Dry-run transaction rejected: {reject}"),
+                serde_json::Value::Null,
+            )
+            .into());
+        }
+        return Ok(TransactionSubmitManifestResponse {
+            transaction_id: exec_result.finalize.transaction_hash.into_array().into(),
+            result: Some(exec_result),
+        });
+    }
+
+    let transaction_id = context
+        .transaction_service()
+        .submit_transaction(transaction, vec![])
+        .await?;
+
+    Ok(TransactionSubmitManifestResponse {
+        transaction_id,
+        result: None,
+    })
+}
+
 pub async fn handle_get(
     context: &HandlerContext,
     token: Option<String>,
@@ -403,7 +518,7 @@ pub async fn handle_publish_template(
             proof_ids: vec![],
         };
         let resp = handle_submit_dry_run(context, token, request).await?;
-        if let Some(reject) = resp.result.finalize.full_reject() {
+        if let Some(reject) = resp.result.finalize.any_reject() {
             return Err(JsonRpcError::new(
                 JsonRpcErrorReason::ApplicationError(5),
                 format!("Dry-run transaction rejected: {reject}"),

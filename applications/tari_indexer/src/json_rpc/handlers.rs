@@ -29,7 +29,7 @@ use axum_jrpc::{
     JsonRpcResponse,
 };
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
-use log::{info, warn};
+use log::{error, info, warn};
 use serde_json::{self as json, json, Value};
 use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::hex::to_hex;
@@ -50,9 +50,6 @@ use tari_indexer_client::types::{
     GetConnectionsResponse,
     GetEpochManagerStatsResponse,
     GetIdentityResponse,
-    GetNonFungibleCollectionsResponse,
-    GetNonFungibleCountRequest,
-    GetNonFungibleCountResponse,
     GetNonFungiblesRequest,
     GetNonFungiblesResponse,
     GetSubstateRequest,
@@ -384,52 +381,34 @@ impl JsonRpcHandlers {
         }))
     }
 
-    pub async fn get_non_fungible_collections(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-
-        let res = self.substate_manager.get_non_fungible_collections().await;
-
-        match res {
-            Ok(collections) => Ok(JsonRpcResponse::success(answer_id, GetNonFungibleCollectionsResponse {
-                collections,
-            })),
-            Err(e) => {
-                warn!(target: LOG_TARGET, "Error getting non fungible collections: {}", e);
-                Err(Self::internal_error(
-                    answer_id,
-                    format!("Error getting non fungible collections: {}", e),
-                ))
-            },
-        }
-    }
-
-    pub async fn get_non_fungible_count(&self, value: JsonRpcExtractor) -> JrpcResult {
-        let answer_id = value.get_answer_id();
-        let request: GetNonFungibleCountRequest = value.parse_params()?;
-        let count = self
-            .substate_manager
-            .get_non_fungible_count(&request.address)
-            .await
-            .map_err(|e| {
-                warn!(target: LOG_TARGET, "Error getting non fungible count: {}", e);
-                Self::internal_error(answer_id, format!("Error getting non fungible count: {}", e))
-            })?;
-
-        Ok(JsonRpcResponse::success(answer_id, GetNonFungibleCountResponse {
-            count,
-        }))
-    }
-
     pub async fn get_non_fungibles(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
         let request: GetNonFungiblesRequest = value.parse_params()?;
+        let limit = usize::try_from(request.end_index.saturating_sub(request.start_index)).map_err(|e| {
+            JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    format!("Invalid end_index: {}", e),
+                    json::Value::Null,
+                ),
+            )
+        })?;
+        let offset = usize::try_from(request.start_index).map_err(|e| {
+            JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    format!("Invalid start_index: {}", e),
+                    json::Value::Null,
+                ),
+            )
+        })?;
 
         let res = self
             .substate_manager
-            .get_non_fungibles(&request.address, request.start_index, request.end_index)
-            .await
-            .map_err(|e| Self::internal_error(answer_id, e))?;
-
+            .get_non_fungibles_by_resource_address(request.address, limit, offset)
+            .map_err(|e| Self::internal_error(answer_id, format!("Error getting non fungibles: {}", e)))?;
         Ok(JsonRpcResponse::success(answer_id, GetNonFungiblesResponse {
             non_fungibles: res
                 .into_iter()
@@ -662,7 +641,7 @@ impl JsonRpcHandlers {
     }
 
     fn internal_error<T: Display>(answer_id: i64, error: T) -> JsonRpcResponse {
-        let msg = error.to_string();
-        Self::error_response(answer_id, JsonRpcErrorReason::InternalError, msg)
+        error!(target: LOG_TARGET, "Internal error: {}", error);
+        Self::error_response(answer_id, JsonRpcErrorReason::InternalError, error)
     }
 }

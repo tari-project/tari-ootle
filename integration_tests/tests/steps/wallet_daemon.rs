@@ -52,7 +52,7 @@ async fn when_i_claim_burn_via_wallet_daemon(
     )
     .await
     .unwrap();
-    if let Some(ref reason) = claim_burn_resp.result.result.reject() {
+    if let Some(ref reason) = claim_burn_resp.result.result.fee_reject() {
         panic!("Transaction failed: {}", reason);
     }
 }
@@ -116,7 +116,7 @@ async fn when_i_claim_fees_for_validator_and_epoch(
     resp.result.result.accept().unwrap_or_else(|| {
         panic!(
             "Expected fee claim to succeeded but failed with {}",
-            resp.result.result.reject().unwrap()
+            resp.result.result.fee_reject().unwrap()
         )
     });
 }

@@ -24,7 +24,7 @@ import { Routes, Route } from "react-router-dom";
 import ValidatorNode from "./routes/VN/ValidatorNode";
 import Connections from "./routes/Connections/Connections";
 import RecentTransactions from "./routes/RecentTransactions/RecentTransactions";
-import NftGallery from "./routes/NftGallery/NftGallery";
+import Resources from "./routes/Resources/Resources";
 import Events from "./routes/Events/Events";
 import Substates from "./routes/Substates/Substates";
 import ErrorPage from "./routes/ErrorPage";
@@ -47,8 +47,8 @@ export const breadcrumbRoutes = [
     dynamic: false,
   },
   {
-    label: "NFT Gallery",
-    path: "/nfts/:resourceAddress",
+    label: "Resources",
+    path: "/resources/:resourceAddress",
     dynamic: true,
   },
   {
@@ -74,7 +74,7 @@ export default function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<ValidatorNode />} />
           <Route path="connections" element={<Connections />} />
-          <Route path="nfts/:resourceAddress" element={<NftGallery />} />
+          <Route path="resources/:resourceAddress" element={<Resources />} />
           <Route path="transactions" element={<RecentTransactions />} />
           <Route path="events" element={<Events />} />
           <Route path="substates" element={<Substates />} />

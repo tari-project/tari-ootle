@@ -195,7 +195,7 @@ impl ValidatorBuilder {
             num_committees: self.num_committees,
             transaction_executions: self.transaction_executions.clone(),
             state_store: store,
-            current_view,
+            _current_view: current_view,
             epoch_manager,
             events: tx_events.subscribe(),
             current_state_machine_state: rx_current_state,

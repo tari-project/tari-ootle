@@ -44,7 +44,7 @@ diesel::table! {
     substates (id) {
         id -> Integer,
         address -> Text,
-        version -> BigInt,
+        version -> Integer,
         data -> Text,
         tx_hash -> Text,
         template_address -> Nullable<Text>,

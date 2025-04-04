@@ -28,6 +28,6 @@
     "@tari-project/typescript-bindings": "^1.5.3"
   },
   "devDependencies": {
-    "typescript": "^5.3.3"
+    "typescript": "^5.8.2"
   }
 }

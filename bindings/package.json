@@ -16,6 +16,7 @@
     "access": "public"
   },
   "scripts": {
+    "build-dist": "tsc",
     "build": "sh build.sh && tsc",
     "ts-build": "tsc"
   },

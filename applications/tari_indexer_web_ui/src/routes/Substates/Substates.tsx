@@ -197,6 +197,7 @@ function SubstatesLayout() {
             <TableBody>
               {substates.map((row) => (
                 <TableRow
+                  key={substateIdToString(row.substate_id)}
                   sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
                 >
                   <TableCell>

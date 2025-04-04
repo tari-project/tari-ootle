@@ -109,6 +109,7 @@ function Resources() {
                 <img
                   src={`${item.img}?size=248&fit=fill&auto=format`}
                   srcSet={`${item.img}?size=248&fit=fill&auto=format&dpr=2 4x`}
+                  alt={item.title || "NFT image"}
                   loading="lazy"
                 />
                 <ImageListItemBar title={item.title} subtitle={<span>{item.address}</span>} position="below" />

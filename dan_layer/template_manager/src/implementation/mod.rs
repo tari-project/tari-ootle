@@ -43,6 +43,5 @@ fn convert_to_db_template_type(template_type: TemplateType) -> DbTemplateType {
     match template_type {
         TemplateType::Wasm => DbTemplateType::Wasm,
         TemplateType::Manifest => DbTemplateType::Manifest,
-        TemplateType::Flow => DbTemplateType::Flow,
     }
 }

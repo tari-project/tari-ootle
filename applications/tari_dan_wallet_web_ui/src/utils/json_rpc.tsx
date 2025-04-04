@@ -24,12 +24,12 @@ import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
+  AccountSetDefaultRequest,
+  AccountSetDefaultResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
-  AccountSetDefaultRequest,
-  AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
@@ -49,6 +49,8 @@ import type {
   ConfidentialTransferResponse,
   ConfidentialViewVaultBalanceRequest,
   ConfidentialViewVaultBalanceResponse,
+  GetValidatorFeesRequest,
+  GetValidatorFeesResponse,
   KeysCreateRequest,
   KeysCreateResponse,
   KeysListRequest,
@@ -70,27 +72,22 @@ import type {
   SubstatesListResponse,
   TemplatesGetRequest,
   TemplatesGetResponse,
+  TemplatesListAuthoredRequest,
+  TemplatesListAuthoredResponse,
   TransactionGetAllRequest,
   TransactionGetAllResponse,
   TransactionGetRequest,
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
+  TransactionSubmitManifestRequest,
+  TransactionSubmitManifestResponse,
   TransactionSubmitRequest,
   TransactionSubmitResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
-} from "@tari-project/wallet_jrpc_client";
-import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
-import {
-  GetValidatorFeesRequest,
-  GetValidatorFeesResponse,
-  TemplatesListAuthoredRequest,
-  TemplatesListAuthoredResponse,
-  TransactionSubmitManifestRequest,
-  TransactionSubmitManifestResponse,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
@@ -100,6 +97,7 @@ import {
   WebauthnStartRegisterRequest,
   WebauthnStartRegisterResponse,
 } from "@tari-project/typescript-bindings";
+import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import useAuthStore from "../store/authStore";
 import { AUTH_TOKEN_FOR_NONE_AUTH } from "../routes/Auth/Auth";
 

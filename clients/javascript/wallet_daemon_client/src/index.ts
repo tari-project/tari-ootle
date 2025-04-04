@@ -3,7 +3,7 @@
  * //  SPDX-License-Identifier: BSD-3-Clause
  */
 
-import {
+import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
@@ -19,11 +19,8 @@ import {
   AccountsListResponse,
   AccountsTransferRequest,
   AccountsTransferResponse,
-  Arg,
-  ArgDef,
   AuthGetAllJwtRequest,
   AuthGetAllJwtResponse,
-  AuthGetMethodRequest,
   AuthGetMethodResponse,
   AuthLoginRequest,
   AuthRevokeTokenRequest,
@@ -32,17 +29,12 @@ import {
   ClaimBurnResponse,
   ClaimValidatorFeesRequest,
   ClaimValidatorFeesResponse,
-  ComponentAddressOrName,
   ConfidentialTransferRequest,
   ConfidentialTransferResponse,
   ConfidentialViewVaultBalanceRequest,
   ConfidentialViewVaultBalanceResponse,
-  FinalizeResult,
-  FunctionDef,
   GetValidatorFeesRequest,
   GetValidatorFeesResponse,
-  Instruction,
-  KeyBranch,
   KeysCreateRequest,
   KeysCreateResponse,
   KeysListRequest,
@@ -60,14 +52,11 @@ import {
   SettingsSetRequest,
   SettingsSetResponse,
   stringToSubstateId,
-  SubstateId,
   substateIdToString,
   SubstatesGetRequest,
   SubstatesGetResponse,
   SubstatesListRequest,
   SubstatesListResponse,
-  SubstateType,
-  TemplateDef,
   TemplatesGetRequest,
   TemplatesGetResponse,
   TemplatesListAuthoredRequest,
@@ -78,14 +67,12 @@ import {
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
-  TransactionStatus,
   TransactionSubmitRequest,
   TransactionSubmitResponse,
   TransactionSubmitManifestRequest,
   TransactionSubmitManifestResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
-  Type,
   WebauthnAlreadyRegisteredRequest,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
@@ -97,89 +84,14 @@ import {
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
   WebRtcStartResponse,
+  TransactionSubmitDryRunRequest,
+  TransactionSubmitDryRunResponse,
 } from "@tari-project/typescript-bindings";
 import { FetchRpcTransport, RpcTransport } from "./transports";
 
 export * as transports from "./transports";
 
 export { substateIdToString, stringToSubstateId, rejectReasonToString };
-
-export type {
-  AuthGetMethodRequest,
-  AuthGetMethodResponse,
-  AccountGetDefaultRequest,
-  AccountGetRequest,
-  AccountGetResponse,
-  AccountSetDefaultRequest,
-  AccountSetDefaultResponse,
-  AccountsCreateFreeTestCoinsRequest,
-  AccountsCreateFreeTestCoinsResponse,
-  AccountsCreateRequest,
-  AccountsCreateResponse,
-  AccountsGetBalancesRequest,
-  AccountsGetBalancesResponse,
-  AccountsListRequest,
-  AccountsListResponse,
-  AccountsTransferRequest,
-  AccountsTransferResponse,
-  AuthGetAllJwtRequest,
-  AuthGetAllJwtResponse,
-  AuthRevokeTokenRequest,
-  AuthRevokeTokenResponse,
-  ClaimBurnRequest,
-  ClaimBurnResponse,
-  ClaimValidatorFeesRequest,
-  ClaimValidatorFeesResponse,
-  ComponentAddressOrName,
-  ConfidentialTransferRequest,
-  ConfidentialTransferResponse,
-  ConfidentialViewVaultBalanceRequest,
-  ConfidentialViewVaultBalanceResponse,
-  KeyBranch,
-  KeysCreateRequest,
-  KeysCreateResponse,
-  KeysListRequest,
-  KeysListResponse,
-  KeysSetActiveRequest,
-  KeysSetActiveResponse,
-  ListAccountNftRequest,
-  ListAccountNftResponse,
-  PublishTemplateRequest,
-  PublishTemplateResponse,
-  RevealFundsRequest,
-  RevealFundsResponse,
-  SettingsGetResponse,
-  SettingsSetRequest,
-  SettingsSetResponse,
-  SubstatesGetRequest,
-  SubstatesGetResponse,
-  SubstatesListRequest,
-  SubstatesListResponse,
-  TemplatesGetRequest,
-  TemplatesGetResponse,
-  TransactionGetAllRequest,
-  TransactionGetAllResponse,
-  TransactionGetRequest,
-  TransactionGetResponse,
-  TransactionGetResultRequest,
-  TransactionGetResultResponse,
-  TransactionSubmitRequest,
-  TransactionSubmitResponse,
-  TransactionWaitResultRequest,
-  TransactionWaitResultResponse,
-  WebRtcStartRequest,
-  WebRtcStartResponse,
-  Arg,
-  FinalizeResult,
-  TemplateDef,
-  FunctionDef,
-  Type,
-  ArgDef,
-  Instruction,
-  SubstateType,
-  TransactionStatus,
-  SubstateId,
-};
 
 export class WalletDaemonClient {
   private token: string | null;
@@ -284,6 +196,10 @@ export class WalletDaemonClient {
 
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {
     return this.__invokeRpc("transactions.submit", params);
+  }
+
+  public submitTransactionDryRun(params: TransactionSubmitDryRunRequest): Promise<TransactionSubmitDryRunResponse> {
+    return this.__invokeRpc("transactions.submit_dry_run", params);
   }
 
   public submitTransactionManifest(params: TransactionSubmitManifestRequest): Promise<TransactionSubmitManifestResponse> {

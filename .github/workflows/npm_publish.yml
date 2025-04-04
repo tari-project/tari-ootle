@@ -20,6 +20,7 @@ jobs:
         with:
           node-version: "20"
       - run: npm ci
+      - run: npm run build
       - uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.NPM_TOKEN }}
@@ -39,7 +40,6 @@ jobs:
         with:
           node-version: "23"
       - run: npm ci
-      - run: npm link ../../../bindings
       - run: npm run build
       - uses: JS-DevTools/npm-publish@v3
         with:

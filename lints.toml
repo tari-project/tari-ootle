@@ -70,3 +70,8 @@ allow = [
     # ignore-interior-mutability does not allow us to selectively disable the lint all usages of this type.
     'clippy::mutable_key_type',
 ]
+
+warn = [
+    # TODO: remove this in future. This is a new lint and the L1 codebase has a number of these that should not error for now
+    'clippy::manual_repeat_n',
+]

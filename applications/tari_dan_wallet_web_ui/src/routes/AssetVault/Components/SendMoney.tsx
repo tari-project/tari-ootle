@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {FormEvent, useEffect, useState} from "react";
-import {Form} from "react-router-dom";
+import { FormEvent, useEffect, useState } from "react";
+import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import CheckBox from "@mui/material/Checkbox";
 import TextField from "@mui/material/TextField";
@@ -30,11 +30,11 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Box from "@mui/material/Box";
-import {useAccountsGetBalances, useAccountsTransfer} from "../../../api/hooks/useAccounts";
-import {useTheme} from "@mui/material/styles";
+import { useAccountsGetBalances, useAccountsTransfer } from "../../../api/hooks/useAccounts";
+import { useTheme } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
 import Select from "@mui/material/Select";
-import {SelectChangeEvent} from "@mui/material/Select/Select";
+import { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
 import {
   BalanceEntry,
@@ -191,7 +191,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
           }
           // temporary fix for having a proper calculation for estimated fee to avoid not enough fee issue
           // TODO: remove once fixed in backend
-          const fee = result.fee += 100;
+          const fee = (result.fee += 100);
           setTransferFormState({ ...transferFormState, fee: fee.toString() });
         })
         .catch((e) => {

@@ -194,7 +194,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
           // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than 
           // accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
           // TODO: remove once this is no longer an issue
-          const fee = (result.fee += 100);
+          const fee = result.fee + 100;
           setTransferFormState({ ...transferFormState, fee: fee.toString() });
         })
         .catch((e) => {

@@ -189,8 +189,11 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             });
             return;
           }
-          // temporary fix for having a proper calculation for estimated fee to avoid not enough fee issue
-          // TODO: remove once fixed in backend
+          // Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
+          // Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof 
+          // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than 
+          // accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
+          // TODO: remove once this is no longer an issue
           const fee = (result.fee += 100);
           setTransferFormState({ ...transferFormState, fee: fee.toString() });
         })

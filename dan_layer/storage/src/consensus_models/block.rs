@@ -26,6 +26,7 @@ use tari_dan_common_types::{
     NodeHeight,
     NumPreshards,
     ShardGroup,
+    ToSubstateAddress,
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
@@ -761,6 +762,7 @@ impl Block {
     pub fn get_substate_updates<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
+        num_preshards: NumPreshards,
     ) -> Result<Vec<SubstateUpdate>, StorageError> {
         let committed = self
             .commands()
@@ -777,9 +779,15 @@ impl Block {
             let Some(outputs) = tx_rec.resulting_outputs() else {
                 continue;
             };
+            let outputs = outputs
+                .iter()
+                .map(|lock| lock.versioned_substate_id().as_ref())
+                .filter(|id| {
+                    self.shard_group()
+                        .contains_or_global(&id.to_substate_address().to_shard(num_preshards))
+                });
 
-            let substates =
-                SubstateRecord::get_all(tx, outputs.iter().map(|lock| lock.versioned_substate_id().as_ref()))?;
+            let substates = SubstateRecord::get_all(tx, outputs)?;
             for substate in substates {
                 if substate.is_destroyed() {
                     // This substate is destroyed. One of the following are possible:

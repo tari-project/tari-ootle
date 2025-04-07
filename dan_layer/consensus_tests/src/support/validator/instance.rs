@@ -43,7 +43,7 @@ pub struct Validator {
     pub shard_group: ShardGroup,
     pub num_committees: u32,
 
-    pub current_view: CurrentView,
+    pub _current_view: CurrentView,
     pub state_store: TestStore,
     pub transaction_executions: TestExecutionSpecStore,
     pub epoch_manager: TestEpochManager,

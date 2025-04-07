@@ -40,6 +40,7 @@ import { useAuthMethod } from "./api/hooks/useAuth";
 import AccessToken from "./routes/AccessToken/AccessToken";
 import { jwtDecode } from "jwt-decode";
 import Templates from "./routes/Templates/Templates";
+import Manifest from "./routes/Manifest/Manifest";
 
 export const breadcrumbRoutes = [
   {
@@ -105,6 +106,11 @@ export const breadcrumbRoutes = [
   {
     label: "Templates",
     path: "/templates",
+    dynamic: false,
+  },
+  {
+    label: "Manifest",
+    path: "/manifest",
     dynamic: false,
   },
 ];
@@ -238,6 +244,10 @@ function App() {
           <Route
             path="templates"
             element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/templates" component={Templates} />}
+          />
+          <Route
+            path="manifest"
+            element={<GuardedRoute isAuthenticated={isAuthenticated} redirect="/manifest" component={Manifest} />}
           />
           <Route path="*" element={<ErrorPage />} />
         </Route>

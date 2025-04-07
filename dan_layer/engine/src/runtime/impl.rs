@@ -102,10 +102,10 @@ use tari_template_lib::{
         NotAuthorized,
         ResourceAddress,
         ResourceAddressAllocation,
-        VaultId,
         VaultRef,
     },
     prelude::ResourceType,
+    resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
 };
 
@@ -223,38 +223,27 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    fn emit_vault_events<T: Into<String>>(
+    fn emit_std_event(
         &self,
-        action: T,
-        vault_id: VaultId,
-        vault_lock: &LockedSubstate,
-        amount: Amount,
-        resource_type: ResourceType,
+        object_name: &str,
+        action: &str,
+        substate_id: SubstateId,
+        payload: Metadata,
         state: &mut WorkingState,
     ) -> Result<(), RuntimeError> {
         let tx_hash = self.entity_id_provider.transaction_hash();
         let (&template_address, _) = state.current_template()?;
-        let &resource_address = state.get_vault(vault_lock)?.resource_address();
 
-        let payload = Metadata::from_iter([
-            ("vault_id", vault_id.to_string()),
-            ("resource_address", resource_address.to_string()),
-            ("resource_type", resource_type.to_string()),
-            ("amount", amount.to_string()),
-        ]);
-
-        let action = action.into();
-
-        let vault_event = Event::std(
-            Some(SubstateId::Vault(vault_id)),
+        let event = Event::std(
+            Some(substate_id),
             template_address,
             tx_hash,
-            "vault",
-            &action,
+            object_name,
+            action,
             payload,
         );
-        debug!(target: LOG_TARGET, "Emitted vault event {}", vault_event);
-        state.push_event(vault_event);
+        debug!(target: LOG_TARGET, "Emitted event {}", event);
+        state.push_event(event);
 
         Ok(())
     }
@@ -816,7 +805,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.check_resource_auth_hook(hook)?;
                 }
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with(|state_mut| {
                     let resource = Resource::new(
                         arg.resource_type,
                         owner_key,
@@ -829,7 +818,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     let resource_address = match arg.address_allocation {
                         Some(allocation) => {
-                            let alloc = state.take_allocated_address(allocation.id())?;
+                            let alloc = state_mut.take_allocated_address(allocation.id())?;
                             alloc.substate_id().as_resource_address().ok_or_else(|| {
                                 RuntimeError::AddressAllocationTypeMismatch {
                                     id: alloc.substate_id().clone(),
@@ -837,22 +826,32 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                                 }
                             })?
                         },
-                        None => state.id_provider()?.new_resource_address()?,
+                        None => state_mut.id_provider()?.new_resource_address()?,
                     };
 
-                    state.new_substate(resource_address, resource)?;
+                    let mut payload = Metadata::from_iter([("resource_type", resource.resource_type().to_string())]);
+                    if let Some(symbol) = resource.metadata().get(TOKEN_SYMBOL) {
+                        payload.insert(TOKEN_SYMBOL, symbol);
+                    }
+                    if let Some(image_url) = resource.metadata().get(IMAGE_URL) {
+                        payload.insert(IMAGE_URL, image_url);
+                    }
+
+                    self.emit_std_event("resource", "create", resource_address.into(), payload, state_mut)?;
+
+                    state_mut.new_substate(resource_address, resource)?;
                     let resource_lock =
-                        state.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Write)?;
+                        state_mut.lock_substate(&SubstateId::Resource(resource_address), LockFlag::Write)?;
 
                     let mut output_bucket = None;
                     if let Some(mint_arg) = arg.mint_arg {
-                        let bucket_id = state.id_provider()?.new_bucket_id();
-                        let container = state.mint_resource(&resource_lock, mint_arg)?;
-                        state.new_bucket(bucket_id, container)?;
+                        let bucket_id = state_mut.id_provider()?.new_bucket_id();
+                        let container = state_mut.mint_resource(&resource_lock, mint_arg)?;
+                        state_mut.new_bucket(bucket_id, container)?;
                         output_bucket = Some(tari_template_lib::models::Bucket::from_id(bucket_id));
                     }
 
-                    state.unlock_substate(resource_lock)?;
+                    state_mut.unlock_substate(resource_lock)?;
 
                     Ok(InvokeResult::encode(&(resource_address, output_bucket))?)
                 })
@@ -924,13 +923,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Mint)?;
                 }
 
-                self.tracker.write_with(|state| {
-                    let resource = state.mint_resource(&resource_lock, mint_resource.mint_arg)?;
-                    let bucket_id = state.id_provider()?.new_bucket_id();
-                    state.new_bucket(bucket_id, resource)?;
+                self.tracker.write_with(|state_mut| {
+                    let resource = state_mut.mint_resource(&resource_lock, mint_resource.mint_arg)?;
+                    let bucket_id = state_mut.id_provider()?.new_bucket_id();
+
+                    let payload = Metadata::from_iter([
+                        ("resource_type", resource.resource_type().to_string()),
+                        ("amount", resource.amount().to_string()),
+                    ]);
+                    self.emit_std_event("resource", "mint", resource_address.into(), payload, state_mut)?;
+
+                    state_mut.new_bucket(bucket_id, resource)?;
 
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
-                    state.unlock_substate(resource_lock)?;
+                    state_mut.unlock_substate(resource_lock)?;
 
                     Ok(InvokeResult::encode(&bucket)?)
                 })
@@ -968,15 +974,22 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Recall)?;
                 }
 
-                self.tracker.write_with(|state| {
-                    let vault_lock = state.lock_substate(&arg.vault_id.into(), LockFlag::Write)?;
+                self.tracker.write_with(|state_mut| {
+                    let vault_lock = state_mut.lock_substate(&arg.vault_id.into(), LockFlag::Write)?;
 
-                    let resource = state.recall_resource_from_vault(&vault_lock, arg.resource)?;
+                    let resource = state_mut.recall_resource_from_vault(&vault_lock, &arg.resource)?;
 
-                    let bucket_id = state.id_provider()?.new_bucket_id();
-                    state.new_bucket(bucket_id, resource)?;
+                    let payload = Metadata::from_iter([
+                        ("resource_type", resource.resource_type().to_string()),
+                        ("vault_id", arg.vault_id.to_string()),
+                        ("recall_desc", arg.resource.to_string()),
+                    ]);
+                    self.emit_std_event("resource", "recall", resource_address.into(), payload, state_mut)?;
 
-                    state.unlock_substate(vault_lock)?;
+                    let bucket_id = state_mut.id_provider()?.new_bucket_id();
+                    state_mut.new_bucket(bucket_id, resource)?;
+
+                    state_mut.unlock_substate(vault_lock)?;
 
                     Ok(InvokeResult::encode(&tari_template_lib::models::Bucket::from_id(
                         bucket_id,
@@ -1049,11 +1062,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     )?;
                 }
 
-                self.tracker.write_with(|state| {
+                self.tracker.write_with(|state_mut| {
                     let addr = NonFungibleAddress::new(resource_address, arg.id);
-                    let locked = state.lock_substate(&SubstateId::NonFungible(addr.clone()), LockFlag::Write)?;
+                    let locked = state_mut.lock_substate(&SubstateId::NonFungible(addr.clone()), LockFlag::Write)?;
 
-                    let nft = state.get_non_fungible_mut(&locked)?;
+                    let nft = state_mut.get_non_fungible_mut(&locked)?;
 
                     let contents = nft
                         .contents_mut()
@@ -1064,7 +1077,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         })?;
                     contents.set_mutable_data(arg.data);
 
-                    state.unlock_substate(locked)?;
+                    let payload = Metadata::from_iter([("resource_type", ResourceType::NonFungible.to_string())]);
+                    self.emit_std_event(
+                        "resource",
+                        "update_nonfungible_data",
+                        resource_address.into(),
+                        payload,
+                        state_mut,
+                    )?;
+
+                    state_mut.unlock_substate(locked)?;
 
                     Ok(InvokeResult::unit())
                 })
@@ -1097,10 +1119,19 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::UpdateAccessRules)?;
                 }
 
-                self.tracker.write_with(|state| {
-                    let resource_mut = state.get_resource_mut(&resource_lock)?;
+                self.tracker.write_with(|state_mut| {
+                    let resource_mut = state_mut.get_resource_mut(&resource_lock)?;
                     resource_mut.set_access_rules(access_rules);
-                    state.unlock_substate(resource_lock)?;
+                    let payload = Metadata::from_iter([("resource_type", resource_mut.resource_type().to_string())]);
+                    self.emit_std_event(
+                        "resource",
+                        "update_access_rules",
+                        resource_address.into(),
+                        payload,
+                        state_mut,
+                    )?;
+
+                    state_mut.unlock_substate(resource_lock)?;
 
                     Ok(InvokeResult::unit())
                 })
@@ -1224,14 +1255,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     }
 
                     // Emit a builtin event for the deposit
-                    self.emit_vault_events(
-                        "deposit",
-                        vault_id,
-                        &vault_lock,
-                        bucket.amount(),
-                        bucket.resource_type(),
-                        state_mut,
-                    )?;
+                    let payload = Metadata::from_iter([
+                        ("resource_address", bucket.resource_address().to_string()),
+                        ("resource_type", bucket.resource_type().to_string()),
+                        ("amount", bucket.amount().to_string()),
+                    ]);
+
+                    self.emit_std_event("vault", "deposit", vault_id.into(), payload, state_mut)?;
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
                     vault_mut.deposit(bucket)?;
@@ -1300,14 +1330,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     };
 
                     // Emit a builtin event for the withdraw
-                    self.emit_vault_events(
-                        "withdraw",
-                        vault_id,
-                        &vault_lock,
-                        amount,
-                        resource_container.resource_type(),
-                        state,
-                    )?;
+                    let payload = Metadata::from_iter([
+                        ("resource_address", resource_container.resource_address().to_string()),
+                        ("resource_type", resource_container.resource_type().to_string()),
+                        ("amount", amount.to_string()),
+                    ]);
+
+                    self.emit_std_event("vault", "withdraw", vault_id.into(), payload, state)?;
 
                     let bucket_id = state.id_provider()?.new_bucket_id();
                     state.new_bucket(bucket_id, resource_container)?;

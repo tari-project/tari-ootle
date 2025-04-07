@@ -106,8 +106,6 @@ export const inspectSubstate = (request: InspectSubstateRequest): Promise<Inspec
 export const listSubstates = (request: ListSubstatesRequest): Promise<ListSubstatesResponse> =>
   jsonRpc("list_substates", request);
 export const getConnections = (): Promise<IndexerGetConnectionsResponse> => jsonRpc("get_connections");
-export const getNonFungibleCollections = (): Promise<GetNonFungibleCollectionsResponse> =>
-  jsonRpc("get_non_fungible_collections");
 export const getNonFungibleCount = (request: GetNonFungibleCountRequest): Promise<GetNonFungibleCountResponse> =>
   jsonRpc("get_non_fungible_count", request);
 export const getNonFungibles = (request: GetNonFungiblesRequest): Promise<GetNonFungiblesResponse> =>

@@ -64,4 +64,5 @@ done
 # code for BTreeMap<Commitment, ConfidentialOutput>. Because of this the ConfidentialOutput type is not imported.
 echo "import { ConfidentialOutput } from './ConfidentialOutput';" >> $TYPES_DIR/ResourceContainer.ts
 
+npx tsc
 npx prettier --write "./**/*.{ts,tsx,css,json}" --log-level=warn

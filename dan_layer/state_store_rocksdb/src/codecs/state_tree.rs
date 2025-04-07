@@ -57,7 +57,7 @@ impl DbCodec<NodeKey> for NodeKeyCodec {
                 })?;
             NibblePath::new_even(nibble_path_bytes)
         } else {
-            let num_bytes_odd = (num_nibbles + 1) / 2;
+            let num_bytes_odd = num_nibbles.div_ceil(2);
             let nibble_path_bytes =
                 read_n_bytes(reader, num_bytes_odd).ok_or_else(|| RocksDbStorageError::DecodeError {
                     source: anyhow!("Invalid nibble path bytes. Could not read {} bytes", num_bytes_odd),

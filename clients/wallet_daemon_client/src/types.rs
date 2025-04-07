@@ -171,6 +171,34 @@ pub struct TransactionSubmitDryRunResponse {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
+pub struct TransactionSubmitManifestRequest {
+    pub manifest: String,
+    pub variables: HashMap<String, String>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub signing_key_index: Option<u64>,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub max_fee: u64,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct TransactionSubmitManifestResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub transaction_id: TransactionId,
+    pub result: Option<ExecuteResult>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
 pub struct PublishTemplateRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::base64")]

@@ -585,16 +585,17 @@ impl TemplateTest {
         proofs: Vec<NonFungibleAddress>,
     ) -> anyhow::Result<ExecuteResult> {
         let result = self.try_execute_instructions(fee_instructions, instructions, proofs)?;
-        let diff = result
-            .finalize
-            .result
-            .accept()
-            .ok_or_else(|| anyhow!("Transaction was rejected: {}", result.finalize.result.reject().unwrap()))?;
+        let diff = result.finalize.result.accept().ok_or_else(|| {
+            anyhow!(
+                "Transaction was rejected: {}",
+                result.finalize.result.fee_reject().unwrap()
+            )
+        })?;
 
         // It is convenient to commit the state back to the staged state store in tests.
         self.commit_diff(diff);
 
-        if let Some(reason) = result.finalize.full_reject() {
+        if let Some(reason) = result.finalize.any_reject() {
             return Err(anyhow!("Transaction failed: {}", reason));
         }
 

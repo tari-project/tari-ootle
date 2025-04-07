@@ -21,7 +21,12 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { transactionsGet, transactionsGetAll, transactionsPublishTemplate } from "../../utils/json_rpc";
+import {
+  transactionsGet,
+  transactionsGetAll,
+  transactionsPublishTemplate,
+  transactionsSubmitManifest,
+} from "../../utils/json_rpc";
 import { ApiError } from "../helpers/types";
 import queryClient from "../queryClient";
 
@@ -53,6 +58,17 @@ export const useGetAllTransactions = (status: TransactionStatus | null, componen
 
 export const usePublishTemplate = () => {
   return useMutation(transactionsPublishTemplate, {
+    onError: (error: ApiError) => {
+      console.error(error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries(["transactions"]);
+      queryClient.invalidateQueries(["accounts_balances"]);
+    },
+  });
+};
+export const useSubmitManifest = () => {
+  return useMutation(transactionsSubmitManifest, {
     onError: (error: ApiError) => {
       console.error(error);
     },

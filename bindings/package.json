@@ -1,6 +1,6 @@
 {
   "name": "@tari-project/typescript-bindings",
-  "version": "1.5.2",
+  "version": "1.5.5",
   "description": "TypeScript types synchronized to the Tari Ootle Rust codebase",
   "homepage": "https://github.com/tari-project/tari-dan#readme",
   "bugs": {
@@ -16,13 +16,17 @@
     "access": "public"
   },
   "scripts": {
+    "build-dist": "tsc",
     "build": "sh build.sh && tsc",
     "ts-build": "tsc"
   },
+  "files": [
+    "/dist"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "shx": "^0.3.4",
-    "typescript": "^5.3.3"
+    "typescript": "^5.8.2"
   }
 }

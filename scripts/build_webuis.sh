@@ -54,7 +54,7 @@ if [ -z "${skip_bindings}" ]; then
 fi
 
 function build() {
-  pushd $base_path/applications/$1 > /dev/null
+  pushd $base_path/$1 > /dev/null
   npm install > /dev/null
   if [ -z ${check_typescript+x} ]; then
     npm run build
@@ -65,14 +65,17 @@ function build() {
   popd > /dev/null
 }
 
+echo "Building Wallet client..."
+build clients/javascript/wallet_daemon_client
+
 # Build webuis
 echo "Building Validator Node Web UI..."
-build tari_validator_node_web_ui
+build applications/tari_validator_node_web_ui
 
 
 echo "Building Wallet Web UI..."
-build tari_dan_wallet_web_ui
+build applications/tari_dan_wallet_web_ui
 
 
 echo "Building Indexer Web UI..."
-build tari_indexer_web_ui
+build applications/tari_indexer_web_ui

@@ -109,7 +109,7 @@ pub async fn handle_mint_account_nft(
             .await?;
 
             total_fee += resp.final_fee;
-            if let Some(reason) = resp.finalize.result.full_reject() {
+            if let Some(reason) = resp.finalize.result.any_reject() {
                 return Err(anyhow!("Failed to create account NFT: {}", reason));
             }
             let component_address = resp
@@ -202,7 +202,7 @@ async fn mint_account_nft(
         .await?;
 
     let event = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = event.finalize.full_reject() {
+    if let Some(reject) = event.finalize.any_reject() {
         return Err(application_error(
             ApplicationErrorCode::TransactionRejected,
             format!("Mint new NFT using account {} was rejected: {}", account, reject),
@@ -243,7 +243,7 @@ async fn create_account_nft(
 
     let event = wait_for_result(&mut events, tx_id).await?;
 
-    if let Some(reason) = event.finalize.reject() {
+    if let Some(reason) = event.finalize.fee_reject() {
         return Err(application_error(
             ApplicationErrorCode::TransactionRejected,
             format!(

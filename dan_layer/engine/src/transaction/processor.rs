@@ -475,13 +475,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             entity_id: account_address.entity_id(),
         })?;
 
-        let result = Self::invoke_template(
-            template,
-            template_provider,
-            runtime.clone(),
-            function_def,
-            resolved_args,
-        )?;
+        let result = Self::invoke_template(template, runtime.clone(), function_def, resolved_args)?;
 
         runtime.interface().validate_return_value(&result.indexed)?;
 
@@ -526,13 +520,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             entity_id: runtime.interface().next_entity_id()?,
         })?;
 
-        let result = Self::invoke_template(
-            template,
-            template_provider,
-            runtime.clone(),
-            function_def,
-            resolved_args,
-        )?;
+        let result = Self::invoke_template(template, runtime.clone(), function_def, resolved_args)?;
 
         runtime.interface().validate_return_value(&result.indexed)?;
 
@@ -601,7 +589,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         final_args.push(to_value(component_address)?);
         final_args.extend(resolved_args);
 
-        let result = Self::invoke_template(template, template_provider, runtime.clone(), function_def, final_args)?;
+        let result = Self::invoke_template(template, runtime.clone(), function_def, final_args)?;
 
         runtime.interface().validate_return_value(&result.indexed)?;
         runtime.interface().pop_call_frame()?;
@@ -611,7 +599,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
     fn invoke_template(
         module: LoadedTemplate,
-        template_provider: &TTemplateProvider,
         runtime: Runtime,
         function_def: FunctionDef,
         args: Vec<tari_bor::Value>,
@@ -621,17 +608,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 let mut store = loaded.create_store();
                 let mut process = WasmProcess::init(&mut store, loaded, runtime)?;
                 process.invoke(&mut store, &function_def, args)?
-            },
-            LoadedTemplate::Flow(flow_factory) => {
-                flow_factory.run_new_instance(
-                    Arc::new(template_provider.clone()),
-                    runtime,
-                    &function_def,
-                    args,
-                    // TODO
-                    0,
-                    MAX_CALL_DEPTH,
-                )?
             },
         };
         Ok(result)

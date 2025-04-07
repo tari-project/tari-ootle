@@ -262,7 +262,6 @@ message StateTransitionId {
 enum TemplateType {
   Wasm = 0;
   Manifest = 1;
-  Flow = 2;
 }
 
 message SyncTemplatesRequest {

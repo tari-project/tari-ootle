@@ -72,7 +72,6 @@ impl From<DbTemplate> for TemplateMetadata {
 pub enum TemplateExecutable {
     CompiledWasm(Vec<u8>),
     Manifest(String),
-    Flow(String),
     // TODO: remove this when base layer template registration is removed
     /// WASM binary download URL and binary hash
     DownloadableWasm(Url, FixedHash),
@@ -118,20 +117,6 @@ impl TryFrom<DbTemplate> for Template {
                             record.template_type
                         ),
                     })?)
-                },
-                DbTemplateType::Flow => {
-                    let s = String::from_utf8(record.code.ok_or_else(|| StorageError::DataInconsistency {
-                        details: format!(
-                            "Template type {} does not have the required binary data",
-                            record.template_type
-                        ),
-                    })?)
-                    .map_err(|e| StorageError::DataInconsistency {
-                        details: format!("flow to UTF8 string: {}", e),
-                    })?;
-                    // TODO: we don't represent flow as any particular type, so any UTF-8 bytes are valid. Unsure if
-                    // "flow" will be further developed.
-                    TemplateExecutable::Flow(s)
                 },
                 DbTemplateType::Manifest => {
                     let s = String::from_utf8(record.code.ok_or_else(|| StorageError::DataInconsistency {

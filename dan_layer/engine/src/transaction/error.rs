@@ -33,8 +33,6 @@ pub enum TransactionError {
     TemplateNotFound { address: TemplateAddress },
     #[error(transparent)]
     RuntimeError(#[from] RuntimeError),
-    #[error(transparent)]
-    FlowEngineError(#[from] crate::flow::FlowEngineError),
     #[error("Failed to load template '{address}': {details}")]
     FailedToLoadTemplate { address: TemplateAddress, details: String },
     #[error("BOR error: {0}")]

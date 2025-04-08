@@ -566,9 +566,7 @@ impl JsonRpcHandlers {
                 .load_template()
                 .map_err(|e| Self::internal_error(answer_id, format!("Error loading template: {}", e)))?,
             // TemplateExecutable::DownloadableWasm is never returned ad there is no DB type for that
-            TemplateExecutable::DownloadableWasm(_, _) |
-            TemplateExecutable::Manifest(_) |
-            TemplateExecutable::Flow(_) => {
+            TemplateExecutable::DownloadableWasm(_, _) | TemplateExecutable::Manifest(_) => {
                 return Err(JsonRpcResponse::error(
                     answer_id,
                     JsonRpcError::new(

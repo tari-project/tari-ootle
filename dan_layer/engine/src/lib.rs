@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 pub mod fees;
-pub mod flow;
 pub mod function_definitions;
 pub mod runtime;
 pub mod state_store;

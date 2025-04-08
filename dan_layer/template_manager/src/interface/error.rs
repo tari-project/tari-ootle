@@ -57,8 +57,6 @@ pub enum TemplateManagerError {
     FlowJsonNotValidUtf8(#[from] FromUtf8Error),
     #[error("The flow was not valid JSON: {0}")]
     InvalidJson(#[from] serde_json::Error),
-    #[error("The flow engine encountered an error: {0}")]
-    FlowEngineError(#[from] tari_dan_engine::flow::FlowEngineError),
     #[error("FixedHashSizeError: {0}")]
     FixedHashSizeError(#[from] FixedHashSizeError),
     #[error("Epoch manager error: {0}")]

@@ -37,8 +37,6 @@ use tari_dan_common_types::{
     NodeAddressable,
 };
 use tari_dan_engine::{
-    flow::FlowFactory,
-    function_definitions::FlowFunctionDefinition,
     template::{LoadedTemplate, TemplateModuleLoader},
     wasm::WasmModule,
 };
@@ -235,9 +233,6 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                     let binary = fs::read(dbg_replacement).expect("Could not read debug file");
                     *wasm = binary;
                 },
-                TemplateExecutable::Flow(_) => {
-                    todo!("debug replacements for flow templates not implemented");
-                },
                 _ => return Err(TemplateManagerError::TemplateUnavailable { status: None }),
             }
 
@@ -332,11 +327,6 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 code = Some(curr_manifest.into_bytes());
                 template_type = DbTemplateType::Manifest;
             },
-            TemplateExecutable::Flow(curr_flow_json) => {
-                template_hash = hash_template_code(curr_flow_json.as_bytes()).into_array().into();
-                code = Some(curr_flow_json.into_bytes());
-                template_type = DbTemplateType::Flow;
-            },
             TemplateExecutable::DownloadableWasm(url, hash) => {
                 template_url = Some(url.to_string());
                 template_type = DbTemplateType::Wasm;
@@ -422,11 +412,6 @@ impl<TAddr: NodeAddressable + Send + Sync + 'static> TemplateProvider for Templa
                 module.load_template()?
             },
             TemplateExecutable::Manifest(_) => return Err(TemplateManagerError::UnsupportedTemplateType),
-            TemplateExecutable::Flow(flow_json) => {
-                let definition: FlowFunctionDefinition = serde_json::from_str(&flow_json)?;
-                let factory = FlowFactory::try_create::<Self>(definition)?;
-                LoadedTemplate::Flow(factory)
-            },
             TemplateExecutable::DownloadableWasm(_, _) => {
                 // impossible case, since there is no separate downloadable wasm type in DB level
                 return Err(Self::Error::UnsupportedTemplateType);

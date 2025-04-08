@@ -127,7 +127,6 @@ pub struct DbTemplateUpdate {
 #[derive(Debug, Clone)]
 pub enum DbTemplateType {
     Wasm,
-    Flow,
     Manifest,
 }
 
@@ -138,7 +137,6 @@ impl FromStr for DbTemplateType {
         let normalized = s.trim().to_lowercase();
         match normalized.as_str() {
             "wasm" => Ok(DbTemplateType::Wasm),
-            "flow" => Ok(DbTemplateType::Flow),
             "manifest" => Ok(DbTemplateType::Manifest),
             _ => Err(()),
         }
@@ -149,7 +147,6 @@ impl DbTemplateType {
     pub fn as_str(&self) -> &'static str {
         match self {
             DbTemplateType::Wasm => "Wasm",
-            DbTemplateType::Flow => "Flow",
             DbTemplateType::Manifest => "Manifest",
         }
     }

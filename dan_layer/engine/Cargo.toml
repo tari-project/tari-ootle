@@ -23,13 +23,11 @@ tari_transaction = { workspace = true }
 anyhow = { workspace = true }
 blake2 = { workspace = true }
 cargo_toml = { workspace = true }
-d3ne = { workspace = true }
 log = { workspace = true, features = ["std"] }
 rand = { workspace = true }
 indexmap = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true, default-features = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 tempfile = { workspace = true }
 wasmer = { workspace = true, features = ["cranelift"] }

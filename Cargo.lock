@@ -2210,17 +2210,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "d3ne"
-version = "0.8.0-pre.0"
-source = "git+https://github.com/stringhandler/d3ne-rs.git?tag=v0.8.0-pre.3#05cd46e3d1cd2a23f37e9eba9a3b965bfc3303a8"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "thiserror 1.0.68",
-]
-
-[[package]]
 name = "darling"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9957,14 +9946,12 @@ dependencies = [
  "anyhow",
  "blake2",
  "cargo_toml",
- "d3ne",
  "env_logger 0.10.2",
  "indexmap 2.6.0",
  "log",
  "rand",
  "semver",
  "serde",
- "serde_json",
  "tari_bor",
  "tari_common",
  "tari_common_types",

@@ -23,7 +23,7 @@
 use log::*;
 use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch, NodeAddressable, ToPeerId};
-use tari_dan_engine::{function_definitions::FlowFunctionDefinition, wasm::WasmModule};
+use tari_dan_engine::wasm::WasmModule;
 use tari_dan_p2p::proto::rpc::TemplateType;
 use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus};
 use tari_engine_types::calculate_template_binary_hash;
@@ -314,25 +314,6 @@ where
                         code: Some(bytes.to_vec()),
                         status: Some(template_status),
                         ..Default::default()
-                    },
-                    DbTemplateType::Flow => {
-                        // make sure it deserializes correctly
-                        let mut status = TemplateStatus::Invalid;
-                        match serde_json::from_slice::<FlowFunctionDefinition>(&bytes) {
-                            Ok(_) => status = template_status,
-                            Err(e) => {
-                                warn!(
-                                    target: LOG_TARGET,
-                                    "⚠️ Template {} is not valid json: {}", download.template_address, e
-                                );
-                            },
-                        };
-
-                        DbTemplateUpdate {
-                            code: Some(bytes.to_vec()),
-                            status: Some(status),
-                            ..Default::default()
-                        }
                     },
                     DbTemplateType::Manifest => todo!(),
                 };

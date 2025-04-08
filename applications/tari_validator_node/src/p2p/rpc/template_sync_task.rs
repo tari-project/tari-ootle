@@ -99,13 +99,6 @@ impl TemplateSyncTask {
                             template_type: TemplateType::Manifest.into(),
                             template_name: template.metadata.name,
                         }),
-                        TemplateExecutable::Flow(flow) => Ok(SyncTemplatesResponse {
-                            address: template.metadata.address.to_vec(),
-                            author_public_key: template.metadata.author_public_key.to_vec(),
-                            binary: flow.into_bytes(),
-                            template_type: TemplateType::Flow.into(),
-                            template_name: template.metadata.name,
-                        }),
                         // this case won't happen as there is no DB type for downloadable WASM
                         TemplateExecutable::DownloadableWasm(_, _) => {
                             Err(RpcStatus::not_implemented("Unsupported type!"))

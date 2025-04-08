@@ -20,12 +20,17 @@ impl<TAddr: NodeAddressable> LeaderStrategy<TAddr> for RoundRobinLeaderStrategy 
 
 #[cfg(test)]
 mod tests {
-    use tari_common_types::types::PublicKey;
+    use tari_crypto::ristretto::RistrettoPublicKey;
+    use tari_engine_types::ToByteType;
+    use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
     use super::*;
 
-    fn new_member(seed: &'static str) -> (String, PublicKey) {
-        (seed.to_string(), PublicKey::new_generator(seed).unwrap())
+    fn new_member(seed: &'static str) -> (String, RistrettoPublicKeyBytes) {
+        (
+            seed.to_string(),
+            RistrettoPublicKey::new_generator(seed).unwrap().to_byte_type(),
+        )
     }
 
     #[test]

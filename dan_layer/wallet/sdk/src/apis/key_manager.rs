@@ -3,15 +3,14 @@
 
 use blake2::Blake2b;
 use digest::consts::U64;
-use tari_common_types::types::PublicKey;
-use tari_crypto::keys::PublicKey as PublicKeyTrait;
-//
-use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::optional::Optional;
+use tari_engine_types::ToByteType;
 use tari_key_manager::{
     cipher_seed::CipherSeed,
     key_manager::{DerivedKey, KeyManager},
 };
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter};
 
@@ -41,7 +40,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_all_keys(&self, branch: &str) -> Result<Vec<(u64, PublicKey, bool)>, KeyManagerApiError> {
+    pub fn get_all_keys(&self, branch: &str) -> Result<Vec<(u64, RistrettoPublicKey, bool)>, KeyManagerApiError> {
         let mut tx = self.store.create_read_tx()?;
         let all_keys = tx.key_manager_get_all(branch)?;
         let mut keys = Vec::with_capacity(all_keys.len());
@@ -50,7 +49,7 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
             let key = km
                 .derive_key(index)
                 .map_err(tari_key_manager::error::KeyManagerError::from)?;
-            let pk = PublicKey::from_secret_key(&key.key);
+            let pk = RistrettoPublicKey::from_secret_key(&key.key);
             keys.push((index, pk, active));
         }
         Ok(keys)
@@ -108,24 +107,19 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
     pub fn get_key_for_public_key(
         &self,
         branch: &str,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<(u64, DerivedKey<RistrettoPublicKey>), KeyManagerApiError> {
         let max_index = self.store.with_read_tx(|tx| tx.key_manager_get_last_index(branch))?;
         for index in 0..=max_index {
             let key = self.derive_key(branch, index)?;
-            if &PublicKey::from_secret_key(&key.key) == public_key {
+            if RistrettoPublicKey::from_secret_key(&key.key).to_byte_type() == *public_key {
                 return Ok((index, key));
             }
         }
         Err(KeyManagerApiError::KeyNotFound {
-            key: public_key.clone(),
+            key: *public_key,
             branch: branch.to_string(),
         })
-    }
-
-    pub fn get_public_key(&self, branch: &str, key_index: Option<u64>) -> Result<PublicKey, KeyManagerApiError> {
-        let (_, key) = self.get_key_or_active(branch, key_index)?;
-        Ok(PublicKey::from_secret_key(&key.key))
     }
 
     fn get_or_create_key_manager(&self, branch: &str) -> Result<WalletKeyManager, KeyManagerApiError> {
@@ -156,5 +150,8 @@ pub enum KeyManagerApiError {
     #[error("Key manager error: {0}")]
     KeyManagerError(#[from] tari_key_manager::error::KeyManagerError),
     #[error("Key for public key {key}, branch {branch} not found")]
-    KeyNotFound { key: PublicKey, branch: String },
+    KeyNotFound {
+        key: RistrettoPublicKeyBytes,
+        branch: String,
+    },
 }

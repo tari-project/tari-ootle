@@ -21,7 +21,7 @@ use diesel::{
 use indexmap::IndexMap;
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -79,6 +79,7 @@ use tari_engine_types::{
     template_models::UnclaimedConfidentialOutputAddress,
 };
 use tari_state_tree::{Node, NodeKey, TreeNode, Version};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 use tari_utilities::hex::Hex;
 
@@ -2357,7 +2358,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn validator_epoch_stats_get(
         &self,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ValidatorConsensusStats, StorageError> {
         use crate::schema::validator_epoch_stats;
 
@@ -2393,7 +2394,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         block_id: &BlockId,
         threshold: u64,
         limit: u64,
-    ) -> Result<Vec<PublicKey>, StorageError> {
+    ) -> Result<Vec<RistrettoPublicKeyBytes>, StorageError> {
         use crate::schema::{evicted_nodes, validator_epoch_stats};
         if limit == 0 {
             return Ok(vec![]);
@@ -2431,7 +2432,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         pks.iter()
             .map(|s| {
-                PublicKey::from_hex(s).map_err(|e| StorageError::DecodingError {
+                deserialize_hex_try_from(s).map_err(|e| StorageError::DecodingError {
                     operation: "validator_epoch_stats_get_nodes_to_evict",
                     item: "public key",
                     details: format!("Failed to decode public key: {e}"),
@@ -2440,7 +2441,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .collect()
     }
 
-    fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
+    fn suspended_nodes_is_evicted(
+        &self,
+        block_id: &BlockId,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Result<bool, StorageError> {
         use crate::schema::evicted_nodes;
 
         if !self.blocks_exists(block_id)? {

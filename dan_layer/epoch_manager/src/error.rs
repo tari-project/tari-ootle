@@ -1,9 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{optional::IsNotFoundError, Epoch, SubstateAddress};
 use tari_dan_storage::StorageError;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(thiserror::Error, Debug)]
 pub enum EpochManagerError {
@@ -30,10 +30,8 @@ pub enum EpochManagerError {
     },
     #[error("Validator node {address} is not registered at epoch {epoch}")]
     ValidatorNodeNotRegistered { address: String, epoch: Epoch },
-    #[error("Base layer consensus constants not set")]
-    BaseLayerConsensusConstantsNotSet,
-    #[error("Base layer could not return shard key for {public_key} at {epoch}")]
-    ShardKeyNotFound { public_key: PublicKey, epoch: Epoch },
+    #[error("Invalid public key bytes: {public_key}")]
+    InvalidPublicKeyBytes { public_key: RistrettoPublicKeyBytes },
     #[error("Integer overflow: {func}")]
     IntegerOverflow { func: &'static str },
     #[error("Invalid epoch: {epoch}")]

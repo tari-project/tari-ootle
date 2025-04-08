@@ -11,7 +11,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib::models::{ComponentAddress, ObjectKey};
+use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 
 use crate::{
     helper::{assert_eq_debug, build_substate_record, create_rocksdb, create_sqlite},

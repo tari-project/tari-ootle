@@ -10,8 +10,10 @@ use tari_common::{
     configuration::bootstrap::prompt,
     exit_codes::{ExitCode, ExitError},
 };
-use tari_common_types::types::{PrivateKey, PublicKey};
-use tari_crypto::keys::{PublicKey as _, SecretKey as _};
+use tari_crypto::{
+    keys::{PublicKey as _, SecretKey as _},
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+};
 use tari_dan_common_types::PeerAddress;
 
 const REQUIRED_IDENTITY_PERMS: u32 = 0o100600;
@@ -23,20 +25,20 @@ pub struct RistrettoKeypair(Arc<KeyPairInner>);
 
 impl RistrettoKeypair {
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        let secret_key = PrivateKey::random(rng);
+        let secret_key = RistrettoSecretKey::random(rng);
         Self::from_secret_key(secret_key)
     }
 
-    pub fn from_secret_key(secret_key: PrivateKey) -> Self {
-        let public_key = PublicKey::from_secret_key(&secret_key);
+    pub fn from_secret_key(secret_key: RistrettoSecretKey) -> Self {
+        let public_key = RistrettoPublicKey::from_secret_key(&secret_key);
         Self(Arc::new(KeyPairInner { secret_key, public_key }))
     }
 
-    pub fn secret_key(&self) -> &PrivateKey {
+    pub fn secret_key(&self) -> &RistrettoSecretKey {
         &self.0.secret_key
     }
 
-    pub fn public_key(&self) -> &PublicKey {
+    pub fn public_key(&self) -> &RistrettoPublicKey {
         &self.0.public_key
     }
 
@@ -47,8 +49,8 @@ impl RistrettoKeypair {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct KeyPairInner {
-    secret_key: PrivateKey,
-    public_key: PublicKey,
+    secret_key: RistrettoSecretKey,
+    public_key: RistrettoPublicKey,
 }
 
 /// Loads the node identity, or creates a new one if create_id is true

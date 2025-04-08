@@ -19,7 +19,6 @@ use diesel::{
 };
 use indexmap::IndexMap;
 use log::*;
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -76,8 +75,8 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeNode, Version};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
-use tari_utilities::{hex::Hex, ByteArray};
 use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::{
@@ -2215,7 +2214,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError> {
+    fn evicted_nodes_evict(
+        &mut self,
+        public_key: &RistrettoPublicKeyBytes,
+        evicted_in_block: BlockId,
+    ) -> Result<(), StorageError> {
         if !self.blocks_exists(&evicted_in_block)? {
             return Err(StorageError::QueryError {
                 reason: format!("suspended_nodes_evict: block {evicted_in_block} does not exist"),
@@ -2229,7 +2232,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 evicted_nodes (public_key, epoch, evicted_in_block, evicted_in_block_height)
                 SELECT ?, epoch, block_id, height FROM blocks where block_id = ?"#,
         )
-        .bind::<Text, _>(public_key.to_hex())
+        .bind::<Text, _>(serialize_hex(public_key))
         .bind::<Text, _>(evicted_in_block)
         .execute(self.connection())
         .map_err(|e| SqliteStorageError::DieselError {
@@ -2242,14 +2245,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
 
     fn evicted_nodes_mark_eviction_as_committed(
         &mut self,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
         epoch: Epoch,
     ) -> Result<(), StorageError> {
         use crate::schema::evicted_nodes;
 
         let num_affected = diesel::update(evicted_nodes::table)
             .set(evicted_nodes::eviction_committed_in_epoch.eq(epoch.as_u64() as i64))
-            .filter(evicted_nodes::public_key.eq(public_key.to_hex()))
+            .filter(evicted_nodes::public_key.eq(serialize_hex(public_key)))
             .execute(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "suspended_nodes_delete",

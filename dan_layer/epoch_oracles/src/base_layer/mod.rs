@@ -16,7 +16,7 @@ use tari_base_node_client::{
     BaseNodeClient,
     BaseNodeClientError,
 };
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_core::{
     base_node::comms_interface::ValidatorNodeChange as BaseLayerValidatorNodeChange,
     transactions::transaction_components::{OutputType, SideChainFeature, SideChainFeatureData, TransactionOutput},
@@ -24,7 +24,12 @@ use tari_core::{
 use tari_dan_common_types::{displayable::Displayable, optional::Optional, Epoch, SubstateAddress};
 use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_epoch_manager::epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange};
-use tari_template_lib::models::EncryptedData;
+use tari_template_lib::{
+    models::EncryptedData,
+    prelude::PedersenCommitmentBytes,
+    types::crypto::RistrettoPublicKeyBytes,
+};
+use tari_utilities::ByteArray;
 use tokio::time;
 use url::Url;
 
@@ -55,9 +60,9 @@ struct BaseLayerOracleInner<TStore> {
     base_node_client: GrpcBaseNodeClient,
     height_lag: u64,
     has_attempted_scan: bool,
-    validator_node_sidechain_id: Option<PublicKey>,
-    burnt_utxo_sidechain_id: Option<PublicKey>,
-    template_sidechain_id: Option<PublicKey>,
+    validator_node_sidechain_id: Option<RistrettoPublicKeyBytes>,
+    burnt_utxo_sidechain_id: Option<RistrettoPublicKeyBytes>,
+    template_sidechain_id: Option<RistrettoPublicKeyBytes>,
     pending_events: VecDeque<EpochEvent>,
 }
 
@@ -67,9 +72,9 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
         base_node_client: GrpcBaseNodeClient,
         height_lag: u64,
         scanning_interval: Duration,
-        validator_node_sidechain_id: Option<PublicKey>,
-        burnt_utxo_sidechain_id: Option<PublicKey>,
-        template_sidechain_id: Option<PublicKey>,
+        validator_node_sidechain_id: Option<RistrettoPublicKeyBytes>,
+        burnt_utxo_sidechain_id: Option<RistrettoPublicKeyBytes>,
+        template_sidechain_id: Option<RistrettoPublicKeyBytes>,
     ) -> Self {
         Self {
             inner: Some(BaseLayerOracleInner {
@@ -283,7 +288,9 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
 
                 match sidechain_feature_data {
                     SideChainFeatureData::ValidatorNodeRegistration(reg) => {
-                        if sidechain_id.as_ref().map(|s| s.public_key()) != self.validator_node_sidechain_id.as_ref() {
+                        if sidechain_id.as_ref().map(|s| s.public_key().as_bytes()) !=
+                            self.validator_node_sidechain_id.as_ref().map(|p| p.as_bytes())
+                        {
                             debug!(
                                 target: LOG_TARGET,
                                 "Ignoring VN reg for sidechain ID {}.",
@@ -295,13 +302,23 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                         info!(target: LOG_TARGET, "🖥️ New validator node registration: {}", reg.public_key());
                         self.pending_events.push_back(EpochEvent::NewValidatorRegistered {
                             epoch: current_epoch,
-                            claim_public_key: reg.claim_public_key().clone(),
-                            validator_node_public_key: reg.public_key().clone(),
+                            claim_public_key: RistrettoPublicKeyBytes::from_bytes(reg.claim_public_key().as_bytes())
+                                .expect(
+                                    "claim_public_key: Compressed<RistrettoPublicKey> and RistrettoPublicKeyBytes \
+                                     must be the same length",
+                                ),
+                            validator_node_public_key: RistrettoPublicKeyBytes::from_bytes(reg.public_key().as_bytes())
+                                .expect(
+                                    "validator_node_public_key: Compressed<RistrettoPublicKey> and \
+                                     RistrettoPublicKeyBytes must be the same length",
+                                ),
                         });
                     },
 
                     SideChainFeatureData::CodeTemplateRegistration(registration) => {
-                        if sidechain_id.as_ref().map(|s| s.public_key()) != self.template_sidechain_id.as_ref() {
+                        if sidechain_id.as_ref().map(|s| s.public_key().as_bytes()) !=
+                            self.template_sidechain_id.as_ref().map(|p| p.as_bytes())
+                        {
                             debug!(
                                 target: LOG_TARGET,
                                 "Ignoring CodeTemplateRegistration for sidechain ID {}.",
@@ -325,7 +342,13 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                         };
                         self.pending_events.push_back(EpochEvent::NewCodeTemplateDownload {
                             name: registration.template_name.to_string(),
-                            author_public_key: registration.author_public_key,
+                            author_public_key: RistrettoPublicKeyBytes::from_bytes(
+                                registration.author_public_key.as_bytes(),
+                            )
+                            .expect(
+                                "author_public_key: Compressed<RistrettoPublicKey> and RistrettoPublicKeyBytes must \
+                                 be the same length",
+                            ),
                             address: template_address,
                             url,
                             binary_hash: registration.binary_sha,
@@ -333,7 +356,9 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                         });
                     },
                     SideChainFeatureData::ConfidentialOutput(_) => {
-                        if sidechain_id.as_ref().map(|s| s.public_key()) != self.burnt_utxo_sidechain_id.as_ref() {
+                        if sidechain_id.as_ref().map(|s| s.public_key().as_bytes()) !=
+                            self.burnt_utxo_sidechain_id.as_ref().map(|p| p.as_bytes())
+                        {
                             debug!(
                                 target: LOG_TARGET,
                                 "Ignoring ConfidentialOutput for sidechain ID {}.",
@@ -347,7 +372,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                                 target: LOG_TARGET,
                                 "Ignoring confidential output that is not burned: {} with commitment {}",
                                 output_hash,
-                                commitment.as_public_key()
+                                commitment.to_compressed_key(),
                             );
                             continue;
                         }
@@ -356,10 +381,10 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                             target: LOG_TARGET,
                             "⛓️ Found burned output: {} with commitment {}",
                             output_hash,
-                            commitment.as_public_key()
+                            commitment.to_compressed_key()
                         );
 
-                        let encrypted_data_bytes = encrypted_data.into_byte_vec();
+                        let encrypted_data_bytes = encrypted_data.as_bytes().to_vec();
                         let encrypted_data = EncryptedData::try_from(encrypted_data_bytes).map_err(|len| {
                             BaseLayerOracleError::InvalidSideChainUtxoResponse(format!(
                                 "Encrypted data incorrect length of bytes: {len}"
@@ -367,7 +392,10 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                         })?;
 
                         let substate = UnclaimedConfidentialOutput {
-                            commitment,
+                            commitment: PedersenCommitmentBytes::from_bytes(commitment.as_bytes()).expect(
+                                "commitment: Compressed<PedersenCommitment> and PedersenCommitmentBytes must be the \
+                                 same length",
+                            ),
                             encrypted_data,
                         };
 
@@ -377,7 +405,9 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                         });
                     },
                     SideChainFeatureData::EvictionProof(eviction_proof) => {
-                        if sidechain_id.as_ref().map(|s| s.public_key()) != self.validator_node_sidechain_id.as_ref() {
+                        if sidechain_id.as_ref().map(|s| s.public_key().as_bytes()) !=
+                            self.validator_node_sidechain_id.as_ref().map(|p| p.as_bytes())
+                        {
                             debug!(
                                 target: LOG_TARGET,
                                 "Ignoring EvictionProof for sidechain ID {}.",
@@ -388,7 +418,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                         trace!(target: LOG_TARGET, "Eviction proof scanned: {eviction_proof:?}");
                         self.pending_events.push_back(EpochEvent::NewEvictionProof {
                             epoch: current_epoch,
-                            eviction_proof,
+                            eviction_proof: Box::new(eviction_proof),
                         })
                     },
                 }
@@ -414,14 +444,29 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                             minimum_value_promise,
                             shard_key,
                         } => ValidatorNodeChange::Add {
-                            claim_public_key: registration.claim_public_key().clone(),
-                            validator_node_public_key: registration.public_key().clone(),
+                            claim_public_key: RistrettoPublicKeyBytes::from_bytes(
+                                registration.claim_public_key().as_bytes(),
+                            )
+                            .expect(
+                                "claim_public_key: Compressed<RistrettoPublicKey> and RistrettoPublicKeyBytes must be \
+                                 the same length",
+                            ),
+                            validator_node_public_key: RistrettoPublicKeyBytes::from_bytes(
+                                registration.public_key().as_bytes(),
+                            )
+                            .expect(
+                                "validator_node_public_key: Compressed<RistrettoPublicKey> and \
+                                 RistrettoPublicKeyBytes must be the same length",
+                            ),
                             activation_epoch: Epoch::from(activation_epoch.as_u64()),
                             minimum_value_promise: minimum_value_promise.as_u64(),
                             shard_key: SubstateAddress::from_hash_and_version(shard_key, 0),
                         },
-                        BaseLayerValidatorNodeChange::Remove { public_key } => {
-                            ValidatorNodeChange::Remove { public_key }
+                        BaseLayerValidatorNodeChange::Remove { public_key } => ValidatorNodeChange::Remove {
+                            public_key: RistrettoPublicKeyBytes::from_bytes(public_key.as_bytes()).expect(
+                                "public_key: Compressed<RistrettoPublicKey> and RistrettoPublicKeyBytes must be the \
+                                 same  length",
+                            ),
                         },
                     })
                     .collect::<Vec<_>>();

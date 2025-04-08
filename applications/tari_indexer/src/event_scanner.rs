@@ -33,7 +33,7 @@ use tari_engine_types::{
     substate::{SubstateId, SubstateValue},
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
-use tari_template_lib::models::{EntityId, TemplateAddress};
+use tari_template_lib::types::{EntityId, TemplateAddress};
 use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory};
 
@@ -208,7 +208,7 @@ impl EventScanner {
 
                         Some(TemplateChange::Add {
                             template_address,
-                            author_public_key: template.author.clone(),
+                            author_public_key: template.author,
                             binary_hash: template.binary_hash.into_array().into(),
                             epoch,
                         })

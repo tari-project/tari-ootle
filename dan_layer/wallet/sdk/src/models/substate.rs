@@ -2,7 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_common_types::VersionedSubstateId;
-use tari_engine_types::{substate::SubstateId, TemplateAddress};
+use tari_engine_types::substate::SubstateId;
+use tari_template_lib::types::TemplateAddress;
 
 #[derive(Debug, Clone)]
 pub struct SubstateModel {

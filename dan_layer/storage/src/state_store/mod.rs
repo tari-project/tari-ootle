@@ -5,7 +5,7 @@ use std::{collections::HashMap, ops::Deref};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     shard::Shard,
     Epoch,
@@ -19,7 +19,7 @@ use tari_dan_common_types::{
 };
 use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::SubstateId};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
-use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
+use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
@@ -317,7 +317,7 @@ pub trait StateStoreReadTransaction: Sized {
     fn validator_epoch_stats_get(
         &self,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ValidatorConsensusStats, StorageError>;
 
     fn validator_epoch_stats_get_nodes_to_evict(
@@ -325,9 +325,13 @@ pub trait StateStoreReadTransaction: Sized {
         block_id: &BlockId,
         threshold: u64,
         limit: u64,
-    ) -> Result<Vec<PublicKey>, StorageError>;
+    ) -> Result<Vec<RistrettoPublicKeyBytes>, StorageError>;
     // -------------------------------- SuspendedNodes -------------------------------- //
-    fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError>;
+    fn suspended_nodes_is_evicted(
+        &self,
+        block_id: &BlockId,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Result<bool, StorageError>;
     fn evicted_nodes_count(&self, epoch: Epoch) -> Result<u64, StorageError>;
 }
 
@@ -561,10 +565,14 @@ pub trait StateStoreWriteTransaction {
 
     // -------------------------------- SuspendedNodes -------------------------------- //
 
-    fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError>;
+    fn evicted_nodes_evict(
+        &mut self,
+        public_key: &RistrettoPublicKeyBytes,
+        evicted_in_block: BlockId,
+    ) -> Result<(), StorageError>;
     fn evicted_nodes_mark_eviction_as_committed(
         &mut self,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
         epoch: Epoch,
     ) -> Result<(), StorageError>;
 

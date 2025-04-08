@@ -3,20 +3,10 @@
 
 use std::sync::{atomic, atomic::AtomicU32};
 
-use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
-    models::{
-        BucketId,
-        ComponentAddress,
-        ComponentKey,
-        EntityId,
-        ObjectKey,
-        ProofId,
-        ResourceAddress,
-        TemplateAddress,
-        VaultId,
-    },
-    Hash,
+    models::{BucketId, ComponentAddress, ProofId, ResourceAddress, VaultId},
+    prelude::TemplateAddress,
+    types::{crypto::RistrettoPublicKeyBytes, ComponentKey, EntityId, Hash, ObjectKey},
 };
 
 use crate::{
@@ -66,12 +56,9 @@ impl<'a> IdProvider<'a> {
     pub fn derive_new_component_address(
         &self,
         template_address: &TemplateAddress,
-        public_key_address: &RistrettoPublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ComponentAddress, IdProviderError> {
-        Ok(new_component_address_from_public_key(
-            template_address,
-            public_key_address,
-        ))
+        Ok(new_component_address_from_public_key(template_address, public_key))
     }
 
     pub fn new_vault_id(&self) -> Result<VaultId, IdProviderError> {

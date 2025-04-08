@@ -23,7 +23,10 @@ use tari_engine_types::{
     substate::{Substate, SubstateId, SubstateValue},
 };
 use tari_state_store_sqlite::SqliteStateStore;
-use tari_template_lib::models::{ComponentAddress, EntityId, ObjectKey};
+use tari_template_lib::{
+    models::ComponentAddress,
+    types::{EntityId, ObjectKey},
+};
 
 use crate::support::{logging::setup_logger, TEST_NUM_PRESHARDS};
 

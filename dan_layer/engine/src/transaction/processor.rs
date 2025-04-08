@@ -25,7 +25,6 @@ use std::{sync::Arc, time::Instant};
 use log::*;
 use tari_bor::to_value;
 use tari_common::configuration::Network;
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
@@ -43,14 +42,12 @@ use tari_template_lib::{
     arg,
     args,
     args::{AllocateAddressResult, Arg, SubstateType, WorkspaceAction},
-    auth::OwnerRule,
-    crypto::RistrettoPublicKeyBytes,
+    auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
     models::{Bucket, ComponentAddress, NonFungibleAddress},
-    prelude::{AccessRules, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 use tari_transaction::Transaction;
-use tari_utilities::ByteArray;
 
 use crate::{
     runtime::{
@@ -178,7 +175,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             .filter(|_| transaction.is_seal_signer_authorized())
             .map(|s| s.public_key())
             .or(transaction.signatures().first().map(|s| s.public_key()))
-            .cloned()
+            .copied()
             .ok_or_else(|| TransactionError::InvariantError {
                 details: "Transaction must have at least one authorized signature".to_string(),
             })?;
@@ -421,9 +418,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     pub fn create_account(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
-        public_key_address: &PublicKey,
+        public_key_address: &RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
-        access_rules: Option<AccessRules>,
+        access_rules: Option<ComponentAccessRules>,
         workspace_bucket: Option<String>,
     ) -> Result<InstructionResult, TransactionError> {
         let template = template_provider
@@ -447,9 +444,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key_address);
 
         // the publick key is the first argument of the Account template constructor
-        let public_key = RistrettoPublicKeyBytes::from_bytes(public_key_address.as_bytes()).unwrap();
         let mut args = args![
-            NonFungibleAddress::from_public_key(public_key),
+            NonFungibleAddress::from_public_key(*public_key_address),
             owner_rule,
             access_rules
         ];

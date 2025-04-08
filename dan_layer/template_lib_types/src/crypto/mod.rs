@@ -5,12 +5,16 @@
 
 mod balance_proof;
 mod commitment;
-mod error;
+mod commitment_signature;
 mod ristretto;
+mod scalar;
 mod schnorr;
 
 pub use balance_proof::*;
 pub use commitment::*;
-pub use error::*;
+pub use commitment_signature::*;
 pub use ristretto::*;
+pub use scalar::*;
 pub use schnorr::*;
+
+pub use crate::error::*;

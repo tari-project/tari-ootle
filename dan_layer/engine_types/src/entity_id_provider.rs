@@ -3,7 +3,7 @@
 
 use std::sync::{atomic::AtomicU32, Arc};
 
-use tari_template_lib::{models::EntityId, Hash};
+use tari_template_lib::types::{EntityId, Hash};
 
 use crate::hashing::{hasher32, EngineHashDomainLabel};
 

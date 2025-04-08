@@ -65,7 +65,7 @@ function Account(account: AccountInfo, index: number) {
         </Link>
       </DataTableCell>
       <DataTableCell>
-        <CopyAddress address={account.account.address} />
+        <CopyAddress address={substateIdToString(account.account.address)} />
       </DataTableCell>
       <DataTableCell>{account.account.key_index}</DataTableCell>
       <DataTableCell>

@@ -39,7 +39,7 @@ use tari_dan_storage_sqlite::{error::SqliteStorageError, SqliteTransaction};
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::NonFungibleSubstate;
-use tari_template_lib::models::{ResourceAddress, TemplateAddress};
+use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use thiserror::Error;
 
 use super::models::{

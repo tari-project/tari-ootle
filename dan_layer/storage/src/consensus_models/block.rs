@@ -13,8 +13,7 @@ use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
-use tari_common_types::types::{FixedHash, FixedHashSizeError, PublicKey};
-use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_common_types::types::{FixedHash, FixedHashSizeError};
 use tari_dan_common_types::{
     committee::CommitteeInfo,
     optional::Optional,
@@ -32,6 +31,7 @@ use tari_dan_common_types::{
 };
 use tari_engine_types::transaction_receipt::TransactionReceiptAddress;
 use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeError, TreeHash};
+use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 #[cfg(feature = "ts")]
@@ -52,7 +52,6 @@ use super::{
     SubstateDestroyedProof,
     SubstateRecord,
     TransactionAtom,
-    ValidatorSchnorrSignature,
     ValidatorStatsUpdate,
 };
 use crate::{
@@ -114,12 +113,12 @@ impl Block {
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
-        proposed_by: PublicKey,
+        proposed_by: RistrettoPublicKeyBytes,
         commands: BTreeSet<Command>,
         state_merkle_root: FixedHash,
         total_leader_fee: u64,
         sorted_foreign_indexes: BTreeMap<Shard, u64>,
-        signature: Option<ValidatorSchnorrSignature>,
+        signature: Option<SchnorrSignatureBytes>,
         timestamp: u64,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
@@ -167,7 +166,7 @@ impl Block {
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
-        proposed_by: PublicKey,
+        proposed_by: RistrettoPublicKeyBytes,
         state_merkle_root: FixedHash,
         commands: BTreeSet<Command>,
         command_merkle_root: FixedHash,
@@ -176,7 +175,7 @@ impl Block {
         is_justified: bool,
         is_committed: bool,
         sorted_foreign_indexes: BTreeMap<Shard, u64>,
-        signature: Option<ValidatorSchnorrSignature>,
+        signature: Option<SchnorrSignatureBytes>,
         created_at: PrimitiveDateTime,
         block_time: Option<u64>,
         timestamp: u64,
@@ -220,7 +219,7 @@ impl Block {
         epoch: Epoch,
         shard_group: ShardGroup,
         state_merkle_root: FixedHash,
-        sidechain_id: Option<RistrettoPublicKey>,
+        sidechain_id: Option<RistrettoPublicKeyBytes>,
     ) -> Self {
         let mut extra_data = ExtraData::new();
         if let Some(sidechain_id) = sidechain_id {
@@ -228,7 +227,6 @@ impl Block {
                 ExtraFieldKey::SidechainId,
                 sidechain_id
                     .as_bytes()
-                    .to_vec()
                     .try_into()
                     .expect("RistrettoPublicKey is 32 bytes"),
             );
@@ -241,7 +239,7 @@ impl Block {
             NodeHeight::zero(),
             epoch,
             shard_group,
-            PublicKey::default(),
+            RistrettoPublicKeyBytes::default(),
             Default::default(),
             state_merkle_root,
             0,
@@ -399,7 +397,7 @@ impl Block {
             .sum()
     }
 
-    pub fn proposed_by(&self) -> &PublicKey {
+    pub fn proposed_by(&self) -> &RistrettoPublicKeyBytes {
         self.header.proposed_by()
     }
 
@@ -451,7 +449,7 @@ impl Block {
         self.header.timestamp()
     }
 
-    pub fn signature(&self) -> Option<&ValidatorSchnorrSignature> {
+    pub fn signature(&self) -> Option<&SchnorrSignatureBytes> {
         self.header.signature()
     }
 

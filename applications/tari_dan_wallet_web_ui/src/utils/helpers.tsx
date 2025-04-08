@@ -110,6 +110,16 @@ export function shortenSubstateId(
   return parts[0] + "_" + shortenString(parts[1], start, end);
 }
 
+export function isSubstateIdString(substateId: SubstateId | string | null | undefined): boolean {
+  if (substateId === null || substateId === undefined) {
+    return false;
+  }
+  const string = substateIdToString(substateId);
+  const SUBSTATE_PREFIXES = ["component_", "vault_", "resource_", "nft_", "commitment_", "txreceipt_", "template_"];
+
+  return SUBSTATE_PREFIXES.some((prefix) => string.startsWith(prefix));
+}
+
 export function shortenString(string: string | null | undefined, start: number = 8, end: number = 8) {
   if (string === null || string === undefined) {
     return "";

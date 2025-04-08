@@ -26,7 +26,7 @@ use diesel;
 use tari_common_types::types::FixedHashSizeError;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_storage::StorageError;
-use tari_template_lib::HashParseError;
+use tari_template_lib::types::HashParseError;
 use thiserror::Error;
 
 use crate::global::models::TemplateConversionError;

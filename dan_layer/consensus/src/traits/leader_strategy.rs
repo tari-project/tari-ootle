@@ -20,8 +20,8 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{committee::Committee, NodeHeight};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 pub trait LeaderStrategy<TAddr> {
     fn calculate_leader(&self, committee: &Committee<TAddr>, height: NodeHeight) -> u32;
@@ -48,7 +48,11 @@ pub trait LeaderStrategy<TAddr> {
         self.is_leader(validator_addr, committee, height + NodeHeight(1))
     }
 
-    fn get_leader<'b>(&self, committee: &'b Committee<TAddr>, height: NodeHeight) -> (&'b TAddr, &'b PublicKey) {
+    fn get_leader<'b>(
+        &self,
+        committee: &'b Committee<TAddr>,
+        height: NodeHeight,
+    ) -> (&'b TAddr, &'b RistrettoPublicKeyBytes) {
         let index = self.calculate_leader(committee, height);
         let (addr, pk) = committee.members.get(index as usize).unwrap();
         (addr, pk)
@@ -58,7 +62,7 @@ pub trait LeaderStrategy<TAddr> {
         &self,
         committee: &'b Committee<TAddr>,
         height: NodeHeight,
-    ) -> (&'b TAddr, &'b PublicKey) {
+    ) -> (&'b TAddr, &'b RistrettoPublicKeyBytes) {
         self.get_leader(committee, height + NodeHeight(1))
     }
 }

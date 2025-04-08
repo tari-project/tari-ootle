@@ -44,9 +44,6 @@ pub use component::*;
 mod confidential_proof;
 pub use confidential_proof::*;
 
-mod entity_id;
-pub use entity_id::*;
-
 mod layer_one_commitment;
 pub use layer_one_commitment::UnclaimedConfidentialOutputAddress;
 
@@ -64,9 +61,6 @@ pub use proof::*;
 
 mod system;
 pub use system::SystemAddress;
-
-mod template;
-pub use template::TemplateAddress;
 
 mod vault;
 pub use vault::{Vault, VaultId, VaultRef};

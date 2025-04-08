@@ -2,10 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_common_types::types::PublicKey;
+use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
 use tari_dan_common_types::optional::{IsNotFoundError, Optional};
 use tari_dan_wallet_crypto::{kdfs, ConfidentialOutputMaskAndValue};
-use tari_engine_types::{confidential::ConfidentialOutput, substate::SubstateId};
+use tari_engine_types::{confidential::ConfidentialOutput, substate::SubstateId, FromByteType, ToByteType};
 use tari_key_manager::key_manager::DerivedKey;
 use tari_template_lib::models::Amount;
 use tari_transaction::TransactionId;
@@ -155,6 +155,13 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
             // Either derive the mask from the sender's public nonce or from the local key manager
             let shared_decrypt_key = match output.sender_public_nonce {
                 Some(nonce) => {
+                    let Ok(nonce) = RistrettoPublicKey::try_from_byte_type(&nonce) else {
+                        return Err(ConfidentialOutputsApiError::InvalidParameter {
+                            param: "sender_public_nonce",
+                            reason: "Failed to parse sender public nonce".to_string(),
+                        });
+                    };
+
                     // Derive shared secret
                     kdfs::encrypted_data_dh_kdf_aead(&output_key.key, &nonce)
                 },
@@ -236,7 +243,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                     info!(
                         target: LOG_TARGET,
                         "Output already exists in the wallet. Skipping. (commitment: {})",
-                        output.commitment.as_public_key()
+                        output.commitment,
                     );
                     // Output exists. We should never have the case this is marked as spent. Should we check that?
                 },
@@ -250,7 +257,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                             warn!(
                                 target: LOG_TARGET,
                                 "Output validation failed. Skipping. (commitment: {}, error: {})",
-                                output.commitment.as_public_key(),
+                                output.commitment,
                                 e
                             );
                         },
@@ -266,15 +273,29 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
     fn validate_output(
         &self,
         account: &Account,
-        key: &DerivedKey<PublicKey>,
+        key: &DerivedKey<RistrettoPublicKey>,
         vault_address: &SubstateId,
         output: &ConfidentialOutput,
     ) -> Result<ConfidentialOutputModel, ConfidentialOutputsApiError> {
+        // Validate the commitment is well-formed.
+        let _output_commitment = PedersenCommitment::try_from_byte_type(&output.commitment).map_err(|e| {
+            ConfidentialOutputsApiError::InvalidParameter {
+                param: "commitment",
+                reason: format!("Invalid output commitment bytes: {}", e),
+            }
+        })?;
+
+        let output_stealth_public_nonce = RistrettoPublicKey::try_from_byte_type(&output.stealth_public_nonce)
+            .map_err(|e| ConfidentialOutputsApiError::InvalidParameter {
+                param: "stealth_public_nonce",
+                reason: format!("Failed to parse stealth public nonce: {}", e),
+            })?;
+
         let unblinded_result = self.crypto_api.unblind_output(
             &output.commitment,
             &output.encrypted_data,
             &key.key,
-            &output.stealth_public_nonce,
+            &output_stealth_public_nonce,
         );
         let (value, status) = match unblinded_result {
             Ok(output) => (output.value, OutputStatus::Unspent),
@@ -282,7 +303,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
                 warn!(
                     target: LOG_TARGET,
                     "Failed to unblind output. (commitment: {}, error: {})",
-                    output.commitment.as_public_key(),
+                    output.commitment,
                     e
                 );
                 (0, OutputStatus::Invalid)
@@ -292,9 +313,9 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         Ok(ConfidentialOutputModel {
             account_address: account.address.clone(),
             vault_address: vault_address.clone(),
-            commitment: output.commitment.clone(),
+            commitment: output.commitment,
             value,
-            sender_public_nonce: Some(output.stealth_public_nonce.clone()),
+            sender_public_nonce: Some(output_stealth_public_nonce.to_byte_type()),
             encryption_secret_key_index: account.key_index,
             encrypted_data: output.encrypted_data.clone(),
             public_asset_tag: None,

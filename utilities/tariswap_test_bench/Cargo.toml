@@ -20,8 +20,8 @@ tari_transaction = { workspace = true }
 tari_validator_node_client = { workspace = true }
 
 clap = { version = "4.3.21", features = ["derive"] }
-url = { version = "2", features = [] }
-anyhow = "1.0.75"
+url = { workspace = true, features = [] }
+anyhow = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 log = { workspace = true }
-fern = { version = "0.6.2", features = ["colored"] }
+fern = { workspace = true, features = ["colored"] }

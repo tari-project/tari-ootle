@@ -5,7 +5,6 @@ use std::collections::HashSet;
 
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_dan_common_types::{Epoch, SubstateRequirement};
 use tari_engine_types::{
@@ -13,7 +12,7 @@ use tari_engine_types::{
     instruction::Instruction,
     substate::SubstateId,
 };
-use tari_template_lib::models::ComponentAddress;
+use tari_template_lib::{models::ComponentAddress, types::crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     v1::{signature::TransactionSignature, transaction::TransactionV1, unsigned::UnsignedTransactionV1},
@@ -51,7 +50,7 @@ impl UnsealedTransactionV1 {
         TransactionV1::new(self, sig).into()
     }
 
-    pub fn add_signature(mut self, seal_signer: &PublicKey, secret: &RistrettoSecretKey) -> Self {
+    pub fn add_signature(mut self, seal_signer: &RistrettoPublicKeyBytes, secret: &RistrettoSecretKey) -> Self {
         let sig = TransactionSignature::sign_v1(secret, seal_signer, &self.transaction);
         self.signatures.push(sig);
         self
@@ -73,7 +72,7 @@ impl UnsealedTransactionV1 {
         &self.signatures
     }
 
-    pub fn verify_all_signatures(&self, seal_signer: &PublicKey) -> bool {
+    pub fn verify_all_signatures(&self, seal_signer: &RistrettoPublicKeyBytes) -> bool {
         if self.signatures.is_empty() {
             return true;
         }

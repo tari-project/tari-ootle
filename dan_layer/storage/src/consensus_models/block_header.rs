@@ -8,18 +8,21 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{hashing, shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
-#[cfg(feature = "ts")]
-use ts_rs::TS;
+use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 
-use super::{BlockError, BlockId, QcId, QuorumCertificate, ValidatorSchnorrSignature};
+use super::{BlockError, BlockId, QcId, QuorumCertificate};
 use crate::consensus_models::{Command, LastExecuted, LastProposed, LastVoted, LeafBlock, LockedBlock};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct BlockHeader {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     id: BlockId,
@@ -33,7 +36,7 @@ pub struct BlockHeader {
     epoch: Epoch,
     shard_group: ShardGroup,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    proposed_by: PublicKey,
+    proposed_by: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     total_leader_fee: u64,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -46,7 +49,7 @@ pub struct BlockHeader {
     foreign_indexes: BTreeMap<Shard, u64>,
     /// Signature of block by the proposer.
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce : string, signature: string} | null"))]
-    signature: Option<ValidatorSchnorrSignature>,
+    signature: Option<SchnorrSignatureBytes>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     timestamp: u64,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -65,12 +68,12 @@ impl BlockHeader {
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
-        proposed_by: PublicKey,
+        proposed_by: RistrettoPublicKeyBytes,
         state_merkle_root: FixedHash,
         commands: &BTreeSet<Command>,
         total_leader_fee: u64,
         sorted_foreign_indexes: BTreeMap<Shard, u64>,
-        signature: Option<ValidatorSchnorrSignature>,
+        signature: Option<SchnorrSignatureBytes>,
         timestamp: u64,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
@@ -111,12 +114,12 @@ impl BlockHeader {
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
-        proposed_by: PublicKey,
+        proposed_by: RistrettoPublicKeyBytes,
         state_merkle_root: FixedHash,
         total_leader_fee: u64,
         is_dummy: bool,
         sorted_foreign_indexes: BTreeMap<Shard, u64>,
-        signature: Option<ValidatorSchnorrSignature>,
+        signature: Option<SchnorrSignatureBytes>,
         timestamp: u64,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
@@ -155,7 +158,7 @@ impl BlockHeader {
             height: NodeHeight::zero(),
             epoch: Epoch::zero(),
             shard_group: ShardGroup::all_shards(num_preshards),
-            proposed_by: PublicKey::default(),
+            proposed_by: RistrettoPublicKeyBytes::default(),
             state_merkle_root: FixedHash::zero(),
             command_merkle_root: FixedHash::zero(),
             total_leader_fee: 0,
@@ -172,7 +175,7 @@ impl BlockHeader {
     pub fn dummy_block(
         network: Network,
         parent: BlockId,
-        proposed_by: PublicKey,
+        proposed_by: RistrettoPublicKeyBytes,
         height: NodeHeight,
         justify_id: QcId,
         epoch: Epoch,
@@ -354,7 +357,7 @@ impl BlockHeader {
         self.total_leader_fee
     }
 
-    pub fn proposed_by(&self) -> &PublicKey {
+    pub fn proposed_by(&self) -> &RistrettoPublicKeyBytes {
         &self.proposed_by
     }
 
@@ -382,11 +385,11 @@ impl BlockHeader {
         self.timestamp
     }
 
-    pub fn signature(&self) -> Option<&ValidatorSchnorrSignature> {
+    pub fn signature(&self) -> Option<&SchnorrSignatureBytes> {
         self.signature.as_ref()
     }
 
-    pub fn set_signature(&mut self, signature: ValidatorSchnorrSignature) {
+    pub fn set_signature(&mut self, signature: SchnorrSignatureBytes) {
         self.signature = Some(signature);
     }
 

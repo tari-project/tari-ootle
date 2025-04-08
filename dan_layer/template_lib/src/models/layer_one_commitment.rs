@@ -8,8 +8,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
+use tari_template_lib_types::{KeyParseError, ObjectKey};
 
-use crate::models::{BinaryTag, KeyParseError, ObjectKey};
+use crate::models::BinaryTag;
 
 const TAG: u64 = BinaryTag::UnclaimedConfidentialOutputAddress.as_u64();
 

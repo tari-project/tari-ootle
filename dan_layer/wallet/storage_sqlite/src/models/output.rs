@@ -2,10 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use chrono::NaiveDateTime;
-use tari_common_types::types::{Commitment, PublicKey};
 use tari_dan_wallet_sdk::{models::ConfidentialOutputModel, storage::WalletStorageError};
-use tari_template_lib::models::EncryptedData;
-use tari_utilities::hex::Hex;
+use tari_template_lib::{
+    models::EncryptedData,
+    types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+};
 
 use crate::schema::outputs;
 
@@ -47,15 +48,17 @@ impl ConfidentialOutput {
                 item: "output",
                 details: format!("Corrupt db: invalid vault address '{}'", vault_addr_str),
             })?,
-            commitment: Commitment::from_hex(&self.commitment).map_err(|_| WalletStorageError::DecodingError {
-                operation: "outputs_lock_smallest_amount",
-                item: "output commitment",
-                details: "Corrupt db: invalid hex representation".to_string(),
+            commitment: PedersenCommitmentBytes::from_hex(&self.commitment).map_err(|_| {
+                WalletStorageError::DecodingError {
+                    operation: "outputs_lock_smallest_amount",
+                    item: "output commitment",
+                    details: "Corrupt db: invalid hex representation".to_string(),
+                }
             })?,
             value: self.value as u64,
             sender_public_nonce: self
                 .sender_public_nonce
-                .map(|nonce| PublicKey::from_hex(&nonce).unwrap()),
+                .map(|nonce| RistrettoPublicKeyBytes::from_hex(&nonce).unwrap()),
             encryption_secret_key_index: self.encryption_secret_key_index as u64,
             encrypted_data: EncryptedData::try_from(self.encrypted_data).map_err(|len| {
                 WalletStorageError::DecodingError {
@@ -64,7 +67,9 @@ impl ConfidentialOutput {
                     details: format!("Corrupt db: invalid encrypted data length {len}"),
                 }
             })?,
-            public_asset_tag: self.public_asset_tag.map(|tag| PublicKey::from_hex(&tag).unwrap()),
+            public_asset_tag: self
+                .public_asset_tag
+                .map(|tag| RistrettoPublicKeyBytes::from_hex(&tag).unwrap()),
             status: self.status.parse().map_err(|_| WalletStorageError::DecodingError {
                 operation: "try_into_output",
                 item: "output",

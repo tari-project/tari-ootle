@@ -2,13 +2,18 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use rand::rngs::OsRng;
-use tari_common_types::types::{PrivateKey, PublicKey};
-use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::SecretKey, tari_utilities::ByteArray};
+use tari_common_types::types::PrivateKey;
+use tari_crypto::{
+    commitment::HomomorphicCommitmentFactory,
+    keys::SecretKey,
+    ristretto::RistrettoPublicKey,
+    tari_utilities::ByteArray,
+};
 use tari_dan_wallet_crypto::{ConfidentialOutputMaskAndValue, ConfidentialProofStatement};
 use tari_engine_types::confidential::get_commitment_factory;
 use tari_template_lib::{
-    crypto::PedersonCommitmentBytes,
     models::{Amount, ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
+    types::crypto::PedersenCommitmentBytes,
 };
 
 pub fn generate_confidential_proof(
@@ -21,7 +26,7 @@ pub fn generate_confidential_proof(
 pub fn generate_confidential_proof_with_view_key(
     output_amount: Amount,
     change: Option<Amount>,
-    view_key: &PublicKey,
+    view_key: &RistrettoPublicKey,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
     generate_confidential_proof_internal(output_amount, change, Some(view_key.clone()))
 }
@@ -29,7 +34,7 @@ pub fn generate_confidential_proof_with_view_key(
 fn generate_confidential_proof_internal(
     output_amount: Amount,
     change: Option<Amount>,
-    view_key: Option<PublicKey>,
+    view_key: Option<RistrettoPublicKey>,
 ) -> (ConfidentialOutputStatement, PrivateKey, Option<PrivateKey>) {
     let mask = PrivateKey::random(&mut OsRng);
     let output_statement = ConfidentialProofStatement {
@@ -68,9 +73,9 @@ pub struct WithdrawProofOutput {
 }
 
 impl WithdrawProofOutput {
-    pub fn to_commitment_bytes_for_output(&self, amount: Amount) -> PedersonCommitmentBytes {
+    pub fn to_commitment_bytes_for_output(&self, amount: Amount) -> PedersenCommitmentBytes {
         let commitment = get_commitment_factory().commit_value(&self.output_mask, amount.value() as u64);
-        PedersonCommitmentBytes::from_bytes(commitment.as_bytes()).unwrap()
+        PedersenCommitmentBytes::from_bytes(commitment.as_bytes()).unwrap()
     }
 }
 
@@ -115,7 +120,7 @@ pub fn generate_withdraw_proof_with_view_key(
     output_amount: Amount,
     change_amount: Option<Amount>,
     revealed_amount: Amount,
-    view_key: &PublicKey,
+    view_key: &RistrettoPublicKey,
 ) -> WithdrawProofOutput {
     generate_withdraw_proof_internal(
         &[(input_mask.clone(), input_value)],
@@ -133,7 +138,7 @@ fn generate_withdraw_proof_internal(
     output_amount: Amount,
     change_amount: Option<Amount>,
     revealed_output_amount: Amount,
-    view_key: Option<PublicKey>,
+    view_key: Option<RistrettoPublicKey>,
 ) -> WithdrawProofOutput {
     // If the amount is zero, we omit the output UTXO, therefore the mask is zero
     let output_mask = if output_amount.is_zero() {

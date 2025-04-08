@@ -1,8 +1,9 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_dan_common_types::optional::IsNotFoundError;
 use tari_template_lib::{
-    models::ResourceAddress,
+    models::{ResourceAddress, VaultId},
     prelude::{ComponentAddress, NonFungibleId},
 };
 use thiserror::Error;
@@ -30,16 +31,20 @@ where TStore: WalletStore
         Ok(())
     }
 
-    pub fn non_fungible_token_get_by_nft_id(
-        &self,
-        nft_id: NonFungibleId,
-    ) -> Result<NonFungibleToken, NonFungibleTokensApiError> {
+    pub fn remove_nft(&self, vault_id: &VaultId, nft_id: &NonFungibleId) -> Result<(), NonFungibleTokensApiError> {
+        let mut tx = self.store.create_write_tx()?;
+        tx.non_fungible_token_remove(vault_id, nft_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_by_id(&self, nft_id: NonFungibleId) -> Result<NonFungibleToken, NonFungibleTokensApiError> {
         let mut tx = self.store.create_read_tx()?;
         let non_fungible_token = tx.non_fungible_token_get_by_nft_id(nft_id)?;
         Ok(non_fungible_token)
     }
 
-    pub fn non_fungible_token_get_all(
+    pub fn get_all(
         &self,
         account: ComponentAddress,
         limit: u64,
@@ -50,10 +55,7 @@ where TStore: WalletStore
         Ok(non_fungibles)
     }
 
-    pub fn non_fungible_token_get_resource_address(
-        &self,
-        nft_id: NonFungibleId,
-    ) -> Result<ResourceAddress, NonFungibleTokensApiError> {
+    pub fn get_resource_address(&self, nft_id: NonFungibleId) -> Result<ResourceAddress, NonFungibleTokensApiError> {
         let mut tx = self.store.create_read_tx()?;
         let resource_address = tx.non_fungible_token_get_resource_address(nft_id)?;
         Ok(resource_address)
@@ -64,4 +66,12 @@ where TStore: WalletStore
 pub enum NonFungibleTokensApiError {
     #[error("Store error: {0}")]
     StoreError(#[from] WalletStorageError),
+}
+
+impl IsNotFoundError for NonFungibleTokensApiError {
+    fn is_not_found_error(&self) -> bool {
+        match self {
+            NonFungibleTokensApiError::StoreError(err) => err.is_not_found_error(),
+        }
+    }
 }

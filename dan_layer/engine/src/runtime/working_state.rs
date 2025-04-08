@@ -27,7 +27,6 @@ use tari_engine_types::{
     transaction_receipt::TransactionReceipt,
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
-    TemplateAddress,
     ValidatorFeePoolAddress,
     ValidatorFeeWithdrawal,
 };
@@ -39,14 +38,13 @@ use tari_template_lib::{
         Amount,
         BucketId,
         ComponentAddress,
-        EntityId,
         NonFungibleAddress,
         ProofId,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
     prelude::{AuthHookCaller, PUBLIC_IDENTITY_RESOURCE_ADDRESS},
-    Hash,
+    types::{EntityId, Hash, TemplateAddress},
 };
 
 use super::workspace::Workspace;
@@ -556,7 +554,13 @@ impl WorkingState {
                     target: LOG_TARGET,
                     "Minting confidential tokens on resource: {}", resource_address
                 );
-                ResourceContainer::mint_confidential(resource_address, *proof, resource.view_key())?
+                let maybe_view_key = resource.to_view_key_public_key().transpose().map_err(|e| {
+                    RuntimeError::InvariantError {
+                        function: "MintArg::Confidential",
+                        details: format!("Resource contained a malformed view key: {e}. This should never happen!",),
+                    }
+                })?;
+                ResourceContainer::mint_confidential(resource_address, *proof, maybe_view_key.as_ref())?
             },
         };
 

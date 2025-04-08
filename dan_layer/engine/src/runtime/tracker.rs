@@ -39,11 +39,9 @@ use tari_engine_types::{
     logs::LogEntry,
     substate::{SubstateId, SubstateValue},
     virtual_substate::VirtualSubstates,
-    TemplateAddress,
 };
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
-    crypto::RistrettoPublicKeyBytes,
     models::{
         Amount,
         BucketId,
@@ -52,7 +50,8 @@ use tari_template_lib::{
         Metadata,
         UnclaimedConfidentialOutputAddress,
     },
-    Hash,
+    prelude::{RistrettoPublicKeyBytes, TemplateAddress},
+    types::Hash,
 };
 use tari_transaction::TransactionWeight;
 

@@ -28,9 +28,8 @@ use syn::{
     Stmt,
     UseTree,
 };
-use tari_engine_types::TemplateAddress;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::args::LogLevel;
+use tari_template_lib::{args::LogLevel, types::TemplateAddress};
 
 #[derive(Debug, Clone)]
 pub enum ManifestIntent {
@@ -174,7 +173,7 @@ impl ManifestParser {
         match stmt {
             Stmt::Local(local) => self.handle_local(local),
             // component.function_name(arg1, arg2);
-            Stmt::Semi(expr, _) => self.handle_semi_expr(expr),
+            Stmt::Expr(expr, _) => self.handle_semi_expr(expr),
             _ => Err(syn::Error::new_spanned(
                 stmt.clone(),
                 format!("Invalid statement {:?}", stmt),
@@ -196,7 +195,7 @@ impl ManifestParser {
             p => unimplemented!("{:?} not supported", p),
         };
 
-        let expr = local.init.as_ref().map(|(_, expr)| expr).ok_or_else(|| {
+        let expr = local.init.as_ref().map(|init| &init.expr).ok_or_else(|| {
             syn::Error::new_spanned(
                 local.clone(),
                 // I think this is `let x;`?

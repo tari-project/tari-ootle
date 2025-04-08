@@ -29,13 +29,14 @@ use std::{
 use anyhow::anyhow;
 use serde_json as json;
 use serde_json::json;
-use tari_common_types::types::{PrivateKey, PublicKey};
+use tari_common_types::types::PrivateKey;
 use tari_crypto::{
-    keys::PublicKey as PublicKeyT,
+    keys::PublicKey,
+    ristretto::RistrettoPublicKey,
     tari_utilities::{hex::Hex, ByteArray},
 };
 use tari_dan_common_types::crypto::create_key_pair;
-use tari_template_lib::{crypto::RistrettoPublicKeyBytes, models::NonFungibleAddress};
+use tari_template_lib::{models::NonFungibleAddress, types::crypto::RistrettoPublicKeyBytes};
 
 #[derive(Debug)]
 pub struct KeyManager {
@@ -110,7 +111,7 @@ fn read_active_key<P: AsRef<Path>>(base_dir: P) -> Option<KeyPair> {
     read_key(base_dir.as_ref().join(format!("{}.json", active_key)))
         .ok()
         .map(|key| KeyPair {
-            public_key: PublicKey::from_secret_key(&key),
+            public_key: RistrettoPublicKey::from_secret_key(&key),
             secret_key: key,
             is_active: true,
         })
@@ -129,7 +130,7 @@ fn read_key<P: AsRef<Path>>(path: P) -> anyhow::Result<PrivateKey> {
 #[derive(Debug, Clone)]
 pub struct KeyPair {
     pub secret_key: PrivateKey,
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKey,
     pub is_active: bool,
 }
 

@@ -30,9 +30,6 @@
 
 pub mod auth;
 
-mod hash;
-pub use hash::{Hash, HashParseError};
-
 #[macro_use]
 pub mod args;
 pub mod models;
@@ -48,10 +45,11 @@ pub use context::{get_context, init_context, AbiContext};
 pub mod rand;
 pub mod resource;
 
-pub mod crypto;
 pub mod events;
 
 pub mod template;
+
+pub use tari_template_lib_types as types;
 
 // ---------------------------------------- WASM target exports ------------------------------------------------
 

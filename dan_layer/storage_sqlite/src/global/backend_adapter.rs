@@ -42,7 +42,7 @@ use diesel::{
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::debug;
 use serde::{de::DeserializeOwned, Serialize};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::Committee,
     hashing::ValidatorNodeBalancedMerkleTree,
@@ -64,7 +64,7 @@ use tari_dan_storage::{
     },
     AtomicDb,
 };
-use tari_engine_types::TemplateAddress;
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use tari_utilities::{hex, ByteArray};
 
 use super::{models, models::DbValidatorNode};
@@ -219,7 +219,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
         match template {
             Some(t) => Ok(Some(DbTemplate {
-                author_public_key: PublicKey::from_canonical_bytes(&t.author_public_key)
+                author_public_key: RistrettoPublicKeyBytes::from_bytes(&t.author_public_key)
                     .map_err(|e| SqliteStorageError::MalformedDbData(format!("Failed to decode public key:{e}")))?,
                 template_name: t.template_name,
                 expected_hash: t.expected_hash.try_into()?,
@@ -298,7 +298,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .into_iter()
             .map(|t| {
                 Ok(DbTemplate {
-                    author_public_key: PublicKey::from_canonical_bytes(&t.author_public_key).map_err(|e| {
+                    author_public_key: RistrettoPublicKeyBytes::from_bytes(&t.author_public_key).map_err(|e| {
                         SqliteStorageError::MalformedDbData(format!("Failed to decode public key: {e}"))
                     })?,
                     template_name: t.template_name,
@@ -421,10 +421,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         &self,
         tx: &mut Self::DbTransaction<'_>,
         address: Self::Addr,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
         start_epoch: Epoch,
-        fee_claim_public_key: PublicKey,
+        fee_claim_public_key: RistrettoPublicKeyBytes,
     ) -> Result<(), Self::Error> {
         use crate::global::schema::validator_nodes;
         let addr = serialize_json(&address)?;
@@ -432,10 +432,10 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         diesel::insert_into(validator_nodes::table)
             .values((
                 validator_nodes::address.eq(&addr),
-                validator_nodes::public_key.eq(ByteArray::as_bytes(&public_key)),
+                validator_nodes::public_key.eq(public_key.as_bytes()),
                 validator_nodes::shard_key.eq(shard_key.as_bytes()),
                 validator_nodes::start_epoch.eq(start_epoch.as_u64() as i64),
-                validator_nodes::fee_claim_public_key.eq(ByteArray::as_bytes(&fee_claim_public_key)),
+                validator_nodes::fee_claim_public_key.eq(fee_claim_public_key.as_bytes()),
             ))
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
@@ -449,14 +449,14 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
     fn deactivate_validator_node(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
     ) -> Result<(), Self::Error> {
         use crate::global::schema::validator_nodes;
 
         diesel::update(validator_nodes::table)
             .set(validator_nodes::end_epoch.eq(deactivation_epoch.as_u64() as i64))
-            .filter(validator_nodes::public_key.eq(ByteArray::as_bytes(&public_key)))
+            .filter(validator_nodes::public_key.eq(public_key.as_bytes()))
             .execute(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -494,7 +494,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         &self,
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error> {
         use crate::global::schema::{committees, validator_nodes};
 
@@ -502,7 +502,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .select(validator_nodes::all_columns)
             .inner_join(committees::table.on(validator_nodes::id.eq(committees::validator_node_id)))
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
-            .filter(validator_nodes::public_key.eq(ByteArray::as_bytes(public_key)))
+            .filter(validator_nodes::public_key.eq(public_key.as_bytes()))
             .order_by(validator_nodes::shard_key.desc())
             .first::<DbValidatorNode>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
@@ -577,7 +577,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
         let mut committees = HashMap::new();
         for (shard_start, shard_end, address, public_key) in results {
             let addr = DbValidatorNode::try_parse_address(&address)?;
-            let pk = PublicKey::from_canonical_bytes(&public_key)
+            let pk = RistrettoPublicKeyBytes::from_bytes(&public_key)
                 .map_err(|_| SqliteStorageError::MalformedDbData("Invalid public key".to_string()))?;
             committees
                 .entry(ShardGroup::new(shard_start as u32, shard_end as u32))
@@ -662,7 +662,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .map(|vn| {
                 Ok((
                     DbValidatorNode::try_parse_address(&vn.address)?,
-                    PublicKey::from_canonical_bytes(&vn.public_key).map_err(|_| {
+                    RistrettoPublicKeyBytes::from_bytes(&vn.public_key).map_err(|_| {
                         SqliteStorageError::MalformedDbData(format!(
                             "validator_nodes_get_for_shard_group: Invalid public key in validator node record id={}",
                             vn.id
@@ -704,7 +704,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
             validators.members.push((
                 DbValidatorNode::try_parse_address(&vn.address)?,
-                PublicKey::from_canonical_bytes(&vn.public_key).map_err(|_| {
+                RistrettoPublicKeyBytes::from_bytes(&vn.public_key).map_err(|_| {
                     SqliteStorageError::MalformedDbData(format!(
                         "validator_nodes_get_overlapping_shard_group: Invalid public key in validator node record \
                          id={}",

@@ -5,7 +5,6 @@ use std::{ops::Add, time::Duration};
 
 use anyhow::anyhow;
 use log::error;
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_wallet_sdk::{
     apis::{key_manager, transaction::TransactionApiError},
@@ -14,9 +13,10 @@ use tari_dan_wallet_sdk::{
     storage::WalletStore,
     DanWalletSdk,
 };
-use tari_engine_types::{commit_result::TransactionResult, TemplateAddress};
+use tari_engine_types::commit_result::TransactionResult;
 use tari_shutdown::ShutdownSignal;
 use tari_template_abi::TemplateDef;
+use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::TemplateAddress};
 
 use crate::{notify::Notify, services::WalletEvent};
 
@@ -83,14 +83,10 @@ where
             if matches!(event.status, TransactionStatus::Accepted) {
                 if let TransactionResult::Accept(diff) = event.finalize.result {
                     let templates_iter = diff.up_iter().filter_map(|(id, value)| {
-                        if let Some(template_address) = id.as_template() {
-                            if let Some(template) = value.clone().into_substate_value().as_template() {
-                                if let Some(key_index) = self.get_key_index_for_public_key(&template.author) {
-                                    return Some((key_index, template_address));
-                                }
-                            }
-                        }
-                        None
+                        let template_address = id.as_template()?;
+                        let template = value.substate_value().as_template()?;
+                        let key_index = self.get_key_index_for_public_key(&template.author)?;
+                        Some((key_index, template_address))
                     });
                     for (key_index, template_addr) in templates_iter {
                         let template_definition = self.fetch_template_definition(template_addr.as_hash()).await?;
@@ -109,15 +105,15 @@ where
         Ok(())
     }
 
-    fn get_key_index_for_public_key(&self, author_public_key: &PublicKey) -> Option<u64> {
-        if let Ok((key_index, _)) = self
+    fn get_key_index_for_public_key(&self, author_public_key: &RistrettoPublicKeyBytes) -> Option<u64> {
+        let (key_index, _) = self
             .wallet_sdk
             .key_manager_api()
             .get_key_for_public_key(key_manager::TRANSACTION_BRANCH, author_public_key)
-        {
-            return Some(key_index);
-        }
-        None
+            // TODO: Other errors could result in keys
+            .ok()?;
+
+        Some(key_index)
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {

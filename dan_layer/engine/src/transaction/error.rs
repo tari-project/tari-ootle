@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_engine_types::indexed_value::IndexedValueError;
-use tari_template_lib::{models::TemplateAddress, HashParseError};
+use tari_template_lib::types::{HashParseError, TemplateAddress};
 
 use crate::{runtime::RuntimeError, template::TemplateLoaderError, wasm::WasmExecutionError};
 

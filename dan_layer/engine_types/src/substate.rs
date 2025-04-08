@@ -35,13 +35,12 @@ use tari_template_lib::{
         ComponentAddress,
         NonFungibleAddress,
         NonFungibleIndexAddress,
-        ObjectKey,
         ResourceAddress,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
     prelude::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    Hash,
+    types::{Hash, ObjectKey},
 };
 
 use crate::{

@@ -2,6 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 pub trait ValueLookupTable {
-    type Error;
+    type Error: std::error::Error;
     fn lookup(&mut self, value: u64) -> Result<Option<[u8; 32]>, Self::Error>;
 }

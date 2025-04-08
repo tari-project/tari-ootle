@@ -34,23 +34,26 @@ import Substates from "./Substates";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "../../Components/Loading";
-import { getDownSubstates, getTransaction, getUpSubstates } from "../../utils/json_rpc";
+import { getTransaction, getTransactionResult } from "../../utils/json_rpc";
 import { displayDuration } from "../../utils/helpers";
 import type {
   Event,
   ExecutedTransaction,
   ExecuteResult,
   LogEntry,
-  SubstateRecord,
+  VersionedSubstateId,
+  SubstateId,
+  Substate,
 } from "@tari-project/typescript-bindings";
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
 import StatusChip from "../../Components/StatusChip";
+import { getSubstateDiffFromTransactionResult } from "@tari-project/typescript-bindings/dist/helpers/helpers";
 
 export default function TransactionDetails() {
   const { transactionHash } = useParams();
   const [state, setState] = useState<ExecutedTransaction>();
-  const [upSubstate, setUpSubstate] = useState<SubstateRecord[]>([]);
-  const [downSubstate, setDownSubstate] = useState<SubstateRecord[]>([]);
+  const [upSubstate, setUpSubstate] = useState<[SubstateId, Substate][]>([]);
+  const [downSubstate, setDownSubstate] = useState<VersionedSubstateId[]>([]);
   const [events, setEvents] = useState<Event[]>();
   const [fee, setFee] = useState<number>();
   const [logs, setLogs] = useState<LogEntry[]>();
@@ -61,45 +64,24 @@ export default function TransactionDetails() {
   const getTransactionByHash = () => {
     setLoading(true);
     Promise.all([
-      getUpSubstates({ transaction_id: String(transactionHash) }),
-      getDownSubstates({ transaction_id: String(transactionHash) }),
       getTransaction({ transaction_id: String(transactionHash) }),
+      getTransactionResult({ transaction_id: String(transactionHash) }),
     ])
-      .then(([upSubstates, downSubstates, transaction]) => {
-        setState(transaction["transaction"]);
+      .then(([transaction, result]) => {
+        setState(transaction.transaction);
+        if (result.result && ("Accept" in result.result.finalize.result || "AcceptFeeRejectRest" in result.result.finalize.result)) {
+          let diff = getSubstateDiffFromTransactionResult(result.result!.finalize.result);
+          if (diff) {
+            setDownSubstate(diff.down_substates.map(([substate_id, version]) => ({
+              substate_id, version,
+            })));
+            setUpSubstate(diff.up_substates);
+          }
+        }
         setError(undefined);
-        setUpSubstate(upSubstates["substates"]);
-        setDownSubstate(downSubstates["substates"]);
-        setEvents(
-          upSubstates["substates"].reduce(
-            (acc: Event[], { substate_value }: SubstateRecord) =>
-              substate_value && "TransactionReceipt" in substate_value && substate_value?.TransactionReceipt?.events
-                ? acc.concat(substate_value?.TransactionReceipt?.events)
-                : acc,
-            [],
-          ),
-        );
-        setLogs(
-          upSubstates["substates"].reduce(
-            (acc: LogEntry[], { substate_value }: SubstateRecord) =>
-              substate_value && "TransactionReceipt" in substate_value && substate_value?.TransactionReceipt?.events
-                ? acc.concat(substate_value?.TransactionReceipt?.logs)
-                : acc,
-            [],
-          ),
-        );
-        setFee(
-          upSubstates["substates"].reduce(
-            (acc: number, { substate_value }: SubstateRecord) =>
-              acc +
-              Number(
-                (substate_value && "TransactionReceipt" in substate_value &&
-                  substate_value?.TransactionReceipt?.fee_receipt?.total_fees_paid) ||
-                0,
-              ),
-            0,
-          ),
-        );
+        setEvents(result.result?.finalize.events);
+        setLogs(result.result?.finalize.logs);
+        setFee(result.result?.finalize.fee_receipt.total_fees_paid);
       })
       .catch((err) => {
         setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
@@ -142,7 +124,7 @@ export default function TransactionDetails() {
     setExpandedPanels([]);
   };
   if (state === undefined) {
-    return <></>;
+    return <Loading />;
   }
   const { result, transaction: container, finalized_time, final_decision } = state;
   const transaction = container.V1.body.transaction;

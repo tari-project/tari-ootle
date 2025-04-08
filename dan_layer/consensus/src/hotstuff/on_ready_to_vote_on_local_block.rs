@@ -39,6 +39,7 @@ use tari_dan_storage::{
     StateStore,
 };
 use tari_engine_types::{commit_result::RejectReason, substate::Substate};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::broadcast;
 
 use crate::{
@@ -104,7 +105,7 @@ where TConsensusSpec: ConsensusSpec
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         valid_block: &ValidBlock,
         local_committee_info: &CommitteeInfo,
-        proposer_claim_public_key_bytes: [u8; 32],
+        proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         can_propose_epoch_end: bool,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
@@ -318,7 +319,7 @@ where TConsensusSpec: ConsensusSpec
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         block: &Block,
         local_committee_info: &CommitteeInfo,
-        proposer_claim_public_key_bytes: [u8; 32],
+        proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         can_propose_epoch_end: bool,
         proposed_block_change_set: &mut ProposedBlockChangeSet,
     ) -> Result<(), HotStuffError> {
@@ -462,7 +463,7 @@ where TConsensusSpec: ConsensusSpec
                         atom.public_key,
                         stats.missed_proposals
                     );
-                    proposed_block_change_set.add_evict_node(atom.public_key.clone());
+                    proposed_block_change_set.add_evict_node(atom.public_key);
                 },
                 Command::EndEpoch => {
                     if !can_propose_epoch_end {

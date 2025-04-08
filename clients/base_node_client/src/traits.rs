@@ -2,13 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use async_trait::async_trait;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_core::{
     base_node::comms_interface::ValidatorNodeChange,
     blocks::BlockHeader,
     transactions::transaction_components::CodeTemplateRegistration,
 };
 use tari_dan_common_types::{Epoch, SubstateAddress};
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::{
     error::BaseNodeClientError,
@@ -23,13 +24,13 @@ pub trait BaseNodeClient: Send + Sync + Clone {
     async fn get_validator_node_changes(
         &mut self,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
+        sidechain_id: Option<&RistrettoPublicKeyBytes>,
     ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError>;
     async fn get_validator_nodes(&mut self, height: u64) -> Result<Vec<BaseLayerValidatorNode>, BaseNodeClientError>;
     async fn get_shard_key(
         &mut self,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<Option<SubstateAddress>, BaseNodeClientError>;
     async fn get_template_registrations(
         &mut self,

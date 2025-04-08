@@ -43,6 +43,7 @@ use tari_dan_common_types::PeerAddress;
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_engine_types::ToByteType;
 use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{base_layer::BaseLayerOracle, configured::ConfiguredEpochOracle, EpochOracle};
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
@@ -125,9 +126,13 @@ pub async fn spawn_services(
                 base_node_client,
                 consensus_constants.base_layer_confirmations,
                 config.epoch_oracle.base_layer.scanning_interval,
-                config.indexer.sidechain_id.clone(),
-                config.indexer.burnt_utxo_sidechain_id.clone(),
-                config.indexer.sidechain_id.clone(),
+                config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
+                config
+                    .indexer
+                    .burnt_utxo_sidechain_id
+                    .as_ref()
+                    .map(|p| p.to_byte_type()),
+                config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
             ))
         },
         EpochOracleType::Configured => EpochOracle::Configured(ConfiguredEpochOracle::new(

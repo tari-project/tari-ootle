@@ -24,7 +24,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
         .filter(|vn| vn.name != name)
         .map(|vn| {
             (
-                vn.public_key.clone(),
+                vn.public_key,
                 Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
             )
         });

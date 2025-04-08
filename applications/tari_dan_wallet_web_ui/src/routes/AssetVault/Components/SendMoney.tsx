@@ -30,7 +30,7 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Box from "@mui/material/Box";
-import { useAccountsGet, useAccountsGetBalances, useAccountsTransfer } from "../../../api/hooks/useAccounts";
+import { useAccountsGetBalances, useAccountsTransfer } from "../../../api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
 import Select from "@mui/material/Select";
@@ -101,7 +101,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const theme = useTheme();
 
-  const { data } = useAccountsGetBalances({ ComponentAddress: substateIdToString(account.address) });
+  const { data } = useAccountsGetBalances(substateIdToString(account.address));
   const badges = data?.balances
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && b.balance > 0)
     .map((b: BalanceEntry) => b.resource_address) as string[];

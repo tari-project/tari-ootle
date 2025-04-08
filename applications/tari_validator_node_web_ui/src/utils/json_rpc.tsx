@@ -117,11 +117,6 @@ export const getTransactionResult = (request: VNGetTransactionResultRequest): Pr
 export const getState = (request: GetStateRequest): Promise<GetStateResponse> => jsonRpc("get_state", request);
 export const getSubstate = (request: VNGetSubstateRequest): Promise<VNGetSubstateResponse> =>
   jsonRpc("get_substate", request);
-export const getUpSubstates = (request: GetSubstatesByTransactionRequest): Promise<GetSubstatesByTransactionResponse> =>
-  jsonRpc("get_substates_created_by_transaction", request);
-export const getDownSubstates = (
-  request: GetSubstatesByTransactionRequest,
-): Promise<GetSubstatesByTransactionResponse> => jsonRpc("get_substates_destroyed_by_transaction", request);
 export const listBlocks = (request: ListBlocksRequest): Promise<ListBlocksResponse> => jsonRpc("list_blocks", request);
 export const getTxPool = (): Promise<GetTxPoolResponse> => jsonRpc("get_tx_pool");
 

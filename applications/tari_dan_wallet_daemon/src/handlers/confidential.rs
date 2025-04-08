@@ -8,14 +8,13 @@ use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
 use rand::rngs::OsRng;
 use serde_json::json;
-use tari_common_types::types::PublicKey;
-use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _};
+use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_wallet_crypto::{AlwaysMissLookupTable, ConfidentialProofStatement, IoReaderValueLookup};
 use tari_dan_wallet_sdk::{
     apis::{jwt::JrpcPermission, key_manager},
     models::{ConfidentialOutputModel, OutputStatus},
 };
-use tari_engine_types::confidential::get_commitment_factory;
+use tari_engine_types::{confidential::get_commitment_factory, ToByteType};
 use tari_template_lib::models::Amount;
 use tari_wallet_daemon_client::types::{
     ConfidentialCreateOutputProofRequest,
@@ -84,7 +83,7 @@ pub async fn handle_create_transfer_proof(
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
     let output_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
-    let (_, public_nonce) = PublicKey::random_keypair(&mut OsRng);
+    let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
         req.amount.as_u64_checked().unwrap(),
@@ -103,8 +102,15 @@ pub async fn handle_create_transfer_proof(
         .ok_or_else(|| {
             anyhow::anyhow!("Indexer returned a non-resource substate when scanning for a resource address")
         })?
-        .view_key()
-        .cloned();
+        .to_view_key_public_key()
+        .transpose()
+        .map_err(|_| {
+            JsonRpcError::new(
+                JsonRpcErrorReason::InvalidRequest,
+                "Invalid resource address".to_string(),
+                json!({}),
+            )
+        })?;
 
     let output_statement = ConfidentialProofStatement {
         amount: req.amount,
@@ -118,7 +124,7 @@ pub async fn handle_create_transfer_proof(
     let change_amount = total_input_value - req.amount.value() as u64 - req.reveal_amount.value() as u64;
     let maybe_change_statement = if change_amount > 0 {
         let change_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
-        let (_, public_nonce) = PublicKey::random_keypair(&mut OsRng);
+        let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
             change_amount,
@@ -130,9 +136,11 @@ pub async fn handle_create_transfer_proof(
         sdk.confidential_outputs_api().add_output(ConfidentialOutputModel {
             account_address: account.address,
             vault_address: vault.address,
-            commitment: get_commitment_factory().commit_value(&change_mask.key, change_amount),
+            commitment: get_commitment_factory()
+                .commit_value(&change_mask.key, change_amount)
+                .to_byte_type(),
             value: change_amount,
-            sender_public_nonce: Some(public_nonce.clone()),
+            sender_public_nonce: Some(public_nonce.to_byte_type()),
             encryption_secret_key_index: change_mask.key_index,
             encrypted_data: encrypted_data.clone(),
             public_asset_tag: None,
@@ -208,7 +216,7 @@ pub async fn handle_create_output_proof(
     }
 
     let output_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
-    let (_, public_nonce) = PublicKey::random_keypair(&mut OsRng);
+    let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
         req.amount.as_u64_checked().unwrap(),
         &output_mask.key,
@@ -245,7 +253,6 @@ pub async fn handle_view_vault_balance(
         .as_vault()
         .ok_or_else(|| anyhow::anyhow!("Indexer returned a non-vault substate when scanning for a vault address"))?;
 
-    #[allow(clippy::mutable_key_type)]
     let commitments = vault
         .get_confidential_commitments()
         .ok_or_else(|| invalid_params("vault_id", Some("Vault down not contain a confidential resource")))?;
@@ -286,10 +293,6 @@ pub async fn handle_view_vault_balance(
     info!(target: LOG_TARGET, "Brute force balance lookup took {:.2?}", timer.elapsed());
 
     Ok(ConfidentialViewVaultBalanceResponse {
-        balances: commitments
-            .keys()
-            .map(|c| c.as_public_key().clone())
-            .zip(balances)
-            .collect(),
+        balances: commitments.keys().copied().zip(balances).collect(),
     })
 }

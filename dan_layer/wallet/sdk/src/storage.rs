@@ -7,7 +7,6 @@ use std::{
     time::Duration,
 };
 
-use tari_common_types::types::Commitment;
 use tari_dan_common_types::{
     optional::IsNotFoundError,
     substate_type::SubstateType,
@@ -15,10 +14,11 @@ use tari_dan_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_dan_storage::consensus_models::QuorumCertificate;
-use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId, TemplateAddress};
+use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
 use tari_template_lib::{
-    models::Amount,
-    prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
+    models::{Amount, VaultId},
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceAddress},
+    types::TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
 use webauthn_rs::prelude::Passkey;
@@ -172,7 +172,7 @@ pub trait WalletStoreReader {
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError>;
     fn outputs_get_by_commitment(
         &mut self,
-        commitment: &Commitment,
+        commitment: &PedersenCommitmentBytes,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
 
     fn outputs_get_by_account_and_status(
@@ -330,6 +330,11 @@ pub trait WalletStoreWriter {
 
     // Non fungible tokens
     fn non_fungible_token_upsert(&mut self, non_fungible_token: &NonFungibleToken) -> Result<(), WalletStorageError>;
+    fn non_fungible_token_remove(
+        &mut self,
+        vault_id: &VaultId,
+        non_fungible_id: &NonFungibleId,
+    ) -> Result<(), WalletStorageError>;
 
     // Webauthn registrations
     fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError>;

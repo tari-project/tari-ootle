@@ -1,7 +1,6 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use serde_with::serde_as;
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -9,13 +8,15 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
+use crate::serde_helpers;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct EntityId([u8; Self::LENGTH]);
+pub struct EntityId(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
 
 impl EntityId {
     pub const LENGTH: usize = 20;
@@ -115,7 +116,7 @@ impl Display for EntityId {
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub struct ComponentKey([u8; Self::LENGTH]);
+pub struct ComponentKey(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
 
 impl ComponentKey {
     pub const LENGTH: usize = 12;
@@ -136,10 +137,9 @@ impl From<[u8; Self::LENGTH]> for ComponentKey {
 }
 
 /// Representation of a 32-byte object key
-#[serde_as]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-pub struct ObjectKey(#[serde_as(as = "serde_with::Bytes")] [u8; Self::LENGTH]);
+pub struct ObjectKey(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
 
 impl ObjectKey {
     pub const LENGTH: usize = EntityId::LENGTH + ComponentKey::LENGTH;

@@ -23,7 +23,7 @@ use tari_engine_types::{
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_template_lib::{args::Arg, models::ComponentAddress, Hash};
+use tari_template_lib::{args::Arg, models::ComponentAddress, types::Hash};
 
 use crate::{
     v1::signature::TransactionSignature,
@@ -118,7 +118,7 @@ impl TransactionV1 {
 
     pub fn verify_all_signatures(&self) -> bool {
         if !self.seal_signature.verify(&self.body) {
-            debug!(target: LOG_TARGET, "Transaction seal signature is valid");
+            debug!(target: LOG_TARGET, "Transaction seal signature is invalid");
             return false;
         }
 

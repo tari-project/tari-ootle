@@ -317,10 +317,18 @@ where
 
         for id in vault.get_non_fungible_ids() {
             let Some(nft) = nfts.get(id) else {
-                error!(
+                debug!(
                     target: LOG_TARGET,
-                    "NonFungible ID {} is found in the vault, but not found in substate diff", id
+                    "NonFungible ID {} is found in the vault, but not found in nft collection. It must have been transferred.", id
                 );
+                if non_fungibles_api.remove_nft(&vault_id, id).optional()?.is_none() {
+                    warn!(
+                        target: LOG_TARGET,
+                        "non-fungible {} from vault {} not found",
+                        id,
+                        vault_id
+                    );
+                }
                 continue;
             };
 

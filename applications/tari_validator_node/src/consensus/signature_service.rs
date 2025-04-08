@@ -2,8 +2,8 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use rand::rngs::OsRng;
-use tari_common_types::types::PublicKey;
 use tari_consensus::traits::{ValidatorSignatureService, VoteSignatureService};
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::keypair::RistrettoKeypair;
 use tari_dan_storage::consensus_models::{BlockId, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
 
@@ -23,7 +23,7 @@ impl ValidatorSignatureService for TariSignatureService {
         ValidatorSchnorrSignature::sign(self.keypair.secret_key(), message, &mut OsRng).unwrap()
     }
 
-    fn public_key(&self) -> &PublicKey {
+    fn public_key(&self) -> &RistrettoPublicKey {
         self.keypair.public_key()
     }
 }

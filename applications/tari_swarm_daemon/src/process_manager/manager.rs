@@ -14,8 +14,9 @@ use log::info;
 use minotari_wallet_grpc_client::grpc;
 use tari_common_types::types::FixedHash;
 use tari_dan_engine::wasm::WasmModule;
-use tari_engine_types::{calculate_template_binary_hash, TemplateAddress};
+use tari_engine_types::calculate_template_binary_hash;
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib_types::TemplateAddress;
 use tari_validator_node_client::types::GetTemplatesRequest;
 use tokio::{sync::mpsc, time, time::sleep};
 use url::Url;
@@ -431,7 +432,7 @@ impl ProcessManager {
             .next()
             .ok_or_else(|| anyhow!("No MinoTariConsoleWallet instances found"))?;
 
-        let proof = wallet.burn_funds(amount, &claim_public_key).await?;
+        let proof = wallet.burn_funds(amount, claim_public_key).await?;
 
         let file_name = PathBuf::from(format!("burn_proof-{}.json", proof.tx_id));
         let path = out_path.join(&file_name);

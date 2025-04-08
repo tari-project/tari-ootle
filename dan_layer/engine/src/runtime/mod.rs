@@ -47,7 +47,6 @@ pub use locking::{LockError, LockState};
 mod address_allocation;
 mod state_store;
 mod tracker_auth;
-mod utils;
 mod working_state;
 mod workspace;
 
@@ -89,7 +88,8 @@ use tari_template_lib::{
         WorkspaceAction,
     },
     invoke_args,
-    models::{ComponentAddress, EntityId, Metadata, NonFungibleAddress, VaultRef},
+    models::{ComponentAddress, Metadata, NonFungibleAddress, VaultRef},
+    types::EntityId,
 };
 pub use tracker::StateTracker;
 

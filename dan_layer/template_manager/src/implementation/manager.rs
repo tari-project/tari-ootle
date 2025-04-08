@@ -29,7 +29,7 @@ use std::{
 
 use chrono::Utc;
 use log::*;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     optional::Optional,
     services::template_provider::TemplateProvider,
@@ -50,7 +50,7 @@ use tari_template_builtin::{
     ACCOUNT_TEMPLATE_ADDRESS,
     FAUCET_TEMPLATE_ADDRESS,
 };
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 use super::{convert_to_db_template_type, TemplateConfig};
 use crate::{
@@ -258,7 +258,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
         &self,
         template_name: String,
         template_address: TemplateAddress,
-        author_public_key: PublicKey,
+        author_public_key: RistrettoPublicKeyBytes,
         binary_hash: FixedHash,
         epoch: Epoch,
         template_type: TemplateType,
@@ -303,8 +303,8 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
 
     pub(super) fn add_template(
         &self,
-        author_public_key: PublicKey,
-        template_address: tari_engine_types::TemplateAddress,
+        author_public_key: RistrettoPublicKeyBytes,
+        template_address: TemplateAddress,
         template: TemplateExecutable,
         template_name: Option<String>,
         template_status: Option<TemplateStatus>,

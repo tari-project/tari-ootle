@@ -35,7 +35,7 @@ where D: Deserializer<'de> {
 #[cfg(test)]
 mod tests {
     use tari_bor::cbor;
-    use tari_template_lib::models::{ObjectKey, ResourceAddress};
+    use tari_template_lib::{models::ResourceAddress, types::ObjectKey};
 
     use super::*;
 

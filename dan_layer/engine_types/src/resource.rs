@@ -23,13 +23,15 @@
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
+use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArrayError};
 use tari_template_lib::{
     auth::{AuthHook, OwnerRule, Ownership, ResourceAccessRules},
-    crypto::RistrettoPublicKeyBytes,
     models::{Amount, Metadata},
     resource::{ResourceType, TOKEN_SYMBOL},
+    types::crypto::RistrettoPublicKeyBytes,
 };
+
+use crate::FromByteType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -46,7 +48,7 @@ pub struct Resource {
     metadata: Metadata,
     total_supply: Amount,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-    view_key: Option<PublicKey>,
+    view_key: Option<RistrettoPublicKeyBytes>,
     auth_hook: Option<AuthHook>,
 }
 
@@ -57,7 +59,7 @@ impl Resource {
         owner_rule: OwnerRule,
         access_rules: ResourceAccessRules,
         metadata: Metadata,
-        view_key: Option<PublicKey>,
+        view_key: Option<RistrettoPublicKeyBytes>,
         auth_hook: Option<AuthHook>,
     ) -> Self {
         Self {
@@ -91,8 +93,13 @@ impl Resource {
         }
     }
 
-    pub fn view_key(&self) -> Option<&PublicKey> {
+    pub fn view_key(&self) -> Option<&RistrettoPublicKeyBytes> {
         self.view_key.as_ref()
+    }
+
+    pub fn to_view_key_public_key(&self) -> Option<Result<RistrettoPublicKey, ByteArrayError>> {
+        let view_key = self.view_key.as_ref()?;
+        Some(RistrettoPublicKey::try_from_byte_type(view_key))
     }
 
     pub fn auth_hook(&self) -> Option<&AuthHook> {

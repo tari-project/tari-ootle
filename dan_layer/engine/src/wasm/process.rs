@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use tari_bor::{decode_exact, encode, encode_into_writer, encode_with_len_to_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, instruction_result::InstructionResult};
@@ -298,7 +299,7 @@ impl Invokable<Store> for WasmProcess {
                         runtime_error: err,
                     });
                 }
-                eprintln!("Error calling function: {}", err);
+                error!(target: LOG_TARGET, "Error calling function: {}", err);
                 return Err(err.into());
             },
         };

@@ -16,9 +16,8 @@ use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceiptAddress,
-    TemplateAddress,
 };
-use tari_template_lib::constants::XTR;
+use tari_template_lib::{constants::XTR, types::TemplateAddress};
 
 use crate::{
     models::SubstateModel,

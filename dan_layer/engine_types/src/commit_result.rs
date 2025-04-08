@@ -26,9 +26,7 @@ use std::{
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tari_template_lib::Hash;
-#[cfg(feature = "ts")]
-use ts_rs::TS;
+use tari_template_lib::types::Hash;
 
 use crate::{
     events::Event,
@@ -40,7 +38,11 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ExecuteResult {
     /// The finalized result to commit. If the fee transaction succeeds but the transaction fails, this will be accept.
     pub finalize: FinalizeResult,
@@ -125,7 +127,11 @@ impl ExecuteResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct FinalizeResult {
     #[serde(with = "serde_with::hex")]
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
@@ -210,7 +216,11 @@ impl FinalizeResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum TransactionResult {
     Accept(SubstateDiff),
     AcceptFeeRejectRest(SubstateDiff, RejectReason),
@@ -293,7 +303,11 @@ impl Display for TransactionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum RejectReason {
     InvalidTransaction(String),
     ExecutionFailure(String),

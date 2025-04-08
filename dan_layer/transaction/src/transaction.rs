@@ -18,7 +18,7 @@ use tari_engine_types::{
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_template_lib::{models::ComponentAddress, Hash};
+use tari_template_lib::{models::ComponentAddress, types::Hash};
 
 use crate::{
     builder::TransactionBuilder,
@@ -268,13 +268,15 @@ impl Display for Transaction {
 #[cfg(test)]
 mod tests {
     use rand::rngs::OsRng;
-    use tari_common_types::types::{PrivateKey, PublicKey};
+    use tari_common_types::types::PrivateKey;
     use tari_crypto::{
         keys::{PublicKey as _, SecretKey},
+        ristretto::RistrettoPublicKey,
         tari_utilities::ByteArray,
     };
-    use tari_engine_types::TemplateAddress;
-    use tari_template_lib::args;
+    use tari_dan_common_types::crypto::create_key_pair;
+    use tari_engine_types::ToByteType;
+    use tari_template_lib::{args, types::TemplateAddress};
 
     use super::*;
 
@@ -282,8 +284,20 @@ mod tests {
         Transaction::builder()
             .for_network(123u8)
             .create_account(Default::default())
-            .call_method(ComponentAddress::from_array([1; 32]), "method", args![1, 2, 3])
-            .call_function(TemplateAddress::from_array([1; 32]), "function", args![1, 2, 3])
+            .call_method(ComponentAddress::from_array([1; 32]), "method", args![
+                1,
+                2,
+                3,
+                "string",
+                args![1, 2]
+            ])
+            .call_function(TemplateAddress::from_array([1; 32]), "function", args![
+                1,
+                2,
+                3,
+                ComponentAddress::from_array([1; 32])
+            ])
+            .put_last_instruction_output_on_workspace("workspace")
             .publish_template(b"template".to_vec())
             .add_input(SubstateRequirement::versioned(
                 SubstateId::Component(ComponentAddress::from_array([1; 32])),
@@ -293,9 +307,10 @@ mod tests {
 
     #[test]
     fn it_encodes_and_decodes_without_errors() {
+        let (k, _) = create_key_pair();
         // This test simply checks that there are no serde tags used that can cause encoding/decoding issues with
         // tari_bor
-        let subject = create_transaction().build_and_seal(&Default::default());
+        let subject = create_transaction().build_and_seal(&k);
         let encoded = tari_bor::encode(&subject).unwrap();
         let _decoded = tari_bor::decode::<Transaction>(&encoded).unwrap();
     }
@@ -303,13 +318,13 @@ mod tests {
     #[test]
     fn it_correctly_signs_and_verifies() {
         let secret = PrivateKey::random(&mut OsRng);
-        let public_key = PublicKey::from_secret_key(&secret);
+        let public_key = RistrettoPublicKey::from_secret_key(&secret);
         let subject = create_transaction().build_and_seal(&secret);
         assert!(subject.verify_all_signatures());
 
         let secret2 = PrivateKey::random(&mut OsRng);
         let subject = create_transaction()
-            .add_signature(&public_key, &secret2)
+            .add_signature(&public_key.to_byte_type(), &secret2)
             .build_and_seal(&secret);
         assert!(subject.verify_all_signatures());
     }

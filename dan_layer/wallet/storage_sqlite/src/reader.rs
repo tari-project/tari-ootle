@@ -18,7 +18,6 @@ use diesel::{
 };
 use log::{error, warn};
 use serde::de::DeserializeOwned;
-use tari_common_types::types::Commitment;
 use tari_dan_common_types::substate_type::SubstateType;
 use tari_dan_wallet_sdk::{
     models::{
@@ -37,23 +36,20 @@ use tari_dan_wallet_sdk::{
     },
     storage::{WalletStorageError, WalletStoreReader},
 };
-use tari_engine_types::{
-    substate::{InvalidSubstateIdFormat, SubstateId},
-    TemplateAddress,
-};
+use tari_engine_types::substate::{InvalidSubstateIdFormat, SubstateId};
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId},
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes},
+    types::TemplateAddress,
 };
 use tari_transaction::TransactionId;
-use tari_utilities::hex::Hex;
 use webauthn_rs::prelude::Passkey;
 
 use crate::{
     diesel::{ExpressionMethods, NullableExpressionMethods},
     models,
     models::{AuthoredTemplate, WebauthnRegistrationPasskey},
-    serialization::deserialize_json,
+    serialization::{deserialize_json, serialize_hex},
 };
 
 const LOG_TARGET: &str = "tari::dan::wallet_sdk::storage_sqlite::reader";
@@ -637,19 +633,19 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     fn outputs_get_by_commitment(
         &mut self,
-        commitment: &Commitment,
+        commitment: &PedersenCommitmentBytes,
     ) -> Result<ConfidentialOutputModel, WalletStorageError> {
         use crate::schema::{accounts, outputs, vaults};
 
         let row = outputs::table
-            .filter(outputs::commitment.eq(commitment.to_hex()))
+            .filter(outputs::commitment.eq(serialize_hex(commitment)))
             .first::<models::ConfidentialOutput>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("outputs_get_by_commitment", e))?
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "outputs_get_by_commitment",
                 entity: "output".to_string(),
-                key: commitment.to_hex(),
+                key: serialize_hex(commitment),
             })?;
 
         let account_addr = accounts::table

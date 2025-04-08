@@ -30,14 +30,12 @@ use tari_engine_types::{
     instruction::Instruction,
     substate::SubstateId,
     virtual_substate::{VirtualSubstate, VirtualSubstateId},
-    TemplateAddress,
 };
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args,
-    crypto::RistrettoPublicKeyBytes,
-    models::{Amount, ComponentAddress, NonFungibleAddress},
-    prelude::{NonFungibleId, ResourceAddress},
+    models::{Amount, ComponentAddress, NonFungibleAddress, NonFungibleId, ResourceAddress},
+    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, SubstateType, TemplateTest};
 use tari_transaction::Transaction;
@@ -1073,7 +1071,7 @@ mod emoji_id {
         .unwrap_err();
 
         // emoji ids with invalid length must fail
-        let too_long_emoji_id = iter::repeat(Emoji::Smile).take(max_emoji_id_len as usize + 1).collect();
+        let too_long_emoji_id = iter::repeat_n(Emoji::Smile, max_emoji_id_len as usize + 1).collect();
         let emoji_id = EmojiId(too_long_emoji_id);
         mint_emoji_id(
             &mut template_test,

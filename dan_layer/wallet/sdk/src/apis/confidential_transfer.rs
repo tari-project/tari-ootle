@@ -6,8 +6,8 @@ use std::cmp;
 use digest::crypto_common::rand_core::OsRng;
 use log::*;
 use tari_bor::{Deserialize, Serialize};
-use tari_common_types::types::{PrivateKey, PublicKey};
-use tari_crypto::keys::PublicKey as _;
+use tari_common_types::types::PrivateKey;
+use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{
     optional::{IsNotFoundError, Optional},
     substate_type::SubstateType,
@@ -18,12 +18,15 @@ use tari_engine_types::{
     component::new_component_address_from_public_key,
     indexed_value::IndexedWellKnownTypes,
     substate::SubstateId,
+    FromByteType,
+    ToByteType,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::{Amount, ComponentAddress, ResourceAddress, VaultId},
+    prelude::RistrettoPublicKeyBytes,
 };
 use tari_transaction::Transaction;
 
@@ -219,7 +222,7 @@ where
 
     async fn resolve_destination_account(
         &self,
-        destination_pk: &PublicKey,
+        destination_pk: &RistrettoPublicKeyBytes,
     ) -> Result<AccountDetails, ConfidentialTransferApiError> {
         let account_component = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, destination_pk);
         // Is it an account we own?
@@ -344,9 +347,9 @@ where
             self.outputs_api.add_output(ConfidentialOutputModel {
                 account_address: account.address.clone(),
                 vault_address: src_vault.address.clone(),
-                commitment: statement.to_commitment(),
+                commitment: statement.to_commitment().to_byte_type(),
                 value: confidential_change.as_u64_checked().unwrap(),
-                sender_public_nonce: Some(statement.sender_public_nonce.clone()),
+                sender_public_nonce: Some(statement.sender_public_nonce.to_byte_type()),
                 encryption_secret_key_index: account_secret.key_index,
                 encrypted_data: statement.encrypted_data.clone(),
                 public_asset_tag: None,
@@ -414,10 +417,21 @@ where
                 ),
             })?
             .view_key()
-            .cloned();
+            .map(RistrettoPublicKey::try_from_byte_type)
+            .transpose()
+            .map_err(|e| ConfidentialTransferApiError::InvalidParameter {
+                param: "resource_view_key",
+                reason: format!("Invalid resource view key: {e}"),
+            })?;
+        let destination_pk = RistrettoPublicKey::try_from_byte_type(&params.destination_public_key).map_err(|e| {
+            ConfidentialTransferApiError::InvalidParameter {
+                param: "destination_public_key",
+                reason: format!("Invalid destination public key: {e}"),
+            }
+        })?;
 
         let output_statement = self.create_confidential_proof_statement(
-            &params.destination_public_key,
+            &destination_pk,
             params.confidential_amount(),
             resource_view_key.clone(),
         )?;
@@ -448,9 +462,9 @@ where
                 self.outputs_api.add_output(ConfidentialOutputModel {
                     account_address: account.address,
                     vault_address: src_vault.address,
-                    commitment: statement.to_commitment(),
+                    commitment: statement.to_commitment().to_byte_type(),
                     value: change_value,
-                    sender_public_nonce: Some(statement.sender_public_nonce.clone()),
+                    sender_public_nonce: Some(statement.sender_public_nonce.to_byte_type()),
                     encryption_secret_key_index: account_secret.key_index,
                     encrypted_data: statement.encrypted_data.clone(),
                     public_asset_tag: None,
@@ -479,7 +493,7 @@ where
                 if dest_account_exists {
                     builder
                 } else {
-                    builder.create_account(params.destination_public_key.clone())
+                    builder.create_account(params.destination_public_key)
                 }
             })
             .then(|builder| {
@@ -522,9 +536,9 @@ where
 
     fn create_confidential_proof_statement(
         &self,
-        dest_public_key: &PublicKey,
+        dest_public_key: &RistrettoPublicKey,
         confidential_amount: Amount,
-        resource_view_key: Option<PublicKey>,
+        resource_view_key: Option<RistrettoPublicKey>,
     ) -> Result<ConfidentialProofStatement, ConfidentialTransferApiError> {
         let mask = if confidential_amount.is_zero() {
             PrivateKey::default()
@@ -532,7 +546,7 @@ where
             self.key_manager_api.next_key(key_manager::TRANSACTION_BRANCH)?.key
         };
 
-        let (nonce, public_nonce) = PublicKey::random_keypair(&mut OsRng);
+        let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
         let encrypted_data = self.crypto_api.encrypt_value_and_mask(
             confidential_amount
                 .as_u64_checked()
@@ -569,7 +583,7 @@ pub struct TransferParams {
     /// Amount to spend to destination
     pub amount: Amount,
     /// Destination public key used to derive the destination account component
-    pub destination_public_key: PublicKey,
+    pub destination_public_key: RistrettoPublicKeyBytes,
     /// Address of the resource to transfer
     pub resource_address: ResourceAddress,
     /// Fee to lock for the transaction

@@ -8,8 +8,8 @@ use tari_engine_types::{
 };
 use tari_template_lib::{
     args,
-    models::{ComponentAddress, TemplateAddress},
-    prelude::{Amount, ResourceAddress},
+    models::{Amount, ComponentAddress, ResourceAddress},
+    types::TemplateAddress,
 };
 use tari_template_test_tooling::{support::assert_error::assert_access_denied_for_action, TemplateTest};
 use tari_transaction::Transaction;

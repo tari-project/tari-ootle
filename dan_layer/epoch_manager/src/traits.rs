@@ -22,7 +22,7 @@
 
 use std::{collections::HashMap, future::Future};
 
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     layer_one_transaction::LayerOneTransactionDef,
@@ -33,8 +33,9 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_storage::global::models::ValidatorNode;
-use tari_engine_types::{confidential::UnclaimedConfidentialOutput, TemplateAddress};
+use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_sidechain::EvictionProof;
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use tokio::sync::broadcast;
 use url::Url;
 
@@ -53,15 +54,15 @@ pub trait EpochManagerWriter: Send + Sync {
     fn add_validator_node_registration(
         &mut self,
         activation_epoch: Epoch,
-        validator_public_key: PublicKey,
-        claim_public_key: PublicKey,
+        validator_public_key: RistrettoPublicKeyBytes,
+        claim_public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
         value_of_registration: u64,
     ) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
 
     fn deactivate_validator_node(
         &mut self,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
     ) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
 
@@ -108,7 +109,7 @@ pub trait EpochManagerReader: Send + Sync {
     fn get_validator_node_by_public_key(
         &self,
         epoch: Epoch,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
     ) -> impl Future<Output = Result<ValidatorNode<Self::Addr>, EpochManagerError>> + Send;
 
     fn get_our_validator_node(
@@ -130,7 +131,7 @@ pub trait EpochManagerReader: Send + Sync {
     fn get_committee_info_by_validator_public_key(
         &self,
         epoch: Epoch,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
     ) -> impl Future<Output = Result<CommitteeInfo, EpochManagerError>> + Send {
         async move {
             let validator = self.get_validator_node_by_public_key(epoch, public_key).await?;
@@ -169,7 +170,7 @@ pub trait EpochManagerReader: Send + Sync {
     fn get_committee_by_validator_public_key(
         &self,
         epoch: Epoch,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
     ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send {
         async move {
             let validator = self.get_validator_node_by_public_key(epoch, public_key).await?;
@@ -258,7 +259,7 @@ pub trait TemplateDownloader {
         epoch: Epoch,
         name: String,
         address: TemplateAddress,
-        author_public_key: PublicKey,
+        author_public_key: RistrettoPublicKeyBytes,
         url: Url,
         binary_hash: FixedHash,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;

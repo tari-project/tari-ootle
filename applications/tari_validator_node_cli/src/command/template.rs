@@ -21,7 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use clap::Subcommand;
-use tari_engine_types::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 use tari_validator_node_client::{
     types::{GetTemplateRequest, GetTemplateResponse, GetTemplatesRequest},
     ValidatorNodeClient,

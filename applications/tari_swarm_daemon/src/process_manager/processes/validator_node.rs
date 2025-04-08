@@ -5,8 +5,8 @@ use std::{fmt::Display, time::Duration};
 
 use anyhow::{anyhow, Context};
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_core::transactions::transaction_components::ValidatorNodeSignature;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_validator_node_client::ValidatorNodeClient;
 use tokio::{fs, time::sleep};
 use url::Url;
@@ -98,6 +98,6 @@ impl Display for ValidatorNodeProcess {
 #[derive(Serialize, Deserialize)]
 pub struct ValidatorRegistrationInfo {
     pub signature: ValidatorNodeSignature,
-    pub public_key: PublicKey,
-    pub claim_fees_public_key: PublicKey,
+    pub public_key: RistrettoPublicKey,
+    pub claim_fees_public_key: RistrettoPublicKey,
 }

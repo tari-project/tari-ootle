@@ -3,11 +3,12 @@
 
 use diesel::{Connection, SqliteConnection};
 use rand::rngs::OsRng;
-use tari_common_types::types::{FixedHash, PublicKey};
-use tari_crypto::keys::PublicKey as _;
+use tari_common_types::types::FixedHash;
+use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{Epoch, NumPreshards, PeerAddress, ShardGroup, SubstateAddress};
 use tari_dan_storage::global::{GlobalDb, ValidatorNodeDb};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_engine_types::ToByteType;
 use tari_utilities::ByteArray;
 
 fn create_db() -> GlobalDb<SqliteGlobalDbAdapter<PeerAddress>> {
@@ -19,11 +20,11 @@ fn create_db() -> GlobalDb<SqliteGlobalDbAdapter<PeerAddress>> {
     db
 }
 
-fn new_public_key() -> PublicKey {
-    PublicKey::random_keypair(&mut OsRng).1
+fn new_public_key() -> RistrettoPublicKey {
+    RistrettoPublicKey::random_keypair(&mut OsRng).1
 }
 
-fn derived_substate_address(public_key: &PublicKey) -> SubstateAddress {
+fn derived_substate_address(public_key: &RistrettoPublicKey) -> SubstateAddress {
     let hash = FixedHash::try_from(public_key.as_bytes()).unwrap();
     SubstateAddress::from_hash_and_version(hash, 0)
 }
@@ -42,23 +43,23 @@ fn insert_vns(
 
 fn insert_vn_with_public_key(
     validator_nodes: &mut ValidatorNodeDb<'_, '_, SqliteGlobalDbAdapter<PeerAddress>>,
-    public_key: PublicKey,
+    public_key: RistrettoPublicKey,
     start_epoch: Epoch,
 ) {
     validator_nodes
         .insert_validator_node(
             public_key.clone().into(),
-            public_key.clone(),
+            public_key.to_byte_type(),
             derived_substate_address(&public_key),
             start_epoch,
-            public_key,
+            public_key.to_byte_type(),
         )
         .unwrap()
 }
 
 fn set_committee_shard_group(
     validator_nodes: &mut ValidatorNodeDb<'_, '_, SqliteGlobalDbAdapter<PeerAddress>>,
-    public_key: &PublicKey,
+    public_key: &RistrettoPublicKey,
     shard_group: ShardGroup,
     epoch: Epoch,
 ) {

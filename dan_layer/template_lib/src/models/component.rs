@@ -26,9 +26,9 @@ use std::{
 };
 
 use tari_bor::BorTag;
+use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use super::{BinaryTag, EntityId, KeyParseError, ObjectKey};
-use crate::newtype_struct_serde_impl;
+use crate::{models::BinaryTag, newtype_struct_serde_impl};
 
 const TAG: u64 = BinaryTag::ComponentAddress.as_u64();
 
@@ -80,15 +80,6 @@ impl FromStr for ComponentAddress {
 impl<T: Into<ObjectKey>> From<T> for ComponentAddress {
     fn from(address: T) -> Self {
         Self::new(address.into())
-    }
-}
-
-impl TryFrom<&[u8]> for ComponentAddress {
-    type Error = KeyParseError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let key = ObjectKey::try_from(value)?;
-        Ok(Self::new(key))
     }
 }
 

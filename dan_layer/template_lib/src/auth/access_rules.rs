@@ -3,10 +3,11 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::collections::BTreeMap;
+use tari_template_lib_types::TemplateAddress;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
-use crate::models::{ComponentAddress, NonFungibleAddress, ResourceAddress, TemplateAddress};
+use crate::models::{ComponentAddress, NonFungibleAddress, ResourceAddress};
 
 /// Represents the types of possible access control rules over a component method or resource
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -371,8 +372,10 @@ macro_rules! __build_vec_inner {
 
 #[cfg(test)]
 mod tests {
+    use tari_template_lib_types::ObjectKey;
+
     use super::*;
-    use crate::{crypto::RistrettoPublicKeyBytes, models::ObjectKey};
+    use crate::types::crypto::RistrettoPublicKeyBytes;
 
     #[test]
     fn it_builds_correct_access_rules() {

@@ -23,6 +23,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 use tari_bor::{from_value, to_value};
 use tari_template_abi::{call_engine, EngineOp};
+use tari_template_lib_types::TemplateAddress;
 
 use crate::{
     args::{
@@ -37,7 +38,7 @@ use crate::{
     },
     auth::ComponentAccessRules,
     caller_context::CallerContext,
-    models::{ComponentAddress, TemplateAddress},
+    models::ComponentAddress,
 };
 
 /// Utility for managing components inside templates

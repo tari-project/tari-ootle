@@ -12,7 +12,7 @@ use tari_dan_p2p::{
 };
 use tari_epoch_manager::{EpochManagerError, EpochManagerReader};
 use tari_rpc_framework::{ClientStreaming, RpcStatus};
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClient, TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service,

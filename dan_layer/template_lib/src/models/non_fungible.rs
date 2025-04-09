@@ -2,26 +2,24 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_with::serde_as;
 use tari_bor::BorTag;
 use tari_template_abi::{
     call_engine,
     rust::{fmt, fmt::Display, str::FromStr, write},
     EngineOp,
 };
+use tari_template_lib_types::{serde_helpers, Hash};
 
 use super::BinaryTag;
 use crate::{
     args::{InvokeResult, NonFungibleAction, NonFungibleInvokeArg},
     constants::PUBLIC_IDENTITY_RESOURCE_ADDRESS,
-    crypto::RistrettoPublicKeyBytes,
     models::ResourceAddress,
     prelude::ResourceManager,
-    Hash,
+    types::crypto::RistrettoPublicKeyBytes,
 };
 
 /// The unique identification of a non-fungible token inside it's parent resource
-#[serde_as]
 #[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[cfg_attr(
     feature = "ts",
@@ -31,8 +29,8 @@ use crate::{
 #[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub enum NonFungibleId {
     U256(
-        #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-        #[serde_as(as = "serde_with::Bytes")]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[serde(with = "serde_helpers::fixed_hex")]
         [u8; 32],
     ),
     // TODO: limit size
@@ -303,6 +301,15 @@ impl FromStr for NonFungibleAddress {
 impl From<NonFungibleAddressContents> for NonFungibleAddress {
     fn from(contents: NonFungibleAddressContents) -> Self {
         Self(BorTag::new(contents))
+    }
+}
+
+impl From<RistrettoPublicKeyBytes> for NonFungibleAddress {
+    fn from(public_key: RistrettoPublicKeyBytes) -> Self {
+        Self::new(
+            PUBLIC_IDENTITY_RESOURCE_ADDRESS,
+            NonFungibleId::U256(public_key.into_array()),
+        )
     }
 }
 

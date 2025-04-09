@@ -21,11 +21,11 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use reqwest::Url;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::global::TemplateStatus;
 use tari_epoch_manager::traits::TemplateDownloader;
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::sync::{mpsc, oneshot};
 
@@ -110,7 +110,7 @@ impl TemplateManagerHandle {
 
     pub async fn add_template(
         &self,
-        author_public_key: PublicKey,
+        author_public_key: RistrettoPublicKeyBytes,
         template_address: TemplateAddress,
         template: TemplateExecutable,
         template_name: Option<String>,
@@ -158,8 +158,8 @@ impl TemplateDownloader for TemplateManagerHandle {
         &mut self,
         epoch: Epoch,
         name: String,
-        address: tari_engine_types::TemplateAddress,
-        author_public_key: PublicKey,
+        address: TemplateAddress,
+        author_public_key: RistrettoPublicKeyBytes,
         url: Url,
         binary_hash: FixedHash,
     ) -> Result<(), Self::Error> {

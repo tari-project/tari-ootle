@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     Epoch,
@@ -12,6 +12,7 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::oneshot;
 
 use crate::error::EpochManagerError;
@@ -33,19 +34,19 @@ pub enum EpochManagerRequest<TAddr> {
     },
     GetValidatorNodeByPublicKey {
         epoch: Epoch,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         reply: Reply<ValidatorNode<TAddr>>,
     },
     AddValidatorNodeRegistration {
         activation_epoch: Epoch,
-        validator_public_key: PublicKey,
-        claim_public_key: PublicKey,
+        validator_public_key: RistrettoPublicKeyBytes,
+        claim_public_key: RistrettoPublicKeyBytes,
         value_of_registration: u64,
         shard_key: SubstateAddress,
         reply: Reply<()>,
     },
     DeactivateValidatorNode {
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
         reply: Reply<()>,
     },
@@ -107,10 +108,10 @@ pub enum EpochManagerRequest<TAddr> {
         reply: Reply<HashMap<ShardGroup, Committee<TAddr>>>,
     },
     GetFeeClaimPublicKey {
-        reply: Reply<Option<PublicKey>>,
+        reply: Reply<Option<RistrettoPublicKeyBytes>>,
     },
     SetFeeClaimPublicKey {
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         reply: Reply<()>,
     },
     AddIntentToEvictValidator {

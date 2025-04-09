@@ -26,9 +26,9 @@ use std::{
 };
 
 use chrono::{NaiveDateTime, Utc};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::Epoch;
-use tari_engine_types::TemplateAddress;
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 use crate::global::GlobalDbAdapter;
 
@@ -84,7 +84,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> TemplateDb<'a, 'tx, TGlobalDbAd
 
 #[derive(Debug, Clone)]
 pub struct DbTemplate {
-    pub author_public_key: PublicKey,
+    pub author_public_key: RistrettoPublicKeyBytes,
     pub template_address: TemplateAddress,
     pub template_name: String,
     pub expected_hash: FixedHash,
@@ -97,7 +97,11 @@ pub struct DbTemplate {
 }
 
 impl DbTemplate {
-    pub fn empty_pending(template_address: TemplateAddress, author_public_key: PublicKey, epoch: Epoch) -> Self {
+    pub fn empty_pending(
+        template_address: TemplateAddress,
+        author_public_key: RistrettoPublicKeyBytes,
+        epoch: Epoch,
+    ) -> Self {
         Self {
             author_public_key,
             template_name: String::new(),
@@ -115,7 +119,7 @@ impl DbTemplate {
 
 #[derive(Debug, Clone, Default)]
 pub struct DbTemplateUpdate {
-    pub author_public_key: Option<PublicKey>,
+    pub author_public_key: Option<RistrettoPublicKeyBytes>,
     pub expected_hash: Option<FixedHash>,
     pub template_name: Option<String>,
     pub template_type: Option<DbTemplateType>,

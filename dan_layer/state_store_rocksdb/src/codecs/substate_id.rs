@@ -58,7 +58,8 @@ impl<'a> DbCodec<&'a SubstateId> for SubstateIdCodec {
 mod tests {
     use tari_common_types::types::FixedHash;
     use tari_dan_storage::consensus_models::BlockId;
-    use tari_engine_types::template_models::{ComponentAddress, ObjectKey};
+    use tari_engine_types::template_models::ComponentAddress;
+    use tari_template_lib_types::ObjectKey;
 
     use super::*;
     use crate::{codecs::BlockDiffKeyCodec, model::block_diff::BlockDiffKey};

@@ -23,15 +23,11 @@
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule, Ownership},
-    crypto::RistrettoPublicKeyBytes,
-    models::{EntityId, ObjectKey, TemplateAddress},
     prelude::ComponentAddress,
+    types::{crypto::RistrettoPublicKeyBytes, EntityId, ObjectKey, TemplateAddress},
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::{
     hashing::{hasher32, EngineHashDomainLabel},
@@ -46,7 +42,7 @@ use crate::{
 /// component builder.
 pub fn new_component_address_from_public_key(
     template_address: &TemplateAddress,
-    public_key: &PublicKey,
+    public_key: &RistrettoPublicKeyBytes,
 ) -> ComponentAddress {
     let address = hasher32(EngineHashDomainLabel::ComponentAddress)
         .chain(template_address)
@@ -57,7 +53,11 @@ pub fn new_component_address_from_public_key(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ComponentHeader {
     #[serde(with = "serde_with::hex")]
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
@@ -109,7 +109,11 @@ impl ComponentHeader {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ComponentBody {
     #[serde(with = "serde_with::cbor_value")]
     #[cfg_attr(feature = "ts", ts(type = "any"))]
@@ -126,5 +130,9 @@ impl ComponentBody {
     pub fn set(&mut self, state: tari_bor::Value) -> &mut Self {
         self.state = state;
         self
+    }
+
+    pub fn to_indexed_well_known_types(&self) -> Result<IndexedWellKnownTypes, IndexedValueError> {
+        IndexedWellKnownTypes::from_value(&self.state)
     }
 }

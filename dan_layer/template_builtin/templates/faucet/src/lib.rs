@@ -5,7 +5,6 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
-    use tari_template_lib::crypto::BalanceProofSignature;
 
     use super::*;
 

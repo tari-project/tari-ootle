@@ -32,10 +32,9 @@ use tari_template_abi::{
     },
     EngineOp,
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
+use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use super::{BinaryTag, EntityId, KeyParseError, NonFungible, ObjectKey, Proof, ProofAuth};
+use super::{BinaryTag, NonFungible, Proof, ProofAuth};
 use crate::{
     args::{
         ConfidentialRevealArg,
@@ -57,7 +56,11 @@ const TAG: u64 = BinaryTag::VaultId as u64;
 
 /// A vault's unique identification in the Tari network
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct VaultId(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl VaultId {
@@ -284,7 +287,7 @@ impl Vault {
         resp.decode().expect("failed to decode Amount")
     }
 
-    /// Returns how many Pederson commitments (related to confidential balances) this vault holds
+    /// Returns how many commitments (related to confidential balances) this vault holds
     pub fn commitment_count(&self) -> u32 {
         let resp: InvokeResult = call_engine(EngineOp::VaultInvoke, &VaultInvokeArg {
             vault_ref: self.vault_ref(),

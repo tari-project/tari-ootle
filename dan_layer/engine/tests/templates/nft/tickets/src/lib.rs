@@ -48,7 +48,7 @@ mod tickets {
             price: Amount,
             event_description: String,
         ) -> Component<Self> {
-            let owner = CallerContext::transaction_signer_public_key().to_non_fungible_address();
+            let owner = CallerContext::transaction_signer_public_key().into();
             // Create the non-fungible resource
             let resource_address = ResourceBuilder::non_fungible().with_token_symbol("tix")
                 // The event description is common for all tickets

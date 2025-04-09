@@ -25,6 +25,7 @@ import { GridHeadCell, GridDataCell } from "../../../Components/StyledComponents
 import { styled } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
 import CopyAddress from "../../../Components/CopyAddress";
+import { substateIdToString } from "@tari-project/typescript-bindings";
 
 const GridContainer = styled(Box)(({ theme }) => ({
   display: "grid",
@@ -54,7 +55,7 @@ function AccountDetails() {
       <GridHeadCell className="head3">Public Key</GridHeadCell>
       <GridDataCell className="content1">{account.name}</GridDataCell>
       <GridDataCell className="content2">
-        <CopyAddress address={account.address} />
+        <CopyAddress address={substateIdToString(account.address)} />
       </GridDataCell>
       <GridDataCell className="content3">
         <CopyAddress address={publicKey} />

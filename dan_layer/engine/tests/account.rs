@@ -3,7 +3,7 @@
 
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_engine::runtime::{ActionIdent, RuntimeError};
-use tari_engine_types::instruction::Instruction;
+use tari_engine_types::{instruction::Instruction, ToByteType};
 use tari_template_lib::{
     args,
     auth::AccessRule,
@@ -201,7 +201,7 @@ fn attempt_to_overwrite_account() {
     let overwriting_tx = template_test.execute_expect_failure(
         Transaction::builder()
             // Create component with the same ID
-            .create_account(source_account_pk)
+            .create_account(source_account_pk.to_byte_type())
             // Signed by source account so that it can pay the fees for the new account creation
             .build_and_seal(&source_account_sk),
         vec![source_account_proof],
@@ -246,7 +246,7 @@ fn gasless() {
             .put_last_instruction_output_on_workspace("b")
             .call_method(user2_account, "deposit", args![Workspace("b")])
             .call_method(user2_account, "get_balances", args![])
-            .add_signature(&fee_account_pk, &user_account_sk)
+            .add_signature(&fee_account_pk.to_byte_type(), &user_account_sk)
             .build_and_seal(&fee_account_sk),
         vec![fee_account_proof, user_account_proof],
     );
@@ -277,7 +277,7 @@ fn custom_access_rules() {
             .put_last_instruction_output_on_workspace("bucket")
             // Create component with the same ID
             .create_account_with_custom_rules(
-                public_key,
+                public_key.to_byte_type(),
                 None,
                 Some(access_rules),
                 Some("bucket"),

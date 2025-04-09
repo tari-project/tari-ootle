@@ -41,7 +41,6 @@ use crate::{
         ResourceUpdateNonFungibleDataArg,
     },
     auth::{OwnerRule, ResourceAccessRules},
-    crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes},
     models::{
         Amount,
         Bucket,
@@ -54,6 +53,7 @@ use crate::{
         VaultId,
     },
     prelude::{AuthHook, ResourceType},
+    types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 
 /// Utility for managing resources inside templates
@@ -300,18 +300,18 @@ impl ResourceManager {
     /// It will panic if:
     /// * The resource is not confidential
     /// * The caller doesn't have permissions (via access rules) for recalling
-    /// * `commitments` cointain invalid commitments
+    /// * `commitments` contain invalid commitments
     /// * `revealed_amount` is greater than the amount of tokens present in the vault
     ///
     /// # Arguments
     ///
     /// * `vault_id` - The vault whose tokens are going to be recalled
-    /// * `commitments` - The Pederson commitments of the tokens that are going to be recalled
+    /// * `commitments` - The Pedersen commitments of the tokens that are going to be recalled
     /// * `revealed_amount` - The amount of tokens that are going to be recalled
     pub fn recall_confidential(
         &self,
         vault_id: VaultId,
-        commitments: BTreeSet<PedersonCommitmentBytes>,
+        commitments: BTreeSet<PedersenCommitmentBytes>,
         revealed_amount: Amount,
     ) -> Bucket {
         self.recall_internal(RecallResourceArg {

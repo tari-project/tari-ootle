@@ -310,16 +310,12 @@ where
                     }
                 }
 
-                match self.swarm.behaviour_mut().gossipsub.unsubscribe(&topic) {
-                    Ok(_) => {
-                        debug!(target: LOG_TARGET, "📢 Unsubscribed from gossipsub topic: {}", topic);
-                        let _ignore = reply_tx.send(Ok(()));
-                    },
-                    Err(err) => {
-                        error!(target: LOG_TARGET, "🚨 Failed to unsubscribe from gossipsub topic: {}", err);
-                        let _ignore = reply_tx.send(Err(err.into()));
-                    },
+                if self.swarm.behaviour_mut().gossipsub.unsubscribe(&topic) {
+                    debug!(target: LOG_TARGET, "📢 Unsubscribed from gossipsub topic: {}", topic);
+                } else {
+                    debug!(target: LOG_TARGET, "Unsubscribe from topic {} that is not subscribed", topic);
                 }
+                let _ignore = reply_tx.send(Ok(()));
             },
             NetworkingRequest::IsSubscribedTopic { topic, reply_tx } => {
                 let hash = topic.hash();
@@ -568,11 +564,13 @@ where
                     // We accept all messages as we cannot validate them in this service.
                     // We could allow users to report back the validation result e.g. if a proposal is valid, however a
                     // naive implementation would likely incur a substantial cost for many messages.
-                    self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+                    if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
                         &message_id,
                         &propagation_source,
                         gossipsub::MessageAcceptance::Ignore,
-                    )?;
+                    ) {
+                        warn!(target: LOG_TARGET, "Unable to report_message_validation_result reject for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
+                    }
                     warn!(target: LOG_TARGET, "📢 Discarding Gossipsub message [{topic}] ({bytes} bytes) with no source propagated by {propagation_source}", topic=message.topic, bytes=message.data.len());
                 },
             },
@@ -644,42 +642,50 @@ where
             match behaviour_mut.peer_sync.validate_and_add_peer_record(rec).await {
                 Ok(_) => {
                     info!(target: LOG_TARGET, "📢 Peer announce message added to peer store");
-                    behaviour_mut.gossipsub.report_message_validation_result(
+                    if !behaviour_mut.gossipsub.report_message_validation_result(
                         &message_id,
                         &propagation_source,
                         gossipsub::MessageAcceptance::Accept,
-                    )?;
+                    ) {
+                        warn!(target: LOG_TARGET, "Unable to report_message_validation_result accept for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
+                    }
                 },
                 // Invalid message
                 Err(err @ peersync::Error::InvalidMessage { .. }) |
                 Err(err @ peersync::Error::DecodeMultiaddr { .. }) |
                 Err(err @ peersync::Error::InvalidSignedPeer { .. }) => {
-                    behaviour_mut.gossipsub.report_message_validation_result(
+                    if !behaviour_mut.gossipsub.report_message_validation_result(
                         &message_id,
                         &propagation_source,
                         gossipsub::MessageAcceptance::Reject,
-                    )?;
+                    ) {
+                        warn!(target: LOG_TARGET, "Unable to report_message_validation_result reject for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
+                    }
                     return Err(err.into());
                 },
                 // Some other internal error
                 Err(err) => {
                     warn!(target: LOG_TARGET, "📢 Peer announce message failed to add to peer store: {}", err);
-                    behaviour_mut.gossipsub.report_message_validation_result(
+                    if !behaviour_mut.gossipsub.report_message_validation_result(
                         &message_id,
                         &propagation_source,
                         gossipsub::MessageAcceptance::Accept,
-                    )?;
+                    ) {
+                        warn!(target: LOG_TARGET, "Unable to report_message_validation_result accept for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
+                    }
                 },
             }
         } else {
             // We accept all messages as we cannot validate them in this service.
             // We could allow users to report back the validation result e.g. if a proposal is valid, however a naive
             // implementation would likely incur a substantial cost for many messages.
-            self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
+            if !self.swarm.behaviour_mut().gossipsub.report_message_validation_result(
                 &message_id,
                 &propagation_source,
                 gossipsub::MessageAcceptance::Accept,
-            )?;
+            ) {
+                warn!(target: LOG_TARGET, "Unable to report_message_validation_result accept for topic {}, {} bytes because message was not in cache", message.topic, message.data.len());
+            }
             if let Err(e) = self.messaging_mode.send_gossip_message(source, message) {
                 warn!(target: LOG_TARGET, "📢 Gossipsub message failed to be handled: {}", e);
             }

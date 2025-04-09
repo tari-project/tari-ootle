@@ -6,13 +6,7 @@ use anyhow::anyhow;
 use base64;
 use log::*;
 use rand::rngs::OsRng;
-use tari_common_types::types::{PrivateKey, PublicKey};
-use tari_crypto::{
-    commitment::HomomorphicCommitment as Commitment,
-    keys::PublicKey as _,
-    ristretto::{RistrettoComSig, RistrettoPublicKey},
-    tari_utilities::ByteArray,
-};
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_crypto::ConfidentialProofStatement;
 use tari_dan_wallet_sdk::{
@@ -27,6 +21,7 @@ use tari_engine_types::{
     confidential::ConfidentialClaim,
     instruction::Instruction,
     substate::{Substate, SubstateId},
+    ToByteType,
 };
 use tari_key_manager::key_manager::DerivedKey;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
@@ -34,7 +29,8 @@ use tari_template_lib::{
     args,
     constants::{XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::{Amount, UnclaimedConfidentialOutputAddress},
-    prelude::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
+    types::crypto::CommitmentSignatureBytes,
 };
 use tari_wallet_daemon_client::{
     types::{
@@ -112,7 +108,7 @@ pub async fn handle_create(
     let signing_key = key_manager_api.derive_key(key_manager::TRANSACTION_BRANCH, signing_key_index)?;
 
     let owner_key = key_manager_api.next_key(key_manager::TRANSACTION_BRANCH)?;
-    let owner_pk = PublicKey::from_secret_key(&owner_key.key);
+    let owner_pk = RistrettoPublicKey::from_secret_key(&owner_key.key).to_byte_type();
 
     info!(
         target: LOG_TARGET,
@@ -125,7 +121,7 @@ pub async fn handle_create(
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
     let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(default_account.address.as_component_address().unwrap(), max_fee)
-        .create_account(owner_pk.clone())
+        .create_account(owner_pk)
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&signing_key.key);
 
@@ -187,10 +183,10 @@ pub async fn handle_list(
         .into_iter()
         .map(|a| {
             let key = km.derive_key(key_manager::TRANSACTION_BRANCH, a.key_index)?;
-            let pk = PublicKey::from_secret_key(&key.key);
+            let pk = RistrettoPublicKey::from_secret_key(&key.key);
             Ok(AccountInfo {
                 account: a,
-                public_key: pk,
+                public_key: pk.to_byte_type(),
             })
         })
         .collect::<Result<_, anyhow::Error>>()?;
@@ -282,8 +278,11 @@ pub async fn handle_get(
     let account = get_account(&req.name_or_address, &sdk.accounts_api())?;
     let km = sdk.key_manager_api();
     let key = km.derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-    let public_key = PublicKey::from_secret_key(&key.key);
-    Ok(AccountGetResponse { account, public_key })
+    let public_key = RistrettoPublicKey::from_secret_key(&key.key);
+    Ok(AccountGetResponse {
+        account,
+        public_key: public_key.to_byte_type(),
+    })
 }
 
 pub async fn handle_get_default(
@@ -296,8 +295,11 @@ pub async fn handle_get_default(
     let account = get_account_or_default(None, &sdk.accounts_api())?;
     let km = sdk.key_manager_api();
     let key = km.derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-    let public_key = PublicKey::from_secret_key(&key.key);
-    Ok(AccountGetResponse { account, public_key })
+    let public_key = RistrettoPublicKey::from_secret_key(&key.key);
+    Ok(AccountGetResponse {
+        account,
+        public_key: public_key.to_byte_type(),
+    })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -336,7 +338,7 @@ pub async fn handle_reveal_funds(
             .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
 
         let output_mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
-        let (_, public_nonce) = PublicKey::random_keypair(&mut OsRng);
+        let (_, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
         let remaining_confidential_amount = input_amount - amount_to_reveal;
         let encrypted_data = sdk.confidential_crypto_api().encrypt_value_and_mask(
@@ -462,7 +464,7 @@ pub async fn handle_claim_burn(
         return Err(invalid_params("fee", Some("cannot be negative")));
     }
 
-    let reciprocal_claim_public_key = PublicKey::from_canonical_bytes(
+    let reciprocal_claim_public_key = RistrettoPublicKey::from_canonical_bytes(
         &base64::decode(
             claim_proof["reciprocal_claim_public_key"]
                 .as_str()
@@ -485,7 +487,7 @@ pub async fn handle_claim_burn(
     )
     .map_err(|e| invalid_params("range_proof", Some(e)))?;
 
-    let public_nonce = PublicKey::from_canonical_bytes(
+    let public_nonce = RistrettoPublicKey::from_canonical_bytes(
         &base64::decode(
             claim_proof["ownership_proof"]["public_nonce"]
                 .as_str()
@@ -494,7 +496,7 @@ pub async fn handle_claim_burn(
         .map_err(|e| invalid_params("ownership_proof.public_nonce", Some(e)))?,
     )
     .map_err(|e| invalid_params("ownership_proof.public_nonce", Some(e)))?;
-    let u = PrivateKey::from_canonical_bytes(
+    let u = Scalar32Bytes::from_bytes(
         &base64::decode(
             claim_proof["ownership_proof"]["u"]
                 .as_str()
@@ -503,7 +505,7 @@ pub async fn handle_claim_burn(
         .map_err(|e| invalid_params("ownership_proof.u", Some(e)))?,
     )
     .map_err(|e| invalid_params("ownership_proof.u", Some(e)))?;
-    let v = PrivateKey::from_canonical_bytes(
+    let v = Scalar32Bytes::from_bytes(
         &base64::decode(
             claim_proof["ownership_proof"]["v"]
                 .as_str()
@@ -518,7 +520,7 @@ pub async fn handle_claim_burn(
     let (account_address, account_secret_key, new_account_name) =
         get_or_create_account(&account, &accounts_api, key_id, sdk, &mut inputs)?;
 
-    let account_public_key = PublicKey::from_secret_key(&account_secret_key.key);
+    let account_public_key = RistrettoPublicKey::from_secret_key(&account_secret_key.key);
 
     info!(
         target: LOG_TARGET,
@@ -562,7 +564,7 @@ pub async fn handle_claim_burn(
     )?;
 
     let mask = sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH)?;
-    let (nonce, output_public_nonce) = PublicKey::random_keypair(&mut OsRng);
+    let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
     let final_amount = Amount::try_from(unmasked_output.value)? - max_fee;
     if final_amount.is_negative() {
@@ -602,13 +604,17 @@ pub async fn handle_claim_burn(
 
     let instructions = vec![Instruction::ClaimBurn {
         claim: Box::new(ConfidentialClaim {
-            public_key: reciprocal_claim_public_key,
+            public_key: reciprocal_claim_public_key.to_byte_type(),
             output_address: commitment_substate_address
                 .substate_id
                 .as_unclaimed_confidential_output_address()
                 .unwrap(),
             range_proof,
-            proof_of_knowledge: RistrettoComSig::new(Commitment::from_public_key(&public_nonce), u, v),
+            proof_of_knowledge: CommitmentSignatureBytes::new(
+                PedersenCommitmentBytes::from_public_key(public_nonce.to_byte_type()),
+                u,
+                v,
+            ),
             withdraw_proof: Some(reveal_proof),
         }),
     }];
@@ -620,7 +626,7 @@ pub async fn handle_claim_burn(
         new_account_name,
         sdk,
         inputs,
-        &account_public_key,
+        account_public_key.to_byte_type(),
         max_fee,
         account_secret_key,
         &accounts_api,
@@ -641,7 +647,7 @@ async fn finish_claiming<T: WalletStore>(
     new_account_name: Option<String>,
     sdk: &DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
     mut inputs: Vec<SubstateRequirement>,
-    account_public_key: &RistrettoPublicKey,
+    account_public_key: RistrettoPublicKeyBytes,
     max_fee: Amount,
     account_secret_key: DerivedKey<RistrettoPublicKey>,
     accounts_api: &tari_dan_wallet_sdk::apis::accounts::AccountsApi<'_, T>,
@@ -670,7 +676,7 @@ async fn finish_claiming<T: WalletStore>(
         });
     } else {
         instructions.push(Instruction::CreateAccount {
-            public_key_address: account_public_key.clone(),
+            public_key_address: account_public_key,
             owner_rule: None,
             access_rules: None,
             workspace_bucket: Some("bucket".to_string()),
@@ -745,7 +751,7 @@ pub async fn handle_create_free_test_coins(
     let (account_address, account_secret_key, new_account_name) =
         get_or_create_account(&account, &accounts_api, key_id, sdk, &mut inputs)?;
 
-    let account_public_key = PublicKey::from_secret_key(&account_secret_key.key);
+    let account_public_key = RistrettoPublicKey::from_secret_key(&account_secret_key.key).to_byte_type();
 
     let instructions = vec![Instruction::CallMethod {
         component_address: XTR_FAUCET_COMPONENT_ADDRESS,
@@ -760,7 +766,7 @@ pub async fn handle_create_free_test_coins(
         new_account_name,
         sdk,
         inputs,
-        &account_public_key,
+        account_public_key,
         max_fee,
         account_secret_key,
         &accounts_api,
@@ -818,9 +824,10 @@ fn get_or_create_account<T: WalletStore>(
             let account_secret_key = key_id
                 .map(|idx| sdk.key_manager_api().derive_key(key_manager::TRANSACTION_BRANCH, idx))
                 .unwrap_or_else(|| sdk.key_manager_api().next_key(key_manager::TRANSACTION_BRANCH))?;
-            let account_pk = PublicKey::from_secret_key(&account_secret_key.key);
+            let account_pk = RistrettoPublicKey::from_secret_key(&account_secret_key.key);
 
-            let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &account_pk);
+            let account_address =
+                new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &account_pk.to_byte_type());
 
             // We have no involved substate addresses, so we need to add an output
             (account_address.into(), account_secret_key, Some(name.to_string()))
@@ -853,30 +860,75 @@ pub async fn handle_transfer(
     let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
     inputs.insert(src_vault_substate.substate_id.into());
 
-    // add the input for the resource address to be transfered
-    let resource_substate = sdk
-        .substate_api()
-        .scan_for_substate(&SubstateId::Resource(req.resource_address), None)
-        .await?;
-    let resource_substate_address = SubstateRequirement::new(
-        resource_substate.address.substate_id().clone(),
-        Some(resource_substate.address.version()),
-    );
-    inputs.insert(resource_substate.address.into());
+    let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
+    inputs.insert(resource_substate_address.clone());
 
     let mut instructions = vec![];
     let mut fee_instructions = vec![];
 
     let destination_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.destination_public_key);
-    let existing_account = sdk
+    let existing_dest_account = sdk
         .substate_api()
         .scan_for_substate(&SubstateId::Component(destination_account_address), None)
         .await
         .optional()?;
 
-    if let Some(ValidatorScanResult { address, .. }) = existing_account {
+    if let Some(ValidatorScanResult { address, substate }) = existing_dest_account {
         inputs.insert(address.into());
+
+        // Figure out which vault to add as an input
+        let Some(component) = substate.component() else {
+            return Err(anyhow::anyhow!(
+                "The destination account {} is not a component. This is unexpected.",
+                destination_account_address
+            ));
+        };
+        let indexed = component.body.to_indexed_well_known_types()?;
+
+        let mut found_dest_vault = None;
+        for vault_id in indexed.vault_ids() {
+            // Local vault?
+            match sdk.accounts_api().get_vault(vault_id).optional()? {
+                Some(vault) => {
+                    if vault.resource_address != src_vault.resource_address {
+                        // Continue searching for a vault for the resource address
+                        continue;
+                    }
+                    // Found it - we're sending to our own vault
+                    found_dest_vault = Some(*vault_id);
+                    break;
+                },
+                None => {
+                    // TODO(perf): slow with lots of vaults
+                    let vault = sdk
+                        .substate_api()
+                        .scan_for_substate(&SubstateId::Vault(*vault_id), None)
+                        .await
+                        .optional()?;
+
+                    let Some(vault) = vault.and_then(|scan| scan.substate.into_vault()) else {
+                        warn!(
+                            target: LOG_TARGET,
+                            "❓️ The destination account {destination_account_address} contains a vault {vault_id} that was not found. This is unexpected.",
+                        );
+                        continue;
+                    };
+
+                    if *vault.resource_address() != src_vault.resource_address {
+                        // Continue searching for a vault for the resource address
+                        continue;
+                    }
+
+                    // Found it
+                    found_dest_vault = Some(*vault_id);
+                },
+            }
+        }
+
+        if let Some(found) = found_dest_vault {
+            inputs.insert(SubstateRequirement::unversioned(found));
+        }
     } else {
         instructions.push(Instruction::CreateAccount {
             public_key_address: req.destination_public_key,
@@ -932,7 +984,6 @@ pub async fn handle_transfer(
     let transaction = transaction_builder(context)
         .with_fee_instructions(fee_instructions)
         .with_instructions(instructions)
-        .add_input(resource_substate_address)
         .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
 

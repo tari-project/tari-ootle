@@ -364,7 +364,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
         let committee = self
             .epoch_manager
-            .get_committee_by_validator_public_key(msg.block.epoch(), msg.block.proposed_by().clone())
+            .get_committee_by_validator_public_key(msg.block.epoch(), *msg.block.proposed_by())
             .await?;
 
         if let Err(err) = self.check_foreign_proposal(&msg.block, &committee) {

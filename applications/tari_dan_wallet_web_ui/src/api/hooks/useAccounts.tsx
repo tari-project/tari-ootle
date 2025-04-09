@@ -39,6 +39,7 @@ import queryClient from "../queryClient";
 import type {
   AccountOrKeyIndex,
   ComponentAccessRules,
+  ComponentAddress,
   ComponentAddressOrName,
   ConfidentialTransferInputSelection,
 } from "@tari-project/typescript-bindings";
@@ -175,22 +176,22 @@ export const useAccountsList = (offset: number, limit: number) => {
   });
 };
 
-export const useAccountsGetBalances = (account: ComponentAddressOrName | null, refresh: boolean = false) => {
+export const useAccountsGetBalances = (account: ComponentAddress, refresh: boolean = false) => {
   return useQuery({
-    queryKey: ["accounts_balances"],
-    queryFn: () => accountsGetBalances({ account, refresh }),
+    queryKey: [`accounts_balances_${account}`],
+    queryFn: () => accountsGetBalances({ account: { ComponentAddress: account }, refresh }),
     onError: (_error: ApiError) => {},
     refetchInterval: 5000,
   });
 };
 
-export const refreshAccountsBalances = (account: ComponentAddressOrName | null) => {
-  return useMutation(() => accountsGetBalances({ account, refresh: true }), {
+export const refreshAccountsBalances = (account: ComponentAddress) => {
+  return useMutation(() => accountsGetBalances({ account: { ComponentAddress: account }, refresh: true }), {
     onError: (error: ApiError) => {
       error;
     },
     onSettled: () => {
-      queryClient.invalidateQueries(["accounts_balances"]);
+      queryClient.invalidateQueries(["accounts_balances_" + account]);
     },
   });
 };
@@ -206,18 +207,18 @@ export const useAccountsGetDefault = () => {
     onError: (_error: ApiError) => {},
   });
 };
-export const useAccountsGet = (account: ComponentAddressOrName) => {
+export const useAccountsGet = (account: ComponentAddress) => {
   return useQuery({
-    queryKey: ["accounts_get"],
-    queryFn: () => accountsGet({ name_or_address: account }),
+    queryKey: ["accounts_get_" + account],
+    queryFn: () => accountsGet({ name_or_address: { ComponentAddress: account } }),
     onError: (_error: ApiError) => {},
   });
 };
 
-export const useAccountNFTsList = (account: ComponentAddressOrName | null, offset: number, limit: number) => {
+export const useAccountNFTsList = (account: ComponentAddress, offset: number, limit: number) => {
   return useQuery({
-    queryKey: ["nfts_list"],
-    queryFn: () => nftList({ account, offset, limit }),
+    queryKey: ["nfts_list_" + account],
+    queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
     onError: (_error: ApiError) => {},
   });
 };

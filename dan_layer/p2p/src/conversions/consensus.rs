@@ -27,7 +27,6 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use tari_bor::{decode_exact, encode};
-use tari_common_types::types::PublicKey;
 use tari_consensus::messages::{
     ForeignProposalMessage,
     ForeignProposalNotificationMessage,
@@ -67,6 +66,7 @@ use tari_dan_storage::{
     },
 };
 use tari_engine_types::substate::{SubstateId, SubstateValue};
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
 use crate::proto::{self};
@@ -431,7 +431,7 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
             epoch: value.epoch().as_u64(),
             shard_group: value.shard_group().encode_as_u32(),
             parent_id: value.parent().as_bytes().to_vec(),
-            proposed_by: ByteArray::as_bytes(value.proposed_by()).to_vec(),
+            proposed_by: value.proposed_by().as_bytes().to_vec(),
             state_merkle_root: value.state_merkle_root().as_slice().to_vec(),
             total_leader_fee: value.total_leader_fee(),
             foreign_indexes: encode(value.foreign_indexes()).unwrap(),
@@ -457,7 +457,7 @@ fn try_convert_proto_block_header(
     let shard_group = ShardGroup::decode_from_u32(value.shard_group)
         .ok_or_else(|| anyhow!("Block shard_group ({}) is not a valid", value.shard_group))?;
 
-    let proposed_by = PublicKey::from_canonical_bytes(&value.proposed_by)
+    let proposed_by = RistrettoPublicKeyBytes::from_bytes(&value.proposed_by)
         .map_err(|_| anyhow!("Block conversion: Invalid proposed_by"))?;
 
     let extra_data = value
@@ -716,7 +716,10 @@ impl TryFrom<proto::consensus::EvictNodeAtom> for EvictNodeAtom {
 
     fn try_from(value: proto::consensus::EvictNodeAtom) -> Result<Self, Self::Error> {
         Ok(Self {
-            public_key: PublicKey::from_canonical_bytes(&value.public_key)
+            public_key: value
+                .public_key
+                .as_slice()
+                .try_into()
                 .map_err(|e| anyhow!("EvictNodeAtom failed to decode public key: {e}"))?,
         })
     }
@@ -883,7 +886,11 @@ impl TryFrom<proto::consensus::ValidatorMetadata> for ValidatorMetadata {
 
     fn try_from(value: proto::consensus::ValidatorMetadata) -> Result<Self, Self::Error> {
         Ok(ValidatorMetadata {
-            public_key: ByteArray::from_canonical_bytes(&value.public_key).map_err(anyhow::Error::msg)?,
+            public_key: value
+                .public_key
+                .as_slice()
+                .try_into()
+                .context("Invalid public key TryFrom<ValidatorMetadata>")?,
             vn_shard_key: value.vn_shard_key.try_into()?,
             signature: value
                 .signature
@@ -911,7 +918,7 @@ impl TryFrom<proto::consensus::Substate> for SubstateRecord {
             state_hash: Default::default(),
 
             created_at_epoch: Epoch(value.created_epoch),
-            created_justify: value.created_justify.try_into()?,
+            created_justify: value.created_justify.as_slice().try_into()?,
             created_block: value.created_block.try_into()?,
 
             destroyed: value.destroyed.map(TryInto::try_into).transpose()?,
@@ -943,7 +950,7 @@ impl TryFrom<proto::consensus::SubstateDestroyed> for SubstateDestroyed {
 
     fn try_from(value: proto::consensus::SubstateDestroyed) -> Result<Self, Self::Error> {
         Ok(Self {
-            justify: value.justify.try_into()?,
+            justify: value.justify.as_slice().try_into()?,
             by_block: NodeHeight(value.block_height),
             at_epoch: value
                 .epoch
@@ -992,7 +999,7 @@ impl TryFrom<proto::consensus::SyncRequest> for SyncRequestMessage {
                         block_id: BlockId::try_from(value.block_id)?,
                         block_height: NodeHeight(value.block_height),
                         epoch: Epoch(value.epoch),
-                        qc_id: QcId::try_from(value.qc_id)?,
+                        qc_id: QcId::try_from(value.qc_id.as_slice())?,
                     })
                 })
                 .transpose()?

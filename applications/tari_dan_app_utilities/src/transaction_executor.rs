@@ -4,8 +4,6 @@
 use std::sync::Arc;
 
 use log::*;
-use tari_common_types::types::PublicKey;
-use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
     services::template_provider::TemplateProvider,
     SubstateLockType,
@@ -21,7 +19,7 @@ use tari_dan_engine::{
 };
 use tari_dan_storage::consensus_models::VersionedSubstateIdLockIntent;
 use tari_engine_types::{commit_result::ExecuteResult, substate::Substate, virtual_substate::VirtualSubstates};
-use tari_template_lib::{crypto::RistrettoPublicKeyBytes, prelude::NonFungibleAddress};
+use tari_template_lib::prelude::NonFungibleAddress;
 use tari_transaction::Transaction;
 
 const _LOG_TARGET: &str = "tari::dan::transaction_executor";
@@ -119,7 +117,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
             .iter()
             .map(|p| p.public_key())
             .chain(Some(transaction.seal_signature().public_key()).filter(|_| transaction.is_seal_signer_authorized()))
-            .map(public_key_to_fungible_address)
+            .map(|pk| NonFungibleAddress::from_public_key(*pk))
             .collect();
         let auth_params = AuthParams {
             initial_ownership_proofs,
@@ -140,12 +138,6 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
 
         Ok(ExecutionOutput { transaction, result })
     }
-}
-
-fn public_key_to_fungible_address(public_key: &PublicKey) -> NonFungibleAddress {
-    RistrettoPublicKeyBytes::from_bytes(public_key.as_bytes())
-        .expect("Expected public key to be 32 bytes")
-        .to_non_fungible_address()
 }
 
 #[derive(Debug, thiserror::Error)]

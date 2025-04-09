@@ -13,9 +13,8 @@ use tari_bor::BorTag;
 use tari_template_lib::{
     auth::{OwnerRule, Ownership},
     constants::XTR,
-    crypto::RistrettoPublicKeyBytes,
-    models::{Amount, BinaryTag, KeyParseError, ObjectKey},
-    Hash,
+    models::{Amount, BinaryTag},
+    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey},
 };
 
 use crate::resource_container::{ResourceContainer, ResourceError};

@@ -5,7 +5,7 @@ use rand::rngs::OsRng;
 use tari_common::configuration::Network;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::SubstateRequirement;
-use tari_engine_types::{component::new_component_address_from_public_key, instruction::Instruction};
+use tari_engine_types::{component::new_component_address_from_public_key, instruction::Instruction, ToByteType};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args,
@@ -17,6 +17,7 @@ use tari_transaction::Transaction;
 pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
     move |_: u64| -> Transaction {
         let (signer_secret_key, signer_public_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let signer_public_key = signer_public_key.to_byte_type();
 
         let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &signer_public_key);
 

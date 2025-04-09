@@ -23,7 +23,8 @@
 use std::{cmp, collections::HashMap, mem, num::NonZeroU32};
 
 use log::*;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef},
@@ -36,7 +37,9 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::global::{models::ValidatorNode, DbEpoch, GlobalDb, MetadataKey};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_engine_types::{FromByteType, ToByteType};
 use tari_sidechain::EvictionProof;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::{broadcast, oneshot};
 
 use crate::{
@@ -56,7 +59,7 @@ pub struct EpochManager<TSpec: EpochManagerSpec> {
     current_epoch_hash: FixedHash,
     tx_events: broadcast::Sender<EpochManagerEvent>,
     waiting_for_scanning_complete: Vec<oneshot::Sender<Result<(), EpochManagerError>>>,
-    node_public_key: PublicKey,
+    node_public_key: RistrettoPublicKey,
     current_shard_key: Option<SubstateAddress>,
     layer_one_submitter: TSpec::LayerOneSubmitter,
     is_initial_epoch_sync_complete: bool,
@@ -70,7 +73,7 @@ where TSpec: EpochManagerSpec
         global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
         layer_one_submitter: TSpec::LayerOneSubmitter,
         tx_events: broadcast::Sender<EpochManagerEvent>,
-        node_public_key: PublicKey,
+        node_public_key: RistrettoPublicKey,
     ) -> Self {
         Self {
             global_db,
@@ -145,24 +148,30 @@ where TSpec: EpochManagerSpec
     pub fn add_validator_node_registration(
         &mut self,
         activation_epoch: Epoch,
-        validator_public_key: PublicKey,
-        claim_public_key: PublicKey,
+        validator_public_key: RistrettoPublicKeyBytes,
+        claim_public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
         // TODO: use the value of the registration
         _registration_value: u64,
     ) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Registering validator node for epoch {}", activation_epoch);
 
+        let Ok(vn_pk) = RistrettoPublicKey::try_from_byte_type(&validator_public_key) else {
+            return Err(EpochManagerError::InvalidPublicKeyBytes {
+                public_key: validator_public_key,
+            });
+        };
+
         let mut tx = self.global_db.create_transaction()?;
         self.global_db.validator_nodes(&mut tx).insert_validator_node(
-            TSpec::Addr::derive_from_public_key(&validator_public_key),
-            validator_public_key.clone(),
+            TSpec::Addr::derive_from_public_key(&vn_pk),
+            validator_public_key,
             shard_key,
             activation_epoch,
             claim_public_key,
         )?;
 
-        if validator_public_key == self.node_public_key {
+        if validator_public_key == self.node_public_key.to_byte_type() {
             let mut metadata = self.global_db.metadata(&mut tx);
             metadata.set_metadata(MetadataKey::EpochManagerCurrentShardKey.as_key_bytes(), &shard_key)?;
             self.current_shard_key = Some(shard_key);
@@ -179,7 +188,7 @@ where TSpec: EpochManagerSpec
 
     pub async fn deactivate_validator_node(
         &mut self,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
     ) -> Result<(), EpochManagerError> {
         info!(target: LOG_TARGET, "Deactivating validator node({}) registration", public_key);
@@ -226,7 +235,7 @@ where TSpec: EpochManagerSpec
     pub fn get_validator_node_by_public_key(
         &self,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<Option<ValidatorNode<TSpec::Addr>>, EpochManagerError> {
         trace!(
             target: LOG_TARGET,
@@ -313,9 +322,11 @@ where TSpec: EpochManagerSpec
         for (_, pub_key) in committees {
             let vn = self.get_validator_node_by_public_key(epoch, &pub_key)?.ok_or_else(|| {
                 EpochManagerError::ValidatorNodeNotRegistered {
-                    address: TSpec::Addr::try_from_public_key(&pub_key)
+                    address: RistrettoPublicKey::try_from_byte_type(&pub_key)
+                        .ok()
+                        .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
                         .map(|a| a.to_string())
-                        .unwrap_or_else(|| pub_key.to_string()),
+                        .unwrap_or_else(|| format!("PARSE FAIL for pk bytes {pub_key}")),
                     epoch,
                 }
             })?;
@@ -389,7 +400,7 @@ where TSpec: EpochManagerSpec
 
     pub fn get_our_validator_node(&self, epoch: Epoch) -> Result<ValidatorNode<TSpec::Addr>, EpochManagerError> {
         let vn = self
-            .get_validator_node_by_public_key(epoch, &self.node_public_key)?
+            .get_validator_node_by_public_key(epoch, &self.node_public_key.to_byte_type())?
             .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
                 address: TSpec::Addr::try_from_public_key(&self.node_public_key)
                     .map(|a| a.to_string())
@@ -436,7 +447,7 @@ where TSpec: EpochManagerSpec
 
     pub fn get_local_committee_info(&self, epoch: Epoch) -> Result<CommitteeInfo, EpochManagerError> {
         let vn = self
-            .get_validator_node_by_public_key(epoch, &self.node_public_key)?
+            .get_validator_node_by_public_key(epoch, &self.node_public_key.to_byte_type())?
             .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
                 address: self.node_public_key.to_string(),
                 epoch,
@@ -485,14 +496,14 @@ where TSpec: EpochManagerSpec
         Ok(vn)
     }
 
-    pub fn get_fee_claim_public_key(&self) -> Result<Option<PublicKey>, EpochManagerError> {
+    pub fn get_fee_claim_public_key(&self) -> Result<Option<RistrettoPublicKeyBytes>, EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut metadata = self.global_db.metadata(&mut tx);
         let fee_claim_public_key = metadata.get_metadata(MetadataKey::EpochManagerFeeClaimPublicKey.as_key_bytes())?;
         Ok(fee_claim_public_key)
     }
 
-    pub fn set_fee_claim_public_key(&mut self, public_key: PublicKey) -> Result<(), EpochManagerError> {
+    pub fn set_fee_claim_public_key(&mut self, public_key: RistrettoPublicKeyBytes) -> Result<(), EpochManagerError> {
         let mut tx = self.global_db.create_transaction()?;
         let mut metadata = self.global_db.metadata(&mut tx);
         metadata.set_metadata(MetadataKey::EpochManagerFeeClaimPublicKey.as_key_bytes(), &public_key)?;

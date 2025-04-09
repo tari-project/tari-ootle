@@ -7,11 +7,10 @@ use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
 use tari_common::configuration::Network;
-use tari_common_types::types::PublicKey;
-use tari_crypto::keys::PublicKey as _;
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_wallet_sdk::apis::{config::ConfigKey, jwt::JrpcPermission, key_manager};
-use tari_engine_types::instruction::Instruction;
+use tari_engine_types::{instruction::Instruction, ToByteType};
 use tari_template_lib::{args, models::Amount};
 use tari_transaction::Transaction;
 use tari_transaction_manifest::parse_manifest;
@@ -270,7 +269,7 @@ pub async fn handle_submit_manifest(
     let (_, key) = sdk
         .key_manager_api()
         .get_key_or_active(key_manager::TRANSACTION_BRANCH, Some(signing_key_index))?;
-    let seal_signer_pk = PublicKey::from_secret_key(&key.key);
+    let seal_signer_pk = RistrettoPublicKey::from_secret_key(&key.key);
 
     let network = context.wallet_sdk().config_api().get::<Network>(ConfigKey::Network)?;
 
@@ -297,7 +296,7 @@ pub async fn handle_submit_manifest(
             if signing_key_index == default_account.key_index {
                 builder
             } else {
-                builder.add_signature(&seal_signer_pk, &acc_key.key)
+                builder.add_signature(&seal_signer_pk.to_byte_type(), &acc_key.key)
             }
         });
     let signatures = builder.signatures().to_vec();

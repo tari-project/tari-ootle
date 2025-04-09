@@ -46,7 +46,7 @@ function MyAssets() {
     return <>Loading...</>;
   }
 
-  const refreshBalances = refreshAccountsBalances({ ComponentAddress: substateIdToString(account.address) });
+  const refreshBalances = refreshAccountsBalances(substateIdToString(account.address));
   const handleRefreshClicked = () => {
     refreshBalances.mutate();
   };

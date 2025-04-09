@@ -39,7 +39,6 @@ tari_validator_node = { workspace = true }
 tari_wallet_daemon_client = { workspace = true }
 tari_base_node_client = { workspace = true }
 tari_transaction_manifest = { workspace = true }
-tari_key_manager = { workspace = true }
 tari_dan_wallet_sdk = { workspace = true }
 
 tari_comms = { git = "https://github.com/tari-project/tari.git", branch = "feature-dan2" }

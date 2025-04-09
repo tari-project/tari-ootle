@@ -365,10 +365,10 @@ impl From<[u8; 32]> for QcId {
     }
 }
 
-impl TryFrom<Vec<u8>> for QcId {
+impl TryFrom<&[u8]> for QcId {
     type Error = FixedHashSizeError;
 
-    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         FixedHash::try_from(value).map(Self)
     }
 }

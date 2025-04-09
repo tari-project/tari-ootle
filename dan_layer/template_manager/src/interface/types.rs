@@ -21,14 +21,14 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use reqwest::Url;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::{
     global::{DbTemplate, DbTemplateType, TemplateStatus},
     StorageError,
 };
 use tari_engine_types::published_template::PublishedTemplateAddress;
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::TemplateAddress};
 use tari_validator_node_client::types::TemplateAbi;
 use tokio::{sync::oneshot, task::JoinHandle};
 
@@ -38,7 +38,7 @@ use super::TemplateManagerError;
 pub enum TemplateChange {
     Add {
         template_address: PublishedTemplateAddress,
-        author_public_key: PublicKey,
+        author_public_key: RistrettoPublicKeyBytes,
         binary_hash: FixedHash,
         epoch: Epoch,
     },
@@ -53,7 +53,7 @@ pub struct TemplateMetadata {
     pub address: TemplateAddress,
     /// SHA hash of binary
     pub binary_sha: FixedHash,
-    pub author_public_key: PublicKey,
+    pub author_public_key: RistrettoPublicKeyBytes,
 }
 
 // TODO: Allow fetching of just the template metadata without the compiled code
@@ -176,8 +176,8 @@ pub enum TemplateManagerRequest {
 
 #[derive(Debug)]
 pub struct AddTemplateRequest {
-    pub author_public_key: PublicKey,
-    pub template_address: tari_engine_types::TemplateAddress,
+    pub author_public_key: RistrettoPublicKeyBytes,
+    pub template_address: TemplateAddress,
     pub template: TemplateExecutable,
     pub template_name: Option<String>,
     pub epoch: Epoch,

@@ -6,7 +6,7 @@ use tari_dan_common_types::VersionedSubstateId;
 use tari_engine_types::{hashing::substate_value_hasher32, substate::SubstateId};
 use tari_jellyfish::{LeafKey, TreeHash, TreeStore, Version};
 use tari_state_tree::{key_mapper::DbKeyMapper, memory_store::MemoryTreeStore, StateTree, SubstateTreeChange};
-use tari_template_lib::models::{ComponentAddress, ObjectKey};
+use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 
 pub fn make_value(seed: u8) -> VersionedSubstateId {
     VersionedSubstateId::new(

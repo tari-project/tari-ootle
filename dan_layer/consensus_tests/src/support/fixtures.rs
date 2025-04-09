@@ -10,7 +10,7 @@ pub fn load_json_fixture<T: DeserializeOwned>(name: &str) -> T {
     let file = std::fs::File::open(&path).unwrap_or_else(|_| {
         panic!("Could not open fixture file at path: {path}");
     });
-    serde_json::from_reader(file).unwrap()
+    serde_json::from_reader(file).unwrap_or_else(|e| panic!("Failed to deserialize JSON fixture at path {path}: {e}"))
 }
 
 pub fn load_binary_fixture(name: &str) -> Vec<u8> {

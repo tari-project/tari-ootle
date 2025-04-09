@@ -101,7 +101,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const theme = useTheme();
 
-  const { data } = useAccountsGetBalances({ ComponentAddress: substateIdToString(account.address) });
+  const { data } = useAccountsGetBalances(substateIdToString(account.address));
   const badges = data?.balances
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && b.balance > 0)
     .map((b: BalanceEntry) => b.resource_address) as string[];

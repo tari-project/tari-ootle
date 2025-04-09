@@ -496,7 +496,8 @@ pub enum VersionedSubstateIdError {
 #[cfg(test)]
 mod tests {
     use indexmap::IndexSet;
-    use tari_template_lib::models::{ComponentAddress, ObjectKey};
+    use tari_template_lib::models::ComponentAddress;
+    use tari_template_lib_types::ObjectKey;
 
     use super::*;
 

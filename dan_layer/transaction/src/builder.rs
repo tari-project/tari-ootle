@@ -1,20 +1,16 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::{PrivateKey, PublicKey};
+use tari_common_types::types::PrivateKey;
 use tari_dan_common_types::{Epoch, SubstateRequirement};
-use tari_engine_types::{
-    confidential::ConfidentialClaim,
-    instruction::Instruction,
-    TemplateAddress,
-    ValidatorFeePoolAddress,
-};
+use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, ValidatorFeePoolAddress};
 use tari_template_lib::{
     args,
     args::{Arg, SubstateType},
     auth::OwnerRule,
     models::{Amount, ComponentAddress, ConfidentialWithdrawProof, ResourceAddress},
     prelude::AccessRules,
+    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 
 use crate::{unsigned_transaction::UnsignedTransaction, Transaction, TransactionSignature, UnsealedTransactionV1};
@@ -82,7 +78,7 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn create_account(self, owner_public_key: PublicKey) -> Self {
+    pub fn create_account(self, owner_public_key: RistrettoPublicKeyBytes) -> Self {
         self.add_instruction(Instruction::CreateAccount {
             public_key_address: owner_public_key,
             owner_rule: None,
@@ -91,7 +87,11 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn create_account_with_bucket<T: Into<String>>(self, owner_public_key: PublicKey, workspace_bucket: T) -> Self {
+    pub fn create_account_with_bucket<T: Into<String>>(
+        self,
+        owner_public_key: RistrettoPublicKeyBytes,
+        workspace_bucket: T,
+    ) -> Self {
         self.add_instruction(Instruction::CreateAccount {
             public_key_address: owner_public_key,
             owner_rule: None,
@@ -102,7 +102,7 @@ impl TransactionBuilder {
 
     pub fn create_account_with_custom_rules<T: Into<String>>(
         self,
-        public_key_address: PublicKey,
+        public_key_address: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
         workspace_bucket: Option<T>,
@@ -115,18 +115,23 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn call_function<T: ToString>(self, template_address: TemplateAddress, function: T, args: Vec<Arg>) -> Self {
+    pub fn call_function<T: Into<String>>(
+        self,
+        template_address: TemplateAddress,
+        function: T,
+        args: Vec<Arg>,
+    ) -> Self {
         self.add_instruction(Instruction::CallFunction {
             template_address,
-            function: function.to_string(),
+            function: function.into(),
             args,
         })
     }
 
-    pub fn call_method(self, component_address: ComponentAddress, method: &str, args: Vec<Arg>) -> Self {
+    pub fn call_method<T: Into<String>>(self, component_address: ComponentAddress, method: T, args: Vec<Arg>) -> Self {
         self.add_instruction(Instruction::CallMethod {
             component_address,
-            method: method.to_string(),
+            method: method.into(),
             args,
         })
     }
@@ -253,7 +258,7 @@ impl TransactionBuilder {
         self.unsigned_transaction
     }
 
-    pub fn add_signature(mut self, sealed_signer: &PublicKey, secret_key: &PrivateKey) -> Self {
+    pub fn add_signature(mut self, sealed_signer: &RistrettoPublicKeyBytes, secret_key: &PrivateKey) -> Self {
         let signature = match &self.unsigned_transaction {
             UnsignedTransaction::V1(tx) => TransactionSignature::sign_v1(secret_key, sealed_signer, tx),
         };

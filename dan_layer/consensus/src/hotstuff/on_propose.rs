@@ -8,7 +8,7 @@ use std::{
 };
 
 use log::*;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
@@ -55,8 +55,10 @@ use tari_engine_types::{
     confidential::UnclaimedConfidentialOutput,
     substate::Substate,
     template_models::UnclaimedConfidentialOutputAddress,
+    ToByteType,
 };
 use tari_epoch_manager::EpochManagerReader;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 use tokio::task;
 
@@ -68,7 +70,6 @@ use crate::{
         error::HotStuffError,
         filter_diff_for_committee,
         substate_store::PendingSubstateStore,
-        to_public_key_bytes,
         transaction_manager::{
             ConsensusTransactionManager,
             EvidenceOrExecution,
@@ -137,7 +138,7 @@ where TConsensusSpec: ConsensusSpec
         next_height: NodeHeight,
         local_committee: &Committee<TConsensusSpec::Addr>,
         local_committee_info: CommitteeInfo,
-        local_claim_public_key: &PublicKey,
+        local_claim_public_key: RistrettoPublicKeyBytes,
         leaf_block: LeafBlock,
         propose_epoch_end: bool,
     ) -> Result<(), HotStuffError> {
@@ -161,7 +162,6 @@ where TConsensusSpec: ConsensusSpec
         let base_layer_block_height = 0;
 
         let on_propose = self.clone();
-        let local_claim_public_key = to_public_key_bytes(local_claim_public_key);
 
         let (next_block, foreign_proposals) = task::spawn_blocking(move || {
             on_propose.store.with_write_tx(|tx| {
@@ -182,7 +182,7 @@ where TConsensusSpec: ConsensusSpec
                     leaf_block,
                     high_qc_cert,
                     &local_committee_info,
-                    local_claim_public_key,
+                    &local_claim_public_key,
                     false,
                     base_layer_block_height,
                     epoch_hash,
@@ -405,7 +405,7 @@ where TConsensusSpec: ConsensusSpec
         parent_block: LeafBlock,
         high_qc_certificate: QuorumCertificate,
         local_committee_info: &CommitteeInfo,
-        local_claim_public_key_bytes: [u8; 32],
+        local_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         dont_propose_transactions: bool,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
@@ -609,7 +609,7 @@ where TConsensusSpec: ConsensusSpec
             next_height,
             epoch,
             local_committee_info.shard_group(),
-            self.signing_service.public_key().clone(),
+            self.signing_service.public_key().to_byte_type(),
             state_root,
             &commands,
             total_leader_fee,
@@ -622,7 +622,7 @@ where TConsensusSpec: ConsensusSpec
         )?;
 
         let signature = self.signing_service.sign(header.id());
-        header.set_signature(signature);
+        header.set_signature(signature.to_byte_type());
 
         let next_block = Block::new(header, high_qc_certificate, commands);
 
@@ -1116,7 +1116,7 @@ struct ProposalBatch {
     pub foreign_proposals: Vec<ForeignProposal>,
     pub burnt_utxos: HashMap<UnclaimedConfidentialOutputAddress, UnclaimedConfidentialOutput>,
     pub transactions: Vec<TransactionPoolRecord>,
-    pub evict_nodes: Vec<PublicKey>,
+    pub evict_nodes: Vec<RistrettoPublicKeyBytes>,
     pub commands: Vec<Command>,
 }
 

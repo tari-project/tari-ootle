@@ -21,9 +21,9 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::consensus_models::BlockId;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     codecs::{BlockIdCodec, DefaultCodec, PublicKeyCodec},
@@ -39,7 +39,7 @@ pub struct EvictedNodeData {
 pub struct EvictedNodeModel;
 
 impl Cf for EvictedNodeModel {
-    type Key = (PublicKey, BlockId);
+    type Key = (RistrettoPublicKeyBytes, BlockId);
     type KeyCodec = (PublicKeyCodec, BlockIdCodec);
     type Value = EvictedNodeData;
     type ValueCodec = DefaultCodec<Self::Value>;
@@ -53,6 +53,6 @@ pub struct ByPublicKeyQuery;
 
 impl QueryCf for ByPublicKeyQuery {
     type Cf = EvictedNodeModel;
-    type Key = PublicKey;
+    type Key = RistrettoPublicKeyBytes;
     type KeyCodec = PublicKeyCodec;
 }

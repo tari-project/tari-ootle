@@ -135,14 +135,14 @@ function Assets({ account }: { account: Account }) {
     isError: balancesIsError,
     error: balancesError,
     isFetching: balancesIsFetching,
-  } = useAccountsGetBalances({ ComponentAddress: substateIdToString(account.address) });
+  } = useAccountsGetBalances(substateIdToString(account.address));
 
   const {
     data: nftsListData,
     isError: nftsListIsError,
     error: nftsListError,
     isFetching: nftsListIsFetching,
-  } = useAccountNFTsList({ ComponentAddress: substateIdToString(account.address) }, 0, 10);
+  } = useAccountNFTsList(substateIdToString(account.address), 0, 10);
 
   const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
     setValue(newValue);

@@ -24,7 +24,6 @@ use std::{collections::HashMap, time::Duration};
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{
     shard::Shard,
     substate_type::SubstateType,
@@ -42,7 +41,6 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     serde_with,
     substate::{SubstateId, SubstateValue},
-    TemplateAddress,
     ValidatorFeePoolAddress,
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
@@ -50,7 +48,8 @@ use tari_template_lib::{
     args::Arg,
     auth::ComponentAccessRules,
     models::{Amount, ConfidentialOutputStatement, NonFungibleId, ResourceAddress, VaultId},
-    prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType},
+    prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
+    types::{crypto::PedersenCommitmentBytes, TemplateAddress},
 };
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 #[cfg(feature = "ts")]
@@ -354,7 +353,7 @@ pub struct KeysListRequest {
 pub struct KeysListResponse {
     /// (index, public key, is_active)
     #[cfg_attr(feature = "ts", ts(type = "Array<[number, string, boolean]>"))]
-    pub keys: Vec<(u64, PublicKey, bool)>,
+    pub keys: Vec<(u64, RistrettoPublicKeyBytes, bool)>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -376,7 +375,7 @@ pub struct KeysSetActiveRequest {
 )]
 pub struct KeysSetActiveResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -422,7 +421,7 @@ pub struct KeysCreateResponse {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub id: u64,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -449,7 +448,7 @@ pub struct AccountsCreateRequest {
 pub struct AccountsCreateResponse {
     pub address: SubstateId,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
     pub result: FinalizeResult,
 }
 
@@ -499,7 +498,7 @@ pub struct AccountsListRequest {
 pub struct AccountInfo {
     pub account: Account,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -606,7 +605,7 @@ pub struct AccountGetDefaultRequest {
 pub struct AccountGetResponse {
     pub account: Account,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -640,7 +639,7 @@ pub struct AccountsTransferRequest {
     pub amount: Amount,
     pub resource_address: ResourceAddress,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub destination_public_key: PublicKey,
+    pub destination_public_key: RistrettoPublicKeyBytes,
     pub max_fee: Option<Amount>,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     pub proof_from_badge_resource: Option<ResourceAddress>,
@@ -676,7 +675,7 @@ pub struct ProofsGenerateRequest {
     pub resource_address: ResourceAddress,
     // TODO: For now, we assume that this is obtained "somehow" from the destination account
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub destination_public_key: PublicKey,
+    pub destination_public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -754,7 +753,7 @@ pub struct ConfidentialTransferRequest {
     pub input_selection: ConfidentialTransferInputSelection,
     pub resource_address: ResourceAddress,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub destination_public_key: PublicKey,
+    pub destination_public_key: RistrettoPublicKeyBytes,
     pub max_fee: Option<Amount>,
     pub output_to_revealed: bool,
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
@@ -799,7 +798,7 @@ pub struct ConfidentialViewVaultBalanceRequest {
 )]
 pub struct ConfidentialViewVaultBalanceResponse {
     #[cfg_attr(feature = "ts", ts(type = "Record<string, number | null>"))]
-    pub balances: HashMap<PublicKey, Option<u64>>,
+    pub balances: HashMap<PedersenCommitmentBytes, Option<u64>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -899,7 +898,7 @@ pub struct AccountsCreateFreeTestCoinsResponse {
     pub fee: Amount,
     pub result: FinalizeResult,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

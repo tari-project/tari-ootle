@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::PublicKey;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
@@ -37,7 +37,7 @@ use crate::{
 pub fn spawn_service<TSpec: EpochManagerSpec>(
     config: EpochManagerConfig,
     global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
-    node_public_key: PublicKey,
+    node_public_key: RistrettoPublicKey,
     epoch_events: TSpec::EpochEventOracle,
     utxo_store: TSpec::UtxoStore,
     template_downloader: TSpec::TemplateDownloader,

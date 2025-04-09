@@ -4,16 +4,20 @@
 use indexmap::IndexSet;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{PublicKey, Signature};
 use tari_crypto::{
     keys::PublicKey as PublicKeyT,
-    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    tari_utilities,
+    tari_utilities::ByteArray,
 };
 use tari_dan_common_types::{Epoch, SubstateRequirement};
 use tari_engine_types::{
     hashing::{hasher64, EngineHashDomainLabel},
     instruction::Instruction,
+    FromByteType,
+    ToByteType,
 };
+use tari_template_lib::types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::{UnsealedTransactionV1, UnsignedTransactionV1};
 
@@ -25,13 +29,13 @@ use crate::{UnsealedTransactionV1, UnsignedTransactionV1};
 )]
 pub struct TransactionSealSignature {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    public_key: PublicKey,
+    public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
-    signature: Signature,
+    signature: SchnorrSignatureBytes,
 }
 
 impl TransactionSealSignature {
-    pub fn new(public_key: PublicKey, signature: Signature) -> Self {
+    pub fn new(public_key: RistrettoPublicKeyBytes, signature: SchnorrSignatureBytes) -> Self {
         Self { public_key, signature }
     }
 
@@ -40,23 +44,34 @@ impl TransactionSealSignature {
 
         let message = Self::create_message(transaction);
         Self {
-            signature: Signature::sign(secret_key, message, &mut OsRng)
-                .expect("sign is infallible with Ristretto keys"),
-            public_key,
+            signature: RistrettoSchnorr::sign(secret_key, message, &mut OsRng)
+                .expect("sign is infallible with Ristretto keys")
+                .to_byte_type(),
+            public_key: public_key.to_byte_type(),
         }
     }
 
     pub fn verify(&self, transaction: &UnsealedTransactionV1) -> bool {
         let message = Self::create_message(transaction);
-        self.signature.verify(&self.public_key, message)
+        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&self.public_key) else {
+            return false;
+        };
+        let Ok(signature) = RistrettoSchnorr::try_from_byte_type(&self.signature) else {
+            return false;
+        };
+        signature.verify(&public_key, message)
     }
 
-    pub fn signature(&self) -> &Signature {
+    pub fn signature(&self) -> &SchnorrSignatureBytes {
         &self.signature
     }
 
-    pub fn public_key(&self) -> &RistrettoPublicKey {
+    pub fn public_key(&self) -> &RistrettoPublicKeyBytes {
         &self.public_key
+    }
+
+    pub fn to_ristretto_public_key(&self) -> Result<RistrettoPublicKey, tari_utilities::ByteArrayError> {
+        RistrettoPublicKey::from_canonical_bytes(self.public_key.as_bytes())
     }
 
     fn create_message(transaction: &UnsealedTransactionV1) -> [u8; 64] {
@@ -75,44 +90,52 @@ impl TransactionSealSignature {
 )]
 pub struct TransactionSignature {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    public_key: PublicKey,
+    public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce: string, signature: string}"))]
-    signature: Signature,
+    signature: SchnorrSignatureBytes,
 }
 
 impl TransactionSignature {
-    pub fn new(public_key: PublicKey, signature: Signature) -> Self {
+    pub fn new(public_key: RistrettoPublicKeyBytes, signature: SchnorrSignatureBytes) -> Self {
         Self { public_key, signature }
     }
 
     pub fn sign_v1(
         secret_key: &RistrettoSecretKey,
-        seal_signer: &PublicKey,
+        seal_signer: &RistrettoPublicKeyBytes,
         transaction: &UnsignedTransactionV1,
     ) -> Self {
         let public_key = RistrettoPublicKey::from_secret_key(secret_key);
         let message = Self::create_message(seal_signer, transaction);
 
         Self {
-            signature: Signature::sign(secret_key, message, &mut OsRng).unwrap(),
-            public_key,
+            signature: RistrettoSchnorr::sign(secret_key, message, &mut OsRng)
+                .expect("sign is infallible with Ristretto keys")
+                .to_byte_type(),
+            public_key: public_key.to_byte_type(),
         }
     }
 
-    pub fn verify(&self, seal_signer: &PublicKey, transaction: &UnsignedTransactionV1) -> bool {
+    pub fn verify(&self, seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> bool {
         let message = Self::create_message(seal_signer, transaction);
-        self.signature.verify(&self.public_key, message)
+        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&self.public_key) else {
+            return false;
+        };
+        let Ok(signature) = RistrettoSchnorr::try_from_byte_type(&self.signature) else {
+            return false;
+        };
+        signature.verify(&public_key, message)
     }
 
-    pub fn signature(&self) -> &Signature {
+    pub fn signature(&self) -> &SchnorrSignatureBytes {
         &self.signature
     }
 
-    pub fn public_key(&self) -> &RistrettoPublicKey {
+    pub fn public_key(&self) -> &RistrettoPublicKeyBytes {
         &self.public_key
     }
 
-    fn create_message(seal_signer: &PublicKey, transaction: &UnsignedTransactionV1) -> [u8; 64] {
+    fn create_message(seal_signer: &RistrettoPublicKeyBytes, transaction: &UnsignedTransactionV1) -> [u8; 64] {
         let signature_fields = TransactionSignatureFields::from(transaction);
         hasher64(EngineHashDomainLabel::TransactionSignature)
             .chain(seal_signer)

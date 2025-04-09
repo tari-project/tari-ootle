@@ -5,7 +5,7 @@ use std::{collections::HashMap, fs, path::Path};
 
 use tari_common::configuration::Network;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 use tari_transaction::Transaction;
 use tari_transaction_manifest::ManifestValue;
 

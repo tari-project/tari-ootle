@@ -12,7 +12,6 @@ use anyhow::anyhow;
 use serde::de::DeserializeOwned;
 use tari_bor::to_value;
 use tari_common::configuration::Network;
-use tari_common_types::types::PublicKey;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -36,16 +35,16 @@ use tari_engine_types::{
     substate::{Substate, SubstateDiff, SubstateId},
     vault::Vault,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
+    ToByteType,
 };
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args,
     args::Arg,
     auth::OwnerRule,
-    crypto::RistrettoPublicKeyBytes,
-    models::{Amount, ComponentAddress, EntityId, NonFungibleAddress, ObjectKey, TemplateAddress},
-    prelude::{ComponentAccessRules, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
-    Hash,
+    models::{Amount, ComponentAddress, NonFungibleAddress},
+    prelude::{ComponentAccessRules, RistrettoPublicKeyBytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
+    types::{EntityId, Hash, ObjectKey, TemplateAddress},
 };
 use tari_transaction::Transaction;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
@@ -272,7 +271,7 @@ impl TemplateTest {
 
     pub fn create_account<T>(
         &mut self,
-        owner_public_key: PublicKey,
+        owner_public_key: RistrettoPublicKeyBytes,
         workspace_bucket: Option<String>,
         proofs: Vec<NonFungibleAddress>,
     ) -> T
@@ -372,7 +371,7 @@ impl TemplateTest {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
-        let component = self.create_account(public_key, None, vec![owner_proof.clone()]);
+        let component = self.create_account(public_key.to_byte_type(), None, vec![owner_proof.clone()]);
         self.enable_fees = old_fail_fees;
         (component, owner_proof, secret_key)
     }
@@ -393,7 +392,7 @@ impl TemplateTest {
             Transaction::builder()
                 .call_method(test_faucet_component(), "take_free_coins", args![])
                 .put_last_instruction_output_on_workspace("bucket")
-                .create_account_with_bucket(public_key, "bucket")
+                .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),
             vec![owner_proof.clone()],
         );
@@ -422,7 +421,7 @@ impl TemplateTest {
             Transaction::builder()
                 .call_method(test_faucet_component(), "take_free_coins_custom", args![amount])
                 .put_last_instruction_output_on_workspace("bucket")
-                .create_account_with_bucket(public_key.clone(), "bucket")
+                .create_account_with_bucket(public_key.to_byte_type(), "bucket")
                 .build_and_seal(&secret_key),
             vec![owner_proof.clone()],
         );
@@ -443,8 +442,7 @@ impl TemplateTest {
 
     pub fn create_owner_proof(&mut self) -> (NonFungibleAddress, RistrettoPublicKey, RistrettoSecretKey) {
         let (secret_key, public_key) = create_key_pair_from_seed(self.next_key_seed());
-        let public_key_bytes = RistrettoPublicKeyBytes::from_bytes(public_key.as_bytes()).unwrap();
-        let owner_token = NonFungibleAddress::from_public_key(public_key_bytes);
+        let owner_token = NonFungibleAddress::from_public_key(public_key.to_byte_type());
         (owner_token, public_key, secret_key)
     }
 

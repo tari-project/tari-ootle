@@ -3,8 +3,8 @@
 
 use std::{fmt, fmt::Display, ops::Deref};
 
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{Epoch, NodeHeight};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     consensus_models::{Block, BlockId, QuorumCertificate},
@@ -46,7 +46,7 @@ impl ValidBlock {
         self.block.epoch()
     }
 
-    pub fn proposed_by(&self) -> &PublicKey {
+    pub fn proposed_by(&self) -> &RistrettoPublicKeyBytes {
         self.block.proposed_by()
     }
 

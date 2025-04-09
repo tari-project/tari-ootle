@@ -7,7 +7,7 @@ use log::info;
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
-use tari_engine_types::indexed_value::decode_value_at_path;
+use tari_engine_types::{indexed_value::decode_value_at_path, ToByteType};
 use tari_template_lib::{
     args,
     models::{Amount, ComponentAddress, VaultId},
@@ -98,7 +98,7 @@ impl Runner {
             .key_manager_api()
             .derive_key(TRANSACTION_BRANCH, primary_account.key_index)?;
         let mut tx_ids = Vec::with_capacity(200);
-        let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key);
+        let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key).to_byte_type();
 
         for i in 0..5 {
             let _timer = TraceTimer::info("tariswap", "add_liquidity")
@@ -215,7 +215,7 @@ impl Runner {
             .sdk
             .key_manager_api()
             .derive_key(TRANSACTION_BRANCH, primary_account.key_index)?;
-        let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key);
+        let primary_account_pk = RistrettoPublicKey::from_secret_key(&primary_account_key.key).to_byte_type();
 
         let mut tx_ids = vec![];
         // Swap XTR for faucet

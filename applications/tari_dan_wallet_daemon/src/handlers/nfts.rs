@@ -5,8 +5,11 @@ use std::{collections::BTreeMap, str::FromStr};
 
 use anyhow::anyhow;
 use log::info;
-use tari_common_types::types::PublicKey;
-use tari_crypto::{keys::PublicKey as PK, ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
+use tari_crypto::{
+    keys::PublicKey as PK,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities::ByteArray,
+};
 use tari_dan_wallet_sdk::{
     apis::{jwt::JrpcPermission, key_manager},
     models::Account,
@@ -14,8 +17,8 @@ use tari_dan_wallet_sdk::{
 use tari_template_builtin::ACCOUNT_NFT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args,
-    crypto::RistrettoPublicKeyBytes,
-    prelude::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
+    models::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
+    types::crypto::RistrettoPublicKeyBytes,
 };
 use tari_transaction::TransactionId;
 use tari_wallet_daemon_client::types::{
@@ -49,7 +52,7 @@ pub async fn handle_get_nft(
     let non_fungible_api = sdk.non_fungible_api();
 
     let non_fungible = non_fungible_api
-        .non_fungible_token_get_by_nft_id(req.nft_id)
+        .get_by_id(req.nft_id)
         .map_err(|e| anyhow!("Failed to get non fungible token, with error: {}", e))?;
 
     Ok(non_fungible)
@@ -69,7 +72,7 @@ pub async fn handle_list_nfts(
     let non_fungible_api = sdk.non_fungible_api();
 
     let non_fungibles = non_fungible_api
-        .non_fungible_token_get_all(account.address.as_component_address().unwrap(), limit, offset)
+        .get_all(account.address.as_component_address().unwrap(), limit, offset)
         .map_err(|e| anyhow!("Failed to list all non fungibles, with error: {}", e))?;
     Ok(ListAccountNftResponse { nfts: non_fungibles })
 }
@@ -88,7 +91,7 @@ pub async fn handle_mint_account_nft(
     let signing_key_index = account.key_index;
     let signing_key = key_manager_api.derive_key(key_manager::TRANSACTION_BRANCH, signing_key_index)?;
 
-    let owner_pk = PublicKey::from_secret_key(&signing_key.key);
+    let owner_pk = RistrettoPublicKey::from_secret_key(&signing_key.key);
     let owner_token =
         NonFungibleAddress::from_public_key(RistrettoPublicKeyBytes::from_bytes(owner_pk.as_bytes()).unwrap());
 

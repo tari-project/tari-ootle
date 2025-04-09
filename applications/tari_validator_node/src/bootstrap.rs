@@ -35,12 +35,12 @@ use tari_common::{
     },
     exit_codes::{ExitCode, ExitError},
 };
-use tari_common_types::epoch::VnEpoch;
+use tari_common_types::{epoch::VnEpoch, types::CompressedPublicKey};
 use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
 use tari_core::transactions::transaction_components::ValidatorNodeSignature;
-use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_app_utilities::{
     common::verify_correct_network,
     epoch_oracle_config::{BaseLayerOracleConfig, EpochOracleType},
@@ -56,6 +56,7 @@ use tari_dan_engine::{fees::FeeTable, transaction::TransactionProcessorConfig};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{global::GlobalDb, StateStore};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
+use tari_engine_types::ToByteType;
 use tari_epoch_manager::{
     service::{EpochManagerConfig, EpochManagerHandle},
     EpochManagerReader,
@@ -65,6 +66,7 @@ use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -182,7 +184,11 @@ pub async fn spawn_services(
 
     info!(target: LOG_TARGET, "State store initializing");
 
-    let sidechain_id = config.validator_node.validator_node_sidechain_id.clone();
+    let sidechain_id = config
+        .validator_node
+        .validator_node_sidechain_id
+        .as_ref()
+        .map(|pk| pk.to_byte_type());
 
     // Connect to state db
     #[cfg(feature = "sqlite_backend")]
@@ -192,14 +198,8 @@ pub async fn spawn_services(
     #[cfg(not(feature = "sqlite_backend"))]
     let state_store = ValidatorNodeStateStore::connect(&config.validator_node.state_db_path)?;
 
-    state_store.with_write_tx(|tx| {
-        bootstrap_state(
-            tx,
-            config.network,
-            consensus_constants.num_preshards,
-            sidechain_id.clone(),
-        )
-    })?;
+    state_store
+        .with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards, sidechain_id))?;
 
     info!(target: LOG_TARGET, "Epoch manager initializing");
     let epoch_manager_config = EpochManagerConfig {
@@ -223,9 +223,21 @@ pub async fn spawn_services(
                 base_node_client,
                 consensus_constants.base_layer_confirmations,
                 config.epoch_oracle.base_layer.scanning_interval,
-                config.validator_node.validator_node_sidechain_id.clone(),
-                config.validator_node.burnt_utxo_sidechain_id.clone(),
-                config.validator_node.template_sidechain_id.clone(),
+                config
+                    .validator_node
+                    .validator_node_sidechain_id
+                    .as_ref()
+                    .map(|pk| pk.to_byte_type()),
+                config
+                    .validator_node
+                    .burnt_utxo_sidechain_id
+                    .as_ref()
+                    .map(|pk| pk.to_byte_type()),
+                config
+                    .validator_node
+                    .template_sidechain_id
+                    .as_ref()
+                    .map(|pk| pk.to_byte_type()),
             ))
         },
         EpochOracleType::Configured => EpochOracle::Configured(ConfiguredEpochOracle::new(
@@ -250,7 +262,7 @@ pub async fn spawn_services(
         );
 
     // Create registration file
-    if let Err(err) = create_registration_file(config, &epoch_manager, sidechain_id.as_ref(), &keypair).await {
+    if let Err(err) = create_registration_file(config, &epoch_manager, sidechain_id, &keypair).await {
         error!(target: LOG_TARGET, "Error creating registration file: {}", err);
         if epoch_manager_join_handle.is_finished() {
             return epoch_manager_join_handle
@@ -417,14 +429,18 @@ pub async fn spawn_services(
 async fn create_registration_file(
     config: &ApplicationConfig,
     epoch_manager: &EpochManagerHandle<PeerAddress>,
-    sidechain_pk: Option<&RistrettoPublicKey>,
+    sidechain_pk: Option<RistrettoPublicKeyBytes>,
     keypair: &RistrettoKeypair,
 ) -> Result<(), anyhow::Error> {
-    let fee_claim_public_key = config.validator_node.fee_claim_public_key.clone();
+    let fee_claim_public_key = config.validator_node.fee_claim_public_key.to_byte_type();
     epoch_manager
-        .set_fee_claim_public_key(fee_claim_public_key.clone())
+        .set_fee_claim_public_key(fee_claim_public_key)
         .await
         .context("set_fee_claim_public_key failed when creating registration file")?;
+    let sidechain_pk = sidechain_pk
+        .map(|pk| CompressedPublicKey::from_canonical_bytes(pk.as_bytes()))
+        .transpose()
+        .map_err(|e| anyhow!("sidechain_pk: {e}"))?;
 
     // TODO: this signature can be replayed since it is not bound to any single use data (e.g. epoch). This
     // could be used to re-register a validator node after that node has exited. However, this is costly and AFAICS
@@ -433,14 +449,15 @@ async fn create_registration_file(
     // with the current epoch. File system access is still required to read the updated signature.
     let signature = ValidatorNodeSignature::sign(
         keypair.secret_key(),
-        sidechain_pk,
-        &fee_claim_public_key,
+        sidechain_pk.as_ref(),
+        &CompressedPublicKey::from_canonical_bytes(fee_claim_public_key.as_bytes())
+            .map_err(|e| anyhow!("Failed to convert fee claim public key to CompressedPublicKey: {e}"))?,
         VnEpoch::zero(),
     );
 
     let registration = ValidatorRegistrationFile {
         signature,
-        public_key: keypair.public_key().clone(),
+        public_key: keypair.public_key().to_byte_type(),
         claim_fees_public_key: fee_claim_public_key,
     };
     fs::write(

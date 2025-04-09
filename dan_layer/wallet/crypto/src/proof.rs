@@ -29,10 +29,12 @@ use tari_crypto::{
     },
     tari_utilities::ByteArray,
 };
-use tari_engine_types::confidential::{challenges, get_commitment_factory, get_range_proof_service};
+use tari_engine_types::{
+    confidential::{get_commitment_factory, get_range_proof_service, messages},
+    ToByteType,
+};
 use tari_hashing::TransactionSecureNonceKdfDomain;
 use tari_template_lib::{
-    crypto::RistrettoPublicKeyBytes,
     models::{
         Amount,
         ConfidentialOutputStatement,
@@ -41,16 +43,13 @@ use tari_template_lib::{
         ViewableBalanceProof,
         ViewableBalanceProofChallengeFields,
     },
+    prelude::{PedersenCommitmentBytes, Scalar32Bytes},
+    types::crypto::RistrettoPublicKeyBytes,
 };
 use tari_utilities::safe_array::SafeArray;
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::{
-    byte_utils::copy_fixed,
-    error::ConfidentialProofError,
-    kdfs::EncryptedDataKey,
-    ConfidentialProofStatement,
-};
+use crate::{error::ConfidentialProofError, kdfs::EncryptedDataKey, ConfidentialProofStatement};
 
 pub fn create_confidential_output_statement(
     output_statement: Option<&ConfidentialProofStatement>,
@@ -63,7 +62,7 @@ pub fn create_confidential_output_statement(
         .map(|stmt| -> Result<_, ConfidentialProofError> {
             let change_commitment = stmt.to_commitment();
             Ok(ConfidentialStatement {
-                commitment: copy_fixed(change_commitment.as_bytes()),
+                commitment: change_commitment.to_byte_type(),
                 sender_public_nonce: RistrettoPublicKeyBytes::from_bytes(stmt.sender_public_nonce.as_bytes())
                     .expect("[generate_confidential_proof] change nonce"),
                 encrypted_data: stmt.encrypted_data.clone(),
@@ -89,8 +88,8 @@ pub fn create_confidential_output_statement(
     let proof_output_statement = output_statement.as_ref().map(|stmt| {
         let commitment = stmt.to_commitment();
         ConfidentialStatement {
-            commitment: copy_fixed(commitment.as_bytes()),
-            sender_public_nonce: copy_fixed(stmt.sender_public_nonce.as_bytes()),
+            commitment: commitment.to_byte_type(),
+            sender_public_nonce: stmt.sender_public_nonce.to_byte_type(),
             encrypted_data: stmt.encrypted_data.clone(),
             minimum_value_promise: stmt.minimum_value_promise,
             viewable_balance_proof: stmt.resource_view_key.as_ref().map(|view_key| {
@@ -112,7 +111,7 @@ pub fn create_confidential_output_statement(
 
 fn inner_encrypted_data_kdf_aead(
     encryption_key: &RistrettoSecretKey,
-    commitment: &PedersenCommitment,
+    commitment: &PedersenCommitmentBytes,
 ) -> EncryptedDataKey {
     let mut aead_key = EncryptedDataKey::from(SafeArray::default());
     DomainSeparatedHasher::<Blake2b<U32>, TransactionSecureNonceKdfDomain>::new_with_label("encrypted_value_and_mask")
@@ -148,11 +147,11 @@ pub fn create_viewable_balance_proof(
     let r_prime = RistrettoPublicKey::from_secret_key(&x_r);
 
     // Create challenge
-    let elgamal_encrypted = copy_fixed(elgamal_encrypted.as_bytes());
-    let elgamal_public_nonce = copy_fixed(elgamal_public_nonce.as_bytes());
-    let c_prime = copy_fixed(c_prime.as_bytes());
-    let e_prime = copy_fixed(e_prime.as_bytes());
-    let r_prime = copy_fixed(r_prime.as_bytes());
+    let elgamal_encrypted = elgamal_encrypted.to_byte_type();
+    let elgamal_public_nonce = elgamal_public_nonce.to_byte_type();
+    let c_prime = c_prime.to_byte_type();
+    let e_prime = e_prime.to_byte_type();
+    let r_prime = r_prime.to_byte_type();
 
     let challenge_fields = ViewableBalanceProofChallengeFields {
         elgamal_encrypted: &elgamal_encrypted,
@@ -162,20 +161,20 @@ pub fn create_viewable_balance_proof(
         r_prime: &r_prime,
     };
 
-    let e = &challenges::viewable_balance_proof_challenge64(commitment, view_key, challenge_fields);
+    let e = messages::viewable_balance_proof_challenge64(commitment, view_key, challenge_fields);
 
     // Generate signatures
     // TODO: sign_raw_uniform should take a [u8; 64] for the challenge so that length mismatches are caught at compile
     //       time. The challenge is never a secret (in all current usages), so non-zeroed memory is not an issue.
 
     // sv = ev + x_v
-    let s_v = RistrettoSchnorr::sign_raw_uniform(&value_as_secret, x_v, e)
+    let s_v = RistrettoSchnorr::sign_raw_uniform(&value_as_secret, x_v, &e)
         .expect("INVARIANT VIOLATION: sv RistrettoSchnorr::sign_raw_uniform and challenge hash output length mismatch");
     // sm = em + x_m
-    let s_m = RistrettoSchnorr::sign_raw_uniform(mask, x_m, e)
+    let s_m = RistrettoSchnorr::sign_raw_uniform(mask, x_m, &e)
         .expect("INVARIANT VIOLATION: sm RistrettoSchnorr::sign_raw_uniform and challenge hash output length mismatch");
     // sr = er + x_r
-    let s_r = RistrettoSchnorr::sign_raw_uniform(r, x_r, e)
+    let s_r = RistrettoSchnorr::sign_raw_uniform(r, x_r, &e)
         .expect("INVARIANT VIOLATION: sr RistrettoSchnorr::sign_raw_uniform and challenge hash output length mismatch");
 
     ViewableBalanceProof {
@@ -184,9 +183,12 @@ pub fn create_viewable_balance_proof(
         c_prime,
         e_prime,
         r_prime,
-        s_v: copy_fixed(s_v.get_signature().as_bytes()),
-        s_m: copy_fixed(s_m.get_signature().as_bytes()),
-        s_r: copy_fixed(s_r.get_signature().as_bytes()),
+        s_v: Scalar32Bytes::from_bytes(s_v.get_signature().as_bytes())
+            .expect("INVARIANT VIOLATION: s_v length mismatch"),
+        s_m: Scalar32Bytes::from_bytes(s_m.get_signature().as_bytes())
+            .expect("INVARIANT VIOLATION: s_m length mismatch"),
+        s_r: Scalar32Bytes::from_bytes(s_r.get_signature().as_bytes())
+            .expect("INVARIANT VIOLATION: s_r length mismatch"),
     }
 }
 
@@ -194,7 +196,7 @@ const ENCRYPTED_DATA_TAG: &[u8] = b"TARI_AAD_VALUE_AND_MASK_EXTEND_NONCE_VARIANT
 
 pub(crate) fn encrypt_data(
     encryption_key: &RistrettoSecretKey,
-    commitment: &PedersenCommitment,
+    commitment: &PedersenCommitmentBytes,
     value: u64,
     mask: &RistrettoSecretKey,
 ) -> Result<EncryptedData, aead::Error> {
@@ -238,7 +240,7 @@ pub(crate) fn encrypt_data(
 
 pub fn decrypt_data_and_mask(
     encryption_key: &RistrettoSecretKey,
-    commitment: &PedersenCommitment,
+    commitment: &PedersenCommitmentBytes,
     encrypted_data: &EncryptedData,
 ) -> Result<(u64, RistrettoSecretKey), aead::Error> {
     // Extract the tag, nonce, and ciphertext
@@ -351,6 +353,7 @@ mod tests {
 
     mod encrypt_decrypt {
         use tari_crypto::ristretto::RistrettoSecretKey;
+        use tari_engine_types::ToByteType;
 
         use super::*;
 
@@ -358,7 +361,7 @@ mod tests {
         fn it_encrypts_and_decrypts() {
             let key = RistrettoSecretKey::random(&mut OsRng);
             let amount = 100;
-            let commitment = get_commitment_factory().commit_value(&key, amount);
+            let commitment = get_commitment_factory().commit_value(&key, amount).to_byte_type();
             let mask = RistrettoSecretKey::random(&mut OsRng);
             let encrypted = encrypt_data(&key, &commitment, amount, &mask).unwrap();
 

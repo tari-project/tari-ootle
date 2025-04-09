@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     Epoch,
@@ -13,6 +13,7 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::global::models::ValidatorNode;
 use tari_sidechain::EvictionProof;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::{
@@ -36,7 +37,7 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
         Self { tx_request, events }
     }
 
-    pub async fn get_fee_claim_public_key(&self) -> Result<Option<PublicKey>, EpochManagerError> {
+    pub async fn get_fee_claim_public_key(&self) -> Result<Option<RistrettoPublicKeyBytes>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::GetFeeClaimPublicKey { reply: tx })
@@ -46,7 +47,7 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
-    pub async fn set_fee_claim_public_key(&self, public_key: PublicKey) -> Result<(), EpochManagerError> {
+    pub async fn set_fee_claim_public_key(&self, public_key: RistrettoPublicKeyBytes) -> Result<(), EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(EpochManagerRequest::SetFeeClaimPublicKey { public_key, reply: tx })
@@ -83,8 +84,8 @@ impl<TAddr: NodeAddressable> EpochManagerWriter for EpochManagerHandle<TAddr> {
     async fn add_validator_node_registration(
         &mut self,
         activation_epoch: Epoch,
-        validator_public_key: PublicKey,
-        claim_public_key: PublicKey,
+        validator_public_key: RistrettoPublicKeyBytes,
+        claim_public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
         value_of_registration: u64,
     ) -> Result<(), EpochManagerError> {
@@ -105,7 +106,7 @@ impl<TAddr: NodeAddressable> EpochManagerWriter for EpochManagerHandle<TAddr> {
 
     async fn deactivate_validator_node(
         &mut self,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
     ) -> Result<(), EpochManagerError> {
         let (tx, rx) = oneshot::channel();
@@ -213,7 +214,7 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
     async fn get_validator_node_by_public_key(
         &self,
         epoch: Epoch,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request

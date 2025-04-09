@@ -1,8 +1,8 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tari_engine_types::TemplateAddress;
 use tari_template_abi::TemplateDef;
+use tari_template_lib::types::TemplateAddress;
 
 use crate::{
     apis::transaction::TransactionApiError,

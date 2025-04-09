@@ -7,4 +7,4 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-tari_engine_types = { workspace = true }
+tari_template_lib_types = { workspace = true }

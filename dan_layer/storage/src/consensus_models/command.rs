@@ -8,9 +8,10 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{hashing::command_hasher, Epoch, ShardGroup};
-use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
+use tari_engine_types::serde_with;
+use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 
 use super::{
@@ -292,7 +293,8 @@ impl Display for Command {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize)]
 pub struct EvictNodeAtom {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    #[serde(with = "serde_with::hex")]
+    pub public_key: RistrettoPublicKeyBytes,
 }
 
 impl EvictNodeAtom {

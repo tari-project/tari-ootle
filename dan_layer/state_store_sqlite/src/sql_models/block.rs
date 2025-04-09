@@ -2,15 +2,13 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::{Queryable, QueryableByName};
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup};
 use tari_dan_storage::{consensus_models, StorageError};
-use tari_utilities::byte_array::ByteArray;
 use time::PrimitiveDateTime;
 
 use crate::{
     schema::blocks,
-    serialization::{deserialize_hex, deserialize_hex_try_from, deserialize_json},
+    serialization::{deserialize_hex_try_from, deserialize_json},
     sql_models,
 };
 
@@ -66,12 +64,10 @@ impl Block {
                     self.id, self.shard_group as u32
                 ),
             })?,
-            PublicKey::from_canonical_bytes(&deserialize_hex(&self.proposed_by)?).map_err(|_| {
-                StorageError::DecodingError {
-                    operation: "try_convert",
-                    item: "block",
-                    details: format!("Block #{} proposed_by is malformed", self.id),
-                }
+            deserialize_hex_try_from(&self.proposed_by).map_err(|_| StorageError::DecodingError {
+                operation: "try_convert",
+                item: "block",
+                details: format!("Block #{} proposed_by is malformed", self.id),
             })?,
             deserialize_hex_try_from(&self.state_merkle_root)?,
             deserialize_json(&self.commands)?,
@@ -143,12 +139,10 @@ impl TryFrom<ParkedBlock> for (consensus_models::Block, Vec<consensus_models::Fo
                     value.id, value.shard_group as u32
                 ),
             })?,
-            PublicKey::from_canonical_bytes(&deserialize_hex(&value.proposed_by)?).map_err(|_| {
-                StorageError::DecodingError {
-                    operation: "try_convert",
-                    item: "block",
-                    details: format!("Block #{} proposed_by is malformed", value.id),
-                }
+            deserialize_hex_try_from(&value.proposed_by).map_err(|_| StorageError::DecodingError {
+                operation: "try_convert",
+                item: "block",
+                details: format!("Block #{} proposed_by is malformed", value.id),
             })?,
             deserialize_hex_try_from(&value.state_merkle_root)?,
             deserialize_json(&value.commands)?,

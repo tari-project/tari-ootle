@@ -187,7 +187,7 @@ jobs:
           rustup show
 
       - name: cargo check
-        run: cargo check --release --all-targets --locked
+        run: cargo check --release --all-features --all-targets --locked
 
   licenses:
     name: file licenses

@@ -47,7 +47,7 @@ impl Validator<Transaction> for TransactionNetworkValidator {
 mod tests {
     use indexmap::IndexSet;
     use tari_common::configuration::Network;
-    use tari_common_types::types::{PublicKey, Signature};
+    use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
     use tari_transaction::{
         Transaction,
         TransactionSealSignature,
@@ -65,9 +65,12 @@ mod tests {
         Transaction::new(
             UnsealedTransactionV1::new(
                 UnsignedTransactionV1::new(network_byte, vec![], vec![], IndexSet::new(), None, None),
-                vec![TransactionSignature::new(PublicKey::default(), Signature::default())],
+                vec![TransactionSignature::new(
+                    RistrettoPublicKeyBytes::zero(),
+                    SchnorrSignatureBytes::zero(),
+                )],
             ),
-            TransactionSealSignature::new(PublicKey::default(), Signature::default()),
+            TransactionSealSignature::new(RistrettoPublicKeyBytes::zero(), SchnorrSignatureBytes::zero()),
         )
     }
 

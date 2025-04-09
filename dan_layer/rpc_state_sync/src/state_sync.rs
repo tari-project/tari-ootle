@@ -231,7 +231,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                                         info!(target: LOG_TARGET, "🛜 Add template {id}");
                                         template_changes_mut.push(TemplateChange::Add {
                                             template_address,
-                                            author_public_key: template.author.clone(),
+                                            author_public_key: template.author,
                                             binary_hash: template.binary_hash.into_array().into(),
                                             epoch: transition.id.epoch(),
                                         });

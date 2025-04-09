@@ -10,9 +10,10 @@ use tari_template_lib::{
     arg,
     args::Arg,
     models::{Amount, Metadata},
+    types::TemplateAddress,
 };
 
-use crate::{substate::SubstateId, template::parse_template_address, TemplateAddress};
+use crate::{substate::SubstateId, template::parse_template_address};
 
 pub fn json_deserialize<'de, D>(d: D) -> Result<Vec<Arg>, D::Error>
 where D: Deserializer<'de> {
@@ -37,11 +38,14 @@ where D: Deserializer<'de> {
 
 fn convert_value_to_arg(arg: json::Value) -> Result<Arg, ArgParseError> {
     if let Some(s) = arg.as_str() {
+        // Support for special string literals e.g. "Amount(123)"
         parse_arg(s)
     } else if is_arg_json(&arg) {
+        // Support for {"Literal": ...} or {"Workspace": ...]}
         let parsed = json::from_value(arg)?;
         Ok(parsed)
     } else {
+        // Support for json objects
         let value = convert_to_cbor(arg);
         let arg = Arg::literal(value)?;
         Ok(arg)
@@ -62,6 +66,10 @@ fn is_arg_json(arg: &json::Value) -> bool {
         .get("Literal")
         .or_else(|| obj.get("Workspace"))
         .expect("Already checked");
+    // Support for {"Literal" "deadbeaf"} - common case for wallet -> indexer JSON rpc
+    if let Some(s) = v.as_str() {
+        return s.chars().all(|c| c.is_ascii_hexdigit());
+    }
     v.is_array()
 }
 
@@ -123,6 +131,10 @@ fn try_parse_special_string_arg(s: &str) -> Result<ParsedArg<'_>, ArgParseError>
     }
 
     if let Ok(bytes) = hex::decode(s) {
+        if let Ok(cbor) = tari_bor::decode_exact(&bytes) {
+            return Ok(ParsedArg::Cbor(cbor));
+        }
+
         return Ok(ParsedArg::Bytes(bytes));
     }
 
@@ -148,6 +160,7 @@ pub enum ParsedArg<'a> {
     SignedInteger(i64),
     Bool(bool),
     Metadata(Metadata),
+    Cbor(tari_bor::Value),
 }
 
 impl From<ParsedArg<'_>> for Arg {
@@ -174,6 +187,7 @@ impl From<ParsedArg<'_>> for Arg {
             ParsedArg::Bytes(v) => Arg::Literal(encode(&tari_bor::Value::Bytes(v)).unwrap()),
             ParsedArg::Workspace(s) => arg!(Workspace(s)),
             ParsedArg::Metadata(m) => arg!(m),
+            ParsedArg::Cbor(cbor) => Arg::from_type(&cbor).unwrap(),
         }
     }
 }
@@ -210,6 +224,7 @@ fn convert_to_cbor(value: json::Value) -> tari_bor::Value {
                 ParsedArg::Bool(b) => tari_bor::Value::Bool(b),
                 ParsedArg::Metadata(metadata) => to_value(&metadata).unwrap(),
                 ParsedArg::Bytes(bytes) => tari_bor::Value::Bytes(bytes),
+                ParsedArg::Cbor(cbor) => cbor,
             },
             Err(_) => tari_bor::Value::Text(s),
         },

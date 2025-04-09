@@ -6,8 +6,7 @@ use std::{collections::HashMap, ops::ControlFlow};
 use indexmap::IndexMap;
 use log::*;
 use tari_common::configuration::Network;
-use tari_common_types::types::{FixedHash, PublicKey};
-use tari_crypto::tari_utilities::ByteArray;
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     derive_fee_pool_address,
@@ -37,6 +36,7 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{substate::SubstateDiff, template_models::Amount, ValidatorFeePool};
 use tari_state_tree::{JellyfishMerkleTree, StateTreeError, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     hotstuff::{
@@ -205,7 +205,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
         let dummy_header = BlockHeader::dummy_block(
             network,
             parent_block_id,
-            leader.clone(),
+            *leader,
             current_height,
             *qc.id(),
             epoch,
@@ -367,15 +367,9 @@ pub(crate) fn get_next_block_height_and_leader<
     Ok((next_height, leader_addr, num_skipped))
 }
 
-pub fn to_public_key_bytes(public_key: &PublicKey) -> [u8; 32] {
-    let mut buf = [0u8; 32];
-    buf.copy_from_slice(public_key.as_bytes());
-    buf
-}
-
 pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
     store: &mut PendingSubstateStore<TStore>,
-    claim_public_key_bytes: [u8; 32],
+    claim_public_key_bytes: &RistrettoPublicKeyBytes,
     shard: Shard,
     num_preshards: NumPreshards,
     total_leader_fee: Amount,
@@ -410,7 +404,7 @@ pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
 
             Ok(())
         },
-        |_| Ok(ValidatorFeePool::new(claim_public_key_bytes.into(), total_leader_fee).into()),
+        |_| Ok(ValidatorFeePool::new(*claim_public_key_bytes, total_leader_fee).into()),
     )?;
 
     Ok(())

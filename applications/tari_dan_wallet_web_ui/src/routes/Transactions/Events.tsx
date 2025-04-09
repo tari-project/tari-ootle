@@ -27,7 +27,7 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import CodeBlockExpand from "../../Components/CodeBlock";
 import { useTheme } from "@mui/material/styles";
-import type { Event } from "@tari-project/typescript-bindings";
+import { Event, substateIdToString } from "@tari-project/typescript-bindings";
 import CopyAddress from "../../Components/CopyAddress";
 
 function RowData({ substate_id, template_address, topic, tx_hash, payload }: Event, index: number) {
@@ -48,7 +48,7 @@ function RowData({ substate_id, template_address, topic, tx_hash, payload }: Eve
           </AccordionIconButton>
         </DataTableCell>
         <DataTableCell>{topic}</DataTableCell>
-        <DataTableCell>{substate_id ? <CopyAddress address={substate_id} /> : "--"}</DataTableCell>
+        <DataTableCell>{substate_id ? <CopyAddress address={substateIdToString(substate_id)} /> : "--"}</DataTableCell>
         <DataTableCell>{template_address ? <CopyAddress address={template_address} /> : "--"}</DataTableCell>
         <DataTableCell>{tx_hash ? <CopyAddress address={tx_hash} /> : "--"}</DataTableCell>
       </TableRow>

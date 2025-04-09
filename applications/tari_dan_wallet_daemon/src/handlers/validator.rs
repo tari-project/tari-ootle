@@ -6,12 +6,10 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use either::Either;
 use log::*;
-use tari_common_types::types::PublicKey;
-use tari_crypto::{keys::PublicKey as _, tari_utilities::ByteArray};
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{derive_fee_pool_address, optional::Optional, SubstateRequirement};
-use tari_dan_wallet_crypto::byte_utils;
 use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_template_lib::args;
 use tari_wallet_daemon_client::types::{
     AccountOrKeyIndex,
@@ -57,7 +55,7 @@ pub async fn handle_get_validator_fees(
             .key_manager_api()
             .derive_key(key_manager::TRANSACTION_BRANCH, index)?,
     };
-    let claim_public_key = PublicKey::from_secret_key(&claim_key.key);
+    let claim_public_key = RistrettoPublicKey::from_secret_key(&claim_key.key);
 
     let shards = req
         .shard_group
@@ -67,11 +65,7 @@ pub async fn handle_get_validator_fees(
     let addresses = shards.into_iter().map(|shard| {
         (
             shard,
-            derive_fee_pool_address(
-                byte_utils::copy_fixed(claim_public_key.as_bytes()),
-                NUM_PRESHARDS,
-                shard,
-            ),
+            derive_fee_pool_address(&claim_public_key.to_byte_type(), NUM_PRESHARDS, shard),
         )
     });
 
@@ -120,25 +114,22 @@ pub async fn handle_claim_validator_fees(
     let account_secret_key = sdk
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-    let account_public_key = PublicKey::from_secret_key(&account_secret_key.key);
+    let account_public_key = RistrettoPublicKey::from_secret_key(&account_secret_key.key);
 
     let (claim_public_key, claim_secret) = match req.claim_key_index {
         Some(index) => {
             let claim_key = sdk
                 .key_manager_api()
                 .derive_key(key_manager::TRANSACTION_BRANCH, index)?;
-            (PublicKey::from_secret_key(&claim_key.key), Some(claim_key))
+            (RistrettoPublicKey::from_secret_key(&claim_key.key), Some(claim_key))
         },
-        None => (PublicKey::from_secret_key(&account_secret_key.key), None),
+        None => (RistrettoPublicKey::from_secret_key(&account_secret_key.key), None),
     };
 
-    let fee_pool_addresses = req.shards.into_iter().map(|shard| {
-        derive_fee_pool_address(
-            byte_utils::copy_fixed(claim_public_key.as_bytes()),
-            NUM_PRESHARDS,
-            shard,
-        )
-    });
+    let fee_pool_addresses = req
+        .shards
+        .into_iter()
+        .map(|shard| derive_fee_pool_address(&claim_public_key.to_byte_type(), NUM_PRESHARDS, shard));
 
     // build the transaction
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
@@ -172,7 +163,7 @@ pub async fn handle_claim_validator_fees(
                 // If the claim key is different from the account secret, we need to sign with both
                 builder
                     .with_authorized_seal_signer()
-                    .add_signature(&account_public_key, &secret.key)
+                    .add_signature(&account_public_key.to_byte_type(), &secret.key)
             } else {
                 builder
             }

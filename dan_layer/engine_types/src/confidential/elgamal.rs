@@ -1,13 +1,16 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::convert;
-
 use tari_bor::{Deserialize, Serialize};
-use tari_common_types::types::{PrivateKey, PublicKey};
-use tari_crypto::{keys::PublicKey as _, tari_utilities::ByteArray};
+use tari_crypto::{
+    keys::PublicKey,
+    ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    tari_utilities,
+    tari_utilities::ByteArray,
+};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
-use crate::confidential::value_lookup_table::ValueLookupTable;
+use crate::{confidential::value_lookup_table::ValueLookupTable, FromByteType, ToByteType};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
@@ -15,26 +18,60 @@ use crate::confidential::value_lookup_table::ValueLookupTable;
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
+pub struct CompressedElgamalVerifiableBalance {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub encrypted: RistrettoPublicKeyBytes,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub public_nonce: RistrettoPublicKeyBytes,
+}
+
+impl FromByteType<CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
+    type Error = tari_utilities::ByteArrayError;
+
+    fn try_from_byte_type(bytes: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
+        let encrypted = RistrettoPublicKey::try_from_byte_type(&bytes.encrypted)?;
+        let public_nonce = RistrettoPublicKey::try_from_byte_type(&bytes.public_nonce)?;
+        Ok(ElgamalVerifiableBalance {
+            encrypted,
+            public_nonce,
+        })
+    }
+}
+
+impl From<ElgamalVerifiableBalance> for CompressedElgamalVerifiableBalance {
+    fn from(value: ElgamalVerifiableBalance) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&ElgamalVerifiableBalance> for CompressedElgamalVerifiableBalance {
+    fn from(value: &ElgamalVerifiableBalance) -> Self {
+        Self {
+            encrypted: value.encrypted.to_byte_type(),
+            public_nonce: value.public_nonce.to_byte_type(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElgamalVerifiableBalance {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub encrypted: PublicKey,
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_nonce: PublicKey,
+    pub encrypted: RistrettoPublicKey,
+    pub public_nonce: RistrettoPublicKey,
 }
 
 impl ElgamalVerifiableBalance {
     pub fn brute_force_balance<I: IntoIterator<Item = u64>, TLookup: ValueLookupTable>(
         &self,
-        view_private_key: &PrivateKey,
+        view_private_key: &RistrettoSecretKey,
         value_range: I,
         lookup_table: &mut TLookup,
     ) -> Result<Option<u64>, TLookup::Error> {
         let mut result = Self::batched_brute_force(view_private_key, value_range, lookup_table, Some(self))?;
-        Ok(result.pop().and_then(convert::identity))
+        Ok(result.pop().flatten())
     }
 
     pub fn batched_brute_force<'a, IValueRange, TLookup, IBalances>(
-        view_private_key: &PrivateKey,
+        view_private_key: &RistrettoSecretKey,
         value_range: IValueRange,
         lookup_table: &mut TLookup,
         verifiable_balances: IBalances,
@@ -50,7 +87,7 @@ impl ElgamalVerifiableBalance {
             .map(|(i, balance)| {
                 // V = E - pR
                 let balance = &balance.encrypted - view_private_key * &balance.public_nonce;
-                (i, copy_fixed(balance.as_bytes()))
+                (i, balance.to_byte_type())
             })
             .collect::<Vec<_>>();
 
@@ -58,13 +95,17 @@ impl ElgamalVerifiableBalance {
 
         for v in value_range {
             let value = lookup_table.lookup(v)?.unwrap_or_else(|| {
-                let pk = PublicKey::from_secret_key(&PrivateKey::from(v));
+                // Fallback to slow lookup method if the lookup table does not contain a key for the value
+                let pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(v));
                 copy_fixed(pk.as_bytes())
             });
 
-            while let Some(pos) = balances.iter().position(|(_, balance)| value == *balance) {
+            while let Some(pos) = balances.iter().position(|(_, balance)| value == balance.as_bytes()) {
                 let (order, _) = balances.swap_remove(pos);
-                results.get_mut(order).unwrap().replace(v);
+                results
+                    .get_mut(order)
+                    .expect("batched_brute_force: balances index greater than results")
+                    .replace(v);
             }
 
             if balances.is_empty() {
@@ -73,6 +114,19 @@ impl ElgamalVerifiableBalance {
         }
 
         Ok(results)
+    }
+}
+
+impl TryFrom<&CompressedElgamalVerifiableBalance> for ElgamalVerifiableBalance {
+    type Error = tari_utilities::ByteArrayError;
+
+    fn try_from(value: &CompressedElgamalVerifiableBalance) -> Result<Self, Self::Error> {
+        let encrypted = RistrettoPublicKey::try_from_byte_type(&value.encrypted)?;
+        let public_nonce = RistrettoPublicKey::try_from_byte_type(&value.public_nonce)?;
+        Ok(ElgamalVerifiableBalance {
+            encrypted,
+            public_nonce,
+        })
     }
 }
 
@@ -100,24 +154,30 @@ mod tests {
         fn lookup(&mut self, value: u64) -> Result<Option<[u8; 32]>, Self::Error> {
             // This would be a sequential lookup in a real implementation
             Ok(Some(copy_fixed(
-                PublicKey::from_secret_key(&PrivateKey::from(value)).as_bytes(),
+                RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(value)).as_bytes(),
             )))
         }
     }
 
     mod brute_force_balance {
+        use tari_crypto::{
+            keys::PublicKey,
+            ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+        };
+
         use super::*;
 
         #[test]
         fn it_finds_the_value() {
             const VALUE: u64 = 5242;
-            let view_sk = &PrivateKey::random(&mut OsRng);
-            let (nonce_sk, nonce_pk) = PublicKey::random_keypair(&mut OsRng);
+            let view_sk = &RistrettoSecretKey::random(&mut OsRng);
+            let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
             let rp = nonce_sk * view_sk;
 
             let subject = ElgamalVerifiableBalance {
-                encrypted: PublicKey::from_secret_key(&rp) + PublicKey::from_secret_key(&PrivateKey::from(VALUE)),
+                encrypted: RistrettoPublicKey::from_secret_key(&rp) +
+                    RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(VALUE)),
                 public_nonce: nonce_pk,
             };
 
@@ -129,13 +189,14 @@ mod tests {
 
         #[test]
         fn it_returns_the_value_equal_to_max_value() {
-            let view_sk = &PrivateKey::random(&mut OsRng);
-            let (nonce_sk, nonce_pk) = PublicKey::random_keypair(&mut OsRng);
+            let view_sk = &RistrettoSecretKey::random(&mut OsRng);
+            let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
 
             let rp = nonce_sk * view_sk;
 
             let subject = ElgamalVerifiableBalance {
-                encrypted: PublicKey::from_secret_key(&rp) + PublicKey::from_secret_key(&PrivateKey::from(10)),
+                encrypted: RistrettoPublicKey::from_secret_key(&rp) +
+                    RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(10)),
                 public_nonce: nonce_pk,
             };
 
@@ -153,31 +214,32 @@ mod tests {
         #[test]
         fn it_returns_none_if_the_value_out_of_range() {
             let subject = ElgamalVerifiableBalance {
-                encrypted: PublicKey::from_secret_key(&PrivateKey::from(101)),
+                encrypted: RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(101)),
                 public_nonce: Default::default(),
             };
 
             let balance = subject
-                .brute_force_balance(&PrivateKey::default(), 0..=100, &mut TestLookupTable)
+                .brute_force_balance(&RistrettoSecretKey::default(), 0..=100, &mut TestLookupTable)
                 .unwrap();
             assert_eq!(balance, None);
 
             let balance = subject
-                .brute_force_balance(&PrivateKey::default(), 102..=103, &mut TestLookupTable)
+                .brute_force_balance(&RistrettoSecretKey::default(), 102..=103, &mut TestLookupTable)
                 .unwrap();
             assert_eq!(balance, None);
         }
 
         #[test]
         fn it_brute_forces_a_batch() {
-            let view_sk = &PrivateKey::random(&mut OsRng);
+            let view_sk = &RistrettoSecretKey::random(&mut OsRng);
 
             let subject = (0..100)
                 .map(|v| {
-                    let (nonce_sk, nonce_pk) = PublicKey::random_keypair(&mut OsRng);
+                    let (nonce_sk, nonce_pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
                     let rp = nonce_sk * view_sk;
                     ElgamalVerifiableBalance {
-                        encrypted: PublicKey::from_secret_key(&rp) + PublicKey::from_secret_key(&PrivateKey::from(v)),
+                        encrypted: (RistrettoPublicKey::from_secret_key(&rp) +
+                            RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(v))),
                         public_nonce: nonce_pk,
                     }
                 })

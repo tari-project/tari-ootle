@@ -16,9 +16,8 @@ use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceiptAddress,
-    TemplateAddress,
 };
-use tari_template_lib::constants::XTR;
+use tari_template_lib::{constants::XTR, types::TemplateAddress};
 
 use crate::{
     models::SubstateModel,
@@ -240,7 +239,7 @@ where
 
     pub fn save_child<I: IntoIterator<Item = SubstateId>>(
         &self,
-        parent: SubstateId,
+        parent: &SubstateId,
         child: VersionedSubstateIdRef<'_>,
         referenced_substates: I,
     ) -> Result<(), SubstateApiError> {

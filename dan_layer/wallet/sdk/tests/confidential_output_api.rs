@@ -125,7 +125,9 @@ fn outputs_locked_and_finalized() {
         assert!(unspent.iter().any(|l| l.commitment == commitment_change));
         assert!(unspent.iter().any(|l| l.commitment == commitment_100));
         assert_eq!(unspent.len(), 2);
-        let balance = tx.outputs_get_unspent_balance(&Test::test_vault_address()).unwrap();
+        let balance = tx
+            .outputs_get_unspent_balance(&Test::test_vault_address().as_vault_id().unwrap())
+            .unwrap();
         assert_eq!(balance, 124);
     }
 }
@@ -219,7 +221,7 @@ impl Test {
     pub fn get_unspent_balance(&self) -> u64 {
         let outputs_api = self.sdk.confidential_outputs_api();
         outputs_api
-            .get_unspent_balance(&Test::test_vault_address())
+            .get_unspent_balance(&Test::test_vault_address().as_vault_id().unwrap())
             .optional()
             .unwrap()
             .unwrap_or(0)

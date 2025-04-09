@@ -131,4 +131,8 @@ impl ComponentBody {
         self.state = state;
         self
     }
+
+    pub fn to_indexed_well_known_types(&self) -> Result<IndexedWellKnownTypes, IndexedValueError> {
+        IndexedWellKnownTypes::from_value(&self.state)
+    }
 }

@@ -71,11 +71,14 @@ export function toHexString(byteArray: any): string {
   if (byteArray === undefined) {
     return "undefined";
   }
+  if (typeof byteArray === "string") {
+    return byteArray;
+  }
   // object might be a tagged object
   if (byteArray["@@TAGGED@@"] !== undefined) {
     return toHexString(byteArray["@@TAGGED@@"][1]);
   }
-  return "Unsupported type";
+  return "Unsupported type " + typeof byteArray;
 }
 
 export function fromHexString(hexString: string) {

@@ -379,7 +379,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
     fn substates_upsert_child(
         &mut self,
-        parent: SubstateId,
+        parent: &SubstateId,
         address: VersionedSubstateIdRef<'_>,
         referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError> {
@@ -886,11 +886,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn non_fungible_token_upsert(&mut self, non_fungible_token: &NonFungibleToken) -> Result<(), WalletStorageError> {
         use crate::schema::{non_fungible_tokens, vaults};
 
-        info!(
-            target: "tari::dan::wallet_daemon::account_monitor",
-            "Inserting new non fungible token with id = {}", non_fungible_token.nft_id
-        );
-
         let data = serde_json::to_string(&CborValueJsonSerializeWrapper(&non_fungible_token.data)).map_err(|e| {
             WalletStorageError::DecodingError {
                 operation: "non_fungible_token_upsert",
@@ -921,7 +916,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 non_fungible_tokens::vault_id.eq(vault_id),
                 non_fungible_tokens::is_burned.eq(non_fungible_token.is_burned),
             ))
-            .on_conflict(non_fungible_tokens::nft_id)
+            .on_conflict((non_fungible_tokens::nft_id, non_fungible_tokens::vault_id))
             .do_update()
             .set((
                 non_fungible_tokens::data.eq(&data),

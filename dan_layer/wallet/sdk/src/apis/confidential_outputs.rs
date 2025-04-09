@@ -7,7 +7,7 @@ use tari_dan_common_types::optional::{IsNotFoundError, Optional};
 use tari_dan_wallet_crypto::{kdfs, ConfidentialOutputMaskAndValue};
 use tari_engine_types::{confidential::ConfidentialOutput, substate::SubstateId, FromByteType, ToByteType};
 use tari_key_manager::key_manager::DerivedKey;
-use tari_template_lib::models::Amount;
+use tari_template_lib::models::{Amount, VaultId};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -219,9 +219,9 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_unspent_balance(&self, vault_addr: &SubstateId) -> Result<u64, ConfidentialOutputsApiError> {
+    pub fn get_unspent_balance(&self, vault_id: &VaultId) -> Result<u64, ConfidentialOutputsApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let balance = tx.outputs_get_unspent_balance(vault_addr)?;
+        let balance = tx.outputs_get_unspent_balance(vault_id)?;
         Ok(balance)
     }
 
@@ -237,6 +237,7 @@ impl<'a, TStore: WalletStore> ConfidentialOutputsApi<'a, TStore> {
             .key_manager_api
             .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
         let mut tx = self.store.create_write_tx()?;
+
         for output in outputs {
             match tx.outputs_get_by_commitment(&output.commitment).optional()? {
                 Some(_) => {

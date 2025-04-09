@@ -860,30 +860,75 @@ pub async fn handle_transfer(
     let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
     inputs.insert(src_vault_substate.substate_id.into());
 
-    // add the input for the resource address to be transfered
-    let resource_substate = sdk
-        .substate_api()
-        .scan_for_substate(&SubstateId::Resource(req.resource_address), None)
-        .await?;
-    let resource_substate_address = SubstateRequirement::new(
-        resource_substate.address.substate_id().clone(),
-        Some(resource_substate.address.version()),
-    );
-    inputs.insert(resource_substate.address.into());
+    let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
+    inputs.insert(resource_substate_address.clone());
 
     let mut instructions = vec![];
     let mut fee_instructions = vec![];
 
     let destination_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.destination_public_key);
-    let existing_account = sdk
+    let existing_dest_account = sdk
         .substate_api()
         .scan_for_substate(&SubstateId::Component(destination_account_address), None)
         .await
         .optional()?;
 
-    if let Some(ValidatorScanResult { address, .. }) = existing_account {
+    if let Some(ValidatorScanResult { address, substate }) = existing_dest_account {
         inputs.insert(address.into());
+
+        // Figure out which vault to add as an input
+        let Some(component) = substate.component() else {
+            return Err(anyhow::anyhow!(
+                "The destination account {} is not a component. This is unexpected.",
+                destination_account_address
+            ));
+        };
+        let indexed = component.body.to_indexed_well_known_types()?;
+
+        let mut found_dest_vault = None;
+        for vault_id in indexed.vault_ids() {
+            // Local vault?
+            match sdk.accounts_api().get_vault(vault_id).optional()? {
+                Some(vault) => {
+                    if vault.resource_address != src_vault.resource_address {
+                        // Continue searching for a vault for the resource address
+                        continue;
+                    }
+                    // Found it - we're sending to our own vault
+                    found_dest_vault = Some(*vault_id);
+                    break;
+                },
+                None => {
+                    // TODO(perf): slow with lots of vaults
+                    let vault = sdk
+                        .substate_api()
+                        .scan_for_substate(&SubstateId::Vault(*vault_id), None)
+                        .await
+                        .optional()?;
+
+                    let Some(vault) = vault.and_then(|scan| scan.substate.into_vault()) else {
+                        warn!(
+                            target: LOG_TARGET,
+                            "❓️ The destination account {destination_account_address} contains a vault {vault_id} that was not found. This is unexpected.",
+                        );
+                        continue;
+                    };
+
+                    if *vault.resource_address() != src_vault.resource_address {
+                        // Continue searching for a vault for the resource address
+                        continue;
+                    }
+
+                    // Found it
+                    found_dest_vault = Some(*vault_id);
+                },
+            }
+        }
+
+        if let Some(found) = found_dest_vault {
+            inputs.insert(SubstateRequirement::unversioned(found));
+        }
     } else {
         instructions.push(Instruction::CreateAccount {
             public_key_address: req.destination_public_key,
@@ -939,7 +984,6 @@ pub async fn handle_transfer(
     let transaction = transaction_builder(context)
         .with_fee_instructions(fee_instructions)
         .with_instructions(instructions)
-        .add_input(resource_substate_address)
         .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
 

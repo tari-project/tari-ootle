@@ -1,7 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use log::*;
 use tari_dan_common_types::optional::{IsNotFoundError, Optional};
@@ -159,14 +162,14 @@ where
         let mut is_updated = false;
         let account_substate = substate_api.get_substate(account_address)?;
         let ValidatorScanResult {
-            address: versioned_account_address,
+            address: account_substate_id,
             substate: account_value,
         } = substate_api
             .scan_for_substate(account_substate.substate_id.substate_id(), None)
             .await?;
 
         let indexed_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
-        substate_api.save_root(versioned_account_address.as_ref(), indexed_value.referenced_substates())?;
+        substate_api.save_root(account_substate_id.as_ref(), indexed_value.referenced_substates())?;
         let known_child_vaults = substate_api
             .load_dependent_substates(&[account_substate.substate_id.substate_id()])?
             .into_iter()
@@ -178,17 +181,16 @@ where
             .collect::<HashMap<_, _>>();
         for vault_id in indexed_value.vault_ids() {
             let vault_substate_id = SubstateId::Vault(*vault_id);
-            let scan_result = substate_api
-                .scan_for_substate(&vault_substate_id, None)
-                .await
-                .optional()?;
             let Some(ValidatorScanResult {
-                address: versioned_addr,
+                address: versioned_vault_substate_id,
                 substate,
                 ..
-            }) = scan_result
+            }) = substate_api
+                .scan_for_substate(&vault_substate_id, None)
+                .await
+                .optional()?
             else {
-                warn!(target: LOG_TARGET, "Vault {} for account {} does not exist according to indexer", vault_substate_id, versioned_account_address);
+                warn!(target: LOG_TARGET, "Vault {} for account {} does not exist according to indexer", vault_substate_id, account_substate_id);
                 continue;
             };
 
@@ -196,45 +198,68 @@ where
             if let Some(vault_version) = maybe_vault_version {
                 // The first time a vault is found, know about the vault substate from the tx result but never added
                 // it to the database.
-                if versioned_addr.version() == vault_version && accounts_api.has_vault(&vault_substate_id)? {
-                    info!(target: LOG_TARGET, "Vault {} is up to date", versioned_addr.substate_id());
+                if versioned_vault_substate_id.version() == vault_version && accounts_api.has_vault(vault_id)? {
+                    info!(target: LOG_TARGET, "Vault {} is up to date", versioned_vault_substate_id.substate_id());
                     continue;
                 }
             }
 
-            let SubstateValue::Vault(vault) = substate else {
+            let SubstateValue::Vault(latest_vault) = substate else {
                 error!(target: LOG_TARGET, "Substate {} is not a vault. This should be impossible.", vault_substate_id);
                 continue;
             };
 
-            // TODO: this is expensive for many NFTs
-            let mut nfts = HashMap::with_capacity(vault.get_non_fungible_ids().len());
-            for nft in vault.get_non_fungible_ids() {
-                let addr = NonFungibleAddress::new(*vault.resource_address(), nft.clone());
-                let ValidatorScanResult { address, substate } =
-                    substate_api.scan_for_substate(&addr.into(), None).await?;
-                let nft_container = substate.into_non_fungible().ok_or_else(|| {
-                    AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a non-fungible token.", nft))
-                })?;
-                substate_api.save_child(versioned_addr.substate_id().clone(), address.as_ref(), [(*vault
-                    .resource_address())
-                .into()])?;
-                nfts.insert(nft.clone(), nft_container);
-            }
+            // // TODO: this is expensive for many NFTs
+            // let mut nfts = HashMap::with_capacity(latest_vault.get_non_fungible_ids().len());
+            // if !latest_vault.get_non_fungible_ids().is_empty() {
+            //     info!(
+            //         target: LOG_TARGET,
+            //         "Found {} non-fungible(s) in vault {}. Collecting NFT data for update",
+            //         latest_vault.get_non_fungible_ids().len(),
+            //         vault_id
+            //     );
+            // }
+            // for nft in latest_vault.get_non_fungible_ids() {
+            //     let addr = NonFungibleAddress::new(*latest_vault.resource_address(), nft.clone());
+            //     let Some(ValidatorScanResult { address, substate }) =
+            //         substate_api.scan_for_substate(&addr.into(), None).await.optional()?
+            //     else {
+            //         warn!(target: LOG_TARGET, "Non-fungible {} for vault {} does not exist according to indexer",
+            // nft, vault_id);         continue;
+            //     };
+            //     substate_api.save_child(versioned_vault_substate_id.substate_id(), address.as_ref(), [
+            //         (*latest_vault.resource_address()).into(),
+            //     ])?;
+            //     let nft_container = substate.into_non_fungible().ok_or_else(|| {
+            //         AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a non-fungible token.", nft))
+            //     })?;
+            //     info!(
+            //         target: LOG_TARGET,
+            //         "Found non-fungible {} in vault {}",
+            //         nft,
+            //         vault_id
+            //     );
+            //     nfts.insert(nft.clone(), nft_container);
+            // }
 
             is_updated = true;
 
             // Save the vault substate
             substate_api.save_child(
-                versioned_account_address.substate_id().clone(),
-                versioned_addr.as_ref(),
-                [SubstateId::from(*vault.resource_address())],
+                account_substate_id.substate_id(),
+                versioned_vault_substate_id.as_ref(),
+                [SubstateId::from(*latest_vault.resource_address())],
             )?;
 
-            self.add_vault_to_account_if_not_exist(versioned_account_address.substate_id(), *vault_id, &vault)
+            self.add_vault_to_account_if_not_exist(account_substate_id.substate_id(), *vault_id, &latest_vault)
                 .await?;
-            self.refresh_vault(versioned_account_address.substate_id(), *vault_id, &vault, &nfts)
-                .await?;
+            self.refresh_vault(
+                account_substate_id.substate_id(),
+                *vault_id,
+                &latest_vault,
+                Default::default(),
+            )
+            .await?;
         }
 
         Ok(is_updated)
@@ -244,22 +269,21 @@ where
         &self,
         account_address: &SubstateId,
         vault_id: VaultId,
-        vault: &Vault,
-        nfts: &HashMap<NonFungibleId, NonFungibleContainer>,
+        latest_vault: &Vault,
+        updated_nft_data: HashMap<NonFungibleId, NonFungibleContainer>,
     ) -> Result<(), AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
-        let non_fungibles_api = self.wallet_sdk.non_fungible_api();
 
-        let balance = vault.balance();
+        let new_balance = latest_vault.balance();
         let vault_addr = SubstateId::Vault(vault_id);
         if !accounts_api.exists_by_address(account_address)? {
             // This is not our account
             return Ok(());
         }
-
         let mut has_changed = false;
 
-        if !accounts_api.has_vault(&vault_addr)? {
+        let maybe_current_vault = accounts_api.get_vault(&vault_id).optional()?;
+        if maybe_current_vault.is_none() {
             info!(
                 target: LOG_TARGET,
                 "🔒️ NEW vault {} in account {}",
@@ -267,14 +291,14 @@ where
                 account_address
             );
 
-            let resource = self.fetch_resource(*vault.resource_address()).await?;
+            let resource = self.fetch_resource(*latest_vault.resource_address()).await?;
             let token_symbol = resource.metadata().get(TOKEN_SYMBOL).cloned();
 
             accounts_api.add_vault(
                 account_address.clone(),
                 vault_addr.clone(),
-                *vault.resource_address(),
-                vault.resource_type(),
+                *latest_vault.resource_address(),
+                latest_vault.resource_type(),
                 token_symbol,
             )?;
             has_changed = true;
@@ -285,9 +309,9 @@ where
             "🔒️ vault {} in account {} has new balance {}",
             vault_id,
             account_address,
-            balance
+            new_balance
         );
-        if let Some(commitments) = vault.get_confidential_commitments() {
+        if let Some(commitments) = latest_vault.get_confidential_commitments() {
             info!(
                 target: LOG_TARGET,
                 "🔒️ vault {} in account {} has {} confidential commitments",
@@ -301,42 +325,133 @@ where
             has_changed = true;
         }
 
+        if latest_vault.resource_type().is_non_fungible() {
+            info!(
+                target: LOG_TARGET,
+                "🔒️ updating vault {} in account {} which has {} non-fungible(s)",
+                vault_id,
+                account_address,
+                latest_vault.get_non_fungible_ids().len()
+            );
+            self.update_vault_nfts(vault_id, latest_vault, updated_nft_data).await?;
+        }
+
         let outputs_api = self.wallet_sdk.confidential_outputs_api();
-        let confidential_balance = outputs_api.get_unspent_balance(&vault_addr)?;
-        let confidential_balance = confidential_balance
+        let confidential_balance = outputs_api.get_unspent_balance(&vault_id)?;
+        let new_confidential_balance = confidential_balance
             .try_into()
             .map_err(|_| AccountMonitorError::Overflow {
                 details: "confidential balance overflowed Amount".to_string(),
             })?;
 
-        let vault_balance = accounts_api.get_vault_balance(&vault_addr)?;
-        if vault_balance.confidential != confidential_balance || vault_balance.revealed != balance {
-            accounts_api.update_vault_balance(&vault_addr, balance, confidential_balance)?;
+        if maybe_current_vault
+            .is_none_or(|v| v.confidential_balance != new_confidential_balance || v.revealed_balance != new_balance)
+        {
+            info!(
+                target: LOG_TARGET,
+                "🔒️ vault {} in account {} has new balance {} and confidential balance {}",
+                vault_id,
+                account_address,
+                new_balance,
+                new_confidential_balance
+            );
+            accounts_api.update_vault_balance(&vault_addr, new_balance, new_confidential_balance)?;
+            has_changed = true;
+        }
+        if has_changed {
+            self.notify.notify(AccountChangedEvent {
+                account_address: account_address.clone(),
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn update_vault_nfts(
+        &self,
+        vault_id: VaultId,
+        latest_vault: &Vault,
+        mut updated_nft_data_cache: HashMap<NonFungibleId, NonFungibleContainer>,
+    ) -> Result<bool, AccountMonitorError> {
+        let non_fungibles_api = self.wallet_sdk.non_fungible_api();
+        let mut has_changed = false;
+
+        // Existing NFTs
+        // TODO: 1_000_000 is arbitrary
+        let existing_nft_ids = non_fungibles_api.get_nft_ids_by_vault_id(&vault_id, 1_000_000, 0)?;
+        let latest_nft_ids = latest_vault
+            .get_non_fungible_ids()
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+
+        let new_nft_ids = latest_nft_ids
+            .difference(&existing_nft_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let removed_nft_ids = existing_nft_ids
+            .difference(&latest_nft_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        debug!(
+            target: LOG_TARGET,
+            "Local vault {} has {} NFTs, and {} NFTs in updated vault, {} new nft(s).",
+            vault_id,
+            existing_nft_ids.len(),
+            latest_vault.get_non_fungible_ids().len(),
+            new_nft_ids.len()
+        );
+
+        for to_remove in removed_nft_ids {
+            info!(
+                target: LOG_TARGET,
+                "🧸 Updating NFTs: Non-fungible {} has been transferred from vault {}. Removing it from the stored vault.",
+                to_remove,
+                vault_id
+            );
+            if non_fungibles_api
+                .remove_nft(&vault_id, &to_remove)
+                .optional()?
+                .is_none()
+            {
+                warn!(
+                    target: LOG_TARGET,
+                    "NonFungible ID {} is found by indexer, but not found in the vault.", to_remove
+                );
+            }
             has_changed = true;
         }
 
-        for id in vault.get_non_fungible_ids() {
-            let Some(nft) = nfts.get(id) else {
-                debug!(
-                    target: LOG_TARGET,
-                    "NonFungible ID {} is found in the vault, but not found in nft collection. It must have been transferred.", id
-                );
-                if non_fungibles_api.remove_nft(&vault_id, id).optional()?.is_none() {
-                    warn!(
-                        target: LOG_TARGET,
-                        "non-fungible {} from vault {} not found",
-                        id,
-                        vault_id
-                    );
-                }
-                continue;
+        for id in new_nft_ids {
+            info!(
+                target: LOG_TARGET,
+                "🧸 Updating NFTs: Non-fungible {} has been added to vault {}. Adding it to the stored vault.",
+                id,
+                vault_id
+            );
+            let nft = match updated_nft_data_cache.remove(&id) {
+                Some(nft) => nft,
+                None => {
+                    let substate = self
+                        .fetch_substate(&NonFungibleAddress::new(*latest_vault.resource_address(), id.clone()).into())
+                        .await
+                        .optional()?;
+                    let Some(substate) = substate else {
+                        warn!(target: LOG_TARGET, "Non-fungible {} for vault {} does not exist according to indexer. Unable to update it", id, vault_id);
+                        continue;
+                    };
+                    substate.into_substate_value().into_non_fungible().ok_or_else(|| {
+                        AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a non-fungible token.", id))
+                    })?
+                },
             };
 
             let maybe_nft_contents = nft.contents();
 
             let non_fungible = NonFungibleToken {
-                is_burned: maybe_nft_contents.is_none(),
-                resource_address: *vault.resource_address(),
+                is_burned: nft.is_burnt(),
+                resource_address: *latest_vault.resource_address(),
                 vault_id,
                 nft_id: id.clone(),
                 data: maybe_nft_contents
@@ -351,15 +466,10 @@ where
             has_changed = true;
         }
 
-        if has_changed {
-            self.notify.notify(AccountChangedEvent {
-                account_address: account_address.clone(),
-            });
-        }
-
-        Ok(())
+        Ok(has_changed)
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn process_result(&mut self, tx_id: TransactionId, diff: &SubstateDiff) -> Result<(), AccountMonitorError> {
         let substate_api = self.wallet_sdk.substate_api();
         let accounts_api = self.wallet_sdk.accounts_api();
@@ -405,24 +515,31 @@ where
                     }
                 });
 
-        let nfts = diff
-            .up_iter()
-            .filter_map(|(addr, s)| {
-                Some((
-                    addr.as_non_fungible_address()?.id().clone(),
-                    s.substate_value().non_fungible()?.clone(),
-                ))
-            })
-            .collect::<HashMap<_, _>>();
-
-        // Find and process all new vaults
+        // Find and process all new/existing vaults
         for (account_addr, value) in accounts {
             for vault_id in value.vault_ids() {
                 // Any vaults we process here do not need to be reprocesed later
                 if let Some(vault) = vaults.remove(vault_id).and_then(|s| s.substate_value().vault()) {
                     self.add_vault_to_account_if_not_exist(account_addr, *vault_id, vault)
                         .await?;
-                    self.refresh_vault(account_addr, *vault_id, vault, &nfts).await?;
+
+                    let updated_nfts = vault
+                        .get_non_fungible_ids()
+                        .iter()
+                        .filter_map(|nft_id| {
+                            diff.up_iter()
+                                .find(|(id, _)| id.as_non_fungible_address().map(|a| a.id()) == Some(nft_id))
+                                .map(|(_, s)| {
+                                    let nft = s
+                                        .substate_value()
+                                        .non_fungible()
+                                        .unwrap_or_else(|| panic!("Expected {} to be a non-fungible token.", nft_id));
+                                    (nft_id.clone(), nft.clone())
+                                })
+                        })
+                        .collect();
+
+                    self.refresh_vault(account_addr, *vault_id, vault, updated_nfts).await?;
                 }
             }
         }
@@ -462,8 +579,24 @@ where
             self.add_vault_to_account_if_not_exist(&account_addr, vault_id, vault)
                 .await?;
 
+            let updated_nfts = vault
+                .get_non_fungible_ids()
+                .iter()
+                .filter_map(|nft_id| {
+                    diff.up_iter()
+                        .find(|(id, _)| id.as_non_fungible_address().map(|a| a.id()) == Some(nft_id))
+                        .map(|(_, s)| {
+                            let nft = s
+                                .substate_value()
+                                .non_fungible()
+                                .unwrap_or_else(|| panic!("Expected {} to be a non-fungible token.", nft_id));
+                            (nft_id.clone(), nft.clone())
+                        })
+                })
+                .collect();
+
             // Update the vault balance / confidential outputs
-            self.refresh_vault(&account_addr, vault_id, vault, &nfts).await?;
+            self.refresh_vault(&account_addr, vault_id, vault, updated_nfts).await?;
             updated_accounts.push(account_addr);
         }
 
@@ -482,13 +615,17 @@ where
     }
 
     async fn fetch_resource(&self, resx_addr: ResourceAddress) -> Result<Resource, AccountMonitorError> {
-        let substate_api = self.wallet_sdk.substate_api();
-        let resx_addr = SubstateId::Resource(resx_addr);
-        let ValidatorScanResult { substate: resource, .. } = substate_api.scan_for_substate(&resx_addr, None).await?;
-        let resx = resource.into_resource().ok_or_else(|| {
+        let substate = self.fetch_substate(&SubstateId::Resource(resx_addr)).await?;
+        let resx = substate.into_substate_value().into_resource().ok_or_else(|| {
             AccountMonitorError::UnexpectedSubstate(format!("Expected {} to be a resource.", resx_addr))
         })?;
         Ok(resx)
+    }
+
+    async fn fetch_substate(&self, substate_id: &SubstateId) -> Result<Substate, AccountMonitorError> {
+        let substate_api = self.wallet_sdk.substate_api();
+        let ValidatorScanResult { substate, address } = substate_api.scan_for_substate(substate_id, None).await?;
+        Ok(Substate::new(address.version(), substate))
     }
 
     async fn add_vault_to_account_if_not_exist(
@@ -503,7 +640,7 @@ where
             // This is not our account
             return Ok(());
         }
-        if accounts_api.has_vault(&vault_addr)? {
+        if accounts_api.has_vault(&vault_id)? {
             return Ok(());
         }
         let maybe_resource = match self.fetch_resource(*vault.resource_address()).await {
@@ -608,6 +745,12 @@ pub enum AccountMonitorError {
     ExpectedNewAccount { tx_id: TransactionId, account_name: String },
     #[error("Overflow error: {details}")]
     Overflow { details: String },
+}
+
+impl IsNotFoundError for AccountMonitorError {
+    fn is_not_found_error(&self) -> bool {
+        matches!(self, Self::Substate(s) if s.is_not_found_error())
+    }
 }
 
 fn find_new_account_address(diff: &SubstateDiff) -> Option<&SubstateId> {

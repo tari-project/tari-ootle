@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::HashSet;
+
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
@@ -42,6 +44,17 @@ where TStore: WalletStore
         let mut tx = self.store.create_read_tx()?;
         let non_fungible_token = tx.non_fungible_token_get_by_nft_id(nft_id)?;
         Ok(non_fungible_token)
+    }
+
+    pub fn get_nft_ids_by_vault_id(
+        &self,
+        vault_id: &VaultId,
+        limit: u64,
+        offset: u64,
+    ) -> Result<HashSet<NonFungibleId>, NonFungibleTokensApiError> {
+        let mut tx = self.store.create_read_tx()?;
+        let non_fungibles = tx.non_fungible_token_get_ids_by_vault_id(vault_id, limit, offset)?;
+        Ok(non_fungibles)
     }
 
     pub fn get_all(

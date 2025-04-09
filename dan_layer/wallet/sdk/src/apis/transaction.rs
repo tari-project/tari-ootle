@@ -11,9 +11,9 @@ use tari_dan_common_types::{
 };
 use tari_engine_types::{
     indexed_value::{IndexedValueError, IndexedWellKnownTypes},
-    substate::SubstateDiff,
+    substate::{SubstateDiff, SubstateId},
 };
-use tari_template_lib::prelude::ComponentAddress;
+use tari_template_lib::{constants::XTR, prelude::ComponentAddress};
 use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
@@ -319,7 +319,7 @@ where
             }
         }
 
-        let (components, mut rest) = diff.up_iter().partition::<Vec<_>, _>(|(addr, _)| addr.is_component());
+        let (components, mut other_substates) = diff.up_iter().partition::<Vec<_>, _>(|(addr, _)| addr.is_component());
 
         for (component_addr, substate) in components {
             let header = substate.substate_value().component().unwrap();
@@ -333,29 +333,27 @@ where
                 Some(header.template_address),
             )?;
 
-            let value = IndexedWellKnownTypes::from_value(header.state())?;
-
-            for owned_id in value.referenced_substates() {
-                if let Some(pos) = rest.iter().position(|(addr, _)| addr == &owned_id) {
-                    let (_, child) = rest.swap_remove(pos);
+            for owned_id in indexed.referenced_substates() {
+                if let Some(pos) = other_substates.iter().position(|(addr, _)| addr == &owned_id) {
+                    let (_, child) = other_substates.swap_remove(pos);
                     // If there was a previous parent for this substate, we keep it as is.
                     let parent = downed_substates_with_parents
                         .get(&owned_id)
                         .cloned()
                         .unwrap_or_else(|| component_addr.clone());
 
-                    if owned_id.is_vault() {
-                        if let Some(vault) = tx.vaults_get(&owned_id).optional()? {
+                    if let Some(vault_id) = owned_id.as_vault_id() {
+                        if let Some(vault) = tx.vaults_get(&vault_id).optional()? {
                             // The vault for an account may have been mutated without mutating the account component
                             // If we know this vault, set it as a child of the account
                             tx.substates_upsert_child(
-                                vault.account_address.clone(),
+                                &vault.account_address,
                                 VersionedSubstateIdRef::new(&owned_id, child.version()),
                                 [vault.resource_address.into()].into_iter().collect(),
                             )?;
                             if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
                                 tx.substates_upsert_child(
-                                    vault.account_address,
+                                    &vault.account_address,
                                     resource.substate_id.as_ref(),
                                     HashSet::new(),
                                 )?;
@@ -375,7 +373,7 @@ where
 
                     let maybe_substate = tx.substates_get(&owned_id).optional()?;
                     tx.substates_upsert_child(
-                        parent,
+                        &parent,
                         VersionedSubstateIdRef::new(&owned_id, child.version()),
                         maybe_substate
                             .map(|s| s.referenced_substates.into_iter().collect())
@@ -385,48 +383,105 @@ where
             }
         }
 
-        for (id, substate) in rest {
-            if id.is_vault() {
-                if let Some(vault) = tx.vaults_get(id).optional()? {
-                    // The vault for an account may have been mutated without mutating the account component
-                    // If we know this vault, set it as a child of the account
-                    tx.substates_upsert_child(
-                        vault.account_address.clone(),
-                        VersionedSubstateIdRef::new(id, substate.version()),
-                        [vault.resource_address.into()].into_iter().collect(),
-                    )?;
-                    if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
-                        tx.substates_upsert_child(
-                            vault.account_address,
-                            resource.substate_id.as_ref(),
-                            HashSet::new(),
+        for (id, substate) in other_substates {
+            match id {
+                SubstateId::Component(_) => unreachable!(),
+                SubstateId::Resource(_) => match tx.substates_get(id).optional()? {
+                    Some(known_substate) => {
+                        tx.substates_upsert_root(
+                            VersionedSubstateIdRef::new(id, substate.version()),
+                            known_substate.referenced_substates.into_iter().collect(),
+                            known_substate.module_name,
+                            known_substate.template_address,
                         )?;
+                    },
+                    None => {
+                        tx.substates_upsert_root(
+                            VersionedSubstateIdRef::new(id, substate.version()),
+                            Default::default(),
+                            None,
+                            None,
+                        )?;
+                    },
+                },
+                SubstateId::Vault(vault_id) => {
+                    match tx.vaults_get(vault_id).optional()? {
+                        Some(vault) => {
+                            // The vault for an account may have been mutated without mutating the account component
+                            // If we know this vault, set it as a child of the account
+                            tx.substates_upsert_child(
+                                &vault.account_address,
+                                VersionedSubstateIdRef::new(id, substate.version()),
+                                [vault.resource_address.into()].into_iter().collect(),
+                            )?;
+                            if let Some(resource) = tx.substates_get(&vault.resource_address.into()).optional()? {
+                                tx.substates_upsert_child(
+                                    &vault.account_address,
+                                    resource.substate_id.as_ref(),
+                                    HashSet::new(),
+                                )?;
+                            }
+                        },
+                        None => {
+                            // This should never happen because Vaults can't dangle and these are removed by the
+                            // previous loop above
+                            warn!(target: LOG_TARGET, "Vault {} does not have a parent", vault_id);
+                            tx.substates_upsert_root(
+                                VersionedSubstateIdRef::new(id, substate.version()),
+                                [(*substate.substate_value().vault().unwrap().resource_address()).into()]
+                                    .into_iter()
+                                    .collect(),
+                                None,
+                                None,
+                            )?;
+                        },
                     }
-                } else {
+                    continue;
+                },
+                SubstateId::UnclaimedConfidentialOutput(_) => {
                     tx.substates_upsert_root(
                         VersionedSubstateIdRef::new(id, substate.version()),
-                        [(*substate.substate_value().vault().unwrap().resource_address()).into()]
-                            .into_iter()
-                            .collect(),
+                        [XTR.into()].into_iter().collect(),
                         None,
                         None,
                     )?;
-                }
-                continue;
+                },
+                SubstateId::NonFungible(nft) => {
+                    let resource_address = nft.resource_address();
+                    let referenced_data = substate
+                        .substate_value()
+                        .non_fungible()
+                        .and_then(|s| s.contents())
+                        .map(|c| IndexedWellKnownTypes::from_value(c.data()))
+                        .transpose()?;
+                    let referenced_mdata = substate
+                        .substate_value()
+                        .non_fungible()
+                        .and_then(|s| s.contents())
+                        .map(|c| IndexedWellKnownTypes::from_value(c.mutable_data()))
+                        .transpose()?;
+                    tx.substates_upsert_child(
+                        &SubstateId::Resource(*resource_address),
+                        VersionedSubstateIdRef::new(id, substate.version()),
+                        referenced_data
+                            .into_iter()
+                            .chain(referenced_mdata)
+                            .flat_map(|s| s.into_referenced_substates())
+                            .collect(),
+                    )?;
+                },
+                SubstateId::NonFungibleIndex(_) |
+                SubstateId::TransactionReceipt(_) |
+                SubstateId::Template(_) |
+                SubstateId::ValidatorFeePool(_) => {
+                    tx.substates_upsert_root(
+                        VersionedSubstateIdRef::new(id, substate.version()),
+                        Default::default(),
+                        None,
+                        None,
+                    )?;
+                },
             }
-            let indexed = substate
-                .substate_value()
-                .component()
-                .map(|c| IndexedWellKnownTypes::from_value(c.state()))
-                .transpose()?;
-
-            let maybe_obj = tx.substates_get(id).optional()?;
-            tx.substates_upsert_root(
-                VersionedSubstateIdRef::new(id, substate.version()),
-                indexed.as_ref().iter().flat_map(|i| i.referenced_substates()).collect(),
-                maybe_obj.as_ref().and_then(|o| o.module_name.clone()),
-                maybe_obj.as_ref().and_then(|o| o.template_address),
-            )?;
         }
 
         Ok(())

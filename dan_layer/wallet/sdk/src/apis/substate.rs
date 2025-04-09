@@ -239,7 +239,7 @@ where
 
     pub fn save_child<I: IntoIterator<Item = SubstateId>>(
         &self,
-        parent: SubstateId,
+        parent: &SubstateId,
         child: VersionedSubstateIdRef<'_>,
         referenced_substates: I,
     ) -> Result<(), SubstateApiError> {

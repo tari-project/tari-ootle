@@ -271,6 +271,19 @@ impl IndexedWellKnownTypes {
             .chain(self.validator_node_fee_pools.iter().map(|a| (*a).into()))
     }
 
+    pub fn into_referenced_substates(self) -> impl Iterator<Item = SubstateId> {
+        self.component_addresses
+            .into_iter()
+            .map(Into::into)
+            .chain(self.resource_addresses.into_iter().map(Into::into))
+            .chain(self.transaction_receipt_addresses.into_iter().map(Into::into))
+            .chain(self.non_fungible_addresses.into_iter().map(Into::into))
+            .chain(self.vault_ids.into_iter().map(Into::into))
+            .chain(self.unclaimed_confidential_output_address.into_iter().map(Into::into))
+            .chain(self.published_template_addresses.into_iter().map(Into::into))
+            .chain(self.validator_node_fee_pools.into_iter().map(Into::into))
+    }
+
     pub fn bucket_ids(&self) -> &[BucketId] {
         &self.bucket_ids
     }

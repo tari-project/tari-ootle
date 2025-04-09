@@ -155,8 +155,8 @@ pub trait WalletStoreReader {
     fn accounts_get_by_vault(&mut self, vault_address: &SubstateId) -> Result<Account, WalletStorageError>;
 
     // Vaults
-    fn vaults_get(&mut self, address: &SubstateId) -> Result<VaultModel, WalletStorageError>;
-    fn vaults_exists(&mut self, address: &SubstateId) -> Result<bool, WalletStorageError>;
+    fn vaults_get(&mut self, vault_id: &VaultId) -> Result<VaultModel, WalletStorageError>;
+    fn vaults_exists(&mut self, vault_id: &VaultId) -> Result<bool, WalletStorageError>;
     fn vaults_get_by_resource(
         &mut self,
         account_addr: &SubstateId,
@@ -165,7 +165,7 @@ pub trait WalletStoreReader {
     fn vaults_get_by_account(&mut self, account_addr: &SubstateId) -> Result<Vec<VaultModel>, WalletStorageError>;
 
     // Outputs
-    fn outputs_get_unspent_balance(&mut self, vault_address: &SubstateId) -> Result<u64, WalletStorageError>;
+    fn outputs_get_unspent_balance(&mut self, vault_id: &VaultId) -> Result<u64, WalletStorageError>;
     fn outputs_get_locked_by_proof(
         &mut self,
         proof_id: ConfidentialProofId,
@@ -192,6 +192,13 @@ pub trait WalletStoreReader {
         &mut self,
         nft_id: NonFungibleId,
     ) -> Result<NonFungibleToken, WalletStorageError>;
+
+    fn non_fungible_token_get_ids_by_vault_id(
+        &mut self,
+        vault_id: &VaultId,
+        limit: u64,
+        offset: u64,
+    ) -> Result<HashSet<NonFungibleId>, WalletStorageError>;
 
     fn non_fungible_token_get_all(
         &mut self,
@@ -270,7 +277,7 @@ pub trait WalletStoreWriter {
     ) -> Result<(), WalletStorageError>;
     fn substates_upsert_child(
         &mut self,
-        parent: SubstateId,
+        parent: &SubstateId,
         address: VersionedSubstateIdRef<'_>,
         referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError>;

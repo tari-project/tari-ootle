@@ -255,7 +255,7 @@ pub async fn handle_view_vault_balance(
 
     let commitments = vault
         .get_confidential_commitments()
-        .ok_or_else(|| invalid_params("vault_id", Some("Vault down not contain a confidential resource")))?;
+        .ok_or_else(|| invalid_params("vault_id", Some("Vault does not contain a confidential resource")))?;
 
     // Get view secret key
     let view_key = sdk

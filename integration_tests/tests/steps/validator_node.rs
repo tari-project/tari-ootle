@@ -21,6 +21,7 @@ use log::warn;
 use minotari_app_grpc::tari_rpc::{RegisterValidatorNodeRequest, Signature};
 use notify::Watcher;
 use tari_base_node_client::{grpc::GrpcBaseNodeClient, BaseNodeClient};
+use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{layer_one_transaction::LayerOneTransactionDef, Epoch, SubstateAddress};
 use tari_engine_types::substate::SubstateId;
@@ -90,7 +91,7 @@ async fn start_seed_validator_node(
         let mut client = vn.get_client();
         client
             .add_peer(AddPeerRequest {
-                public_key: ident.public_key.clone(),
+                public_key: ident.public_key,
                 addresses: ident.public_addresses.clone(),
                 wait_for_dial: false,
             })
@@ -101,7 +102,7 @@ async fn start_seed_validator_node(
         let mut client = indexer.get_jrpc_indexer_client();
         client
             .add_peer(tari_indexer_client::types::AddPeerRequest {
-                public_key: ident.public_key.clone(),
+                public_key: ident.public_key,
                 addresses: ident.public_addresses.clone(),
                 wait_for_dial: false,
             })
@@ -135,7 +136,7 @@ async fn given_validator_connects_to_other_vns(world: &mut TariWorld, name: Stri
         .filter(|vn| vn.name != name)
         .map(|vn| {
             (
-                vn.public_key.clone(),
+                vn.public_key,
                 Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
             )
         })
@@ -171,13 +172,21 @@ pub async fn send_vn_registration_with_claim_wallet(world: &mut TariWorld, vn_na
         .register_validator_node(RegisterValidatorNodeRequest {
             validator_node_public_key: registration.public_key.to_vec(),
             validator_node_signature: Some(Signature {
-                public_nonce: registration.signature.signature().get_public_nonce().to_vec(),
+                public_nonce: registration
+                    .signature
+                    .signature()
+                    .get_compressed_public_nonce()
+                    .to_vec(),
                 signature: registration.signature.signature().get_signature().to_vec(),
             }),
             validator_node_claim_public_key: registration.claim_fees_public_key.to_vec(),
             sidechain_deployment_key: vec![],
             fee_per_gram: 1,
-            message: "Register".to_string(),
+            payment_id: PaymentId::Open {
+                user_data: "Register".as_bytes().to_vec(),
+                tx_type: TxType::ValidatorNodeRegistration,
+            }
+            .to_bytes(),
         })
         .await
         .unwrap()
@@ -634,7 +643,7 @@ async fn then_i_wait_for_validator_node_to_be_evicted(
                         continue;
                     },
                 };
-                if *transaction_def.payload.node_to_evict() != evict_vn.public_key {
+                if transaction_def.payload.node_to_evict().as_bytes() != evict_vn.public_key.as_bytes() {
                     panic!(
                         "Got an eviction proof for public key {}, however this did not match the public key of \
                          validator {evict_vn_name}",

@@ -60,8 +60,9 @@ impl ProcessDefinition for MinotariMiner {
             .arg(format!("--max-blocks={max_blocks}"))
             .arg(format!("-pminer.wallet_payment_address={wallet_payment_address}"))
             .arg(format!(
-                "-pminer.base_node_grpc_address=/ip4/127.0.0.1/tcp/{base_node_grpc_port}",
+                "-pminer.base_node_grpc_address=http://127.0.0.1:{base_node_grpc_port}",
             ))
+            .arg("-pminer.sha_p2pool_enabled=false")
             .arg("-pminer.num_mining_threads=1");
 
         Ok(command)

@@ -74,6 +74,21 @@ impl<const MAX: usize> TryFrom<Vec<u8>> for MaxSizeBytes<MAX> {
     }
 }
 
+impl<const MAX: usize> TryFrom<&[u8]> for MaxSizeBytes<MAX> {
+    type Error = MaxSizeBytesError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() > MAX {
+            Err(MaxSizeBytesError::MaxSizeBytesLengthError {
+                expected: MAX,
+                actual: value.len(),
+            })
+        } else {
+            Ok(MaxSizeBytes { inner: value.to_vec() })
+        }
+    }
+}
+
 impl<const MAX: usize> AsRef<[u8]> for MaxSizeBytes<MAX> {
     fn as_ref(&self) -> &[u8] {
         &self.inner

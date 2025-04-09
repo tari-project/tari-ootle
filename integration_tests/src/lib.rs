@@ -37,18 +37,24 @@ use rand::rngs::OsRng;
 use tari_common::configuration::Network;
 use tari_common_types::{
     tari_address::{TariAddress, TariAddressFeatures},
-    types::{PrivateKey, PublicKey},
+    types::{CompressedPublicKey, PrivateKey},
 };
 use tari_core::{
     consensus::ConsensusManager,
-    transactions::key_manager::{create_memory_db_key_manager, MemoryDbKeyManager, TariKeyId},
+    transactions::transaction_key_manager::{
+        create_memory_db_key_manager,
+        MemoryDbKeyManager,
+        TariKeyId,
+        TransactionKeyManagerInterface,
+    },
 };
 use tari_crypto::{
-    keys::{PublicKey as _, SecretKey},
-    ristretto::{RistrettoComSig, RistrettoSecretKey},
+    keys::SecretKey,
+    ristretto::{RistrettoComSig, RistrettoPublicKey, RistrettoSecretKey},
 };
 use tari_dan_common_types::SubstateRequirement;
 use tari_sidechain::EvictionProof;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use template::RegisteredTemplate;
 use validator_node::ValidatorNodeProcess;
 use wallet::WalletProcess;
@@ -88,11 +94,11 @@ pub struct TariWorld {
     pub rangeproofs: IndexMap<String, Vec<u8>>,
     pub addresses: IndexMap<String, String>,
     pub num_databases_saved: usize,
-    pub account_keys: IndexMap<String, (RistrettoSecretKey, PublicKey)>,
+    pub account_keys: IndexMap<String, (RistrettoSecretKey, RistrettoPublicKeyBytes)>,
     pub key_manager: MemoryDbKeyManager,
     /// Key name -> key index
     pub wallet_keys: IndexMap<String, u64>,
-    pub claim_public_keys: IndexMap<String, PublicKey>,
+    pub claim_public_keys: IndexMap<String, RistrettoPublicKey>,
     pub wallet_daemons: IndexMap<String, DanWalletDaemonProcess>,
     /// Used for all one-sided coinbase payments
     pub wallet_private_key: PrivateKey,
@@ -268,13 +274,10 @@ impl TariWorld {
     }
 
     pub async fn script_key_id(&self) -> TariKeyId {
-        use tari_key_manager::key_manager_service::KeyManagerInterface;
-        match self.key_manager.import_key(self.wallet_private_key.clone()).await {
-            Ok(key_id) => key_id,
-            Err(_) => tari_core::transactions::transaction_protocol::sender::KeyId::Imported {
-                key: PublicKey::from_secret_key(&self.wallet_private_key),
-            },
-        }
+        self.key_manager
+            .import_key(self.wallet_private_key.clone())
+            .await
+            .unwrap()
     }
 }
 
@@ -282,7 +285,7 @@ impl Default for TariWorld {
     fn default() -> Self {
         let wallet_private_key = PrivateKey::random(&mut OsRng);
         let default_payment_address = TariAddress::new_single_address(
-            PublicKey::from_secret_key(&wallet_private_key),
+            CompressedPublicKey::from_secret_key(&wallet_private_key),
             Network::LocalNet,
             TariAddressFeatures::create_interactive_and_one_sided(),
         );

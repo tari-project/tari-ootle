@@ -2,22 +2,31 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{BulletRangeProof, Commitment, PrivateKey, PublicKey, Signature};
-use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::ByteArray};
+use tari_common_types::types::{BulletRangeProof, PrivateKey};
+use tari_crypto::{
+    commitment::HomomorphicCommitmentFactory,
+    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr},
+    tari_utilities::ByteArray,
+};
 use tari_template_lib::{
-    crypto::BalanceProofSignature,
     models::{Amount, ConfidentialWithdrawProof, EncryptedData},
+    types::crypto::{BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 
-use super::{challenges, get_commitment_factory, validate_confidential_proof};
-use crate::{confidential::elgamal::ElgamalVerifiableBalance, resource_container::ResourceError};
+use super::{get_commitment_factory, messages, validate_confidential_proof, CompressedElgamalVerifiableBalance};
+use crate::{
+    confidential::elgamal::ElgamalVerifiableBalance,
+    resource_container::ResourceError,
+    FromByteType,
+    ToByteType,
+};
 
 #[derive(Debug, Clone)]
 pub struct ValidatedConfidentialWithdrawProof {
     /// Optional confidential output of the withdraw. This will be created as a new output commitment.
-    pub output: Option<ConfidentialOutput>,
+    pub output: Option<ValidatedConfidentialOutput>,
     /// Optional confidential change output of the withdraw. This will replace any inputs used.
-    pub change_output: Option<ConfidentialOutput>,
+    pub change_output: Option<ValidatedConfidentialOutput>,
     /// Range proof
     pub range_proof: BulletRangeProof,
     /// Amount of revealed value to use as an input.
@@ -36,19 +45,40 @@ pub struct ValidatedConfidentialWithdrawProof {
 )]
 pub struct ConfidentialOutput {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub commitment: Commitment,
+    pub commitment: PedersenCommitmentBytes,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub stealth_public_nonce: PublicKey,
+    pub stealth_public_nonce: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub encrypted_data: EncryptedData,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub minimum_value_promise: u64,
+    pub viewable_balance: Option<CompressedElgamalVerifiableBalance>,
+}
+
+impl From<ValidatedConfidentialOutput> for ConfidentialOutput {
+    fn from(output: ValidatedConfidentialOutput) -> Self {
+        Self {
+            commitment: output.commitment.to_byte_type(),
+            stealth_public_nonce: output.stealth_public_nonce.to_byte_type(),
+            encrypted_data: output.encrypted_data,
+            minimum_value_promise: output.minimum_value_promise,
+            viewable_balance: output.viewable_balance.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedConfidentialOutput {
+    pub commitment: PedersenCommitment,
+    pub stealth_public_nonce: RistrettoPublicKey,
+    pub encrypted_data: EncryptedData,
+    pub minimum_value_promise: u64,
     pub viewable_balance: Option<ElgamalVerifiableBalance>,
 }
 
-pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Commitment>>(
+pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a PedersenCommitment>>(
     inputs: I,
-    view_key: Option<&PublicKey>,
+    view_key: Option<&RistrettoPublicKey>,
     withdraw_proof: ConfidentialWithdrawProof,
 ) -> Result<ValidatedConfidentialWithdrawProof, ResourceError> {
     let validated_proof = validate_confidential_proof(&withdraw_proof.output_proof, view_key)?;
@@ -101,10 +131,9 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Comm
         &PrivateKey::default(),
         withdraw_proof.input_revealed_amount.value() as u64,
     );
-    let agg_inputs = inputs
-        .into_iter()
-        .fold(PublicKey::default(), |sum, commit| sum + commit.as_public_key()) +
-        revealed_input_commitment.as_public_key();
+    let agg_inputs = inputs.into_iter().fold(RistrettoPublicKey::default(), |sum, commit| {
+        sum + commit.as_public_key()
+    }) + revealed_input_commitment.as_public_key();
 
     let public_excess = agg_inputs -
         &output_commitment_with_revealed -
@@ -112,9 +141,9 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Comm
             .change_output
             .as_ref()
             .map(|output| output.commitment.as_public_key())
-            .unwrap_or(&PublicKey::default());
+            .unwrap_or(&RistrettoPublicKey::default());
 
-    let message = challenges::confidential_withdraw64(
+    let message = messages::confidential_withdraw64(
         &public_excess,
         balance_proof.get_public_nonce(),
         input_revealed_amount,
@@ -137,8 +166,8 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Comm
     })
 }
 
-fn try_decode_to_signature(balance_proof: &BalanceProofSignature) -> Option<Signature> {
-    let public_nonce = PublicKey::from_canonical_bytes(balance_proof.as_public_nonce()).ok()?;
-    let signature = PrivateKey::from_canonical_bytes(balance_proof.as_signature()).ok()?;
-    Some(Signature::new(public_nonce, signature))
+fn try_decode_to_signature(balance_proof: &BalanceProofSignature) -> Option<RistrettoSchnorr> {
+    let public_nonce = RistrettoPublicKey::try_from_byte_type(balance_proof.public_nonce()).ok()?;
+    let signature = PrivateKey::from_canonical_bytes(balance_proof.signature().as_bytes()).ok()?;
+    Some(RistrettoSchnorr::new(public_nonce, signature))
 }

@@ -12,10 +12,7 @@ use std::time::Duration;
 
 use log::info;
 use tari_common_types::types::PrivateKey;
-use tari_consensus::{
-    hotstuff::{to_public_key_bytes, HotStuffError},
-    messages::HotstuffMessage,
-};
+use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
     crypto::{create_key_pair, create_key_pair_from_seed},
@@ -38,6 +35,7 @@ use tari_engine_types::{
     hashing::hash_template_code,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
+    ToByteType,
     ValidatorFeeWithdrawal,
 };
 use tari_transaction::Transaction;
@@ -1468,7 +1466,7 @@ async fn leader_failure_node_goes_down_and_gets_evicted() {
         .with_read_tx(|tx| {
             let leaf = tx.leaf_block_get(Epoch(1))?;
             assert!(
-                tx.suspended_nodes_is_evicted(leaf.block_id(), &failure_node_pk)
+                tx.suspended_nodes_is_evicted(leaf.block_id(), &failure_node_pk.to_byte_type())
                     .unwrap(),
                 "{failure_node} is not evicted"
             );
@@ -1484,7 +1482,7 @@ async fn leader_failure_node_goes_down_and_gets_evicted() {
         .eviction_proofs()
         .await;
     for proof in &eviction_proofs {
-        assert_eq!(proof.node_to_evict(), &failure_node_pk);
+        assert_eq!(proof.node_to_evict().as_bytes(), failure_node_pk.as_bytes());
     }
 
     // Epoch manager state is shared between all validators, so each working validator (4) should create a proof.
@@ -1518,7 +1516,7 @@ async fn multishard_publish_template() {
         .await;
 
     let binary_hash = hash_template_code(&wasm);
-    let template_id = PublishedTemplateAddress::from_author_and_binary_hash(&pk, &binary_hash);
+    let template_id = PublishedTemplateAddress::from_author_and_binary_hash(&pk.to_byte_type(), &binary_hash);
     test.add_execution_at_destination(TestVnDestination::All, ExecuteSpec {
         transaction: tx.transaction().clone(),
         decision: Decision::Commit,
@@ -1569,7 +1567,7 @@ async fn multishard_publish_template() {
 async fn multishard_validator_fee_claim() {
     setup_logger();
     let (claim_sk, claim_pk) = create_key_pair_from_seed(100);
-    let claim_bytes = to_public_key_bytes(&claim_pk);
+    let claim_bytes = claim_pk.to_byte_type();
     let mut test = Test::builder()
         .add_committee(0, vec!["1", "2"])
         .add_committee(1, vec!["3", "4"])
@@ -1579,7 +1577,7 @@ async fn multishard_validator_fee_claim() {
     // Create and send publish template transaction
     let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
     let address = derive_fee_pool_address(
-        claim_bytes,
+        &claim_bytes,
         test.num_preshards(),
         test.num_preshards()
             .all_shard_groups_iter(test.num_committees())

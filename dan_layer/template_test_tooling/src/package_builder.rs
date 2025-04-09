@@ -15,7 +15,7 @@ use tari_dan_engine::{
 };
 use tari_engine_types::hashing::hash_template_code;
 use tari_template_builtin::get_template_builtin;
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::prelude::TemplateAddress;
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -103,10 +103,7 @@ impl TemplateProvider for Package {
     type Error = PackageError;
     type Template = LoadedTemplate;
 
-    fn get_template_module(
-        &self,
-        id: &tari_engine_types::TemplateAddress,
-    ) -> Result<Option<Self::Template>, Self::Error> {
+    fn get_template_module(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
         Ok(self.templates.lock().unwrap().get(id).cloned())
     }
 }

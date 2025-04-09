@@ -1,15 +1,21 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::BTreeMap;
+
 use rand::rngs::OsRng;
-use tari_common_types::types::PublicKey;
-use tari_crypto::keys::PublicKey as _;
-use tari_engine_types::{resource_container::ResourceError, substate::SubstateId};
+use tari_common_types::types::PrivateKey;
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
+use tari_engine_types::{
+    confidential::{ConfidentialOutput, ElgamalVerifiableBalance, ValueLookupTable},
+    resource_container::ResourceError,
+    substate::SubstateId,
+};
 use tari_template_lib::{
     args,
-    crypto::RistrettoPublicKeyBytes,
     models::{Amount, ComponentAddress},
     prelude::ConfidentialOutputStatement,
+    types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 use tari_template_test_tooling::{
     support::{
@@ -32,7 +38,7 @@ use tari_utilities::ByteArray;
 
 fn setup(
     initial_supply: ConfidentialOutputStatement,
-    view_key: Option<&PublicKey>,
+    view_key: Option<&RistrettoPublicKey>,
 ) -> (TemplateTest, ComponentAddress, SubstateId) {
     let mut template_test = TemplateTest::new(vec![
         "tests/templates/confidential/faucet",
@@ -459,9 +465,35 @@ fn mint_revealed_with_invalid_proof() {
     });
 }
 
+pub fn try_brute_force_confidential_balance<I, TValueLookup>(
+    utxos: &BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>,
+    secret_view_key: &PrivateKey,
+    value_range: I,
+    value_lookup: &mut TValueLookup,
+) -> Result<Option<u64>, TValueLookup::Error>
+where
+    I: IntoIterator<Item = u64> + Clone,
+    TValueLookup: ValueLookupTable,
+{
+    let decompressed_viewable_balances = utxos
+        .values()
+        .filter_map(|utxo| utxo.viewable_balance.as_ref().map(|vb| vb.try_into().unwrap()))
+        .collect::<Vec<_>>();
+
+    let balances = ElgamalVerifiableBalance::batched_brute_force(
+        secret_view_key,
+        value_range,
+        value_lookup,
+        &decompressed_viewable_balances,
+    )?;
+
+    // If any of the commitments cannot be brute forced, then we return None
+    Ok(balances.into_iter().sum())
+}
+
 #[test]
 fn mint_with_view_key() {
-    let (view_key_secret, ref view_key) = PublicKey::random_keypair(&mut OsRng);
+    let (view_key_secret, ref view_key) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let (confidential_proof, _mask, _change) = generate_confidential_proof_with_view_key(Amount(123), None, view_key);
     let (mut test, faucet, _faucet_resx) = setup(confidential_proof, Some(view_key));
     let faucet_entity_id = faucet.entity_id();
@@ -496,9 +528,13 @@ fn mint_with_view_key() {
         .map(|(_, vault)| vault.substate_value().as_vault().unwrap())
         .unwrap();
 
-    let total_balance = faucet_vault
-        .try_brute_force_confidential_balance(&view_key_secret, 0..=200, &mut AlwaysMissLookupTable)
-        .unwrap();
+    let total_balance = try_brute_force_confidential_balance(
+        faucet_vault.get_confidential_commitments().unwrap(),
+        &view_key_secret,
+        0..=200,
+        &mut AlwaysMissLookupTable,
+    )
+    .unwrap();
     assert_eq!(total_balance, Some(223 - 55));
 
     let user_vault = diff
@@ -507,8 +543,12 @@ fn mint_with_view_key() {
         .map(|(_, vault)| vault.substate_value().as_vault().unwrap())
         .unwrap();
 
-    let total_balance = user_vault
-        .try_brute_force_confidential_balance(&view_key_secret, 0..=200, &mut AlwaysMissLookupTable)
-        .unwrap();
+    let total_balance = try_brute_force_confidential_balance(
+        user_vault.get_confidential_commitments().unwrap(),
+        &view_key_secret,
+        0..=200,
+        &mut AlwaysMissLookupTable,
+    )
+    .unwrap();
     assert_eq!(total_balance, Some(55));
 }

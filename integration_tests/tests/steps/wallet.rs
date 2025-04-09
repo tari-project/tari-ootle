@@ -5,8 +5,12 @@ use std::time::Duration;
 
 use cucumber::{given, then, when};
 use minotari_app_grpc::tari_rpc::{GetBalanceRequest, SubmitValidatorEvictionProofRequest, ValidateRequest};
-use tari_common_types::types::{Commitment, PrivateKey, PublicKey};
-use tari_crypto::{ristretto::RistrettoComSig, tari_utilities::ByteArray};
+use tari_common_types::types::PrivateKey;
+use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
+use tari_crypto::{
+    ristretto::{pedersen::PedersenCommitment, RistrettoComSig, RistrettoPublicKey},
+    tari_utilities::ByteArray,
+};
 use tokio::time::sleep;
 
 use crate::{spawn_wallet, TariWorld};
@@ -45,7 +49,11 @@ async fn when_i_burn_on_wallet(
         .create_burn_transaction(minotari_app_grpc::tari_rpc::CreateBurnTransactionRequest {
             amount: amount * 1_000_000,
             fee_per_gram: 1,
-            message: "Burn".to_string(),
+            payment_id: PaymentId::Open {
+                user_data: "Burn".as_bytes().to_vec(),
+                tx_type: TxType::Burn,
+            }
+            .to_bytes(),
             claim_public_key: public_key.to_vec(),
             sidechain_deployment_key: vec![],
         })
@@ -60,7 +68,9 @@ async fn when_i_burn_on_wallet(
     world.commitment_ownership_proofs.insert(
         proof,
         RistrettoComSig::new(
-            Commitment::from_public_key(&PublicKey::from_canonical_bytes(&ownership_proof.public_nonce).unwrap()),
+            PedersenCommitment::from_public_key(
+                &RistrettoPublicKey::from_canonical_bytes(&ownership_proof.public_nonce).unwrap(),
+            ),
             PrivateKey::from_canonical_bytes(&ownership_proof.u).unwrap(),
             PrivateKey::from_canonical_bytes(&ownership_proof.v).unwrap(),
         ),
@@ -68,7 +78,7 @@ async fn when_i_burn_on_wallet(
     world.rangeproofs.insert(range_proof, resp.range_proof);
     world.claim_public_keys.insert(
         claim_public_key_name,
-        PublicKey::from_canonical_bytes(&resp.reciprocal_claim_public_key).unwrap(),
+        RistrettoPublicKey::from_canonical_bytes(&resp.reciprocal_claim_public_key).unwrap(),
     );
 }
 

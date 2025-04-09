@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{substate_type::SubstateType, Epoch, SubstateRequirement};
 use tari_dan_storage::consensus_models::Decision;
 use tari_engine_types::{
@@ -13,9 +13,9 @@ use tari_engine_types::{
     serde_with as serde_tools,
     substate::{Substate, SubstateId, SubstateValue},
     template_models::ResourceAddress,
-    TemplateAddress,
 };
 use tari_template_abi::TemplateDef;
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use tari_transaction::{Transaction, TransactionId};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
@@ -246,7 +246,8 @@ pub enum IndexerTransactionFinalizedResult {
 pub struct GetIdentityResponse {
     pub peer_id: String,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    #[serde(with = "serde_tools::hex")]
+    pub public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub public_addresses: Vec<Multiaddr>,
 }
@@ -300,7 +301,7 @@ pub struct NonFungibleSubstate {
 )]
 pub struct AddPeerRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub addresses: Vec<Multiaddr>,
     pub wait_for_dial: bool,

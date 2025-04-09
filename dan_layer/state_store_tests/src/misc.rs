@@ -2,7 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use indexmap::IndexMap;
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, NumPreshards, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
@@ -24,7 +23,6 @@ use tari_dan_storage::{
         QcId,
         QuorumCertificate,
         QuorumDecision,
-        ValidatorSchnorrSignature,
         ValidatorSignature,
     },
     StateStore,
@@ -32,6 +30,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 use tari_state_tree::TreeHash;
+use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
 
@@ -74,7 +73,7 @@ fn miscellaneous_operations(db: impl StateStore) {
         epoch: Epoch::zero(),
         block_height: NodeHeight(123),
         decision: QuorumDecision::Accept,
-        signature: ValidatorSignature::new(PublicKey::default(), ValidatorSchnorrSignature::default()),
+        signature: ValidatorSignature::new(RistrettoPublicKeyBytes::default(), SchnorrSignatureBytes::zero()),
     };
     tx.last_sent_vote_set(&last_sent_vote).unwrap();
     let res = tx.last_sent_vote_get().unwrap();

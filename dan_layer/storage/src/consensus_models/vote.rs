@@ -8,7 +8,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
-use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{optional::Optional, Epoch};
 
 use crate::{
@@ -36,8 +35,8 @@ impl Vote {
         hasher.write_u8(self.decision.as_u8());
         hasher.write(self.sender_leaf_hash.as_slice());
         hasher.write(self.signature.public_key.as_bytes());
-        hasher.write(self.signature.signature.get_public_nonce().as_bytes());
-        hasher.write(self.signature.signature.get_signature().as_bytes());
+        hasher.write(self.signature.signature.public_nonce().as_bytes());
+        hasher.write(self.signature.signature.signature().as_bytes());
         hasher.finish()
     }
 

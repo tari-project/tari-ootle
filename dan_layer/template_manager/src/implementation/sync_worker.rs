@@ -34,7 +34,7 @@ use tari_dan_common_types::{displayable::Displayable, NodeAddressable, ToPeerId}
 use tari_dan_storage::global::DbTemplateType;
 use tari_engine_types::hashing::hash_template_code;
 use tari_epoch_manager::EpochManagerReader;
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
 use crate::{

@@ -2,6 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use tari_common_types::types::CompressedPublicKey;
+use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_dan_storage::{
     consensus_models::{Block, BlockHeader, QuorumCertificate, QuorumDecision},
     StateStoreReadTransaction,
@@ -14,8 +16,10 @@ use tari_sidechain::{
     EvictionProof,
     SidechainBlockCommitProof,
     SidechainBlockHeader,
+    ValidatorBlockSignature,
     ValidatorQcSignature,
 };
+use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
 use crate::hotstuff::HotStuffError;
 
@@ -42,7 +46,15 @@ pub fn generate_eviction_proofs<TTx: StateStoreReadTransaction>(
             };
             info!(target: LOG_TARGET, "🦶 Generating eviction proof for validator: {atom}");
             let inclusion_proof = block.compute_command_inclusion_proof(idx)?;
-            let atom = EvictNodeAtom::new(atom.public_key.clone());
+            let atom = EvictNodeAtom::new(
+                CompressedPublicKey::from_canonical_bytes(atom.public_key.as_bytes()).map_err(|_| {
+                    HotStuffError::InvariantError(format!(
+                        "EvictNodeAtom RistrettoPublicKey non-canonical bytes for public key, in \
+                         generate_eviction_proofs ({:?})",
+                        atom.public_key,
+                    ))
+                })?,
+            );
             let commit_command_proof = CommandCommitProof::new(atom, block_commit_proof.clone(), inclusion_proof);
             let proof = EvictionProof::new(commit_command_proof);
             proofs.push(proof);
@@ -66,13 +78,13 @@ fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
     }
 
     debug!(target: LOG_TARGET, "Add tip_qc: {tip_qc}");
-    proof_elements.push(convert_qc_to_proof_element(tip_qc));
+    proof_elements.push(convert_qc_to_proof_element(tip_qc)?);
 
     let mut block = tip_qc.get_block(tx)?;
     while block.id() != commit_block.id() {
         if block.justifies_parent() {
             debug!(target: LOG_TARGET, "Add justify: {}", block.justify());
-            proof_elements.push(convert_qc_to_proof_element(block.justify()));
+            proof_elements.push(convert_qc_to_proof_element(block.justify())?);
             block = block.get_parent(tx)?;
         } else {
             block = block.get_parent(tx)?;
@@ -102,7 +114,7 @@ fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
 
             proof_elements.push(CommitProofElement::DummyChain(dummy_chain));
             debug!(target: LOG_TARGET, "Add justify: {}", qc);
-            proof_elements.push(convert_qc_to_proof_element(&qc));
+            proof_elements.push(convert_qc_to_proof_element(&qc)?);
         }
         // Prevent possibility of endless loop
         if block.height() < commit_block.height() {
@@ -114,15 +126,18 @@ fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
     }
 
     let command_commit_proof = SidechainBlockCommitProof {
-        header: convert_block_to_sidechain_block_header(commit_block.header()),
+        header: convert_block_to_sidechain_block_header(commit_block.header())?,
         proof_elements,
     };
 
     Ok(command_commit_proof)
 }
 
-pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> SidechainBlockHeader {
-    SidechainBlockHeader {
+pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<SidechainBlockHeader, HotStuffError> {
+    // NOTE: if the signature is not validated prior to this, an invariant error could be caused by the block proposer
+    let signature = convert_validator_block_signature(header.signature().expect("checked by caller"))?;
+
+    Ok(SidechainBlockHeader {
         network: header.network().as_byte(),
         parent_id: *header.parent().hash(),
         justify_id: *header.justify_id().hash(),
@@ -132,35 +147,73 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Sidechai
             start: header.shard_group().start().as_u32(),
             end_inclusive: header.shard_group().end().as_u32(),
         },
-        proposed_by: header.proposed_by().clone(),
+        proposed_by: CompressedPublicKey::from_canonical_bytes(header.proposed_by().as_bytes()).map_err(|_| {
+            HotStuffError::InvariantError(format!(
+                "RistrettoPublicKey non-canonical bytes for proposed_by, in convert_block_to_sidechain_block_header \
+                 ({:?})",
+                header.proposed_by(),
+            ))
+        })?,
         total_leader_fee: header.total_leader_fee(),
         state_merkle_root: *header.state_merkle_root(),
         command_merkle_root: *header.command_merkle_root(),
         is_dummy: header.is_dummy(),
         foreign_indexes_hash: header.create_foreign_indexes_hash(),
-        signature: header.signature().expect("checked by caller").clone(),
+        signature,
         timestamp: header.timestamp(),
         base_layer_block_height: header.base_layer_block_height(),
         base_layer_block_hash: *header.base_layer_block_hash(),
         extra_data_hash: header.create_extra_data_hash(),
-    }
+    })
 }
 
-fn convert_qc_to_proof_element(qc: &QuorumCertificate) -> CommitProofElement {
-    CommitProofElement::QuorumCertificate(tari_sidechain::QuorumCertificate {
-        header_hash: *qc.header_hash(),
-        parent_id: *qc.parent_id().hash(),
-        signatures: qc
-            .signatures()
-            .iter()
-            .map(|s| ValidatorQcSignature {
-                public_key: s.public_key.clone(),
-                signature: s.signature.clone(),
-            })
-            .collect(),
-        decision: match qc.decision() {
-            QuorumDecision::Accept => tari_sidechain::QuorumDecision::Accept,
-            QuorumDecision::Reject => tari_sidechain::QuorumDecision::Reject,
+fn convert_qc_to_proof_element(qc: &QuorumCertificate) -> Result<CommitProofElement, HotStuffError> {
+    Ok(CommitProofElement::QuorumCertificate(
+        tari_sidechain::QuorumCertificate {
+            header_hash: *qc.header_hash(),
+            parent_id: *qc.parent_id().hash(),
+            signatures: qc
+                .signatures()
+                .iter()
+                .map(|s| {
+                    Ok(ValidatorQcSignature {
+                        public_key: CompressedPublicKey::from_canonical_bytes(s.public_key.as_bytes()).map_err(
+                            |_| {
+                                HotStuffError::InvariantError(format!(
+                                    "RistrettoPublicKey non-canonical bytes for public key, in \
+                                     convert_qc_to_proof_element ({:?})",
+                                    s.public_key,
+                                ))
+                            },
+                        )?,
+                        signature: convert_validator_block_signature(&s.signature)?,
+                    })
+                })
+                .collect::<Result<_, HotStuffError>>()?,
+            decision: match qc.decision() {
+                QuorumDecision::Accept => tari_sidechain::QuorumDecision::Accept,
+                QuorumDecision::Reject => tari_sidechain::QuorumDecision::Reject,
+            },
         },
-    })
+    ))
+}
+
+fn convert_validator_block_signature(
+    signature: &SchnorrSignatureBytes,
+) -> Result<ValidatorBlockSignature, HotStuffError> {
+    let public_nonce =
+        CompressedPublicKey::from_canonical_bytes(signature.public_nonce().as_bytes()).map_err(|_| {
+            HotStuffError::InvariantError(format!(
+                "RistrettoPublicKey non-canonical bytes for public nonce, in convert_validator_block_signature ({:?})",
+                signature.public_nonce(),
+            ))
+        })?;
+    let signature = RistrettoSecretKey::from_canonical_bytes(signature.signature().as_bytes()).map_err(|_| {
+        HotStuffError::InvariantError(format!(
+            "RistrettoPublicKey non-canonical bytes for signature, in convert_validator_block_signature ({:?})",
+            signature.signature(),
+        ))
+    })?;
+
+    Ok(ValidatorBlockSignature::new(public_nonce, signature))
 }

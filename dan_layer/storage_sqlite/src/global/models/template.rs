@@ -21,12 +21,13 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use chrono::NaiveDateTime;
-use tari_common_types::types::{FixedHashSizeError, PublicKey};
+use tari_common_types::types::FixedHashSizeError;
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::global::DbTemplate;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::HashParseError;
-use tari_utilities::ByteArray;
+use tari_template_lib::{
+    prelude::RistrettoPublicKeyBytes,
+    types::{HashParseError, TemplateAddress},
+};
 use thiserror::Error;
 
 use crate::global::schema::*;
@@ -62,7 +63,7 @@ impl TryInto<DbTemplate> for TemplateModel {
 
     fn try_into(self) -> Result<DbTemplate, Self::Error> {
         Ok(DbTemplate {
-            author_public_key: PublicKey::from_canonical_bytes(&self.author_public_key)
+            author_public_key: RistrettoPublicKeyBytes::from_bytes(&self.author_public_key)
                 .map_err(|_| TemplateConversionError::InvalidPublicKeyBytes)?,
             template_name: self.template_name,
             expected_hash: self.expected_hash.try_into()?,

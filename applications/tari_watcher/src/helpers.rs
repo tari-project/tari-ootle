@@ -8,9 +8,7 @@ use std::{
 
 use anyhow::anyhow;
 use minotari_app_grpc::tari_rpc::GetActiveValidatorNodesResponse;
-use tari_common_types::types::PublicKey;
-use tari_core::transactions::transaction_components::ValidatorNodeSignature;
-use tari_crypto::tari_utilities::ByteArray;
+use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 use tokio::fs;
 
 use crate::config::Config;
@@ -27,9 +25,9 @@ pub async fn read_config_file(path: PathBuf) -> anyhow::Result<Config> {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ValidatorNodeRegistration {
-    pub signature: ValidatorNodeSignature,
-    pub public_key: PublicKey,
-    pub claim_fees_public_key: PublicKey,
+    pub signature: SchnorrSignatureBytes,
+    pub public_key: RistrettoPublicKeyBytes,
+    pub claim_fees_public_key: RistrettoPublicKeyBytes,
 }
 
 pub async fn read_registration_file<P: AsRef<Path>>(
@@ -52,8 +50,8 @@ pub async fn read_registration_file<P: AsRef<Path>>(
     }
 }
 
-pub fn to_vn_public_keys(vns: Vec<GetActiveValidatorNodesResponse>) -> Vec<PublicKey> {
+pub fn to_vn_public_keys(vns: Vec<GetActiveValidatorNodesResponse>) -> Vec<RistrettoPublicKeyBytes> {
     vns.into_iter()
-        .map(|vn| PublicKey::from_vec(&vn.public_key).expect("Invalid public key, should not happen"))
+        .map(|vn| RistrettoPublicKeyBytes::from_bytes(&vn.public_key).expect("Invalid public key, should not happen"))
         .collect()
 }

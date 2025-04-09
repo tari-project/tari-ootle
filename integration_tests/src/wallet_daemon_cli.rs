@@ -40,7 +40,7 @@ use tari_template_lib::{
     args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::Amount,
-    prelude::{ComponentAddress, ResourceAddress},
+    prelude::{ComponentAddress, ResourceAddress, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
 };
 use tari_transaction::UnsignedTransaction;
@@ -269,10 +269,9 @@ pub async fn create_account(world: &mut TariWorld, account_name: String, wallet_
         .unwrap();
 
     // TODO: store the secret key in the world, but we don't have a need for it at the moment
-    world.account_keys.insert(
-        account_name.clone(),
-        (RistrettoSecretKey::default(), resp.public_key.clone()),
-    );
+    world
+        .account_keys
+        .insert(account_name.clone(), (RistrettoSecretKey::default(), resp.public_key));
 
     add_substate_ids(
         world,
@@ -305,10 +304,9 @@ pub async fn create_account_with_free_coins(
 
     let resp = client.create_free_test_coins(request).await.unwrap();
     // TODO: store the secret key in the world, but we don't have a need for it at the moment
-    world.account_keys.insert(
-        account_name.clone(),
-        (RistrettoSecretKey::default(), resp.public_key.clone()),
-    );
+    world
+        .account_keys
+        .insert(account_name.clone(), (RistrettoSecretKey::default(), resp.public_key));
     let wait_req = TransactionWaitResultRequest {
         transaction_id: resp.result.transaction_hash.into_array().into(),
         timeout_secs: Some(120),
@@ -864,7 +862,7 @@ pub async fn concurrent_call_component(
 pub async fn transfer(
     world: &mut TariWorld,
     account_name: String,
-    destination_public_key: RistrettoPublicKey,
+    destination_public_key: RistrettoPublicKeyBytes,
     resource_address: ResourceAddress,
     amount: Amount,
     wallet_daemon_name: String,
@@ -892,7 +890,7 @@ pub async fn transfer(
 pub async fn confidential_transfer(
     world: &mut TariWorld,
     account_name: String,
-    destination_public_key: RistrettoPublicKey,
+    destination_public_key: RistrettoPublicKeyBytes,
     amount: Amount,
     wallet_daemon_name: String,
     outputs_name: String,

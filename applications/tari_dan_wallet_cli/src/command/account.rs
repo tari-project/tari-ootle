@@ -32,7 +32,6 @@ use anyhow::anyhow;
 use clap::{Args, Subcommand};
 use serde_json as json;
 use tari_template_lib::models::Amount;
-use tari_utilities::ByteArray;
 use tari_wallet_daemon_client::{
     types::{
         AccountInfo,

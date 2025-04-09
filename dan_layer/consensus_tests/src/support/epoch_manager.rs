@@ -4,7 +4,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use rand::seq::IteratorRandom;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     Epoch,
@@ -14,7 +15,9 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_dan_storage::{global::models::ValidatorNode, StorageError};
+use tari_engine_types::ToByteType;
 use tari_epoch_manager::{EpochManagerError, EpochManagerEvent, EpochManagerReader};
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tokio::sync::{broadcast, Mutex, MutexGuard};
 
 use crate::support::{
@@ -65,15 +68,15 @@ impl TestEpochManager {
     pub fn clone_for(
         &self,
         address: TestAddress,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKey,
         shard_key: SubstateAddress,
-        fee_claim_pk: PublicKey,
+        fee_claim_pk: RistrettoPublicKeyBytes,
     ) -> Self {
         let mut copy = self.clone();
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
-                public_key: public_key.clone(),
+                public_key: public_key.to_byte_type(),
                 shard_key,
                 start_epoch: our_validator_node.start_epoch,
                 end_epoch: None,
@@ -82,7 +85,7 @@ impl TestEpochManager {
         } else {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
-                public_key: public_key.clone(),
+                public_key: public_key.to_byte_type(),
                 shard_key,
                 start_epoch: Epoch(0),
                 end_epoch: None,
@@ -103,11 +106,11 @@ impl TestEpochManager {
                     (
                         ValidatorNode {
                             address: address.clone(),
-                            public_key: pk.clone(),
+                            public_key: *pk,
                             shard_key: substate_id.to_substate_address(),
                             start_epoch: Epoch(0),
                             end_epoch: None,
-                            fee_claim_public_key: pk.clone(),
+                            fee_claim_public_key: *pk,
                         },
                         shard_group,
                     ),
@@ -120,12 +123,12 @@ impl TestEpochManager {
         self
     }
 
-    pub async fn set_claim_keys(&self, dest: TestVnDestination, claim_key: PublicKey) -> &Self {
+    pub async fn set_claim_keys(&self, dest: TestVnDestination, claim_key: RistrettoPublicKey) -> &Self {
         let mut state = self.state_lock().await;
         let num_committees = state.committees.len() as u32;
         state.validator_nodes.iter_mut().for_each(|(address, (vn, sg))| {
             if dest.is_for(address, *sg, num_committees) {
-                vn.fee_claim_public_key = claim_key.clone();
+                vn.fee_claim_public_key = claim_key.to_byte_type();
             }
         });
         self
@@ -305,7 +308,7 @@ impl EpochManagerReader for TestEpochManager {
     async fn get_validator_node_by_public_key(
         &self,
         _epoch: Epoch,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
     ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
         let lock = self.state_lock().await;
         let (vn, _) = lock
@@ -316,11 +319,11 @@ impl EpochManagerReader for TestEpochManager {
 
         Ok(ValidatorNode {
             address: vn.address.clone(),
-            public_key: vn.public_key.clone(),
+            public_key: vn.public_key,
             shard_key: vn.shard_key,
             start_epoch: vn.start_epoch,
             end_epoch: vn.end_epoch,
-            fee_claim_public_key: vn.fee_claim_public_key.clone(),
+            fee_claim_public_key: vn.fee_claim_public_key,
         })
     }
 

@@ -2,9 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_core::transactions::{tari_amount::MicroMinotari, transaction_components::TransactionOutput};
 use tari_dan_common_types::{Epoch, SubstateAddress};
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
@@ -35,10 +36,10 @@ pub struct BlockInfo {
 )]
 pub struct BaseLayerValidatorNode {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
     pub shard_key: SubstateAddress,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub sidechain_id: Option<PublicKey>,
+    pub sidechain_id: Option<RistrettoPublicKeyBytes>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

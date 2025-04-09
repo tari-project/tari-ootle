@@ -60,6 +60,7 @@ impl ProcessDefinition for MinotariNode {
                 "-pbase_node.p2p.allow_test_addresses=true",
                 "-pbase_node.metadata_auto_ping_interval=3",
                 "-pbase_node.report_grpc_error=true",
+                "-pbase_node.grpc_tls_enabled=false",
             ]);
         // TODO: seed nodes?
         // # "-p",

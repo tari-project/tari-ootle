@@ -3,7 +3,7 @@
 
 use chrono::NaiveDateTime;
 use tari_dan_wallet_sdk::{models::AuthoredTemplateModel, storage::WalletStorageError};
-use tari_engine_types::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 
 use crate::schema::authored_templates;
 

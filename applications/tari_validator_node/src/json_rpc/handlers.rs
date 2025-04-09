@@ -31,6 +31,7 @@ use log::*;
 use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::FixedHash;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::keypair::RistrettoKeypair;
 use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateAddress};
 use tari_dan_p2p::TariMessagingSpec;
@@ -42,6 +43,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
 };
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
+use tari_engine_types::{FromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
@@ -139,7 +141,7 @@ impl JsonRpcHandlers {
             .map_err(internal_error(answer_id))?;
         let response = GetIdentityResponse {
             peer_id: info.peer_id.to_string(),
-            public_key: self.keypair.public_key().clone(),
+            public_key: self.keypair.public_key().to_byte_type(),
             public_addresses: info.listen_addrs,
             supported_protocols: info.protocols.into_iter().map(|p| p.to_string()).collect(),
             protocol_version: info.protocol_version,
@@ -643,6 +645,17 @@ impl JsonRpcHandlers {
             addresses,
             wait_for_dial,
         } = value.parse_params()?;
+
+        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(&public_key) else {
+            return Err(JsonRpcResponse::error(
+                answer_id,
+                JsonRpcError::new(
+                    JsonRpcErrorReason::InvalidParams,
+                    "Invalid public key".to_string(),
+                    json::Value::Null,
+                ),
+            ));
+        };
 
         if let Some(unsupported) = addresses.iter().find(|a| !is_supported_multiaddr(a)) {
             return Err(JsonRpcResponse::error(

@@ -87,8 +87,8 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore> {
             self.pending_events
                 .extend(registered_vns.map(|vn| EpochEvent::NewValidatorRegistered {
                     epoch,
-                    claim_public_key: vn.claim_key.clone(),
-                    validator_node_public_key: vn.public_key.clone(),
+                    claim_public_key: vn.claim_key,
+                    validator_node_public_key: vn.public_key,
                 }));
 
             let next_epoch = epoch + Epoch(1);
@@ -99,8 +99,8 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore> {
                         node_changes: vns
                             .into_iter()
                             .map(|vn| ValidatorNodeChange::Add {
-                                claim_public_key: vn.claim_key.clone(),
-                                validator_node_public_key: vn.public_key.clone(),
+                                claim_public_key: vn.claim_key,
+                                validator_node_public_key: vn.public_key,
                                 activation_epoch: epoch,
                                 minimum_value_promise: 0,
                                 shard_key: vn.calculate_shard_key(),
@@ -137,8 +137,8 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore> {
             self.pending_events
                 .extend(vns.iter().map(|vn| EpochEvent::NewValidatorRegistered {
                     epoch: next_epoch,
-                    claim_public_key: vn.claim_key.clone(),
-                    validator_node_public_key: vn.public_key.clone(),
+                    claim_public_key: vn.claim_key,
+                    validator_node_public_key: vn.public_key,
                 }))
         }
 
@@ -149,8 +149,8 @@ impl<TStore: EpochOracleStore + Send> ConfiguredEpochOracle<TStore> {
                     node_changes: vns
                         .into_iter()
                         .map(|vn| ValidatorNodeChange::Add {
-                            claim_public_key: vn.claim_key.clone(),
-                            validator_node_public_key: vn.public_key.clone(),
+                            claim_public_key: vn.claim_key,
+                            validator_node_public_key: vn.public_key,
                             activation_epoch: next_epoch,
                             minimum_value_promise: 0,
                             shard_key: vn.calculate_shard_key(),

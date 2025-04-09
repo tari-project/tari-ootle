@@ -6,9 +6,9 @@ use std::marker::PhantomData;
 use crate::{
     auth::{ComponentAccessRules, OwnerRule},
     caller_context::CallerContext,
-    crypto::RistrettoPublicKeyBytes,
     engine,
     models::{ComponentAddress, ComponentAddressAllocation},
+    types::crypto::RistrettoPublicKeyBytes,
 };
 
 /// Utility for building components inside templates
@@ -114,9 +114,9 @@ impl<T: serde::Serialize> Component<T> {
 #[cfg(test)]
 mod tests {
     use tari_bor::{decode, encode};
+    use tari_template_lib_types::ObjectKey;
 
     use super::*;
-    use crate::models::ObjectKey;
 
     #[test]
     fn it_serializes_as_a_component_address() {

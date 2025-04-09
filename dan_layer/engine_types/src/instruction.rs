@@ -4,32 +4,33 @@
 use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_template_lib::{
     args::{Arg, LogLevel, SubstateType},
     auth::OwnerRule,
-    models::{ComponentAddress, ResourceAddress, TemplateAddress},
+    models::{ComponentAddress, ResourceAddress},
     prelude::{AccessRules, Amount},
+    types::{crypto::RistrettoPublicKeyBytes, serde_helpers, TemplateAddress},
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
-use crate::{confidential::ConfidentialClaim, serde_with, ValidatorFeePoolAddress};
+use crate::{confidential::ConfidentialClaim, ValidatorFeePoolAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum Instruction {
     CreateAccount {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        public_key_address: PublicKey,
+        public_key_address: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
         workspace_bucket: Option<String>,
     },
     CallFunction {
-        #[serde(with = "serde_with::hex")]
-        #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
         template_address: TemplateAddress,
         function: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
@@ -44,6 +45,8 @@ pub enum Instruction {
         args: Vec<Arg>,
     },
     PutLastInstructionOutputOnWorkspace {
+        #[serde(with = "serde_helpers::dynamic_hex")]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
         key: Vec<u8>,
     },
     EmitLog {
@@ -59,6 +62,8 @@ pub enum Instruction {
     },
     DropAllProofsInWorkspace,
     AssertBucketContains {
+        #[serde(with = "serde_helpers::dynamic_hex")]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
         key: Vec<u8>,
         resource_address: ResourceAddress,
         min_amount: Amount,
@@ -100,7 +105,7 @@ impl Display for Instruction {
             } => {
                 write!(
                     f,
-                    "CreateAccount {{ public_key_address: {}, owner_rule: {:?}, acces_rules: {:?}, bucket: ",
+                    "CreateAccount {{ public_key_address: {}, owner_rule: {:?}, access_rules: {:?}, bucket: ",
                     public_key_address, owner_rule, access_rules
                 )?;
                 match workspace_bucket {
@@ -138,9 +143,9 @@ impl Display for Instruction {
                     f,
                     "ClaimBurn {{ commitment_address: {}, proof_of_knowledge: nonce({}), u({}) v({}) }}",
                     claim.output_address,
-                    claim.proof_of_knowledge.public_nonce().as_public_key(),
-                    claim.proof_of_knowledge.u().reveal(),
-                    claim.proof_of_knowledge.v().reveal(),
+                    claim.proof_of_knowledge.public_nonce(),
+                    claim.proof_of_knowledge.u(),
+                    claim.proof_of_knowledge.v(),
                 )
             },
             Self::ClaimValidatorFees { address } => {
@@ -174,5 +179,29 @@ impl Display for Instruction {
                 )
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib::args;
+
+    use super::*;
+
+    #[test]
+    fn decode_encode() {
+        let instruction = Instruction::CallFunction {
+            template_address: Default::default(),
+            function: "test".to_string(),
+            args: args![("A", "B"), 123u64, true, vec![1, 2, 3]],
+        };
+        let json = serde_json::to_string(&instruction).unwrap();
+        let decoded: Instruction = serde_json::from_str(&json).unwrap();
+        assert_eq!(instruction, decoded);
+
+        let instruction = Instruction::PublishTemplate { binary: vec![1, 2, 3] };
+        let json = serde_json::to_string(&instruction).unwrap();
+        let decoded: Instruction = serde_json::from_str(&json).unwrap();
+        assert_eq!(instruction, decoded);
     }
 }

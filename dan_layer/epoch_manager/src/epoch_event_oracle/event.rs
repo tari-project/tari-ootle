@@ -1,10 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{Epoch, SubstateAddress};
-use tari_engine_types::{confidential::UnclaimedConfidentialOutput, TemplateAddress};
+use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_sidechain::EvictionProof;
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use url::Url;
 
 #[derive(Debug)]
@@ -16,14 +17,14 @@ pub enum EpochEvent {
     },
     NewValidatorRegistered {
         epoch: Epoch,
-        claim_public_key: PublicKey,
-        validator_node_public_key: PublicKey,
+        claim_public_key: RistrettoPublicKeyBytes,
+        validator_node_public_key: RistrettoPublicKeyBytes,
     },
     NewCodeTemplateDownload {
         epoch: Epoch,
         name: String,
         address: TemplateAddress,
-        author_public_key: PublicKey,
+        author_public_key: RistrettoPublicKeyBytes,
         url: Url,
         binary_hash: FixedHash,
     },
@@ -33,7 +34,7 @@ pub enum EpochEvent {
     },
     NewEvictionProof {
         epoch: Epoch,
-        eviction_proof: EvictionProof,
+        eviction_proof: Box<EvictionProof>,
     },
     EpochChanged {
         epoch: Epoch,
@@ -54,13 +55,13 @@ impl EpochEvent {
 #[derive(Debug, Clone)]
 pub enum ValidatorNodeChange {
     Add {
-        claim_public_key: PublicKey,
-        validator_node_public_key: PublicKey,
+        claim_public_key: RistrettoPublicKeyBytes,
+        validator_node_public_key: RistrettoPublicKeyBytes,
         activation_epoch: Epoch,
         minimum_value_promise: u64,
         shard_key: SubstateAddress,
     },
     Remove {
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
     },
 }

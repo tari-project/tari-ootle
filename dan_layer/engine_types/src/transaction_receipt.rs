@@ -11,8 +11,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tari_bor::BorTag;
 use tari_template_lib::{
-    models::{BinaryTag, KeyParseError, ObjectKey},
-    Hash,
+    models::BinaryTag,
+    types::{Hash, KeyParseError, ObjectKey},
 };
 
 use crate::{events::Event, fees::FeeReceipt, logs::LogEntry};

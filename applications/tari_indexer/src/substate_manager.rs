@@ -30,7 +30,7 @@ use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_client::types::ListSubstateItem;
 use tari_indexer_lib::{substate_scanner::SubstateScanner, NonFungibleSubstate};
-use tari_template_lib::models::{ResourceAddress, TemplateAddress};
+use tari_template_lib::{models::ResourceAddress, types::TemplateAddress};
 use tari_validator_node_rpc::client::{SubstateResult, TariValidatorNodeRpcClientFactory};
 
 use crate::substate_storage_sqlite::sqlite_substate_store_factory::{

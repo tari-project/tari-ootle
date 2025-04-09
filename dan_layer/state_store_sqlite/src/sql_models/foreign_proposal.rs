@@ -4,10 +4,9 @@
 use std::str::FromStr;
 
 use diesel::Queryable;
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup};
 use tari_dan_storage::{consensus_models, StorageError};
-use tari_utilities::ByteArray;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use time::PrimitiveDateTime;
 
 use crate::{
@@ -68,7 +67,7 @@ impl ForeignProposal {
                     self.id, self.shard_group as u32
                 ),
             })?,
-            PublicKey::from_canonical_bytes(&deserialize_hex(&self.proposed_by)?).map_err(|_| {
+            RistrettoPublicKeyBytes::from_bytes(&deserialize_hex(&self.proposed_by)?).map_err(|_| {
                 StorageError::DecodingError {
                     operation: "try_convert",
                     item: "block",

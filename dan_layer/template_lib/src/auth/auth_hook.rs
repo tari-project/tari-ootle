@@ -2,8 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_template_abi::rust::fmt;
+use tari_template_lib_types::TemplateAddress;
 
-use crate::models::{ComponentAddress, TemplateAddress};
+use crate::models::ComponentAddress;
 
 #[cfg_attr(
     feature = "ts",

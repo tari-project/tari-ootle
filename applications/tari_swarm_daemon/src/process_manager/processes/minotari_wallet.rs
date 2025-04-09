@@ -7,11 +7,13 @@ use minotari_node_grpc_client::grpc;
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use serde::Serialize;
 use serde_json::json;
-use tari_common_types::types::{Commitment, PrivateKey};
+use tari_common_types::types::PrivateKey;
+use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
 use tari_crypto::{
-    ristretto::{RistrettoComSig, RistrettoPublicKey},
+    ristretto::{pedersen::PedersenCommitment, RistrettoComSig, RistrettoPublicKey},
     tari_utilities::ByteArray,
 };
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::process_manager::{Instance, ValidatorRegistrationInfo};
 
@@ -48,12 +50,16 @@ impl MinoTariWalletProcess {
             .register_validator_node(grpc::RegisterValidatorNodeRequest {
                 validator_node_public_key: info.public_key.to_vec(),
                 validator_node_signature: Some(grpc::Signature {
-                    public_nonce: info.signature.signature().get_public_nonce().to_vec(),
+                    public_nonce: info.signature.signature().get_compressed_public_nonce().to_vec(),
                     signature: info.signature.signature().get_signature().to_vec(),
                 }),
                 validator_node_claim_public_key: info.claim_fees_public_key.to_vec(),
                 fee_per_gram: 10,
-                message: format!("Validator node registration: {}", info.public_key),
+                payment_id: PaymentId::Open {
+                    user_data: format!("Validator node registration: {}", info.public_key).into_bytes(),
+                    tx_type: TxType::ValidatorNodeRegistration,
+                }
+                .to_bytes(),
                 sidechain_deployment_key: vec![],
             })
             .await?;
@@ -68,14 +74,18 @@ impl MinoTariWalletProcess {
     pub async fn burn_funds(
         &self,
         amount: u64,
-        claim_public_key: &RistrettoPublicKey,
+        claim_public_key: RistrettoPublicKeyBytes,
     ) -> anyhow::Result<BurnClaimProofJson> {
         let mut client = self.connect_client().await?;
 
         let request = grpc::CreateBurnTransactionRequest {
             amount,
             fee_per_gram: 1,
-            message: "Burn funds in swarm".to_string(),
+            payment_id: PaymentId::Open {
+                user_data: "Burn funds in swarm".as_bytes().to_vec(),
+                tx_type: TxType::Burn,
+            }
+            .to_bytes(),
             claim_public_key: claim_public_key.to_vec(),
             sidechain_deployment_key: vec![],
         };
@@ -88,11 +98,11 @@ impl MinoTariWalletProcess {
         let ownership_proof = resp
             .ownership_proof
             .ok_or_else(|| anyhow!("No ownership proof in response"))?;
-        let commitment =
-            Commitment::from_canonical_bytes(&resp.commitment).map_err(|e| anyhow!("commitment parse error: {e}"))?;
+        let commitment = PedersenCommitment::from_canonical_bytes(&resp.commitment)
+            .map_err(|e| anyhow!("commitment parse error: {e}"))?;
 
         let ownership_proof = RistrettoComSig::new(
-            Commitment::from_canonical_bytes(&ownership_proof.public_nonce)
+            PedersenCommitment::from_canonical_bytes(&ownership_proof.public_nonce)
                 .map_err(|e| anyhow!("comsig public_nonce parse error {e}"))?,
             PrivateKey::from_canonical_bytes(&ownership_proof.u).map_err(|e| anyhow!("comsig u parse error {e}"))?,
             PrivateKey::from_canonical_bytes(&ownership_proof.v).map_err(|e| anyhow!("comsig v parse error {e}"))?,
@@ -103,7 +113,7 @@ impl MinoTariWalletProcess {
 
         let proof = BurnClaimProofJson {
             tx_id: resp.transaction_id,
-            claim_public_key: claim_public_key.clone(),
+            claim_public_key,
             claim_proof: json!({
                 "commitment": BASE64.encode(commitment.as_bytes()),
                 "ownership_proof": {
@@ -129,6 +139,6 @@ impl MinoTariWalletProcess {
 #[derive(Debug, Clone, Serialize)]
 pub struct BurnClaimProofJson {
     pub tx_id: u64,
-    pub claim_public_key: RistrettoPublicKey,
+    pub claim_public_key: RistrettoPublicKeyBytes,
     pub claim_proof: serde_json::Value,
 }

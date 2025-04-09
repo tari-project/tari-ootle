@@ -4,14 +4,20 @@
 use std::ops::RangeInclusive;
 
 use rand::{rngs::OsRng, Rng, RngCore};
-use tari_common_types::types::{PrivateKey, PublicKey};
-use tari_crypto::keys::{PublicKey as _, SecretKey};
+use tari_common_types::types::PrivateKey;
+use tari_crypto::{
+    keys::{PublicKey, SecretKey},
+    ristretto::RistrettoPublicKey,
+};
 use tari_dan_common_types::{NumPreshards, ShardGroup, SubstateAddress};
 use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{SubstateId, SubstateValue},
 };
-use tari_template_lib::models::{ComponentAddress, ComponentKey, EntityId, ObjectKey};
+use tari_template_lib::{
+    models::ComponentAddress,
+    types::{ComponentKey, EntityId, ObjectKey},
+};
 
 use crate::support::TestAddress;
 
@@ -41,11 +47,11 @@ fn copy_fixed<const SZ: usize>(bytes: &[u8]) -> [u8; SZ] {
     out
 }
 
-pub fn derive_keypair_from_address(addr: &TestAddress) -> (PrivateKey, PublicKey) {
+pub fn derive_keypair_from_address(addr: &TestAddress) -> (PrivateKey, RistrettoPublicKey) {
     let mut bytes = [0u8; 64];
     bytes[0..addr.as_bytes().len()].copy_from_slice(addr.as_bytes());
     let secret_key = PrivateKey::from_uniform_bytes(&bytes).unwrap();
-    let public_key = PublicKey::from_secret_key(&secret_key);
+    let public_key = RistrettoPublicKey::from_secret_key(&secret_key);
     (secret_key, public_key)
 }
 

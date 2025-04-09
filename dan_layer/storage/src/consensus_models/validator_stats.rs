@@ -2,14 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::Epoch;
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{consensus_models::BlockId, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ValidatorStatsUpdate<'a> {
-    public_key: &'a PublicKey,
+    public_key: &'a RistrettoPublicKeyBytes,
 
     /// None = no change, Some(n) = inc failure by n, Some(0) = clear failures
     missed_proposal_change: Option<i64>,
@@ -18,7 +18,7 @@ pub struct ValidatorStatsUpdate<'a> {
 }
 
 impl<'a> ValidatorStatsUpdate<'a> {
-    pub fn new(public_key: &'a PublicKey) -> Self {
+    pub fn new(public_key: &'a RistrettoPublicKeyBytes) -> Self {
         Self {
             public_key,
             missed_proposal_change: None,
@@ -27,7 +27,7 @@ impl<'a> ValidatorStatsUpdate<'a> {
         }
     }
 
-    pub fn public_key(&self) -> &PublicKey {
+    pub fn public_key(&self) -> &RistrettoPublicKeyBytes {
         self.public_key
     }
 
@@ -82,7 +82,7 @@ impl ValidatorConsensusStats {
         block_id: &BlockId,
         threshold: u64,
         limit: u64,
-    ) -> Result<Vec<PublicKey>, StorageError> {
+    ) -> Result<Vec<RistrettoPublicKeyBytes>, StorageError> {
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -92,7 +92,7 @@ impl ValidatorConsensusStats {
     pub fn get_by_public_key<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<Self, StorageError> {
         tx.validator_epoch_stats_get(epoch, public_key)
     }
@@ -100,14 +100,14 @@ impl ValidatorConsensusStats {
     pub fn is_node_evicted<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         block_id: &BlockId,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<bool, StorageError> {
         tx.suspended_nodes_is_evicted(block_id, public_key)
     }
 
     pub fn evict_node<TTx: StateStoreWriteTransaction>(
         tx: &mut TTx,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
         evicted_in_block: BlockId,
     ) -> Result<(), StorageError> {
         tx.evicted_nodes_evict(public_key, evicted_in_block)

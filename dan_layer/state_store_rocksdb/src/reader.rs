@@ -28,7 +28,7 @@ use std::{
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
 use serde::{de::DeserializeOwned, Serialize};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -87,6 +87,7 @@ use tari_engine_types::{
     template_models::UnclaimedConfidentialOutputAddress,
 };
 use tari_state_tree::{Node, NodeKey, Version};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -1714,11 +1715,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn validator_epoch_stats_get(
         &self,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ValidatorConsensusStats, StorageError> {
         const OPERATION: &str = "validator_epoch_stats_get";
         let cf = self.db().cf(ValidatorNodeEpochStatsModel)?;
-        let stats = cf.get(&(epoch, public_key.clone()), OPERATION)?;
+        let stats = cf.get(&(epoch, *public_key), OPERATION)?;
         Ok(stats)
     }
 
@@ -1727,7 +1728,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         block_id: &BlockId,
         threshold: u64,
         limit: u64,
-    ) -> Result<Vec<PublicKey>, StorageError> {
+    ) -> Result<Vec<RistrettoPublicKeyBytes>, StorageError> {
         const OPERATION: &str = "validator_epoch_stats_get_nodes_to_evict";
         if limit == 0 {
             return Ok(vec![]);
@@ -1773,7 +1774,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(nodes_to_evict)
     }
 
-    fn suspended_nodes_is_evicted(&self, block_id: &BlockId, public_key: &PublicKey) -> Result<bool, StorageError> {
+    fn suspended_nodes_is_evicted(
+        &self,
+        block_id: &BlockId,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Result<bool, StorageError> {
         const OPERATION: &str = "suspended_nodes_is_evicted";
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::QueryError {

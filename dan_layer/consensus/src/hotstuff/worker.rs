@@ -7,7 +7,7 @@ use std::{
 };
 
 use log::*;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     optional::Optional,
@@ -33,6 +33,7 @@ use tari_dan_storage::{
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
 use tari_state_tree::SPARSE_MERKLE_PLACEHOLDER_HASH;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::sync::{broadcast, mpsc};
 
@@ -680,7 +681,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         epoch: Epoch,
         local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
-        local_claim_public_key: &PublicKey,
+        local_claim_public_key: &RistrettoPublicKeyBytes,
     ) -> Result<(), HotStuffError> {
         let leaf_block = self.state_store.with_read_tx(|tx| LeafBlock::get(tx, epoch))?;
         let next_height = leaf_block.height() + NodeHeight(1);
@@ -730,7 +731,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             next_height,
             local_committee_info,
             local_committee,
-            local_claim_public_key,
+            *local_claim_public_key,
         )
         .await?;
 
@@ -745,7 +746,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         forced_height: Option<NodeHeight>,
         local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
-        local_claim_public_key: &PublicKey,
+        local_claim_public_key: &RistrettoPublicKeyBytes,
     ) -> Result<(), HotStuffError> {
         let next_height = match forced_height {
             Some(height) => {
@@ -787,7 +788,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             next_height,
             local_committee_info,
             local_committee,
-            local_claim_public_key,
+            *local_claim_public_key,
         )
         .await?;
 
@@ -800,7 +801,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         next_height: NodeHeight,
         local_committee_info: &CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
-        local_claim_public_key: &PublicKey,
+        local_claim_public_key: RistrettoPublicKeyBytes,
     ) -> Result<(), HotStuffError> {
         let mut leaf_block = self.state_store.with_read_tx(|tx| LeafBlock::get(tx, epoch))?;
         if next_height > leaf_block.height + NodeHeight(1) {
@@ -943,7 +944,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         local_committee: &Committee<TConsensusSpec::Addr>,
         msg: ProposalMessage,
     ) -> Result<(), HotStuffError> {
-        let proposed_by = msg.block.proposed_by().clone();
+        let proposed_by = *msg.block.proposed_by();
         match log_err(
             "on_receive_local_proposal",
             self.on_receive_local_proposal
@@ -995,7 +996,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 epoch,
                 shard_group,
                 FixedHash::from(state_merkle_root.into_array()),
-                self.config.sidechain_id.clone(),
+                self.config.sidechain_id,
             );
             if !genesis.exists(&**tx)? {
                 info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");

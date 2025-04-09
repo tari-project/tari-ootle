@@ -30,8 +30,8 @@ use tari_engine_types::{events::Event, substate::SubstateId};
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_template_lib::{
-    models::{Metadata, TemplateAddress},
-    Hash,
+    models::Metadata,
+    types::{Hash, TemplateAddress},
 };
 use tari_transaction::TransactionId;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;

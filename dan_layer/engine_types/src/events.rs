@@ -24,8 +24,8 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib::{
-    models::{Metadata, TemplateAddress},
-    Hash,
+    models::Metadata,
+    types::{Hash, TemplateAddress},
 };
 #[cfg(feature = "ts")]
 use ts_rs::TS;

@@ -25,7 +25,7 @@ use std::{ops::RangeInclusive, sync::Arc, time::Duration};
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_base_node_client::types::BaseLayerValidatorNode;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     shard::Shard,
@@ -44,8 +44,8 @@ use tari_engine_types::{
     fees::FeeCostBreakdown,
     serde_with,
     substate::{SubstateId, SubstateValue},
-    TemplateAddress,
 };
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use tari_transaction::{Transaction, TransactionId};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
@@ -63,7 +63,8 @@ use ts_rs::TS;
 pub struct GetIdentityResponse {
     pub peer_id: String,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    #[serde(with = "serde_with::string")]
+    pub public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub public_addresses: Vec<Multiaddr>,
     pub supported_protocols: Vec<String>,
@@ -290,14 +291,14 @@ pub struct GetConsensusStatusResponse {
 pub enum ValidatorNodeChange {
     Add {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         activation_epoch: Epoch,
         minimum_value_promise: u64,
         shard_key: SubstateAddress,
     },
     Remove {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
     },
 }
 
@@ -532,11 +533,11 @@ pub struct ValidatorNode {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: PeerAddress,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
     pub shard_key: SubstateAddress,
     pub start_epoch: Epoch,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub fee_claim_public_key: PublicKey,
+    pub fee_claim_public_key: RistrettoPublicKeyBytes,
 }
 
 impl From<models::ValidatorNode<PeerAddress>> for ValidatorNode {
@@ -560,7 +561,7 @@ impl From<models::ValidatorNode<PeerAddress>> for ValidatorNode {
 pub struct GetShardKeyRequest {
     pub epoch: Epoch,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -647,7 +648,7 @@ pub enum SubstateStatus {
 )]
 pub struct AddPeerRequest {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub addresses: Vec<Multiaddr>,
     pub wait_for_dial: bool,

@@ -24,8 +24,7 @@ use std::fmt::Display;
 
 use anyhow::anyhow;
 use tari_bor::BorError;
-use tari_common_types::types::PublicKey;
-use tari_dan_common_types::{optional::IsNotFoundError, Epoch};
+use tari_dan_common_types::optional::IsNotFoundError;
 use tari_engine_types::{
     commit_result::RejectReason,
     entity_id_provider::EntityIdProviderError,
@@ -47,10 +46,10 @@ use tari_template_lib::{
         NonFungibleId,
         ProofId,
         ResourceAddress,
-        TemplateAddress,
         UnclaimedConfidentialOutputAddress,
         VaultId,
     },
+    types::TemplateAddress,
 };
 
 use super::workspace::WorkspaceError;
@@ -206,12 +205,8 @@ pub enum RuntimeError {
         method: String,
         details: String,
     },
-    #[error("Fee claim not permitted for epoch {epoch} vn address {address:.10}")]
-    FeeClaimNotPermitted { epoch: Epoch, address: PublicKey },
     #[error("Virtual substate not found: {address}")]
     VirtualSubstateNotFound { address: VirtualSubstateId },
-    #[error("Double claimed fee for epoch {epoch} vn address {address:.10}")]
-    DoubleClaimedFee { address: PublicKey, epoch: Epoch },
     #[error("Invalid return value: {0}")]
     InvalidReturnValue(IndexedValueError),
     #[error("Attempt to pop auth scope stack but it was empty")]

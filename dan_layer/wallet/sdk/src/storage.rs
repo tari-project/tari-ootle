@@ -7,7 +7,6 @@ use std::{
     time::Duration,
 };
 
-use tari_common_types::types::Commitment;
 use tari_dan_common_types::{
     optional::IsNotFoundError,
     substate_type::SubstateType,
@@ -15,10 +14,11 @@ use tari_dan_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_dan_storage::consensus_models::QuorumCertificate;
-use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId, TemplateAddress};
+use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
 use tari_template_lib::{
-    models::Amount,
-    prelude::{ComponentAddress, NonFungibleId, ResourceAddress},
+    models::{Amount, VaultId},
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceAddress},
+    types::TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
 use webauthn_rs::prelude::Passkey;
@@ -155,8 +155,8 @@ pub trait WalletStoreReader {
     fn accounts_get_by_vault(&mut self, vault_address: &SubstateId) -> Result<Account, WalletStorageError>;
 
     // Vaults
-    fn vaults_get(&mut self, address: &SubstateId) -> Result<VaultModel, WalletStorageError>;
-    fn vaults_exists(&mut self, address: &SubstateId) -> Result<bool, WalletStorageError>;
+    fn vaults_get(&mut self, vault_id: &VaultId) -> Result<VaultModel, WalletStorageError>;
+    fn vaults_exists(&mut self, vault_id: &VaultId) -> Result<bool, WalletStorageError>;
     fn vaults_get_by_resource(
         &mut self,
         account_addr: &SubstateId,
@@ -165,14 +165,14 @@ pub trait WalletStoreReader {
     fn vaults_get_by_account(&mut self, account_addr: &SubstateId) -> Result<Vec<VaultModel>, WalletStorageError>;
 
     // Outputs
-    fn outputs_get_unspent_balance(&mut self, vault_address: &SubstateId) -> Result<u64, WalletStorageError>;
+    fn outputs_get_unspent_balance(&mut self, vault_id: &VaultId) -> Result<u64, WalletStorageError>;
     fn outputs_get_locked_by_proof(
         &mut self,
         proof_id: ConfidentialProofId,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError>;
     fn outputs_get_by_commitment(
         &mut self,
-        commitment: &Commitment,
+        commitment: &PedersenCommitmentBytes,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
 
     fn outputs_get_by_account_and_status(
@@ -192,6 +192,13 @@ pub trait WalletStoreReader {
         &mut self,
         nft_id: NonFungibleId,
     ) -> Result<NonFungibleToken, WalletStorageError>;
+
+    fn non_fungible_token_get_ids_by_vault_id(
+        &mut self,
+        vault_id: &VaultId,
+        limit: u64,
+        offset: u64,
+    ) -> Result<HashSet<NonFungibleId>, WalletStorageError>;
 
     fn non_fungible_token_get_all(
         &mut self,
@@ -270,7 +277,7 @@ pub trait WalletStoreWriter {
     ) -> Result<(), WalletStorageError>;
     fn substates_upsert_child(
         &mut self,
-        parent: SubstateId,
+        parent: &SubstateId,
         address: VersionedSubstateIdRef<'_>,
         referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError>;
@@ -330,6 +337,11 @@ pub trait WalletStoreWriter {
 
     // Non fungible tokens
     fn non_fungible_token_upsert(&mut self, non_fungible_token: &NonFungibleToken) -> Result<(), WalletStorageError>;
+    fn non_fungible_token_remove(
+        &mut self,
+        vault_id: &VaultId,
+        non_fungible_id: &NonFungibleId,
+    ) -> Result<(), WalletStorageError>;
 
     // Webauthn registrations
     fn webauthn_reg_insert(&mut self, username: String, passkey: Passkey) -> Result<(), WalletStorageError>;

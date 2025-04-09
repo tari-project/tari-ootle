@@ -29,7 +29,6 @@ use std::{
 use indexmap::IndexMap;
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -87,6 +86,7 @@ use tari_dan_storage::{
 };
 use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -1653,20 +1653,20 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let cf = self.db().cf(ValidatorNodeEpochStatsModel)?;
         for update in updates {
-            let existing = cf.get(&(epoch, update.public_key().clone()), OPERATION).optional()?;
+            let existing = cf.get(&(epoch, *update.public_key()), OPERATION).optional()?;
 
             match existing {
                 Some(mut existing) => match update.missed_proposal_change() {
                     Some(0) => {
                         existing.participation_shares += update.participation_shares_increment();
                         existing.missed_proposals = 0;
-                        cf.put(&(epoch, update.public_key().clone()), &existing, OPERATION)?;
+                        cf.put(&(epoch, *update.public_key()), &existing, OPERATION)?;
                     },
                     Some(n) => {
                         // NOTE: n can be negative
                         existing.participation_shares += update.participation_shares_increment();
                         existing.missed_proposals = cmp::max(existing.missed_proposals as i64 + n, 0) as u64;
-                        cf.put(&(epoch, update.public_key().clone()), &existing, OPERATION)?;
+                        cf.put(&(epoch, *update.public_key()), &existing, OPERATION)?;
                     },
                     None => {},
                 },
@@ -1676,7 +1676,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                         participation_shares: update.participation_shares_increment(),
                         missed_proposals: leader_failure_inc as u64,
                     };
-                    cf.put(&(epoch, update.public_key().clone()), &rec, OPERATION)?;
+                    cf.put(&(epoch, *update.public_key()), &rec, OPERATION)?;
                 },
             }
         }
@@ -1684,7 +1684,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn evicted_nodes_evict(&mut self, public_key: &PublicKey, evicted_in_block: BlockId) -> Result<(), StorageError> {
+    fn evicted_nodes_evict(
+        &mut self,
+        public_key: &RistrettoPublicKeyBytes,
+        evicted_in_block: BlockId,
+    ) -> Result<(), StorageError> {
         const OPERATION: &str = "evicted_nodes_evict";
 
         let block = self
@@ -1695,7 +1699,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             })?;
 
         self.db().cf(EvictedNodeModel)?.put(
-            &(public_key.clone(), evicted_in_block),
+            &(*public_key, evicted_in_block),
             &EvictedNodeData {
                 is_committed: false,
                 epoch: block.epoch(),
@@ -1708,7 +1712,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn evicted_nodes_mark_eviction_as_committed(
         &mut self,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
         // For debugging
         _epoch: Epoch,
     ) -> Result<(), StorageError> {

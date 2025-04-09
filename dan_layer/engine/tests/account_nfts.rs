@@ -4,9 +4,10 @@
 use tari_engine_types::{commit_result::ExecuteResult, instruction::Instruction};
 use tari_template_lib::{
     args,
-    models::{ComponentAddress, NonFungibleAddress, NonFungibleId, TemplateAddress},
+    models::{ComponentAddress, NonFungibleAddress, NonFungibleId},
     prelude::Metadata,
     resource::TOKEN_SYMBOL,
+    types::TemplateAddress,
 };
 use tari_template_test_tooling::TemplateTest;
 

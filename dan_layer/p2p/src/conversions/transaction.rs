@@ -22,26 +22,26 @@
 
 use std::convert::{TryFrom, TryInto};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use tari_bor::{decode_exact, encode};
-use tari_common_types::types::{Commitment, PrivateKey, PublicKey};
-use tari_crypto::{ristretto::RistrettoComSig, tari_utilities::ByteArray};
 use tari_dan_common_types::{SubstateRequirement, SubstateRequirementRef, VersionedSubstateId};
 use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
     args::{Arg, SubstateType},
     auth::OwnerRule,
-    crypto::{BalanceProofSignature, PedersonCommitmentBytes, RistrettoPublicKeyBytes},
     models::{
         Amount,
         ConfidentialOutputStatement,
         ConfidentialStatement,
         ConfidentialWithdrawProof,
         EncryptedData,
-        ObjectKey,
         ViewableBalanceProof,
     },
-    prelude::AccessRules,
+    prelude::{AccessRules, Scalar32Bytes},
+    types::{
+        crypto::{BalanceProofSignature, CommitmentSignatureBytes, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+        ObjectKey,
+    },
 };
 use tari_transaction::Transaction;
 
@@ -208,7 +208,7 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
 
         let instruction = match instruction_type {
             InstructionType::CreateAccount => Instruction::CreateAccount {
-                public_key_address: PublicKey::from_canonical_bytes(&request.create_account_public_key)
+                public_key_address: RistrettoPublicKeyBytes::from_bytes(&request.create_account_public_key)
                     .map_err(|e| anyhow!("create_account_public_key: {}", e))?,
                 owner_rule: request.create_account_owner_rule.map(TryInto::try_into).transpose()?,
                 access_rules: request.create_account_access_rules.map(TryInto::try_into).transpose()?,
@@ -240,7 +240,10 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
             },
             InstructionType::ClaimBurn => Instruction::ClaimBurn {
                 claim: Box::new(ConfidentialClaim {
-                    public_key: PublicKey::from_canonical_bytes(&request.claim_burn_public_key)
+                    public_key: request
+                        .claim_burn_public_key
+                        .as_slice()
+                        .try_into()
                         .map_err(|e| anyhow!("claim_burn_public_key: {}", e))?,
                     output_address: request
                         .claim_burn_commitment_address
@@ -474,20 +477,21 @@ impl From<&VersionedSubstateId> for proto::transaction::VersionedSubstateId {
 
 // -------------------------------- CommitmentSignature -------------------------------- //
 
-impl TryFrom<proto::transaction::CommitmentSignature> for RistrettoComSig {
+impl TryFrom<proto::transaction::CommitmentSignature> for CommitmentSignatureBytes {
     type Error = anyhow::Error;
 
     fn try_from(val: proto::transaction::CommitmentSignature) -> Result<Self, Self::Error> {
-        let u = PrivateKey::from_canonical_bytes(&val.signature_u).map_err(anyhow::Error::msg)?;
-        let v = PrivateKey::from_canonical_bytes(&val.signature_v).map_err(anyhow::Error::msg)?;
-        let public_nonce = PublicKey::from_canonical_bytes(&val.public_nonce_commitment).map_err(anyhow::Error::msg)?;
+        let u = Scalar32Bytes::from_bytes(&val.signature_u).context("Invalid u signature")?;
+        let v = Scalar32Bytes::from_bytes(&val.signature_v).context("Invalid v signature")?;
+        let public_nonce =
+            PedersenCommitmentBytes::from_bytes(&val.public_nonce_commitment).context("Invalid public nonce")?;
 
-        Ok(RistrettoComSig::new(Commitment::from_public_key(&public_nonce), u, v))
+        Ok(Self::new(public_nonce, u, v))
     }
 }
 
-impl From<RistrettoComSig> for proto::transaction::CommitmentSignature {
-    fn from(val: RistrettoComSig) -> Self {
+impl From<CommitmentSignatureBytes> for proto::transaction::CommitmentSignature {
+    fn from(val: CommitmentSignatureBytes) -> Self {
         Self {
             public_nonce_commitment: val.public_nonce().to_vec(),
             signature_u: val.u().to_vec(),
@@ -495,7 +499,8 @@ impl From<RistrettoComSig> for proto::transaction::CommitmentSignature {
         }
     }
 }
-// -------------------------------- ConfidentialWithdrawProof -------------------------------- //
+
+// // -------------------------------- ConfidentialWithdrawProof -------------------------------- //
 
 impl TryFrom<proto::transaction::ConfidentialWithdrawProof> for ConfidentialWithdrawProof {
     type Error = anyhow::Error;
@@ -506,7 +511,7 @@ impl TryFrom<proto::transaction::ConfidentialWithdrawProof> for ConfidentialWith
                 .inputs
                 .into_iter()
                 .map(|v| {
-                    PedersonCommitmentBytes::from_bytes(&v).map_err(|e| anyhow!("Invalid input commitment bytes: {e}"))
+                    PedersenCommitmentBytes::from_bytes(&v).map_err(|e| anyhow!("Invalid input commitment bytes: {e}"))
                 })
                 .collect::<Result<_, _>>()?,
             input_revealed_amount: val.input_revealed_amount.try_into()?,
@@ -529,7 +534,7 @@ impl From<ConfidentialWithdrawProof> for proto::transaction::ConfidentialWithdra
                 .as_u64_checked()
                 .expect("input_revealed_amount is negative or too large"),
             output_proof: Some(val.output_proof.into()),
-            balance_proof: val.balance_proof.as_bytes().to_vec(),
+            balance_proof: val.balance_proof.to_bytes(),
         }
     }
 }

@@ -12,7 +12,7 @@ use tari_common_types::types::FixedHashSizeError;
 use tari_crypto::tari_utilities::hex::{from_hex, Hex};
 use tari_dan_common_types::{SubstateAddress, ToSubstateAddress};
 use tari_engine_types::{serde_with, transaction_receipt::TransactionReceiptAddress};
-use tari_template_lib::Hash;
+use tari_template_lib::types::Hash;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Default, BorshSerialize)]
 #[serde(transparent)]

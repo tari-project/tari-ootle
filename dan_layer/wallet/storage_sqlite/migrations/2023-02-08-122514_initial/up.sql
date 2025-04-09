@@ -163,7 +163,8 @@ CREATE TABLE non_fungible_tokens
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX nfts_uniq_address ON non_fungible_tokens (nft_id);
+CREATE INDEX nfts_uniq_address ON non_fungible_tokens (nft_id);
+CREATE UNIQUE INDEX nfts_uniq_address_vault_id_uniq_idx ON non_fungible_tokens (nft_id, vault_id);
 
 CREATE TABLE authored_templates
 (

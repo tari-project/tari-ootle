@@ -3,19 +3,22 @@
 
 use std::mem::size_of;
 
-use serde::{de::Error, Deserialize, Serialize};
-#[cfg(feature = "ts")]
-use ts_rs::TS;
+use serde::{Deserialize, Serialize};
+use tari_template_lib_types::serde_helpers;
 
 use crate::{
-    crypto::{BalanceProofSignature, PedersonCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
     models::Amount,
+    types::crypto::{BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
 };
 
 /// A statement for confidential and revealed outputs. A statement must contain either confidential outputs or non-zero
 /// revealed funds or both.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ConfidentialOutputStatement {
     /// Proof of the confidential resources that are going to be transferred to the receiver
     pub output_statement: Option<ConfidentialStatement>,
@@ -45,10 +48,14 @@ impl ConfidentialOutputStatement {
 
 /// A zero-knowledge proof that a confidential resource amount is valid
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ConfidentialStatement {
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
-    pub commitment: PedersonCommitmentBytes,
+    pub commitment: PedersenCommitmentBytes,
     /// Public nonce (R) that was used to generate the commitment mask
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub sender_public_nonce: RistrettoPublicKeyBytes,
@@ -79,7 +86,11 @@ pub struct ConfidentialStatement {
 /// It is a sigma protocol for the relation that is complete, $2$-special sound, and special honest-verifier zero
 /// knowledge.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ViewableBalanceProof {
     /// The encrypted value that takes the form: E = v.G + r.P
     /// where v is the value, G is the generator, r is the secret_nonce and P is the view key
@@ -90,7 +101,7 @@ pub struct ViewableBalanceProof {
     pub elgamal_public_nonce: RistrettoPublicKeyBytes,
     /// Part of the proof that the encrypted value is correctly constructed. C' = x_v.H + x_m.G
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
-    pub c_prime: RistrettoPublicKeyBytes,
+    pub c_prime: PedersenCommitmentBytes,
     /// Part of the proof that the encrypted value is correctly constructed. E' = x_v.G + x_r.P
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub e_prime: RistrettoPublicKeyBytes,
@@ -99,13 +110,13 @@ pub struct ViewableBalanceProof {
     pub r_prime: RistrettoPublicKeyBytes,
     /// Part of the proof that the encrypted value is correctly constructed. s_v = x_v + e.v
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
-    pub s_v: SchnorrSignatureBytes,
+    pub s_v: Scalar32Bytes,
     /// Part of the proof that the encrypted value is correctly constructed. s_m = x_m + e.m
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
-    pub s_m: SchnorrSignatureBytes,
+    pub s_m: Scalar32Bytes,
     /// Part of the proof that the encrypted value is correctly constructed. s_r = x_r + e.r
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
-    pub s_r: SchnorrSignatureBytes,
+    pub s_r: Scalar32Bytes,
 }
 
 impl ViewableBalanceProof {
@@ -124,17 +135,21 @@ impl ViewableBalanceProof {
 pub struct ViewableBalanceProofChallengeFields<'a> {
     pub elgamal_encrypted: &'a RistrettoPublicKeyBytes,
     pub elgamal_public_nonce: &'a RistrettoPublicKeyBytes,
-    pub c_prime: &'a RistrettoPublicKeyBytes,
+    pub c_prime: &'a PedersenCommitmentBytes,
     pub e_prime: &'a RistrettoPublicKeyBytes,
     pub r_prime: &'a RistrettoPublicKeyBytes,
 }
 
 /// A zero-knowledge proof that a transfer of confidential resources is valid
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ConfidentialWithdrawProof {
     #[cfg_attr(feature = "ts", ts(type = "Array<Uint8Array>"))]
-    pub inputs: Vec<PedersonCommitmentBytes>,
+    pub inputs: Vec<PedersenCommitmentBytes>,
     /// The amount to withdraw from revealed funds i.e. the revealed funds as inputs
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub input_revealed_amount: Amount,
@@ -210,8 +225,8 @@ impl ConfidentialWithdrawProof {
 
 /// Used by the receiver to determine the value component of the commitment, in both confidential transfers and Minotari
 /// burns
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EncryptedData(Vec<u8>);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EncryptedData(#[serde(with = "serde_helpers::dynamic_hex")] Vec<u8>);
 
 impl EncryptedData {
     pub const ENCRYPTED_DATA_SIZE_TOTAL: usize = Self::SIZE_NONCE + Self::SIZE_VALUE + Self::SIZE_MASK + Self::SIZE_TAG;
@@ -274,22 +289,5 @@ impl TryFrom<Vec<u8>> for EncryptedData {
             return Err(value.len());
         }
         Ok(Self(value))
-    }
-}
-
-impl Serialize for EncryptedData {
-    fn serialize<S>(&self, __serializer: S) -> Result<S::Ok, S::Error>
-    where S: serde::Serializer {
-        serde_with::As::<serde_with::Bytes>::serialize(&self.0, __serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for EncryptedData {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: serde::Deserializer<'de> {
-        // TODO: implement a deserializer that only deserializes up to some MAX_BYTES
-        serde_with::As::<serde_with::Bytes>::deserialize(deserializer).and_then(|v: Vec<u8>| {
-            EncryptedData::try_from(v).map_err(|len| D::Error::custom(format!("EncryptedData invalid length {len}")))
-        })
     }
 }

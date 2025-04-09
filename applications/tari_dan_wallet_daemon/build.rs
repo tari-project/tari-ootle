@@ -57,8 +57,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     target
                 );
                 println!("cargo:warning=Status: {}", output.status);
-                println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
-                println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
+                if !output.stdout.is_empty() {
+                    println!(
+                        "cargo:warning=Output: {}",
+                        String::from_utf8_lossy(&output.stdout).trim()
+                    );
+                }
+                if !output.stderr.is_empty() {
+                    println!(
+                        "cargo:warning=Error: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    );
+                }
                 exit_on_ci();
                 // Ignore it unless on CI
                 continue;

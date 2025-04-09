@@ -7,7 +7,11 @@ use log::info;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::SubstateRequirement;
 use tari_dan_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
-use tari_engine_types::{component::new_component_address_from_public_key, indexed_value::IndexedWellKnownTypes};
+use tari_engine_types::{
+    component::new_component_address_from_public_key,
+    indexed_value::IndexedWellKnownTypes,
+    ToByteType,
+};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args,
@@ -21,7 +25,7 @@ use crate::{faucet::Faucet, runner::Runner};
 impl Runner {
     pub async fn create_account_with_free_coins(&mut self) -> anyhow::Result<Account> {
         let key = self.sdk.key_manager_api().derive_key(TRANSACTION_BRANCH, 0)?;
-        let owner_public_key = RistrettoPublicKey::from_secret_key(&key.key);
+        let owner_public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
 
         let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &owner_public_key);
 
@@ -81,7 +85,7 @@ impl Runner {
             Amount(1000 * owners.len() as i64),
         );
         for owner in &owners {
-            builder = builder.create_account(RistrettoPublicKey::from_secret_key(&owner.key));
+            builder = builder.create_account(RistrettoPublicKey::from_secret_key(&owner.key).to_byte_type());
         }
 
         let pay_fee_vault = self
@@ -110,7 +114,7 @@ impl Runner {
                 .find(|addr| {
                     new_component_address_from_public_key(
                         &ACCOUNT_TEMPLATE_ADDRESS,
-                        &RistrettoPublicKey::from_secret_key(&owner.key),
+                        &RistrettoPublicKey::from_secret_key(&owner.key).to_byte_type(),
                     ) == **addr
                 })
                 .expect("New account not found in diff");

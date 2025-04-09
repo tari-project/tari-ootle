@@ -7,7 +7,6 @@ use serde::Serialize;
 use tari_bor::cbor;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{shard::Shard, Epoch, NodeAddressable, NumPreshards, ShardGroup, VersionedSubstateId};
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, SubstateRecord},
@@ -30,9 +29,10 @@ use tari_template_lib::{
         XTR_FAUCET_COMPONENT_ADDRESS,
         XTR_FAUCET_VAULT_ADDRESS,
     },
-    models::{Amount, EntityId, Metadata},
-    prelude::ResourceType,
+    models::{Amount, Metadata},
+    prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
+    types::EntityId,
 };
 
 pub fn has_bootstrapped<TTx: StateStoreReadTransaction>(tx: &TTx) -> Result<bool, StorageError> {
@@ -44,7 +44,7 @@ pub fn bootstrap_state<TTx>(
     tx: &mut TTx,
     network: Network,
     num_preshards: NumPreshards,
-    sidechain_id: Option<RistrettoPublicKey>,
+    sidechain_id: Option<RistrettoPublicKeyBytes>,
 ) -> Result<(), StorageError>
 where
     TTx: StateStoreWriteTransaction + Deref,
@@ -68,7 +68,7 @@ where
         tx,
         network,
         num_preshards,
-        &sidechain_id,
+        sidechain_id,
         PUBLIC_IDENTITY_RESOURCE_ADDRESS,
         value,
     )?;
@@ -100,7 +100,7 @@ where
             tx,
             network,
             num_preshards,
-            &sidechain_id,
+            sidechain_id,
             XTR_FAUCET_COMPONENT_ADDRESS,
             value,
         )?;
@@ -118,7 +118,7 @@ where
             tx,
             network,
             num_preshards,
-            &sidechain_id,
+            sidechain_id,
             XTR_FAUCET_VAULT_ADDRESS,
             value,
         )?;
@@ -128,7 +128,7 @@ where
         tx,
         network,
         num_preshards,
-        &sidechain_id,
+        sidechain_id,
         CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
         xtr_resource,
     )?;
@@ -140,7 +140,7 @@ fn create_substate<TTx, TId, TVal>(
     tx: &mut TTx,
     network: Network,
     num_preshards: NumPreshards,
-    sidechain_id: &Option<RistrettoPublicKey>,
+    sidechain_id: Option<RistrettoPublicKeyBytes>,
     substate_id: TId,
     value: TVal,
 ) -> Result<(), StorageError>
@@ -156,7 +156,7 @@ where
         Epoch(0),
         ShardGroup::all_shards(num_preshards),
         FixedHash::default(),
-        sidechain_id.clone(),
+        sidechain_id,
     );
     let substate_id = substate_id.into();
     let id = VersionedSubstateId::new(substate_id, 0);

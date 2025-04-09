@@ -4,8 +4,8 @@
 use log::*;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_p2p::proto::rpc::{SyncTemplatesResponse, TemplateType};
-use tari_engine_types::TemplateAddress;
 use tari_rpc_framework::RpcStatus;
+use tari_template_lib::types::TemplateAddress;
 use tari_template_manager::interface::{
     TemplateExecutable,
     TemplateManagerError,

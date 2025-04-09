@@ -20,6 +20,7 @@ minotari_wallet_grpc_client = { workspace = true }
 tari_validator_node_client = { workspace = true }
 tari_wallet_daemon_client = { workspace = true }
 tari_dan_engine = { workspace = true }
+tari_template_lib_types = { workspace = true }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }

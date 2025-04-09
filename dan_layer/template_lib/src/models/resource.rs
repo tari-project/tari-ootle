@@ -26,17 +26,20 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
+use tari_template_lib_types::{EntityId, KeyParseError, ObjectKey};
 
-use super::{BinaryTag, EntityId, KeyParseError, ObjectKey};
+use super::BinaryTag;
 use crate::{newtype_struct_serde_impl, prelude::CONFIDENTIAL_TARI_RESOURCE_ADDRESS};
 
 const TAG: u64 = BinaryTag::ResourceAddress.as_u64();
 
 /// The unique identification of a resource in the Tari network
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ResourceAddress(#[cfg_attr(feature = "ts", ts(type = "string"))] BorTag<ObjectKey, TAG>);
 
 impl ResourceAddress {
@@ -90,15 +93,6 @@ impl Display for ResourceAddress {
 impl AsRef<[u8]> for ResourceAddress {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
-    }
-}
-
-impl TryFrom<&[u8]> for ResourceAddress {
-    type Error = KeyParseError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let key = ObjectKey::try_from(value)?;
-        Ok(Self::new(key))
     }
 }
 

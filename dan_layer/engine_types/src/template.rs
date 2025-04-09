@@ -23,11 +23,9 @@
 use std::str::FromStr;
 
 use tari_common_types::types::FixedHash;
+use tari_template_lib::types::TemplateAddress;
 
 use crate::hashing::{hasher32, EngineHashDomainLabel};
-
-/// Package (template) identifier
-pub type TemplateAddress = tari_template_lib::Hash;
 
 // TODO: should we refactor TemplateAddress as a newtype to implement FromStr?
 pub fn parse_template_address(s: &str) -> Option<TemplateAddress> {

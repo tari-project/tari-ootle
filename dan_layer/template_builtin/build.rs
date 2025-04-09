@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Rebuild templates if abi or lib changes
     println!("cargo:rerun-if-changed=../template_abi");
     println!("cargo:rerun-if-changed=../template_lib");
+    println!("cargo:rerun-if-changed=../tari_bor");
     for template in TEMPLATE_BUILTINS {
         // we only want to rebuild if a template was added/modified
         println!("cargo:rerun-if-changed={}/src", template);
@@ -33,6 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         // copy the wasm binary to the root folder of the template, to be included in source control
         let wasm_dest = template_path.join(wasm_name).with_extension("wasm");
+        println!("cargo:rerun-if-changed={}", wasm_dest.display());
         if wasm_dest.exists() {
             let existing_contents = fs::read(&wasm_dest)?;
             let dest_contents = fs::read(&wasm_path)?;

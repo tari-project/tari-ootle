@@ -11,11 +11,11 @@ use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use itertools::Itertools;
 use log::info;
 use tari_common::configuration::Network;
-use tari_common_types::types::PublicKey;
 use tari_consensus::{
     consensus_constants::ConsensusConstants,
     hotstuff::{HotstuffConfig, HotstuffEvent},
 };
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
     committee::Committee,
     displayable::Displayable,
@@ -33,7 +33,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_engine_types::substate::SubstateId;
+use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_epoch_manager::EpochManagerReader;
 use tari_shutdown::{Shutdown, ShutdownSignal};
 use tari_transaction::TransactionId;
@@ -565,7 +565,7 @@ pub struct TestBuilder {
     message_filter: Option<MessageFilter>,
     failure_nodes: Vec<TestAddress>,
     config: HotstuffConfig,
-    claim_keys: Option<(TestVnDestination, PublicKey)>,
+    claim_keys: Option<(TestVnDestination, RistrettoPublicKey)>,
 }
 
 impl TestBuilder {
@@ -624,7 +624,7 @@ impl TestBuilder {
         self
     }
 
-    pub fn set_claim_key(mut self, dest: TestVnDestination, claim_key: PublicKey) -> Self {
+    pub fn set_claim_key(mut self, dest: TestVnDestination, claim_key: RistrettoPublicKey) -> Self {
         self.claim_keys = Some((dest, claim_key));
         self
     }
@@ -638,7 +638,7 @@ impl TestBuilder {
         for addr in addresses {
             let addr = TestAddress::new(addr);
             let (_, pk) = helpers::derive_keypair_from_address(&addr);
-            entry.members.push((addr, pk));
+            entry.members.push((addr, pk.to_byte_type()));
         }
         self
     }
@@ -689,7 +689,7 @@ impl TestBuilder {
                     .with_address_and_secret_key(vn.address.clone(), sk)
                     .with_shard(vn.shard_key)
                     .with_shard_group(shard_group)
-                    .with_fee_claim_public_key(vn.fee_claim_public_key.clone())
+                    .with_fee_claim_public_key(vn.fee_claim_public_key)
                     .with_epoch_manager(epoch_manager.clone_for(vn.address.clone(), pk, vn.shard_key, vn.fee_claim_public_key))
                     .with_leader_strategy(*leader_strategy)
                     .with_num_committees(num_committees)

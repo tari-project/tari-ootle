@@ -33,7 +33,6 @@ use std::{
 use anyhow::anyhow;
 use clap::{Args, Subcommand};
 use tari_bor::decode_exact;
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{Epoch, SubstateAddress, SubstateRequirement};
 use tari_dan_engine::abi::Type;
 use tari_dan_wallet_sdk::apis::confidential_transfer::ConfidentialTransferInputSelection;
@@ -43,7 +42,6 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
-    TemplateAddress,
 };
 use tari_template_lib::{
     arg,
@@ -51,11 +49,11 @@ use tari_template_lib::{
     args::Arg,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::{Amount, BucketId, NonFungibleAddress, NonFungibleId},
-    prelude::ResourceAddress,
+    prelude::{ResourceAddress, RistrettoPublicKeyBytes},
+    types::TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
-use tari_utilities::ByteArray;
 use tari_wallet_daemon_client::{
     types::{
         AccountGetResponse,
@@ -375,7 +373,7 @@ pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Res
     } = args;
 
     let destination_public_key =
-        PublicKey::from_canonical_bytes(&destination_public_key.into_inner()).map_err(anyhow::Error::msg)?;
+        RistrettoPublicKeyBytes::from_bytes(&destination_public_key.into_inner()).map_err(anyhow::Error::msg)?;
 
     let fee = common.max_fee.map(|f| f.try_into()).transpose()?;
     let resp = client
@@ -412,7 +410,7 @@ pub async fn handle_confidential_transfer(
 
     // let AccountByNameResponse { account, .. } = client.accounts_get_by_name(&source_account_name).await?;
     let destination_public_key =
-        PublicKey::from_canonical_bytes(&destination_public_key.into_inner()).map_err(anyhow::Error::msg)?;
+        RistrettoPublicKeyBytes::from_bytes(&destination_public_key.into_inner()).map_err(anyhow::Error::msg)?;
     let resp = client
         .accounts_confidential_transfer(ConfidentialTransferRequest {
             account: source_account,

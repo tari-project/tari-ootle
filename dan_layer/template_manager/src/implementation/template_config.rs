@@ -23,7 +23,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tari_engine_types::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TemplateConfig {

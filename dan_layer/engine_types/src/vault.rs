@@ -23,16 +23,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{Commitment, PrivateKey, PublicKey};
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::{
-    crypto::PedersonCommitmentBytes,
     models::{Amount, ConfidentialWithdrawProof, NonFungibleId, ResourceAddress, VaultId},
     prelude::ResourceType,
+    types::crypto::PedersenCommitmentBytes,
 };
 
 use crate::{
     bucket::Bucket,
-    confidential::{ConfidentialOutput, ElgamalVerifiableBalance, ValueLookupTable},
+    confidential::ConfidentialOutput,
     proof::{ContainerRef, LockedResource, Proof},
     resource_container::{ResourceContainer, ResourceError},
 };
@@ -73,7 +73,7 @@ impl Vault {
     pub fn withdraw_confidential(
         &mut self,
         proof: ConfidentialWithdrawProof,
-        view_key: Option<&PublicKey>,
+        view_key: Option<&RistrettoPublicKey>,
     ) -> Result<ResourceContainer, ResourceError> {
         self.resource_container.withdraw_confidential(proof, view_key)
     }
@@ -84,7 +84,7 @@ impl Vault {
 
     pub fn recall_confidential(
         &mut self,
-        commitments: &BTreeSet<PedersonCommitmentBytes>,
+        commitments: &BTreeSet<PedersenCommitmentBytes>,
         revealed_amount: Amount,
     ) -> Result<ResourceContainer, ResourceError> {
         self.resource_container
@@ -103,33 +103,8 @@ impl Vault {
         self.resource_container.get_commitment_count()
     }
 
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<Commitment, ConfidentialOutput>> {
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
         self.resource_container.get_confidential_commitments()
-    }
-
-    pub fn try_brute_force_confidential_balance<I, TValueLookup>(
-        &self,
-        secret_view_key: &PrivateKey,
-        value_range: I,
-        value_lookup: &mut TValueLookup,
-    ) -> Result<Option<u64>, TValueLookup::Error>
-    where
-        I: IntoIterator<Item = u64> + Clone,
-        TValueLookup: ValueLookupTable,
-    {
-        let Some(utxos) = self.get_confidential_commitments() else {
-            return Ok(None);
-        };
-
-        let balances = ElgamalVerifiableBalance::batched_brute_force(
-            secret_view_key,
-            value_range,
-            value_lookup,
-            utxos.values().filter_map(|utxo| utxo.viewable_balance.as_ref()),
-        )?;
-
-        // If any of the commitments cannot be brute forced, then we return None
-        Ok(balances.into_iter().sum())
     }
 
     pub fn resource_address(&self) -> &ResourceAddress {
@@ -147,7 +122,7 @@ impl Vault {
     pub fn reveal_confidential(
         &mut self,
         proof: ConfidentialWithdrawProof,
-        view_key: Option<&PublicKey>,
+        view_key: Option<&RistrettoPublicKey>,
     ) -> Result<ResourceContainer, ResourceError> {
         self.resource_container.reveal_confidential(proof, view_key)
     }

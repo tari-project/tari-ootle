@@ -24,7 +24,7 @@ use tari_engine_types::{
     fees::{FeeBreakdown, FeeReceipt},
     substate::SubstateDiff,
 };
-use tari_template_lib::{models::Amount, Hash};
+use tari_template_lib::models::Amount;
 use tari_transaction::{Instruction, Transaction};
 use tari_utilities::epoch_time::EpochTime;
 
@@ -246,6 +246,7 @@ mod transaction_operations {
 
 mod transaction_execution_operations {
     use tari_dan_common_types::optional::Optional;
+    use tari_template_lib::types::Hash;
 
     use super::*;
     use crate::helper::{commit_chain, create_chain};

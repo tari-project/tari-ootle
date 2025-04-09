@@ -26,7 +26,7 @@ use async_graphql::{Context, EmptyMutation, EmptySubscription, Object, Schema, S
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib::Hash;
+use tari_template_lib::types::Hash;
 use tari_transaction::TransactionId;
 
 use crate::event_manager::EventManager;

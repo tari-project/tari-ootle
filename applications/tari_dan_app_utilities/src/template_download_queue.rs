@@ -5,10 +5,10 @@
 //! In the current implementation (at the time of writing), the circular dependency cannot result in a deadlock.
 //! However, later changes could cause this to change.
 
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::Epoch;
-use tari_engine_types::TemplateAddress;
 use tari_epoch_manager::traits::TemplateDownloader;
+use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::TemplateAddress};
 use tari_template_manager::interface::{AddTemplateRequest, TemplateExecutable, TemplateManagerError};
 use tokio::sync::mpsc;
 
@@ -31,7 +31,7 @@ impl TemplateDownloader for TemplateDownloadQueue {
         epoch: Epoch,
         name: String,
         address: TemplateAddress,
-        author_public_key: PublicKey,
+        author_public_key: RistrettoPublicKeyBytes,
         url: url::Url,
         binary_hash: FixedHash,
     ) -> Result<(), Self::Error> {

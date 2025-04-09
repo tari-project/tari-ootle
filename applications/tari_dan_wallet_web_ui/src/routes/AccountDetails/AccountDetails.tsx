@@ -29,13 +29,13 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import TableBody from "@mui/material/TableBody";
-import { useParams } from "react-router-dom";
-import { useAccountsGetBalances, useAccountsGet, useAccountNFTsList } from "../../api/hooks/useAccounts";
+import { useAccountsGetBalances, useAccountNFTsList } from "../../api/hooks/useAccounts";
 import { DataTableCell } from "../../Components/StyledComponents";
 import FetchStatusCheck from "../../Components/FetchStatusCheck";
-import { BalanceEntry } from "@tari-project/typescript-bindings";
+import { BalanceEntry, substateIdToString } from "@tari-project/typescript-bindings";
 import NFTList from "../../Components/NFTList";
 import CopyAddress from "../../Components/CopyAddress";
+import useAccountStore from "../../store/accountStore";
 
 function BalanceRow(props: BalanceEntry) {
   return (
@@ -51,28 +51,32 @@ function BalanceRow(props: BalanceEntry) {
 }
 
 function AccountDetailsLayout() {
-  const { id: accountId } = useParams();
+  const { account, publicKey } = useAccountStore();
+
+  if (!account) {
+    return <>No Account</>;
+  }
+
   const {
     data: balancesData,
     isLoading: balancesIsLoading,
     isError: balancesIsError,
     error: balancesError,
-  } = useAccountsGetBalances(accountId ? { ComponentAddress: accountId } : null);
+  } = useAccountsGetBalances(substateIdToString(account.address));
 
-  const {
-    data: accountsData,
-    isLoading: accountsIsLoading,
-    isError: accountsIsError,
-    error: accountsError,
-  } = useAccountsGet({ ComponentAddress: accountId || "" });
+  // const {
+  //   data: accountsData,
+  //   isLoading: accountsIsLoading,
+  //   isError: accountsIsError,
+  //   error: accountsError,
+  // } = useAccountsGet({ ComponentAddress: accountId });
 
-  const name = accountsData?.account?.name || null;
   const {
     data: nftsListData,
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useAccountNFTsList(name ? { Name: name } : null, 0, 10);
+  } = useAccountNFTsList(substateIdToString(account.address), 0, 10);
   return (
     <>
       <Grid item xs={12} md={12} lg={12}>
@@ -90,23 +94,15 @@ function AccountDetailsLayout() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                <FetchStatusCheck
-                  isError={accountsIsError}
-                  errorMessage={accountsError?.message || "Error fetching data"}
-                  isLoading={accountsIsLoading}
-                >
-                  {accountsData && (
-                    <TableRow>
-                      <DataTableCell>{accountsData.account.name}</DataTableCell>
-                      <DataTableCell>
-                        <CopyAddress address={accountsData.account.address} />
-                      </DataTableCell>
-                      <DataTableCell>
-                        <CopyAddress address={accountsData.public_key} />
-                      </DataTableCell>
-                    </TableRow>
-                  )}
-                </FetchStatusCheck>
+                <TableRow>
+                  <DataTableCell>{account.name}</DataTableCell>
+                  <DataTableCell>
+                    <CopyAddress address={substateIdToString(account.address)} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <CopyAddress address={publicKey} />
+                  </DataTableCell>
+                </TableRow>
               </TableBody>
             </Table>
           </TableContainer>

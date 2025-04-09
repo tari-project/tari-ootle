@@ -368,13 +368,20 @@ impl TemplateTest {
         RistrettoPublicKeyBytes::from_bytes(self.public_key.as_bytes()).unwrap()
     }
 
-    pub fn create_empty_account(&mut self) -> (ComponentAddress, NonFungibleAddress, RistrettoSecretKey) {
+    pub fn create_empty_account(
+        &mut self,
+    ) -> (
+        ComponentAddress,
+        NonFungibleAddress,
+        RistrettoPublicKey,
+        RistrettoSecretKey,
+    ) {
         let (owner_proof, public_key, secret_key) = self.create_owner_proof();
         let old_fail_fees = self.enable_fees;
         self.enable_fees = false;
-        let component = self.create_account(public_key, None, vec![owner_proof.clone()]);
+        let component = self.create_account(public_key.clone(), None, vec![owner_proof.clone()]);
         self.enable_fees = old_fail_fees;
-        (component, owner_proof, secret_key)
+        (component, owner_proof, public_key, secret_key)
     }
 
     #[deprecated(

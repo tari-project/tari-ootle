@@ -81,7 +81,7 @@ pub struct IndexerConfig {
     pub json_rpc_address: Option<SocketAddr>,
     /// GraphQL port of the indexer application
     pub graphql_address: Option<SocketAddr>,
-    /// The address of the HTTP UI
+    /// The address of the Web UI
     pub web_ui_address: Option<SocketAddr>,
     /// The jrpc address where the UI should connect to the JSON RPC (it can be the same as the json_rpc_address, but
     /// doesn't have to be), if this will be None, then the listen_addr will be used.

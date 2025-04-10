@@ -101,7 +101,7 @@ pub async fn run_tari_dan_wallet_daemon(
     let (jrpc_address, listen_fut) =
         jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers, shutdown_signal)?;
 
-    // Run the http ui
+    // Run the web ui
     if let Some(web_listener_address) = config.dan_wallet_daemon.web_ui_address {
         let mut public_jrpc_url = config
             .dan_wallet_daemon

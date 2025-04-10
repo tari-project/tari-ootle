@@ -25,7 +25,7 @@ diesel::table! {
 diesel::table! {
     authored_templates (id) {
         id -> Integer,
-        key_index -> Nullable<BigInt>,
+        author_public_key -> Text,
         address -> Text,
         name -> Text,
         tari_version -> Text,

@@ -40,7 +40,7 @@ pub async fn handle_list_owned(
         context
             .wallet_sdk()
             .template_api()
-            .list_authored_templates(req.key_index, req.page, req.page_size)?;
+            .list_authored_templates(&req.author_public_key, req.page, req.page_size)?;
     Ok(TemplatesListAuthoredResponse {
         templates: templates.iter().map(AuthoredTemplate::from).collect(),
         total_templates,

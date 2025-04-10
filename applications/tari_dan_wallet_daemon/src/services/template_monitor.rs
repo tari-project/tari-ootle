@@ -5,7 +5,10 @@ use std::{ops::Add, time::Duration};
 
 use anyhow::anyhow;
 use log::*;
-use tari_dan_common_types::optional::IsNotFoundError;
+use tari_dan_common_types::{
+    optional::{IsNotFoundError, Optional},
+    substate_type::SubstateType,
+};
 use tari_dan_wallet_sdk::{
     apis::transaction::TransactionApiError,
     network::WalletNetworkInterface,
@@ -50,17 +53,19 @@ where
         let max_wait_time = Duration::from_secs(5);
         let wait_step = Duration::from_millis(100);
         let mut current_wait_time = min_wait_time;
-        let mut template_definition = None;
         let network_interface = self.wallet_sdk.get_network_interface();
-        while template_definition.is_none() {
-            template_definition = match network_interface
+        loop {
+            match network_interface
                 .fetch_template_definition(template_address)
                 .await
-                .map_err(|error| TransactionApiError::NetworkInterfaceError(format!("{}", error)))
+                .optional()
+                .map_err(|error| TransactionApiError::NetworkInterfaceError(error.to_string()))?
             {
-                Ok(template_def) => Some(template_def),
-                Err(error) => {
-                    error!(target: LOG_TARGET, "Failed to fetch template definition: {}, retry...", error);
+                Some(template_def) => {
+                    return Ok(template_def);
+                },
+                None => {
+                    info!(target: LOG_TARGET, "Template definition not found yet. retry after {:.2?}...", current_wait_time);
                     if self.shutdown_signal.is_triggered() {
                         return Err(anyhow!("shutdown during fetch template definition"));
                     }
@@ -68,12 +73,9 @@ where
                     if current_wait_time < max_wait_time {
                         current_wait_time = current_wait_time.add(wait_step);
                     }
-                    None
                 },
             };
         }
-
-        template_definition.ok_or(anyhow!("Could not fetch template definition"))
     }
 
     async fn handle_wallet_event(&self, event: WalletEvent) -> anyhow::Result<()> {
@@ -82,15 +84,33 @@ where
                 return Ok(());
             };
 
-            for (id, _) in diff.up_iter().filter(|(id, _)| id.is_template()) {
+            for (id, substate) in diff.up_iter().filter(|(id, _)| id.is_template()) {
                 let template_address = id
                     .as_template()
                     .expect("is_template checked but as_template returned None");
-                let template_definition = self.fetch_template_definition(template_address.as_hash()).await?;
+                if self
+                    .wallet_sdk
+                    .template_api()
+                    .template_exists(template_address.as_hash())?
+                {
+                    // Template already exists, no need to add it again
+                    info!(target: LOG_TARGET, "Template {id} already exists, skipping...");
+                    continue;
+                }
+
+                let Some(template) = substate.substate_value().as_template() else {
+                    error!(target: LOG_TARGET, "Diff contained a template substate ID {id} but the substate was type {}. This should not be possible", SubstateType::from(substate.substate_value()));
+                    continue;
+                };
+                let template_definition = match self.fetch_template_definition(template_address.as_hash()).await {
+                    Ok(template_definition) => template_definition,
+                    Err(error) => {
+                        error!(target: LOG_TARGET, "Failed to fetch template definition: {}", error);
+                        continue;
+                    },
+                };
                 self.wallet_sdk.template_api().add_authored_template(
-                    // There is currently safe no way to get the key index from the public key.
-                    // Unsuccessfully searching from 0 to u64::MAX will take in excess of 584942 years.
-                    None,
+                    template.author,
                     template_address.as_hash(),
                     template_definition,
                 )?;

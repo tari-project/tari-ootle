@@ -3,11 +3,11 @@
 
 use serde::{Deserialize, Serialize};
 use tari_template_abi::{FunctionDef, TemplateDef};
-use tari_template_lib::prelude::TemplateAddress;
+use tari_template_lib::prelude::{RistrettoPublicKeyBytes, TemplateAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthoredTemplateModel {
-    pub key_index: Option<u64>,
+    pub author_public_key: RistrettoPublicKeyBytes,
     pub address: TemplateAddress,
     pub name: String,
     pub tari_version: String,
@@ -15,9 +15,13 @@ pub struct AuthoredTemplateModel {
 }
 
 impl AuthoredTemplateModel {
-    pub fn new(key_index: Option<u64>, template_address: TemplateAddress, template_def: TemplateDef) -> Self {
+    pub fn new(
+        author_public_key: RistrettoPublicKeyBytes,
+        template_address: TemplateAddress,
+        template_def: TemplateDef,
+    ) -> Self {
         Self {
-            key_index,
+            author_public_key,
             address: template_address,
             name: template_def.template_name().to_string(),
             tari_version: template_def.tari_version().to_string(),

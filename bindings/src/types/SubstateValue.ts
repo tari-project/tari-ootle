@@ -9,4 +9,13 @@ import type { UnclaimedConfidentialOutput } from "./UnclaimedConfidentialOutput"
 import type { ValidatorFeePool } from "./ValidatorFeePool";
 import type { Vault } from "./Vault";
 
-export type SubstateValue = { "Component": ComponentHeader } | { "Resource": Resource } | { "Vault": Vault } | { "NonFungible": NonFungibleContainer } | { "NonFungibleIndex": NonFungibleIndex } | { "UnclaimedConfidentialOutput": UnclaimedConfidentialOutput } | { "TransactionReceipt": TransactionReceipt } | { "Template": PublishedTemplate } | { "ValidatorFeePool": ValidatorFeePool };
+export type SubstateValue =
+  | { Component: ComponentHeader }
+  | { Resource: Resource }
+  | { Vault: Vault }
+  | { NonFungible: NonFungibleContainer }
+  | { NonFungibleIndex: NonFungibleIndex }
+  | { UnclaimedConfidentialOutput: UnclaimedConfidentialOutput }
+  | { TransactionReceipt: TransactionReceipt }
+  | { Template: PublishedTemplate }
+  | { ValidatorFeePool: ValidatorFeePool };

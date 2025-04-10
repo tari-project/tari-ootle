@@ -1016,7 +1016,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         })?;
         diesel::insert_into(authored_templates::table)
             .values((
-                authored_templates::key_index.eq(entity.key_index),
+                authored_templates::author_public_key.eq(entity.author_public_key),
                 authored_templates::address.eq(entity.address),
                 authored_templates::name.eq(entity.name),
                 authored_templates::tari_version.eq(entity.tari_version),

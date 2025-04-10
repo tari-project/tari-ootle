@@ -32,6 +32,7 @@ import { Collapse, TablePagination } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { SlCheck, SlClose } from "react-icons/sl";
 import { handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
+import useAccountStore from "../../store/accountStore";
 
 function getTypeAsString(funcType: FuncType): string {
   if (typeof funcType === "string") {
@@ -60,12 +61,13 @@ function getTypeAsString(funcType: FuncType): string {
 function Templates() {
   const [page, setPage] = useState(0);
   const [templatesCount, setTemplatesCount] = useState(0);
+  const accountStore = useAccountStore();
   const [account, setAccount] = useState<AccountInfo | undefined>(undefined);
   const [open, setOpen] = useState<boolean[]>([]);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const theme = useTheme();
   const { data: templatesResponse } = useListTemplatesAuthored({
-    key_index: account?.account.key_index || 0,
+    author_public_key: account?.public_key || accountStore.publicKey,
     page: page,
     page_size: rowsPerPage,
   });

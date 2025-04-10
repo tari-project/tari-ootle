@@ -26,7 +26,7 @@ use std::{convert::TryFrom, str::FromStr};
 use diesel::sql_types::{Integer, Nullable, Text};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
-use tari_template_lib::Hash;
+use tari_template_lib::types::Hash;
 
 use crate::substate_storage_sqlite::schema::*;
 

@@ -30,19 +30,19 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Box from "@mui/material/Box";
-import { useAccountsGet, useAccountsGetBalances, useAccountsTransfer } from "../../../api/hooks/useAccounts";
+import { useAccountsGetBalances, useAccountsTransfer } from "../../../api/hooks/useAccounts";
 import { useTheme } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
 import Select from "@mui/material/Select";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import MenuItem from "@mui/material/MenuItem";
 import {
+  BalanceEntry,
+  ConfidentialTransferInputSelection,
   ResourceAddress,
   ResourceType,
-  ConfidentialTransferInputSelection,
-  TransactionResult,
-  BalanceEntry,
   substateIdToString,
+  TransactionResult,
 } from "@tari-project/typescript-bindings";
 import InputLabel from "@mui/material/InputLabel";
 
@@ -101,7 +101,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const theme = useTheme();
 
-  const { data } = useAccountsGetBalances({ ComponentAddress: substateIdToString(account.address) });
+  const { data } = useAccountsGetBalances(substateIdToString(account.address));
   const badges = data?.balances
     ?.filter((b: BalanceEntry) => b.resource_type === "NonFungible" && b.balance > 0)
     .map((b: BalanceEntry) => b.resource_address) as string[];
@@ -189,7 +189,13 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             });
             return;
           }
-          setTransferFormState({ ...transferFormState, fee: result.fee.toString() });
+          // Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
+          // Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof 
+          // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than 
+          // accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
+          // TODO: remove once this is no longer an issue
+          const fee = result.fee + 100;
+          setTransferFormState({ ...transferFormState, fee: fee.toString() });
         })
         .catch((e) => {
           setPopup({ title: "Fee estimate failed", error: true, message: e.message });

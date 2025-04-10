@@ -42,13 +42,13 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
-    TemplateAddress,
 };
 use tari_template_lib::{
     arg,
     args::Arg,
     models::{Amount, BucketId, NonFungibleAddress, NonFungibleId},
     prelude::ResourceAddress,
+    types::TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
 use tari_transaction_manifest::parse_manifest;

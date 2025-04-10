@@ -20,10 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{Epoch, NodeAddressable, SubstateAddress};
 use tari_dan_storage::global::models::ValidatorNode;
-use tari_utilities::ByteArray;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 use crate::{
     error::SqliteStorageError,
@@ -50,12 +49,12 @@ impl<TAddr: NodeAddressable> TryFrom<DbValidatorNode> for ValidatorNode<TAddr> {
                 SqliteStorageError::MalformedDbData(format!("Invalid shard id in validator node record id={}", vn.id))
             })?,
             address: DbValidatorNode::try_parse_address(&vn.address)?,
-            public_key: PublicKey::from_canonical_bytes(&vn.public_key).map_err(|_| {
+            public_key: RistrettoPublicKeyBytes::from_bytes(&vn.public_key).map_err(|_| {
                 SqliteStorageError::MalformedDbData(format!("Invalid public key in validator node record id={}", vn.id))
             })?,
             start_epoch: Epoch(vn.start_epoch as u64),
             end_epoch: vn.end_epoch.map(|e| Epoch(e as u64)),
-            fee_claim_public_key: PublicKey::from_canonical_bytes(&vn.fee_claim_public_key).map_err(|_| {
+            fee_claim_public_key: RistrettoPublicKeyBytes::from_bytes(&vn.fee_claim_public_key).map_err(|_| {
                 SqliteStorageError::MalformedDbData(format!(
                     "Invalid fee claim public key in validator node record id={}",
                     vn.id

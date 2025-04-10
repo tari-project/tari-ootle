@@ -8,6 +8,7 @@ use tari_engine_types::{
     commit_result::RejectReason,
     instruction::Instruction,
     substate::{SubstateDiff, SubstateId},
+    ToByteType,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::args;
@@ -34,7 +35,9 @@ pub fn create_or_use_key(world: &mut TariWorld, key_name: String) {
     } else {
         let key = km.create().expect("Could not create a new key pair");
         km.set_active_key(&key.public_key.to_string()).unwrap();
-        world.account_keys.insert(key_name, (key.secret_key, key.public_key));
+        world
+            .account_keys
+            .insert(key_name, (key.secret_key, key.public_key.to_byte_type()));
     }
 }
 pub fn create_key(world: &mut TariWorld, key_name: String) {
@@ -42,16 +45,19 @@ pub fn create_key(world: &mut TariWorld, key_name: String) {
         .create()
         .expect("Could not create a new key pair");
 
-    world.account_keys.insert(key_name, (key.secret_key, key.public_key));
+    world
+        .account_keys
+        .insert(key_name, (key.secret_key, key.public_key.to_byte_type()));
 }
 
 pub async fn create_account(world: &mut TariWorld, account_name: String, validator_node_name: String) {
     let data_dir = get_cli_data_dir(world);
     let key = get_key_manager(world).create().expect("Could not create keypair");
     let owner_token = key.to_owner_token();
-    world
-        .account_keys
-        .insert(account_name.clone(), (key.secret_key.clone(), key.public_key.clone()));
+    world.account_keys.insert(
+        account_name.clone(),
+        (key.secret_key.clone(), key.public_key.to_byte_type()),
+    );
     // create an account component
     let instruction = Instruction::CallFunction {
         // The "account" template is builtin in the validator nodes with a constant address

@@ -34,7 +34,7 @@ import useAccountStore from "../../store/accountStore";
 
 function Onboarding() {
   const { mutate, status } = useAccountsCreateFreeTestCoins();
-  const { setAccount, setPublicKey } = useAccountStore();
+  const { setAccount, setPublicKey, setPopup } = useAccountStore();
   const theme = useTheme();
 
   const [accountFormState, setAccountFormState] = useState({
@@ -53,6 +53,9 @@ function Onboarding() {
         onSuccess: (resp) => {
           setAccount(resp.account);
           setPublicKey(resp.public_key);
+        },
+        onError: (e) => {
+          setPopup({ title: "Account create failed: " + e, error: true });
         },
       },
     );

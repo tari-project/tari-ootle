@@ -16,11 +16,11 @@ jobs:
         working-directory: bindings
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: 'moonrepo/setup-toolchain@v0'
         with:
-          node-version: "20"
-      - run: npm ci
-      - run: npm run build-dist
+          auto-install: true
+      - run: pnpm install --frozen-lockfile
+      - run: moon bindings:build
       - uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.NPM_TOKEN }}
@@ -36,11 +36,11 @@ jobs:
         working-directory: clients/javascript/wallet_daemon_client
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: 'moonrepo/setup-toolchain@v0'
         with:
-          node-version: "23"
-      - run: npm ci
-      - run: npm run build
+          auto-install: true
+      - run: pnpm install --frozen-lockfile
+      - run: moon wallet_daemon_client:build
       - uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.NPM_TOKEN }}

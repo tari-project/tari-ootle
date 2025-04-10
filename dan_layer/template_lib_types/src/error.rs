@@ -9,8 +9,8 @@ use tari_template_abi::rust::{
 /// Represents an error that occurs when reading byte data with an unexpected length
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidByteLengthError {
-    pub(super) size: usize,
-    pub(super) expected: usize,
+    pub(crate) size: usize,
+    pub(crate) expected: usize,
 }
 
 impl InvalidByteLengthError {

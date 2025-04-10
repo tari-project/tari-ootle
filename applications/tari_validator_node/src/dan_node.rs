@@ -127,7 +127,7 @@ impl DanNode {
                     .services
                     .template_manager
                     .add_template(
-                        author_pk.clone(),
+                        *author_pk,
                         template_address.as_hash(),
                         TemplateExecutable::CompiledWasm(code.to_vec()),
                         None,

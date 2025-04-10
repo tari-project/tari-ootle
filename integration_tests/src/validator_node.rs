@@ -27,10 +27,12 @@ use std::{
 
 use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
-use tari_common_types::types::PublicKey;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
+use tari_engine_types::FromByteType;
 use tari_p2p::Network;
 use tari_shutdown::Shutdown;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig, ValidatorRegistrationFile};
 use tari_validator_node_client::ValidatorNodeClient;
 use tari_wallet_daemon_client::types::KeyBranch;
@@ -47,7 +49,7 @@ use crate::{
 #[derive(Debug)]
 pub struct ValidatorNodeProcess {
     pub name: String,
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
     pub port: u16,
     pub json_rpc_port: u16,
     pub web_ui_port: u16,
@@ -153,7 +155,8 @@ pub async fn spawn_validator_node(
             config.validator_node.web_ui_listener_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
             config.validator_node.p2p.listener_port = port;
 
-            config.validator_node.fee_claim_public_key = key.public_key;
+            config.validator_node.fee_claim_public_key =
+                RistrettoPublicKey::try_from_byte_type(&key.public_key).unwrap();
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
@@ -189,7 +192,7 @@ fn get_vn_client(port: u16) -> ValidatorNodeClient {
     ValidatorNodeClient::connect(endpoint).unwrap()
 }
 
-async fn get_vn_identity(jrpc_port: u16) -> PublicKey {
+async fn get_vn_identity(jrpc_port: u16) -> RistrettoPublicKeyBytes {
     // send the JSON RPC "get_identity" request to the VN
     let mut client = get_vn_client(jrpc_port);
     let resp = client.get_identity().await.unwrap();

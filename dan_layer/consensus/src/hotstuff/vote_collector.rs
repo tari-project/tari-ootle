@@ -87,7 +87,7 @@ where TConsensusSpec: ConsensusSpec
         // Is a local committee member that signed this vote?
         let sender_vn = self
             .epoch_manager
-            .get_validator_node_by_public_key(message.epoch, message.signature.public_key.clone())
+            .get_validator_node_by_public_key(message.epoch, message.signature.public_key)
             .await
             .optional()?;
         let Some(sender_vn) = sender_vn else {

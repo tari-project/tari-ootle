@@ -4,7 +4,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::{format, string::String};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BorError(String);
 
 impl BorError {
@@ -33,6 +33,6 @@ impl std::error::Error for BorError {
 
 impl From<ciborium::value::Error> for BorError {
     fn from(value: ciborium::value::Error) -> Self {
-        BorError(format!("{}", value))
+        Self(value.to_string())
     }
 }

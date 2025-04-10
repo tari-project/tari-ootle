@@ -46,7 +46,7 @@ export default function AccountBalance() {
     isLoading: balancesIsLoading,
     isRefetching: balancesIsRefetching,
     refetch,
-  } = useAccountsGetBalances({ ComponentAddress: substateIdToString(account.address) });
+  } = useAccountsGetBalances(substateIdToString(account.address));
 
   useEffect(() => {
     refetch();

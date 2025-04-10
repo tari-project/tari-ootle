@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::anyhow;
-use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_wallet_daemon_client::{
     types::{
         AccountGetResponse,
@@ -57,7 +57,7 @@ impl WalletDaemonProcess {
         &self,
         name: String,
         webauthn_finish_auth_request: Option<WebauthnFinishAuthRequest>,
-    ) -> anyhow::Result<RistrettoPublicKey> {
+    ) -> anyhow::Result<RistrettoPublicKeyBytes> {
         let mut client = self.connect_client(webauthn_finish_auth_request).await?;
         let AccountGetResponse { public_key, .. } = client.accounts_get(name.into()).await?;
         Ok(public_key)

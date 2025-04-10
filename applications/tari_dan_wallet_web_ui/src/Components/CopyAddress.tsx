@@ -21,19 +21,17 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { SubstateId, shortenString } from "@tari-project/typescript-bindings";
-import { shortenSubstateId, substateIdToString } from "../utils/helpers";
+import { isSubstateIdString, shortenSubstateId, substateIdToString } from "../utils/helpers";
 import CopyToClipboard from "./CopyToClipboard";
 
 interface Props {
-  address: SubstateId | string;
+  address: string;
   display?: SubstateId | string;
 }
 
 export default function CopyAddress({ address, display }: Props) {
-  const [shortAddress, addressString] =
-    typeof address === "object"
-      ? [shortenSubstateId(address), substateIdToString(address)]
-      : [shortenString(address), address];
+  const shortAddress = isSubstateIdString(address) ? shortenSubstateId(address) : shortenString(address);
+  const addressString = isSubstateIdString(address) ? substateIdToString(address) : address;
   const displayStr = display && (typeof display === "object" ? shortenSubstateId(display) : display);
 
   return (

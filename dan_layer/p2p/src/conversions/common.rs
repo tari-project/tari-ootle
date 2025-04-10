@@ -22,32 +22,32 @@
 
 use std::convert::{TryFrom, TryInto};
 
-use anyhow::anyhow;
-use tari_common_types::types::{PrivateKey, PublicKey, Signature};
-use tari_crypto::{hashing::DomainSeparation, signatures::SchnorrSignature, tari_utilities::ByteArray};
+use anyhow::Context;
+use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{Epoch, SubstateAddress};
-use tari_dan_storage::consensus_models::{ValidatorSchnorrSignature, ValidatorSignature};
+use tari_dan_storage::consensus_models::ValidatorSignature;
+use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_transaction::TransactionSignature;
 
 use crate::proto;
 
 //---------------------------------- Signature --------------------------------------------//
-impl<H: DomainSeparation> TryFrom<proto::common::Signature> for SchnorrSignature<PublicKey, PrivateKey, H> {
+impl TryFrom<proto::common::Signature> for SchnorrSignatureBytes {
     type Error = anyhow::Error;
 
     fn try_from(sig: proto::common::Signature) -> Result<Self, Self::Error> {
-        let public_nonce = ByteArray::from_canonical_bytes(&sig.public_nonce).map_err(anyhow::Error::msg)?;
-        let signature = PrivateKey::from_canonical_bytes(&sig.signature).map_err(anyhow::Error::msg)?;
+        let public_nonce = RistrettoPublicKeyBytes::from_bytes(&sig.public_nonce).map_err(anyhow::Error::msg)?;
+        let signature = Scalar32Bytes::from_bytes(&sig.signature).map_err(anyhow::Error::msg)?;
 
         Ok(Self::new(public_nonce, signature))
     }
 }
 
-impl<H: DomainSeparation> From<&SchnorrSignature<PublicKey, PrivateKey, H>> for proto::common::Signature {
-    fn from(sig: &SchnorrSignature<PublicKey, PrivateKey, H>) -> Self {
+impl From<&SchnorrSignatureBytes> for proto::common::Signature {
+    fn from(sig: &SchnorrSignatureBytes) -> Self {
         Self {
-            public_nonce: sig.get_public_nonce().to_vec(),
-            signature: sig.get_signature().to_vec(),
+            public_nonce: sig.public_nonce().to_vec(),
+            signature: sig.signature().to_vec(),
         }
     }
 }
@@ -57,13 +57,14 @@ impl TryFrom<proto::common::SignatureAndPublicKey> for ValidatorSignature {
 
     fn try_from(sig: proto::common::SignatureAndPublicKey) -> Result<Self, Self::Error> {
         let public_key =
-            PublicKey::from_canonical_bytes(&sig.public_key).map_err(|_| anyhow!("Public key was not valid bytes"))?;
-        let public_nonce = ByteArray::from_canonical_bytes(&sig.public_nonce).map_err(anyhow::Error::msg)?;
-        let signature = PrivateKey::from_canonical_bytes(&sig.signature).map_err(anyhow::Error::msg)?;
+            RistrettoPublicKeyBytes::from_bytes(&sig.public_key).context("Public key was not valid bytes")?;
+        let public_nonce =
+            RistrettoPublicKeyBytes::from_bytes(&sig.public_nonce).context("public nonce bytes length != 32")?;
+        let signature = Scalar32Bytes::from_bytes(&sig.signature).context("signature bytes length != 32")?;
 
         Ok(Self::new(
             public_key,
-            ValidatorSchnorrSignature::new(public_nonce, signature),
+            SchnorrSignatureBytes::new(public_nonce, signature),
         ))
     }
 }
@@ -71,8 +72,8 @@ impl TryFrom<proto::common::SignatureAndPublicKey> for ValidatorSignature {
 impl From<&ValidatorSignature> for proto::common::SignatureAndPublicKey {
     fn from(value: &ValidatorSignature) -> Self {
         Self {
-            public_nonce: value.signature.get_public_nonce().to_vec(),
-            signature: value.signature.get_signature().to_vec(),
+            public_nonce: value.signature.public_nonce().to_vec(),
+            signature: value.signature.signature().to_vec(),
             public_key: value.public_key.as_bytes().to_vec(),
         }
     }
@@ -84,19 +85,24 @@ impl TryFrom<proto::common::SignatureAndPublicKey> for TransactionSignature {
     type Error = anyhow::Error;
 
     fn try_from(sig: proto::common::SignatureAndPublicKey) -> Result<Self, Self::Error> {
-        let public_key = ByteArray::from_canonical_bytes(&sig.public_key).map_err(anyhow::Error::msg)?;
-        let public_nonce = ByteArray::from_canonical_bytes(&sig.public_nonce).map_err(anyhow::Error::msg)?;
-        let signature = PrivateKey::from_canonical_bytes(&sig.signature).map_err(anyhow::Error::msg)?;
+        let public_key =
+            RistrettoPublicKeyBytes::from_bytes(&sig.public_key).context("Public key was not valid bytes")?;
+        let public_nonce =
+            RistrettoPublicKeyBytes::from_bytes(&sig.public_nonce).context("public nonce bytes length != 32")?;
+        let signature = Scalar32Bytes::from_bytes(&sig.signature).context("signature bytes length != 32")?;
 
-        Ok(Self::new(public_key, Signature::new(public_nonce, signature)))
+        Ok(Self::new(
+            public_key,
+            SchnorrSignatureBytes::new(public_nonce, signature),
+        ))
     }
 }
 
 impl From<&TransactionSignature> for proto::common::SignatureAndPublicKey {
     fn from(value: &TransactionSignature) -> Self {
         Self {
-            public_nonce: value.signature().get_public_nonce().to_vec(),
-            signature: value.signature().get_signature().to_vec(),
+            public_nonce: value.signature().public_nonce().to_vec(),
+            signature: value.signature().signature().to_vec(),
             public_key: value.public_key().to_vec(),
         }
     }

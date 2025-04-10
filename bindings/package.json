@@ -1,6 +1,6 @@
 {
   "name": "@tari-project/typescript-bindings",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "TypeScript types synchronized to the Tari Ootle Rust codebase",
   "homepage": "https://github.com/tari-project/tari-dan#readme",
   "bugs": {
@@ -27,6 +27,7 @@
   "license": "ISC",
   "devDependencies": {
     "shx": "^0.3.4",
-    "typescript": "^5.8.2"
+    "typescript": "catalog:",
+    "@types/node": "catalog:"
   }
 }

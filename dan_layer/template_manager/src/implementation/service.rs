@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{services::template_provider::TemplateProvider, Epoch, NodeAddressable, ToPeerId};
 use tari_dan_engine::wasm::WasmModule;
 use tari_dan_p2p::proto::rpc::TemplateType;
@@ -29,7 +28,7 @@ use tari_dan_storage::global::{DbTemplateType, DbTemplateUpdate, TemplateStatus}
 use tari_engine_types::calculate_template_binary_hash;
 use tari_epoch_manager::EpochManagerReader;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::{models::TemplateAddress, Hash};
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, Hash, TemplateAddress};
 use tari_validator_node_client::types::{ArgDef, FunctionDef, TemplateAbi};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 use tokio::{
@@ -350,8 +349,8 @@ where
 
     async fn handle_add_template(
         &mut self,
-        author_public_key: PublicKey,
-        template_address: tari_engine_types::TemplateAddress,
+        author_public_key: RistrettoPublicKeyBytes,
+        template_address: TemplateAddress,
         template: TemplateExecutable,
         template_name: Option<String>,
         epoch: Epoch,

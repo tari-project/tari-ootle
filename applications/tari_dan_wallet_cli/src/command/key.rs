@@ -21,7 +21,7 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use clap::Subcommand;
-use tari_common_types::types::PublicKey;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_wallet_daemon_client::{types::KeyBranch, WalletDaemonClient};
 
 use crate::{table::Table, table_row};
@@ -65,7 +65,7 @@ impl KeysSubcommand {
     }
 }
 
-fn print_keys(keys: Vec<(u64, PublicKey, bool)>) {
+fn print_keys(keys: Vec<(u64, RistrettoPublicKeyBytes, bool)>) {
     println!("Key pairs:");
     println!();
 

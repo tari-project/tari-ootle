@@ -203,7 +203,7 @@ where TSubstateCache: SubstateCache + 'static
                     continue;
                 },
                 Err(e) => {
-                    info!(target: LOG_TARGET, "Unable to get substate from peer: {} ", e.to_string());
+                    info!(target: LOG_TARGET, "Unable to get substate from peer: {} ", e);
                     // we do not stop when an individual request errors, we try all Vns
                     err_count += 1;
                     continue;

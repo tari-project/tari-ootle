@@ -22,7 +22,21 @@
 
 use proc_macro2::TokenStream;
 use quote::ToTokens;
-use syn::{fold, fold::Fold, FnArg, GenericArgument, ItemTrait, Meta, NestedMeta, PathArguments, ReturnType, Type};
+use syn::{
+    fold,
+    fold::Fold,
+    punctuated::Punctuated,
+    FnArg,
+    GenericArgument,
+    ItemTrait,
+    Meta,
+    PathArguments,
+    ReturnType,
+    Token,
+    TraitItem,
+    TraitItemFn,
+    Type,
+};
 
 use crate::{generator::RpcCodeGenerator, method_info::RpcMethodInfo, options::RpcTraitOptions};
 
@@ -56,11 +70,11 @@ impl TraitInfoCollector {
     }
 
     /// Returns true if a method has the `#[rpc(...)]` attribute, otherwise false
-    fn is_rpc_method(&self, node: &syn::TraitItemMethod) -> bool {
-        node.attrs.iter().any(|at| at.path.is_ident("rpc"))
+    fn is_rpc_method(&self, node: &TraitItemFn) -> bool {
+        node.attrs.iter().any(|at| at.meta.path().is_ident("rpc"))
     }
 
-    fn parse_trait_item_method(&mut self, node: &mut syn::TraitItemMethod) -> syn::Result<RpcMethodInfo> {
+    fn parse_trait_item_method(&mut self, node: &mut TraitItemFn) -> syn::Result<RpcMethodInfo> {
         let mut info = RpcMethodInfo {
             method_ident: node.sig.ident.clone(),
             method_num: 0,
@@ -75,61 +89,52 @@ impl TraitInfoCollector {
         Ok(info)
     }
 
-    fn parse_attr(&self, node: &mut syn::TraitItemMethod, info: &mut RpcMethodInfo) -> syn::Result<()> {
+    fn parse_attr(&self, node: &mut TraitItemFn, info: &mut RpcMethodInfo) -> syn::Result<()> {
         let attr = node
             .attrs
             .iter()
-            .position(|at| at.path.is_ident("rpc"))
+            .position(|at| at.meta.path().is_ident("rpc"))
             .map(|pos| node.attrs.remove(pos))
             .ok_or_else(|| {
                 let ident = node.sig.ident.to_string();
                 syn_error!(node, "Missing #[rpc(...)] attribute on method `{}`", ident)
             })?;
 
-        let meta = attr.parse_meta().unwrap();
-        match meta {
+        match attr.meta {
             Meta::List(meta_list) => {
-                for meta in meta_list.nested {
+                let nested = meta_list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+                for meta in nested {
                     match meta {
-                        NestedMeta::Meta(meta) => match meta {
-                            Meta::NameValue(name_value) => {
-                                let ident = name_value
-                                    .path
-                                    .get_ident()
-                                    .expect("Invalid syntax for #[rpc(...)] attribute");
-                                match ident.to_string().as_str() {
-                                    "method" => {
-                                        info.method_num = extract_u32(ident, &name_value.lit)?;
-                                        self.validate_method_num(ident, info.method_num)?;
-                                        if info.method_num == 0 {
-                                            return Err(syn_error!(
-                                                name_value,
-                                                "method must be greater than 0 in `#[rpc(...)]` attribute for method \
-                                                 `{}`",
-                                                info.method_ident,
-                                            ));
-                                        }
-                                    },
-                                    s => {
+                        Meta::NameValue(name_value) => {
+                            let ident = name_value
+                                .path
+                                .get_ident()
+                                .expect("Invalid syntax for #[rpc(...)] attribute");
+                            match ident.to_string().as_str() {
+                                "method" => {
+                                    info.method_num = extract_u32(ident, &name_value.value)?;
+                                    self.validate_method_num(ident, info.method_num)?;
+                                    if info.method_num == 0 {
                                         return Err(syn_error!(
                                             name_value,
-                                            "Invalid option `{}` in #[rpc(...)] attribute",
-                                            s
-                                        ))
-                                    },
-                                }
-                            },
-                            m => {
-                                return Err(syn_error!(
-                                    m,
-                                    "Invalid syntax given to #[rpc(...)] attribute. Expected a name/value pair.",
-                                ))
-                            },
+                                            "method must be greater than 0 in `#[rpc(...)]` attribute for method `{}`",
+                                            info.method_ident,
+                                        ));
+                                    }
+                                },
+                                s => {
+                                    return Err(syn_error!(
+                                        name_value,
+                                        "Invalid option `{}` in #[rpc(...)] attribute",
+                                        s
+                                    ))
+                                },
+                            }
                         },
                         m => {
                             return Err(syn_error!(
                                 m,
-                                "Invalid syntax given to #[rpc(...)] attribute. Expected a name/value pair",
+                                "Invalid syntax given to #[rpc(...)] attribute. Expected a name/value pair.",
                             ))
                         },
                     }
@@ -159,7 +164,7 @@ impl TraitInfoCollector {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn parse_method_signature(&self, node: &syn::TraitItemMethod, info: &mut RpcMethodInfo) -> syn::Result<()> {
+    fn parse_method_signature(&self, node: &TraitItemFn, info: &mut RpcMethodInfo) -> syn::Result<()> {
         info.method_ident = node.sig.ident.clone();
 
         // Check the self receiver
@@ -190,7 +195,7 @@ impl TraitInfoCollector {
         Ok(())
     }
 
-    fn parse_method_return_type(&self, node: &syn::TraitItemMethod, info: &mut RpcMethodInfo) -> syn::Result<()> {
+    fn parse_method_return_type(&self, node: &TraitItemFn, info: &mut RpcMethodInfo) -> syn::Result<()> {
         let ident = info.method_ident.clone();
         let invalid_return_type = || {
             syn_error!(
@@ -248,7 +253,7 @@ impl TraitInfoCollector {
         }
     }
 
-    fn parse_request_type(&self, node: &syn::TraitItemMethod, info: &mut RpcMethodInfo) -> syn::Result<()> {
+    fn parse_request_type(&self, node: &TraitItemFn, info: &mut RpcMethodInfo) -> syn::Result<()> {
         let request_arg = &node.sig.inputs[1];
         match request_arg {
             FnArg::Typed(syn::PatType { ty, .. }) => match &**ty {
@@ -288,30 +293,45 @@ impl Fold for TraitInfoCollector {
         fold::fold_item_trait(self, node)
     }
 
-    fn fold_trait_item_method(&mut self, mut node: syn::TraitItemMethod) -> syn::TraitItemMethod {
-        if self.is_rpc_method(&node) {
-            let info = match self.parse_trait_item_method(&mut node) {
-                Ok(i) => i,
-                Err(err) => {
-                    panic!("{}", err);
-                },
-            };
+    fn fold_trait_item(&mut self, mut node: TraitItem) -> TraitItem {
+        match &mut node {
+            TraitItem::Fn(fn_item) => {
+                if self.is_rpc_method(fn_item) {
+                    let info = match self.parse_trait_item_method(fn_item) {
+                        Ok(i) => i,
+                        Err(err) => {
+                            panic!("{}", err);
+                        },
+                    };
 
-            self.rpc_methods.push(info);
+                    self.rpc_methods.push(info);
+                }
+            },
+            _ => {
+                // Nothing
+            },
         }
 
-        fold::fold_trait_item_method(self, node)
+        fold::fold_trait_item(self, node)
     }
 }
 
-fn extract_u32(ident: &syn::Ident, lit: &syn::Lit) -> syn::Result<u32> {
-    match lit {
-        syn::Lit::Int(int) => int.base10_parse(),
-        l => Err(syn_error!(
-            ident,
+fn extract_u32(ident: &syn::Ident, expr: &syn::Expr) -> syn::Result<u32> {
+    match expr {
+        syn::Expr::Lit(lit) => match &lit.lit {
+            syn::Lit::Int(int) => int.base10_parse(),
+            l => Err(syn_error!(
+                ident,
+                "Expected integer for `{}` in the #[rpc(...)] attribute, got {:?}",
+                ident,
+                l
+            )),
+        },
+        _ => Err(syn_error!(
+            expr,
             "Expected integer for `{}` in the #[rpc(...)] attribute, got {:?}",
             ident,
-            l
+            expr
         )),
     }
 }

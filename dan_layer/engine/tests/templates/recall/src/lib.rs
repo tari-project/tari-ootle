@@ -89,7 +89,7 @@ mod template {
         pub fn recall_confidential(
             &mut self,
             vault_id: VaultId,
-            commitments: BTreeSet<PedersonCommitmentBytes>,
+            commitments: BTreeSet<PedersenCommitmentBytes>,
             revealed_amount: Amount,
         ) {
             let bucket = ResourceManager::get(self.confidential.resource_address()).recall_confidential(

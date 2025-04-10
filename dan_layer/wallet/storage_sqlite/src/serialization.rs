@@ -21,3 +21,7 @@ pub fn deserialize_json<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, Wa
         details: e.to_string(),
     })
 }
+
+pub fn serialize_hex<T: AsRef<[u8]>>(bytes: T) -> String {
+    hex::encode(bytes.as_ref())
+}

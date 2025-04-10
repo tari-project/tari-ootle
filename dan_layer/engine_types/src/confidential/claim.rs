@@ -2,9 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
-use tari_crypto::ristretto::RistrettoComSig;
-use tari_template_lib::models::{ConfidentialWithdrawProof, UnclaimedConfidentialOutputAddress};
+use tari_template_lib::{
+    models::{ConfidentialWithdrawProof, UnclaimedConfidentialOutputAddress},
+    prelude::RistrettoPublicKeyBytes,
+    types::crypto::CommitmentSignatureBytes,
+};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
@@ -12,11 +14,11 @@ use ts_rs::TS;
 #[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
 pub struct ConfidentialClaim {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub output_address: UnclaimedConfidentialOutputAddress,
     pub range_proof: Vec<u8>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub proof_of_knowledge: RistrettoComSig,
+    pub proof_of_knowledge: CommitmentSignatureBytes,
     pub withdraw_proof: Option<ConfidentialWithdrawProof>,
 }

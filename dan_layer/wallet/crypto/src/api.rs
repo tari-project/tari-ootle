@@ -4,14 +4,17 @@ use chacha20poly1305::aead;
 use rand::rngs::OsRng;
 use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
-    keys::{PublicKey as _, SecretKey},
-    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
+    keys::PublicKey as _,
+    ristretto::{RistrettoPublicKey, RistrettoSchnorr, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
-use tari_engine_types::confidential::{challenges, get_commitment_factory, ConfidentialOutput};
+use tari_engine_types::{
+    confidential::{get_commitment_factory, messages},
+    ToByteType,
+};
 use tari_template_lib::{
-    crypto::{BalanceProofSignature, PedersonCommitmentBytes},
     models::{Amount, ConfidentialOutputStatement, ConfidentialWithdrawProof, EncryptedData},
+    types::crypto::{BalanceProofSignature, PedersenCommitmentBytes},
 };
 
 use crate::{
@@ -41,7 +44,7 @@ pub fn create_withdraw_proof(
         |(mut commitments, agg_input), input| {
             let commitment = get_commitment_factory().commit_value(&input.mask, input.value);
             commitments.push(
-                PedersonCommitmentBytes::from_bytes(commitment.as_bytes()).expect("PedersonCommitment not 32 bytes"),
+                PedersenCommitmentBytes::from_bytes(commitment.as_bytes()).expect("PedersenCommitment not 32 bytes"),
             );
             (commitments, agg_input + &input.mask)
         },
@@ -80,14 +83,14 @@ pub fn encrypt_value_and_mask(
     secret: &RistrettoSecretKey,
 ) -> Result<EncryptedData, WalletCryptoError> {
     let key = kdfs::encrypted_data_dh_kdf_aead(secret, public_nonce);
-    let commitment = get_commitment_factory().commit_value(mask, amount);
+    let commitment = get_commitment_factory().commit_value(mask, amount).to_byte_type();
     let encrypted_data = encrypt_data(&key, &commitment, amount, mask)?;
     Ok(encrypted_data)
 }
 
 pub fn extract_value_and_mask(
     encryption_key: &RistrettoSecretKey,
-    commitment: &PedersenCommitment,
+    commitment: &PedersenCommitmentBytes,
     encrypted_data: &EncryptedData,
 ) -> Result<(u64, RistrettoSecretKey), WalletCryptoError> {
     let (value, mask) = decrypt_data_and_mask(encryption_key, commitment, encrypted_data)
@@ -96,7 +99,7 @@ pub fn extract_value_and_mask(
 }
 
 pub fn unblind_output(
-    output_commitment: &PedersenCommitment,
+    output_commitment: &PedersenCommitmentBytes,
     output_encrypted_value: &EncryptedData,
     claim_secret: &RistrettoSecretKey,
     reciprocal_public_key: &RistrettoPublicKey,
@@ -105,42 +108,11 @@ pub fn unblind_output(
 
     let (value, mask) = extract_value_and_mask(&encryption_key, output_commitment, output_encrypted_value)?;
     let commitment = get_commitment_factory().commit_value(&mask, value);
-    if *output_commitment == commitment {
+    if output_commitment.as_bytes() == commitment.as_bytes() {
         Ok(ConfidentialOutputMaskAndValue { value, mask })
     } else {
         Err(WalletCryptoError::UnableToOpenCommitment)
     }
-}
-
-pub fn create_output_for_dest(
-    dest_public_key: &RistrettoPublicKey,
-    amount: Amount,
-) -> Result<ConfidentialOutput, WalletCryptoError> {
-    let mask = RistrettoSecretKey::random(&mut OsRng);
-    // FIXME: This allows anyone to subtract the public mask from the commitment and brute force the value
-    // This is only used for create free test coins
-    let stealth_public_nonce = RistrettoPublicKey::from_secret_key(&mask);
-    let amount = amount
-        .as_u64_checked()
-        .ok_or_else(|| WalletCryptoError::InvalidArgument {
-            name: "amount",
-            details: "[generate_output_for_dest] amount is negative".to_string(),
-        })?;
-    let commitment = create_commitment(&mask, amount);
-    let encrypt_key = kdfs::encrypted_data_dh_kdf_aead(&mask, dest_public_key);
-    let encrypted_data = encrypt_data(&encrypt_key, &commitment, amount, &mask)?;
-
-    Ok(ConfidentialOutput {
-        commitment,
-        stealth_public_nonce,
-        encrypted_data,
-        minimum_value_promise: 0,
-        viewable_balance: None,
-    })
-}
-
-fn create_commitment(mask: &RistrettoSecretKey, value: u64) -> PedersenCommitment {
-    get_commitment_factory().commit_value(mask, value)
 }
 
 fn generate_balance_proof(
@@ -160,7 +132,7 @@ fn generate_balance_proof(
     let excess = RistrettoPublicKey::from_secret_key(&secret_excess);
     let (nonce, public_nonce) = RistrettoPublicKey::random_keypair(&mut OsRng);
     let message =
-        challenges::confidential_withdraw64(&excess, &public_nonce, input_revealed_amount, output_reveal_amount);
+        messages::confidential_withdraw64(&excess, &public_nonce, input_revealed_amount, output_reveal_amount);
 
     let sig = RistrettoSchnorr::sign_raw_uniform(&secret_excess, nonce, &message).unwrap();
     BalanceProofSignature::try_from_parts(sig.get_public_nonce().as_bytes(), sig.get_signature().as_bytes()).unwrap()

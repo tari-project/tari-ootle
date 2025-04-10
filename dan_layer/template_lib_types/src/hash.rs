@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes};
 use tari_template_abi::rust::{
     fmt,
     fmt::{Display, Formatter},
@@ -29,11 +28,12 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
+use crate::{serde_helpers, serde_helpers::fixed_bytes_from_hex};
+
 /// Representation of a 32-byte hash value
-#[serde_as]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Hash(#[serde_as(as = "Bytes")] [u8; Self::LENGTH]);
+pub struct Hash(#[serde(with = "serde_helpers::fixed_hex")] [u8; Self::LENGTH]);
 
 impl Hash {
     pub const LENGTH: usize = 32;
@@ -51,14 +51,7 @@ impl Hash {
     }
 
     pub fn from_hex(s: &str) -> Result<Self, HashParseError> {
-        if s.len() != Self::LENGTH * 2 {
-            return Err(HashParseError);
-        }
-
-        let mut hash = [0u8; Self::LENGTH];
-        for (i, h) in hash.iter_mut().enumerate() {
-            *h = u8::from_str_radix(&s[2 * i..2 * (i + 1)], 16).map_err(|_| HashParseError)?;
-        }
+        let hash = fixed_bytes_from_hex(s)?;
         Ok(Hash(hash))
     }
 

@@ -50,7 +50,7 @@ pub async fn run_http_ui_server(
         )
         .fallback(handler);
 
-    info!(target: LOG_TARGET, "🕸️ HTTP UI started at {}", address);
+    info!(target: LOG_TARGET, "🕸️ Web UI started at http://{}", address);
     let server = axum::Server::try_bind(&address).or_else(|_| {
         error!(
             target: LOG_TARGET,
@@ -60,10 +60,10 @@ pub async fn run_http_ui_server(
     })?;
 
     let server = server.serve(router.into_make_service());
-    info!(target: LOG_TARGET, "🕸️ HTTP UI listening on {}", server.local_addr());
+    info!(target: LOG_TARGET, "🕸️ Web UI listening on {}", server.local_addr());
     server.await?;
 
-    info!(target: LOG_TARGET, "Stopping HTTP UI");
+    info!(target: LOG_TARGET, "Stopping Web UI");
     Ok(())
 }
 

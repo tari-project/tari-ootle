@@ -21,12 +21,12 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_core::transactions::transaction_components::ValidatorNodeSignature;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 #[derive(Serialize, Deserialize)]
 pub struct ValidatorRegistrationFile {
     pub signature: ValidatorNodeSignature,
-    pub public_key: PublicKey,
-    pub claim_fees_public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
+    pub claim_fees_public_key: RistrettoPublicKeyBytes,
 }

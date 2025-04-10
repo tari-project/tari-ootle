@@ -50,10 +50,9 @@ use tari_dan_storage::{
     consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
-use tari_engine_types::TemplateAddress;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_rpc_framework::{Request, Response, RpcStatus, Streaming};
-use tari_template_lib::HashParseError;
+use tari_template_lib::types::{HashParseError, TemplateAddress};
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;

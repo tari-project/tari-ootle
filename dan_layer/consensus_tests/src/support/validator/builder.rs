@@ -1,15 +1,16 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::{PrivateKey, PublicKey};
+use tari_common_types::types::PrivateKey;
 use tari_consensus::{
     hotstuff::{ConsensusCurrentState, ConsensusWorker, ConsensusWorkerContext, HotstuffConfig, HotstuffWorker},
     traits::hooks::NoopHooks,
 };
-use tari_crypto::keys::PublicKey as _;
+use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{ShardGroup, SubstateAddress};
 use tari_dan_storage::consensus_models::TransactionPool;
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -32,9 +33,9 @@ use crate::support::{
 pub struct ValidatorBuilder {
     pub address: TestAddress,
     pub secret_key: PrivateKey,
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKey,
     pub shard_address: SubstateAddress,
-    pub fee_claim_public_key: PublicKey,
+    pub fee_claim_public_key: RistrettoPublicKeyBytes,
     pub shard_group: ShardGroup,
     pub sql_url: String,
     #[allow(dead_code)]
@@ -51,8 +52,8 @@ impl ValidatorBuilder {
         Self {
             address: TestAddress::new("default"),
             secret_key: PrivateKey::default(),
-            public_key: PublicKey::default(),
-            fee_claim_public_key: PublicKey::default(),
+            public_key: RistrettoPublicKey::default(),
+            fee_claim_public_key: RistrettoPublicKeyBytes::default(),
             shard_address: SubstateAddress::zero(),
             num_committees: 0,
             shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
@@ -67,7 +68,7 @@ impl ValidatorBuilder {
 
     pub fn with_address_and_secret_key(&mut self, address: TestAddress, secret_key: PrivateKey) -> &mut Self {
         self.address = address;
-        self.public_key = PublicKey::from_secret_key(&secret_key);
+        self.public_key = RistrettoPublicKey::from_secret_key(&secret_key);
         self.secret_key = secret_key;
         self
     }
@@ -82,7 +83,7 @@ impl ValidatorBuilder {
         self
     }
 
-    pub fn with_fee_claim_public_key(&mut self, fee_claim_public_key: PublicKey) -> &mut Self {
+    pub fn with_fee_claim_public_key(&mut self, fee_claim_public_key: RistrettoPublicKeyBytes) -> &mut Self {
         self.fee_claim_public_key = fee_claim_public_key;
         self
     }
@@ -128,7 +129,7 @@ impl ValidatorBuilder {
             self.address.clone(),
             self.public_key.clone(),
             self.shard_address,
-            self.fee_claim_public_key.clone(),
+            self.fee_claim_public_key,
         );
 
         let (outbound_messaging, rx_loopback) =

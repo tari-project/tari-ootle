@@ -5,8 +5,8 @@ use std::{cmp, ops::RangeInclusive};
 
 use rand::{rngs::OsRng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_engine_types::substate::SubstateId;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
 
@@ -19,7 +19,7 @@ use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
 pub struct Committee<TAddr> {
     // TODO: not pub
     #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
-    pub members: Vec<(TAddr, PublicKey)>,
+    pub members: Vec<(TAddr, RistrettoPublicKeyBytes)>,
 }
 
 impl<TAddr: PartialEq> Committee<TAddr> {
@@ -31,7 +31,7 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         Self::new(Vec::with_capacity(cap))
     }
 
-    pub fn new(members: Vec<(TAddr, PublicKey)>) -> Self {
+    pub fn new(members: Vec<(TAddr, RistrettoPublicKeyBytes)>) -> Self {
         Self { members }
     }
 
@@ -68,7 +68,7 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         self.members.shuffle(&mut OsRng);
     }
 
-    pub fn shuffled(&self) -> impl Iterator<Item = &(TAddr, PublicKey)> + '_ {
+    pub fn shuffled(&self) -> impl Iterator<Item = &(TAddr, RistrettoPublicKeyBytes)> + '_ {
         self.members.choose_multiple(&mut OsRng, self.len())
     }
 
@@ -107,7 +107,7 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &(TAddr, PublicKey)> {
+    pub fn iter(&self) -> impl Iterator<Item = &(TAddr, RistrettoPublicKeyBytes)> {
         self.members.iter()
     }
 
@@ -119,22 +119,22 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         self.members.into_iter().map(|(addr, _)| addr)
     }
 
-    pub fn public_keys(&self) -> impl Iterator<Item = &PublicKey> {
+    pub fn public_keys(&self) -> impl Iterator<Item = &RistrettoPublicKeyBytes> {
         self.members.iter().map(|(_, pk)| pk)
     }
 
-    pub fn into_public_keys(self) -> impl Iterator<Item = PublicKey> {
+    pub fn into_public_keys(self) -> impl Iterator<Item = RistrettoPublicKeyBytes> {
         self.members.into_iter().map(|(_, pk)| pk)
     }
 
-    pub fn contains_public_key(&self, public_key: &PublicKey) -> bool {
+    pub fn contains_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> bool {
         self.members.iter().any(|(_, pk)| pk == public_key)
     }
 }
 
 impl<TAddr> IntoIterator for Committee<TAddr> {
     type IntoIter = std::vec::IntoIter<Self::Item>;
-    type Item = (TAddr, PublicKey);
+    type Item = (TAddr, RistrettoPublicKeyBytes);
 
     fn into_iter(self) -> Self::IntoIter {
         self.members.into_iter()
@@ -142,16 +142,16 @@ impl<TAddr> IntoIterator for Committee<TAddr> {
 }
 
 impl<'a, TAddr> IntoIterator for &'a Committee<TAddr> {
-    type IntoIter = std::slice::Iter<'a, (TAddr, PublicKey)>;
-    type Item = &'a (TAddr, PublicKey);
+    type IntoIter = std::slice::Iter<'a, (TAddr, RistrettoPublicKeyBytes)>;
+    type Item = &'a (TAddr, RistrettoPublicKeyBytes);
 
     fn into_iter(self) -> Self::IntoIter {
         self.members.iter()
     }
 }
 
-impl<TAddr: PartialEq> FromIterator<(TAddr, PublicKey)> for Committee<TAddr> {
-    fn from_iter<T: IntoIterator<Item = (TAddr, PublicKey)>>(iter: T) -> Self {
+impl<TAddr: PartialEq> FromIterator<(TAddr, RistrettoPublicKeyBytes)> for Committee<TAddr> {
+    fn from_iter<T: IntoIterator<Item = (TAddr, RistrettoPublicKeyBytes)>>(iter: T) -> Self {
         Self::new(iter.into_iter().collect())
     }
 }
@@ -271,12 +271,14 @@ impl CommitteeInfo {
 
 #[cfg(test)]
 mod tests {
-    use tari_crypto::ristretto::RistrettoPublicKey;
-
     use super::*;
 
     fn create_committee(size: usize) -> Committee<u32> {
-        Committee::new((0..size as u32).map(|c| (c, RistrettoPublicKey::default())).collect())
+        Committee::new(
+            (0..size as u32)
+                .map(|c| (c, RistrettoPublicKeyBytes::default()))
+                .collect(),
+        )
     }
 
     mod select_n_starting_from {

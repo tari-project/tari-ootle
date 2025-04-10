@@ -678,7 +678,7 @@ async fn given_all_validator_connects_to_other_vns(world: &mut TariWorld) {
         .values()
         .map(|vn| {
             (
-                vn.public_key.clone(),
+                vn.public_key,
                 Multiaddr::from_str(&format!("/ip4/127.0.0.1/tcp/{}", vn.port)).unwrap(),
             )
         })
@@ -780,7 +780,7 @@ async fn print_world(world: &mut TariWorld) {
     // vns
     for (name, node) in &world.validator_nodes {
         eprintln!(
-            "Validator node \"{}\": json rpc port \"{}\", http ui port \"{}\", temp dir path \"{:?}\"",
+            "Validator node \"{}\": json rpc port \"{}\", web ui port \"{}\", temp dir path \"{:?}\"",
             name, node.json_rpc_port, node.web_ui_port, node.temp_dir_path
         );
     }
@@ -788,7 +788,7 @@ async fn print_world(world: &mut TariWorld) {
     // indexes
     for (name, node) in &world.indexers {
         eprintln!(
-            "Indexer \"{}\": json rpc port \"{}\", graphql port \"{}\", http ui port  \"{}\", temp dir path \"{}\"",
+            "Indexer \"{}\": json rpc port \"{}\", graphql port \"{}\", web ui port  \"{}\", temp dir path \"{}\"",
             name, node.json_rpc_port, node.graphql_port, node.web_ui_port, node.temp_dir_path
         );
     }

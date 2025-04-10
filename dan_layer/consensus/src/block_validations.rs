@@ -6,9 +6,11 @@ use std::collections::HashSet;
 use log::{debug, warn};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{committee::Committee, DerivableFromPublicKey, Epoch, ExtraFieldKey};
-use tari_dan_storage::consensus_models::{Block, QuorumCertificate};
+use tari_dan_storage::consensus_models::{Block, QuorumCertificate, ValidatorSchnorrSignature};
+use tari_engine_types::FromByteType;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, ProposalValidationError},
@@ -128,7 +130,16 @@ pub fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: 
     candidate_block: &Block,
 ) -> Result<(), ProposalValidationError> {
     let (leader, _) = leader_strategy.get_leader(local_committee, candidate_block.height());
-    if !leader.eq_to_public_key(candidate_block.proposed_by()) {
+    let Ok(proposed_by) = RistrettoPublicKey::try_from_byte_type(candidate_block.proposed_by()) else {
+        return Err(ProposalValidationError::MalformedBlock {
+            block_id: *candidate_block.id(),
+            details: format!(
+                "proposed_by {} is not a valid compressed RistrettoPublicKey",
+                candidate_block.proposed_by()
+            ),
+        });
+    };
+    if !leader.eq_to_public_key(&proposed_by) {
         return Err(ProposalValidationError::NotLeader {
             proposed_by: candidate_block.proposed_by().to_string(),
             expected_leader: leader.to_string(),
@@ -153,6 +164,16 @@ pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidation
             block_id: *candidate_block.id(),
             height: candidate_block.height(),
         })?;
+    let Ok(validator_signature) = ValidatorSchnorrSignature::try_from_byte_type(validator_signature) else {
+        return Err(ProposalValidationError::MalformedBlock {
+            block_id: *candidate_block.id(),
+            details: format!(
+                "signature {} is not a valid compressed Schnorr signature",
+                validator_signature
+            ),
+        });
+    };
+
     debug!(
         target: LOG_TARGET,
         "Validating signature block_id={}, P={}, R={}",
@@ -160,7 +181,18 @@ pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidation
         candidate_block.proposed_by(),
         validator_signature.get_public_nonce(),
     );
-    if !validator_signature.verify(candidate_block.proposed_by(), candidate_block.id()) {
+
+    let Ok(proposed_by) = RistrettoPublicKey::try_from_byte_type(candidate_block.proposed_by()) else {
+        return Err(ProposalValidationError::MalformedBlock {
+            block_id: *candidate_block.id(),
+            details: format!(
+                "proposed_by {} is not a valid compressed RistrettoPublicKey",
+                candidate_block.proposed_by()
+            ),
+        });
+    };
+
+    if !validator_signature.verify(&proposed_by, candidate_block.id()) {
         return Err(ProposalValidationError::InvalidSignature {
             block_id: *candidate_block.id(),
             height: candidate_block.height(),
@@ -216,7 +248,7 @@ pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
         if !check_dups.insert(signature.public_key()) {
             return Err(ProposalValidationError::QcDuplicateSignature {
                 qc: *qc.id(),
-                validator: signature.public_key().clone(),
+                validator: *signature.public_key(),
             });
         }
         let message = vote_signing_service.create_message(qc.block_id(), &qc.decision());
@@ -245,7 +277,7 @@ pub fn check_sidechain_id(candidate_block: &Block, config: &HotstuffConfig) -> R
             }
             .into(),
         )?;
-        let sidechain_id = RistrettoPublicKey::from_canonical_bytes(sidechain_id_bytes).map_err(|e| {
+        let sidechain_id = RistrettoPublicKeyBytes::from_bytes(sidechain_id_bytes.as_ref()).map_err(|e| {
             ProposalValidationError::InvalidSidechainId {
                 block_id: *candidate_block.id(),
                 reason: e.to_string(),
@@ -256,7 +288,7 @@ pub fn check_sidechain_id(candidate_block: &Block, config: &HotstuffConfig) -> R
         if sidechain_id != *expected_sidechain_id {
             return Err(ProposalValidationError::MismatchedSidechainId {
                 block_id: *candidate_block.id(),
-                expected_sidechain_id: expected_sidechain_id.clone(),
+                expected_sidechain_id: *expected_sidechain_id,
                 sidechain_id,
             }
             .into());

@@ -1,7 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, str::FromStr, sync::MutexGuard};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::MutexGuard,
+};
 
 use bigdecimal::{BigDecimal, ToPrimitive};
 use diesel::{
@@ -18,7 +22,6 @@ use diesel::{
 };
 use log::{error, warn};
 use serde::de::DeserializeOwned;
-use tari_common_types::types::Commitment;
 use tari_dan_common_types::substate_type::SubstateType;
 use tari_dan_wallet_sdk::{
     models::{
@@ -37,23 +40,20 @@ use tari_dan_wallet_sdk::{
     },
     storage::{WalletStorageError, WalletStoreReader},
 };
-use tari_engine_types::{
-    substate::{InvalidSubstateIdFormat, SubstateId},
-    TemplateAddress,
-};
+use tari_engine_types::substate::{InvalidSubstateIdFormat, SubstateId};
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId},
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes},
+    types::TemplateAddress,
 };
 use tari_transaction::TransactionId;
-use tari_utilities::hex::Hex;
 use webauthn_rs::prelude::Passkey;
 
 use crate::{
     diesel::{ExpressionMethods, NullableExpressionMethods},
     models,
     models::{AuthoredTemplate, WebauthnRegistrationPasskey},
-    serialization::deserialize_json,
+    serialization::{deserialize_json, serialize_hex},
 };
 
 const LOG_TARGET: &str = "tari::dan::wallet_sdk::storage_sqlite::reader";
@@ -453,18 +453,18 @@ impl WalletStoreReader for ReadTransaction<'_> {
     }
 
     // -------------------------------- Vaults -------------------------------- //
-    fn vaults_get(&mut self, address: &SubstateId) -> Result<VaultModel, WalletStorageError> {
+    fn vaults_get(&mut self, vault_id: &VaultId) -> Result<VaultModel, WalletStorageError> {
         use crate::schema::{accounts, vaults};
 
         let row = vaults::table
-            .filter(vaults::address.eq(address.to_string()))
+            .filter(vaults::address.eq(vault_id.to_string()))
             .first::<models::Vault>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("vaults_get", e))?
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "vaults_get",
                 entity: "vault".to_string(),
-                key: address.to_string(),
+                key: vault_id.to_string(),
             })?;
 
         let account_address = accounts::table
@@ -483,11 +483,11 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(vault)
     }
 
-    fn vaults_exists(&mut self, address: &SubstateId) -> Result<bool, WalletStorageError> {
+    fn vaults_exists(&mut self, vault_id: &VaultId) -> Result<bool, WalletStorageError> {
         use crate::schema::vaults;
 
         let count = vaults::table
-            .filter(vaults::address.eq(address.to_string()))
+            .filter(vaults::address.eq(vault_id.to_string()))
             .count()
             .first::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general("vaults_exists", e))?;
@@ -559,7 +559,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
     }
 
     // -------------------------------- Outputs -------------------------------- //
-    fn outputs_get_unspent_balance(&mut self, vault_address: &SubstateId) -> Result<u64, WalletStorageError> {
+    fn outputs_get_unspent_balance(&mut self, vault_address: &VaultId) -> Result<u64, WalletStorageError> {
         use crate::schema::{outputs, vaults};
 
         let vault_id = vaults::table
@@ -637,19 +637,19 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     fn outputs_get_by_commitment(
         &mut self,
-        commitment: &Commitment,
+        commitment: &PedersenCommitmentBytes,
     ) -> Result<ConfidentialOutputModel, WalletStorageError> {
         use crate::schema::{accounts, outputs, vaults};
 
         let row = outputs::table
-            .filter(outputs::commitment.eq(commitment.to_hex()))
+            .filter(outputs::commitment.eq(serialize_hex(commitment)))
             .first::<models::ConfidentialOutput>(self.connection())
             .optional()
             .map_err(|e| WalletStorageError::general("outputs_get_by_commitment", e))?
             .ok_or_else(|| WalletStorageError::NotFound {
                 operation: "outputs_get_by_commitment",
                 entity: "output".to_string(),
-                key: commitment.to_hex(),
+                key: serialize_hex(commitment),
             })?;
 
         let account_addr = accounts::table
@@ -758,6 +758,41 @@ impl WalletStoreReader for ReadTransaction<'_> {
             operation: "non_fungible_token_get_by_nft_id",
         })?;
         non_fungible_token.try_into_non_fungible_token(vault_address)
+    }
+
+    fn non_fungible_token_get_ids_by_vault_id(
+        &mut self,
+        vault_id: &VaultId,
+        limit: u64,
+        offset: u64,
+    ) -> Result<HashSet<NonFungibleId>, WalletStorageError> {
+        const OPERATION: &str = "non_fungible_token_get_ids_by_vault_id";
+        use crate::schema::{non_fungible_tokens, vaults};
+
+        let vault_id = vaults::table
+            .select(vaults::id)
+            .filter(vaults::address.eq(vault_id.to_string()))
+            .first::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        let non_fungibles = non_fungible_tokens::table
+            .select(non_fungible_tokens::nft_id)
+            .filter(non_fungible_tokens::vault_id.eq(vault_id))
+            .limit(limit as i64)
+            .offset(offset as i64)
+            .get_results::<String>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        non_fungibles
+            .into_iter()
+            .map(|nft_id| {
+                NonFungibleId::try_from_canonical_string(&nft_id).map_err(|e| WalletStorageError::DecodingError {
+                    operation: OPERATION,
+                    item: "non_fungible_tokens.nft_id",
+                    details: format!("{:?}", e),
+                })
+            })
+            .collect()
     }
 
     fn non_fungible_token_get_all(

@@ -22,17 +22,20 @@
 //
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::Commitment;
-use tari_crypto::tari_utilities::ByteArray;
-use tari_template_lib::models::{EncryptedData, UnclaimedConfidentialOutputAddress};
-#[cfg(feature = "ts")]
-use ts_rs::TS;
+use tari_template_lib::{
+    models::{EncryptedData, UnclaimedConfidentialOutputAddress},
+    prelude::PedersenCommitmentBytes,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct UnclaimedConfidentialOutput {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub commitment: Commitment,
+    pub commitment: PedersenCommitmentBytes,
     #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
     pub encrypted_data: EncryptedData,
 }

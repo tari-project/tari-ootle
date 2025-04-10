@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use crate::{auth::AccessRule, crypto::RistrettoPublicKeyBytes};
+use crate::{auth::AccessRule, types::crypto::RistrettoPublicKeyBytes};
 
 /// Data that is needed to represent ownership of a value (resource or component method).
 /// Owners are the only ones allowed to update the values's access rules after creation

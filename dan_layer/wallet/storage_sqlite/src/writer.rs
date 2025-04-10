@@ -14,7 +14,6 @@ use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
-use tari_common_types::types::{Commitment, PublicKey};
 use tari_dan_common_types::{SubstateRequirement, VersionedSubstateIdRef};
 use tari_dan_storage::consensus_models::QuorumCertificate;
 use tari_dan_wallet_sdk::{
@@ -31,8 +30,12 @@ use tari_dan_wallet_sdk::{
     },
     storage::{WalletStorageError, WalletStoreReader, WalletStoreWriter},
 };
-use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId, TemplateAddress};
-use tari_template_lib::models::{Amount, EncryptedData};
+use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
+use tari_template_lib::{
+    models::{Amount, EncryptedData, NonFungibleId, VaultId},
+    prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    types::TemplateAddress,
+};
 use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;
 use webauthn_rs::prelude::Passkey;
@@ -376,7 +379,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
     fn substates_upsert_child(
         &mut self,
-        parent: SubstateId,
+        parent: &SubstateId,
         address: VersionedSubstateIdRef<'_>,
         referenced_substates: HashSet<SubstateId>,
     ) -> Result<(), WalletStorageError> {
@@ -708,7 +711,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 details: e.to_string(),
             })?,
             vault_address: vault_address.clone(),
-            commitment: Commitment::from_hex(&locked_output.commitment).map_err(|_| {
+            commitment: PedersenCommitmentBytes::from_hex(&locked_output.commitment).map_err(|_| {
                 WalletStorageError::DecodingError {
                     operation: "outputs_lock_smallest_amount",
                     item: "output commitment",
@@ -719,7 +722,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             sender_public_nonce: locked_output
                 .sender_public_nonce
                 .map(|nonce| {
-                    PublicKey::from_hex(&nonce).map_err(|e| WalletStorageError::DecodingError {
+                    RistrettoPublicKeyBytes::from_hex(&nonce).map_err(|e| WalletStorageError::DecodingError {
                         operation: "outputs_lock_smallest_amount",
                         item: "sender public nonce",
                         details: e.to_string(),
@@ -883,11 +886,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn non_fungible_token_upsert(&mut self, non_fungible_token: &NonFungibleToken) -> Result<(), WalletStorageError> {
         use crate::schema::{non_fungible_tokens, vaults};
 
-        info!(
-            target: "tari::dan::wallet_daemon::account_monitor",
-            "Inserting new non fungible token with id = {}", non_fungible_token.nft_id
-        );
-
         let data = serde_json::to_string(&CborValueJsonSerializeWrapper(&non_fungible_token.data)).map_err(|e| {
             WalletStorageError::DecodingError {
                 operation: "non_fungible_token_upsert",
@@ -918,7 +916,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 non_fungible_tokens::vault_id.eq(vault_id),
                 non_fungible_tokens::is_burned.eq(non_fungible_token.is_burned),
             ))
-            .on_conflict(non_fungible_tokens::nft_id)
+            .on_conflict((non_fungible_tokens::nft_id, non_fungible_tokens::vault_id))
             .do_update()
             .set((
                 non_fungible_tokens::data.eq(&data),
@@ -932,6 +930,36 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             target: LOG_TARGET,
             "Inserted successfully new non fungible token with id = {}", non_fungible_token.nft_id
         );
+        Ok(())
+    }
+
+    fn non_fungible_token_remove(
+        &mut self,
+        vault_id: &VaultId,
+        non_fungible_id: &NonFungibleId,
+    ) -> Result<(), WalletStorageError> {
+        use crate::schema::{non_fungible_tokens, vaults};
+
+        let vault_id = vaults::table
+            .select(vaults::id)
+            .filter(vaults::address.eq(vault_id.to_string()))
+            .first::<i32>(self.connection())
+            .map_err(|e| WalletStorageError::general("non_fungible_token_remove", e))?;
+
+        let num_affected = diesel::delete(non_fungible_tokens::table)
+            .filter(non_fungible_tokens::nft_id.eq(non_fungible_id.to_canonical_string()))
+            .filter(non_fungible_tokens::vault_id.eq(vault_id))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("non_fungible_token_remove", e))?;
+
+        if num_affected == 0 {
+            return Err(WalletStorageError::NotFound {
+                operation: "non_fungible_token_remove",
+                entity: "non_fungible_token".to_string(),
+                key: non_fungible_id.to_canonical_string(),
+            });
+        }
+
         Ok(())
     }
 

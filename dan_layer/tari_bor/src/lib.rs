@@ -77,13 +77,13 @@ where
 pub fn encode<T: Serialize + ?Sized>(val: &T) -> Result<Vec<u8>, BorError> {
     let len = encoded_len(val)?;
     let mut buf = Vec::with_capacity(len);
-    encode_into_writer(val, &mut buf).map_err(|e| BorError::new(format!("{:?}", e)))?;
+    encode_into_writer(val, &mut buf)?;
     Ok(buf)
 }
 
 pub fn encoded_len<T: Serialize + ?Sized>(val: &T) -> Result<usize, BorError> {
     let mut counter = ByteCounter::new();
-    encode_into_writer(val, &mut counter).map_err(|e| BorError::new(format!("{:?}", e)))?;
+    encode_into_writer(val, &mut counter)?;
     Ok(counter.get())
 }
 

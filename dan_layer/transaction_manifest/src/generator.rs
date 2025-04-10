@@ -5,11 +5,12 @@ use std::collections::{HashMap, HashSet};
 
 use proc_macro2::Ident;
 use syn::Lit;
-use tari_engine_types::{instruction::Instruction, substate::SubstateId, TemplateAddress};
+use tari_engine_types::{instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
     arg,
     args::Arg,
     models::{Amount, NonFungibleId},
+    types::TemplateAddress,
 };
 
 use crate::{
@@ -246,6 +247,10 @@ fn lit_to_arg(lit: &Lit) -> Result<Arg, ManifestError> {
         Lit::Verbatim(v) => Err(ManifestError::UnsupportedExpr(format!(
             "Raw token literals not supported ({})",
             v
+        ))),
+        _ => Err(ManifestError::UnsupportedExpr(format!(
+            "Unsupported literal type ({:?})",
+            lit
         ))),
     }
 }

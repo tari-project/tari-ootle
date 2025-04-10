@@ -30,7 +30,7 @@ use syn::{
     FnArg,
     Ident,
     ImplItem,
-    ImplItemMethod,
+    ImplItemFn,
     Item,
     ItemMod,
     ItemUse,
@@ -130,7 +130,7 @@ impl TemplateAst {
 
     fn get_function_from_item(item: &ImplItem) -> Option<FunctionAst> {
         match item {
-            ImplItem::Method(m) => {
+            ImplItem::Fn(m) => {
                 if !Self::is_public_function(m) {
                     return None;
                 }
@@ -143,7 +143,7 @@ impl TemplateAst {
                     // is_public: true,
                 })
             },
-            _ => todo!("get_function_from_item does not support anything other than methods"),
+            _ => todo!("get_function_from_item does not support anything other than functions/methods"),
         }
     }
 
@@ -203,21 +203,7 @@ impl TemplateAst {
         }
     }
 
-    // fn get_statements(method: &ImplItemMethod) -> Vec<Stmt> {
-    //     method.block.stmts.clone()
-    // }
-
-    // fn is_constructor(sig: &Signature) -> bool {
-    //     match &sig.output {
-    //         ReturnType::Default => false, // the function does not return anything
-    //         ReturnType::Type(_, t) => match t.as_ref() {
-    //             syn::Type::Path(type_path) => type_path.path.segments[0].ident == "Self",
-    //             _ => false,
-    //         },
-    //     }
-    // }
-
-    fn is_public_function(item: &ImplItemMethod) -> bool {
+    fn is_public_function(item: &ImplItemFn) -> bool {
         matches!(item.vis, syn::Visibility::Public(_))
     }
 }

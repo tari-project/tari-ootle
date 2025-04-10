@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 
 use serde::{de::DeserializeOwned, Serialize};
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::Committee,
     hashing::ValidatorNodeBalancedMerkleTree,
@@ -32,7 +32,7 @@ use tari_dan_common_types::{
     ShardGroup,
     SubstateAddress,
 };
-use tari_engine_types::TemplateAddress;
+use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
 use super::{DbBaseLayerBlockInfo, DbEpoch, TemplateStatus};
 use crate::{
@@ -98,16 +98,16 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         &self,
         tx: &mut Self::DbTransaction<'_>,
         address: Self::Addr,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
         start_epoch: Epoch,
-        fee_claim_public_key: PublicKey,
+        fee_claim_public_key: RistrettoPublicKeyBytes,
     ) -> Result<(), Self::Error>;
 
     fn deactivate_validator_node(
         &self,
         tx: &mut Self::DbTransaction<'_>,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
     ) -> Result<(), Self::Error>;
 
@@ -134,7 +134,7 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
         &self,
         tx: &mut Self::DbTransaction<'_>,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ValidatorNode<Self::Addr>, Self::Error>;
     fn validator_nodes_count(&self, tx: &mut Self::DbTransaction<'_>, epoch: Epoch) -> Result<u64, Self::Error>;
     fn validator_nodes_count_for_shard_group(

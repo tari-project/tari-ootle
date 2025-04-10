@@ -1,0 +1,14 @@
+# https://moonrepo.dev/docs/config/workspace
+$schema: './cache/schemas/workspace.json'
+
+# extends: './shared/workspace.yml'
+
+projects:
+  - 'bindings'
+  - 'clients/javascript/*'
+  - 'applications/tari_dan_wallet_web_ui'
+  - 'applications/tari_indexer_web_ui'
+  - 'applications/tari_validator_node_web_ui'
+vcs:
+  manager: 'git'
+  defaultBranch: 'development'

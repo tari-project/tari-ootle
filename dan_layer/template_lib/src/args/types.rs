@@ -36,7 +36,6 @@ use ts_rs::TS;
 use crate::{
     args::Arg,
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
-    crypto::{PedersonCommitmentBytes, RistrettoPublicKeyBytes},
     models::{
         AddressAllocationId,
         Amount,
@@ -56,6 +55,7 @@ use crate::{
     prelude::{ComponentAccessRules, ConfidentialOutputStatement, TemplateAddress},
     resource::ResourceType,
     template::BuiltinTemplate,
+    types::crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
 };
 // -------------------------------- LOGS -------------------------------- //
 
@@ -297,7 +297,7 @@ pub enum ResourceDiscriminator {
         tokens: BTreeSet<NonFungibleId>,
     },
     Confidential {
-        commitments: BTreeSet<PedersonCommitmentBytes>,
+        commitments: BTreeSet<PedersenCommitmentBytes>,
         revealed_amount: Amount,
     },
 }
@@ -565,7 +565,7 @@ pub enum SubstateType {
 pub enum AddressAllocationInvokeArg {
     GetAddress(AddressAllocationId),
     CreateComponentAllocation {
-        public_key_address: Option<RistrettoPublicKeyBytes>,
+        public_key: Option<RistrettoPublicKeyBytes>,
     },
     CreateResourceAllocation,
 }

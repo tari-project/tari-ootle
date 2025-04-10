@@ -27,7 +27,7 @@ use tari_indexer_client::{
         SubmitTransactionRequest,
     },
 };
-use tari_template_lib::models::TemplateAddress;
+use tari_template_lib::types::TemplateAddress;
 use tari_transaction::{Transaction, TransactionId};
 use url::ParseError;
 

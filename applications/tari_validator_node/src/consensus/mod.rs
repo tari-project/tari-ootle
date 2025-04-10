@@ -8,7 +8,6 @@ use tari_consensus::{
     hotstuff::{ConsensusWorker, ConsensusWorkerContext, HotstuffConfig, HotstuffWorker},
     traits::ConsensusSpec,
 };
-use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::transaction_executor::TariDanTransactionProcessor;
 use tari_dan_common_types::PeerAddress;
 use tari_dan_storage::consensus_models::TransactionPool;
@@ -43,6 +42,7 @@ pub use block_transaction_executor::*;
 pub use handle::*;
 pub use signature_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_template_manager::interface::TemplateManagerHandle;
 
 use crate::{consensus::spec::ValidatorNodeStateStore, p2p::NopLogger};
@@ -51,7 +51,7 @@ pub type ConsensusTransactionValidator = BoxedValidator<ValidationContext, Trans
 
 pub async fn spawn(
     network: Network,
-    sidechain_id: Option<RistrettoPublicKey>,
+    sidechain_id: Option<RistrettoPublicKeyBytes>,
     store: ValidatorNodeStateStore,
     local_addr: PeerAddress,
     signing_service: TariSignatureService,

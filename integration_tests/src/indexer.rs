@@ -45,7 +45,7 @@ use tari_indexer_client::{
 };
 use tari_p2p::Network;
 use tari_shutdown::Shutdown;
-use tari_template_lib::models::ObjectKey;
+use tari_template_lib::types::ObjectKey;
 use tokio::task;
 
 use crate::{

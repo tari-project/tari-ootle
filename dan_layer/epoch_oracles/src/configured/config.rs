@@ -6,10 +6,9 @@ use std::{
     time::Duration,
 };
 
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
 use tari_engine_types::serde_with;
-use tari_utilities::byte_array::ByteArray;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
@@ -32,8 +31,8 @@ impl Default for Config {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Validator {
-    pub public_key: PublicKey,
-    pub claim_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
+    pub claim_key: RistrettoPublicKeyBytes,
     pub shard_group: ShardGroup,
     pub registration_epoch: Epoch,
 }

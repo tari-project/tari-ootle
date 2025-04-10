@@ -8,11 +8,12 @@
 use std::{collections::BTreeMap, mem};
 
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::{Commitment, PublicKey};
-use tari_crypto::tari_utilities::ByteArray;
+use tari_crypto::{
+    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
+    tari_utilities::ByteArray,
+};
 use tari_template_abi::rust::collections::BTreeSet;
 use tari_template_lib::{
-    crypto::PedersonCommitmentBytes,
     models::{
         Amount,
         ConfidentialOutputStatement,
@@ -22,18 +23,22 @@ use tari_template_lib::{
         ResourceAddress,
     },
     prelude::ResourceType,
+    types::crypto::PedersenCommitmentBytes,
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::{
     confidential::{validate_confidential_proof, validate_confidential_withdraw, ConfidentialOutput},
     substate::SubstateId,
+    ToByteType,
 };
 
 /// Instances of a single resource kept in Buckets and Vaults
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum ResourceContainer {
     Fungible {
         address: ResourceAddress,
@@ -49,11 +54,11 @@ pub enum ResourceContainer {
         address: ResourceAddress,
         #[cfg_attr(feature = "ts", ts(type = "Record<string, ConfidentialOutput>"))]
         #[cfg_attr(all(feature = "ts", feature = "ts-rs-temporary-fix"), ts(skip))]
-        commitments: BTreeMap<Commitment, ConfidentialOutput>,
+        commitments: BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>,
         revealed_amount: Amount,
         #[cfg_attr(feature = "ts", ts(type = "Record<string, ConfidentialOutput>"))]
         #[cfg_attr(all(feature = "ts", feature = "ts-rs-temporary-fix"), ts(skip))]
-        locked_commitments: BTreeMap<Commitment, ConfidentialOutput>,
+        locked_commitments: BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>,
         locked_revealed_amount: Amount,
     },
 }
@@ -75,7 +80,7 @@ impl ResourceContainer {
         }
     }
 
-    pub fn confidential<I: IntoIterator<Item = (Commitment, ConfidentialOutput)>>(
+    pub fn confidential<I: IntoIterator<Item = (PedersenCommitmentBytes, ConfidentialOutput)>>(
         address: ResourceAddress,
         commitment: I,
         revealed_amount: Amount,
@@ -92,7 +97,7 @@ impl ResourceContainer {
     pub fn mint_confidential(
         address: ResourceAddress,
         proof: ConfidentialOutputStatement,
-        view_key: Option<&PublicKey>,
+        view_key: Option<&RistrettoPublicKey>,
     ) -> Result<ResourceContainer, ResourceError> {
         if proof.change_statement.is_some() {
             return Err(ResourceError::InvalidConfidentialMintWithChange);
@@ -112,7 +117,7 @@ impl ResourceContainer {
             commitments: validated_proof
                 .output
                 .into_iter()
-                .map(|o| (o.commitment.clone(), o))
+                .map(|o| (o.commitment.to_byte_type(), o.into()))
                 .collect(),
             revealed_amount: validated_proof.output_revealed_amount,
             locked_commitments: BTreeMap::new(),
@@ -366,7 +371,7 @@ impl ResourceContainer {
     pub fn withdraw_confidential(
         &mut self,
         proof: ConfidentialWithdrawProof,
-        view_key: Option<&PublicKey>,
+        view_key: Option<&RistrettoPublicKey>,
     ) -> Result<ResourceContainer, ResourceError> {
         match self {
             ResourceContainer::Fungible { .. } => Err(ResourceError::OperationNotAllowed(
@@ -384,12 +389,12 @@ impl ResourceContainer {
                     .inputs
                     .iter()
                     .map(|input| {
-                        let commitment = Commitment::from_canonical_bytes(input.as_bytes()).map_err(|_| {
+                        let commitment = PedersenCommitment::from_canonical_bytes(input.as_bytes()).map_err(|_| {
                             ResourceError::InvalidConfidentialProof {
-                                details: "Invalid input commitment".to_string(),
+                                details: "Malformed input commitment".to_string(),
                             }
                         })?;
-                        match commitments.remove(&commitment) {
+                        match commitments.remove(input) {
                             Some(_) => Ok(commitment),
                             None => Err(ResourceError::InvalidConfidentialProof {
                                 details: format!(
@@ -416,7 +421,10 @@ impl ResourceContainer {
                 *revealed_amount -= validated_proof.input_revealed_amount;
 
                 if let Some(change) = validated_proof.change_output {
-                    if commitments.insert(change.commitment.clone(), change).is_some() {
+                    if commitments
+                        .insert(change.commitment.to_byte_type(), change.into())
+                        .is_some()
+                    {
                         return Err(ResourceError::InvariantError(
                             "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
                         ));
@@ -437,7 +445,7 @@ impl ResourceContainer {
 
                 Ok(ResourceContainer::confidential(
                     *self.resource_address(),
-                    validated_proof.output.map(|o| (o.commitment.clone(), o)),
+                    validated_proof.output.map(|o| (o.commitment.to_byte_type(), o.into())),
                     validated_proof.output_revealed_amount,
                 ))
             },
@@ -446,7 +454,7 @@ impl ResourceContainer {
 
     pub fn recall_confidential_commitments(
         &mut self,
-        commitments: &BTreeSet<PedersonCommitmentBytes>,
+        commitments: &BTreeSet<PedersenCommitmentBytes>,
         revealed_amount: Amount,
     ) -> Result<ResourceContainer, ResourceError> {
         match self {
@@ -476,20 +484,15 @@ impl ResourceContainer {
                 let recalled = commitments
                     .iter()
                     .map(|commitment| {
-                        let commitment = Commitment::from_canonical_bytes(commitment.as_bytes()).map_err(|_| {
-                            ResourceError::InvalidConfidentialProof {
-                                details: "Invalid input commitment".to_string(),
-                            }
-                        })?;
-                        let output = existing_commitments.remove(&commitment).ok_or_else(|| {
+                        let output = existing_commitments.remove(commitment).ok_or_else(|| {
                             ResourceError::InvalidConfidentialProof {
                                 details: format!(
                                     "recall_confidential_commitments: input commitment {} not found in resource",
-                                    commitment.as_public_key()
+                                    commitment,
                                 ),
                             }
                         })?;
-                        Ok((commitment, output))
+                        Ok((*commitment, output))
                     })
                     .collect::<Result<Vec<_>, ResourceError>>()?;
 
@@ -505,20 +508,20 @@ impl ResourceContainer {
     pub fn reveal_confidential(
         &mut self,
         proof: ConfidentialWithdrawProof,
-        view_key: Option<&PublicKey>,
+        view_key: Option<&RistrettoPublicKey>,
     ) -> Result<ResourceContainer, ResourceError> {
         self.withdraw_confidential(proof, view_key)
     }
 
     /// Returns all confidential commitments. If the resource is not confidential, None is returned.
-    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<Commitment, ConfidentialOutput>> {
+    pub fn get_confidential_commitments(&self) -> Option<&BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
         match self {
             ResourceContainer::Fungible { .. } | ResourceContainer::NonFungible { .. } => None,
             ResourceContainer::Confidential { commitments, .. } => Some(commitments),
         }
     }
 
-    pub fn into_confidential_commitments(self) -> Option<BTreeMap<Commitment, ConfidentialOutput>> {
+    pub fn into_confidential_commitments(self) -> Option<BTreeMap<PedersenCommitmentBytes, ConfidentialOutput>> {
         match self {
             ResourceContainer::Fungible { .. } | ResourceContainer::NonFungible { .. } => None,
             ResourceContainer::Confidential { commitments, .. } => Some(commitments),
@@ -572,7 +575,7 @@ impl ResourceContainer {
                 }
                 let newly_locked_commitments = mem::take(commitments);
                 let newly_locked_revealed_amount = *revealed_amount;
-                locked_commitments.extend(newly_locked_commitments.iter().map(|(c, o)| (c.clone(), o.clone())));
+                locked_commitments.extend(newly_locked_commitments.iter().map(|(c, o)| (*c, o.clone())));
                 *locked_revealed_amount += newly_locked_revealed_amount;
 
                 Ok(ResourceContainer::confidential(

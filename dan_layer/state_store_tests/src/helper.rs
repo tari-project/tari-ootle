@@ -24,8 +24,8 @@ use std::{io::Write, ops::Deref};
 
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_bor::cbor;
-use tari_common_types::types::{FixedHash, PublicKey};
-use tari_crypto::{keys::PublicKey as _, signatures::SchnorrSignature};
+use tari_common_types::types::FixedHash;
+use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
 use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
@@ -52,8 +52,9 @@ use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::{
     auth::OwnerRule,
-    models::{ComponentAddress, ComponentKey, EntityId, ObjectKey, TemplateAddress},
-    prelude::ComponentAccessRules,
+    models::ComponentAddress,
+    prelude::{ComponentAccessRules, TemplateAddress},
+    types::{ComponentKey, EntityId, ObjectKey},
 };
 use tari_transaction::TransactionId;
 use tari_utilities::epoch_time::EpochTime;
@@ -208,9 +209,8 @@ pub fn create_random_hash() -> FixedHash {
 
 pub fn create_random_vn_signature() -> ValidatorSignature {
     let message = OsRng.gen::<[u8; FixedHash::byte_size()]>();
-    let (secret_key, public_key) = PublicKey::random_keypair(&mut OsRng);
-    let signature = SchnorrSignature::sign(&secret_key, message, &mut OsRng).unwrap();
-    ValidatorSignature { public_key, signature }
+    let secret_key = RistrettoSecretKey::random(&mut OsRng);
+    ValidatorSignature::sign(&secret_key, message)
 }
 
 pub fn create_block(parent: Option<&Block>) -> Block {

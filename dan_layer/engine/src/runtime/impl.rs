@@ -24,7 +24,12 @@ use std::sync::Arc;
 
 use log::{warn, *};
 use tari_common::configuration::Network;
-use tari_crypto::{range_proof::RangeProofService, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_crypto::{
+    range_proof::RangeProofService,
+    ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey},
+    signatures::CommitmentSignature,
+    tari_utilities::ByteArray,
+};
 use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_engine_types::{
     base_layer_hashing::ownership_proof_hasher64,
@@ -43,7 +48,7 @@ use tari_engine_types::{
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
-    TemplateAddress,
+    FromByteType,
     ValidatorFeePoolAddress,
 };
 use tari_template_abi::{TemplateDef, Type};
@@ -89,13 +94,11 @@ use tari_template_lib::{
     },
     auth::{AuthHook, AuthHookCaller, ComponentAccessRules, OwnerRule, ResourceAccessRules, ResourceAuthAction},
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR},
-    crypto::RistrettoPublicKeyBytes,
     models::{
         Amount,
         BucketId,
         ComponentAddress,
         ComponentAddressAllocation,
-        EntityId,
         Metadata,
         NonFungible,
         NonFungibleAddress,
@@ -104,9 +107,10 @@ use tari_template_lib::{
         ResourceAddressAllocation,
         VaultRef,
     },
-    prelude::ResourceType,
+    prelude::{ResourceType, RistrettoPublicKeyBytes},
     resource::{IMAGE_URL, TOKEN_SYMBOL},
     template::BuiltinTemplate,
+    types::{EntityId, TemplateAddress},
 };
 
 use super::{working_state::WorkingState, Runtime};
@@ -117,7 +121,6 @@ use crate::{
         locking::{LockError, LockedSubstate},
         scope::PushCallFrame,
         tracker::StateTracker,
-        utils::to_ristretto_public_key_bytes,
         RuntimeError,
         RuntimeInterface,
         RuntimeModule,
@@ -133,7 +136,7 @@ pub struct RuntimeInterfaceImpl<TTemplateProvider> {
     tracker: StateTracker,
     template_provider: Arc<TTemplateProvider>,
     entity_id_provider: EntityIdProvider,
-    transaction_signer_public_key: RistrettoPublicKey,
+    transaction_signer_public_key: RistrettoPublicKeyBytes,
     modules: Vec<Arc<dyn RuntimeModule>>,
     max_call_depth: usize,
     network: Network,
@@ -143,7 +146,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
     pub fn initialize(
         tracker: StateTracker,
         template_provider: Arc<TTemplateProvider>,
-        signer_public_key: RistrettoPublicKey,
+        signer_public_key: RistrettoPublicKeyBytes,
         entity_id_provider: EntityIdProvider,
         modules: Vec<Arc<dyn RuntimeModule>>,
         max_call_depth: usize,
@@ -465,13 +468,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         match action {
             CallerContextAction::GetCallerPublicKey => {
                 args.assert_no_args("CallerContextAction::GetCallerPublicKey")?;
-                let sender_public_key =
-                    RistrettoPublicKeyBytes::from_bytes(self.transaction_signer_public_key.as_bytes()).expect(
-                        "RistrettoPublicKeyBytes::from_bytes should be infallible when called with RistrettoPublicKey \
-                         bytes",
-                    );
-
-                Ok(InvokeResult::encode(&sender_public_key)?)
+                Ok(InvokeResult::encode(&self.transaction_signer_public_key)?)
             },
             CallerContextAction::GetComponentAddress => self.tracker.read_with(|state| {
                 args.assert_no_args("CallerContextAction::GetComponentAddress")?;
@@ -498,12 +495,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         _ => unreachable!("Invalid SubstateId variant. Allocation created for unsupported substate"),
                     }
                 },
-                AddressAllocationInvokeArg::CreateComponentAllocation { public_key_address } => {
-                    let public_key_address = public_key_address
+                AddressAllocationInvokeArg::CreateComponentAllocation { public_key } => {
+                    // Validate the public key
+                    let _ignore = public_key
                         .map(|pk| {
                             RistrettoPublicKey::from_canonical_bytes(pk.as_bytes()).map_err(|_| {
                                 RuntimeError::InvalidArgument {
-                                    argument: "public_key_address",
+                                    argument: "public_key",
                                     reason: "Invalid RistrettoPublicKeyBytes".to_string(),
                                 }
                             })
@@ -512,11 +510,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     let (template, _) = state.current_template()?;
                     let id_provider = state.id_provider()?;
-                    let address = public_key_address
+                    let address = public_key
                         .as_ref()
-                        .map(|public_key_address| {
-                            id_provider.derive_new_component_address(template, public_key_address)
-                        })
+                        .map(|public_key| id_provider.derive_new_component_address(template, public_key))
                         .unwrap_or_else(|| id_provider.new_component_address())?;
 
                     let id = state.new_address_allocation(address)?;
@@ -568,9 +564,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 validate_component_access_rule_methods(&access_rules, &template_def)?;
 
                 let owner_key = match owner_rule {
-                    OwnerRule::OwnedBySigner => {
-                        Some(to_ristretto_public_key_bytes(&self.transaction_signer_public_key))
-                    },
+                    OwnerRule::OwnedBySigner => Some(self.transaction_signer_public_key),
                     OwnerRule::None => None,
                     OwnerRule::ByAccessRule(_) => None,
                     OwnerRule::ByPublicKey(key) => Some(key),
@@ -784,21 +778,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 }
 
                 let owner_key = match &arg.owner_rule {
-                    OwnerRule::OwnedBySigner => {
-                        Some(to_ristretto_public_key_bytes(&self.transaction_signer_public_key))
-                    },
+                    OwnerRule::OwnedBySigner => Some(self.transaction_signer_public_key),
                     OwnerRule::ByPublicKey(key) => Some(*key),
                     OwnerRule::None | OwnerRule::ByAccessRule(_) => None,
                 };
-
-                let maybe_view_key = arg
-                    .view_key
-                    .map(|k| RistrettoPublicKey::from_canonical_bytes(k.as_ref()))
-                    .transpose()
-                    .map_err(|e| RuntimeError::InvalidArgument {
-                        argument: "CreateResourceArg",
-                        reason: format!("Invalid view key: {}", e),
-                    })?;
 
                 // Check that auth hook is valid
                 if let Some(hook) = arg.authorize_hook.as_ref() {
@@ -812,7 +795,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         arg.owner_rule,
                         arg.access_rules,
                         arg.metadata,
-                        maybe_view_key,
+                        arg.view_key,
                         arg.authorize_hook,
                     );
 
@@ -1306,7 +1289,18 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state| {
                     let resource = state.get_resource(&resource_lock)?;
-                    let maybe_view_key = resource.view_key().cloned();
+                    let maybe_view_key =
+                        resource
+                            .to_view_key_public_key()
+                            .transpose()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "VaultAction::Withdraw",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.address(),
+                                    e
+                                ),
+                            })?;
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let (resource_container, amount) = match arg {
@@ -1455,10 +1449,21 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                 self.tracker.write_with(|state| {
                     let resource = state.get_resource(&resource_lock)?;
-                    let view_key = resource.view_key().cloned();
+                    let maybe_view_key =
+                        resource
+                            .to_view_key_public_key()
+                            .transpose()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "VaultAction::ConfidentialReveal",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.address(),
+                                    e
+                                ),
+                            })?;
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
-                    let resource_container = vault_mut.reveal_confidential(arg.proof, view_key.as_ref())?;
+                    let resource_container = vault_mut.reveal_confidential(arg.proof, maybe_view_key.as_ref())?;
                     let bucket_id = state.id_provider()?.new_bucket_id();
                     state.new_bucket(bucket_id, resource_container)?;
 
@@ -1503,7 +1508,18 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         resource.as_ownership(),
                         resource.access_rules(),
                     )?;
-                    let view_key = resource.view_key().cloned();
+                    let view_key =
+                        resource
+                            .to_view_key_public_key()
+                            .transpose()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "VaultAction::PayFee",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.address(),
+                                    e
+                                ),
+                            })?;
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
 
@@ -1763,7 +1779,18 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.lock_substate(&(*bucket.resource_address()).into(), LockFlag::Read)?;
                     let resource = state.get_resource(&resource_lock)?;
-                    let view_key = resource.view_key().cloned();
+                    let view_key =
+                        resource
+                            .to_view_key_public_key()
+                            .transpose()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "BucketAction::TakeConfidential",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.address(),
+                                    e
+                                ),
+                            })?;
                     let bucket_mut = state.get_bucket_mut(bucket_id)?;
                     let resource = bucket_mut.take_confidential(proof, view_key.as_ref())?;
                     let bucket_id = state.id_provider()?.new_bucket_id();
@@ -1796,7 +1823,18 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let bucket = state.get_bucket(bucket_id)?;
                     let resource_lock = state.lock_substate(&(*bucket.resource_address()).into(), LockFlag::Read)?;
                     let resource = state.get_resource(&resource_lock)?;
-                    let view_key = resource.view_key().cloned();
+                    let view_key =
+                        resource
+                            .to_view_key_public_key()
+                            .transpose()
+                            .map_err(|e| RuntimeError::InvariantError {
+                                function: "BucketAction::RevealConfidential",
+                                details: format!(
+                                    "Resource {} has a malformed view key: {}",
+                                    resource_lock.address(),
+                                    e
+                                ),
+                            })?;
                     let bucket = state.get_bucket_mut(bucket_id)?;
                     let resource = bucket.reveal_confidential(proof, view_key.as_ref())?;
                     let bucket_id = state.id_provider()?.new_bucket_id();
@@ -2267,13 +2305,23 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             .chain(&self.transaction_signer_public_key)
             .finalize();
 
-        if !proof_of_knowledge.verify_challenge(&unclaimed_output.commitment, &message, get_commitment_factory()) {
+        let commitment = PedersenCommitment::try_from_byte_type(&unclaimed_output.commitment).map_err(|e| {
+            warn!(target: LOG_TARGET, "Claim burn failed - malformed commitment: {}", e);
+            RuntimeError::InvalidClaimingSignature
+        })?;
+
+        let proof_of_knowledge = CommitmentSignature::try_from_byte_type(&proof_of_knowledge).map_err(|e| {
+            warn!(target: LOG_TARGET, "Claim burn failed - malformed proof of knowledge: {}", e);
+            RuntimeError::InvalidClaimingSignature
+        })?;
+
+        if !proof_of_knowledge.verify_challenge(&commitment, &message, get_commitment_factory()) {
             warn!(target: LOG_TARGET, "Claim burn failed - Invalid signature");
             return Err(RuntimeError::InvalidClaimingSignature);
         }
 
         // 3. range_proof must be valid
-        if !get_range_proof_service(1).verify(&range_proof, &unclaimed_output.commitment) {
+        if !get_range_proof_service(1).verify(&range_proof, &commitment) {
             warn!(target: LOG_TARGET, "Claim burn failed - Invalid range proof");
             return Err(RuntimeError::InvalidRangeProof);
         }
@@ -2281,7 +2329,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         // 4. Create the confidential resource
         let mut resource = ResourceContainer::confidential(
             CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-            Some((unclaimed_output.commitment.clone(), ConfidentialOutput {
+            Some((unclaimed_output.commitment, ConfidentialOutput {
                 commitment: unclaimed_output.commitment,
                 stealth_public_nonce: diffie_hellman_public_key,
                 encrypted_data: unclaimed_output.encrypted_data,
@@ -2416,7 +2464,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 SubstateValue::Template(PublishedTemplate {
                     // We essentially store the pre-image of the template address in the substate
                     binary_hash,
-                    author: self.transaction_signer_public_key.clone(),
+                    author: self.transaction_signer_public_key,
                 }),
             )?;
             // Mark template substate as owned by current call stack

@@ -9,7 +9,6 @@ use std::{
 
 use indexmap::IndexMap;
 use log::*;
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{displayable::Displayable, optional::Optional, shard::Shard, Epoch, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
@@ -41,6 +40,7 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
 use crate::{hotstuff::transaction_manager::TransactionLockConflicts, tracing::TraceTimer};
@@ -82,7 +82,7 @@ pub struct ProposedBlockChangeSet {
     proposed_foreign_proposals: Vec<BlockId>,
     proposed_utxo_mints: Vec<UnclaimedConfidentialOutputAddress>,
     no_vote_reason: Option<NoVoteReason>,
-    evict_nodes: Vec<PublicKey>,
+    evict_nodes: Vec<RistrettoPublicKeyBytes>,
 }
 
 impl ProposedBlockChangeSet {
@@ -220,7 +220,7 @@ impl ProposedBlockChangeSet {
         }
     }
 
-    pub fn add_evict_node(&mut self, public_key: PublicKey) -> &mut Self {
+    pub fn add_evict_node(&mut self, public_key: RistrettoPublicKeyBytes) -> &mut Self {
         self.evict_nodes.push(public_key);
         self
     }
@@ -535,7 +535,7 @@ mod tests {
     fn check_max_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 21_816_000;
+        const TARGET_MAX_MEM_USAGE: usize = 20_056_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
         eprintln!("mem_block_diff: {}MiB", mem_block_diff / 1024 / 1024);
         let mem_state_tree_diffs =

@@ -46,6 +46,7 @@ use log::*;
 use serde::{Deserialize, Serialize};
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_consensus::consensus_constants::ConsensusConstants;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::{
     keypair::setup_keypair_prompt,
     template_download_queue::TemplateDownloadQueue,
@@ -143,7 +144,7 @@ pub async fn run_validator_node(config: &ApplicationConfig, shutdown: Shutdown) 
             #[cfg(feature = "metrics")]
             metrics_registry,
         )?;
-        // Run the http ui
+        // Run the web ui
         if let Some(address) = config.validator_node.web_ui_listener_address {
             task::spawn(run_http_ui_server(
                 address,
@@ -168,7 +169,7 @@ pub async fn run_validator_node(config: &ApplicationConfig, shutdown: Shutdown) 
 }
 
 #[cfg(feature = "metrics")]
-fn create_metrics_registry(public_key: &tari_common_types::types::PublicKey) -> prometheus::Registry {
+fn create_metrics_registry(public_key: &RistrettoPublicKey) -> prometheus::Registry {
     let mut labels = std::collections::HashMap::with_capacity(2);
     labels.insert("app".to_string(), "ValidatorNode".to_string());
     labels.insert("public_key".to_string(), public_key.to_string());

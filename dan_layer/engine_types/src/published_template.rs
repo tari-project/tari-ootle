@@ -8,10 +8,9 @@ use std::{
 };
 
 use tari_bor::{BorTag, Deserialize, Serialize};
-use tari_common_types::types::PublicKey;
 use tari_template_lib::{
-    models::{BinaryTag, KeyParseError, ObjectKey},
-    Hash,
+    models::BinaryTag,
+    types::{crypto::RistrettoPublicKeyBytes, Hash, KeyParseError, ObjectKey},
 };
 
 use crate::hashing::{hasher32, EngineHashDomainLabel};
@@ -36,7 +35,7 @@ impl PublishedTemplateAddress {
         Self(BorTag::new(key))
     }
 
-    pub fn from_author_and_binary_hash(author_public_key: &PublicKey, binary_hash: &Hash) -> Self {
+    pub fn from_author_and_binary_hash(author_public_key: &RistrettoPublicKeyBytes, binary_hash: &Hash) -> Self {
         let hash = hasher32(EngineHashDomainLabel::TemplateAddress)
             .chain(author_public_key)
             .chain(binary_hash)
@@ -99,7 +98,7 @@ impl borsh::BorshDeserialize for PublishedTemplateAddress {
 )]
 pub struct PublishedTemplate {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    pub author: PublicKey,
+    pub author: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub binary_hash: Hash,
 }

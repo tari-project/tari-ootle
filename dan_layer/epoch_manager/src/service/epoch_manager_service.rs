@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use tari_common_types::types::PublicKey;
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
@@ -60,7 +60,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         utxo_store: TSpec::UtxoStore,
         template_downloader: TSpec::TemplateDownloader,
         layer_one_transaction_submitter: TSpec::LayerOneSubmitter,
-        node_public_key: PublicKey,
+        node_public_key: RistrettoPublicKey,
         shutdown: ShutdownSignal,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {

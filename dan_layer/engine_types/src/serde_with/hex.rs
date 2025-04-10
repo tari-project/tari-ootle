@@ -20,6 +20,8 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Deserializer, Serializer};
 
 pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &T, s: S) -> Result<S::Ok, S::Error> {
@@ -37,14 +39,15 @@ where
     D: Deserializer<'de>,
     T: for<'a> TryFrom<&'a [u8]>,
 {
-    let bytes = if d.is_human_readable() {
-        let hex = <String as Deserialize>::deserialize(d)?;
-        hex::decode(&hex).map_err(serde::de::Error::custom)?
+    let value = if d.is_human_readable() {
+        let hex = <Cow<'_, str> as Deserialize>::deserialize(d)?;
+        let bytes = hex::decode(&*hex).map_err(serde::de::Error::custom)?;
+        T::try_from(&bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?
     } else {
-        <Vec<u8> as Deserialize>::deserialize(d)?
+        let bytes = <Cow<'_, [u8]> as Deserialize>::deserialize(d)?;
+        T::try_from(&bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?
     };
 
-    let value = T::try_from(&bytes).map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?;
     Ok(value)
 }
 
@@ -132,5 +135,27 @@ pub mod option {
             .transpose()
             .map_err(|_| serde::de::Error::custom("Failed to convert bytes to T"))?;
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::Serialize;
+
+    use super::*;
+
+    #[derive(Serialize, Deserialize)]
+    struct TestCase {
+        #[serde(with = "super")]
+        bytes: [u8; 32],
+    }
+
+    // Test it
+    #[test]
+    fn test_serialize() {
+        let data = TestCase { bytes: [1; 32] };
+        let serialized = serde_json::to_vec(&data).unwrap();
+        let deserialized: TestCase = serde_json::from_slice(&serialized).unwrap();
+        assert_eq!(data.bytes, deserialized.bytes);
     }
 }

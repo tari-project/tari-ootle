@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::BTreeMap, ops::ControlFlow};
+use std::{any::type_name, collections::BTreeMap, ops::ControlFlow};
 
 use serde::{Deserialize, Serialize};
 use tari_bor::{decode, BorError, FromTagAndValue, ValueVisitor};
@@ -11,7 +11,6 @@ use tari_template_lib::{
         BucketId,
         ComponentAddressAllocation,
         NonFungibleAddressContents,
-        ObjectKey,
         ProofId,
         ResourceAddress,
         ResourceAddressAllocation,
@@ -19,7 +18,7 @@ use tari_template_lib::{
         VaultId,
     },
     prelude::{ComponentAddress, Metadata, NonFungibleAddress},
-    Hash,
+    types::{Hash, ObjectKey},
 };
 
 use crate::{
@@ -47,7 +46,8 @@ pub struct IndexedValue {
 
 impl IndexedValue {
     pub fn from_type<T: Serialize + ?Sized>(v: &T) -> Result<Self, IndexedValueError> {
-        let value = tari_bor::to_value(v)?;
+        let value = tari_bor::to_value(v)
+            .map_err(|e| IndexedValueError::Custom(format!("from_type<{}>: {}", type_name::<T>(), e)))?;
         Self::from_value(value)
     }
 
@@ -55,12 +55,14 @@ impl IndexedValue {
         if bytes.is_empty() {
             return Ok(Self::default());
         }
-        let value: tari_bor::Value = decode(bytes)?;
+        let value: tari_bor::Value =
+            decode(bytes).map_err(|e| IndexedValueError::Custom(format!("from_raw: {}", e)))?;
         Self::from_value(value)
     }
 
     pub fn from_value(value: tari_bor::Value) -> Result<Self, IndexedValueError> {
-        let indexed = IndexedWellKnownTypes::from_value(&value)?;
+        let indexed = IndexedWellKnownTypes::from_value(&value)
+            .map_err(|e| IndexedValueError::Custom(format!("from_value: {}", e)))?;
         Ok(Self { indexed, value })
     }
 
@@ -186,7 +188,7 @@ impl IndexedWellKnownTypes {
         Self::from_value_with_max_depth(value, MAX_VISITOR_DEPTH)
     }
 
-    pub fn from_value_with_max_depth(value: &tari_bor::Value, max_depth: usize) -> Result<Self, IndexedValueError> {
+    fn from_value_with_max_depth(value: &tari_bor::Value, max_depth: usize) -> Result<Self, IndexedValueError> {
         let mut visitor = IndexedValueVisitor::new();
         tari_bor::walk_all(value, &mut visitor, max_depth)?;
 
@@ -267,6 +269,19 @@ impl IndexedWellKnownTypes {
             .chain(self.unclaimed_confidential_output_address.iter().map(|a| (*a).into()))
             .chain(self.published_template_addresses.iter().map(|a| (*a).into()))
             .chain(self.validator_node_fee_pools.iter().map(|a| (*a).into()))
+    }
+
+    pub fn into_referenced_substates(self) -> impl Iterator<Item = SubstateId> {
+        self.component_addresses
+            .into_iter()
+            .map(Into::into)
+            .chain(self.resource_addresses.into_iter().map(Into::into))
+            .chain(self.transaction_receipt_addresses.into_iter().map(Into::into))
+            .chain(self.non_fungible_addresses.into_iter().map(Into::into))
+            .chain(self.vault_ids.into_iter().map(Into::into))
+            .chain(self.unclaimed_confidential_output_address.into_iter().map(Into::into))
+            .chain(self.published_template_addresses.into_iter().map(Into::into))
+            .chain(self.validator_node_fee_pools.into_iter().map(Into::into))
     }
 
     pub fn bucket_ids(&self) -> &[BucketId] {

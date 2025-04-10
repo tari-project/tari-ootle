@@ -71,11 +71,14 @@ export function toHexString(byteArray: any): string {
   if (byteArray === undefined) {
     return "undefined";
   }
+  if (typeof byteArray === "string") {
+    return byteArray;
+  }
   // object might be a tagged object
   if (byteArray["@@TAGGED@@"] !== undefined) {
     return toHexString(byteArray["@@TAGGED@@"][1]);
   }
-  return "Unsupported type";
+  return "Unsupported type " + typeof byteArray;
 }
 
 export function fromHexString(hexString: string) {
@@ -108,6 +111,16 @@ export function shortenSubstateId(
   const string = substateIdToString(substateId);
   const parts = string.split("_", 2);
   return parts[0] + "_" + shortenString(parts[1], start, end);
+}
+
+export function isSubstateIdString(substateId: SubstateId | string | null | undefined): boolean {
+  if (substateId === null || substateId === undefined) {
+    return false;
+  }
+  const string = substateIdToString(substateId);
+  const SUBSTATE_PREFIXES = ["component_", "vault_", "resource_", "nft_", "commitment_", "txreceipt_", "template_"];
+
+  return SUBSTATE_PREFIXES.some((prefix) => string.startsWith(prefix));
 }
 
 export function shortenString(string: string | null | undefined, start: number = 8, end: number = 8) {

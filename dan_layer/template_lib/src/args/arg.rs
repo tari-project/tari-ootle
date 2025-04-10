@@ -22,6 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_bor::encode;
+use tari_template_lib_types::serde_helpers;
 
 /// The possible ways to represent an instruction's argument
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,9 +34,17 @@ use tari_bor::encode;
 pub enum Arg {
     /// The argument is in the transaction execution's workspace, which means it is the result of a previous
     /// instruction
-    Workspace(Vec<u8>),
+    Workspace(
+        #[serde(with = "serde_helpers::dynamic_hex")]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        Vec<u8>,
+    ),
     /// The argument is a value specified in the transaction
-    Literal(Vec<u8>),
+    Literal(
+        #[serde(with = "serde_helpers::dynamic_hex")]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        Vec<u8>,
+    ),
     // Literal(tari_bor::Value),
 }
 
@@ -59,5 +68,52 @@ impl Arg {
             Arg::Workspace(_) => None,
             Arg::Literal(bytes) => Some(bytes),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_bor::decode_exact;
+    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+
+    use super::*;
+    use crate::args;
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct TestCase {
+        bytes: Vec<u8>,
+        pk: RistrettoPublicKeyBytes,
+    }
+
+    #[test]
+    fn decode_encode() {
+        let test_case = TestCase {
+            bytes: vec![1, 2, 3, 4, 5],
+            pk: RistrettoPublicKeyBytes::from([1; 32]),
+        };
+        let args = args![test_case];
+        let json = serde_json::to_string(&args).unwrap();
+        let decoded: Vec<Arg> = serde_json::from_str(&json).unwrap();
+
+        let decoded: TestCase = decode_exact(decoded[0].as_literal_bytes().unwrap()).unwrap();
+        assert_eq!(test_case.bytes, decoded.bytes);
+        assert_eq!(test_case.pk, decoded.pk);
+
+        let json = serde_json::to_value(&args).unwrap();
+        assert_eq!(
+            json[0]["Literal"].as_str().expect("string"),
+            "a265627974657385010203040562706b58200101010101010101010101010101010101010101010101010101010101010101"
+        );
+
+        let decoded = tari_bor::decode::<Vec<Arg>>(&tari_bor::encode(&args).unwrap()).unwrap();
+        let decoded: TestCase = decode_exact(decoded[0].as_literal_bytes().unwrap()).unwrap();
+        assert_eq!(test_case.bytes, decoded.bytes);
+        assert_eq!(test_case.pk, decoded.pk);
+
+        let cbor = tari_bor::to_value(&args).unwrap();
+        let decoded = tari_bor::from_value::<Vec<Arg>>(&cbor).unwrap();
+        let decoded: TestCase = decode_exact(decoded[0].as_literal_bytes().unwrap()).unwrap();
+        assert_eq!(test_case.bytes, decoded.bytes);
+        assert_eq!(test_case.pk, decoded.pk);
     }
 }

@@ -3,7 +3,7 @@
 
 use std::iter;
 
-use tari_engine_types::{instruction::Instruction, substate::SubstateId};
+use tari_engine_types::{instruction::Instruction, substate::SubstateId, ToByteType};
 use tari_template_lib::{
     args,
     models::{Amount, ComponentAddress},
@@ -32,7 +32,7 @@ fn airdrop() {
     let instructions = iter::repeat_with(|| {
         let (_, owner_public_key, _) = template_test.create_owner_proof();
         Instruction::CreateAccount {
-            public_key_address: owner_public_key,
+            public_key_address: owner_public_key.to_byte_type(),
             owner_rule: None,
             access_rules: None,
             workspace_bucket: None,

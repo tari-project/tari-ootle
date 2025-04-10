@@ -30,30 +30,15 @@ pub fn get_commitment_factory() -> &'static CommitmentFactory {
     &COMMITMENT_FACTORY
 }
 
-pub mod challenges {
-    use tari_common_types::types::{Commitment, PublicKey};
-    use tari_template_lib::{
-        models::{Amount, ViewableBalanceProofChallengeFields},
-        Hash,
-    };
+pub mod messages {
+    use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoPublicKey};
+    use tari_template_lib::models::{Amount, ViewableBalanceProofChallengeFields};
 
-    use crate::hashing::{hasher32, hasher64, EngineHashDomainLabel};
-
-    pub fn confidential_commitment_proof64(
-        public_key: &PublicKey,
-        public_nonce: &PublicKey,
-        commitment: &Commitment,
-    ) -> [u8; 64] {
-        hasher64(EngineHashDomainLabel::ConfidentialProof)
-            .chain(&public_key)
-            .chain(&public_nonce)
-            .chain(commitment.as_public_key())
-            .result()
-    }
+    use crate::hashing::{hasher64, EngineHashDomainLabel};
 
     pub fn confidential_withdraw64(
-        excess: &PublicKey,
-        public_nonce: &PublicKey,
+        excess: &RistrettoPublicKey,
+        public_nonce: &RistrettoPublicKey,
         input_revealed_amount: Amount,
         output_revealed_amount: Amount,
     ) -> [u8; 64] {
@@ -66,34 +51,14 @@ pub mod challenges {
     }
 
     pub fn viewable_balance_proof_challenge64(
-        commitment: &Commitment,
-        view_key: &PublicKey,
+        commitment: &PedersenCommitment,
+        view_key: &RistrettoPublicKey,
         challenge_fields: ViewableBalanceProofChallengeFields<'_>,
     ) -> [u8; 64] {
         hasher64(EngineHashDomainLabel::ViewKey)
             .chain(commitment)
             .chain(view_key)
             .chain(&challenge_fields)
-            .result()
-    }
-
-    pub fn confidential_commitment_proof32(
-        public_key: &PublicKey,
-        public_nonce: &PublicKey,
-        commitment: &Commitment,
-    ) -> Hash {
-        hasher32(EngineHashDomainLabel::ConfidentialProof)
-            .chain(&public_key)
-            .chain(&public_nonce)
-            .chain(commitment.as_public_key())
-            .result()
-    }
-
-    pub fn confidential_withdraw32(excess: &PublicKey, public_nonce: &PublicKey, revealed_amount: Amount) -> Hash {
-        hasher32(EngineHashDomainLabel::ConfidentialTransfer)
-            .chain(excess)
-            .chain(public_nonce)
-            .chain(&revealed_amount)
             .result()
     }
 }

@@ -9,11 +9,13 @@ license.workspace = true
 
 [dependencies]
 tari_common_types = { workspace = true }
+tari_crypto = { workspace = true }
 tari_dan_common_types = { workspace = true }
 tari_dan_storage = { workspace = true }
 tari_dan_storage_sqlite = { workspace = true, optional = true }
 tari_engine_types = { workspace = true }
 tari_sidechain = { workspace = true }
+tari_template_lib_types = { workspace = true }
 tari_shutdown = { workspace = true }
 
 anyhow = { workspace = true }

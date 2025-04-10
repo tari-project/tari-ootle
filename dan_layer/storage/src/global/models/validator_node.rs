@@ -5,17 +5,18 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{displayable::Displayable, vn_node_hash, Epoch, NodeAddressable, SubstateAddress};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorNode<TAddr> {
     pub address: TAddr,
-    pub public_key: PublicKey,
+    pub public_key: RistrettoPublicKeyBytes,
     pub shard_key: SubstateAddress,
     pub start_epoch: Epoch,
     pub end_epoch: Option<Epoch>,
-    pub fee_claim_public_key: PublicKey,
+    pub fee_claim_public_key: RistrettoPublicKeyBytes,
 }
 
 impl<TAddr: NodeAddressable> ValidatorNode<TAddr> {

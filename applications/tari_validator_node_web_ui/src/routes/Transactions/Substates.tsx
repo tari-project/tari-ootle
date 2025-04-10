@@ -30,13 +30,16 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 import CodeBlockDialog from "../../Components/CodeBlock";
 import { substateIdToString, SubstateRecord } from "@tari-project/typescript-bindings";
+import { VersionedSubstateId } from "@tari-project/typescript-bindings/dist/types/VersionedSubstateId";
+import { SubstateId } from "@tari-project/typescript-bindings/dist/types/SubstateId";
+import { Substate } from "@tari-project/typescript-bindings/dist/types/Substate";
 
-function RowData({ info, state }: { info: SubstateRecord; state: string }, index: number) {
+function UpSubstateRowData({ id, substate }: { id: SubstateId; substate: Substate }) {
   const [open, setOpen] = useState(false);
-  const substateId = substateIdToString(info.substate_id);
+  const substateId = substateIdToString(id);
   return (
     <>
-      <TableRow key={`${index}-1`}>
+      <TableRow>
         <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }}>
           <AccordionIconButton
             open={open}
@@ -58,20 +61,15 @@ function RowData({ info, state }: { info: SubstateRecord; state: string }, index
               gap: "0.5rem",
             }}
           >
-            {state === "Up" ? (
-              <IoArrowUpCircle style={{ width: 22, height: 22, color: "#5F9C91" }} />
-            ) : (
-              <IoArrowDownCircle style={{ width: 22, height: 22, color: "#ECA86A" }} />
-            )}
-            {state}
+            <IoArrowUpCircle style={{ width: 22, height: 22, color: "#5F9C91" }} /> Up
           </div>
         </DataTableCell>
-        <DataTableCell>{substateId}:{info.version}</DataTableCell>
+        <DataTableCell>{substateId}:{substate.version}</DataTableCell>
       </TableRow>
-      <TableRow key={`${index}-2`}>
+      <TableRow>
         <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
           <Collapse in={open} timeout="auto" unmountOnExit>
-            <CodeBlockDialog title="Substate">{renderJson(info)}</CodeBlockDialog>
+            <CodeBlockDialog title="Substate">{renderJson(substate.substate)}</CodeBlockDialog>
           </Collapse>
         </DataTableCell>
       </TableRow>
@@ -79,7 +77,34 @@ function RowData({ info, state }: { info: SubstateRecord; state: string }, index
   );
 }
 
-export default function Substates({ upData, downData }: { upData: SubstateRecord[]; downData: SubstateRecord[] }) {
+function DownSubstateRowData({ id }: { id: VersionedSubstateId }) {
+  const substateId = substateIdToString(id.substate_id);
+  return (
+    <TableRow>
+      <DataTableCell sx={{ borderBottom: "none", textAlign: "center" }} />
+      <DataTableCell>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            gap: "0.5rem",
+          }}
+        >
+          <IoArrowDownCircle style={{ width: 22, height: 22, color: "#ECA86A" }} />
+          Down
+        </div>
+      </DataTableCell>
+      <DataTableCell>{substateId}:{id.version}</DataTableCell>
+    </TableRow>
+  );
+}
+
+
+export default function Substates({ upData, downData }: {
+  upData: [SubstateId, Substate][];
+  downData: VersionedSubstateId[]
+}) {
   // const down = data.Accept.down_substates;
   const up = upData;
   const down = downData;
@@ -87,11 +112,11 @@ export default function Substates({ upData, downData }: { upData: SubstateRecord
     <TableContainer>
       <Table>
         <TableBody>
-          {up.map((item: SubstateRecord, index: number) => {
-            return <RowData info={item} state="Up" key={index} />;
+          {up.map(([id, substate], i) => {
+            return <UpSubstateRowData id={id} substate={substate} key={i} />;
           })}
-          {down.map((item: SubstateRecord, index: number) => {
-            return <RowData info={item} state="Down" key={index} />;
+          {down.map((id, i) => {
+            return <DownSubstateRowData id={id} key={i} />;
           })}
         </TableBody>
       </Table>

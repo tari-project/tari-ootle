@@ -2,23 +2,36 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes};
 use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     ops::Deref,
 };
 
-use crate::{crypto::InvalidByteLengthError, models::NonFungibleAddress, Hash};
+use crate::{
+    crypto::{InvalidByteLengthError, RistrettoPublicKeyBytes},
+    serde_helpers,
+    serde_helpers::fixed_bytes_from_hex,
+    Hash,
+    HashParseError,
+};
 
-/// A Ristretto public key byte contents
-#[serde_as]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+/// A Pedersen Commitment byte contents
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct RistrettoPublicKeyBytes(#[serde_as(as = "Bytes")] [u8; RistrettoPublicKeyBytes::length()]);
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
+pub struct PedersenCommitmentBytes(#[serde(with = "serde_helpers::fixed_hex")] [u8; PedersenCommitmentBytes::length()]);
 
-impl RistrettoPublicKeyBytes {
+impl PedersenCommitmentBytes {
     pub const fn length() -> usize {
         32
+    }
+
+    pub const fn zero() -> Self {
+        Self([0u8; Self::length()])
+    }
+
+    pub fn from_public_key(commitment: RistrettoPublicKeyBytes) -> Self {
+        Self(commitment.into_array())
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, InvalidByteLengthError> {
@@ -31,7 +44,12 @@ impl RistrettoPublicKeyBytes {
 
         let mut key = [0u8; Self::length()];
         key.copy_from_slice(bytes);
-        Ok(RistrettoPublicKeyBytes(key))
+        Ok(PedersenCommitmentBytes(key))
+    }
+
+    pub fn from_hex(hex: &str) -> Result<Self, HashParseError> {
+        let bytes = fixed_bytes_from_hex(hex)?;
+        Ok(Self(bytes))
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -45,13 +63,9 @@ impl RistrettoPublicKeyBytes {
     pub fn as_hash(&self) -> Hash {
         Hash::from_array(self.0)
     }
-
-    pub fn to_non_fungible_address(&self) -> NonFungibleAddress {
-        NonFungibleAddress::from_public_key(*self)
-    }
 }
 
-impl TryFrom<&[u8]> for RistrettoPublicKeyBytes {
+impl TryFrom<&[u8]> for PedersenCommitmentBytes {
     type Error = InvalidByteLengthError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -59,25 +73,25 @@ impl TryFrom<&[u8]> for RistrettoPublicKeyBytes {
     }
 }
 
-impl AsRef<[u8]> for RistrettoPublicKeyBytes {
+impl AsRef<[u8]> for PedersenCommitmentBytes {
     fn as_ref(&self) -> &[u8] {
         self.deref().as_ref()
     }
 }
 
-impl From<[u8; 32]> for RistrettoPublicKeyBytes {
+impl From<[u8; 32]> for PedersenCommitmentBytes {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
 }
 
-impl Display for RistrettoPublicKeyBytes {
+impl Display for PedersenCommitmentBytes {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_hash())
     }
 }
 
-impl Deref for RistrettoPublicKeyBytes {
+impl Deref for PedersenCommitmentBytes {
     type Target = [u8; 32];
 
     fn deref(&self) -> &Self::Target {

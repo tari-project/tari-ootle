@@ -20,9 +20,9 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::consensus_models::ValidatorConsensusStats;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     codecs::{DefaultCodec, EpochCodec, PublicKeyCodec},
@@ -32,7 +32,7 @@ use crate::{
 pub struct ValidatorNodeEpochStatsModel;
 
 impl Cf for ValidatorNodeEpochStatsModel {
-    type Key = (Epoch, PublicKey);
+    type Key = (Epoch, RistrettoPublicKeyBytes);
     type KeyCodec = (EpochCodec, PublicKeyCodec);
     type Value = ValidatorConsensusStats;
     type ValueCodec = DefaultCodec<Self::Value>;

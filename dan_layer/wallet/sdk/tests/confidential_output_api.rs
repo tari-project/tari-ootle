@@ -5,7 +5,6 @@ use std::{convert::Infallible, time::Duration};
 
 use async_trait::async_trait;
 use tari_common::configuration::Network;
-use tari_common_types::types::Commitment;
 use tari_crypto::commitment::HomomorphicCommitmentFactory;
 use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{
@@ -16,12 +15,14 @@ use tari_dan_wallet_sdk::{
     WalletSdkConfig,
 };
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
-use tari_engine_types::{confidential::get_commitment_factory, substate::SubstateId};
+use tari_engine_types::{confidential::get_commitment_factory, substate::SubstateId, ToByteType};
 use tari_template_abi::TemplateDef;
 use tari_template_lib::{
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
-    models::{Amount, EncryptedData, TemplateAddress},
+    models::{Amount, EncryptedData},
+    prelude::PedersenCommitmentBytes,
     resource::ResourceType,
+    types::TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
 
@@ -90,12 +91,14 @@ fn outputs_locked_and_finalized() {
     assert_eq!(locked.len(), 2);
 
     // Add a change output belonging to this proof
-    let commitment_change = get_commitment_factory().commit_value(&Default::default(), 24);
+    let commitment_change = get_commitment_factory()
+        .commit_value(&Default::default(), 24)
+        .to_byte_type();
     outputs_api
         .add_output(ConfidentialOutputModel {
             account_address: Test::test_account_address(),
             vault_address: Test::test_vault_address(),
-            commitment: commitment_change.clone(),
+            commitment: commitment_change,
             value: 24,
             sender_public_nonce: None,
             encryption_secret_key_index: 0,
@@ -122,7 +125,9 @@ fn outputs_locked_and_finalized() {
         assert!(unspent.iter().any(|l| l.commitment == commitment_change));
         assert!(unspent.iter().any(|l| l.commitment == commitment_100));
         assert_eq!(unspent.len(), 2);
-        let balance = tx.outputs_get_unspent_balance(&Test::test_vault_address()).unwrap();
+        let balance = tx
+            .outputs_get_unspent_balance(&Test::test_vault_address().as_vault_id().unwrap())
+            .unwrap();
         assert_eq!(balance, 124);
     }
 }
@@ -186,14 +191,16 @@ impl Test {
             .unwrap()
     }
 
-    pub fn add_unspent_output(&self, amount: u64) -> Commitment {
+    pub fn add_unspent_output(&self, amount: u64) -> PedersenCommitmentBytes {
         let outputs_api = self.sdk.confidential_outputs_api();
-        let commitment = get_commitment_factory().commit_value(&Default::default(), amount);
+        let commitment = get_commitment_factory()
+            .commit_value(&Default::default(), amount)
+            .to_byte_type();
         outputs_api
             .add_output(ConfidentialOutputModel {
                 account_address: Self::test_account_address(),
                 vault_address: Self::test_vault_address(),
-                commitment: commitment.clone(),
+                commitment,
                 value: amount,
                 sender_public_nonce: None,
                 encryption_secret_key_index: 0,
@@ -214,7 +221,7 @@ impl Test {
     pub fn get_unspent_balance(&self) -> u64 {
         let outputs_api = self.sdk.confidential_outputs_api();
         outputs_api
-            .get_unspent_balance(&Test::test_vault_address())
+            .get_unspent_balance(&Test::test_vault_address().as_vault_id().unwrap())
             .optional()
             .unwrap()
             .unwrap_or(0)

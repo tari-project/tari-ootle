@@ -5,10 +5,10 @@ use super::{IMAGE_URL, TOKEN_SYMBOL};
 use crate::{
     args::MintArg,
     auth::{AccessRule, AuthHook, OwnerRule, ResourceAccessRules},
-    crypto::RistrettoPublicKeyBytes,
     models::{Bucket, ComponentAddress, Metadata, ResourceAddress, ResourceAddressAllocation},
     prelude::ConfidentialOutputStatement,
     resource::{ResourceManager, ResourceType},
+    types::crypto::RistrettoPublicKeyBytes,
 };
 
 /// Utility for building confidential resources inside templates

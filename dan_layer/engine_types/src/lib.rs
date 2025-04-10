@@ -3,6 +3,7 @@
 
 pub mod base_layer_hashing;
 pub mod bucket;
+pub mod byte_types;
 pub mod commit_result;
 pub mod component;
 pub mod confidential;
@@ -26,7 +27,7 @@ pub mod vault;
 pub mod virtual_substate;
 
 mod template;
-pub use template::{calculate_template_binary_hash, parse_template_address, TemplateAddress};
+pub use template::{calculate_template_binary_hash, parse_template_address};
 
 pub mod entity_id_provider;
 pub mod id_provider;
@@ -35,7 +36,9 @@ mod argument_parser;
 pub mod published_template;
 mod substate_serde;
 mod validator_fee;
+
 pub use argument_parser::parse_arg;
+pub use byte_types::*;
 pub use validator_fee::*;
 
 pub mod template_models {

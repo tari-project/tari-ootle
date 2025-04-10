@@ -1,8 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::{FixedHash, PublicKey};
-use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError};
 use tari_dan_storage::{
     consensus_models::{BlockError, BlockId, LeafBlock, LockedBlock, QcId, TransactionPoolError},
@@ -10,6 +9,7 @@ use tari_dan_storage::{
 };
 use tari_epoch_manager::EpochManagerError;
 use tari_state_tree::StateTreeError;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 use tokio::task::JoinError;
 
@@ -201,7 +201,10 @@ pub enum ProposalValidationError {
     #[error("QC has invalid signature: {qc}")]
     QcInvalidSignature { qc: QcId },
     #[error("QC has duplicate signature: {qc} by {validator}")]
-    QcDuplicateSignature { qc: QcId, validator: PublicKey },
+    QcDuplicateSignature {
+        qc: QcId,
+        validator: RistrettoPublicKeyBytes,
+    },
     #[error("Quorum was not reached on QC {qc}. {got} out of {required} signatures")]
     QuorumWasNotReached { qc: QcId, got: usize, required: usize },
     #[error("Invalid network in block {block_id}: expected {expected_network}, given {block_network}")]
@@ -273,8 +276,8 @@ pub enum ProposalValidationError {
     )]
     MismatchedSidechainId {
         block_id: BlockId,
-        expected_sidechain_id: RistrettoPublicKey,
-        sidechain_id: RistrettoPublicKey,
+        expected_sidechain_id: RistrettoPublicKeyBytes,
+        sidechain_id: RistrettoPublicKeyBytes,
     },
     #[error("Invalid epoch in block {block_id}. Expected: {current_epoch}, given: {block_epoch}")]
     InvalidEpochInBlock {

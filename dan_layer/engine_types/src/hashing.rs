@@ -31,7 +31,7 @@ use serde::Serialize;
 use tari_bor::encode_into_std_writer;
 use tari_crypto::hashing::DomainSeparation;
 use tari_hashing::TariEngineHashDomain;
-use tari_template_lib::Hash;
+use tari_template_lib::types::Hash;
 
 pub fn hasher64(label: EngineHashDomainLabel) -> TariHasher64 {
     TariHasher64::new_with_label::<TariEngineHashDomain>(label.as_label())

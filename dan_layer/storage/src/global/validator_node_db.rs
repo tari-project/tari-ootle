@@ -22,8 +22,8 @@
 
 use std::collections::HashMap;
 
-use tari_common_types::types::PublicKey;
 use tari_dan_common_types::{committee::Committee, Epoch, ShardGroup, SubstateAddress};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
 use crate::global::{models::ValidatorNode, GlobalDbAdapter};
 
@@ -40,10 +40,10 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     pub fn insert_validator_node(
         &mut self,
         peer_address: TGlobalDbAdapter::Addr,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         shard_key: SubstateAddress,
         start_epoch: Epoch,
-        fee_claim_public_key: PublicKey,
+        fee_claim_public_key: RistrettoPublicKeyBytes,
     ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend.insert_validator_node(
             self.tx,
@@ -57,7 +57,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
 
     pub fn deactivate(
         &mut self,
-        public_key: PublicKey,
+        public_key: RistrettoPublicKeyBytes,
         deactivation_epoch: Epoch,
     ) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend
@@ -80,7 +80,7 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     pub fn get_by_public_key(
         &mut self,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ValidatorNode<TGlobalDbAdapter::Addr>, TGlobalDbAdapter::Error> {
         self.backend
             .get_validator_node_by_public_key(self.tx, epoch, public_key)

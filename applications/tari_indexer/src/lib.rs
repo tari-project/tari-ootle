@@ -175,7 +175,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             indexer_ready_requests_tx,
         );
         let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
-        // Run the http ui
+        // Run the web ui
         if let Some(address) = config.indexer.web_ui_address {
             // json rpc
             let public_jrpc_url = config

@@ -167,9 +167,7 @@ fn get_function_block(template_ident: &Ident, ast: FunctionAst) -> Expr {
         attrs: vec![],
         label: None,
         block: Block {
-            brace_token: Brace {
-                span: Span::call_site(),
-            },
+            brace_token: Brace::default(),
             stmts,
         },
     })

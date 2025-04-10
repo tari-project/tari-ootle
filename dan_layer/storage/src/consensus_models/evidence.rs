@@ -621,7 +621,7 @@ impl Display for EvidenceInputLockData {
 #[cfg(test)]
 mod tests {
     use tari_dan_common_types::SubstateLockType;
-    use tari_template_lib::models::{ComponentAddress, ObjectKey};
+    use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 
     use super::*;
     use crate::consensus_models::SubstateRequirementLockIntent;

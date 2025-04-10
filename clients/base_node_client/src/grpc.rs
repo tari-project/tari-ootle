@@ -26,13 +26,14 @@ use async_trait::async_trait;
 use log::*;
 use minotari_app_grpc::tari_rpc::{self as grpc, GetShardKeyRequest, GetValidatorNodeChangesRequest};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
-use tari_common_types::types::{FixedHash, PublicKey};
+use tari_common_types::types::FixedHash;
 use tari_core::{
     base_node::comms_interface::ValidatorNodeChange,
     blocks::BlockHeader,
     transactions::transaction_components::CodeTemplateRegistration,
 };
 use tari_dan_common_types::{Epoch, SubstateAddress};
+use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use tari_utilities::ByteArray;
 use url::Url;
 
@@ -128,7 +129,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
     async fn get_validator_node_changes(
         &mut self,
         epoch: Epoch,
-        sidechain_id: Option<&PublicKey>,
+        sidechain_id: Option<&RistrettoPublicKeyBytes>,
     ) -> Result<Vec<ValidatorNodeChange>, BaseNodeClientError> {
         let client = self.connection().await?;
         let result = client
@@ -165,7 +166,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
             match stream.message().await {
                 Ok(Some(val)) => {
                     vns.push(BaseLayerValidatorNode {
-                        public_key: PublicKey::from_canonical_bytes(&val.public_key).map_err(|_| {
+                        public_key: RistrettoPublicKeyBytes::from_bytes(&val.public_key).map_err(|_| {
                             BaseNodeClientError::InvalidPeerMessage("public_key was not a valid public key".to_string())
                         })?,
                         shard_key: {
@@ -179,7 +180,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
                         sidechain_id: if val.sidechain_id.is_empty() {
                             None
                         } else {
-                            Some(PublicKey::from_canonical_bytes(&val.sidechain_id).map_err(|_| {
+                            Some(RistrettoPublicKeyBytes::from_bytes(&val.sidechain_id).map_err(|_| {
                                 BaseNodeClientError::InvalidPeerMessage(
                                     "sidechain_id was not a valid public key".to_string(),
                                 )
@@ -210,7 +211,7 @@ impl BaseNodeClient for GrpcBaseNodeClient {
     async fn get_shard_key(
         &mut self,
         epoch: Epoch,
-        public_key: &PublicKey,
+        public_key: &RistrettoPublicKeyBytes,
     ) -> Result<Option<SubstateAddress>, BaseNodeClientError> {
         let inner = self.connection().await?;
         let request = GetShardKeyRequest {

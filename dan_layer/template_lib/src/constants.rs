@@ -3,7 +3,9 @@
 
 //! A collection of convenient constant values
 
-use crate::models::{ComponentAddress, ObjectKey, ResourceAddress, VaultId};
+use tari_template_lib_types::ObjectKey;
+
+use crate::models::{ComponentAddress, ResourceAddress, VaultId};
 
 // TODO: This is set pretty arbitrarily.
 

@@ -4,7 +4,7 @@
 use tari_dan_common_types::optional::{IsNotFoundError, Optional};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
-    models::{Amount, ResourceAddress},
+    models::{Amount, ResourceAddress, VaultId},
     prelude::ResourceType,
 };
 
@@ -87,7 +87,7 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         Ok(())
     }
 
-    pub fn get_vault_balance(&self, vault_address: &SubstateId) -> Result<VaultBalance, AccountsApiError> {
+    pub fn get_vault_balance(&self, vault_address: &VaultId) -> Result<VaultBalance, AccountsApiError> {
         let vault = self.store.with_read_tx(|tx| tx.vaults_get(vault_address))?;
         Ok(VaultBalance {
             account: vault.account_address,
@@ -132,7 +132,7 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         Ok(vault)
     }
 
-    pub fn get_vault(&self, vault_addr: &&SubstateId) -> Result<VaultModel, AccountsApiError> {
+    pub fn get_vault(&self, vault_addr: &VaultId) -> Result<VaultModel, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
         let vault = tx.vaults_get(vault_addr)?;
         Ok(vault)
@@ -145,9 +145,9 @@ impl<'a, TStore: WalletStore> AccountsApi<'a, TStore> {
         Ok(exists)
     }
 
-    pub fn has_vault(&self, vault_addr: &SubstateId) -> Result<bool, AccountsApiError> {
+    pub fn has_vault(&self, vault_id: &VaultId) -> Result<bool, AccountsApiError> {
         let mut tx = self.store.create_read_tx()?;
-        let exists = tx.vaults_exists(vault_addr)?;
+        let exists = tx.vaults_exists(vault_id)?;
         Ok(exists)
     }
 

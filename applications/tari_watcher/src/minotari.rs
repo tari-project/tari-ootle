@@ -8,6 +8,7 @@ use log::*;
 use minotari_app_grpc::tari_rpc::{self as grpc, GetActiveValidatorNodesResponse, RegisterValidatorNodeResponse};
 use minotari_node_grpc_client::BaseNodeGrpcClient;
 use minotari_wallet_grpc_client::WalletGrpcClient;
+use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef};
 use tari_sidechain::EvictionProof;
@@ -121,20 +122,23 @@ impl MinotariNodes {
                     self.node_registration_file.display()
                 )
             })?;
-        let sig = info.signature.signature();
         let resp = self
             .connect_wallet()
             .await?
             .register_validator_node(grpc::RegisterValidatorNodeRequest {
                 validator_node_public_key: info.public_key.to_vec(),
                 validator_node_signature: Some(grpc::Signature {
-                    public_nonce: sig.get_public_nonce().to_vec(),
-                    signature: sig.get_signature().to_vec(),
+                    public_nonce: info.signature.public_nonce().to_vec(),
+                    signature: info.signature.signature().to_vec(),
                 }),
                 validator_node_claim_public_key: info.claim_fees_public_key.to_vec(),
                 fee_per_gram: 10,
-                message: format!("VN registration: {}", info.public_key),
                 sidechain_deployment_key: vec![],
+                payment_id: PaymentId::Open {
+                    user_data: format!("VN registration: {}", info.public_key).into_bytes(),
+                    tx_type: TxType::ValidatorNodeRegistration,
+                }
+                .to_bytes(),
             })
             .await?
             .into_inner();

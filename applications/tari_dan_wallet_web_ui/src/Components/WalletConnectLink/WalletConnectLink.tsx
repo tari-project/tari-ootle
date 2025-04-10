@@ -36,10 +36,27 @@ import CheckMark from "./CheckMark";
 import ConnectorLogo from "./ConnectorLogo";
 import ConfirmTransaction from "./ConfirmTransaction";
 import { useTheme } from "@mui/material/styles";
-import { TariPermission, TariPermissionKeyList, TariPermissionTransactionGet, TariPermissionTransactionSend } from "../../utils/tari_permissions";
-import { Core } from '@walletconnect/core'
-import { Web3Wallet } from '@walletconnect/web3wallet'
-import { accountsCreateFreeTestCoins, accountsGetBalances, accountsGetDefault, confidentialViewVaultBalance, keysCreate, nftList, substatesGet, substatesList, templatesGet, transactionsGetResult, transactionsSubmit } from "../../utils/json_rpc";
+import {
+  TariPermission,
+  TariPermissionKeyList,
+  TariPermissionTransactionGet,
+  TariPermissionTransactionSend,
+} from "../../utils/tari_permissions";
+import { Core } from "@walletconnect/core";
+import { Web3Wallet } from "@walletconnect/web3wallet";
+import {
+  accountsCreateFreeTestCoins,
+  accountsGetBalances,
+  accountsGetDefault,
+  confidentialViewVaultBalance,
+  keysCreate,
+  nftList,
+  substatesGet,
+  substatesList,
+  templatesGet,
+  transactionsGetResult,
+  transactionsSubmit,
+} from "../../utils/json_rpc";
 
 const projectId: string = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || "78f3485d08b9640a087cbcea000e1f8b";
 
@@ -62,19 +79,19 @@ const ConnectorDialog = () => {
   ];
   const optionalPermissions: TariPermission[] = [];
 
-  async function createWallet(): Promise<any| null> {
+  async function createWallet(): Promise<any | null> {
     const core = new Core({ projectId });
     const wallet = await Web3Wallet.init({
       core: core,
       metadata: {
-        name: 'Example WalletConnect Wallet',
-        description: 'Example WalletConnect Integration',
-        url: 'myexamplewallet.com',
-        icons: []
-      }
+        name: "Example WalletConnect Wallet",
+        description: "Example WalletConnect Integration",
+        url: "myexamplewallet.com",
+        icons: [],
+      },
     });
 
-    wallet.on('session_proposal', async proposal => {
+    wallet.on("session_proposal", async (proposal) => {
       console.log({ proposal });
 
       const session = await wallet.approveSession({
@@ -82,44 +99,40 @@ const ConnectorDialog = () => {
         namespaces: {
           tari: {
             methods: [
-              'tari_getSubstate',
-              'tari_getDefaultAccount',
-              'tari_getAccountBalances',
-              'tari_submitTransaction',
-              'tari_getTransactionResult',
-              'tari_getTemplate',
-              'tari_createKey',
-              'tari_viewConfidentialVaultBalance',
-              'tari_createFreeTestCoins',
-              'tari_listSubstates',
-              'tari_getNftsList'
+              "tari_getSubstate",
+              "tari_getDefaultAccount",
+              "tari_getAccountBalances",
+              "tari_submitTransaction",
+              "tari_getTransactionResult",
+              "tari_getTemplate",
+              "tari_createKey",
+              "tari_viewConfidentialVaultBalance",
+              "tari_createFreeTestCoins",
+              "tari_listSubstates",
+              "tari_getNftsList",
             ],
-            chains: [
-              'tari:devnet',
-            ],
+            chains: ["tari:devnet"],
             events: ['chainChanged", "accountsChanged'],
-            accounts: [
-              "tari:devnet:component_d43f1d674a0df0579354659d1b0c8dd4a397b072afa9dd027e41c8bc"
-            ],
-          }
-        }
-      })
+            accounts: ["tari:devnet:component_d43f1d674a0df0579354659d1b0c8dd4a397b072afa9dd027e41c8bc"],
+          },
+        },
+      });
 
       // create response object
-      const response = { id: proposal.id, result: 'session approved', jsonrpc: '2.0' }
+      const response = { id: proposal.id, result: "session approved", jsonrpc: "2.0" };
 
       // respond to the dapp request with the approved session's topic and response
-      await wallet.respondSessionRequest({ topic: session.topic, response })
+      await wallet.respondSessionRequest({ topic: session.topic, response });
     });
 
-    wallet.on('session_request', async requestEvent => {
+    wallet.on("session_request", async (requestEvent) => {
       console.log({ requestEvent });
       const { params, id, topic } = requestEvent;
       const { request } = params;
-      
+
       const result = await executeMethod(request.method, request.params);
-      
-      const response = { id, result, jsonrpc: '2.0' }
+
+      const response = { id, result, jsonrpc: "2.0" };
       await wallet.respondSessionRequest({ topic, response });
     });
 
@@ -127,7 +140,7 @@ const ConnectorDialog = () => {
   }
 
   async function executeMethod(method: string, params: any) {
-    switch(method) {
+    switch (method) {
       case "tari_getSubstate":
         return substatesGet(params);
       case "tari_getDefaultAccount":
@@ -151,7 +164,7 @@ const ConnectorDialog = () => {
       case "tari_getNftsList":
         return nftList(params);
       default:
-        throw new Error("Invalid method")
+        throw new Error("Invalid method");
     }
   }
 
@@ -208,8 +221,8 @@ const ConnectorDialog = () => {
       return;
     }
 
-    console.log({wallet});
-    console.log({link});
+    console.log({ wallet });
+    console.log({ link });
 
     const result = await wallet.pair({ uri: link });
     console.log({ result });
@@ -287,13 +300,13 @@ const ConnectorDialog = () => {
           </div>
         );
       default:
-        return (<></>);
+        return <></>;
     }
   };
 
   // Don't render anything if wallet connect is not set up in the wallet daemon
   if (!projectId) {
-    return (<></>);
+    return <></>;
   } else {
     return (
       <>
@@ -319,8 +332,8 @@ const ConnectorDialog = () => {
         </Dialog>
         <ConfirmTransaction />
       </>
-    )
-  };
+    );
+  }
 };
 
 export default ConnectorDialog;

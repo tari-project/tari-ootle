@@ -82,7 +82,7 @@ pub fn create_execution_result_for_transaction(
                     diff.up(
                         output.versioned_substate_id().substate_id().clone(),
                         Substate::new(output.versioned_substate_id().version(), PublishedTemplate {
-                            author: transaction.seal_signature().public_key().clone(),
+                            author: *transaction.seal_signature().public_key(),
                             binary_hash: hash_template_code(binary),
                         }),
                     );

@@ -32,9 +32,9 @@ use tari_core::{
     consensus::ConsensusManager,
     transactions::{
         generate_coinbase_with_wallet_output,
-        key_manager::{MemoryDbKeyManager, TariKeyId},
         tari_amount::MicroMinotari,
         transaction_components::{encrypted_data::PaymentId, RangeProofType, WalletOutput},
+        transaction_key_manager::{MemoryDbKeyManager, TariKeyId},
     },
 };
 

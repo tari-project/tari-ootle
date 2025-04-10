@@ -2,6 +2,12 @@
 
 set -e
 
+if ! command -v pnpm &> /dev/null
+then
+    echo "pnpm could not be found, please install it first. https://pnpm.io/installation"
+    exit 1
+fi
+
 #
 # Builds all webuis
 #
@@ -48,16 +54,16 @@ done
 if [ -z "${skip_bindings}" ]; then
   echo "Building Bindings..."
   pushd $base_path/bindings > /dev/null
-  npm install
-  npm run build
+  pnpm install
+  pnpm run build
   popd > /dev/null
 fi
 
 function build() {
   pushd $base_path/$1 > /dev/null
-  npm install > /dev/null
+  pnpm install > /dev/null
   if [ -z ${check_typescript+x} ]; then
-    npm run build
+    pnpm run build
   else
     npx tsc
     echo "✅ Typescript compiled successfully"

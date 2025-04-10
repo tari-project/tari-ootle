@@ -26,6 +26,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 use tari_epoch_manager::EpochManagerReader;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::{sync::broadcast, task};
 
 use crate::{
@@ -39,7 +40,6 @@ use crate::{
         on_ready_to_vote_on_local_block::OnReadyToVoteOnLocalBlock,
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
         pacemaker_handle::PaceMakerHandle,
-        to_public_key_bytes,
         transaction_manager::ConsensusTransactionManager,
         HotstuffConfig,
         HotstuffEvent,
@@ -219,16 +219,15 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // TODO: perf - we may want to cache this
         let proposer_vn = self
             .epoch_manager
-            .get_validator_node_by_public_key(valid_block.epoch(), valid_block.proposed_by().clone())
+            .get_validator_node_by_public_key(valid_block.epoch(), *valid_block.proposed_by())
             .await?;
-        let proposer_claim_public_key_bytes = to_public_key_bytes(&proposer_vn.fee_claim_public_key);
 
         let result = self
             .process_block(
                 current_epoch,
                 *local_committee_info,
                 local_committee,
-                proposer_claim_public_key_bytes,
+                proposer_vn.fee_claim_public_key,
                 valid_block,
             )
             .await;
@@ -253,7 +252,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         current_epoch: Epoch,
         local_committee_info: CommitteeInfo,
         local_committee: &Committee<TConsensusSpec::Addr>,
-        proposer_claim_public_key_bytes: [u8; 32],
+        proposer_claim_public_key_bytes: RistrettoPublicKeyBytes,
         valid_block: ValidBlock,
     ) -> Result<bool, HotStuffError> {
         debug!(target: LOG_TARGET, "RECV-LOCAL-PROPOSAL - [{:?}] Starting processing block: {}", current_epoch, valid_block);
@@ -284,7 +283,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         tx,
                         &valid_block,
                         &local_committee_info,
-                        proposer_claim_public_key_bytes,
+                        &proposer_claim_public_key_bytes,
                         can_propose_epoch_end,
                         &mut change_set,
                     )?;
@@ -387,7 +386,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         next_epoch,
                         next_shard_group,
                         *valid_block.block().state_merkle_root(),
-                        self.config.sidechain_id.clone(),
+                        self.config.sidechain_id,
                     );
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
                     genesis.justify().insert(tx)?;

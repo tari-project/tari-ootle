@@ -5,9 +5,15 @@
     "moduleResolution": "node",
     "declaration": true,
     "outDir": "./dist",
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "composite": true
   },
   "include": [
     "src/**/*"
+  ],
+  "references": [
+    {
+      "path": "../../../bindings"
+    }
   ]
 }

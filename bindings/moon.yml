@@ -1,0 +1,21 @@
+language: "typescript"
+platform: "node"
+type: "library"
+
+fileGroups:
+  configs:
+    - "tsconfig.json"
+    - "package.json"
+    - "eslint.config.ts"
+  sources:
+    - "src/**/*"
+  tests:
+
+tasks:
+  build:
+    command: "pnpm run build-dist"
+    inputs:
+      - "@files(sources)"
+      - "@files(configs)"
+    outputs:
+      - "dist"

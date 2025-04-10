@@ -1,0 +1,15 @@
+packages:
+  - bindings
+  - clients/javascript/*
+  - applications/tari_dan_wallet_web_ui
+  - applications/tari_indexer_web_ui
+  - applications/tari_validator_node_web_ui
+
+catalog:
+  typescript: ^5.8.3
+  vite: ^6.2.5
+  '@types/node': ^22.13.1
+
+ignoredBuiltDependencies:
+  - '@swc/core'
+  - esbuild

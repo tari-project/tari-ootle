@@ -1,0 +1,13 @@
+# Enable Node.js and override default settings
+node:
+  version: '23.11.0'
+  packageManager: 'pnpm'
+typescript:
+  syncProjectReferences: true
+rust:
+  version: 'stable'
+  targets:
+    - wasm32-unknown-unknown
+    - x86_64-unknown-linux-gnu
+  bins:
+    - cargo-nextest

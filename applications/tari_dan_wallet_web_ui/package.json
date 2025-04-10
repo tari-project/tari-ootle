@@ -16,8 +16,8 @@
     "@mui/x-data-grid": "^6.0.2",
     "@tanstack/react-query": "^4.33.0",
     "@tanstack/react-query-devtools": "^4.33.0",
-    "@tari-project/typescript-bindings": "file:../../bindings",
-    "@tari-project/wallet_jrpc_client": "file:../../clients/javascript/wallet_daemon_client",
+    "@tari-project/typescript-bindings": "workspace:*",
+    "@tari-project/wallet_jrpc_client": "workspace:*",
     "@walletconnect/core": "^2.13.3",
     "@walletconnect/web3wallet": "^1.12.3",
     "buffer": "^6.0.3",
@@ -39,6 +39,7 @@
     "@vitejs/plugin-react-swc": "^3.8.0",
     "prettier": "^3.3.2",
     "typescript": "^4.9.5",
-    "vite": "^6.2.4"
+    "vite": "catalog:",
+    "@types/node": "catalog:"
   }
 }

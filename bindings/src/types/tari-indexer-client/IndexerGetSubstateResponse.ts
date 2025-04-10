@@ -2,8 +2,4 @@
 import type { SubstateId } from "../SubstateId";
 import type { SubstateValue } from "../SubstateValue";
 
-export interface IndexerGetSubstateResponse {
-  address: SubstateId;
-  version: number;
-  substate: SubstateValue;
-}
+export interface IndexerGetSubstateResponse { address: SubstateId, version: number, substate: SubstateValue, }

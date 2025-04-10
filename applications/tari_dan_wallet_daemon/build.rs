@@ -45,14 +45,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:warning=The web ui is not being compiled when we are generating typescript types/interfaces.");
         return Ok(());
     }
-
-    let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
+    #[cfg(windows)]
+    const NPM: &str = "pnpm.cmd";
+    #[cfg(not(windows))]
+    const NPM: &str = "pnpm";
 
     for (target, args) in NPM_COMMANDS {
-        match Command::new(npm).args(*args).current_dir(target).output() {
+        match Command::new(NPM).args(*args).current_dir(target).output() {
             Ok(output) if !output.status.success() => {
                 println!(
-                    "cargo:warning='npm {}' in {} exited with non-zero status code",
+                    "cargo:warning='pnpm {}' in {} exited with non-zero status code",
                     args.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(" "),
                     target
                 );
@@ -74,7 +76,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             },
             Err(error) => {
-                println!("cargo:warning='npm run build' error : {:?}", error);
+                println!(
+                    "cargo:warning='{NPM} run build' error (is {NPM} installed?): {:?}",
+                    error
+                );
                 println!("cargo:warning=The web ui will not be included!");
                 exit_on_ci();
                 continue;

@@ -8,22 +8,4 @@ import type { LogLevel } from "./LogLevel";
 import type { OwnerRule } from "./OwnerRule";
 import type { ResourceAddress } from "./ResourceAddress";
 
-export type Instruction =
-  | {
-      CreateAccount: {
-        public_key_address: string;
-        owner_rule: OwnerRule | null;
-        access_rules: ComponentAccessRules | null;
-        workspace_bucket: string | null;
-      };
-    }
-  | { CallFunction: { template_address: Uint8Array; function: string; args: Array<Arg> } }
-  | { CallMethod: { component_address: ComponentAddress; method: string; args: Array<string> } }
-  | { PutLastInstructionOutputOnWorkspace: { key: Array<number> } }
-  | { EmitLog: { level: LogLevel; message: string } }
-  | { ClaimBurn: { claim: ConfidentialClaim } }
-  | { ClaimValidatorFees: { address: string } }
-  | "DropAllProofsInWorkspace"
-  | { AssertBucketContains: { key: Array<number>; resource_address: ResourceAddress; min_amount: Amount } }
-  | { PublishTemplate: { binary: Array<number> } }
-  | { AllocateAddress: { substate_type: string; workspace_id: string } };
+export type Instruction = { "CreateAccount": { public_key_address: string, owner_rule: OwnerRule | null, access_rules: ComponentAccessRules | null, workspace_bucket: string | null, } } | { "CallFunction": { template_address: string, function: string, args: Array<Arg>, } } | { "CallMethod": { component_address: ComponentAddress, method: string, args: Array<string>, } } | { "PutLastInstructionOutputOnWorkspace": { key: string, } } | { "EmitLog": { level: LogLevel, message: string, } } | { "ClaimBurn": { claim: ConfidentialClaim, } } | { "ClaimValidatorFees": { address: string, } } | "DropAllProofsInWorkspace" | { "AssertBucketContains": { key: string, resource_address: ResourceAddress, min_amount: Amount, } } | { "PublishTemplate": { binary: Array<number>, } } | { "AllocateAddress": { substate_type: string, workspace_id: string, } };

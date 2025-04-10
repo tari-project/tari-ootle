@@ -37,17 +37,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
+    #[cfg(windows)]
+    const NPM: &str = "pnpm.cmd";
+    #[cfg(not(windows))]
+    const NPM: &str = "pnpm";
 
-    if let Err(error) = Command::new(npm)
-        .arg("ci")
+    if let Err(error) = Command::new(NPM)
+        .arg("install")
         .current_dir("../tari_indexer_web_ui")
         .status()
     {
-        println!("cargo:warning='npm ci' error : {:?}", error);
+        println!("cargo:warning='npm install' error : {:?}", error);
         exit_on_ci();
     }
-    match Command::new(npm)
+    match Command::new(NPM)
         .args(["run", "build"])
         .current_dir("../tari_indexer_web_ui")
         .output()
@@ -59,7 +62,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             exit_on_ci();
         },
         Err(error) => {
-            println!("cargo:warning='npm run build' error : {:?}", error);
+            println!(
+                "cargo:warning='{NPM} run build' error (is {NPM} installed?): {:?}",
+                error
+            );
             println!("cargo:warning=The web ui will not be included!");
             exit_on_ci();
         },

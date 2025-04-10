@@ -432,6 +432,4 @@ pub struct GetTemplateDefinitionResponse {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
 )]
-pub struct IndexerReadyResponse {
-    pub ready: bool,
-}
+pub struct IndexerReadyResponse {}

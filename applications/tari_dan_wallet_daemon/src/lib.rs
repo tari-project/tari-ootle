@@ -86,10 +86,12 @@ pub async fn run_tari_dan_wallet_daemon(
 
     // trigger resource scanning if needed
     if wallet_sdk_init_result.needs_resource_sync {
-        let scanner = resource_scanner::Service::new(wallet_sdk.clone(), shutdown_signal.clone());
-        tokio::spawn(async move {
-            scanner.scan().await;
-        });
+        let scanner = resource_scanner::Service::new(
+            wallet_sdk.clone(),
+            services.account_monitor_handle.clone(),
+            shutdown_signal.clone(),
+        );
+        tokio::spawn(scanner.scan());
     }
 
     let jrpc_address = config.dan_wallet_daemon.json_rpc_address.unwrap();

@@ -169,7 +169,7 @@ CREATE UNIQUE INDEX nfts_uniq_address_vault_id_uniq_idx ON non_fungible_tokens (
 CREATE TABLE authored_templates
 (
     id           INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    key_index    INT      NOT NULL,
+    key_index    BIGINT   NULL,
     address      TEXT     NOT NULL,
     name         TEXT     NOT NULL,
     tari_version TEXT     NOT NULL,

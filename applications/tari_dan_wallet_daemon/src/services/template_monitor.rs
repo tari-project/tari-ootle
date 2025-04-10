@@ -4,19 +4,17 @@
 use std::{ops::Add, time::Duration};
 
 use anyhow::anyhow;
-use log::error;
+use log::*;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_wallet_sdk::{
-    apis::{key_manager, transaction::TransactionApiError},
-    models::TransactionStatus,
+    apis::transaction::TransactionApiError,
     network::WalletNetworkInterface,
     storage::WalletStore,
     DanWalletSdk,
 };
-use tari_engine_types::commit_result::TransactionResult;
 use tari_shutdown::ShutdownSignal;
 use tari_template_abi::TemplateDef;
-use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::TemplateAddress};
+use tari_template_lib::types::TemplateAddress;
 
 use crate::{notify::Notify, services::WalletEvent};
 
@@ -80,40 +78,25 @@ where
 
     async fn handle_wallet_event(&self, event: WalletEvent) -> anyhow::Result<()> {
         if let WalletEvent::TransactionFinalized(event) = event {
-            if matches!(event.status, TransactionStatus::Accepted) {
-                if let TransactionResult::Accept(diff) = event.finalize.result {
-                    let templates_iter = diff.up_iter().filter_map(|(id, value)| {
-                        let template_address = id.as_template()?;
-                        let template = value.substate_value().as_template()?;
-                        let key_index = self.get_key_index_for_public_key(&template.author)?;
-                        Some((key_index, template_address))
-                    });
-                    for (key_index, template_addr) in templates_iter {
-                        let template_definition = self.fetch_template_definition(template_addr.as_hash()).await?;
-                        if let Err(error) = self
-                            .wallet_sdk
-                            .template_api()
-                            .add_authored_template(key_index, template_addr.as_hash(), template_definition)
-                            .await
-                        {
-                            error!(target: LOG_TARGET, "Error saving template to authored ({template_addr:?}): {}", error);
-                        }
-                    }
-                }
+            let Some(diff) = event.finalize.result.accept() else {
+                return Ok(());
+            };
+
+            for (id, _) in diff.up_iter().filter(|(id, _)| id.is_template()) {
+                let template_address = id
+                    .as_template()
+                    .expect("is_template checked but as_template returned None");
+                let template_definition = self.fetch_template_definition(template_address.as_hash()).await?;
+                self.wallet_sdk.template_api().add_authored_template(
+                    // There is currently safe no way to get the key index from the public key.
+                    // Unsuccessfully searching from 0 to u64::MAX will take in excess of 584942 years.
+                    None,
+                    template_address.as_hash(),
+                    template_definition,
+                )?;
             }
         }
         Ok(())
-    }
-
-    fn get_key_index_for_public_key(&self, author_public_key: &RistrettoPublicKeyBytes) -> Option<u64> {
-        let (key_index, _) = self
-            .wallet_sdk
-            .key_manager_api()
-            .get_key_for_public_key(key_manager::TRANSACTION_BRANCH, author_public_key)
-            // TODO: Other errors could result in keys
-            .ok()?;
-
-        Some(key_index)
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {

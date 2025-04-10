@@ -70,11 +70,7 @@ use tari_epoch_oracles::EpochOracle;
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::NetworkingService;
 use tari_shutdown::ShutdownSignal;
-use tokio::{
-    sync::{mpsc, oneshot},
-    task,
-    time,
-};
+use tokio::{task, time};
 
 use crate::{
     bootstrap::{spawn_services, Services},
@@ -87,10 +83,6 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::indexer::app";
-
-pub struct IndexerReadyRequest {
-    response: oneshot::Sender<bool>,
-}
 
 #[allow(clippy::too_many_lines)]
 pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: ShutdownSignal) -> Result<(), ExitError> {
@@ -158,9 +150,6 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         task::spawn(run_graphql(address, substate_manager.clone(), event_manager.clone()));
     }
 
-    // Indexer ready requests channel
-    let (indexer_ready_requests_tx, mut indexer_ready_requests_rx) = mpsc::channel::<IndexerReadyRequest>(1);
-
     // Run the JSON-RPC API
     let jrpc_address = config.indexer.json_rpc_address;
     if let Some(jrpc_address) = jrpc_address {
@@ -172,7 +161,6 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
             services.global_db.clone(),
             services.template_manager.clone(),
             dry_run_transaction_processor,
-            indexer_ready_requests_tx,
         );
         let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
         // Run the web ui
@@ -239,23 +227,6 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
                     Err(e) =>  error!(target: LOG_TARGET, "Event auto-scan failed: {}", e),
                 };
             },
-
-            Some(req) = indexer_ready_requests_rx.recv() => {
-                // start a task to not block other operations
-                let epoch_manager = services.epoch_manager.clone();
-                let shutdown = shutdown_signal.clone();
-                tokio::spawn(async move {
-                    while let Err(error) = epoch_manager.wait_for_initial_scanning_to_complete().await {
-                        if shutdown.is_triggered() {
-                            break;
-                        }
-                        error!(target: LOG_TARGET, "Failed to wait for epoch manager initial scan: {error:?}");
-                    }
-                    if req.response.send(true).is_err() {
-                                error!(target: LOG_TARGET, "Failed to send event scan response!");
-                            }
-                });
-            }
 
             Ok(event) = epoch_manager_events.recv() => {
                 if let Err(err) = handle_epoch_manager_event(&services, event).await {

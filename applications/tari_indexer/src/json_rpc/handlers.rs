@@ -83,7 +83,6 @@ use crate::{
     network_client::NetworkClientError,
     substate_manager::SubstateManager,
     transaction_manager::{error::TransactionManagerError, TransactionManager},
-    IndexerReadyRequest,
 };
 
 const LOG_TARGET: &str = "tari::indexer::json_rpc::handlers";
@@ -98,7 +97,6 @@ pub struct JsonRpcHandlers {
     template_manager: TemplateManager<PeerAddress>,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
-    indexer_ready_requests_tx: tokio::sync::mpsc::Sender<IndexerReadyRequest>,
 }
 
 impl JsonRpcHandlers {
@@ -113,7 +111,6 @@ impl JsonRpcHandlers {
         global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
         template_manager: TemplateManager<PeerAddress>,
         dry_run_transaction_processor: DryRunTransactionProcessor<SubstateFileCache>,
-        indexer_ready_requests_tx: tokio::sync::mpsc::Sender<IndexerReadyRequest>,
     ) -> Self {
         Self {
             keypair: services.keypair.clone(),
@@ -124,7 +121,6 @@ impl JsonRpcHandlers {
             transaction_manager,
             template_manager,
             dry_run_transaction_processor,
-            indexer_ready_requests_tx,
         }
     }
 }
@@ -645,37 +641,15 @@ impl JsonRpcHandlers {
         Ok(JsonRpcResponse::success(answer_id, resp))
     }
 
-    pub async fn ready(&self, value: JsonRpcExtractor) -> JrpcResult {
+    pub async fn wait_until_ready(&self, value: JsonRpcExtractor) -> JrpcResult {
         let answer_id = value.get_answer_id();
-        let (indexer_ready_result_tx, indexer_ready_result_rx) = tokio::sync::oneshot::channel();
-        self.indexer_ready_requests_tx
-            .send(IndexerReadyRequest {
-                response: indexer_ready_result_tx,
-            })
+        // TODO: we should rather return the current state of the indexer and have clients poll
+        self.epoch_manager
+            .wait_for_initial_scanning_to_complete()
             .await
-            .map_err(|error| {
-                JsonRpcResponse::error(
-                    answer_id,
-                    JsonRpcError::new(
-                        JsonRpcErrorReason::InternalError,
-                        format!("Failed to send indexer ready request: {:?}", error),
-                        Value::Null,
-                    ),
-                )
-            })?;
+            .map_err(internal_error(answer_id))?;
 
-        let ready = indexer_ready_result_rx.await.map_err(|error| {
-            JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InternalError,
-                    format!("Failed to receive indexer ready response: {:?}", error).to_string(),
-                    Value::Null,
-                ),
-            )
-        })?;
-
-        Ok(JsonRpcResponse::success(answer_id, IndexerReadyResponse { ready }))
+        Ok(JsonRpcResponse::success(answer_id, IndexerReadyResponse {}))
     }
 
     fn error_response<T: Display>(answer_id: i64, reason: JsonRpcErrorReason, message: T) -> JsonRpcResponse {

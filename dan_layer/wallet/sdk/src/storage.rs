@@ -239,6 +239,7 @@ pub trait WalletStoreWriter {
     // Key manager
     fn key_manager_insert(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
+    fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
 
     // Config
     fn config_set<T: serde::Serialize + ?Sized>(

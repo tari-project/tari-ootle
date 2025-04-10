@@ -3,9 +3,8 @@
 
 use blake2::Blake2b;
 use digest::consts::U64;
-use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
-use tari_dan_common_types::optional::Optional;
-use tari_engine_types::ToByteType;
+use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_dan_common_types::optional::{IsNotFoundError, Optional};
 use tari_key_manager::{
     cipher_seed::CipherSeed,
     key_manager::{DerivedKey, KeyManager},
@@ -89,6 +88,16 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         Ok(())
     }
 
+    /// Resets the active key index to the provided index for the given branch.
+    /// A subsequent call to next_key will return the key for index + 1.
+    /// If the active key is after the provided index, no key will be active.
+    pub fn reset_key_index_to(&self, branch: &str, index: u64) -> Result<(), KeyManagerApiError> {
+        let mut tx = self.store.create_write_tx()?;
+        tx.key_manager_reset_index(branch, index)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn get_active_key(&self, branch: &str) -> Result<(u64, DerivedKey<RistrettoPublicKey>), KeyManagerApiError> {
         let index = self
             .store
@@ -109,36 +118,39 @@ impl<'a, TStore: WalletStore> KeyManagerApi<'a, TStore> {
         }
     }
 
-    pub fn get_key_for_public_key_with_max_index(
+    /// Brute force key search
+    /// WARNING: searching from 0 to u64::MAX will take in excess of 584942 years (assuming 1 microsecond per search)
+    /// for a key not to be found. Do not use this unless you are using a small range.
+    pub fn search_for_key_within_range(
         &self,
         branch: &str,
         public_key: &RistrettoPublicKeyBytes,
-        max_index: u64,
+        start_index: u64,
+        end_index: u64,
     ) -> Result<(u64, DerivedKey<RistrettoPublicKey>), KeyManagerApiError> {
-        for index in 0..=max_index {
-            let key = self.derive_key(branch, index)?;
-            if RistrettoPublicKey::from_secret_key(&key.key).to_byte_type() == *public_key {
+        let km = self.get_or_create_key_manager(branch)?;
+        for index in start_index..=end_index {
+            let key = km
+                .derive_key(index)
+                .map_err(tari_key_manager::error::KeyManagerError::from)?;
+            if RistrettoPublicKey::from_secret_key(&key.key).as_bytes() == public_key.as_bytes() {
                 return Ok((index, key));
             }
         }
+        // For huge search ranges, it would take many years to get here!
         Err(KeyManagerApiError::KeyNotFound {
             key: *public_key,
             branch: branch.to_string(),
         })
     }
 
-    pub fn get_key_for_public_key(
+    pub fn get_public_key(
         &self,
         branch: &str,
-        public_key: &RistrettoPublicKeyBytes,
-    ) -> Result<(u64, DerivedKey<RistrettoPublicKey>), KeyManagerApiError> {
-        let max_index = self.store.with_read_tx(|tx| tx.key_manager_get_last_index(branch))?;
-        self.get_key_for_public_key_with_max_index(branch, public_key, max_index)
-    }
-
-    pub fn get_public_key(&self, branch: &str, key_index: Option<u64>) -> Result<RistrettoPublicKeyBytes, KeyManagerApiError> {
+        key_index: Option<u64>,
+    ) -> Result<RistrettoPublicKey, KeyManagerApiError> {
         let (_, key) = self.get_key_or_active(branch, key_index)?;
-        Ok(RistrettoPublicKeyBytes::from_secret_key(&key.key))
+        Ok(RistrettoPublicKey::from_secret_key(&key.key))
     }
 
     fn get_or_create_key_manager(&self, branch: &str) -> Result<WalletKeyManager, KeyManagerApiError> {
@@ -173,4 +185,11 @@ pub enum KeyManagerApiError {
         key: RistrettoPublicKeyBytes,
         branch: String,
     },
+}
+
+impl IsNotFoundError for KeyManagerApiError {
+    fn is_not_found_error(&self) -> bool {
+        matches!(self, KeyManagerApiError::KeyNotFound { .. }) ||
+            matches!(self, KeyManagerApiError::StoreError(e) if e.is_not_found_error())
+    }
 }

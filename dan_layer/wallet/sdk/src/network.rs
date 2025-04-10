@@ -53,7 +53,7 @@ pub trait WalletNetworkInterface {
 
     async fn fetch_template_definition(&self, template_address: TemplateAddress) -> Result<TemplateDef, Self::Error>;
 
-    async fn indexer_ready(&self) -> Result<bool, Self::Error>;
+    async fn wait_until_ready(&self) -> Result<(), Self::Error>;
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -7,7 +7,7 @@ use tari_template_lib::prelude::TemplateAddress;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthoredTemplateModel {
-    pub key_index: u64,
+    pub key_index: Option<u64>,
     pub address: TemplateAddress,
     pub name: String,
     pub tari_version: String,
@@ -15,7 +15,7 @@ pub struct AuthoredTemplateModel {
 }
 
 impl AuthoredTemplateModel {
-    pub fn new(key_index: u64, template_address: TemplateAddress, template_def: TemplateDef) -> Self {
+    pub fn new(key_index: Option<u64>, template_address: TemplateAddress, template_def: TemplateDef) -> Self {
         Self {
             key_index,
             address: template_address,

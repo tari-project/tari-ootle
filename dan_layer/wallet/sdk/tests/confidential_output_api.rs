@@ -294,7 +294,7 @@ impl WalletNetworkInterface for PanicIndexer {
         panic!("PanicIndexer called")
     }
 
-    async fn indexer_ready(&self) -> Result<bool, Self::Error> {
+    async fn wait_until_ready(&self) -> Result<(), Self::Error> {
         panic!("PanicIndexer called")
     }
 }

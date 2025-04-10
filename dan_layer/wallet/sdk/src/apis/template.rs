@@ -7,7 +7,7 @@ use tari_template_lib::types::TemplateAddress;
 use crate::{
     apis::transaction::TransactionApiError,
     models::AuthoredTemplateModel,
-    storage::{WalletStorageError, WalletStore, WalletStoreReader, WalletStoreWriter},
+    storage::{WalletStore, WalletStoreReader, WalletStoreWriter},
 };
 
 pub struct TemplateApi<'a, TStore> {
@@ -23,30 +23,30 @@ where TStore: WalletStore
 
     /// Adds a new template to the list of known templates authored by an owned account.
     /// If the template already exists in this list, will do nothing, just return success.
-    pub async fn add_authored_template(
+    pub fn add_authored_template(
         &self,
-        key_index: u64,
+        key_index: Option<u64>,
         template_address: TemplateAddress,
         template_definition: TemplateDef,
     ) -> Result<(), TransactionApiError> {
-        // check if we already have this template
-        if self.store.with_read_tx(|tx| {
-            if tx.authored_templates_exists_by_address(&template_address)? {
-                return Ok::<bool, WalletStorageError>(true);
-            }
-            Ok(false)
-        })? {
-            return Ok(());
-        };
-
         self.store.with_write_tx(|tx| {
-            tx.authored_templates_insert(AuthoredTemplateModel::new(
-                key_index,
-                template_address,
-                template_definition,
-            ))?;
+            // check if we already have this template
+            if !tx.authored_templates_exists_by_address(&template_address)? {
+                tx.authored_templates_insert(AuthoredTemplateModel::new(
+                    key_index,
+                    template_address,
+                    template_definition,
+                ))?;
+            }
             Ok(())
         })
+    }
+
+    pub fn template_exists(&self, template_address: TemplateAddress) -> Result<bool, TransactionApiError> {
+        let exists = self
+            .store
+            .with_read_tx(|tx| tx.authored_templates_exists_by_address(&template_address))?;
+        Ok(exists)
     }
 
     /// Listing authored templates in a paginated way.

@@ -1316,7 +1316,6 @@ pub struct TemplatesListAuthoredRequest {
 )]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthoredTemplate {
-    pub key_index: u64,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::string")]
     pub address: TemplateAddress,
@@ -1328,7 +1327,6 @@ pub struct AuthoredTemplate {
 impl From<&AuthoredTemplateModel> for AuthoredTemplate {
     fn from(model: &AuthoredTemplateModel) -> Self {
         AuthoredTemplate {
-            key_index: model.key_index,
             address: model.address,
             name: model.name.clone(),
             tari_version: model.tari_version.clone(),

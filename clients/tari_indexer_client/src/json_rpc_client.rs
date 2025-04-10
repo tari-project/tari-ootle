@@ -140,8 +140,8 @@ impl IndexerJsonRpcClient {
         self.send_request("get_epoch_manager_stats", ()).await
     }
 
-    pub async fn indexer_ready(&mut self) -> Result<IndexerReadyResponse, IndexerClientError> {
-        self.send_request("ready", ()).await
+    pub async fn wait_until_ready(&mut self) -> Result<IndexerReadyResponse, IndexerClientError> {
+        self.send_request("wait_until_ready", ()).await
     }
 
     async fn send_request<T: Serialize, R: DeserializeOwned>(

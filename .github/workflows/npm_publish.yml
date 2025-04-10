@@ -21,9 +21,9 @@ jobs:
           auto-install: true
       - run: pnpm install --frozen-lockfile
       - run: moon bindings:build
-      - run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - uses: JS-DevTools/npm-publish@v3
+        with:
+          token: ${{ secrets.NPM_TOKEN }}
 
   # Publish the Tari Wallet Daemon client to the NPM registry
   publish-wallet-daemon-client:
@@ -39,8 +39,8 @@ jobs:
           auto-install: true
       - run: pnpm install --frozen-lockfile
       - run: moon wallet_daemon_client:build
-      - run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - uses: JS-DevTools/npm-publish@v3
+        with:
+          token: ${{ secrets.NPM_TOKEN }}
 
       

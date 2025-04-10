@@ -20,7 +20,7 @@ jobs:
         with:
           auto-install: true
       - run: pnpm install --frozen-lockfile
-      - run: moon :build
+      - run: moon bindings:build
       - run: pnpm publish --access public --force
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -38,7 +38,7 @@ jobs:
         with:
           auto-install: true
       - run: pnpm install --frozen-lockfile
-      - run: moon :build
+      - run: moon wallet_daemon_client:build
       - run: pnpm publish --access public --force
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

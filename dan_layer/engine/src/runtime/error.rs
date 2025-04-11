@@ -167,8 +167,8 @@ pub enum RuntimeError {
     InvalidMethodAccessRule { template_name: String, details: String },
     #[error("Runtime module error: {0}")]
     ModuleError(#[from] RuntimeModuleError),
-    #[error("Invalid claiming signature")]
-    InvalidClaimingSignature,
+    #[error("Invalid claiming signature: {details}")]
+    InvalidClaimingSignature { details: String },
     #[error("Invalid range proof")]
     InvalidRangeProof,
     #[error("Invalid substate type")]

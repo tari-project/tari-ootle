@@ -59,6 +59,7 @@ use tari_indexer_client::types::{
     GetTemplateDefinitionResponse,
     GetTransactionResultRequest,
     GetTransactionResultResponse,
+    IndexerReadyResponse,
     IndexerTransactionFinalizedResult,
     InspectSubstateRequest,
     InspectSubstateResponse,
@@ -566,7 +567,14 @@ impl JsonRpcHandlers {
         let template = self
             .template_manager
             .fetch_template(&request.template_address)
-            .map_err(|e| Self::internal_error(answer_id, e))?;
+            .optional()
+            .map_err(|e| Self::internal_error(answer_id, e))?
+            .ok_or_else(|| {
+                Self::not_found(
+                    answer_id,
+                    format!("Template with address {} not found", request.template_address),
+                )
+            })?;
         let template = match template.executable {
             TemplateExecutable::CompiledWasm(code) => WasmModule::from_code(code)
                 .load_template()
@@ -638,6 +646,17 @@ impl JsonRpcHandlers {
         };
 
         Ok(JsonRpcResponse::success(answer_id, resp))
+    }
+
+    pub async fn wait_until_ready(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        // TODO: we should rather return the current state of the indexer and have clients poll
+        self.epoch_manager
+            .wait_for_initial_scanning_to_complete()
+            .await
+            .map_err(internal_error(answer_id))?;
+
+        Ok(JsonRpcResponse::success(answer_id, IndexerReadyResponse {}))
     }
 
     fn error_response<T: Display>(answer_id: i64, reason: JsonRpcErrorReason, message: T) -> JsonRpcResponse {

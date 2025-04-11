@@ -43,7 +43,7 @@ use tari_dan_wallet_sdk::{
 use tari_engine_types::substate::{InvalidSubstateIdFormat, SubstateId};
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes},
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::TemplateAddress,
 };
 use tari_transaction::TransactionId;
@@ -911,22 +911,24 @@ impl WalletStoreReader for ReadTransaction<'_> {
         Ok(address_count > 0)
     }
 
-    fn authored_templates_fetch_by_key_index(
+    fn authored_templates_fetch_by_public_key(
         &mut self,
-        key_index: u64,
+        author_public_key: &RistrettoPublicKeyBytes,
         page: u64,
         page_size: u64,
     ) -> Result<(Vec<AuthoredTemplateModel>, u64), WalletStorageError> {
         use crate::schema::authored_templates;
 
+        let author_public_key_str = author_public_key.to_string();
+
         let total_templates_for_key_index = authored_templates::table
-            .filter(authored_templates::key_index.eq(key_index as i32))
+            .filter(authored_templates::author_public_key.eq(&author_public_key_str))
             .count()
             .first::<i64>(self.connection())
             .map_err(|e| WalletStorageError::general("count_authored_templates_fetch_by_key_index", e))?;
 
         let templates = authored_templates::table
-            .filter(authored_templates::key_index.eq(key_index as i32))
+            .filter(authored_templates::author_public_key.eq(author_public_key_str))
             .limit(page_size as i64)
             .offset((page * page_size) as i64)
             .select(AuthoredTemplate::as_select())

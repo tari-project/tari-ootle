@@ -2,4 +2,8 @@
 import type { FinalizeResult } from "../FinalizeResult";
 import type { TransactionStatus } from "../TransactionStatus";
 
-export interface TransactionGetResultResponse { transaction_id: string, status: TransactionStatus, result: FinalizeResult | null, }
+export interface TransactionGetResultResponse {
+  transaction_id: string;
+  status: TransactionStatus;
+  result: FinalizeResult | null;
+}

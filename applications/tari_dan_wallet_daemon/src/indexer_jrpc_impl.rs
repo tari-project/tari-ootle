@@ -188,6 +188,12 @@ impl WalletNetworkInterface for IndexerJsonRpcNetworkInterface {
 
         Ok(resp.definition)
     }
+
+    async fn wait_until_ready(&self) -> Result<(), Self::Error> {
+        let mut client = self.get_client()?;
+        client.wait_until_ready().await?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

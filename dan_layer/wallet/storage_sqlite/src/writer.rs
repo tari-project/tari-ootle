@@ -233,6 +233,20 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
+        const OPERATION: &str = "key_manager_reset_index";
+        use crate::schema::key_manager_states;
+        let index = i64::try_from(index).map_err(|_| WalletStorageError::general(OPERATION, "index too large"))?;
+
+        diesel::delete(key_manager_states::table)
+            .filter(key_manager_states::branch_seed.eq(branch))
+            .filter(key_manager_states::index.gt(index))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        Ok(())
+    }
+
     // -------------------------------- Config -------------------------------- //
 
     fn config_set<T: Serialize + ?Sized>(
@@ -1002,7 +1016,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         })?;
         diesel::insert_into(authored_templates::table)
             .values((
-                authored_templates::key_index.eq(entity.key_index),
+                authored_templates::author_public_key.eq(entity.author_public_key),
                 authored_templates::address.eq(entity.address),
                 authored_templates::name.eq(entity.name),
                 authored_templates::tari_version.eq(entity.tari_version),

@@ -425,3 +425,11 @@ pub struct GetTemplateDefinitionResponse {
     pub name: String,
     pub definition: TemplateDef,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/tari-indexer-client/")
+)]
+pub struct IndexerReadyResponse {}

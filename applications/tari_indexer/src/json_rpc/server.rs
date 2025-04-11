@@ -79,6 +79,7 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "get_epoch_manager_stats" => handlers.get_epoch_manager_stats(value).await,
         "get_template_definition" => handlers.get_template_definition(value).await,
         "list_templates" => handlers.list_templates(value).await,
+        "wait_until_ready" => handlers.wait_until_ready(value).await,
         method => Ok(value.method_not_found(method)),
     }
 }

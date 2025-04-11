@@ -17,7 +17,7 @@ use tari_dan_storage::consensus_models::QuorumCertificate;
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
 use tari_template_lib::{
     models::{Amount, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceAddress},
+    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
     types::TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
@@ -218,9 +218,9 @@ pub trait WalletStoreReader {
 
     // Authored templates
     fn authored_templates_exists_by_address(&mut self, address: &TemplateAddress) -> Result<bool, WalletStorageError>;
-    fn authored_templates_fetch_by_key_index(
+    fn authored_templates_fetch_by_public_key(
         &mut self,
-        key_index: u64,
+        author_public_key: &RistrettoPublicKeyBytes,
         page: u64,
         page_size: u64,
     ) -> Result<(Vec<AuthoredTemplateModel>, u64), WalletStorageError>;
@@ -239,6 +239,7 @@ pub trait WalletStoreWriter {
     // Key manager
     fn key_manager_insert(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
+    fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
 
     // Config
     fn config_set<T: serde::Serialize + ?Sized>(

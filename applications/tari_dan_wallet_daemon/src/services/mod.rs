@@ -14,6 +14,8 @@ pub use webauthn::*;
 mod session_store;
 mod template_monitor;
 
+pub mod resource_scanner;
+
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;
 use futures::{future, future::BoxFuture, FutureExt};

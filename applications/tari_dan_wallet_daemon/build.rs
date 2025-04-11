@@ -41,10 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=../tari_dan_wallet_web_ui/src");
     println!("cargo:rerun-if-changed=../tari_dan_wallet_web_ui/public");
 
-    if env::var("CARGO_FEATURE_TS").is_ok() {
-        println!("cargo:warning=The web ui is not being compiled when we are generating typescript types/interfaces.");
+    if env::var("CARGO_FEATURE_SKIP_WEB_UI_BUILD").is_ok() {
+        println!("cargo:warning=The web ui is not being built because the skip_web_ui_build feature is enabled.");
         return Ok(());
     }
+
     #[cfg(windows)]
     const NPM: &str = "pnpm.cmd";
     #[cfg(not(windows))]

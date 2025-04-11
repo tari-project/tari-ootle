@@ -84,6 +84,7 @@ impl TryFrom<EventFilterConfig> for EventFilter {
     }
 }
 
+#[derive(Clone)]
 pub struct EventScanner {
     epoch_manager: EpochManagerHandle<PeerAddress>,
     client_factory: TariValidatorNodeRpcClientFactory,

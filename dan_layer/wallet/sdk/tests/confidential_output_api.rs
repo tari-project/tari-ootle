@@ -146,7 +146,7 @@ impl Test {
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
 
-        let sdk = DanWalletSdk::initialize(
+        let sdk_init_result = DanWalletSdk::initialize(
             Network::LocalNet,
             store.clone(),
             PanicIndexer,
@@ -158,7 +158,7 @@ impl Test {
             None,
         )
         .unwrap();
-        let accounts_api = sdk.accounts_api();
+        let accounts_api = sdk_init_result.sdk.accounts_api();
         accounts_api
             .add_account(Some("test"), &Test::test_account_address(), 0, true)
             .unwrap();
@@ -174,7 +174,7 @@ impl Test {
 
         Self {
             store,
-            sdk,
+            sdk: sdk_init_result.sdk,
             _temp: temp,
         }
     }
@@ -291,6 +291,10 @@ impl WalletNetworkInterface for PanicIndexer {
         _limit: Option<u64>,
         _offset: Option<u64>,
     ) -> Result<tari_dan_wallet_sdk::network::SubstateListResult, Self::Error> {
+        panic!("PanicIndexer called")
+    }
+
+    async fn wait_until_ready(&self) -> Result<(), Self::Error> {
         panic!("PanicIndexer called")
     }
 }

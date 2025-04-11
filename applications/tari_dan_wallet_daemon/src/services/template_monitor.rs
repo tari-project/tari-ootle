@@ -4,19 +4,20 @@
 use std::{ops::Add, time::Duration};
 
 use anyhow::anyhow;
-use log::error;
-use tari_dan_common_types::optional::IsNotFoundError;
+use log::*;
+use tari_dan_common_types::{
+    optional::{IsNotFoundError, Optional},
+    substate_type::SubstateType,
+};
 use tari_dan_wallet_sdk::{
-    apis::{key_manager, transaction::TransactionApiError},
-    models::TransactionStatus,
+    apis::transaction::TransactionApiError,
     network::WalletNetworkInterface,
     storage::WalletStore,
     DanWalletSdk,
 };
-use tari_engine_types::commit_result::TransactionResult;
 use tari_shutdown::ShutdownSignal;
 use tari_template_abi::TemplateDef;
-use tari_template_lib::{prelude::RistrettoPublicKeyBytes, types::TemplateAddress};
+use tari_template_lib::types::TemplateAddress;
 
 use crate::{notify::Notify, services::WalletEvent};
 
@@ -52,17 +53,19 @@ where
         let max_wait_time = Duration::from_secs(5);
         let wait_step = Duration::from_millis(100);
         let mut current_wait_time = min_wait_time;
-        let mut template_definition = None;
         let network_interface = self.wallet_sdk.get_network_interface();
-        while template_definition.is_none() {
-            template_definition = match network_interface
+        loop {
+            match network_interface
                 .fetch_template_definition(template_address)
                 .await
-                .map_err(|error| TransactionApiError::NetworkInterfaceError(format!("{}", error)))
+                .optional()
+                .map_err(|error| TransactionApiError::NetworkInterfaceError(error.to_string()))?
             {
-                Ok(template_def) => Some(template_def),
-                Err(error) => {
-                    error!(target: LOG_TARGET, "Failed to fetch template definition: {}, retry...", error);
+                Some(template_def) => {
+                    return Ok(template_def);
+                },
+                None => {
+                    info!(target: LOG_TARGET, "Template definition not found yet. retry after {:.2?}...", current_wait_time);
                     if self.shutdown_signal.is_triggered() {
                         return Err(anyhow!("shutdown during fetch template definition"));
                     }
@@ -70,50 +73,50 @@ where
                     if current_wait_time < max_wait_time {
                         current_wait_time = current_wait_time.add(wait_step);
                     }
-                    None
                 },
             };
         }
-
-        template_definition.ok_or(anyhow!("Could not fetch template definition"))
     }
 
     async fn handle_wallet_event(&self, event: WalletEvent) -> anyhow::Result<()> {
         if let WalletEvent::TransactionFinalized(event) = event {
-            if matches!(event.status, TransactionStatus::Accepted) {
-                if let TransactionResult::Accept(diff) = event.finalize.result {
-                    let templates_iter = diff.up_iter().filter_map(|(id, value)| {
-                        let template_address = id.as_template()?;
-                        let template = value.substate_value().as_template()?;
-                        let key_index = self.get_key_index_for_public_key(&template.author)?;
-                        Some((key_index, template_address))
-                    });
-                    for (key_index, template_addr) in templates_iter {
-                        let template_definition = self.fetch_template_definition(template_addr.as_hash()).await?;
-                        if let Err(error) = self
-                            .wallet_sdk
-                            .template_api()
-                            .add_authored_template(key_index, template_addr.as_hash(), template_definition)
-                            .await
-                        {
-                            error!(target: LOG_TARGET, "Error saving template to authored ({template_addr:?}): {}", error);
-                        }
-                    }
+            let Some(diff) = event.finalize.result.accept() else {
+                return Ok(());
+            };
+
+            for (id, substate) in diff.up_iter().filter(|(id, _)| id.is_template()) {
+                let template_address = id
+                    .as_template()
+                    .expect("is_template checked but as_template returned None");
+                if self
+                    .wallet_sdk
+                    .template_api()
+                    .template_exists(template_address.as_hash())?
+                {
+                    // Template already exists, no need to add it again
+                    info!(target: LOG_TARGET, "Template {id} already exists, skipping...");
+                    continue;
                 }
+
+                let Some(template) = substate.substate_value().as_template() else {
+                    error!(target: LOG_TARGET, "Diff contained a template substate ID {id} but the substate was type {}. This should not be possible", SubstateType::from(substate.substate_value()));
+                    continue;
+                };
+                let template_definition = match self.fetch_template_definition(template_address.as_hash()).await {
+                    Ok(template_definition) => template_definition,
+                    Err(error) => {
+                        error!(target: LOG_TARGET, "Failed to fetch template definition: {}", error);
+                        continue;
+                    },
+                };
+                self.wallet_sdk.template_api().add_authored_template(
+                    template.author,
+                    template_address.as_hash(),
+                    template_definition,
+                )?;
             }
         }
         Ok(())
-    }
-
-    fn get_key_index_for_public_key(&self, author_public_key: &RistrettoPublicKeyBytes) -> Option<u64> {
-        let (key_index, _) = self
-            .wallet_sdk
-            .key_manager_api()
-            .get_key_for_public_key(key_manager::TRANSACTION_BRANCH, author_public_key)
-            // TODO: Other errors could result in keys
-            .ok()?;
-
-        Some(key_index)
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {

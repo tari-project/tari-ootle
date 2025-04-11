@@ -266,6 +266,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 22.14.0
+      prettier:
+        specifier: ^3.5.3
+        version: 3.5.3
       shx:
         specifier: ^0.3.4
         version: 0.3.4

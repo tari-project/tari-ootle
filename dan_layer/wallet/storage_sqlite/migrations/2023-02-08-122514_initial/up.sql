@@ -168,14 +168,14 @@ CREATE UNIQUE INDEX nfts_uniq_address_vault_id_uniq_idx ON non_fungible_tokens (
 
 CREATE TABLE authored_templates
 (
-    id           INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
-    key_index    INT      NOT NULL,
-    address      TEXT     NOT NULL,
-    name         TEXT     NOT NULL,
-    tari_version TEXT     NOT NULL,
-    functions    TEXT     NOT NULL,
-    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                INTEGER  NOT NULL PRIMARY KEY AUTOINCREMENT,
+    author_public_key TEXT     NOT NULL,
+    address           TEXT     NOT NULL,
+    name              TEXT     NOT NULL,
+    tari_version      TEXT     NOT NULL,
+    functions         TEXT     NOT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE webauthn_registrations
 (

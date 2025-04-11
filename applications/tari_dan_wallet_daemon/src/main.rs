@@ -67,7 +67,7 @@ async fn main() -> Result<(), anyhow::Error> {
             output_path,
         }) => {
             let wallet_store = init_wallet_store(&config)?;
-            let sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store)?;
+            let sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store)?.sdk;
             let km = sdk.key_manager_api();
             let secret = if let Some(index) = key_index {
                 km.derive_key(key_manager::TRANSACTION_BRANCH, index)?
@@ -103,7 +103,7 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         Some(Subcommand::SeedWords) => {
             let wallet_store = init_wallet_store(&config)?;
-            let sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store)?;
+            let sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store)?.sdk;
             let seed_words = sdk.seed_words()?;
             println!("{}", seed_words.join(" ").reveal())
         },

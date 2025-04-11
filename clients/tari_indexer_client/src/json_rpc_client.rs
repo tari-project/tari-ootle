@@ -40,6 +40,7 @@ use crate::{
         GetTemplateDefinitionResponse,
         GetTransactionResultRequest,
         GetTransactionResultResponse,
+        IndexerReadyResponse,
         ListSubstatesRequest,
         ListSubstatesResponse,
         SubmitTransactionRequest,
@@ -137,6 +138,10 @@ impl IndexerJsonRpcClient {
 
     pub async fn get_epoch_manager_stats(&mut self) -> Result<GetEpochManagerStatsResponse, IndexerClientError> {
         self.send_request("get_epoch_manager_stats", ()).await
+    }
+
+    pub async fn wait_until_ready(&mut self) -> Result<IndexerReadyResponse, IndexerClientError> {
+        self.send_request("wait_until_ready", ()).await
     }
 
     async fn send_request<T: Serialize, R: DeserializeOwned>(

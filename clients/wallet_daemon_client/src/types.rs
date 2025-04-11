@@ -1301,8 +1301,8 @@ pub struct TemplatesGetResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TemplatesListAuthoredRequest {
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub key_index: u64,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub author_public_key: RistrettoPublicKeyBytes,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub page: u64,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -1316,9 +1316,9 @@ pub struct TemplatesListAuthoredRequest {
 )]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthoredTemplate {
-    pub key_index: u64,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
-    #[serde(with = "serde_with::string")]
+    pub author_public_key: RistrettoPublicKeyBytes,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub address: TemplateAddress,
     pub name: String,
     pub tari_version: String,
@@ -1328,7 +1328,7 @@ pub struct AuthoredTemplate {
 impl From<&AuthoredTemplateModel> for AuthoredTemplate {
     fn from(model: &AuthoredTemplateModel) -> Self {
         AuthoredTemplate {
-            key_index: model.key_index,
+            author_public_key: model.author_public_key,
             address: model.address,
             name: model.name.clone(),
             tari_version: model.tari_version.clone(),

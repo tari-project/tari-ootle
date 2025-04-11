@@ -11,7 +11,7 @@ use crate::schema::authored_templates;
 #[diesel(table_name = authored_templates)]
 pub struct AuthoredTemplate {
     pub id: i32,
-    pub key_index: i32,
+    pub author_public_key: String,
     pub address: String,
     pub name: String,
     pub tari_version: String,
@@ -26,7 +26,7 @@ impl TryFrom<AuthoredTemplateModel> for AuthoredTemplate {
     fn try_from(model: AuthoredTemplateModel) -> Result<Self, Self::Error> {
         Ok(Self {
             id: 0,
-            key_index: model.key_index as i32,
+            author_public_key: model.author_public_key.to_string(),
             address: format!("{}", model.address),
             name: model.name,
             tari_version: model.tari_version,
@@ -42,7 +42,14 @@ impl TryFrom<&AuthoredTemplate> for AuthoredTemplateModel {
 
     fn try_from(template: &AuthoredTemplate) -> Result<Self, Self::Error> {
         Ok(Self {
-            key_index: template.key_index as u64,
+            author_public_key: template
+                .author_public_key
+                .parse()
+                .map_err(|e| WalletStorageError::DecodingError {
+                    operation: "TryFrom<AuthoredTemplate>",
+                    item: "AuthoredTemplateModel",
+                    details: format!("Failed to parse author_public_key: {}", e),
+                })?,
             address: TemplateAddress::from_hex(template.address.as_str()).map_err(|error| {
                 Self::Error::DecodingError {
                     operation: "convert_authored_template_to_model",

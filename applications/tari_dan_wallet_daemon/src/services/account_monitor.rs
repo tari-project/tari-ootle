@@ -160,18 +160,15 @@ where
         }
 
         let mut is_updated = false;
-        let account_substate = substate_api.get_substate(account_address)?;
         let ValidatorScanResult {
             address: account_substate_id,
             substate: account_value,
-        } = substate_api
-            .scan_for_substate(account_substate.substate_id.substate_id(), None)
-            .await?;
+        } = substate_api.scan_for_substate(account_address, None).await?;
 
         let indexed_value = IndexedWellKnownTypes::from_value(account_value.component().unwrap().state())?;
         substate_api.save_root(account_substate_id.as_ref(), indexed_value.referenced_substates())?;
         let known_child_vaults = substate_api
-            .load_dependent_substates(&[account_substate.substate_id.substate_id()])?
+            .load_dependent_substates(&[account_substate_id.substate_id()])?
             .into_iter()
             .filter(|s| s.substate_id().is_vault())
             .map(|s| {

@@ -78,4 +78,4 @@ ignored = [
 ]
 
 [features]
-ts = [] # this is just for the build script to skip the build
+skip_web_ui_build = []

@@ -218,6 +218,11 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.stable_toolchain }}
+
       - name: ubuntu dependencies
         run: |
           sudo apt-get update
@@ -225,9 +230,11 @@ jobs:
 
       - uses: rui314/setup-mold@v1
 
-      - uses: 'moonrepo/setup-toolchain@v0'
-        with:
-          auto-install: true
+      - name: wasm target install
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
 
       - name: cargo test compile
         run: cargo test --no-run --locked --all-features --release

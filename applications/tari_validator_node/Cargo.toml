@@ -11,7 +11,7 @@ license.workspace = true
 default = ["metrics"]
 metrics = ["prometheus"]
 sqlite_backend = ["tari_state_store_sqlite"]
-ts = []                  # this is just for the build script to skip the build
+skip_web_ui_build = []
 
 [dependencies]
 minotari_app_utilities = { workspace = true }

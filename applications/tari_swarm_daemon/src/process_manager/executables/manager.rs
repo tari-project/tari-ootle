@@ -1,11 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{
-    env,
-    io,
-    path::{Path, PathBuf},
-};
+use std::{env, io, path::Path};
 
 use anyhow::{anyhow, Context};
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -86,14 +82,11 @@ impl ExecutableManager {
                 .as_ref()
                 .expect("BUG: Compiled but compile config was None");
 
-            let bin_path = compile
-                .working_dir()
-                .join(compile.target_dir())
-                .join(&compile.package_name);
+            let bin_path = compile.bin_path();
 
             self.prepared.push(Executable {
                 instance_type: exec.instance_type,
-                path: add_ext(&bin_path),
+                path: bin_path,
                 env: exec.env.clone(),
             })
         }
@@ -140,12 +133,7 @@ impl ExecutableManager {
             {
                 &self.prepared[i]
             } else {
-                let bin_path = add_ext(
-                    compile
-                        .working_dir()
-                        .join(compile.target_dir())
-                        .join(&compile.package_name),
-                );
+                let bin_path = compile.bin_path();
                 self.prepared.push(Executable {
                     instance_type,
                     path: bin_path.canonicalize().with_context(|| {
@@ -194,15 +182,5 @@ pub struct Executables<'a> {
 impl Executables<'_> {
     pub fn get(&self, instance_type: InstanceType) -> Option<&Executable> {
         self.executables.iter().find(|e| e.instance_type == instance_type)
-    }
-}
-
-fn add_ext<P: AsRef<Path>>(path: P) -> PathBuf {
-    let path = path.as_ref().to_path_buf();
-
-    if cfg!(windows) {
-        path.with_extension("exe")
-    } else {
-        path
     }
 }

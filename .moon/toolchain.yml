@@ -6,8 +6,10 @@ typescript:
   syncProjectReferences: true
 rust:
   version: 'stable'
+  components:
+    - rustfmt
+    - clippy
   targets:
     - wasm32-unknown-unknown
-    - x86_64-unknown-linux-gnu
   bins:
     - cargo-nextest

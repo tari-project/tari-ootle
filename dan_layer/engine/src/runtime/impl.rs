@@ -2299,25 +2299,33 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         // 1. Must exist
         let unclaimed_output = self.tracker.take_unclaimed_confidential_output(output_address)?;
         // 2. owner_sig must be valid
+        // NOTE: .as_bytes() used because the tari_crypto borsh implementations serialize as variable length bytes
+        // (always 32)
         let message = ownership_proof_hasher64(self.network)
-            .chain(proof_of_knowledge.public_nonce())
-            .chain(&unclaimed_output.commitment)
-            .chain(&self.transaction_signer_public_key)
+            .chain(&proof_of_knowledge.public_nonce().as_bytes())
+            .chain(&unclaimed_output.commitment.as_bytes())
+            .chain(&self.transaction_signer_public_key.as_bytes())
             .finalize();
 
         let commitment = PedersenCommitment::try_from_byte_type(&unclaimed_output.commitment).map_err(|e| {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed commitment: {}", e);
-            RuntimeError::InvalidClaimingSignature
+            RuntimeError::InvalidClaimingSignature {
+                details: "malformed commitment".to_string(),
+            }
         })?;
 
         let proof_of_knowledge = CommitmentSignature::try_from_byte_type(&proof_of_knowledge).map_err(|e| {
             warn!(target: LOG_TARGET, "Claim burn failed - malformed proof of knowledge: {}", e);
-            RuntimeError::InvalidClaimingSignature
+            RuntimeError::InvalidClaimingSignature {
+                details: "malformed proof of knowledge".to_string(),
+            }
         })?;
 
         if !proof_of_knowledge.verify_challenge(&commitment, &message, get_commitment_factory()) {
-            warn!(target: LOG_TARGET, "Claim burn failed - Invalid signature");
-            return Err(RuntimeError::InvalidClaimingSignature);
+            warn!(target: LOG_TARGET, "Claim burn failed - signature verification failed");
+            return Err(RuntimeError::InvalidClaimingSignature {
+                details: "signature verification failed".to_string(),
+            });
         }
 
         // 3. range_proof must be valid

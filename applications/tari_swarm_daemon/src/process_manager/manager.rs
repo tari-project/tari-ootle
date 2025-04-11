@@ -440,7 +440,6 @@ impl ProcessManager {
         serde_json::to_writer_pretty(&mut file, &proof)?;
 
         info!("🔥 Burned {amount} Tari to account {account_name}");
-        self.mine(10).await?;
         Ok(file_name)
     }
 

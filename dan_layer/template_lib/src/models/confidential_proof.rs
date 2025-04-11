@@ -26,6 +26,8 @@ pub struct ConfidentialOutputStatement {
     pub change_statement: Option<ConfidentialStatement>,
     /// Bulletproof range proof for the output and change commitments proving that values are in the range
     /// [minimum_value_promise, 2^64)
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_helpers::dynamic_hex")]
     pub range_proof: Vec<u8>,
     /// The amount of revealed funds to output
     pub output_revealed_amount: Amount,

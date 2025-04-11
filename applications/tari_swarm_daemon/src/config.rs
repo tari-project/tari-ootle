@@ -258,4 +258,16 @@ impl CompileConfig {
     pub fn working_dir(&self) -> PathBuf {
         self.working_dir.clone().unwrap_or_else(|| PathBuf::from("."))
     }
+
+    pub fn bin_path(&self) -> PathBuf {
+        add_ext(self.working_dir().join(self.target_dir()).join(&self.package_name))
+    }
+}
+
+fn add_ext(path: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        path.with_extension("exe")
+    } else {
+        path
+    }
 }

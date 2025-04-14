@@ -62,7 +62,9 @@ impl Cf for EpochIndex {
     }
 }
 
-/// Used to query proposals by epoch. Not for writing - TODO: maybe a marker trait to make writes impossible
+/// Used to query proposals by epoch.
+/// TODO: this is used to delete all FPs within an epoch. It feels like there is an efficient way to do with without a
+/// separate CF
 pub struct ByEpochQuery;
 
 impl QueryCf for ByEpochQuery {

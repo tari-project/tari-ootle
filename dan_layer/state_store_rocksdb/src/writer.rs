@@ -92,7 +92,7 @@ use tari_transaction::TransactionId;
 use crate::{
     cf_api::DbContext,
     codecs::ByteColumn,
-    model::{
+    models::{
         block,
         block::BlockModel,
         block_diff,

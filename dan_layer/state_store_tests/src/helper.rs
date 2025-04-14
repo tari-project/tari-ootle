@@ -69,7 +69,7 @@ pub const fn num_preshards() -> NumPreshards {
 pub fn create_rocksdb() -> (RocksDbStateStore<String>, TempDir) {
     let temp_dir = tempfile::Builder::new().keep(false).tempdir().unwrap();
     let db_file = temp_dir.path().join("rocksdb");
-    (RocksDbStateStore::connect(db_file).unwrap(), temp_dir)
+    (RocksDbStateStore::open(db_file).unwrap(), temp_dir)
 }
 
 pub fn create_sqlite() -> SqliteStateStore<String> {

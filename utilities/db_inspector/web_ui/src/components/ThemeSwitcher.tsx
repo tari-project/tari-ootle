@@ -1,4 +1,4 @@
-//  Copyright 2025. The Tari Project
+//  Copyright 2022. The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,44 +20,37 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_dan_storage::consensus_models::{BlockId, QcId, QuorumCertificate};
+import { Button } from "@mui/material";
+import { IoMoonOutline, IoSunny } from "react-icons/io5";
+import useThemeStore from "../store/theme.ts";
+import { useTheme } from "@mui/material/styles";
 
-use crate::{
-    codecs::{BlockIdCodec, DefaultCodec, FixedBytesCodec32, UnitCodec},
-    traits::{Cf, QueryCf},
+const ThemeSwitcher = () => {
+  const { themeMode, setThemeMode } = useThemeStore();
+  const theme = useTheme();
+
+  return (
+    <Button
+      onClick={() => setThemeMode(themeMode === "light" ? "dark" : "light")}
+      style={{
+        borderRadius: 0,
+        color: theme.palette.text.secondary,
+        padding: "0.8rem 28px",
+        width: "100%",
+        justifyContent: "flex-start",
+      }}
+      startIcon={themeMode === "light" ? <IoMoonOutline /> : <IoSunny />}
+    >
+      <span
+        style={{
+          marginLeft: "1rem",
+          fontSize: "14px",
+        }}
+      >
+        {themeMode === "light" ? "Dark Mode" : "Light Mode"}
+      </span>
+    </Button>
+  );
 };
 
-pub struct QuorumCertificateModel;
-
-impl Cf for QuorumCertificateModel {
-    type Key = QcId;
-    type KeyCodec = FixedBytesCodec32;
-    type Value = QuorumCertificate;
-    type ValueCodec = DefaultCodec<Self::Value>;
-
-    fn name() -> &'static str {
-        "quorumcertificates"
-    }
-}
-
-pub struct QuorumCertificateBlockIndex;
-
-impl Cf for QuorumCertificateBlockIndex {
-    type Key = (BlockId, QcId);
-    type KeyCodec = (BlockIdCodec, FixedBytesCodec32);
-    type Value = ();
-    type ValueCodec = UnitCodec;
-
-    fn name() -> &'static str {
-        // Re-used cf
-        QuorumCertificateModel::name()
-    }
-}
-
-pub struct ByBlockIdQuery;
-
-impl QueryCf for ByBlockIdQuery {
-    type Cf = QuorumCertificateBlockIndex;
-    type Key = BlockId;
-    type KeyCodec = BlockIdCodec;
-}
+export default ThemeSwitcher;

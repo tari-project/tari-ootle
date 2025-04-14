@@ -12,6 +12,10 @@ pub trait Cf {
 
     fn name() -> &'static str;
 
+    fn as_name(&self) -> &'static str {
+        Self::name()
+    }
+
     fn key_codec() -> Self::KeyCodec {
         Self::KeyCodec::default()
     }

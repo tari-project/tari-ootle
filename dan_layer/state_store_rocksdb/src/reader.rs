@@ -94,7 +94,7 @@ use crate::{
     cf_api::DbContext,
     codecs::ByteColumn,
     error::RocksDbStorageError,
-    model::{
+    models::{
         block,
         block::BlockModel,
         block_diff,
@@ -163,7 +163,7 @@ impl<'a, TAddr> RocksDbStateStoreReadTransaction<'a, TAddr> {
         }
     }
 
-    fn db(&self) -> DbContext<'_> {
+    pub fn db(&self) -> DbContext<'_> {
         DbContext::new(self.db, &self.tx)
     }
 

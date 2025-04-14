@@ -29,9 +29,9 @@ use url::Url;
 
 #[derive(Args, Debug)]
 pub struct WalletRestoreArgs {
-    #[clap(long)]
     /// Seed words of a wallet to be restored.
     /// If set, wallet daemon tries to restore your wallet based on these seed words.
+    #[clap(long)]
     pub seed_words: Option<String>,
 }
 

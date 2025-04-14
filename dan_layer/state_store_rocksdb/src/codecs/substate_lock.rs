@@ -10,7 +10,7 @@ use tari_transaction::TransactionId;
 use crate::{
     codecs::{DbCodec, EncodeVec, SubstateIdCodec},
     error::RocksDbStorageError,
-    model::substate_locks::SubstateLockKey,
+    models::substate_locks::SubstateLockKey,
     utils::read_to_fixed,
 };
 

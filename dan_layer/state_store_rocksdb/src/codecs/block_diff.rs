@@ -8,7 +8,7 @@ use tari_dan_storage::consensus_models::BlockId;
 use crate::{
     codecs::{DbCodec, EncodeVec, SubstateIdCodec},
     error::RocksDbStorageError,
-    model::block_diff::BlockDiffKey,
+    models::block_diff::BlockDiffKey,
     utils::read_to_fixed,
 };
 

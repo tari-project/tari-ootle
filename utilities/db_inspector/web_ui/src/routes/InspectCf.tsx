@@ -78,8 +78,8 @@ export default function InspectCf() {
       headerName: col.label,
       valueGetter: (_, val) => getter(val),
       // Try roughly estimating the width of the column based on the length of the data
-      width: Math.min(2000, Object.keys(data.rows).reduce((acc, _k, i) => {
-        const value = getter(data.rows[i]);
+      width: Math.min(2000, data.rows.reduce((acc, row) => {
+        const value = getter(row);
         if (typeof value === "string") {
           return Math.max(acc, value.length * 8);
         }

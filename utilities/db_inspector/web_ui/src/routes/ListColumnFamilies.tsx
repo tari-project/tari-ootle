@@ -35,7 +35,7 @@ export default function ListColumnFamilies() {
       field: "total_entries_bytes",
       headerName: "Total Bytes",
       width: 400,
-      valueGetter: (_n: unknown, value: any) => {
+      valueFormatter: (_n: unknown, value: any) => {
         const bytes = value.total_entries_bytes;
         if (value.num_entries === 0) {
           return `${prettyBytes(bytes)} (avg: --)`;

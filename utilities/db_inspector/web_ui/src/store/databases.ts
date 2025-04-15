@@ -17,6 +17,8 @@ export const useDatabasesList = () => {
     queryKey: ["dbs"],
     queryFn: () => client.listDatabases().then((res) => res.databases),
     refetchOnMount: false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   });
 };
 
@@ -26,6 +28,8 @@ export const useDatabaseCfsList = (dbName: string) => {
     queryKey: ["dbs-cfs", dbName],
     queryFn: () => client.listColumnFamilies(dbName).then((res) => res.cfs),
     refetchOnMount: false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   });
 };
 

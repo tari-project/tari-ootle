@@ -28,10 +28,13 @@ pub async fn list(
     let db = context.open_db(&db_name)?;
     let mut table = TableResponse::new([
         Column::new("block_id", "Block ID"),
-        Column::new("epoch", "Epoch"),
-        Column::new("height", "Height"),
-        Column::new("commands", "Cmds"),
         Column::new("flags", "Flags"),
+        Column::new("height", "Height"),
+        Column::new("epoch", "Epoch"),
+        Column::new("num_commands", "#Cmds"),
+        Column::new("commands", "Commands"),
+        Column::new("proposed_by", "Proposed by"),
+        Column::new("state_hash", "State Hash"),
     ]);
     let tx = db.read_only_context();
 
@@ -56,10 +59,13 @@ pub async fn list(
         table.add_row(json!({
             "id": block.id(),
             "block_id": block.id(),
-            "epoch": block.epoch(),
+            "flags": flags,
             "height": block.height(),
+            "epoch": block.epoch(),
+            "num_commands": block.commands().len(),
             "commands": block.commands(),
-            "flags": flags
+            "proposed_by": block.proposed_by(),
+            "state_hash": hex::encode(block.header().state_merkle_root()),
         }));
     }
     let total = cf.count(OPERATION)?;

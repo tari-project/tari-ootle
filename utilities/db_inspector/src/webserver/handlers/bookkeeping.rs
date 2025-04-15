@@ -3,24 +3,20 @@
 
 use std::sync::Arc;
 
-use axum::{
-    extract::{Path, Query},
-    Extension,
-    Json,
-};
+use axum::{extract::Path, Extension, Json};
 use serde_json::json;
+use tari_dan_common_types::optional::Optional;
 use tari_state_store_rocksdb::{codecs::ByteColumn, models, read_only::ReadOnlyContext, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{Column, TableRequest, TableResponse},
+    handlers::types::{Column, TableResponse},
 };
 
 pub async fn list(
     Extension(context): Extension<Arc<HandlerContext>>,
     Path(db_name): Path<String>,
-    Query(_req): Query<TableRequest>,
 ) -> Result<Json<TableResponse>, WebError> {
     const OPERATION: &str = "list_bookkeeping";
     let db = context.open_db(&db_name)?;
@@ -39,12 +35,13 @@ pub async fn list(
     {
         let cf = tx.cf(cf)?;
         let col = ByteColumn;
-        let item = cf.get(&col, "list_bookkeeping")?;
-        table_mut.add_row(json!({
-            "id": col.byte(),
-            "name": name,
-            "contents": item,
-        }));
+        if let Some(item) = cf.get(&col, "list_bookkeeping").optional()? {
+            table_mut.add_row(json!({
+                "id": col.byte(),
+                "name": name,
+                "contents": item,
+            }));
+        }
         Ok(())
     }
 

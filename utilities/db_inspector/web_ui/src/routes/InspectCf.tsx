@@ -78,14 +78,14 @@ export default function InspectCf() {
       headerName: col.label,
       valueGetter: (_, val) => getter(val),
       // Try roughly estimating the width of the column based on the length of the data
-      width: Object.keys(data.rows).reduce((acc, _k, i) => {
+      width: Math.min(2000, Object.keys(data.rows).reduce((acc, _k, i) => {
         const value = getter(data.rows[i]);
         if (typeof value === "string") {
           return Math.max(acc, value.length * 8);
         }
 
         return Math.max(acc, value.toString().length * 8);
-      }, labelLength * 10),
+      }, labelLength * 15)),
     } as GridColDef<(typeof data.rows)[number]>;
   });
 

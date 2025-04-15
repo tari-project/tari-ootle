@@ -47,6 +47,7 @@ pub struct QuorumCertificate {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     block_id: BlockId,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
     header_hash: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     parent_id: BlockId,

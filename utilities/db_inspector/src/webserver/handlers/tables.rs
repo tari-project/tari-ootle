@@ -90,7 +90,9 @@ fn create_table_for_cf(cf_name: &str) -> Result<TableResponse, WebError> {
                 Column::new("transaction.V1.id", "Tx Id"),
                 Column::new("transaction.V1.body.transaction.instructions", "Instructions"),
                 Column::new("transaction.V1.body.transaction.fee_instructions", "Fee Instructions"),
-                Column::new("transaction.V1.body.transaction.inputs", "Inputs"),
+                Column::new("execution_result.finalize.result", "Result"),
+                Column::new("resolved_inputs", "Inputs"),
+                Column::new("resulting_outputs", "Outputs"),
             ]);
         },
         "votes" => {

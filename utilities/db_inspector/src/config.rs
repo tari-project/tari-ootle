@@ -27,11 +27,8 @@ impl Config {
         std::fs::write(path, config_str).context("write to file")
     }
 
-    pub fn get_database(&self, name: Option<&str>) -> Option<&DatabaseConfig> {
-        match name {
-            Some(name) => self.dbs.iter().find(|db| db.name == name),
-            None => self.dbs.first(),
-        }
+    pub fn get_database(&self, name: &str) -> Option<&DatabaseConfig> {
+        self.dbs.iter().find(|db| db.name == name)
     }
 }
 

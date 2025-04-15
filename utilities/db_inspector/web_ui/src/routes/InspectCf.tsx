@@ -28,7 +28,7 @@ export default function InspectCf() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    client.listCfItems(dbName!, cfName!, { limit: 1000 }).then((res) => {
+    client.listCfItems(dbName!, cfName!, { limit: 500 }).then((res) => {
       setData(res);
     }).catch((err) => {
       setError(err.message);

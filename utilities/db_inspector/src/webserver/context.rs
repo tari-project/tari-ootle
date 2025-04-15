@@ -4,10 +4,7 @@
 use tari_dan_common_types::PeerAddress;
 use tari_state_store_rocksdb::RocksDbReadOnlyStateStore;
 
-use crate::{
-    config::Config,
-    webserver::{error::WebError, handlers::web_open_db},
-};
+use crate::{config::Config, helpers::open_db, webserver::error::WebError};
 
 #[derive(Debug, Clone)]
 pub struct HandlerContext {
@@ -24,6 +21,12 @@ impl HandlerContext {
     }
 
     pub fn open_db(&self, db_name: &str) -> Result<RocksDbReadOnlyStateStore<PeerAddress>, WebError> {
-        web_open_db(self, Some(db_name))
+        let config = self
+            .config()
+            .get_database(db_name)
+            .ok_or_else(|| WebError::bad_request(format!("Database {} not found", db_name)))?;
+        let db = open_db(config)
+            .map_err(|e| WebError::internal_server_error(format!("Failed to open database {}: {}", db_name, e)))?;
+        Ok(db)
     }
 }

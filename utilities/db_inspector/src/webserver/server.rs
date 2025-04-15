@@ -60,6 +60,8 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     add_cf_route!(api, models::foreign_proposal::UnconfirmedIndex);
     add_cf_route!(api, models::quorum_certificate::QuorumCertificateModel);
     add_cf_route!(api, models::transaction_pool::TransactionPoolModel);
+    add_cf_route!(api, models::lock_conflict::LockConflictModel);
+    add_cf_route!(api, models::substate_locks::SubstateLockModel);
     // TODO: more
 
     let api = api.fallback(handlers::not_found);

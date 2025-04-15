@@ -24,9 +24,8 @@ use tari_dan_storage::consensus_models::TransactionRecord;
 use tari_transaction::TransactionId;
 
 use crate::{
-    codecs::{DefaultCodec, TimestampCodec, TransactionIdCodec},
+    codecs::{DefaultCodec, TransactionIdCodec},
     traits::Cf,
-    utils::RocksDbTimestamp,
 };
 
 pub struct TransactionModel;
@@ -39,18 +38,5 @@ impl Cf for TransactionModel {
 
     fn name() -> &'static str {
         "transactions"
-    }
-}
-
-pub struct FinalizedAtIndex;
-
-impl Cf for FinalizedAtIndex {
-    type Key = TransactionId;
-    type KeyCodec = TransactionIdCodec;
-    type Value = RocksDbTimestamp;
-    type ValueCodec = TimestampCodec;
-
-    fn name() -> &'static str {
-        "transactions_finalized_idx"
     }
 }

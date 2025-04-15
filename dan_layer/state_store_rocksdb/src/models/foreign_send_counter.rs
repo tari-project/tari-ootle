@@ -26,15 +26,12 @@ use tari_dan_storage::consensus_models::{BlockId, ForeignSendCounters};
 use crate::{
     codecs::{BlockIdCodec, DefaultCodec, DefaultCodecRef},
     traits::Cf,
-    utils::RocksDbTimestamp,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignSendCounterData {
     pub block_id: BlockId,
     pub counters: ForeignSendCounters,
-    // we need this field to keep track of insertion order
-    pub created_at: RocksDbTimestamp,
 }
 
 pub struct ForeignSendCounterModel;

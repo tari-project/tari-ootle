@@ -20,14 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    fmt::{self, Display},
-    io,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::io;
 
 use anyhow::anyhow;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::error::RocksDbStorageError;
 
@@ -59,35 +55,6 @@ pub fn bincode_decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RocksDbSto
         });
     }
     Ok(value)
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, PartialOrd, Ord)]
-pub struct RocksDbTimestamp(u128);
-
-impl RocksDbTimestamp {
-    pub fn from_millis(millis: u128) -> Self {
-        Self(millis)
-    }
-
-    pub fn now() -> Self {
-        Self(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("RocksDbTimestamp::now()")
-                .as_millis(),
-        )
-    }
-
-    pub fn as_millis(&self) -> u128 {
-        self.0
-    }
-}
-
-impl Display for RocksDbTimestamp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // displayed as binary to order if the value is used in a RocksDB key
-        write!(f, "{:b}", self.0)
-    }
 }
 
 pub(crate) fn read_to_fixed<const SZ: usize, T, R>(reader: &mut R) -> Option<T>

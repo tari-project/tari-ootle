@@ -16,7 +16,7 @@ use reqwest::{header, StatusCode};
 use tari_state_store_rocksdb::{models, traits::Cf};
 use tower_http::cors::CorsLayer;
 
-use crate::webserver::{context::HandlerContext, handlers};
+use crate::webserver::{context::HandlerContext, handlers, or_else_cf::EitherCf};
 
 const LOG_TARGET: &str = "tari::dan::swarm::webserver";
 
@@ -26,6 +26,11 @@ macro_rules! add_cf_route {
             &format!("/databases/:db_name/column-families/{}", $cf.as_name()),
             get(handlers::tables::list(|| $cf)),
         );
+    };
+}
+macro_rules! add_cf_routes {
+    ($api:expr, $($cf:expr),+) => {
+        $(add_cf_route!($api, $cf);)+
     };
 }
 
@@ -46,23 +51,53 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
             get(handlers::bookkeeping::list),
         );
 
-    add_cf_route!(api, models::transaction::TransactionModel);
-    add_cf_route!(api, models::transaction::FinalizedAtIndex);
-    add_cf_route!(api, models::substate::HeadIndex);
-    add_cf_route!(api, models::substate::SubstateModel);
-    add_cf_route!(api, models::substate::UnprunedDownedValuesIndex);
-    add_cf_route!(api, models::block::EpochHeightIndex);
-    add_cf_route!(api, models::chain::PendingChainIndex);
-    add_cf_route!(api, models::vote::VoteModel);
-    add_cf_route!(api, models::foreign_proposal::ForeignProposalModel);
-    add_cf_route!(api, models::foreign_proposal::EpochIndex);
-    add_cf_route!(api, models::foreign_proposal::ProposedInBlockIndex);
-    add_cf_route!(api, models::foreign_proposal::UnconfirmedIndex);
-    add_cf_route!(api, models::quorum_certificate::QuorumCertificateModel);
-    add_cf_route!(api, models::transaction_pool::TransactionPoolModel);
-    add_cf_route!(api, models::lock_conflict::LockConflictModel);
-    add_cf_route!(api, models::substate_locks::SubstateLockModel);
-    // TODO: more
+    add_cf_routes!(
+        api,
+        models::vote::VoteModel,
+        models::chain::PendingChainIndex,
+        models::chain::CommittedParentChildChainIndex,
+        models::chain::PendingParentChildIndex,
+        models::foreign_proposal::ForeignProposalModel,
+        models::foreign_proposal::ProposedInBlockIndex,
+        models::foreign_proposal::EpochIndex,
+        models::foreign_proposal::UnconfirmedIndex,
+        models::block::EpochHeightIndex,
+        models::block_diff::BlockDiffModel,
+        models::block_diff::SubstateIdIndex,
+        models::quorum_certificate::QuorumCertificateModel,
+        models::quorum_certificate::QuorumCertificateBlockIndex,
+        models::block_transaction_execution::BlockTransactionExecutionModel,
+        models::block_transaction_execution::TransactionIndex,
+        models::transaction::TransactionModel,
+        models::transaction_pool::TransactionPoolModel,
+        models::transaction_pool_state_update::TransactionPoolStateUpdateModel,
+        models::missing_transactions::MissingTransactionModel,
+        models::parked_block::ParkedBlockModel,
+        models::foreign_parked_blocks::ForeignParkedBlockModel,
+        models::foreign_parked_blocks::MissingTransactionsModel,
+        models::foreign_send_counter::ForeignSendCounterModel,
+        models::foreign_receive_counter::ForeignReceiveCounterModel,
+        models::substate_locks::SubstateLockModel,
+        models::substate_locks::HeadIndex,
+        models::substate_locks::BlockIdIndex,
+        models::substate_locks::SubstateIdIndex,
+        models::substate::SubstateModel,
+        models::substate::HeadIndex,
+        models::substate::UnprunedDownedValuesIndex,
+        models::state_transition::StateTransitionModel,
+        models::state_transition::ShardSeqIndex,
+        models::foreign_substate_pledge::ForeignSubstatePledgeModel,
+        models::pending_state_tree_diff::PendingStateTreeDiffModel,
+        models::state_tree::StateTreeModel,
+        models::state_tree::StateTreeStaleNodesModel,
+        models::state_tree_shard_versions::StateTreeShardVersionModel,
+        models::epoch_checkpoint::EpochCheckpointModel,
+        models::burnt_utxo::BurntUtxoModel,
+        models::burnt_utxo::ProposedInBlockIndex,
+        EitherCf::<models::lock_conflict::LockConflictModel, models::lock_conflict::LockConflictBlockIdIndex>::new(),
+        models::evicted_node::EvictedNodeModel,
+        models::validator_node_epoch_stats::ValidatorNodeEpochStatsModel
+    );
 
     let api = api.fallback(handlers::not_found);
 

@@ -22,6 +22,7 @@
 
 use std::fmt::Display;
 
+use serde::Serialize;
 use tari_dan_common_types::SubstateLockType;
 use tari_dan_storage::consensus_models::{BlockId, SubstateLock};
 use tari_engine_types::substate::SubstateId;
@@ -32,7 +33,7 @@ use crate::{
     traits::{Cf, QueryCf},
 };
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct SubstateLockKey {
     pub block_id: BlockId,
     pub substate_id: SubstateId,

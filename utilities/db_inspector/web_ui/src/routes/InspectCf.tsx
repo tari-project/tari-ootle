@@ -1,12 +1,13 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-import { Box, Divider, Grid, Typography } from "@mui/material";
+import { Box, Button, Divider, Grid, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { client } from "../store/databases.ts";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { useEffect, useState } from "react";
+import { Refresh } from "@mui/icons-material";
 
 
 type Row = Record<string, string | object>;
@@ -21,19 +22,68 @@ interface ColumnFamilyData {
   rows: Row[];
 }
 
+function estimateWidth(labelLength: number, data: Row[], getter: (row: Row) => any): number {
+  return Math.min(2000, data.reduce((acc, row) => {
+    const value = getter(row);
+    if (typeof value === "string") {
+      return Math.max(acc, value.length * 8);
+    }
+
+    return Math.max(acc, value.toString().length * 8);
+  }, labelLength * 15));
+}
+
+function generateColumns(data: ColumnFamilyData): GridColDef<Row>[] {
+  if (data.columns.length === 0) {
+    if (data.rows.length === 0) {
+      return [];
+    }
+    // Use the depth 1 fields
+    return Object.keys(data.rows[0]).map((key) => {
+      const getter = valueGetter(key);
+      return {
+        field: key,
+        headerName: key,
+        valueGetter: (_, val) => getter(val),
+        // Try roughly estimating the width of the column based on the length of the data
+        width: estimateWidth(key.length, data.rows, getter),
+      };
+    });
+  }
+
+  const cols = data.columns.map((col) => {
+    const getter = valueGetter(col.field);
+    const labelLength = col.label.length;
+    return {
+      field: col.field,
+      headerName: col.label,
+      valueGetter: (_, val) => getter(val),
+      // Try roughly estimating the width of the column based on the length of the data
+      width: estimateWidth(labelLength, data.rows, getter),
+    } as GridColDef<Row>;
+  });
+
+  return [{
+    field: "id",
+    headerName: "Key",
+  }, ...cols];
+}
+
 export default function InspectCf() {
   const theme = useTheme();
   const { dbName, cfName } = useParams();
   const [data, setData] = useState<ColumnFamilyData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetch = () => {
     client.listCfItems(dbName!, cfName!, { limit: 500 }).then((res) => {
       setData(res);
     }).catch((err) => {
       setError(err.message);
     });
-  }, [dbName, cfName]);
+  };
+
+  useEffect(fetch, [dbName, cfName]);
 
   if (error) {
     return (
@@ -70,29 +120,7 @@ export default function InspectCf() {
   }
 
 
-  const cols = data.columns.map((col) => {
-    const getter = valueGetter(col.field);
-    const labelLength = col.label.length;
-    return {
-      field: col.field,
-      headerName: col.label,
-      valueGetter: (_, val) => getter(val),
-      // Try roughly estimating the width of the column based on the length of the data
-      width: Math.min(2000, data.rows.reduce((acc, row) => {
-        const value = getter(row);
-        if (typeof value === "string") {
-          return Math.max(acc, value.length * 8);
-        }
-
-        return Math.max(acc, value.toString().length * 8);
-      }, labelLength * 15)),
-    } as GridColDef<(typeof data.rows)[number]>;
-  });
-
-  const columns = [{
-    field: "id",
-    headerName: "Key",
-  }, ...cols];
+  const columns = generateColumns(data);
 
   return (
     <>
@@ -112,6 +140,15 @@ export default function InspectCf() {
             }}
           >
             <RouterLink to={`/databases/${dbName}`}>{dbName}</RouterLink> - {cfName}
+            {/*  Refresh button*/}
+            <Button
+              variant="outlined"
+              color="primary"
+              onClick={() => fetch()}
+              style={{ marginLeft: theme.spacing(2) }}
+            >
+              <Refresh />
+            </Button>
           </Typography>
         </Box>
         <Divider />

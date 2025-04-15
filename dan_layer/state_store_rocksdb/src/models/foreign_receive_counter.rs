@@ -27,21 +27,17 @@ use tari_dan_storage::consensus_models::ForeignReceiveCounters;
 use crate::{
     codecs::{NumberCodec, ShardCodec},
     traits::Cf,
-    utils::RocksDbTimestamp,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignReceiveCounterData {
     pub counters: ForeignReceiveCounters,
-    // we need this field to keep track of insertion order
-    pub created_at: RocksDbTimestamp,
 }
 
 impl From<&ForeignReceiveCounters> for ForeignReceiveCounterData {
     fn from(value: &ForeignReceiveCounters) -> Self {
         Self {
             counters: value.clone(),
-            created_at: RocksDbTimestamp::now(),
         }
     }
 }
@@ -55,6 +51,6 @@ impl Cf for ForeignReceiveCounterModel {
     type ValueCodec = NumberCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "foreignreceivecounters"
+        "foreign_receive_counters"
     }
 }

@@ -60,7 +60,6 @@ impl Cf for LockConflictBlockIdIndex {
     type ValueCodec = UnitCodec;
 
     fn name() -> &'static str {
-        // Same column family
         "lockconflicts"
     }
 }

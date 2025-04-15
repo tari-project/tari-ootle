@@ -142,7 +142,6 @@ use crate::{
         substate::{SubstateHeadData, SubstateModel},
         substate_locks,
         substate_locks::{SubstateLockKey, SubstateLockModel},
-        transaction,
         transaction::TransactionModel,
         transaction_pool::TransactionPoolModel,
         transaction_pool_state_update,
@@ -151,7 +150,6 @@ use crate::{
         vote::VoteModel,
     },
     reader::RocksDbStateStoreReadTransaction,
-    utils::RocksDbTimestamp,
 };
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::writer";
@@ -687,7 +685,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let records = cf.multi_get(id_decision_map.keys(), OPERATION)?;
 
-        let index_cf = self.db().cf(transaction::FinalizedAtIndex)?;
         let exec_cf = self.db().cf(BlockTransactionExecutionModel)?;
         let exec_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
         let exec_index_cf = self.db().cf(block_transaction_execution::TransactionIndex)?;
@@ -717,9 +714,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             transaction.execution_result = Some(exec.execution.result);
             transaction.final_decision = Some(decision);
             transaction.abort_reason = exec.execution.abort_reason;
+            // TODO: track insertion time to calculate a local finalize time
+            // transaction.finalized_time = now() - transaction.created_at
             cf.put(transaction.id(), &transaction, OPERATION)?;
-
-            index_cf.put(transaction.id(), &RocksDbTimestamp::now(), OPERATION)?;
         }
 
         Ok(())

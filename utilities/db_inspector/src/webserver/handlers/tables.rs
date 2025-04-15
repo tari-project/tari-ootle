@@ -11,6 +11,7 @@ use axum::{
     Json,
 };
 use serde::Serialize;
+use serde_json::json;
 use tari_dan_storage::Ordering;
 use tari_state_store_rocksdb::{codecs::DbCodec, models, traits::Cf};
 
@@ -35,7 +36,7 @@ where
             async move {
                 const OPERATION: &str = "list_cf";
                 let db = context.open_db(&db_name)?;
-                let mut table = create_table_for_cf(CF::name())?;
+                let mut table = create_table_for_cf(CF::name());
 
                 let tx = db.read_only_context();
                 let cf = tx.cf(cf())?;
@@ -53,6 +54,12 @@ where
                     let key = key_codec
                         .encode(&key)
                         .map_err(|e| anyhow!("Failed to encode key: {}", e))?;
+                    if !value.is_object() {
+                        // Must return an object
+                        value = json!({
+                            "value": value,
+                        });
+                    }
                     value["id"] = serde_json::Value::String(hex::encode(key));
                     table.add_row(value);
                 }
@@ -66,7 +73,7 @@ where
 }
 
 #[allow(clippy::too_many_lines)]
-fn create_table_for_cf(cf_name: &str) -> Result<TableResponse, WebError> {
+fn create_table_for_cf(cf_name: &str) -> TableResponse {
     let mut table = TableResponse::empty();
 
     match cf_name {
@@ -167,11 +174,10 @@ fn create_table_for_cf(cf_name: &str) -> Result<TableResponse, WebError> {
             ]);
         },
         _ => {
-            return Err(WebError::bad_request(format!(
-                "Unknown/unsupported column family {cf_name}"
-            )))
+            // The data can still be returned to the request, though the columns will not be specified
+            log::warn!("Unsupported column family {cf_name}");
         },
     }
 
-    Ok(table)
+    table
 }

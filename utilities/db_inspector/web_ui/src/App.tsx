@@ -1,3 +1,6 @@
+//   Copyright 2025 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
 import "./App.css";
 import { Route } from "react-router-dom";
 import Layout from "./theme/LayoutMain.tsx";

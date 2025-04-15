@@ -46,7 +46,7 @@ where
                     Ordering::Descending
                 };
                 let iter = cf.iterator(ordering, OPERATION);
-                for result in iter.take(req.limit.unwrap_or(usize::MAX)) {
+                for result in iter.take(req.limit.unwrap_or(1_000_000)) {
                     let (key, value) = result?;
                     let mut value =
                         serde_json::to_value(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;

@@ -39,7 +39,7 @@ pub async fn list(
     let query_cf = tx.cf(models::block::ByEpochQuery)?;
     // let ((epoch, height, block_id), _) = query_cf.query_last(OPERATION)?;
     let iter = query_cf.query_end_range_key_iterator(Ordering::Descending, &Epoch::max());
-    for result in iter.take(req.limit.unwrap_or(usize::MAX)) {
+    for result in iter.take(req.limit.unwrap_or(1_000_000)) {
         let (_, _, block_id) = result?;
         let block = cf.get(&block_id, OPERATION)?;
         let mut flags = Vec::new();

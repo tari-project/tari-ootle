@@ -33,8 +33,7 @@ export default function InspectCf() {
     }).catch((err) => {
       setError(err.message);
     });
-
-  }, []);
+  }, [dbName, cfName]);
 
   if (error) {
     return (

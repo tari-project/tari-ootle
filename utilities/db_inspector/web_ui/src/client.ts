@@ -1,7 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-const URL = "http://localhost:9090/api";
+const URL = import.meta.env.VITE_API_ADDRESS || "http://localhost:9090/api";
 
 type Params = string[][] | Record<string, string | number | boolean> | string | URLSearchParams;
 

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createTheme, styled } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import MuiDrawer from "@mui/material/Drawer";
@@ -100,12 +100,13 @@ export default function Layout() {
     setOpen(!open);
   };
 
-  const themeOptions = (mode: string) => mode === "light" ? light : dark;
-
-  const theme = createTheme({
-    ...themeOptions(themeMode),
-    ...componentSettings,
-  });
+  const theme = useMemo(() => {
+    const themeOptions = (mode: string) => mode === "light" ? light : dark;
+    return createTheme({
+      ...themeOptions(themeMode),
+      ...componentSettings,
+    });
+  }, [themeMode]);
 
   return (
     <ThemeProvider theme={theme}>

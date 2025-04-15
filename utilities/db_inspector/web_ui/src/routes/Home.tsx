@@ -9,9 +9,17 @@ import { Link as RouterLink } from "react-router-dom";
 export default function Home() {
   const theme = useTheme();
 
-  const { data: databases, isLoading } = useDatabasesList();
+  const { data: databases, isLoading, error } = useDatabasesList();
 
-  if (isLoading || !databases) {
+  if (error) {
+    return (
+      <div>
+        <p>Error loading databases: {error.message}</p>
+      </div>
+    );
+  }
+
+  if (isLoading) {
     return <div>Loading...</div>;
   }
 

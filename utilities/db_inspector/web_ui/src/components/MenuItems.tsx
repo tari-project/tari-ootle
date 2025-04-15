@@ -38,7 +38,15 @@ function MainListItems() {
   const theme = useTheme();
 
 
-  const { data: databases, isLoading } = useDatabasesList();
+  const { data: databases, isLoading, error, status } = useDatabasesList();
+
+  if (status === "error") {
+    return (
+      <div>
+        <p>Error loading databases: {error.message}</p>
+      </div>
+    );
+  }
 
   if (isLoading || !databases) {
     return <div>Loading...</div>;
@@ -101,10 +109,10 @@ function MainListItems() {
       }}
     >
       <Box>
-        {mainItems.map(({ title, icon, activeIcon, link }) => (
+        {mainItems.map(({ title, icon, activeIcon, link }, i) => (
           <NavLink
+            key={i}
             to={link}
-            key={title}
             style={{
               textDecoration: "none",
               color: "inherit",

@@ -2,6 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 fn main() {
+    if option_env!("CI").is_some() {
+        println!("cargo:warning=CI detected, skipping web UI build");
+        return;
+    }
+
     println!("cargo:rerun-if-changed=web_ui/src");
     if let Err(e) = run() {
         // We never want to fail the build if the build fails for this utility

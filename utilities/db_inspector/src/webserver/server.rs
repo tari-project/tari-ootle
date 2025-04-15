@@ -16,7 +16,7 @@ use reqwest::{header, StatusCode};
 use tari_state_store_rocksdb::{models, traits::Cf};
 use tower_http::cors::CorsLayer;
 
-use crate::webserver::{context::HandlerContext, handlers, or_else_cf::EitherCf};
+use crate::webserver::{context::HandlerContext, either_cf::EitherCf, handlers};
 
 const LOG_TARGET: &str = "tari::dan::swarm::webserver";
 

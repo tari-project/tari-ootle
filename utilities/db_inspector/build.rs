@@ -9,14 +9,17 @@ fn main() {
 
     println!("cargo:rerun-if-changed=web_ui/src");
     println!("cargo:rerun-if-changed=web_ui/package.json");
+    println!("cargo:rerun-if-changed=web_ui/moon.yml");
     if let Err(e) = run() {
         // We never want to fail the build if the build fails for this utility
         println!("cargo:warning=Web UI build failed: {e}");
     }
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "windows")]
+    const MOON_BIN: &str = "moon.cmd";
+    #[cfg(not(target_os = "windows"))]
     const MOON_BIN: &str = "moon";
-
     run_command(MOON_BIN, &["db-inspector:install"])?;
     run_command(MOON_BIN, &["db-inspector:build"])?;
 

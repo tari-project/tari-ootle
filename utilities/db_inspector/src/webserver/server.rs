@@ -36,11 +36,15 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         "/databases/:db_name/column-families",
         get(handlers::databases::list_column_families),
     )
-    // Special handling for blocks
+    // Special cases
     .route(
         "/databases/:db_name/column-families/blocks",
         get(handlers::blocks::list),
-    );
+    )
+        .route(
+            "/databases/:db_name/column-families/bookkeeping",
+            get(handlers::bookkeeping::list),
+        );
 
     add_cf_route!(api, models::transaction::TransactionModel);
     add_cf_route!(api, models::transaction::FinalizedAtIndex);
@@ -48,7 +52,6 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     add_cf_route!(api, models::substate::SubstateModel);
     add_cf_route!(api, models::substate::UnprunedDownedValuesIndex);
     add_cf_route!(api, models::block::EpochHeightIndex);
-    add_cf_route!(api, models::bookkeeping::HighQcModel); // TODO: Special case
     add_cf_route!(api, models::chain::PendingChainIndex);
     add_cf_route!(api, models::vote::VoteModel);
     add_cf_route!(api, models::foreign_proposal::ForeignProposalModel);

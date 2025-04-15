@@ -12,7 +12,7 @@ import prettyBytes from "pretty-bytes";
 export default function ListColumnFamilies() {
   const theme = useTheme();
   const { dbName } = useParams();
-  const [selectedCf, setSelectedCf] = useState<string | null>(null);
+  const [selectedCf, setSelectedCf] = useState<string | number | null>(null);
 
   const { data: cfs, isLoading } = useDatabaseCfsList(dbName || "<NOTHING>");
 
@@ -35,7 +35,7 @@ export default function ListColumnFamilies() {
       field: "total_entries_bytes",
       headerName: "Total Bytes",
       width: 400,
-      valueGetter: (_n, value) => {
+      valueGetter: (_n: unknown, value: any) => {
         const bytes = value.total_entries_bytes;
         if (value.num_entries === 0) {
           return `${prettyBytes(bytes)} (avg: --)`;
@@ -45,7 +45,7 @@ export default function ListColumnFamilies() {
     },
   ];
 
-  const onSelectedRowChange = (selection: string) => {
+  const onSelectedRowChange = (selection: string | number) => {
     setSelectedCf(selection);
   };
 

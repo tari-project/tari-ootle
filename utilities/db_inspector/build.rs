@@ -8,6 +8,7 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=web_ui/src");
+    println!("cargo:rerun-if-changed=web_ui/package.json");
     if let Err(e) = run() {
         // We never want to fail the build if the build fails for this utility
         println!("cargo:warning=Web UI build failed: {e}");
@@ -29,7 +30,13 @@ fn run_command(command: &str, args: &[&str]) -> Result<(), Box<dyn std::error::E
         .map_err(|e| format!("Failed to execute command (is {command} installed?): {e}"))?;
 
     if !output.status.success() {
-        return Err(format!("Command failed with status: {}", output.status).into());
+        return Err(format!(
+            "Command failed with status: {}: stderr: {}, stdout: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).replace("\n", " "),
+            String::from_utf8_lossy(&output.stdout)
+        )
+        .into());
     }
 
     Ok(())

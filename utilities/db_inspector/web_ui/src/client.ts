@@ -3,10 +3,19 @@
 
 const URL = import.meta.env.VITE_API_ADDRESS || "http://localhost:9090/api";
 
-type Params = string[][] | Record<string, string | number | boolean> | string | URLSearchParams;
+type Params = { [key: string]: string | number | boolean | null };
 
 function getUrl(entity: string, params: Params = {}) {
-  const queryString = new URLSearchParams(params).toString();
+  function toQueryString(params: Params): string {
+    return new URLSearchParams(
+      Object.entries(params).reduce((acc, [key, value]) => {
+        acc[key] = String(value);
+        return acc;
+      }, {} as Record<string, string>),
+    ).toString();
+  }
+
+  const queryString = toQueryString(params);
   return `${URL}/${entity}${queryString ? `?${queryString}` : ""}`;
 }
 

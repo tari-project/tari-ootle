@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 pub mod blocks;
+pub mod bookkeeping;
 pub mod databases;
 pub mod tables;
 mod types;

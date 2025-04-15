@@ -22,7 +22,7 @@ export const useDatabasesList = () => {
 
 
 export const useDatabaseCfsList = (dbName: string) => {
-  return useQuery<unknown, Error>({
+  return useQuery<unknown[], Error>({
     queryKey: ["dbs-cfs", dbName],
     queryFn: () => client.listColumnFamilies(dbName).then((res) => res.cfs),
     refetchOnMount: false,

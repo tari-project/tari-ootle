@@ -1,11 +1,11 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-import { Box, Button, Divider, Grid, Typography } from "@mui/material";
+import { Box, Divider, Grid, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { client } from "../store/databases.ts";
 import { Link as RouterLink, useParams } from "react-router-dom";
-import { DataGrid, GridColDef, GridRowModel } from "@mui/x-data-grid";
+import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { useEffect, useState } from "react";
 
 
@@ -77,13 +77,14 @@ export default function InspectCf() {
       field: col.field,
       headerName: col.label,
       valueGetter: (_, val) => getter(val),
+      // Try roughly estimating the width of the column based on the length of the data
       width: Object.keys(data.rows).reduce((acc, _k, i) => {
         const value = getter(data.rows[i]);
         if (typeof value === "string") {
-          return Math.max(acc, value.length + 100);
+          return Math.max(acc, value.length * 8);
         }
 
-        return Math.max(acc, value.toString().length + 100);
+        return Math.max(acc, value.toString().length * 8);
       }, labelLength * 10),
     } as GridColDef<(typeof data.rows)[number]>;
   });

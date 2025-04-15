@@ -9,6 +9,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{optional::Optional, Epoch};
+use tari_engine_types::serde_with;
 
 use crate::{
     consensus_models::{BlockId, QuorumDecision, ValidatorSignature},
@@ -22,6 +23,7 @@ pub struct Vote {
     pub epoch: Epoch,
     pub block_id: BlockId,
     pub decision: QuorumDecision,
+    #[serde(with = "serde_with::hex")]
     pub sender_leaf_hash: FixedHash,
     pub signature: ValidatorSignature,
 }

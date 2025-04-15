@@ -65,6 +65,7 @@ where
     )
 }
 
+#[allow(clippy::too_many_lines)]
 fn create_table_for_cf(cf_name: &str) -> Result<TableResponse, WebError> {
     let mut table = TableResponse::empty();
 
@@ -174,41 +175,3 @@ fn create_table_for_cf(cf_name: &str) -> Result<TableResponse, WebError> {
 
     Ok(table)
 }
-
-//         block::EpochHeightIndex::name(),
-//         BlockDiffModel::name(),
-//         block_diff::SubstateIdIndex::name(),
-//         QuorumCertificateModel::name(),
-//         BlockTransactionExecutionModel::name(),
-//         block_transaction_execution::TransactionIndex::name(),
-//         TransactionModel::name(),
-//         transaction::FinalizedAtIndex::name(),
-//         TransactionPoolModel::name(),
-//         TransactionPoolStateUpdateModel::name(),
-//         MissingTransactionModel::name(),
-//         ParkedBlockModel::name(),
-//         ForeignParkedBlockModel::name(),
-//         foreign_parked_blocks::MissingTransactionsModel::name(),
-//         ForeignSendCounterModel::name(),
-//         ForeignReceiveCounterModel::name(),
-//         SubstateLockModel::name(),
-//         substate_locks::HeadIndex::name(),
-//         substate_locks::BlockIdIndex::name(),
-//         substate_locks::SubstateIdIndex::name(),
-//         SubstateModel::name(),
-//         substate::HeadIndex::name(),
-//         substate::UnprunedDownedValuesIndex::name(),
-//         StateTransitionModel::name(),
-//         state_transition::ShardSeqIndex::name(),
-//         ForeignSubstatePledgeModel::name(),
-//         PendingStateTreeDiffModel::name(),
-//         StateTreeModel::name(),
-//         StateTreeStaleNodesModelRef::name(),
-//         StateTreeShardVersionModel::name(),
-//         EpochCheckpointModel::name(),
-//         BurntUtxoModel::name(),
-//         burnt_utxo::ProposedInBlockIndex::name(),
-//         LockConflictModel::name(),
-//         lock_conflict::ByBlockIdQuery::name(),
-//         EvictedNodeModel::name(),
-//         ValidatorNodeEpochStatsModel::name(),

@@ -9,6 +9,7 @@ projects:
   - 'applications/tari_dan_wallet_web_ui'
   - 'applications/tari_indexer_web_ui'
   - 'applications/tari_validator_node_web_ui'
+  - 'utilities/db_inspector/web_ui'
 vcs:
   manager: 'git'
   defaultBranch: 'development'

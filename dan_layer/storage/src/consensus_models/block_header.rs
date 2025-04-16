@@ -11,6 +11,7 @@ use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{hashing, shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+use tari_engine_types::serde_with;
 use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 
@@ -40,8 +41,10 @@ pub struct BlockHeader {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     total_leader_fee: u64,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
     state_merkle_root: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
     command_merkle_root: FixedHash,
     /// If the block is a dummy block.
     is_dummy: bool,
@@ -55,6 +58,7 @@ pub struct BlockHeader {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     base_layer_block_height: u64,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
     base_layer_block_hash: FixedHash,
     extra_data: ExtraData,
 }

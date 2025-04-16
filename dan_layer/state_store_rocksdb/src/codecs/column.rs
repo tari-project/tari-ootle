@@ -27,8 +27,13 @@ impl<const COL: u32> Display for Column<COL> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ByteColumn<const COL: u8>;
+impl<const COL: u8> ByteColumn<COL> {
+    pub const fn byte(&self) -> u8 {
+        COL
+    }
+}
 impl<const COL: u8> Display for ByteColumn<COL> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ByteColumn<{COL}>")

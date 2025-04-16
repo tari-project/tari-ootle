@@ -196,7 +196,7 @@ pub async fn spawn_services(
         ValidatorNodeStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path.display()))?;
 
     #[cfg(not(feature = "sqlite_backend"))]
-    let state_store = ValidatorNodeStateStore::connect(&config.validator_node.state_db_path)?;
+    let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path)?;
 
     state_store
         .with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards, sidechain_id))?;

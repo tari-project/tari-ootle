@@ -1,0 +1,28 @@
+[package]
+name = "db_inspector"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+tari_dan_storage = { workspace = true }
+tari_state_store_rocksdb = { workspace = true }
+tari_dan_common_types = { workspace = true }
+
+anyhow = { workspace = true }
+axum = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+fern = { workspace = true }
+humantime = { workspace = true }
+include_dir = { workspace = true }
+log = { workspace = true }
+mime_guess = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+toml = { workspace = true }
+hex = { workspace = true }
+tower-http = { workspace = true, default-features = false, features = ["cors"] }

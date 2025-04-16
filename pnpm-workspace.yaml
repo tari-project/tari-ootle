@@ -5,6 +5,7 @@ packages:
   - applications/tari_dan_wallet_web_ui
   - applications/tari_indexer_web_ui
   - applications/tari_validator_node_web_ui
+  - utilities/db_inspector/web_ui
 catalog:
   typescript: ^5.8.3
   vite: ^6.2.5

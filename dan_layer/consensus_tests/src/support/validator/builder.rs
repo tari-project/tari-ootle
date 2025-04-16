@@ -137,7 +137,7 @@ impl ValidatorBuilder {
         let inbound_messaging = TestInboundMessaging::new(self.address.clone(), rx_hs_message, rx_loopback);
 
         #[cfg(not(feature = "sqlite_backend"))]
-        let store = TestStore::connect(&self.rocks_path).unwrap();
+        let store = TestStore::open(&self.rocks_path).unwrap();
         #[cfg(feature = "sqlite_backend")]
         let store = TestStore::connect(&self.sql_url).unwrap();
         let signing_service = TestVoteSignatureService::new(self.address.clone());

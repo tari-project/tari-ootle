@@ -21,16 +21,21 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 mod cf_api;
-mod codecs;
-mod error;
-mod model;
+pub mod codecs;
+pub mod error;
+pub mod models;
 mod reader;
 mod store;
 pub mod traits;
 mod utils;
 mod writer;
 
-pub use store::RocksDbStateStore;
+pub use store::*;
+
+mod dbs;
+mod info;
+pub mod read_only;
+pub mod snapshot;
 
 #[cfg(test)]
 mod tests;

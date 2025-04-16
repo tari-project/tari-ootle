@@ -62,7 +62,7 @@ mod tests {
     use tari_template_lib_types::ObjectKey;
 
     use super::*;
-    use crate::{codecs::BlockDiffKeyCodec, model::block_diff::BlockDiffKey};
+    use crate::{codecs::BlockDiffKeyCodec, models::block_diff::BlockDiffKey};
 
     fn new_substate_id(seed: u8) -> SubstateId {
         let component = ComponentAddress::from_array([seed; ObjectKey::LENGTH]);

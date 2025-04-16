@@ -37,6 +37,10 @@ impl Epoch {
         Self(0)
     }
 
+    pub const fn max() -> Self {
+        Self(u64::MAX)
+    }
+
     pub const fn as_u64(self) -> u64 {
         self.0
     }

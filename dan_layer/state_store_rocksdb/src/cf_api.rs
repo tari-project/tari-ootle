@@ -13,7 +13,7 @@ use tari_dan_storage::Ordering;
 use crate::{
     codecs::{DbCodec, EncodeVec, UnitCodec},
     error::RocksDbStorageError,
-    traits::{Cf, QueryCf},
+    traits::{Cf, QueryCf, RocksReader, RocksWriter},
 };
 
 pub struct DbContext<'db> {
@@ -26,33 +26,34 @@ impl<'db> DbContext<'db> {
         Self { db, tx }
     }
 
-    pub fn cf<CF: Cf>(&self, _cf: CF) -> Result<CfContext<'db, CF>, RocksDbStorageError> {
-        CfContext::create(self.db, self.tx)
+    pub fn cf<CF: Cf>(
+        &self,
+        _cf: CF,
+    ) -> Result<CfContext<'db, Transaction<'db, TransactionDB>, CF>, RocksDbStorageError> {
+        let handle = self
+            .db
+            .cf_handle(CF::name())
+            .ok_or_else(|| RocksDbStorageError::ColumnFamilyNotFound {
+                operation: "create CF context",
+                cf: format!("CF={}, cf_name={}", type_name::<CF>(), CF::name()),
+            })?;
+        CfContext::create(self.tx, handle)
     }
 }
 
-pub struct CfContext<'db, CF: Cf> {
-    tx: &'db Transaction<'db, TransactionDB>,
+pub struct CfContext<'db, DB, CF: Cf> {
+    db: &'db DB,
     handle: &'db ColumnFamily,
     key_codec: CF::KeyCodec,
     value_codec: CF::ValueCodec,
 }
 
-impl<'db, CF: Cf> CfContext<'db, CF> {
-    pub(crate) fn create(
-        db: &'db TransactionDB,
-        tx: &'db Transaction<'db, TransactionDB>,
-    ) -> Result<Self, RocksDbStorageError> {
-        let handle = db
-            .cf_handle(CF::name())
-            .ok_or_else(|| RocksDbStorageError::ColumnFamilyNotFound {
-                operation: "create context",
-                cf: format!("CF={}, cf_name={}", type_name::<CF>(), CF::name()),
-            })?;
+impl<'db, DB, CF: Cf> CfContext<'db, DB, CF> {
+    pub(crate) fn create(db: &'db DB, handle: &'db ColumnFamily) -> Result<Self, RocksDbStorageError> {
         let key_codec = CF::key_codec();
         let value_codec = CF::value_codec();
         Ok(Self {
-            tx,
+            db,
             handle,
             key_codec,
             value_codec,
@@ -60,7 +61,7 @@ impl<'db, CF: Cf> CfContext<'db, CF> {
     }
 }
 
-impl<CF: Cf> CfContext<'_, CF> {
+impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
     fn encode_key(&self, key: &CF::Key) -> EncodeVec {
         self.key_codec.encode(key).unwrap_or_else(|e| {
             panic!(
@@ -75,7 +76,7 @@ impl<CF: Cf> CfContext<'_, CF> {
     pub fn get(&self, key: &CF::Key, operation: &'static str) -> Result<CF::Value, RocksDbStorageError> {
         let key = self.encode_key(key);
         let value = self
-            .tx
+            .db
             .get_pinned_cf(self.handle, &key)
             .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound {
@@ -87,7 +88,7 @@ impl<CF: Cf> CfContext<'_, CF> {
     }
 
     pub fn count(&self, operation: &'static str) -> Result<usize, RocksDbStorageError> {
-        let iter = self.tx.iterator_cf(self.handle, IteratorMode::Start);
+        let iter = self.db.iterator_cf(self.handle, IteratorMode::Start);
         let mut count = 0;
         for result in iter {
             let _unused = result.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
@@ -100,7 +101,7 @@ impl<CF: Cf> CfContext<'_, CF> {
         let prefix = self.encode_key(prefix);
         let mut opts = rocksdb::ReadOptions::default();
         opts.set_iterate_range(rocksdb::PrefixRange(prefix));
-        let iter = self.tx.iterator_cf_opt(self.handle, opts, IteratorMode::Start);
+        let iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start);
         let mut count = 0;
         for result in iter {
             result.map_err(|e| RocksDbStorageError::RocksDbError {
@@ -116,7 +117,7 @@ impl<CF: Cf> CfContext<'_, CF> {
     pub fn exists(&self, key: &CF::Key, operation: &'static str) -> Result<bool, RocksDbStorageError> {
         let key = self.encode_key(key);
         let value = self
-            .tx
+            .db
             .get_pinned_cf(self.handle, key)
             .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         Ok(value.is_some())
@@ -129,7 +130,7 @@ impl<CF: Cf> CfContext<'_, CF> {
     pub fn any_exists_within_range(&self, range: impl IterateBounds) -> Result<bool, RocksDbStorageError> {
         let mut opts = rocksdb::ReadOptions::default();
         opts.set_iterate_range(range);
-        let mut iter = self.tx.iterator_cf_opt(self.handle, opts, IteratorMode::Start);
+        let mut iter = self.db.iterator_cf_opt(self.handle, opts, IteratorMode::Start);
         let next = iter.next().transpose().map_err(|e| RocksDbStorageError::RocksDbError {
             operation: "any_exists_within_range",
             source: e,
@@ -155,7 +156,7 @@ impl<CF: Cf> CfContext<'_, CF> {
             let key = self.key_codec.encode(k.as_ref()).expect("Failed to encode key");
             (self.handle, key)
         });
-        let results = self.tx.multi_get_cf(keys);
+        let results = self.db.multi_get_cf(keys);
 
         let mut values = Vec::with_capacity(results.len());
 
@@ -177,7 +178,7 @@ impl<CF: Cf> CfContext<'_, CF> {
         operation: &'static str,
     ) -> impl Iterator<Item = Result<(CF::Key, CF::Value), RocksDbStorageError>> + '_ {
         let mode = ordering_to_mode(ordering);
-        self.tx.iterator_cf(self.handle, mode).map(move |res| {
+        self.db.iterator_cf(self.handle, mode).map(move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
                 .and_then(|(k, v)| Ok((self.key_codec.decode(&k)?, self.value_codec.decode(&v)?)))
         })
@@ -189,7 +190,7 @@ impl<CF: Cf> CfContext<'_, CF> {
         operation: &'static str,
     ) -> impl Iterator<Item = Result<CF::Key, RocksDbStorageError>> + '_ {
         let mode = ordering_to_mode(ordering);
-        self.tx.iterator_cf(self.handle, mode).map(move |res| {
+        self.db.iterator_cf(self.handle, mode).map(move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
                 .and_then(|(k, _)| self.key_codec.decode(&k))
         })
@@ -201,7 +202,7 @@ impl<CF: Cf> CfContext<'_, CF> {
         operation: &'static str,
     ) -> impl Iterator<Item = Result<CF::Value, RocksDbStorageError>> + '_ {
         let mode = ordering_to_mode(ordering);
-        self.tx.iterator_cf(self.handle, mode).map(move |res| {
+        self.db.iterator_cf(self.handle, mode).map(move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })
                 .and_then(|(_, v)| self.value_codec.decode(&v))
         })
@@ -218,7 +219,7 @@ impl<CF: Cf> CfContext<'_, CF> {
         };
         let mut opts = rocksdb::ReadOptions::default();
         opts.set_iterate_range(range);
-        self.tx.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
+        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError {
                 operation: "range_iterator_with_codecs",
                 source: e,
@@ -241,7 +242,7 @@ impl<CF: Cf> CfContext<'_, CF> {
         opts.set_iterate_range(range);
         let key_codec = KC::default();
         let value_codec = VC::default();
-        self.tx.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
+        self.db.iterator_cf_opt(self.handle, opts, mode).map(move |res| {
             res.map_err(|e| RocksDbStorageError::RocksDbError {
                 operation: "range_iterator_with_codecs",
                 source: e,
@@ -287,7 +288,9 @@ impl<CF: Cf> CfContext<'_, CF> {
             Ok::<_, RocksDbStorageError>(k)
         })
     }
+}
 
+impl<CF: Cf, DB: RocksWriter> CfContext<'_, DB, CF> {
     pub fn insert(&self, key: &CF::Key, value: &CF::Value, operation: &'static str) -> Result<(), RocksDbStorageError> {
         if self.exists(key, operation)? {
             let key = self.encode_key(key);
@@ -304,7 +307,7 @@ impl<CF: Cf> CfContext<'_, CF> {
         let key = self.key_codec.encode(key)?;
         let encoded_value = self.value_codec.encode(value)?;
 
-        self.tx
+        self.db
             .put_cf(self.handle, &key, encoded_value)
             .map_err(|source| RocksDbStorageError::RocksDbError { operation, source })?;
 
@@ -330,7 +333,7 @@ impl<CF: Cf> CfContext<'_, CF> {
 
     pub fn delete(&self, key: &CF::Key, operation: &'static str) -> Result<(), RocksDbStorageError> {
         let key = self.key_codec.encode(key)?;
-        self.tx
+        self.db
             .delete_cf(self.handle, key)
             .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         Ok(())
@@ -342,7 +345,7 @@ pub type QueryCfKv<TQuery> = (
     <<TQuery as QueryCf>::Cf as Cf>::Value,
 );
 
-impl<TQuery: QueryCf> CfContext<'_, TQuery> {
+impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
     pub fn query_prefix_range_key_iterator<'a>(
         &'a self,
         ordering: Ordering,
@@ -392,9 +395,9 @@ impl<TQuery: QueryCf> CfContext<'_, TQuery> {
     pub fn query_end_range_key_iterator(
         &self,
         ordering: Ordering,
-        start_key: &TQuery::Key,
+        end_key: &TQuery::Key,
     ) -> impl Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + '_ {
-        let key = self.encode_key(start_key);
+        let key = self.encode_key(end_key);
         let iter = self
             .range_iterator_with_codecs::<<TQuery::Cf as Cf>::KeyCodec, UnitCodec, <TQuery::Cf as Cf>::Key, ()>(
                 ordering,
@@ -405,9 +408,23 @@ impl<TQuery: QueryCf> CfContext<'_, TQuery> {
             Ok::<_, RocksDbStorageError>(k)
         })
     }
+
+    pub fn query_last(&self, operation: &'static str) -> Result<QueryCfKv<TQuery>, RocksDbStorageError> {
+        let mut iter = self.db.iterator_cf(self.handle, IteratorMode::End);
+        let result = iter.next().ok_or_else(|| RocksDbStorageError::QueryError {
+            operation,
+            details: format!("No values in TQuery {}", TQuery::name()),
+        })?;
+        let key_codec = TQuery::make_cf_key_codec();
+        let value_codec = TQuery::make_cf_value_codec();
+        let (key, value) = result.map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
+        let key = key_codec.decode(&key)?;
+        let value = value_codec.decode(&value)?;
+        Ok((key, value))
+    }
 }
 
-impl<CF> CfContext<'_, CF>
+impl<CF, DB: RocksReader> CfContext<'_, DB, CF>
 where
     CF: Cf,
     CF::Key: Debug,
@@ -415,7 +432,7 @@ where
 {
     #[allow(dead_code)]
     pub fn dump_debug(&self) {
-        let iter = self.tx.iterator_cf(self.handle, IteratorMode::Start);
+        let iter = self.db.iterator_cf(self.handle, IteratorMode::Start);
         let mut count = 0;
         eprintln!("-------------- Dumping CF: {} ------------", CF::name());
         for result in iter {
@@ -434,15 +451,16 @@ where
         eprintln!("Total: {}", count);
     }
 }
-impl<CF> CfContext<'_, CF>
+impl<CF, DB> CfContext<'_, DB, CF>
 where
+    DB: RocksReader,
     CF: Cf,
     CF::Key: Display,
     CF::Value: Debug,
 {
     #[allow(dead_code)]
     pub fn dump_display(&self) {
-        let iter = self.tx.iterator_cf(self.handle, IteratorMode::Start);
+        let iter = self.db.iterator_cf(self.handle, IteratorMode::Start);
         let mut count = 0;
         eprintln!("-------------- Dumping CF: {} ------------", CF::name());
         for result in iter {

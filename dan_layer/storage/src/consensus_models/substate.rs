@@ -15,7 +15,10 @@ use tari_dan_common_types::{
     VersionedSubstateId,
     VersionedSubstateIdRef,
 };
-use tari_engine_types::substate::{hash_substate, Substate, SubstateId, SubstateValue};
+use tari_engine_types::{
+    serde_with,
+    substate::{hash_substate, Substate, SubstateId, SubstateValue},
+};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -36,6 +39,7 @@ pub struct SubstateRecord {
     pub version: u32,
     pub substate_value: Option<SubstateValue>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
+    #[serde(with = "serde_with::hex")]
     pub state_hash: FixedHash,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub created_justify: QcId,

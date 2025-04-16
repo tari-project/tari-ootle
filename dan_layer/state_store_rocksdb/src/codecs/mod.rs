@@ -10,7 +10,6 @@ pub use public_key::*;
 pub use state_tree::*;
 pub use substate_id::*;
 pub use substate_lock::*;
-pub use timestamp::*;
 pub use tuple::*;
 
 use crate::error::RocksDbStorageError;
@@ -25,7 +24,6 @@ mod small_bytes;
 mod state_tree;
 mod substate_id;
 mod substate_lock;
-mod timestamp;
 mod tuple;
 
 /// Prevent heap allocations when the key is very small

@@ -1,5 +1,5 @@
 {
-  "name": "tari_dan_wallet_web_ui",
+  "name": "tari_validator_node_web_ui",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@emotion/react": "^11.10.6",

@@ -3386,10 +3386,6 @@ snapshots:
     optionalDependencies:
       '@types/react': 18.3.20
 
-  '@mui/types@7.2.24(@types/react@19.1.0)':
-    optionalDependencies:
-      '@types/react': 19.1.0
-
   '@mui/types@7.4.1(@types/react@18.3.20)':
     dependencies:
       '@babel/runtime': 7.27.0
@@ -3413,18 +3409,6 @@ snapshots:
       react-is: 19.1.0
     optionalDependencies:
       '@types/react': 18.3.20
-
-  '@mui/utils@5.17.1(@types/react@19.1.0)(react@19.1.0)':
-    dependencies:
-      '@babel/runtime': 7.27.0
-      '@mui/types': 7.2.24(@types/react@19.1.0)
-      '@types/prop-types': 15.7.14
-      clsx: 2.1.1
-      prop-types: 15.8.1
-      react: 19.1.0
-      react-is: 19.1.0
-    optionalDependencies:
-      '@types/react': 19.1.0
 
   '@mui/utils@7.0.2(@types/react@18.3.20)(react@18.3.1)':
     dependencies:
@@ -3469,7 +3453,7 @@ snapshots:
       '@babel/runtime': 7.27.0
       '@mui/material': 7.0.2(@emotion/react@11.14.0(@types/react@19.1.0)(react@19.1.0))(@emotion/styled@11.14.0(@emotion/react@11.14.0(@types/react@19.1.0)(react@19.1.0))(@types/react@19.1.0)(react@19.1.0))(@types/react@19.1.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       '@mui/system': 7.0.2(@emotion/react@11.14.0(@types/react@19.1.0)(react@19.1.0))(@emotion/styled@11.14.0(@emotion/react@11.14.0(@types/react@19.1.0)(react@19.1.0))(@types/react@19.1.0)(react@19.1.0))(@types/react@19.1.0)(react@19.1.0)
-      '@mui/utils': 5.17.1(@types/react@19.1.0)(react@19.1.0)
+      '@mui/utils': 7.0.2(@types/react@19.1.0)(react@19.1.0)
       '@mui/x-internals': 7.28.0(@types/react@19.1.0)(react@19.1.0)
       clsx: 2.1.1
       prop-types: 15.8.1
@@ -3486,7 +3470,7 @@ snapshots:
   '@mui/x-internals@7.28.0(@types/react@19.1.0)(react@19.1.0)':
     dependencies:
       '@babel/runtime': 7.27.0
-      '@mui/utils': 5.17.1(@types/react@19.1.0)(react@19.1.0)
+      '@mui/utils': 7.0.2(@types/react@19.1.0)(react@19.1.0)
       react: 19.1.0
     transitivePeerDependencies:
       - '@types/react'
@@ -3924,7 +3908,7 @@ snapshots:
       '@walletconnect/jsonrpc-utils': 1.0.8
       '@walletconnect/logger': 2.1.2
       '@walletconnect/time': 1.0.2
-      '@walletconnect/utils': 2.17.1
+      '@walletconnect/utils': 2.20.0(typescript@4.9.5)
       events: 3.3.0
       isomorphic-unfetch: 3.1.0
     transitivePeerDependencies:

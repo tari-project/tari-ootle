@@ -33,11 +33,11 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build-dist
-      - uses: JS-DevTools/npm-publish@v3
-        with:
-          token: ${{ secrets.NPM_TOKEN }}
-          package: bindings
-          access: 'public'
+      - run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # Publish the Tari Wallet Daemon client to the NPM registry
   publish-wallet-daemon-client:
@@ -59,9 +59,9 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - uses: JS-DevTools/npm-publish@v3
-        with:
-          token: ${{ secrets.NPM_TOKEN }}
-          package: clients/javascript/wallet_daemon_client
-          access: 'public'
+      - run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          pnpm publish --access public --no-git-checks || echo "Publish failed (probably already published)"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       

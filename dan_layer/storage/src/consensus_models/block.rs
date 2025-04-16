@@ -98,7 +98,7 @@ pub struct Block {
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     block_time: Option<u64>,
     /// Timestamp when was this stored.
-    #[cfg_attr(feature = "ts", ts(type = "Array<number>| null"))]
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
     stored_at: Option<PrimitiveDateTime>,
 }
 

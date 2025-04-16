@@ -12,7 +12,7 @@
     },
     "proposed_by": "5e13c16840aa8d2e7e68390d0eb1b45c86bc363db0419f7ec5daa534e63bdb35",
     "total_leader_fee": 0,
-    "state_merkle_root": "f773794398ef04d586cdbcedeefb00c9a301d25ab392ac45c52b280178fd8d",
+    "state_merkle_root": "e709b60df2ab56c5a4b6021cc9f75cdc8a1fd84a9dd84a3d0111ff86463f603b",
     "command_merkle_root": "e709b60df2ab56c5a4b6021cc9f75cdc8a1fd84a9dd84a3d0111ff86463f603b",
     "is_dummy": false,
     "foreign_indexes": {},
@@ -93,13 +93,6 @@
   "is_justified": true,
   "is_committed": true,
   "block_time": 9,
-  "stored_at": [
-    2024,
-    334,
-    9,
-    47,
-    8,
-    0
-  ]
+  "stored_at": null
 }
 

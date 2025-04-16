@@ -8,6 +8,7 @@ use std::{
 };
 
 use tari_dan_common_types::services::template_provider::TemplateProvider;
+use tari_dan_engine::wasm::compile::compile_template_with_custom_target_dir;
 use tari_dan_engine::{
     abi::TemplateDef,
     template::{LoadedTemplate, TemplateLoaderError, TemplateModuleLoader},
@@ -53,6 +54,7 @@ impl Package {
 #[derive(Debug, Clone, Default)]
 pub struct PackageBuilder {
     templates: HashMap<TemplateAddress, LoadedTemplate>,
+
 }
 
 impl PackageBuilder {
@@ -62,12 +64,19 @@ impl PackageBuilder {
         }
     }
 
-    pub fn add_template<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
-        self.add_template_with_features(path, &[])
+    pub fn add_template<P: AsRef<Path>>(&mut self, path: P, target_dir: Option<P>) -> &mut Self {
+        self.add_template_with_features(path, &[], target_dir)
     }
 
-    pub fn add_template_with_features<P: AsRef<Path>>(&mut self, path: P, features: &[&str]) -> &mut Self {
-        let wasm = compile_template(path, features).unwrap();
+    pub fn add_template_with_features<P: AsRef<Path>>(&mut self, path: P, features: &[&str], target_dir: Option<P>) -> &mut Self {
+        let wasm = match target_dir {
+            None => {
+                compile_template(path, features).unwrap()
+            }
+            Some(target_dir) => {
+                compile_template_with_custom_target_dir(path, features, target_dir).unwrap()
+            }
+        };
         let template_addr = hash_template_code(wasm.code());
         let wasm = wasm.load_template().unwrap();
         self.add_loaded_template(template_addr, wasm);

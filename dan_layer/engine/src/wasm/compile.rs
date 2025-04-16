@@ -70,7 +70,15 @@ crate-type = ["cdylib", "lib"]
     compile_template(temp_dir.path(), features)
 }
 
+pub fn compile_template_with_custom_target_dir<P: AsRef<Path>>(package_dir: P, features: &[&str], target_dir: P) -> io::Result<WasmModule> {
+    compile_template_internal(package_dir, features, Some(target_dir))
+}
+
 pub fn compile_template<P: AsRef<Path>>(package_dir: P, features: &[&str]) -> io::Result<WasmModule> {
+    compile_template_internal(package_dir, features, None)
+}
+
+fn compile_template_internal<P: AsRef<Path>>(package_dir: P, features: &[&str], target_dir: Option<P>) -> io::Result<WasmModule> {
     if !package_dir.as_ref().exists() {
         return Err(io::Error::new(
             ErrorKind::NotFound,
@@ -124,12 +132,25 @@ pub fn compile_template<P: AsRef<Path>>(package_dir: P, features: &[&str]) -> io
     };
 
     // path of the wasm executable
-    let mut path = package_dir.as_ref().to_path_buf();
-    path.push("target");
-    path.push("wasm32-unknown-unknown");
-    path.push("release");
-    path.push(wasm_name);
-    path.set_extension("wasm");
+    let path = match target_dir {
+        None => {
+            let mut path = package_dir.as_ref().to_path_buf();
+            path.push("target");
+            path.push("wasm32-unknown-unknown");
+            path.push("release");
+            path.push(wasm_name);
+            path.set_extension("wasm");
+            path
+        }
+        Some(target_dir) => {
+            let mut path = target_dir.as_ref().to_path_buf();
+            path.push("wasm32-unknown-unknown");
+            path.push("release");
+            path.push(wasm_name);
+            path.set_extension("wasm");
+            path
+        }
+    };
 
     // return
     let code = fs::read(path)?;

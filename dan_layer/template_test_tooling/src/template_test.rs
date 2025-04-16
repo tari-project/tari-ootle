@@ -70,7 +70,15 @@ pub struct TemplateTest {
 }
 
 impl TemplateTest {
-    pub fn new<I: IntoIterator<Item = P>, P: AsRef<Path>>(template_paths: I) -> Self {
+    pub fn new<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I) -> Self {
+        Self::new_internal(template_paths, None)
+    }
+
+    pub fn new_with_shared_target_dir<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I, target_dir: P) -> Self {
+        Self::new_internal(template_paths, Some(target_dir))
+    }
+
+    fn new_internal<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I, target_dir: Option<P>) -> Self {
         let mut builder = Package::builder();
 
         // Add builtin templates
@@ -78,11 +86,11 @@ impl TemplateTest {
         builder.add_builtin_template(&ACCOUNT_NFT_TEMPLATE_ADDRESS);
 
         // Add the faucet template for fungible tokens
-        builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"));
+        builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"), None);
 
         // Add all of the templates specified in the argument
         for path in template_paths {
-            builder.add_template(path);
+            builder.add_template(path, target_dir.clone());
         }
 
         let package = builder.build();

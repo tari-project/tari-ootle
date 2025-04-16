@@ -33,16 +33,21 @@ const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["run", "ts-build"]),
     ("../../clients/javascript/wallet_daemon_client", &["install"]),
     ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
-    ("../tari_dan_wallet_web_ui", &["install"]),
-    ("../tari_dan_wallet_web_ui", &["run", "build"]),
+    ("./web_ui", &["install"]),
+    ("./web_ui", &["run", "build"]),
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=../tari_dan_wallet_web_ui/src");
-    println!("cargo:rerun-if-changed=../tari_dan_wallet_web_ui/public");
+    println!("cargo:rerun-if-changed=./web_ui/src");
+    println!("cargo:rerun-if-changed=./web_ui/public");
 
     if env::var("CARGO_FEATURE_SKIP_WEB_UI_BUILD").is_ok() {
         println!("cargo:warning=The web ui is not being built because the skip_web_ui_build feature is enabled.");
+        return Ok(());
+    }
+
+    if cfg!(debug_assertions) {
+        println!("cargo:warning=The web ui is not being compiled in debug mode.");
         return Ok(());
     }
 

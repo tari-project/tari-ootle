@@ -2,6 +2,16 @@
 
 set -e
 
+if ! command -v node &> /dev/null
+then
+    echo "Node.js could not be found, please install it first. https://nodejs.org/en/download/"
+    exit 1
+fi
+
+pnpm env use --global 23
+echo "Node.js version:"
+node -v
+
 if ! command -v pnpm &> /dev/null
 then
     echo "pnpm could not be found, please install it first. https://pnpm.io/installation"
@@ -76,12 +86,11 @@ build clients/javascript/wallet_daemon_client
 
 # Build webuis
 echo "Building Validator Node Web UI..."
-build applications/tari_validator_node_web_ui
-
+build applications/tari_validator_node/web_ui
 
 echo "Building Wallet Web UI..."
-build applications/tari_dan_wallet_web_ui
+build applications/tari_dan_wallet_daemon/web_ui
 
 
 echo "Building Indexer Web UI..."
-build applications/tari_indexer_web_ui
+build applications/tari_indexer/web_ui

@@ -23,7 +23,6 @@
 import { useEffect, useState } from "react";
 import { getIdentity, getBlocks, getFilteredBlocksCount } from "../../../utils/json_rpc";
 import { Link } from "react-router-dom";
-import { emptyRows, primitiveDateTimeToDate, primitiveDateTimeToSecs } from "../../../utils/helpers";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -359,7 +358,7 @@ function Blocks() {
                     </div>
                   </DataTableCell>
                   <DataTableCell>{block.block_time} secs</DataTableCell>
-                  <DataTableCell>{primitiveDateTimeToDate(block.stored_at || []).toLocaleString()}</DataTableCell>
+                  <DataTableCell>{block.stored_at ? new Date(block.stored_at).toLocaleString() : "--"}</DataTableCell>
                   <DataTableCell>
                     <div className={block.header.proposed_by == identity?.public_key ? "my_money" : ""}>
                       {block.header.proposed_by.slice(0, 8)}

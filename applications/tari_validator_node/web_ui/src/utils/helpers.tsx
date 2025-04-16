@@ -94,15 +94,6 @@ export function emptyRows(page: number, rowsPerPage: number, array: any[]) {
 }
 
 
-export function primitiveDateTimeToDate([year, dayOfTheYear, hour, minute, second, nanos]: number[]): Date {
-  return new Date(year, 0, dayOfTheYear, hour, minute, second, nanos / 1000000);
-}
-
-export function primitiveDateTimeToSecs([year, dayOfTheYear, hour, minute, second, nanos]: number[]): number {
-  // The datetime is in format [year, day of the year, hour, minute, second, nanos]
-  return new Date(year, 0, dayOfTheYear, hour, minute, second, nanos / 1000000).valueOf() / 1000;
-}
-
 export interface Duration {
   secs: number;
   nanos: number;

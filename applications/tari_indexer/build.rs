@@ -29,30 +29,30 @@ fn exit_on_ci() {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=../tari_indexer_web_ui/src");
-    println!("cargo:rerun-if-changed=../tari_indexer_web_ui/public");
+    println!("cargo:rerun-if-changed=./web_ui/src");
+    println!("cargo:rerun-if-changed=./web_ui/public");
 
     if env::var("CARGO_FEATURE_SKIP_WEB_UI_BUILD").is_ok() {
         println!("cargo:warning=The web ui is not being built because the skip_web_ui_build feature is enabled.");
         return Ok(());
     }
 
+    if cfg!(debug_assertions) {
+        println!("cargo:warning=The web ui is not being compiled in debug mode.");
+        return Ok(());
+    }
     #[cfg(windows)]
     const NPM: &str = "pnpm.cmd";
     #[cfg(not(windows))]
     const NPM: &str = "pnpm";
 
-    if let Err(error) = Command::new(NPM)
-        .arg("install")
-        .current_dir("../tari_indexer_web_ui")
-        .status()
-    {
+    if let Err(error) = Command::new(NPM).arg("install").current_dir("./web_ui").status() {
         println!("cargo:warning='npm install' error : {:?}", error);
         exit_on_ci();
     }
     match Command::new(NPM)
         .args(["run", "build"])
-        .current_dir("../tari_indexer_web_ui")
+        .current_dir("./web_ui")
         .output()
     {
         Ok(output) if !output.status.success() => {

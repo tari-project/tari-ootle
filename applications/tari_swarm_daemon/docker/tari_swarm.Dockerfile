@@ -164,11 +164,11 @@ RUN if [ -n "${RUST_TOOLCHAIN}" ] ; then \
       rustup toolchain install ${RUST_TOOLCHAIN} --force-non-host ; \
       fi
 
-RUN  cd ./applications/tari_indexer_web_ui && \
+RUN  cd ./applications/tari_indexer/web_ui && \
       npm install react-scripts && \
       npm run build
 
-RUN   cd ./applications/tari_validator_node_web_ui && \
+RUN   cd ./applications/tari_validator_node/web_ui && \
       npm install react-scripts && \
       npm run build
 

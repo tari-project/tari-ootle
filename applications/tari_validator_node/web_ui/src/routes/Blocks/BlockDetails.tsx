@@ -33,7 +33,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import Loading from "../../Components/Loading";
 import { getBlock, getIdentity } from "../../utils/json_rpc";
 import Transactions from "./Transactions";
-import { decodeShardGroup, primitiveDateTimeToDate, primitiveDateTimeToSecs } from "../../utils/helpers";
+import { decodeShardGroup } from "../../utils/helpers";
 import type {
   Block,
   Command,
@@ -84,9 +84,9 @@ export default function BlockDetails() {
           if (resp?.block?.justify?.block_id) {
             getBlock({ block_id: resp.block.justify.block_id }).then((justify) => {
               if (resp.block.stored_at && justify.block.stored_at) {
-                let blockTime = primitiveDateTimeToSecs(resp.block.stored_at);
-                let justifyTime = primitiveDateTimeToSecs(justify.block.stored_at);
-                setBlockTime(blockTime - justifyTime);
+                let blockTime = resp.block.stored_at;
+                let justifyTime = justify.block.stored_at;
+                setBlockTime(Math.floor(new Date(blockTime).getTime() / 1000) - Math.floor(new Date(justifyTime).getTime() / 1000));
               }
             });
           }
@@ -223,7 +223,7 @@ export default function BlockDetails() {
                             <TableRow>
                               <TableCell>Stored at</TableCell>
                               <DataTableCell>
-                                {primitiveDateTimeToDate(block!.stored_at).toLocaleString()}
+                                {new Date(block!.stored_at).toLocaleString()}
                               </DataTableCell>
                             </TableRow>
                           )}

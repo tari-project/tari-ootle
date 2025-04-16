@@ -7,6 +7,11 @@ fn main() {
         return;
     }
 
+    if cfg!(debug_assertions) {
+        println!("cargo:warning=The web ui is not being compiled in debug mode.");
+        return;
+    }
+
     println!("cargo:rerun-if-changed=web_ui/src");
     println!("cargo:rerun-if-changed=web_ui/package.json");
     println!("cargo:rerun-if-changed=web_ui/moon.yml");

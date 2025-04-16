@@ -70,10 +70,10 @@ RUN if [ "${BUILDARCH}" != "${TARGETARCH}" ] ; then \
       # By default we use the toolchain specified in rust-toolchain.toml
       rustup toolchain install ${RUST_TOOLCHAIN} --force-non-host ; \
     fi && \
-    cd /tari-dan/applications/tari_indexer_web_ui && \
+    cd /tari-dan/applications/tari_indexer/web_ui && \
     npm install react-scripts && \
     npm run build && \
-    cd /tari-dan/applications/tari_validator_node_web_ui && \
+    cd /tari-dan/applications/tari_validator_node/web_ui && \
     npm install react-scripts && \
     npm run build && \
     cd /tari-dan/ && \

@@ -22,44 +22,41 @@
 
 use std::{env, process::Command};
 
-fn exit_on_ci() {
-    if option_env!("CI").is_some() {
-        std::process::exit(1);
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=../tari_indexer_web_ui/src");
-    println!("cargo:rerun-if-changed=../tari_indexer_web_ui/public");
+    println!("cargo:rerun-if-changed=./web_ui/src");
+    println!("cargo:rerun-if-changed=./web_ui/public");
 
-    if env::var("CARGO_FEATURE_SKIP_WEB_UI_BUILD").is_ok() {
-        println!("cargo:warning=The web ui is not being built because the skip_web_ui_build feature is enabled.");
+    if env::var("CARGO_FEATURE_TS").is_ok() {
+        println!("cargo:warning=The web ui is not being built because the tx feature is enabled.");
+        return Ok(());
+    }
+    if env::var("CARGO_FEATURE_WEB_UI").is_err() {
+        println!("cargo:warning=The web ui is not being built because the web_ui feature is not enabled.");
         return Ok(());
     }
 
+    if cfg!(debug_assertions) {
+        println!("cargo:warning=The web ui is not being compiled in debug mode.");
+        return Ok(());
+    }
     #[cfg(windows)]
     const NPM: &str = "pnpm.cmd";
     #[cfg(not(windows))]
     const NPM: &str = "pnpm";
 
-    if let Err(error) = Command::new(NPM)
-        .arg("install")
-        .current_dir("../tari_indexer_web_ui")
-        .status()
-    {
+    if let Err(error) = Command::new(NPM).arg("install").current_dir("./web_ui").status() {
         println!("cargo:warning='npm install' error : {:?}", error);
-        exit_on_ci();
+        return Ok(());
     }
     match Command::new(NPM)
         .args(["run", "build"])
-        .current_dir("../tari_indexer_web_ui")
+        .current_dir("./web_ui")
         .output()
     {
         Ok(output) if !output.status.success() => {
             println!("cargo:warning='npm run build' exited with non-zero status code");
             println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
             println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
-            exit_on_ci();
         },
         Err(error) => {
             println!(
@@ -67,7 +64,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error
             );
             println!("cargo:warning=The web ui will not be included!");
-            exit_on_ci();
         },
         _ => {},
     }

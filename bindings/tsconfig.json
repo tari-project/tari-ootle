@@ -8,5 +8,7 @@
     "outDir": "./dist",
     "composite": true
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

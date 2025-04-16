@@ -21,7 +21,7 @@ TMP_DIR=$(mktemp -d)
 # Build the binaries
 for bin in "${TARI_BINS[@]}"; do
     echo "Building $bin"
-    cargo build --release --bin $bin
+    cargo build --release --bin $bin --all-features
     cp target/release/$bin $TMP_DIR
 done
 

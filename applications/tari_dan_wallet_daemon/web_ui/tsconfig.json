@@ -29,10 +29,10 @@
       "path": "./tsconfig.node.json"
     },
     {
-      "path": "../../bindings"
+      "path": "../../../bindings"
     },
     {
-      "path": "../../clients/javascript/wallet_daemon_client"
+      "path": "../../../clients/javascript/wallet_daemon_client"
     }
   ]
 }

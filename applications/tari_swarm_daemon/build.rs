@@ -23,6 +23,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if cfg!(debug_assertions) {
+        println!("cargo:warning=The web ui is not being compiled in debug mode.");
+        return Ok(());
+    }
+
     let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
 
     for (target, build_cmd) in BUILD {

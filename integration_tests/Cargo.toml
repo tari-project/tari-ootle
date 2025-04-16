@@ -11,9 +11,9 @@ license.workspace = true
 # Apps
 minotari_console_wallet = { workspace = true, features = ["grpc"] }
 minotari_node = { workspace = true }
-tari_validator_node = { workspace = true, features = ["skip_web_ui_build"] }
-tari_indexer = { workspace = true, features = ["skip_web_ui_build"] }
-tari_dan_wallet_daemon = { workspace = true, features = ["skip_web_ui_build"] }
+tari_validator_node = { workspace = true, default-features = false }
+tari_indexer = { workspace = true, default-features = false }
+tari_dan_wallet_daemon = { workspace = true, default-features = false }
 
 tari_core = { workspace = true, default-features = true }
 minotari_app_grpc = { workspace = true }

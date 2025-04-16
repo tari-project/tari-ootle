@@ -6,9 +6,9 @@ $schema: './cache/schemas/workspace.json'
 projects:
   - 'bindings'
   - 'clients/javascript/*'
-  - 'applications/tari_dan_wallet_web_ui'
-  - 'applications/tari_indexer_web_ui'
-  - 'applications/tari_validator_node_web_ui'
+  - 'applications/tari_dan_wallet_daemon/web_ui'
+  - 'applications/tari_indexer/web_ui'
+  - 'applications/tari_validator_node/web_ui'
   - 'utilities/db_inspector/web_ui'
 vcs:
   manager: 'git'

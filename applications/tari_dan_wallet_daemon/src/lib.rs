@@ -23,6 +23,7 @@
 pub mod cli;
 pub mod config;
 mod handlers;
+#[cfg(feature = "web_ui")]
 mod http_ui;
 pub mod indexer_jrpc_impl;
 mod jrpc_server;
@@ -48,13 +49,11 @@ use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_key_manager::SeedWords;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::models::Amount;
-use tokio::task;
 
 use crate::{
     cli::{Cli, WalletRestoreArgs},
     config::ApplicationConfig,
     handlers::{auth::create_authenticator, HandlerContext},
-    http_ui::server::run_http_ui_server,
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
     services::{resource_scanner, spawn_services},
@@ -113,6 +112,7 @@ pub async fn run_tari_dan_wallet_daemon(
         jrpc_server::spawn_listener(jrpc_address, signaling_server_address, handlers, shutdown_signal)?;
 
     // Run the web ui
+    #[cfg(feature = "web_ui")]
     if let Some(web_listener_address) = config.dan_wallet_daemon.web_ui_address {
         let mut public_jrpc_url = config
             .dan_wallet_daemon
@@ -123,8 +123,17 @@ pub async fn run_tari_dan_wallet_daemon(
         }
 
         let public_jrpc_url = url::Url::parse(&public_jrpc_url)?;
-        task::spawn(run_http_ui_server(web_listener_address, public_jrpc_url));
+
+        tokio::spawn(http_ui::server::run_http_ui_server(
+            web_listener_address,
+            public_jrpc_url,
+        ));
     }
+    #[cfg(not(feature = "web_ui"))]
+    info!(
+        target: LOG_TARGET,
+        "Web UI is not enabled. To enable it, add the `web_ui` feature to your Cargo.toml. JSON-RPC address is {jrpc_address}"
+    );
 
     if let Err(e) = fs::write(config.common.base_path.join("pid"), process::id().to_string()) {
         error!(

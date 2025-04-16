@@ -229,7 +229,7 @@ where
             self.state_store.with_write_tx(|tx| {
                 TransactionRecord::new(transaction)
                     .abort_and_finalize(RejectReason::InvalidTransaction(format!(
-                        "Mempool validation failed: {e}"
+                        "Mempool validation failed {transaction_id}: {e}"
                     )))
                     .insert(tx)
             })?;

@@ -22,27 +22,30 @@
 
 use std::{env, process::Command};
 
-fn exit_on_ci() {
-    if option_env!("CI").is_some() {
-        std::process::exit(1);
-    }
-}
-
 const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["install"]),
     ("../../bindings", &["run", "ts-build"]),
     ("../../clients/javascript/wallet_daemon_client", &["install"]),
     ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
-    ("../tari_dan_wallet_web_ui", &["install"]),
-    ("../tari_dan_wallet_web_ui", &["run", "build"]),
+    ("./web_ui", &["install"]),
+    ("./web_ui", &["run", "build"]),
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=../tari_dan_wallet_web_ui/src");
-    println!("cargo:rerun-if-changed=../tari_dan_wallet_web_ui/public");
+    println!("cargo:rerun-if-changed=./web_ui/src");
+    println!("cargo:rerun-if-changed=./web_ui/public");
 
-    if env::var("CARGO_FEATURE_SKIP_WEB_UI_BUILD").is_ok() {
-        println!("cargo:warning=The web ui is not being built because the skip_web_ui_build feature is enabled.");
+    if env::var("CARGO_FEATURE_TS").is_ok() {
+        println!("cargo:warning=The web ui is not being built because the tx feature is enabled.");
+        return Ok(());
+    }
+    if env::var("CARGO_FEATURE_WEB_UI").is_err() {
+        println!("cargo:warning=The web ui is not being built because the web_ui feature is not enabled.");
+        return Ok(());
+    }
+
+    if cfg!(debug_assertions) {
+        println!("cargo:warning=The web ui is not being compiled in debug mode.");
         return Ok(());
     }
 
@@ -72,7 +75,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         String::from_utf8_lossy(&output.stderr).trim()
                     );
                 }
-                exit_on_ci();
                 // Ignore it unless on CI
                 continue;
             },
@@ -82,7 +84,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     error
                 );
                 println!("cargo:warning=The web ui will not be included!");
-                exit_on_ci();
                 continue;
             },
             _ => {},

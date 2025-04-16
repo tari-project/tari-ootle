@@ -18,7 +18,7 @@ catalogs:
 
 importers:
 
-  applications/tari_dan_wallet_web_ui:
+  applications/tari_dan_wallet_daemon/web_ui:
     dependencies:
       '@emotion/react':
         specifier: ^11.10.6
@@ -43,13 +43,13 @@ importers:
         version: 4.36.1(@tanstack/react-query@4.36.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@tari-project/typescript-bindings':
         specifier: workspace:*
-        version: link:../../bindings
+        version: link:../../../bindings
       '@tari-project/wallet_jrpc_client':
         specifier: workspace:*
-        version: link:../../clients/javascript/wallet_daemon_client
+        version: link:../../../clients/javascript/wallet_daemon_client
       '@walletconnect/core':
         specifier: ^2.13.3
-        version: 2.19.2(typescript@4.9.5)
+        version: 2.20.0(typescript@4.9.5)
       '@walletconnect/web3wallet':
         specifier: ^1.12.3
         version: 1.16.1(typescript@4.9.5)
@@ -112,7 +112,7 @@ importers:
         specifier: 'catalog:'
         version: 6.2.5(@types/node@22.14.0)
 
-  applications/tari_indexer_web_ui:
+  applications/tari_indexer/web_ui:
     dependencies:
       '@emotion/react':
         specifier: ^11.10.6
@@ -137,7 +137,7 @@ importers:
         version: 4.36.1(@tanstack/react-query@4.36.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@tari-project/typescript-bindings':
         specifier: workspace:*
-        version: link:../../bindings
+        version: link:../../../bindings
       async-mutex:
         specifier: ^0.4.0
         version: 0.4.1
@@ -185,7 +185,7 @@ importers:
         specifier: 'catalog:'
         version: 6.2.5(@types/node@22.14.0)
 
-  applications/tari_validator_node_web_ui:
+  applications/tari_validator_node/web_ui:
     dependencies:
       '@emotion/react':
         specifier: ^11.10.6
@@ -210,7 +210,7 @@ importers:
         version: 4.36.1(@tanstack/react-query@4.36.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@tari-project/typescript-bindings':
         specifier: workspace:*
-        version: link:../../bindings
+        version: link:../../../bindings
       async-mutex:
         specifier: ^0.4.0
         version: 0.4.1
@@ -1417,8 +1417,8 @@ packages:
     resolution: {integrity: sha512-SMgJR5hEyEE/tENIuvlEb4aB9tmMXPzQ38Y61VgYBmwAFEhOHtpt8EDfnfRWqEhMyXuBXG4K70Yh8c67Yry+Xw==}
     engines: {node: '>=18'}
 
-  '@walletconnect/core@2.19.2':
-    resolution: {integrity: sha512-iu0mgLj51AXcKpdNj8+4EdNNBd/mkNjLEhZn6UMc/r7BM9WbmpPMEydA39WeRLbdLO4kbpmq4wTbiskI1rg+HA==}
+  '@walletconnect/core@2.20.0':
+    resolution: {integrity: sha512-MpCx9WthaAJ9pA2oHC84oTFUtntjj9mCmevwBDPVsQ2Q/pYeh2+THDPaaw6fzTbNTXyGCvJXRyLQkN9xO+Vmzw==}
     engines: {node: '>=18'}
 
   '@walletconnect/environment@1.0.1':
@@ -1478,14 +1478,14 @@ packages:
   '@walletconnect/types@2.17.1':
     resolution: {integrity: sha512-aiUeBE3EZZTsZBv5Cju3D0PWAsZCMks1g3hzQs9oNtrbuLL6pKKU0/zpKwk4vGywszxPvC3U0tBCku9LLsH/0A==}
 
-  '@walletconnect/types@2.19.2':
-    resolution: {integrity: sha512-/LZWhkVCUN+fcTgQUxArxhn2R8DF+LSd/6Wh9FnpjeK/Sdupx1EPS8okWG6WPAqq2f404PRoNAfQytQ82Xdl3g==}
+  '@walletconnect/types@2.20.0':
+    resolution: {integrity: sha512-oFGHRL/yQbZqBiTA8yvV+PGJYBU/laDAQWFiJZ9Xlv+qN5EzHipW39Ru6qyp8P4DGnbQI6bHPs9bizJ7hkDRKA==}
 
   '@walletconnect/utils@2.17.1':
     resolution: {integrity: sha512-KL7pPwq7qUC+zcTmvxGqIyYanfHgBQ+PFd0TEblg88jM7EjuDLhjyyjtkhyE/2q7QgR7OanIK7pCpilhWvBsBQ==}
 
-  '@walletconnect/utils@2.19.2':
-    resolution: {integrity: sha512-VU5CcUF4sZDg8a2/ov29OJzT3KfLuZqJUM0GemW30dlipI5fkpb0VPenZK7TcdLPXc1LN+Q+7eyTqHRoAu/BIA==}
+  '@walletconnect/utils@2.20.0':
+    resolution: {integrity: sha512-PlglakJ/zhBRUg7yfulfedWgPC0ZoVEYCiniFkCeWfTq03ufvkB3tgBJQkNoHUV7ZgPYxAdSbO3KsKceZzjufw==}
 
   '@walletconnect/web3wallet@1.16.1':
     resolution: {integrity: sha512-l6jVoLEh/UtRfvYUDs52fN+LYXsBgx3F9WfErJuCSCFfpbxDKIzM2Y9sI0WI1/5dWN5sh24H1zNCXnQ4JJltZw==}
@@ -3918,13 +3918,13 @@ snapshots:
       '@ethersproject/transactions': 5.8.0
       '@stablelib/random': 1.0.2
       '@stablelib/sha256': 1.0.1
-      '@walletconnect/core': 2.19.2(typescript@4.9.5)
+      '@walletconnect/core': 2.20.0(typescript@4.9.5)
       '@walletconnect/events': 1.0.1
       '@walletconnect/heartbeat': 1.2.2
       '@walletconnect/jsonrpc-utils': 1.0.8
       '@walletconnect/logger': 2.1.2
       '@walletconnect/time': 1.0.2
-      '@walletconnect/utils': 2.19.2(typescript@4.9.5)
+      '@walletconnect/utils': 2.17.1
       events: 3.3.0
       isomorphic-unfetch: 3.1.0
     transitivePeerDependencies:
@@ -3993,7 +3993,7 @@ snapshots:
       - uploadthing
       - utf-8-validate
 
-  '@walletconnect/core@2.19.2(typescript@4.9.5)':
+  '@walletconnect/core@2.20.0(typescript@4.9.5)':
     dependencies:
       '@walletconnect/heartbeat': 1.2.2
       '@walletconnect/jsonrpc-provider': 1.0.14
@@ -4006,8 +4006,8 @@ snapshots:
       '@walletconnect/relay-auth': 1.1.0
       '@walletconnect/safe-json': 1.0.2
       '@walletconnect/time': 1.0.2
-      '@walletconnect/types': 2.19.2
-      '@walletconnect/utils': 2.19.2(typescript@4.9.5)
+      '@walletconnect/types': 2.20.0
+      '@walletconnect/utils': 2.20.0(typescript@4.9.5)
       '@walletconnect/window-getters': 1.0.1
       es-toolkit: 1.33.0
       events: 3.3.0
@@ -4207,7 +4207,7 @@ snapshots:
       - ioredis
       - uploadthing
 
-  '@walletconnect/types@2.19.2':
+  '@walletconnect/types@2.20.0':
     dependencies:
       '@walletconnect/events': 1.0.1
       '@walletconnect/heartbeat': 1.2.2
@@ -4277,7 +4277,7 @@ snapshots:
       - ioredis
       - uploadthing
 
-  '@walletconnect/utils@2.19.2(typescript@4.9.5)':
+  '@walletconnect/utils@2.20.0(typescript@4.9.5)':
     dependencies:
       '@noble/ciphers': 1.2.1
       '@noble/curves': 1.8.1
@@ -4288,7 +4288,7 @@ snapshots:
       '@walletconnect/relay-auth': 1.1.0
       '@walletconnect/safe-json': 1.0.2
       '@walletconnect/time': 1.0.2
-      '@walletconnect/types': 2.19.2
+      '@walletconnect/types': 2.20.0
       '@walletconnect/window-getters': 1.0.1
       '@walletconnect/window-metadata': 1.0.1
       bs58: 6.0.0

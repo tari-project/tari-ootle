@@ -7,7 +7,8 @@
     "rootDir": "./src",
     "outDir": "./dist",
     "esModuleInterop": true,
-    "composite": false
+    // Required for wallet web ui to build
+    "composite": true
   },
   "include": [
     "src/**/*"

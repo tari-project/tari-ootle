@@ -10,5 +10,5 @@ export interface Block {
   is_justified: boolean;
   is_committed: boolean;
   block_time: number | null;
-  stored_at: Array<number> | null;
+  stored_at: string | null;
 }

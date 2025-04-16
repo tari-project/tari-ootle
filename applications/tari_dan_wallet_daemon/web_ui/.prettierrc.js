@@ -1,3 +1,3 @@
-import base from "../../.prettierrc.mjs";
+import base from "../../../.prettierrc.mjs";
 
 export default base;

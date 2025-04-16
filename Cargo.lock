@@ -10685,7 +10685,6 @@ dependencies = [
  "log4rs",
  "mime_guess",
  "minotari_app_utilities",
- "reqwest",
  "serde",
  "serde_json",
  "tari_base_node_client",

@@ -30,6 +30,7 @@ pub mod cli;
 pub mod config;
 mod dry_run;
 pub mod graphql;
+#[cfg(feature = "web_ui")]
 mod http_ui;
 
 mod block_data;
@@ -45,7 +46,6 @@ mod transaction_manager;
 use std::{convert::Infallible, fs, future, future::Future, sync::Arc};
 
 use event_scanner::{EventFilter, EventScanner};
-use http_ui::server::run_http_ui_server;
 use log::*;
 use serde::Serialize;
 use substate_manager::SubstateManager;
@@ -164,6 +164,7 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
         );
         let jrpc_address = spawn_json_rpc(jrpc_address, handlers)?;
         // Run the web ui
+        #[cfg(feature = "web_ui")]
         if let Some(address) = config.indexer.web_ui_address {
             // json rpc
             let public_jrpc_url = config
@@ -193,9 +194,15 @@ pub async fn run_indexer(config: ApplicationConfig, mut shutdown_signal: Shutdow
                 })
                 .transpose()?;
 
-            task::spawn(run_http_ui_server(address, public_jrpc_address, public_graphql_url));
+            tokio::spawn(http_ui::server::run_http_ui_server(
+                address,
+                public_jrpc_address,
+                public_graphql_url,
+            ));
         }
     }
+    #[cfg(not(feature = "web_ui"))]
+    info!(target: LOG_TARGET, "🕸️ Web UI not enabled. Run with --features web_ui to enable it.");
 
     // Run the event scanner
     let event_filters: Vec<EventFilter> = config

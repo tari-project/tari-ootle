@@ -27,6 +27,7 @@ mod consensus;
 mod dan_node;
 mod dry_run_transaction_processor;
 mod event_subscription;
+#[cfg(feature = "web_ui")]
 mod http_ui;
 mod json_rpc;
 #[cfg(feature = "metrics")]
@@ -58,7 +59,6 @@ use tari_dan_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
 use tari_shutdown::Shutdown;
-use tokio::task;
 pub use validator_registration_file::ValidatorRegistrationFile;
 
 pub use crate::config::{ApplicationConfig, ValidatorNodeConfig};
@@ -67,7 +67,6 @@ use crate::{
     consensus::spec::ValidatorNodeStateStore,
     dan_node::DanNode,
     file_l1_submitter::FileLayerOneSubmitter,
-    http_ui::server::run_http_ui_server,
     json_rpc::{spawn_json_rpc, JsonRpcHandlers},
 };
 
@@ -145,8 +144,9 @@ pub async fn run_validator_node(config: &ApplicationConfig, shutdown: Shutdown) 
             metrics_registry,
         )?;
         // Run the web ui
+        #[cfg(feature = "web_ui")]
         if let Some(address) = config.validator_node.web_ui_listener_address {
-            task::spawn(run_http_ui_server(
+            tokio::spawn(http_ui::server::run_http_ui_server(
                 address,
                 config
                     .validator_node
@@ -156,6 +156,11 @@ pub async fn run_validator_node(config: &ApplicationConfig, shutdown: Shutdown) 
             ));
         }
     }
+    #[cfg(not(feature = "web_ui"))]
+    info!(
+        target: LOG_TARGET,
+        "Web UI is not enabled. To enable it, add the `web_ui` feature to your Cargo.toml"
+    );
 
     fs::write(config.common.base_path.join("pid"), process::id().to_string())
         .map_err(|e| ExitError::new(ExitCode::UnknownError, e))?;

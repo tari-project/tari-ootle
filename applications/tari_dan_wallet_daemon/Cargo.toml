@@ -38,7 +38,7 @@ config = { workspace = true }
 either = { workspace = true }
 humantime-serde = { workspace = true }
 futures = { workspace = true }
-include_dir = { workspace = true }
+include_dir = { workspace = true, optional = true }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true }
 log4rs = { workspace = true, features = [
@@ -78,4 +78,5 @@ ignored = [
 ]
 
 [features]
-skip_web_ui_build = []
+default = ["web_ui"]
+web_ui = ["include_dir"]

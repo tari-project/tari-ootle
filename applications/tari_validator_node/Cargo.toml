@@ -8,10 +8,10 @@ repository.workspace = true
 license.workspace = true
 
 [features]
-default = ["metrics"]
+default = ["metrics", "web_ui"]
 metrics = ["prometheus"]
 sqlite_backend = ["tari_state_store_sqlite"]
-skip_web_ui_build = []
+web_ui = []
 
 [dependencies]
 minotari_app_utilities = { workspace = true }

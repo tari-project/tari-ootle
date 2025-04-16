@@ -41,8 +41,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=./web_ui/src");
     println!("cargo:rerun-if-changed=./web_ui/public");
 
-    if env::var("CARGO_FEATURE_SKIP_WEB_UI_BUILD").is_ok() {
-        println!("cargo:warning=The web ui is not being built because the skip_web_ui_build feature is enabled.");
+    if env::var("CARGO_FEATURE_TS").is_ok() {
+        println!("cargo:warning=The web ui is not being built because the tx feature is enabled.");
+        return Ok(());
+    }
+    if env::var("CARGO_FEATURE_WEB_UI").is_err() {
+        println!("cargo:warning=The web ui is not being built because the web_ui feature is not enabled.");
         return Ok(());
     }
 

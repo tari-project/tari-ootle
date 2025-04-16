@@ -23,14 +23,13 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    http::{Response, Uri},
+    http::{header::CONTENT_TYPE, Response, StatusCode, Uri},
     response::IntoResponse,
     routing::get,
     Router,
 };
 use include_dir::{include_dir, Dir};
 use log::{error, info};
-use reqwest::{header::CONTENT_TYPE, StatusCode};
 use url::Url;
 
 const LOG_TARGET: &str = "tari::indexer::web_ui::server";
@@ -88,7 +87,7 @@ async fn handler(uri: Uri) -> impl IntoResponse {
             .body(body.to_owned())
             .unwrap();
     }
-    println!("Not found {:?}", path);
+    log::warn!(target: LOG_TARGET, "Path not found: {}", path);
     Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body("".to_string())

@@ -47,7 +47,7 @@ diesel = { workspace = true, default-features = false, features = [
 ] }
 diesel_migrations = { workspace = true }
 futures = { workspace = true }
-include_dir = { workspace = true }
+include_dir = { workspace = true, optional = true }
 libp2p = { workspace = true }
 log = { workspace = true, features = ["std"] }
 log4rs = { workspace = true, features = [
@@ -57,7 +57,6 @@ log4rs = { workspace = true, features = [
     "fixed_window_roller",
 ] }
 mime_guess = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true, features = ["default", "derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -78,4 +77,5 @@ ignored = [
 ]
 
 [features]
-skip_web_ui_build = []
+default = ["web_ui"]
+web_ui = ["include_dir"]

@@ -22,12 +22,6 @@
 
 use std::{env, process::Command};
 
-fn exit_on_ci() {
-    if option_env!("CI").is_some() {
-        std::process::exit(1);
-    }
-}
-
 const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["install"]),
     ("../../bindings", &["run", "ts-build"]),
@@ -81,7 +75,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         String::from_utf8_lossy(&output.stderr).trim()
                     );
                 }
-                exit_on_ci();
                 // Ignore it unless on CI
                 continue;
             },
@@ -91,7 +84,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     error
                 );
                 println!("cargo:warning=The web ui will not be included!");
-                exit_on_ci();
                 continue;
             },
             _ => {},

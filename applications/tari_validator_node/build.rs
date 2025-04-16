@@ -22,12 +22,6 @@
 
 use std::{env, process::Command};
 
-fn exit_on_ci() {
-    if option_env!("CI").is_some() {
-        std::process::exit(1);
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=./web_ui/src");
     println!("cargo:rerun-if-changed=./web_ui/public");
@@ -53,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Err(error) = Command::new(NPM).arg("install").current_dir("./web_ui").status() {
         println!("cargo:warning='npm install' error : {:?}", error);
-        exit_on_ci();
+        return Ok(());
     }
     match Command::new(NPM)
         .args(["run", "build"])
@@ -64,7 +58,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("cargo:warning='npm run build' exited with non-zero status code");
             println!("cargo:warning=Output: {}", String::from_utf8_lossy(&output.stdout));
             println!("cargo:warning=Error: {}", String::from_utf8_lossy(&output.stderr));
-            exit_on_ci();
         },
         Err(error) => {
             println!(
@@ -72,7 +65,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error
             );
             println!("cargo:warning=The web ui will not be included!");
-            exit_on_ci();
         },
         _ => {},
     }

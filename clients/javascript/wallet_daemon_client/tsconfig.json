@@ -4,9 +4,10 @@
     "target": "ESNext",
     "moduleResolution": "node",
     "declaration": true,
+    "rootDir": "./src",
     "outDir": "./dist",
     "esModuleInterop": true,
-    "composite": true
+    "composite": false
   },
   "include": [
     "src/**/*"

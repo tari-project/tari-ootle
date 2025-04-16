@@ -132,7 +132,7 @@ pub async fn run_tari_dan_wallet_daemon(
     #[cfg(not(feature = "web_ui"))]
     info!(
         target: LOG_TARGET,
-        "Web UI is not enabled. To enable it, add the `web_ui` feature to your Cargo.toml"
+        "Web UI is not enabled. To enable it, add the `web_ui` feature to your Cargo.toml. JSON-RPC address is {jrpc_address}"
     );
 
     if let Err(e) = fs::write(config.common.base_path.join("pid"), process::id().to_string()) {

@@ -17,8 +17,7 @@
   },
   "scripts": {
     "build-dist": "tsc --project tsconfig.prod.json",
-    "build": "sh build.sh && tsc",
-    "ts-build": "tsc"
+    "build": "sh build.sh && tsc"
   },
   "files": [
     "/dist"

@@ -7,6 +7,12 @@ on:
   push:
     branches: development
 
+env:
+  # Set the Node.js version to use
+  NODE_VERSION: '23.11.0'
+  # Set the pnpm version to use
+  PNPM_VERSION: '10'
+
 jobs:
   # Publish the TypeScript bindings to the NPM registry
   publish-typescript-bindings:
@@ -16,11 +22,17 @@ jobs:
         working-directory: bindings
     steps:
       - uses: actions/checkout@v4
-      - uses: 'moonrepo/setup-toolchain@v0'
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
-          auto-install: true
+          version: ${{ env.PNPM_VERSION }}
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - run: moon bindings:build
+      - run: pnpm run build-dist
       - uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.NPM_TOKEN }}
@@ -36,11 +48,17 @@ jobs:
         working-directory: clients/javascript/wallet_daemon_client
     steps:
       - uses: actions/checkout@v4
-      - uses: 'moonrepo/setup-toolchain@v0'
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
-          auto-install: true
+          version: ${{ env.PNPM_VERSION }}
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - run: moon wallet_daemon_client:build
+      - run: pnpm run build
       - uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.NPM_TOKEN }}

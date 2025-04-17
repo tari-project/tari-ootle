@@ -74,11 +74,17 @@ impl TemplateTest {
         Self::new_internal(template_paths, None)
     }
 
-    pub fn new_with_shared_target_dir<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I, target_dir: P) -> Self {
+    pub fn new_with_shared_target_dir<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(
+        template_paths: I,
+        target_dir: P,
+    ) -> Self {
         Self::new_internal(template_paths, Some(target_dir))
     }
 
-    fn new_internal<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I, target_dir: Option<P>) -> Self {
+    fn new_internal<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(
+        template_paths: I,
+        target_dir: Option<P>,
+    ) -> Self {
         let mut builder = Package::builder();
 
         // Add builtin templates

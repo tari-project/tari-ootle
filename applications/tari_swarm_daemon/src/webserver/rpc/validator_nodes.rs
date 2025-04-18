@@ -88,3 +88,47 @@ pub async fn create(
 
     Ok(ValidatorNodeCreateResponse { instance_id })
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValidatorNodeRegisterRequest {
+    instance_id: InstanceId,
+    #[serde(default)]
+    mine: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidatorNodeRegisterResponse {}
+
+pub async fn register(
+    context: &HandlerContext,
+    req: ValidatorNodeRegisterRequest,
+) -> Result<ValidatorNodeRegisterResponse, anyhow::Error> {
+    let process_manager = context.process_manager();
+    process_manager.register_validator_node(req.instance_id).await?;
+    if req.mine {
+        process_manager.mine_blocks(10).await?;
+    }
+    Ok(ValidatorNodeRegisterResponse {})
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValidatorNodeExitRequest {
+    instance_id: InstanceId,
+    #[serde(default)]
+    mine: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidatorNodeExitResponse {}
+
+pub async fn exit(
+    context: &HandlerContext,
+    req: ValidatorNodeExitRequest,
+) -> Result<ValidatorNodeExitResponse, anyhow::Error> {
+    let process_manager = context.process_manager();
+    process_manager.exit_validator_node(req.instance_id).await?;
+    if req.mine {
+        process_manager.mine_blocks(10).await?;
+    }
+    Ok(ValidatorNodeExitResponse {})
+}

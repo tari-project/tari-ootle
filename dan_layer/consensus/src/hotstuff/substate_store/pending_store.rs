@@ -116,7 +116,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                         substate: Substate::new(next_id.version(), value),
                         id: next_id.into_substate_id(),
                     };
-                    self.put(up)?;
+                    self.insert(up);
                 },
             }
             return Ok(());
@@ -130,7 +130,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                 substate: Substate::new(0, value),
                 id: substate_id.clone(),
             };
-            self.put(up)?;
+            self.insert(up);
             return Ok(());
         };
         match change {
@@ -155,7 +155,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                     substate: Substate::new(next_id.version(), value),
                     id: next_id.into_substate_id(),
                 };
-                self.put(up)?;
+                self.insert(up);
             },
         }
         Ok(())

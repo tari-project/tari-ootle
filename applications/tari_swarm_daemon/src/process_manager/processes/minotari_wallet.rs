@@ -15,7 +15,7 @@ use tari_crypto::{
 };
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use crate::process_manager::{Instance, ValidatorRegistrationInfo};
+use crate::process_manager::Instance;
 
 pub struct MinoTariWalletProcess {
     instance: Instance,
@@ -42,33 +42,6 @@ impl MinoTariWalletProcess {
             .ok_or_else(|| anyhow!("No wallet port allocated"))?;
         let client = WalletGrpcClient::connect(&format!("http://localhost:{}", port)).await?;
         Ok(client)
-    }
-
-    pub async fn register_validator_node(&self, info: ValidatorRegistrationInfo) -> anyhow::Result<u64> {
-        let mut client = self.connect_client().await?;
-        let resp = client
-            .register_validator_node(grpc::RegisterValidatorNodeRequest {
-                validator_node_public_key: info.public_key.to_vec(),
-                validator_node_signature: Some(grpc::Signature {
-                    public_nonce: info.signature.signature().get_compressed_public_nonce().to_vec(),
-                    signature: info.signature.signature().get_signature().to_vec(),
-                }),
-                validator_node_claim_public_key: info.claim_fees_public_key.to_vec(),
-                fee_per_gram: 10,
-                payment_id: PaymentId::Open {
-                    user_data: format!("Validator node registration: {}", info.public_key).into_bytes(),
-                    tx_type: TxType::ValidatorNodeRegistration,
-                }
-                .to_bytes(),
-                sidechain_deployment_key: vec![],
-            })
-            .await?;
-        let resp = resp.into_inner();
-        if !resp.is_success {
-            return Err(anyhow!("Failed to register validator node: {}", resp.failure_message));
-        }
-
-        Ok(resp.transaction_id)
     }
 
     pub async fn burn_funds(
@@ -133,6 +106,21 @@ impl MinoTariWalletProcess {
         let mut client = self.connect_client().await?;
         let balance = client.get_balance(grpc::GetBalanceRequest {}).await?.into_inner();
         Ok(balance)
+    }
+
+    pub async fn revalidate_all_transactions(&self) -> anyhow::Result<()> {
+        let mut client = self.connect_client().await?;
+        client.revalidate_all_transactions(grpc::RevalidateRequest {}).await?;
+        Ok(())
+    }
+
+    pub async fn get_transaction_info(&self, transaction_ids: Vec<u64>) -> anyhow::Result<Vec<grpc::TransactionInfo>> {
+        let mut client = self.connect_client().await?;
+        let identity = client
+            .get_transaction_info(grpc::GetTransactionInfoRequest { transaction_ids })
+            .await?
+            .into_inner();
+        Ok(identity.transactions)
     }
 }
 

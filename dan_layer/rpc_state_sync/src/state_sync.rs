@@ -140,12 +140,13 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             return Ok(persisted_version);
         }
 
-        let mut current_version = persisted_version;
+        let mut maybe_current_version = persisted_version;
+        let current_version = maybe_current_version.unwrap_or(0);
 
         info!(
             target: LOG_TARGET,
             "🛜Syncing from v{} to state transition {last_state_transition_id}",
-            current_version.unwrap_or(0),
+            current_version
         );
 
         let mut state_stream = client
@@ -164,7 +165,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             let msg = match result {
                 Ok(msg) => msg,
                 Err(err) if err.is_not_found() => {
-                    return Ok(current_version);
+                    return Ok(maybe_current_version);
                 },
                 Err(err) => {
                     return Err(err.into());
@@ -184,7 +185,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     target: LOG_TARGET,
                     "🛜 Next state updates batch of size {} from v{}",
                     msg.transitions.len(),
-                    current_version.unwrap_or(0),
+                    current_version
                 );
 
                 let mut store = ShardScopedTreeStoreWriter::new(tx, shard);
@@ -263,26 +264,26 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
 
 
-                    info!(target: LOG_TARGET, "🛜 Applying state update (v{}) {}", current_version.unwrap_or(0), transition);
+                    info!(target: LOG_TARGET, "🛜 Applying state update (v{}) {}", current_version, transition);
                     self.commit_update(store.transaction(), checkpoint, transition)?;
 
                     tree_changes.push(change);
                     if tree_changes.len() == BATCH_SIZE {
                         let mut state_tree = SpreadPrefixStateTree::new(&mut store);
-                        info!(target: LOG_TARGET, "🛜 Committing {} state tree changes v{} to v{}", tree_changes.len(), current_version.unwrap_or(0), current_version.unwrap_or(0) + 1);
-                        let next_version = current_version.unwrap_or(0) + 1;
-                        state_tree.put_substate_changes(current_version, next_version, tree_changes.drain(..))?;
-                        current_version = Some(next_version);
+                        let next_version = current_version + 1;
+                        info!(target: LOG_TARGET, "🛜 Committing {} state tree changes v{} to v{}", tree_changes.len(), current_version, next_version);
+                        state_tree.put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
+                        maybe_current_version = Some(next_version);
                         store.set_version(next_version)?;
                     }
                 }
 
                 if !tree_changes.is_empty() {
                     let mut state_tree = SpreadPrefixStateTree::new(&mut store);
-                    let next_version = current_version.unwrap_or(0) + 1;
-                    info!(target: LOG_TARGET, "🛜 Committing final {} state tree changes v{} to v{}", tree_changes.len(), current_version.unwrap_or(0), next_version);
-                    state_tree.put_substate_changes(current_version, next_version, tree_changes.drain(..))?;
-                    current_version = Some(next_version);
+                    let next_version = current_version + 1;
+                    info!(target: LOG_TARGET, "🛜 Committing final {} state tree changes v{} to v{}", tree_changes.len(), current_version, next_version);
+                    state_tree.put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
+                    maybe_current_version = Some(next_version);
                     store.set_version(next_version)?;
                 }
 
@@ -292,7 +293,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
         let local_state_root = self
             .state_store
-            .with_read_tx(|tx| self.get_state_root_for_shard(tx, shard, current_version))?;
+            .with_read_tx(|tx| self.get_state_root_for_shard(tx, shard, maybe_current_version))?;
         if local_state_root != checkpoint_state_root {
             error!(
                 target: LOG_TARGET,
@@ -308,9 +309,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             });
         }
 
-        info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {local_state_root}", current_version.unwrap_or(0));
+        info!(target: LOG_TARGET, "🛜 Synced state for {shard} to v{} with root {local_state_root}", maybe_current_version.unwrap_or(0));
 
-        Ok(current_version)
+        Ok(maybe_current_version)
     }
 
     fn get_state_root_for_shard(

@@ -35,11 +35,9 @@ use tari_common::{
     },
     exit_codes::{ExitCode, ExitError},
 };
-use tari_common_types::{epoch::VnEpoch, types::CompressedPublicKey};
 use tari_consensus::consensus_constants::ConsensusConstants;
 #[cfg(not(feature = "metrics"))]
 use tari_consensus::traits::hooks::NoopHooks;
-use tari_core::transactions::transaction_components::ValidatorNodeSignature;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_app_utilities::{
     common::verify_correct_network,
@@ -66,7 +64,6 @@ use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
-use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -103,7 +100,6 @@ use crate::{
         WithContext,
     },
     validator::Validator,
-    validator_registration_file::ValidatorRegistrationFile,
     ApplicationConfig,
     ValidatorNodeEpochManagerSpec,
     ValidatorNodeStateStore,
@@ -113,7 +109,7 @@ const LOG_TARGET: &str = "tari::validator_node::bootstrap";
 
 #[allow(clippy::too_many_lines)]
 pub async fn spawn_services(
-    config: &ApplicationConfig,
+    config: ApplicationConfig,
     shutdown: ShutdownSignal,
     keypair: RistrettoKeypair,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
@@ -122,7 +118,7 @@ pub async fn spawn_services(
 ) -> Result<Services<ValidatorNodeStateStore>, anyhow::Error> {
     let mut handles = Vec::with_capacity(10);
 
-    ensure_directories_exist(config)?;
+    ensure_directories_exist(&config)?;
 
     // Networking
     let (tx_consensus_messages, rx_consensus_messages) = mpsc::unbounded_channel();
@@ -208,7 +204,8 @@ pub async fn spawn_services(
             .committee_size
             .try_into()
             .context("committee size must be non-zero")?,
-        validator_node_sidechain_id: config.validator_node.validator_node_sidechain_id.clone(),
+        validator_node_sidechain_id: config.validator_node.validator_node_sidechain_id.to_byte_type(),
+        fee_claim_public_key: config.validator_node.fee_claim_public_key.to_byte_type(),
         num_preshards: consensus_constants.num_preshards,
     };
 
@@ -248,31 +245,21 @@ pub async fn spawn_services(
 
     let (template_queue_sender, template_queue_receiver) = TemplateDownloadQueue::create();
 
+    let layer_one_transaction_submitter = FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path());
+
     // Epoch manager
     let (epoch_manager, epoch_manager_join_handle) =
         tari_epoch_manager::service::spawn_service::<ValidatorNodeEpochManagerSpec>(
             epoch_manager_config,
             global_db.clone(),
-            keypair.public_key().clone(),
+            keypair.public_key().to_byte_type(),
             epoch_event_oracle,
             StateUtxoStore::new(state_store.clone()),
             template_queue_sender,
-            FileLayerOneSubmitter::new(config.get_layer_one_transaction_base_path()),
+            layer_one_transaction_submitter.clone(),
             shutdown.clone(),
         );
 
-    // Create registration file
-    if let Err(err) = create_registration_file(config, &epoch_manager, sidechain_id, &keypair).await {
-        error!(target: LOG_TARGET, "Error creating registration file: {}", err);
-        if epoch_manager_join_handle.is_finished() {
-            return epoch_manager_join_handle
-                .await?
-                .and_then(|_| Err(anyhow!("Epoch manager exited in bootstrap")))
-                .map_err(|err| anyhow!("Epoch manager crashed: {err}"));
-        } else {
-            return Err(err);
-        }
-    }
     handles.push(epoch_manager_join_handle);
 
     let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
@@ -393,7 +380,7 @@ pub async fn spawn_services(
     let substate_resolver = TariSubstateResolver::new(state_store.clone(), scanner);
 
     spawn_p2p_rpc(
-        config,
+        &config,
         &mut networking,
         epoch_manager.clone(),
         state_store.clone(),
@@ -404,12 +391,13 @@ pub async fn spawn_services(
     .await?;
     // Save final node identity after comms has initialized. This is required because the public_address can be
     // changed by comms during initialization when using tor.
-    save_identities(config, &keypair)?;
+    save_identities(&config, &keypair)?;
 
     let dry_run_transaction_processor =
         DryRunTransactionProcessor::new(epoch_manager.clone(), payload_processor, substate_resolver);
 
     Ok(Services {
+        config,
         keypair,
         networking,
         mempool,
@@ -417,55 +405,11 @@ pub async fn spawn_services(
         global_db,
         template_manager: template_manager_service,
         consensus_handle,
-        // global_db,
         state_store,
         dry_run_transaction_processor,
         handles,
-        // validator_node_client_factory,
-        // consensus_gossip_service,
+        layer_one_transaction_submitter,
     })
-}
-
-async fn create_registration_file(
-    config: &ApplicationConfig,
-    epoch_manager: &EpochManagerHandle<PeerAddress>,
-    sidechain_pk: Option<RistrettoPublicKeyBytes>,
-    keypair: &RistrettoKeypair,
-) -> Result<(), anyhow::Error> {
-    let fee_claim_public_key = config.validator_node.fee_claim_public_key.to_byte_type();
-    epoch_manager
-        .set_fee_claim_public_key(fee_claim_public_key)
-        .await
-        .context("set_fee_claim_public_key failed when creating registration file")?;
-    let sidechain_pk = sidechain_pk
-        .map(|pk| CompressedPublicKey::from_canonical_bytes(pk.as_bytes()))
-        .transpose()
-        .map_err(|e| anyhow!("sidechain_pk: {e}"))?;
-
-    // TODO: this signature can be replayed since it is not bound to any single use data (e.g. epoch). This
-    // could be used to re-register a validator node after that node has exited. However, this is costly and AFAICS
-    // could only potentially do reputational damage since an attacker would not be able to operate as the node
-    // (missed propsals etc). Suggest: perhaps a JSON-rpc call that triggers this file to be re-signed
-    // with the current epoch. File system access is still required to read the updated signature.
-    let signature = ValidatorNodeSignature::sign(
-        keypair.secret_key(),
-        sidechain_pk.as_ref(),
-        &CompressedPublicKey::from_canonical_bytes(fee_claim_public_key.as_bytes())
-            .map_err(|e| anyhow!("Failed to convert fee claim public key to CompressedPublicKey: {e}"))?,
-        VnEpoch::zero(),
-    );
-
-    let registration = ValidatorRegistrationFile {
-        signature,
-        public_key: keypair.public_key().to_byte_type(),
-        claim_fees_public_key: fee_claim_public_key,
-    };
-    fs::write(
-        config.common.base_path.join("registration.json"),
-        serde_json::to_string(&registration)?,
-    )
-    .context("failed to write registration file")?;
-    Ok(())
 }
 
 fn save_identities(config: &ApplicationConfig, keypair: &RistrettoKeypair) -> Result<(), ExitError> {
@@ -480,18 +424,17 @@ fn ensure_directories_exist(config: &ApplicationConfig) -> io::Result<()> {
     Ok(())
 }
 pub struct Services<TStore> {
+    pub config: ApplicationConfig,
     pub keypair: RistrettoKeypair,
     pub networking: NetworkingHandle<TariMessagingSpec>,
     pub mempool: MempoolHandle,
     pub epoch_manager: EpochManagerHandle<PeerAddress>,
     pub template_manager: TemplateManagerHandle,
     pub consensus_handle: ConsensusHandle,
-    // pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     pub dry_run_transaction_processor: DryRunTransactionProcessor<TStore>,
-    // pub validator_node_client_factory: TariValidatorNodeRpcClientFactory,
-    // pub consensus_gossip_service: ConsensusGossipHandle,
     pub state_store: TStore,
     pub global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
+    pub layer_one_transaction_submitter: FileLayerOneSubmitter,
 
     pub handles: Vec<JoinHandle<Result<(), anyhow::Error>>>,
 }

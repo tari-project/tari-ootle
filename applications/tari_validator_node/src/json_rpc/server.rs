@@ -94,6 +94,7 @@ async fn handler(Extension(handlers): Extension<Arc<JsonRpcHandlers>>, value: Js
         "add_peer" => handlers.add_peer(value).await,
         "get_comms_stats" => handlers.get_comms_stats(value).await,
         "get_connections" => handlers.get_connections(value).await,
+        "prepare_layer_one_transaction" => handlers.prepare_layer_one_transaction(value).await,
         method => Ok(value.method_not_found(method)),
     };
 

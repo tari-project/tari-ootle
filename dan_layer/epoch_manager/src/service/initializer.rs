@@ -20,10 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::{
     sync::{broadcast, mpsc},
     task::JoinHandle,
@@ -37,7 +37,7 @@ use crate::{
 pub fn spawn_service<TSpec: EpochManagerSpec>(
     config: EpochManagerConfig,
     global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
-    node_public_key: RistrettoPublicKey,
+    node_public_key: RistrettoPublicKeyBytes,
     epoch_events: TSpec::EpochEventOracle,
     utxo_store: TSpec::UtxoStore,
     template_downloader: TSpec::TemplateDownloader,
@@ -46,8 +46,9 @@ pub fn spawn_service<TSpec: EpochManagerSpec>(
 ) -> (EpochManagerHandle<TSpec::Addr>, JoinHandle<anyhow::Result<()>>) {
     let (tx_request, rx_request) = mpsc::channel(10);
     let (events, _) = broadcast::channel(100);
-    let epoch_manager = EpochManagerHandle::new(tx_request, events.clone());
-    let handle = EpochManagerService::<TSpec>::spawn(
+    let epoch_manager_handle = EpochManagerHandle::new(tx_request, events.clone());
+
+    let join_handle = EpochManagerService::<TSpec>::spawn(
         config,
         events,
         rx_request,
@@ -57,7 +58,8 @@ pub fn spawn_service<TSpec: EpochManagerSpec>(
         template_downloader,
         layer_one_submitter,
         node_public_key,
+        epoch_manager_handle.get_current_epoch_atomic(),
         shutdown_signal,
     );
-    (epoch_manager, handle)
+    (epoch_manager_handle, join_handle)
 }

@@ -18,3 +18,30 @@ pub fn derive_fee_pool_address(
     let offset_addr = range.start().to_u256() + U256::from_be_bytes(masked_public_key_bytes);
     ValidatorFeePoolAddress::from_array(offset_addr.to_be_bytes())
 }
+
+#[cfg(test)]
+mod tests {
+    use rand::rngs::OsRng;
+    use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
+    use tari_engine_types::ToByteType;
+
+    use super::*;
+    use crate::SubstateAddress;
+
+    #[test]
+    fn it_creates_a_pool_address_that_naturally_falls_in_the_shard() {
+        let pk = RistrettoPublicKeyBytes::from([0xff; 32]);
+        let num_preshards = NumPreshards::P256;
+        let fee_pool_address = derive_fee_pool_address(&pk, num_preshards, Shard::from(1));
+        let addr = SubstateAddress::from_substate_id(&fee_pool_address.into(), 0);
+        let shard = addr.to_shard(num_preshards);
+
+        assert_eq!(shard, Shard::from(1));
+
+        let (_, pk) = RistrettoPublicKey::random_keypair(&mut OsRng);
+        let fee_pool_address = derive_fee_pool_address(&pk.to_byte_type(), num_preshards, Shard::from(212));
+        let addr = SubstateAddress::from_substate_id(&fee_pool_address.into(), 0);
+        let shard = addr.to_shard(num_preshards);
+        assert_eq!(shard, Shard::from(212));
+    }
+}

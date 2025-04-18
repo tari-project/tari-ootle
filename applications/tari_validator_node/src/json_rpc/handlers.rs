@@ -30,10 +30,23 @@ use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::*;
 use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
-use tari_common_types::types::FixedHash;
-use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_common_types::types::{CompressedPublicKey, FixedHash};
+use tari_core::transactions::transaction_components::ValidatorNodeSignature;
+use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_app_utilities::keypair::RistrettoKeypair;
-use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateAddress};
+use tari_dan_common_types::{
+    layer_one_transaction::{
+        LayerOnePayloadType,
+        LayerOneTransactionDef,
+        ValidatorExitParams,
+        ValidatorRegistrationParams,
+    },
+    optional::Optional,
+    public_key_to_peer_id,
+    Epoch,
+    PeerAddress,
+    SubstateAddress,
+};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
     consensus_models::{Block, ExecutedTransaction, LeafBlock, QuorumDecision, SubstateRecord, TransactionRecord},
@@ -44,9 +57,10 @@ use tari_dan_storage::{
 };
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
 use tari_engine_types::{FromByteType, ToByteType};
-use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
+use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
 use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
+use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_client::types::{
     self,
@@ -85,6 +99,7 @@ use tari_validator_node_client::types::{
     GetTransactionResponse,
     GetTransactionResultRequest,
     GetTransactionResultResponse,
+    LayerOneTransactionParams,
     ListBlocksRequest,
     ListBlocksResponse,
     SubmitTransactionRequest,
@@ -97,17 +112,21 @@ use crate::{
     bootstrap::Services,
     consensus::{spec::ValidatorNodeStateStore, ConsensusHandle},
     dry_run_transaction_processor::DryRunTransactionProcessor,
-    json_rpc::jrpc_errors::{internal_error, not_found},
+    file_l1_submitter::FileLayerOneSubmitter,
+    json_rpc::jrpc_errors::{general_error, internal_error, invalid_operation, not_found},
     p2p::services::mempool::MempoolHandle,
+    ApplicationConfig,
 };
 
 const LOG_TARGET: &str = "tari::validator_node::json_rpc::handlers";
 
 pub struct JsonRpcHandlers {
+    config: ApplicationConfig,
     keypair: RistrettoKeypair,
     mempool: MempoolHandle,
     template_manager: TemplateManagerHandle,
     epoch_manager: EpochManagerHandle<PeerAddress>,
+    layer_one_transaction_submitter: FileLayerOneSubmitter,
     global_db: GlobalDb<SqliteGlobalDbAdapter<PeerAddress>>,
     consensus: ConsensusHandle,
     networking: NetworkingHandle<TariMessagingSpec>,
@@ -118,16 +137,22 @@ pub struct JsonRpcHandlers {
 impl JsonRpcHandlers {
     pub fn new(services: &Services<ValidatorNodeStateStore>) -> Self {
         Self {
+            config: services.config.clone(),
             keypair: services.keypair.clone(),
             mempool: services.mempool.clone(),
             epoch_manager: services.epoch_manager.clone(),
             consensus: services.consensus_handle.clone(),
             global_db: services.global_db.clone(),
             template_manager: services.template_manager.clone(),
+            layer_one_transaction_submitter: services.layer_one_transaction_submitter.clone(),
             networking: services.networking.clone(),
             state_store: services.state_store.clone(),
             dry_run_transaction_processor: services.dry_run_transaction_processor.clone(),
         }
+    }
+
+    pub fn sidechain_id(&self) -> Option<&RistrettoPublicKey> {
+        self.config.validator_node.validator_node_sidechain_id.as_ref()
     }
 }
 
@@ -319,13 +344,9 @@ impl JsonRpcHandlers {
         let answer_id = value.get_answer_id();
         if !self.consensus.get_current_state().is_running() {
             // Describe better why the following call may fail
-            return Err(JsonRpcResponse::error(
+            return Err(general_error(
                 answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::ApplicationError(100),
-                    "Consensus is not running. Please try again later".to_string(),
-                    json::Value::Null,
-                ),
+                "Consensus is not running. Please try again later",
             ));
         }
         let tx_pool = self
@@ -544,16 +565,7 @@ impl JsonRpcHandlers {
             .wait_for_initial_scanning_to_complete()
             .await
             .map_err(internal_error(answer_id))?;
-        let current_epoch = self.epoch_manager.current_epoch().await.map_err(|e| {
-            JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InternalError,
-                    format!("Could not get current epoch: {}", e),
-                    json::Value::Null,
-                ),
-            )
-        })?;
+        let current_epoch = self.epoch_manager.get_current_epoch();
 
         let (current_block_hash, current_block_height) = self
             .global_db
@@ -627,10 +639,16 @@ impl JsonRpcHandlers {
                     ))
                 }
             })?;
+        let is_initial_scanning_complete = self
+            .epoch_manager
+            .is_initial_scanning_complete()
+            .await
+            .map_err(internal_error(answer_id))?;
         let response = GetEpochManagerStatsResponse {
             current_epoch,
             current_block_height,
             current_block_hash,
+            is_initial_scanning_complete,
             is_valid: committee_info.is_some(),
             start_epoch: local_vn_start_epoch,
             committee_info,
@@ -772,5 +790,131 @@ impl JsonRpcHandlers {
             height,
             state: format!("{:?}", state),
         }))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub async fn prepare_layer_one_transaction(&self, value: JsonRpcExtractor) -> JrpcResult {
+        let answer_id = value.get_answer_id();
+        let request = value.parse_params::<types::PrepareLayerOneTransactionRequest>()?;
+        let path = match request.params {
+            LayerOneTransactionParams::Registration => {
+                let current_epoch = self
+                    .epoch_manager
+                    .current_epoch()
+                    .await
+                    .map_err(internal_error(answer_id))?;
+                if self
+                    .epoch_manager
+                    .is_this_validator_registered_for_epoch(current_epoch)
+                    .await
+                    .map_err(internal_error(answer_id))?
+                {
+                    return Err(invalid_operation(
+                        answer_id,
+                        "Cannot submit registration for validator node that is already registered",
+                    ));
+                }
+
+                // Use the currently configured fee claim public key
+                let fee_claim_public_key = self.config.validator_node.fee_claim_public_key.to_byte_type();
+                let sidechain_id = self.sidechain_id().map(|s| {
+                    // The following is guaranteed to be infallible (invariant), more of a shortcoming of the
+                    // CompressedPublicKey API. new_from_pk requires a clone
+                    CompressedPublicKey::from_canonical_bytes(s.as_bytes()).expect(
+                        "INVARIANT VIOLATION: \
+                         CompressedPublicKey::from_canonical_bytes(fee_claim_public_key.as_bytes()) returned an error",
+                    )
+                });
+                // TODO: we permit the registration within the next 3 epochs. Since we scan behind the chain, this
+                // should be set according to the number of epochs behind (consensus constants) rather than arbitrarily.
+                let max_epoch = current_epoch + Epoch(3);
+
+                let signature = ValidatorNodeSignature::sign_for_registration(
+                    self.keypair.secret_key(),
+                    sidechain_id.as_ref(),
+                    &CompressedPublicKey::from_canonical_bytes(fee_claim_public_key.as_bytes()).expect(
+                        "INVARIANT VIOLATION: \
+                         CompressedPublicKey::from_canonical_bytes(fee_claim_public_key.as_bytes()) returned an error",
+                    ),
+                    max_epoch.as_u64().into(),
+                );
+                let l1_tx = LayerOneTransactionDef {
+                    payload_type: LayerOnePayloadType::ValidatorRegistration,
+                    payload: ValidatorRegistrationParams {
+                        public_key: self.keypair.public_key().to_byte_type(),
+                        signature: SchnorrSignatureBytes::new(
+                            RistrettoPublicKeyBytes::from_bytes(
+                                signature.signature().get_compressed_public_nonce().as_bytes(),
+                            )
+                            .expect("INVARIANT VIOLATION: ristretto public key length mismatch"),
+                            Scalar32Bytes::from_bytes(signature.signature().get_signature().as_bytes())
+                                .expect("INVARIANT VIOLATION: signature scalar length mismatch"),
+                        ),
+                        claim_public_key: fee_claim_public_key,
+                        max_epoch,
+                        // TODO: this wont work if Some because the wallet expects a private key - who should hold the
+                        // sidechain secret key? This depends on the required security model.
+                        // Likely the Minotari wallet, which implies functionality that is able
+                        // to "look up" the secret from the public key provided here.
+                        sidechain_public_key: self.sidechain_id().map(|pk| pk.to_byte_type()),
+                    },
+                };
+                self.layer_one_transaction_submitter
+                    .submit_transaction(l1_tx)
+                    .await
+                    .map_err(internal_error(answer_id))?
+            },
+            LayerOneTransactionParams::Exit => {
+                let current_epoch = self
+                    .epoch_manager
+                    .current_epoch()
+                    .await
+                    .map_err(internal_error(answer_id))?;
+                if !self
+                    .epoch_manager
+                    .is_this_validator_registered_for_epoch(current_epoch)
+                    .await
+                    .map_err(internal_error(answer_id))?
+                {
+                    return Err(invalid_operation(
+                        answer_id,
+                        "Cannot submit exit for validator node that is  not registered",
+                    ));
+                }
+
+                let max_epoch = current_epoch + Epoch(3);
+                let signature = ValidatorNodeSignature::sign_for_exit(
+                    self.keypair.secret_key(),
+                    // TODO: sidechain support
+                    None,
+                    max_epoch.as_u64().into(),
+                );
+                let l1_tx = LayerOneTransactionDef {
+                    payload_type: LayerOnePayloadType::ValidatorExit,
+                    payload: ValidatorExitParams {
+                        public_key: self.keypair.public_key().to_byte_type(),
+                        signature: SchnorrSignatureBytes::new(
+                            RistrettoPublicKeyBytes::from_bytes(
+                                signature.signature().get_compressed_public_nonce().as_bytes(),
+                            )
+                            .expect("INVARIANT VIOLATION: ristretto public key length mismatch"),
+                            Scalar32Bytes::from_bytes(signature.signature().get_signature().as_bytes())
+                                .expect("INVARIANT VIOLATION: signature scalar length mismatch"),
+                        ),
+                        max_epoch,
+                        sidechain_public_key: self.sidechain_id().map(|pk| pk.to_byte_type()),
+                    },
+                };
+                self.layer_one_transaction_submitter
+                    .submit_transaction(l1_tx)
+                    .await
+                    .map_err(internal_error(answer_id))?
+            },
+        };
+
+        Ok(JsonRpcResponse::success(
+            answer_id,
+            types::PrepareLayerOneTransactionResponse { path },
+        ))
     }
 }

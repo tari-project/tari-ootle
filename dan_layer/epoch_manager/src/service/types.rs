@@ -27,11 +27,6 @@ pub enum EpochManagerRequest<TAddr> {
     CurrentEpochHash {
         reply: Reply<FixedHash>,
     },
-    GetValidatorNode {
-        epoch: Epoch,
-        addr: TAddr,
-        reply: Reply<ValidatorNode<TAddr>>,
-    },
     GetValidatorNodeByPublicKey {
         epoch: Epoch,
         public_key: RistrettoPublicKeyBytes,
@@ -73,11 +68,11 @@ pub enum EpochManagerRequest<TAddr> {
         epoch: Epoch,
         reply: Reply<Vec<ValidatorNode<TAddr>>>,
     },
-    NotifyScanningComplete {
-        reply: Reply<()>,
-    },
     WaitForInitialScanningToComplete {
         reply: Reply<()>,
+    },
+    IsInitialScanningComplete {
+        reply: Reply<bool>,
     },
     GetOurValidatorNode {
         epoch: Epoch,
@@ -109,10 +104,6 @@ pub enum EpochManagerRequest<TAddr> {
     },
     GetFeeClaimPublicKey {
         reply: Reply<Option<RistrettoPublicKeyBytes>>,
-    },
-    SetFeeClaimPublicKey {
-        public_key: RistrettoPublicKeyBytes,
-        reply: Reply<()>,
     },
     AddIntentToEvictValidator {
         proof: Box<EvictionProof>,

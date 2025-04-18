@@ -4,6 +4,7 @@
 use anyhow::{bail, Result};
 use reqwest::StatusCode;
 use serde_json::json;
+use url::Url;
 
 pub trait Alerting {
     // Sends an alert message to the service
@@ -19,7 +20,7 @@ pub trait Alerting {
 
 pub struct MatterMostNotifier {
     // Mattermost server URL
-    pub server_url: String,
+    pub server_url: Url,
     // Mattermost channel ID used for alerts
     pub channel_id: String,
     // User token (retrieved after login)
@@ -32,9 +33,6 @@ pub struct MatterMostNotifier {
 
 impl Alerting for MatterMostNotifier {
     async fn alert(&mut self, message: &str) -> Result<()> {
-        if self.server_url.is_empty() {
-            bail!("Server URL field is empty");
-        }
         if self.credentials.is_empty() {
             bail!("Credentials field is empty");
         }
@@ -67,9 +65,6 @@ impl Alerting for MatterMostNotifier {
 
     async fn ping(&self) -> Result<()> {
         const PING_ENDPOINT: &str = "/api/v4/users/me";
-        if self.server_url.is_empty() {
-            bail!("Server URL is empty");
-        }
         if self.credentials.is_empty() {
             bail!("Credentials field is empty");
         }

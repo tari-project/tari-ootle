@@ -1,7 +1,10 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
@@ -26,6 +29,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct EpochManagerHandle<TAddr> {
     tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
+    current_epoch: Arc<AtomicU64>,
     events: broadcast::Sender<EpochManagerEvent>,
 }
 
@@ -34,7 +38,15 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
         tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
         events: broadcast::Sender<EpochManagerEvent>,
     ) -> Self {
-        Self { tx_request, events }
+        Self {
+            tx_request,
+            events,
+            current_epoch: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub(crate) fn get_current_epoch_atomic(&self) -> Arc<AtomicU64> {
+        self.current_epoch.clone()
     }
 
     pub async fn get_fee_claim_public_key(&self) -> Result<Option<RistrettoPublicKeyBytes>, EpochManagerError> {
@@ -47,40 +59,23 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
-    pub async fn set_fee_claim_public_key(&self, public_key: RistrettoPublicKeyBytes) -> Result<(), EpochManagerError> {
+    pub async fn is_initial_scanning_complete(&self) -> Result<bool, EpochManagerError> {
         let (tx, rx) = oneshot::channel();
         self.tx_request
-            .send(EpochManagerRequest::SetFeeClaimPublicKey { public_key, reply: tx })
+            .send(EpochManagerRequest::IsInitialScanningComplete { reply: tx })
             .await
             .map_err(|_| EpochManagerError::SendError)?;
 
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
-    pub async fn get_committees(
-        &self,
-        epoch: Epoch,
-    ) -> Result<HashMap<ShardGroup, Committee<TAddr>>, EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::GetCommittees { epoch, reply: tx })
-            .await
-            .map_err(|_| EpochManagerError::SendError)?;
-
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+    /// Non-async and infallible version of `current_epoch`. TODO: change the trait to be non-async and infallible
+    pub fn get_current_epoch(&self) -> Epoch {
+        Epoch(self.current_epoch.load(std::sync::atomic::Ordering::SeqCst))
     }
 }
+
 impl<TAddr: NodeAddressable> EpochManagerWriter for EpochManagerHandle<TAddr> {
-    async fn notify_scanning_complete(&mut self) -> Result<(), EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::NotifyScanningComplete { reply: tx })
-            .await
-            .map_err(|_| EpochManagerError::SendError)?;
-
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
-    }
-
     async fn add_validator_node_registration(
         &mut self,
         activation_epoch: Epoch,
@@ -193,24 +188,6 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
-    async fn get_validator_node(
-        &self,
-        epoch: Epoch,
-        addr: &Self::Addr,
-    ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::GetValidatorNode {
-                epoch,
-                addr: addr.clone(),
-                reply: tx,
-            })
-            .await
-            .map_err(|_| EpochManagerError::SendError)?;
-
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
-    }
-
     async fn get_validator_node_by_public_key(
         &self,
         epoch: Epoch,
@@ -285,14 +262,9 @@ impl<TAddr: NodeAddressable> EpochManagerReader for EpochManagerHandle<TAddr> {
         rx.await.map_err(|_| EpochManagerError::ReceiveError)?
     }
 
+    // TODO: not async and infallible
     async fn current_epoch(&self) -> Result<Epoch, EpochManagerError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx_request
-            .send(EpochManagerRequest::CurrentEpoch { reply: tx })
-            .await
-            .map_err(|_| EpochManagerError::SendError)?;
-
-        rx.await.map_err(|_| EpochManagerError::ReceiveError)?
+        Ok(Epoch(self.current_epoch.load(std::sync::atomic::Ordering::SeqCst)))
     }
 
     async fn get_current_epoch_hash(&self) -> Result<FixedHash, EpochManagerError> {

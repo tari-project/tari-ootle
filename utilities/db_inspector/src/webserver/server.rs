@@ -37,15 +37,21 @@ macro_rules! add_cf_routes {
 pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     let bind_address = context.config().webserver.bind_address;
 
-    let mut api = Router::new().route("/databases", get(handlers::databases::list)).route(
-        "/databases/:db_name/column-families",
-        get(handlers::databases::list_column_families),
-    )
-    // Special cases
-    .route(
-        "/databases/:db_name/column-families/blocks",
-        get(handlers::blocks::list),
-    )
+    let mut api = Router::new()
+        .route("/databases", get(handlers::databases::list))
+        .route(
+            "/databases/:db_name/column-families",
+            get(handlers::databases::list_column_families),
+        )
+        // Special cases
+        .route(
+            "/databases/:db_name/column-families/blocks",
+            get(handlers::blocks::list),
+        )
+        .route(
+            "/databases/:db_name/column-families/state_transitions",
+            get(handlers::state_transitions::list),
+        )
         .route(
             "/databases/:db_name/column-families/block_diff",
             get(handlers::block_diff::list),
@@ -88,7 +94,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         models::substate::SubstateModel,
         models::substate::HeadIndex,
         models::substate::UnprunedDownedValuesIndex,
-        models::state_transition::StateTransitionModel,
+        // models::state_transition::StateTransitionModel,
         models::state_transition::ShardSeqIndex,
         models::foreign_substate_pledge::ForeignSubstatePledgeModel,
         models::pending_state_tree_diff::PendingStateTreeDiffModel,

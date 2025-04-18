@@ -25,19 +25,20 @@ impl FileLayerOneSubmitter {
 
 impl LayerOneTransactionSubmitter for FileLayerOneSubmitter {
     type Error = io::Error;
+    type Output = PathBuf;
 
     async fn submit_transaction<T: Serialize + Send>(
         &self,
-        proof: LayerOneTransactionDef<T>,
-    ) -> Result<(), Self::Error> {
+        transaction: LayerOneTransactionDef<T>,
+    ) -> Result<Self::Output, Self::Error> {
         fs::create_dir_all(&self.path).await?;
         let id = OsRng.next_u64();
-        let file_name = format!("{}-{}.json", proof.proof_type, id);
+        let file_name = format!("{}-{}.json", transaction.payload_type, id);
         let path = self.path.join(file_name);
-        info!(target: LOG_TARGET, "Saving layer one transaction proof to {}", path.display());
-        let file = fs::File::create(path).await?;
+        info!(target: LOG_TARGET, "Saving layer transaction to {}", path.display());
+        let file = fs::File::create(&path).await?;
         let mut file = file.into_std().await;
-        serde_json::to_writer_pretty(&mut file, &proof)?;
-        Ok(())
+        serde_json::to_writer_pretty(&mut file, &transaction)?;
+        Ok(path)
     }
 }

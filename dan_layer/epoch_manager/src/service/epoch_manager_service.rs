@@ -20,12 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::sync::{atomic::AtomicU64, Arc};
+
 use log::*;
-use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::optional::IsNotFoundError;
 use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::{
     sync::{broadcast, mpsc, oneshot},
     task::JoinHandle,
@@ -60,7 +62,8 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
         utxo_store: TSpec::UtxoStore,
         template_downloader: TSpec::TemplateDownloader,
         layer_one_transaction_submitter: TSpec::LayerOneSubmitter,
-        node_public_key: RistrettoPublicKey,
+        node_public_key: RistrettoPublicKeyBytes,
+        current_epoch_atomic: Arc<AtomicU64>,
         shutdown: ShutdownSignal,
     ) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(async move {
@@ -72,6 +75,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     layer_one_transaction_submitter,
                     events,
                     node_public_key,
+                    current_epoch_atomic,
                 ),
                 epoch_events,
                 template_downloader,
@@ -181,6 +185,16 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     "🖥️ New validator registered in {epoch} with public key {validator_node_public_key}",
                 );
             },
+            EpochEvent::NewValidatorNodeExit {
+                epoch,
+                validator_node_public_key,
+                ..
+            } => {
+                info!(
+                    target: LOG_TARGET,
+                    "🖥️ validator exit in {epoch} with public key {validator_node_public_key}",
+                );
+            },
             EpochEvent::NewCodeTemplateDownload {
                 epoch,
                 name,
@@ -228,16 +242,6 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochManagerRequest::CurrentEpochHash { reply } => {
                 handle(reply, Ok(self.inner.current_epoch_hash()), context)
             },
-            EpochManagerRequest::GetValidatorNode { epoch, addr, reply } => handle(
-                reply,
-                self.inner.get_validator_node_by_address(epoch, &addr).and_then(|x| {
-                    x.ok_or(EpochManagerError::ValidatorNodeNotRegistered {
-                        address: addr.to_string(),
-                        epoch,
-                    })
-                }),
-                context,
-            ),
             EpochManagerRequest::GetValidatorNodeByPublicKey {
                 epoch,
                 public_key,
@@ -312,8 +316,8 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     .await,
                 context,
             ),
-            EpochManagerRequest::NotifyScanningComplete { reply } => {
-                handle(reply, self.inner.on_scanning_complete().await, context)
+            EpochManagerRequest::IsInitialScanningComplete { reply } => {
+                handle(reply, Ok(self.inner.is_initial_epoch_sync_complete()), context)
             },
             EpochManagerRequest::WaitForInitialScanningToComplete { reply } => {
                 self.inner.add_notify_on_scanning_complete(reply);
@@ -360,9 +364,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             EpochManagerRequest::GetFeeClaimPublicKey { reply } => {
                 handle(reply, self.inner.get_fee_claim_public_key(), context)
             },
-            EpochManagerRequest::SetFeeClaimPublicKey { public_key, reply } => {
-                handle(reply, self.inner.set_fee_claim_public_key(public_key), context)
-            },
+
             EpochManagerRequest::AddIntentToEvictValidator { proof, reply } => {
                 handle(reply, self.inner.add_intent_to_evict_validator(*proof).await, context)
             },

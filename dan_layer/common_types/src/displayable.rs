@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     fmt,
     fmt::{Debug, Display},
     time::Duration,
@@ -55,6 +55,21 @@ impl<T: Display> Display for DisplayContainer<&'_ Option<T>> {
 }
 
 impl<T: Display> Display for DisplayContainer<&'_ [T]> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let len = self.value.len();
+        write!(f, "[")?;
+        for (i, item) in self.value.iter().enumerate() {
+            Display::fmt(item, f)?;
+            if i < len - 1 {
+                write!(f, ", ")?;
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
+}
+
+impl<T: Display> Display for DisplayContainer<&'_ VecDeque<T>> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let len = self.value.len();
         write!(f, "[")?;
@@ -141,6 +156,13 @@ impl<T: Display> Displayable for Vec<T> {
 
     fn display(&self) -> DisplayContainer<&'_ [T]> {
         (*self.as_slice()).display()
+    }
+}
+impl<T: Display> Displayable for VecDeque<T> {
+    type Item = VecDeque<T>;
+
+    fn display(&self) -> DisplayContainer<&'_ VecDeque<T>> {
+        DisplayContainer { value: self }
     }
 }
 

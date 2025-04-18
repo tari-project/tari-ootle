@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::{
     alerting::{Alerting, MatterMostNotifier, TelegramNotifier},
-    config::Channels,
+    config::ChannelConfig,
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -127,7 +127,7 @@ pub async fn process_status_log(mut rx: mpsc::Receiver<ProcessStatus>) {
     }
 }
 
-fn setup_alerting_clients(cfg: Channels) -> (Option<MatterMostNotifier>, Option<TelegramNotifier>) {
+fn setup_alerting_clients(cfg: ChannelConfig) -> (Option<MatterMostNotifier>, Option<TelegramNotifier>) {
     let mut mattermost: Option<MatterMostNotifier> = None;
     if cfg.mattermost.enabled {
         let cfg = cfg.mattermost.clone();
@@ -160,7 +160,7 @@ fn setup_alerting_clients(cfg: Channels) -> (Option<MatterMostNotifier>, Option<
     (mattermost, telegram)
 }
 
-pub async fn process_status_alert(mut rx: mpsc::Receiver<ProcessStatus>, cfg: Channels) {
+pub async fn process_status_alert(mut rx: mpsc::Receiver<ProcessStatus>, cfg: ChannelConfig) {
     let (mut mattermost, mut telegram) = setup_alerting_clients(cfg);
 
     loop {

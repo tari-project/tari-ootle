@@ -360,7 +360,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         if let Some(prev_epoch) = block_decision.end_of_epoch {
             let next_epoch = prev_epoch + Epoch(1);
-            let mut registered_shard_group = None;
 
             // If we're registered for the next epoch. Create a new genesis block.
             if let Some(vn) = self.epoch_manager.get_our_validator_node(next_epoch).await.optional()? {
@@ -369,7 +368,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 let next_shard_group = vn
                     .shard_key
                     .to_shard_group(self.config.consensus_constants.num_preshards, num_committees);
-                registered_shard_group = Some(next_shard_group);
                 self.store.with_write_tx(|tx| {
                     // Generate checkpoint
                     let checkpoint = generate_epoch_checkpoint(&**tx, prev_epoch, local_committee_info.shard_group())?;
@@ -407,16 +405,22 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 // TODO: We should exit consensus to sync for the epoch - when this is implemented, we will not
                 // need to create the genesis, set the pacemaker, etc.
                 self.pacemaker.set_epoch(next_epoch).await?;
+                self.publish_event(HotstuffEvent::EpochChanged {
+                    epoch: next_epoch,
+                    registered_shard_group: Some(next_shard_group),
+                });
             } else {
                 info!(
                     target: LOG_TARGET,
                     "💤 Our validator node is not registered for epoch {next_epoch}.",
-                )
+                );
+
+                self.publish_event(HotstuffEvent::EpochChanged {
+                    epoch: next_epoch,
+                    registered_shard_group: None,
+                });
+                return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch: next_epoch });
             }
-            self.publish_event(HotstuffEvent::EpochChanged {
-                epoch: next_epoch,
-                registered_shard_group,
-            });
         }
 
         // Propose quickly for the end of epoch chain

@@ -594,10 +594,19 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 registered_shard_group,
             } => {
                 if registered_shard_group.is_none() {
+                    let current_epoch = self.pacemaker.current_view().get_epoch();
+                    if current_epoch < epoch {
+                        info!(
+                            target: LOG_TARGET,
+                            "💤 This validator is not registered for next epoch {epoch}. Will stop consensus once the current epoch {current_epoch} has transitioned."
+                        );
+                        return Ok(());
+                    }
                     info!(
                         target: LOG_TARGET,
                         "💤 This validator is not registered for epoch {}. Going to sleep.", epoch
                     );
+
                     return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
                 }
                 info!(

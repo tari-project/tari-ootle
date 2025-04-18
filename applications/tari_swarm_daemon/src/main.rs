@@ -16,6 +16,7 @@ use crate::{
 
 mod cli;
 mod config;
+mod layer_one_transactions;
 mod logger;
 mod process_definitions;
 mod process_manager;
@@ -26,10 +27,9 @@ async fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::init();
     let config_path = cli.get_config_path();
 
-    init_logger()?;
-
     match cli.command {
         Commands::Init(ref args) => {
+            init_logger(None)?;
             if config_path.exists() {
                 if args.force {
                     log::warn!("Overwriting existing config file at {}", config_path.display());
@@ -201,6 +201,7 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         },
         auto_register_previous_templates: true,
         public_ip: None,
+        log_to_file: false,
     })
 }
 
@@ -219,6 +220,8 @@ async fn start(cli: &Cli) -> anyhow::Result<()> {
     })?;
 
     create_paths(&config).await?;
+
+    init_logger(Some(config.base_dir.join("logs/")).filter(|_| config.log_to_file))?;
 
     let mut shutdown = Shutdown::new();
     let signal = shutdown.to_signal().select(exit_signal().context("exit_signal")?);
@@ -255,6 +258,9 @@ async fn create_paths(config: &Config) -> anyhow::Result<()> {
     fs::create_dir_all(&config.base_dir.join("misc"))
         .await
         .context("Failed to create misc directory")?;
+    fs::create_dir_all(&config.base_dir.join("logs"))
+        .await
+        .context("Failed to create templates directory")?;
     Ok(())
 }
 

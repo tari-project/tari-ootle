@@ -22,6 +22,7 @@
 
 use std::{
     fs,
+    fs::File,
     path::{Path, PathBuf},
 };
 
@@ -29,12 +30,16 @@ use reqwest::Url;
 use tari_common::configuration::{CommonConfig, StringList};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::{epoch_oracle_config::EpochOracleConfig, p2p_config::PeerSeedsConfig};
+use tari_dan_common_types::layer_one_transaction::{LayerOneTransactionDef, ValidatorRegistrationParams};
 use tari_engine_types::FromByteType;
 use tari_p2p::Network;
 use tari_shutdown::Shutdown;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
-use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig, ValidatorRegistrationFile};
-use tari_validator_node_client::ValidatorNodeClient;
+use tari_validator_node::{run_validator_node, ApplicationConfig, ValidatorNodeConfig};
+use tari_validator_node_client::{
+    types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
+    ValidatorNodeClient,
+};
 use tari_wallet_daemon_client::types::KeyBranch;
 use tokio::task;
 
@@ -74,10 +79,16 @@ impl ValidatorNodeProcess {
         fs::copy(from, to.join(format!("{}.sqlite", database_name))).expect("Could not copy file");
     }
 
-    pub fn get_registration_info(&self) -> ValidatorRegistrationFile {
-        let registration_file_path = self.temp_dir_path.join("registration.json");
-        let registration_file = fs::read_to_string(registration_file_path).expect("Could not read file");
-        serde_json::from_str(&registration_file).expect("Could not parse file")
+    pub async fn get_registration_info(&self) -> LayerOneTransactionDef<ValidatorRegistrationParams> {
+        let mut client = self.create_client();
+        let resp = client
+            .prepare_layer_one_transaction(PrepareLayerOneTransactionRequest {
+                params: LayerOneTransactionParams::Registration,
+            })
+            .await
+            .expect("Could not prepare transaction");
+        let file = File::open(resp.path).expect("Could not open file");
+        serde_json::from_reader(file).expect("Could not parse file")
     }
 }
 
@@ -160,7 +171,7 @@ pub async fn spawn_validator_node(
 
             // Add all other VNs as peer seeds
             config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
-            run_validator_node(&config, shutdown).await
+            run_validator_node(config, shutdown).await
         }
     });
 

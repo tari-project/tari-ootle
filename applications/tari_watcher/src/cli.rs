@@ -9,7 +9,10 @@ use std::{
 use clap::Parser;
 use tari_common::configuration::Network;
 
-use crate::{config::Config, constants::DEFAULT_VALIDATOR_DIR};
+use crate::{
+    config::{AutoStart, Config},
+    constants::DEFAULT_VALIDATOR_DIR,
+};
 
 #[derive(Clone, Debug, Parser)]
 pub struct Cli {
@@ -72,7 +75,13 @@ pub enum Commands {
 }
 
 #[derive(Clone, Debug, clap::Args)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct InitArgs {
+    #[clap(long)]
+    /// Turns off automatic starting and managing of the validator node.
+    /// --no-auto-register and --no-auto-restart are implicit.
+    pub unmanaged: bool,
+
     #[clap(long)]
     /// Disable initial and auto registration of the validator node
     pub no_auto_register: bool,
@@ -82,13 +91,20 @@ pub struct InitArgs {
     pub no_auto_restart: bool,
 
     #[clap(long, short = 'f')]
+    /// Force overwriting the config file if it already exists
     pub force: bool,
 }
 
 impl InitArgs {
     pub fn apply(&self, config: &mut Config) {
-        config.auto_register = !self.no_auto_register;
-        config.auto_restart = !self.no_auto_restart;
+        config.auto_register = !self.unmanaged || !self.no_auto_register;
+        if self.unmanaged {
+            config.auto_start = AutoStart::Never;
+        } else if self.no_auto_restart {
+            config.auto_start = AutoStart::JustOnce;
+        } else {
+            // Leave the value unchanged
+        }
     }
 }
 

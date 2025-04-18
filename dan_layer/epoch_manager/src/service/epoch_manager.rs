@@ -20,7 +20,13 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{cmp, collections::HashMap, mem, num::NonZeroU32};
+use std::{
+    cmp,
+    collections::HashMap,
+    mem,
+    num::NonZeroU32,
+    sync::{atomic, atomic::AtomicU64, Arc},
+};
 
 use log::*;
 use tari_common_types::types::FixedHash;
@@ -37,7 +43,7 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::global::{models::ValidatorNode, DbEpoch, GlobalDb, MetadataKey};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
-use tari_engine_types::{FromByteType, ToByteType};
+use tari_engine_types::FromByteType;
 use tari_sidechain::EvictionProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::{broadcast, oneshot};
@@ -54,15 +60,15 @@ const LOG_TARGET: &str = "tari::dan::epoch_manager::base_layer";
 pub struct EpochManager<TSpec: EpochManagerSpec> {
     global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
     config: EpochManagerConfig,
-    current_epoch: Epoch,
     has_epoch_changed: bool,
     current_epoch_hash: FixedHash,
     tx_events: broadcast::Sender<EpochManagerEvent>,
     waiting_for_scanning_complete: Vec<oneshot::Sender<Result<(), EpochManagerError>>>,
-    node_public_key: RistrettoPublicKey,
+    node_public_key: RistrettoPublicKeyBytes,
     current_shard_key: Option<SubstateAddress>,
     layer_one_submitter: TSpec::LayerOneSubmitter,
     is_initial_epoch_sync_complete: bool,
+    current_epoch: Arc<AtomicU64>,
 }
 
 impl<TSpec> EpochManager<TSpec>
@@ -73,12 +79,12 @@ where TSpec: EpochManagerSpec
         global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
         layer_one_submitter: TSpec::LayerOneSubmitter,
         tx_events: broadcast::Sender<EpochManagerEvent>,
-        node_public_key: RistrettoPublicKey,
+        node_public_key: RistrettoPublicKeyBytes,
+        current_epoch_atomic: Arc<AtomicU64>,
     ) -> Self {
         Self {
             global_db,
             config,
-            current_epoch: Epoch(0),
             current_epoch_hash: FixedHash::zero(),
             has_epoch_changed: false,
             waiting_for_scanning_complete: Vec::new(),
@@ -87,6 +93,7 @@ where TSpec: EpochManagerSpec
             current_shard_key: None,
             layer_one_submitter,
             is_initial_epoch_sync_complete: false,
+            current_epoch: current_epoch_atomic,
         }
     }
 
@@ -94,9 +101,10 @@ where TSpec: EpochManagerSpec
         info!(target: LOG_TARGET, "Retrieving current epoch and block info from database");
         let mut tx = self.global_db.create_transaction()?;
         let mut metadata = self.global_db.metadata(&mut tx);
-        self.current_epoch = metadata
+        let current_epoch = metadata
             .get_metadata(MetadataKey::EpochManagerCurrentEpoch.as_key_bytes())?
             .unwrap_or(Epoch(0));
+        self.set_current_epoch(current_epoch);
         self.current_shard_key = metadata.get_metadata(MetadataKey::EpochManagerCurrentShardKey.as_key_bytes())?;
         self.current_epoch_hash = metadata
             .get_metadata(MetadataKey::EpochManagerLastEpochHash.as_key_bytes())?
@@ -105,7 +113,7 @@ where TSpec: EpochManagerSpec
     }
 
     pub async fn activate_epoch(&mut self, epoch: Epoch, epoch_hash: FixedHash) -> Result<(), EpochManagerError> {
-        if self.current_epoch >= epoch {
+        if self.current_epoch() >= epoch {
             // no need to update the epoch
             return Ok(());
         }
@@ -171,9 +179,13 @@ where TSpec: EpochManagerSpec
             claim_public_key,
         )?;
 
-        if validator_public_key == self.node_public_key.to_byte_type() {
+        if validator_public_key == self.node_public_key {
             let mut metadata = self.global_db.metadata(&mut tx);
             metadata.set_metadata(MetadataKey::EpochManagerCurrentShardKey.as_key_bytes(), &shard_key)?;
+            metadata.set_metadata(
+                MetadataKey::EpochManagerFeeClaimPublicKey.as_key_bytes(),
+                &claim_public_key,
+            )?;
             self.current_shard_key = Some(shard_key);
             info!(
                 target: LOG_TARGET,
@@ -218,14 +230,18 @@ where TSpec: EpochManagerSpec
         metadata.set_metadata(MetadataKey::EpochManagerLastEpochHash.as_key_bytes(), &epoch_hash)?;
 
         tx.commit()?;
-        self.current_epoch = epoch;
+        self.set_current_epoch(epoch);
         self.has_epoch_changed = true;
         self.current_epoch_hash = epoch_hash;
         Ok(())
     }
 
     pub fn current_epoch(&self) -> Epoch {
-        self.current_epoch
+        self.current_epoch.load(atomic::Ordering::SeqCst).into()
+    }
+
+    fn set_current_epoch(&self, epoch: Epoch) {
+        self.current_epoch.store(epoch.as_u64(), atomic::Ordering::SeqCst);
     }
 
     pub fn current_epoch_hash(&self) -> FixedHash {
@@ -251,7 +267,7 @@ where TSpec: EpochManagerSpec
         Ok(vn)
     }
 
-    pub fn get_validator_node_by_address(
+    fn get_validator_node_by_address(
         &self,
         epoch: Epoch,
         address: &TSpec::Addr,
@@ -361,11 +377,15 @@ where TSpec: EpochManagerSpec
         Ok(vns)
     }
 
+    pub fn is_initial_epoch_sync_complete(&self) -> bool {
+        self.is_initial_epoch_sync_complete
+    }
+
     pub async fn on_scanning_complete(&mut self) -> Result<(), EpochManagerError> {
         if !self.is_initial_epoch_sync_complete {
             info!(
                 target: LOG_TARGET,
-                "🌟 Initial epoch sync complete. Current epoch is {}", self.current_epoch
+                "🌟 Initial epoch sync complete. Current epoch is {}", self.current_epoch()
             );
             self.is_initial_epoch_sync_complete = true;
             for reply in mem::take(&mut self.waiting_for_scanning_complete) {
@@ -374,14 +394,14 @@ where TSpec: EpochManagerSpec
         }
 
         if self.has_epoch_changed {
-            let num_committees = self.get_number_of_committees(self.current_epoch)?;
+            let num_committees = self.get_number_of_committees(self.current_epoch())?;
             let shard_group = self
-                .get_our_validator_node(self.current_epoch)
+                .get_our_validator_node(self.current_epoch())
                 .optional()?
                 .map(|vn| vn.shard_key.to_shard_group(self.config.num_preshards, num_committees));
 
             self.publish_event(EpochManagerEvent::EpochChanged {
-                epoch: self.current_epoch,
+                epoch: self.current_epoch(),
                 registered_shard_group: shard_group,
             });
             self.has_epoch_changed = false;
@@ -400,11 +420,13 @@ where TSpec: EpochManagerSpec
 
     pub fn get_our_validator_node(&self, epoch: Epoch) -> Result<ValidatorNode<TSpec::Addr>, EpochManagerError> {
         let vn = self
-            .get_validator_node_by_public_key(epoch, &self.node_public_key.to_byte_type())?
+            .get_validator_node_by_public_key(epoch, &self.node_public_key)?
             .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
-                address: TSpec::Addr::try_from_public_key(&self.node_public_key)
+                address: RistrettoPublicKey::try_from_byte_type(&self.node_public_key)
+                    .ok()
+                    .and_then(|pk| TSpec::Addr::try_from_public_key(&pk))
                     .map(|a| a.to_string())
-                    .unwrap_or_else(|| self.node_public_key.to_string()),
+                    .unwrap_or_else(|| format!("PARSE FAIL for pk bytes {}", self.node_public_key)),
                 epoch,
             })?;
         Ok(vn)
@@ -447,7 +469,7 @@ where TSpec: EpochManagerSpec
 
     pub fn get_local_committee_info(&self, epoch: Epoch) -> Result<CommitteeInfo, EpochManagerError> {
         let vn = self
-            .get_validator_node_by_public_key(epoch, &self.node_public_key.to_byte_type())?
+            .get_validator_node_by_public_key(epoch, &self.node_public_key)?
             .ok_or_else(|| EpochManagerError::ValidatorNodeNotRegistered {
                 address: self.node_public_key.to_string(),
                 epoch,
@@ -503,14 +525,6 @@ where TSpec: EpochManagerSpec
         Ok(fee_claim_public_key)
     }
 
-    pub fn set_fee_claim_public_key(&mut self, public_key: RistrettoPublicKeyBytes) -> Result<(), EpochManagerError> {
-        let mut tx = self.global_db.create_transaction()?;
-        let mut metadata = self.global_db.metadata(&mut tx);
-        metadata.set_metadata(MetadataKey::EpochManagerFeeClaimPublicKey.as_key_bytes(), &public_key)?;
-        tx.commit()?;
-        Ok(())
-    }
-
     fn publish_event(&mut self, event: EpochManagerEvent) {
         let _ignore = self.tx_events.send(event);
     }
@@ -525,7 +539,7 @@ where TSpec: EpochManagerSpec
         }
 
         let proof = LayerOneTransactionDef {
-            proof_type: LayerOnePayloadType::EvictionProof,
+            payload_type: LayerOnePayloadType::EvictionProof,
             payload: proof,
         };
 

@@ -123,7 +123,7 @@ async fn check_and_submit_layer_one_transactions(
         };
         match serde_json::from_reader::<_, LayerOneTransactionDef<serde_json::Value>>(f) {
             Ok(transaction_def) => {
-                info!("Submitting {} transaction", transaction_def.proof_type);
+                info!("Submitting {} transaction", transaction_def.payload_type);
                 if let Err(err) = handle.submit_transaction(transaction_def).await {
                     warn!(
                         "Failed to submit transaction: {}. Moving to {}",

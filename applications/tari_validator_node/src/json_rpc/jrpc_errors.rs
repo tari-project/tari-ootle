@@ -29,20 +29,21 @@ use axum_jrpc::{
     JsonRpcResponse,
 };
 
-// pub fn invalid_argument<T: Display>(answer_id: i64) -> impl Fn(T) -> JsonRpcResponse {
+// pub fn invalid_params<T: Display, S: Display>(answer_id: i64, details: S) -> impl Fn(T) -> JsonRpcResponse {
 //     move |err| {
-//         log::error!(target: LOG_TARGET, "🚨 Invalid argument: {}", err);
+//         log::error!(target: LOG_TARGET, "⚠️ Request has invalid params: {details}. Error: {}", err);
 //         JsonRpcResponse::error(
 //             answer_id,
 //             JsonRpcError::new(
 //                 JsonRpcErrorReason::InvalidParams,
-//                 format!("Invalid argument: {}", err),
+//                 format!("Invalid params: {}. Error: {}", details, err),
 //                 serde_json::Value::Null,
 //             ),
 //         )
 //     }
 // }
 
+/// Creates a handler for internal errors. This will log the error and return a generic message to the user.
 pub fn internal_error<T: Display>(answer_id: i64) -> impl Fn(T) -> JsonRpcResponse {
     move |err| {
         let msg = if cfg!(debug_assertions) || option_env!("CI").is_some() {
@@ -63,6 +64,29 @@ pub fn not_found<T: Into<String>>(answer_id: i64, details: T) -> JsonRpcResponse
         answer_id,
         JsonRpcError::new(
             JsonRpcErrorReason::ApplicationError(404),
+            details.into(),
+            serde_json::Value::Null,
+        ),
+    )
+}
+
+/// Creates a handler for general errors. The error will be sent to the client as a JSON-RPC error response.
+pub fn general_error<T: Into<String>>(answer_id: i64, details: T) -> JsonRpcResponse {
+    JsonRpcResponse::error(
+        answer_id,
+        JsonRpcError::new(
+            JsonRpcErrorReason::ApplicationError(500),
+            details.into(),
+            serde_json::Value::Null,
+        ),
+    )
+}
+
+pub fn invalid_operation<T: Into<String>>(answer_id: i64, details: T) -> JsonRpcResponse {
+    JsonRpcResponse::error(
+        answer_id,
+        JsonRpcError::new(
+            JsonRpcErrorReason::ApplicationError(400),
             details.into(),
             serde_json::Value::Null,
         ),

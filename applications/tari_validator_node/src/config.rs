@@ -108,7 +108,7 @@ pub struct ValidatorNodeConfig {
     pub template_sidechain_id: Option<RistrettoPublicKey>,
     /// The burnt utxo sidechain id
     pub burnt_utxo_sidechain_id: Option<RistrettoPublicKey>,
-    /// The path to store layer one transactions.
+    /// The path to store layer-one transactions.
     pub layer_one_transaction_path: PathBuf,
 }
 

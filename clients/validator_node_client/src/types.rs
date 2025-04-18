@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{ops::RangeInclusive, sync::Arc, time::Duration};
+use std::{ops::RangeInclusive, path::PathBuf, sync::Arc, time::Duration};
 
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
@@ -693,6 +693,7 @@ pub struct GetEpochManagerStatsResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub current_block_hash: FixedHash,
     pub is_valid: bool,
+    pub is_initial_scanning_complete: bool,
     pub start_epoch: Option<Epoch>,
     pub committee_info: Option<CommitteeInfo>,
 }
@@ -796,4 +797,34 @@ pub struct GetConnectionsResponse {
 )]
 pub struct GetMempoolStatsResponse {
     pub size: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
+)]
+pub struct PrepareLayerOneTransactionRequest {
+    pub params: LayerOneTransactionParams,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
+)]
+pub enum LayerOneTransactionParams {
+    Registration,
+    Exit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/validator-node-client/")
+)]
+pub struct PrepareLayerOneTransactionResponse {
+    pub path: PathBuf,
 }

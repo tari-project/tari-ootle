@@ -1,14 +1,20 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{fmt::Display, time::Duration};
+use std::{
+    fmt::Display,
+    ops::ControlFlow,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
-use anyhow::{anyhow, Context};
-use serde::{Deserialize, Serialize};
-use tari_core::transactions::transaction_components::ValidatorNodeSignature;
-use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_validator_node_client::ValidatorNodeClient;
-use tokio::{fs, time::sleep};
+use anyhow::bail;
+use log::info;
+use tari_validator_node_client::{
+    types::{LayerOneTransactionParams, PrepareLayerOneTransactionRequest},
+    ValidatorNodeClient,
+};
+use tokio::time::sleep;
 use url::Url;
 
 use crate::process_manager::Instance;
@@ -35,43 +41,70 @@ impl ValidatorNodeProcess {
         Ok(client)
     }
 
-    pub async fn is_json_rpc_listening(&self) -> bool {
-        let mut client = self
-            .connect_client()
-            .expect("Validator node client is infallible unless using TLS backend");
-        match client.get_identity().await {
-            Ok(_) => true,
-            Err(err) => {
-                log::error!("Failed to connect to validator node: {}", err);
-                false
-            },
-        }
+    pub async fn wait_for_startup(&self, timeout: Duration) -> anyhow::Result<()> {
+        let client = self.connect_client()?;
+
+        attempt(timeout, || {
+            let mut client = client.clone();
+            async move {
+                match client.get_identity().await {
+                    Ok(_) => Ok(ControlFlow::Break(())),
+                    Err(err) => {
+                        log::error!("Failed to connect to validator node: {}", err);
+                        log::info!(
+                            "Waiting for validator node {} ({}) to start up...",
+                            self.instance().id(),
+                            self.instance().name()
+                        );
+                        Ok(ControlFlow::Continue(()))
+                    },
+                }
+            }
+        })
+        .await
     }
 
-    pub async fn wait_for_startup(&self, timeout: Duration) -> anyhow::Result<()> {
-        let mut attempts = 0usize;
-        loop {
-            if attempts * 1000 > timeout.as_millis() as usize {
-                return Err(anyhow!(
-                    "Validator node {} ({}) did not start up within {} seconds",
-                    self.instance().id(),
-                    self.instance().name(),
-                    timeout.as_secs()
-                ));
-            }
-            if self.is_json_rpc_listening().await {
-                return Ok(());
-            }
+    pub async fn wait_for_initial_scanning_to_complete(&self, timeout: Duration) -> anyhow::Result<()> {
+        let client = self.connect_client()?;
 
-            log::info!(
-                "Waiting for validator node {} ({}) to start up (attempt {})...",
-                self.instance().id(),
-                self.instance().name(),
-                attempts
-            );
-            sleep(Duration::from_secs(1)).await; // wait for the validator node to start up before continuing
-            attempts += 1;
-        }
+        attempt(timeout, || {
+            let mut client = client.clone();
+            async move {
+                let stats = client.get_epoch_manager_stats().await?;
+                if stats.is_initial_scanning_complete {
+                    return Ok(ControlFlow::Break(()));
+                }
+                log::info!(
+                    "Waiting for validator node {} ({}) to complete initial scanning...",
+                    self.instance().id(),
+                    self.instance().name()
+                );
+                Ok(ControlFlow::Continue(()))
+            }
+        })
+        .await
+    }
+
+    pub async fn prepare_registration_transaction(&self) -> anyhow::Result<()> {
+        let mut client = self.connect_client()?;
+        client
+            .prepare_layer_one_transaction(PrepareLayerOneTransactionRequest {
+                params: LayerOneTransactionParams::Registration,
+            })
+            .await?;
+        info!("🟢 Submitted validator node registration prepare request to {self}");
+        Ok(())
+    }
+
+    pub async fn prepare_exit_transaction(&self) -> anyhow::Result<()> {
+        let mut client = self.connect_client()?;
+        client
+            .prepare_layer_one_transaction(PrepareLayerOneTransactionRequest {
+                params: LayerOneTransactionParams::Exit,
+            })
+            .await?;
+        info!("🟢 Submitted validator node exit prepare request to {self}");
+        Ok(())
     }
 
     pub fn json_rpc_address(&self) -> Url {
@@ -79,13 +112,8 @@ impl ValidatorNodeProcess {
         Url::parse(&format!("http://localhost:{jrpc_port}/json_rpc")).unwrap()
     }
 
-    pub async fn get_registration_info(&self) -> anyhow::Result<ValidatorRegistrationInfo> {
-        let reg_file = self.instance.base_path().join("registration.json");
-        let info = fs::read_to_string(reg_file)
-            .await
-            .context("Failed to load registration.json")?;
-        let reg = json5::from_str(&info)?;
-        Ok(reg)
+    pub fn layer_one_transaction_path(&self) -> PathBuf {
+        self.instance.base_path().join("data/layer_one_transactions")
     }
 }
 
@@ -95,9 +123,20 @@ impl Display for ValidatorNodeProcess {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct ValidatorRegistrationInfo {
-    pub signature: ValidatorNodeSignature,
-    pub public_key: RistrettoPublicKey,
-    pub claim_fees_public_key: RistrettoPublicKey,
+pub async fn attempt<F, Fut, T>(timeout: Duration, mut f: F) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<ControlFlow<T>>>,
+{
+    let start = Instant::now();
+    loop {
+        if start.elapsed() > timeout {
+            bail!("Operation timed out");
+        }
+
+        match f().await? {
+            ControlFlow::Break(result) => return Ok(result),
+            ControlFlow::Continue(_) => sleep(Duration::from_secs(1)).await,
+        }
+    }
 }

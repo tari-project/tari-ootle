@@ -568,6 +568,11 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 validator_nodes::public_key,
             ))
             .filter(committees::epoch.eq(epoch.as_u64() as i64))
+            .filter(
+                validator_nodes::end_epoch
+                    .is_null()
+                    .or(validator_nodes::end_epoch.gt(epoch.as_u64() as i64)),
+            )
             .load::<(i32, i32, String, Vec<u8>)>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,

@@ -5,7 +5,7 @@ use std::num::NonZeroU64;
 
 use log::*;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup, VersionedSubstateId};
+use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup, SubstateAddress};
 use tari_dan_storage::{
     consensus_models::{
         AbortReason,
@@ -1529,10 +1529,11 @@ where TConsensusSpec: ConsensusSpec
             );
             return Ok(Some(NoVoteReason::MintConfidentialOutputUnknown));
         };
-        let id = VersionedSubstateId::new(atom.commitment, 0);
-        let shard = id.to_shard(local_committee_info.num_preshards());
+        let substate_id = atom.commitment.into();
+        let addr = SubstateAddress::from_substate_id(&substate_id, 0);
+        let shard = addr.to_shard(local_committee_info.num_preshards());
         let change = SubstateChange::Up {
-            id,
+            id: substate_id,
             shard,
             substate: Substate::new(0, output),
         };

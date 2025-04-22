@@ -40,7 +40,6 @@ impl BlockDiff {
         let substate_id = SubstateId::from_str(&d.substate_id).map_err(|err| StorageError::DataInconsistency {
             details: format!("Invalid substate id {}: {}", d.substate_id, err),
         })?;
-        let id = VersionedSubstateId::new(substate_id, d.version as u32);
         let shard = Shard::from(d.shard as u32);
         match d.change.as_str() {
             "Up" => {
@@ -48,12 +47,15 @@ impl BlockDiff {
                     details: "Block diff change type is Up but state is missing".to_string(),
                 })?;
                 Ok(consensus_models::SubstateChange::Up {
-                    id,
+                    id: substate_id,
                     shard,
                     substate: deserialize_json(&state)?,
                 })
             },
-            "Down" => Ok(consensus_models::SubstateChange::Down { id, shard }),
+            "Down" => Ok(consensus_models::SubstateChange::Down {
+                id: VersionedSubstateId::new(substate_id, d.version as u32),
+                shard,
+            }),
             _ => Err(StorageError::DataInconsistency {
                 details: format!("Invalid block diff change type: {}", d.change),
             }),

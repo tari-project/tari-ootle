@@ -656,9 +656,9 @@ impl Block {
         for change in changes {
             match change {
                 SubstateChange::Up { id, shard, substate } => {
-                    let version = id.version();
+                    let version = substate.version();
                     SubstateRecord::new(
-                        id.into_substate_id(),
+                        id,
                         version,
                         substate.into_substate_value(),
                         shard,

@@ -4,6 +4,7 @@
 use std::{
     collections::{hash_map, HashMap, HashSet},
     fmt::Display,
+    fs,
     time::Duration,
 };
 
@@ -560,6 +561,7 @@ impl Test {
 pub struct TestBuilder {
     committees: HashMap<u32, Committee<TestAddress>>,
     sql_address: String,
+    rocks_path: Option<String>,
     timeout: Option<Duration>,
     debug_sql_file: Option<String>,
     message_filter: Option<MessageFilter>,
@@ -575,6 +577,7 @@ impl TestBuilder {
             sql_address: ":memory:".to_string(),
             timeout: Some(Duration::from_secs(10)),
             debug_sql_file: None,
+            rocks_path: None,
             message_filter: None,
             failure_nodes: Vec::new(),
             claim_keys: None,
@@ -616,6 +619,12 @@ impl TestBuilder {
     #[allow(dead_code)]
     pub fn with_sql_url<T: Into<String>>(mut self, sql_address: T) -> Self {
         self.sql_address = sql_address.into();
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_rocks_path<T: Into<String>>(mut self, path: T) -> Self {
+        self.rocks_path = Some(path.into());
         self
     }
 
@@ -662,6 +671,7 @@ impl TestBuilder {
         leader_strategy: &RoundRobinLeaderStrategy,
         epoch_manager: &TestEpochManager,
         sql_address: String,
+        rocks_path_override: Option<String>,
         config: HotstuffConfig,
         failure_nodes: &[TestAddress],
         shutdown_signal: ShutdownSignal,
@@ -681,10 +691,22 @@ impl TestBuilder {
             })
             .map(|(vn, shard_group)| {
                 let sql_address = sql_address.replace("{}", vn.address.as_str());
+                let rocks_path_override = rocks_path_override
+                    .as_ref()
+                    .map(|path| path.replace("{}", vn.address.as_str()));
+
+                if let Some(ref rocks_path) = rocks_path_override {
+                    if fs::exists(rocks_path).unwrap() {
+                        log::info!("Removing existing rocks path {}", rocks_path);
+                        let _ignore = fs::remove_dir_all(rocks_path);
+                    }
+                    fs::create_dir_all(rocks_path).unwrap();
+                }
                 let (sk, pk) = helpers::derive_keypair_from_address(&vn.address);
 
                 let (channels, validator) = Validator::builder()
                     .with_sql_url(sql_address)
+                    .with_rocks_override_path(rocks_path_override)
                     .with_config(config.clone())
                     .with_address_and_secret_key(vn.address.clone(), sk)
                     .with_shard(vn.shard_key)
@@ -728,6 +750,7 @@ impl TestBuilder {
             &leader_strategy,
             &epoch_manager,
             self.sql_address,
+            self.rocks_path,
             self.config,
             &self.failure_nodes,
             shutdown.to_signal(),

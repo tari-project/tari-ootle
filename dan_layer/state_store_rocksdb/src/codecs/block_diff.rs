@@ -52,6 +52,7 @@ impl DbCodec<BlockDiffKey> for BlockIdSubstateIdVersionCodec {
     }
 }
 
+/// Codec for the BlockDiffKey. Encodes in substate_id, block_id, and version order.
 #[derive(Default)]
 pub struct BlockDiffKeyCodec {
     substate_id_codec: SubstateIdCodec,

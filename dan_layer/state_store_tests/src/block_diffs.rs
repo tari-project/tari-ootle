@@ -46,10 +46,9 @@ fn block_diffs_operations(db: impl StateStore) {
     let block_id9 = *block9.id();
     let substate_id = create_random_substate_id();
     let version = 0;
-    let versioned_substate_id = VersionedSubstateId::new(substate_id.clone(), version);
     let substate_record = build_substate_record(&substate_id, version);
     let change = SubstateChange::Up {
-        id: versioned_substate_id.clone(),
+        id: substate_id.clone(),
         shard: block9.shard_group().start(),
         substate: Substate::new(version, substate_record.substate_value.clone().unwrap()),
     };
@@ -57,13 +56,14 @@ fn block_diffs_operations(db: impl StateStore) {
     let value2 = build_substate_value(Some(
         substate_record.substate_value().unwrap().component().unwrap().entity_id,
     ));
+    let versioned_substate_id = VersionedSubstateId::new(substate_id.clone(), version);
     let changes = &[
         SubstateChange::Down {
             id: versioned_substate_id.clone(),
             shard: block9.shard_group().end(),
         },
         SubstateChange::Up {
-            id: versioned_substate_id.to_next_version(),
+            id: substate_id.clone(),
             shard: block9.shard_group().end(),
             substate: Substate::new(version + 1, value2.clone()),
         },
@@ -79,7 +79,7 @@ fn block_diffs_operations(db: impl StateStore) {
         .unwrap();
     match &change {
         SubstateChange::Up { id, shard, substate } => {
-            assert_eq!(*id, versioned_substate_id.to_next_version());
+            assert_eq!(id, versioned_substate_id.substate_id());
             assert_eq!(*shard, block9.shard_group().end());
             assert_eq!(substate.version(), version + 1);
             assert_eq!(substate.to_value_hash(), hash_substate(&value2, version + 1));

@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod block_diff;
 pub mod blocks;
 pub mod bookkeeping;
 pub mod databases;

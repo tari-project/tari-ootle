@@ -24,6 +24,8 @@ async fn check_state_transitions() {
         .add_committee(0, vec!["1"])
         .start()
         .await;
+    let _ignore = test.send_transaction_to_all(Decision::Commit, 100, 1, 10).await;
+    let _ignore = test.send_transaction_to_all(Decision::Commit, 200, 1, 1).await;
     let _ignore = test.send_transaction_to_all(Decision::Commit, 1, 1, 1).await;
     test.start_epoch(Epoch(1)).await;
 

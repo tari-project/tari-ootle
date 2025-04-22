@@ -346,6 +346,10 @@ impl VersionedSubstateId {
         Self::new(self.substate_id.clone(), self.version + 1)
     }
 
+    pub fn into_next_version(self) -> Self {
+        Self::new(self.substate_id, self.version + 1)
+    }
+
     pub fn as_ref(&self) -> VersionedSubstateIdRef {
         VersionedSubstateIdRef {
             substate_id: &self.substate_id,

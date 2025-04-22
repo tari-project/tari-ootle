@@ -4,14 +4,20 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{shard::Shard, SubstateAddress, ToSubstateAddress, VersionedSubstateId};
+use tari_dan_common_types::{
+    shard::Shard,
+    SubstateAddress,
+    ToSubstateAddress,
+    VersionedSubstateId,
+    VersionedSubstateIdRef,
+};
 use tari_engine_types::substate::{Substate, SubstateId};
 use tari_state_tree::SubstateTreeChange;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateChange {
     Up {
-        id: VersionedSubstateId,
+        id: SubstateId,
         shard: Shard,
         substate: Substate,
     },
@@ -24,20 +30,23 @@ pub enum SubstateChange {
 impl SubstateChange {
     pub fn to_substate_address(&self) -> SubstateAddress {
         match self {
-            SubstateChange::Up { id, .. } => id.to_substate_address(),
+            SubstateChange::Up { id, substate, .. } => SubstateAddress::from_substate_id(id, substate.version()),
             SubstateChange::Down { id, .. } => id.to_substate_address(),
         }
     }
 
-    pub fn versioned_substate_id(&self) -> &VersionedSubstateId {
+    pub fn versioned_substate_id(&self) -> VersionedSubstateIdRef<'_> {
         match self {
-            SubstateChange::Up { id, .. } => id,
-            SubstateChange::Down { id, .. } => id,
+            SubstateChange::Up { id, substate, .. } => VersionedSubstateIdRef::new(id, substate.version()),
+            SubstateChange::Down { id, .. } => id.as_ref(),
         }
     }
 
     pub fn substate_id(&self) -> &SubstateId {
-        self.versioned_substate_id().substate_id()
+        match self {
+            SubstateChange::Up { id, .. } => id,
+            SubstateChange::Down { id, .. } => id.substate_id(),
+        }
     }
 
     pub fn version(&self) -> u32 {
@@ -92,7 +101,14 @@ impl Display for SubstateChange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SubstateChange::Up { id, shard, substate } => {
-                write!(f, "Up: {}, {}, substate hash: {}", id, shard, substate.to_value_hash())
+                write!(
+                    f,
+                    "Up: {}v{}, {}, substate hash: {}",
+                    id,
+                    substate.version(),
+                    shard,
+                    substate.to_value_hash()
+                )
             },
             SubstateChange::Down { id, shard } => write!(f, "Down: {}, {}", id, shard),
         }
@@ -103,7 +119,7 @@ impl From<&SubstateChange> for SubstateTreeChange {
     fn from(value: &SubstateChange) -> Self {
         match value {
             SubstateChange::Up { id, substate, .. } => SubstateTreeChange::Up {
-                id: id.clone(),
+                id: VersionedSubstateId::new(id.clone(), substate.version()),
                 value_hash: substate.to_value_hash(),
             },
             SubstateChange::Down { id, .. } => SubstateTreeChange::Down { id: id.clone() },

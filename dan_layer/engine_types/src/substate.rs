@@ -104,6 +104,10 @@ impl Substate {
     pub fn to_value_hash(&self) -> FixedHash {
         hash_substate(self.substate_value(), self.version)
     }
+
+    pub fn previous_version(&self) -> Option<u32> {
+        self.version.checked_sub(1)
+    }
 }
 
 pub fn hash_substate(substate: &SubstateValue, version: u32) -> FixedHash {

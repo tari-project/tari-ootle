@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::path::{Path, PathBuf};
+
 use tari_common_types::types::PrivateKey;
 use tari_consensus::{
     hotstuff::{ConsensusCurrentState, ConsensusWorker, ConsensusWorkerContext, HotstuffConfig, HotstuffWorker},
@@ -39,7 +41,9 @@ pub struct ValidatorBuilder {
     pub shard_group: ShardGroup,
     pub sql_url: String,
     #[allow(dead_code)]
-    pub rocks_path: TempDir,
+    pub rocks_tmp_path: TempDir,
+    #[allow(dead_code)]
+    pub rocks_override_path: Option<PathBuf>,
     pub leader_strategy: RoundRobinLeaderStrategy,
     pub num_committees: u32,
     pub epoch_manager: Option<TestEpochManager>,
@@ -58,7 +62,8 @@ impl ValidatorBuilder {
             num_committees: 0,
             shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
             sql_url: ":memory".to_string(),
-            rocks_path: tempfile::tempdir().unwrap(),
+            rocks_override_path: None,
+            rocks_tmp_path: tempfile::tempdir().unwrap(),
             leader_strategy: RoundRobinLeaderStrategy::new(),
             epoch_manager: None,
             transaction_executions: TestExecutionSpecStore::new(),
@@ -103,6 +108,11 @@ impl ValidatorBuilder {
         self
     }
 
+    pub fn with_rocks_override_path<P: AsRef<Path>>(&mut self, path: Option<P>) -> &mut Self {
+        self.rocks_override_path = path.as_ref().map(|p| p.as_ref().to_path_buf());
+        self
+    }
+
     pub fn with_leader_strategy(&mut self, leader_strategy: RoundRobinLeaderStrategy) -> &mut Self {
         self.leader_strategy = leader_strategy;
         self
@@ -137,7 +147,15 @@ impl ValidatorBuilder {
         let inbound_messaging = TestInboundMessaging::new(self.address.clone(), rx_hs_message, rx_loopback);
 
         #[cfg(not(feature = "sqlite_backend"))]
-        let store = TestStore::open(&self.rocks_path).unwrap();
+        let store = {
+            let rocks_path = self
+                .rocks_override_path
+                .as_ref()
+                .map(|p| p.as_path())
+                .unwrap_or_else(|| self.rocks_tmp_path.path());
+            log::info!("Rocksdb path {}", rocks_path.display());
+            TestStore::open(rocks_path).unwrap()
+        };
         #[cfg(feature = "sqlite_backend")]
         let store = TestStore::connect(&self.sql_url).unwrap();
         let signing_service = TestVoteSignatureService::new(self.address.clone());

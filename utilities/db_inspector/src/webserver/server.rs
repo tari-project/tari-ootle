@@ -47,6 +47,10 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         get(handlers::blocks::list),
     )
         .route(
+            "/databases/:db_name/column-families/block_diff",
+            get(handlers::block_diff::list),
+        )
+        .route(
             "/databases/:db_name/column-families/bookkeeping",
             get(handlers::bookkeeping::list),
         );
@@ -62,7 +66,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         models::foreign_proposal::EpochIndex,
         models::foreign_proposal::UnconfirmedIndex,
         models::block::EpochHeightIndex,
-        models::block_diff::BlockDiffModel,
+        // models::block_diff::BlockDiffModel,
         models::block_diff::SubstateIdIndex,
         models::quorum_certificate::QuorumCertificateModel,
         models::quorum_certificate::QuorumCertificateBlockIndex,

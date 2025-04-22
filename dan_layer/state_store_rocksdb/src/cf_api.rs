@@ -62,7 +62,7 @@ impl<'db, DB, CF: Cf> CfContext<'db, DB, CF> {
 }
 
 impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
-    fn encode_key(&self, key: &CF::Key) -> EncodeVec {
+    pub fn encode_key(&self, key: &CF::Key) -> EncodeVec {
         self.key_codec.encode(key).unwrap_or_else(|e| {
             panic!(
                 "database corruption: key encoding failed for CF[{}], key type {}: {}",

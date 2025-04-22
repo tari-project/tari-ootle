@@ -44,7 +44,7 @@ fn it_allows_substate_up_for_v0() {
     // Cannot put version 1
     store
         .put(SubstateChange::Up {
-            id: VersionedSubstateId::new(id.clone(), 1),
+            id: id.clone(),
             shard: Shard::first(),
             substate: Substate::new(1, value.clone()),
         })
@@ -52,7 +52,7 @@ fn it_allows_substate_up_for_v0() {
 
     store
         .put(SubstateChange::Up {
-            id: VersionedSubstateId::new(id.clone(), 0),
+            id: id.clone(),
             shard: Shard::first(),
             substate: Substate::new(0, value),
         })
@@ -82,11 +82,12 @@ fn it_allows_down_then_up() {
         })
         .unwrap();
 
+    let next_version = id.to_next_version();
     store
         .put(SubstateChange::Up {
-            id: id.to_next_version(),
+            id: next_version.substate_id().clone(),
             shard: Shard::first(),
-            substate: new_substate(1, 1),
+            substate: new_substate(1, next_version.version()),
         })
         .unwrap();
 
@@ -106,9 +107,9 @@ fn it_fails_if_previous_version_is_not_down() {
     let mut store = create_pending_store(&tx);
     let err = store
         .put(SubstateChange::Up {
-            id: id.to_next_version(),
+            id: id.substate_id().clone(),
             shard: Shard::first(),
-            substate: new_substate(1, 1),
+            substate: new_substate(1, id.version() + 1),
         })
         .unwrap_err();
 

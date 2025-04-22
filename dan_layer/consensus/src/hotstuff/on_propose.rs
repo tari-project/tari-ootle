@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     fmt::Display,
     num::NonZeroU64,
 };
@@ -14,11 +14,10 @@ use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     displayable::Displayable,
     optional::Optional,
-    shard::Shard,
     Epoch,
     ExtraData,
     NodeHeight,
-    VersionedSubstateId,
+    SubstateAddress,
 };
 use tari_dan_storage::{
     consensus_models::{
@@ -543,10 +542,11 @@ where TConsensusSpec: ConsensusSpec
 
         // This relies on the UTXO commands being ordered after transaction commands
         for (commitment, output) in batch.burnt_utxos {
-            let id = VersionedSubstateId::new(commitment, 0);
-            let shard = id.to_shard(local_committee_info.num_preshards());
+            let substate_id = commitment.into();
+            let addr = SubstateAddress::from_substate_id(&substate_id, 0);
+            let shard = addr.to_shard(local_committee_info.num_preshards());
             let change = SubstateChange::Up {
-                id,
+                id: substate_id,
                 shard,
                 substate: Substate::new(0, output),
             };
@@ -559,11 +559,6 @@ where TConsensusSpec: ConsensusSpec
             "command(s) for next block: [{}]",
             commands.display()
         );
-
-        let timer = TraceTimer::info(LOG_TARGET, "Propose calculate state root");
-
-        let pending_tree_diffs =
-            PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, start_of_chain_block.block_id())?;
 
         // Add proposer fee substate
         if total_leader_fee > 0 {
@@ -583,6 +578,9 @@ where TConsensusSpec: ConsensusSpec
             )?;
         }
 
+        let timer = TraceTimer::info(LOG_TARGET, "Propose calculate state root");
+        let pending_tree_diffs =
+            PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, start_of_chain_block.block_id())?;
         let (state_root, _) = calculate_state_merkle_root(
             tx,
             local_committee_info.shard_group(),
@@ -594,12 +592,13 @@ where TConsensusSpec: ConsensusSpec
         )?;
         timer.done();
 
-        let non_local_shards = get_non_local_shards(substate_store.diff(), local_committee_info);
-
         let foreign_counters = ForeignSendCounters::get_or_default(tx, parent_block.block_id())?;
-        let foreign_indexes = non_local_shards
+        let foreign_indexes = substate_store
+            .diff()
             .iter()
-            .map(|shard| (*shard, foreign_counters.get_count(*shard) + 1))
+            .map(|change| change.shard())
+            .filter(|shard| !local_committee_info.shard_group().contains(shard))
+            .map(|shard| (shard, foreign_counters.get_count(shard) + 1))
             .collect();
 
         let mut header = BlockHeader::create(
@@ -1096,19 +1095,6 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(executed.into_execution())
     }
-}
-
-pub fn get_non_local_shards<'a, I: IntoIterator<Item = &'a SubstateChange>>(
-    diff: I,
-    local_committee_info: &CommitteeInfo,
-) -> HashSet<Shard> {
-    diff.into_iter()
-        .map(|ch| {
-            ch.versioned_substate_id()
-                .to_shard(local_committee_info.num_preshards())
-        })
-        .filter(|shard| !local_committee_info.shard_group().contains(shard))
-        .collect()
 }
 
 #[derive(Default)]

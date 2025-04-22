@@ -83,7 +83,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
             });
         }
         Ok(SubstateChange::Up {
-            id: VersionedSubstateId::new(id.clone(), substate.version()),
+            id: id.clone(),
             shard: substate.created_by_shard,
             substate: substate
                 .into_substate()
@@ -114,7 +114,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                     let up = SubstateChange::Up {
                         shard: id.to_shard(num_preshards),
                         substate: Substate::new(next_id.version(), value),
-                        id: next_id,
+                        id: next_id.into_substate_id(),
                     };
                     self.put(up)?;
                 },
@@ -124,37 +124,36 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
 
         let Some(change) = self.get_latest_change_from_store(substate_id).optional()? else {
             let value = creator(None)?;
-            let id = VersionedSubstateId::new(substate_id.clone(), 0);
+            let id = SubstateAddress::from_substate_id(substate_id, 0);
             let up = SubstateChange::Up {
                 shard: id.to_shard(num_preshards),
-                substate: Substate::new(id.version(), value),
-                id,
+                substate: Substate::new(0, value),
+                id: substate_id.clone(),
             };
             self.put(up)?;
             return Ok(());
         };
         match change {
             SubstateChange::Up {
-                mut substate,
-                id,
-                shard,
-                ..
+                substate, id, shard, ..
             } => {
-                updater(substate.substate_value_mut())?;
-                self.put(SubstateChange::Down { id: id.clone(), shard })?;
-                self.put(SubstateChange::Up {
-                    id: id.to_next_version(),
+                self.insert(SubstateChange::Down {
+                    id: VersionedSubstateId::new(id.clone(), substate.version()),
                     shard,
-                    substate,
-                })?;
+                });
+                let next_version = substate.version() + 1;
+                let mut substate_value = substate.into_substate_value();
+                updater(&mut substate_value)?;
+                let substate = Substate::new(next_version, substate_value);
+                self.insert(SubstateChange::Up { id, shard, substate });
             },
             SubstateChange::Down { id, .. } => {
                 let value = creator(Some(id.as_ref()))?;
-                let next_id = id.to_next_version();
+                let next_id = id.into_next_version();
                 let up = SubstateChange::Up {
-                    shard: id.to_shard(self.num_preshards),
+                    shard: next_id.to_shard(self.num_preshards),
                     substate: Substate::new(next_id.version(), value),
-                    id: next_id,
+                    id: next_id.into_substate_id(),
                 };
                 self.put(up)?;
             },
@@ -175,7 +174,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
                 .up_substate()
                 .cloned()
                 .ok_or_else(|| SubstateStoreError::SubstateIsDown {
-                    id: change.versioned_substate_id().clone(),
+                    id: change.versioned_substate_id().to_owned(),
                 });
         }
 
@@ -202,9 +201,9 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> ReadableSubstateStore
 impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingSubstateStore<'a, 'tx, TStore> {
     fn put(&mut self, change: SubstateChange) -> Result<(), Self::Error> {
         match &change {
-            SubstateChange::Up { id, .. } => {
-                if let Some(v) = id.to_previous_version() {
-                    self.assert_is_down(&v)?;
+            SubstateChange::Up { id, substate, .. } => {
+                if let Some(v) = substate.previous_version() {
+                    self.assert_is_down(VersionedSubstateIdRef::new(id, v))?;
                 }
             },
             SubstateChange::Down { id, .. } => {
@@ -234,11 +233,11 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
             if id.is_validator_fee_pool() {
                 continue;
             }
-            let id = VersionedSubstateId::new(id.clone(), substate.version());
-            let shard = id.to_shard(self.num_preshards);
+            let addr = SubstateAddress::from_substate_id(id, substate.version());
+            let shard = addr.to_shard(self.num_preshards);
             debug!(target: LOG_TARGET, "🔼️ Up: {id} {shard} value hash: {}", substate.to_value_hash());
             self.put(SubstateChange::Up {
-                id,
+                id: id.clone(),
                 shard,
                 substate: substate.clone(),
             })?;
@@ -753,10 +752,10 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         }
     }
 
-    fn assert_is_down(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
+    fn assert_is_down(&self, id: VersionedSubstateIdRef<'_>) -> Result<(), SubstateStoreError> {
         if let Some(change) = self.get_pending(&id.to_substate_address()) {
             if change.is_up() {
-                return Err(SubstateStoreError::ExpectedSubstateDown { id: id.clone() });
+                return Err(SubstateStoreError::ExpectedSubstateDown { id: id.to_owned() });
             }
             return Ok(());
         }
@@ -765,7 +764,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             BlockDiff::get_for_versioned_substate(self.read_transaction(), &self.parent_block, id).optional()?
         {
             if change.is_up() {
-                return Err(SubstateStoreError::ExpectedSubstateDown { id: id.clone() });
+                return Err(SubstateStoreError::ExpectedSubstateDown { id: id.to_owned() });
             }
             return Ok(());
         }
@@ -773,10 +772,10 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         let address = id.to_substate_address();
         let Some(is_up) = SubstateRecord::substate_is_up(self.read_transaction(), &address).optional()? else {
             debug!(target: LOG_TARGET, "Expected substate {} to be DOWN but it does not exist", address);
-            return Err(SubstateStoreError::SubstateNotFound { id: id.clone() });
+            return Err(SubstateStoreError::SubstateNotFound { id: id.to_owned() });
         };
         if is_up {
-            return Err(SubstateStoreError::ExpectedSubstateDown { id: id.clone() });
+            return Err(SubstateStoreError::ExpectedSubstateDown { id: id.to_owned() });
         }
 
         Ok(())

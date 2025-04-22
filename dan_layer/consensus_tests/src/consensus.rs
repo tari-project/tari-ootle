@@ -20,10 +20,9 @@ use tari_dan_common_types::{
     optional::Optional,
     Epoch,
     NodeHeight,
+    SubstateAddress,
     SubstateLockType,
     SubstateRequirement,
-    ToSubstateAddress,
-    VersionedSubstateId,
 };
 use tari_dan_storage::{
     consensus_models::{AbortReason, Command, Decision, SubstateRecord, TransactionRecord},
@@ -49,6 +48,7 @@ use crate::support::{
     Test,
     TestAddress,
     TestVnDestination,
+    TEST_NUM_PRESHARDS,
 };
 
 // Although these tests will pass with a single thread, we enable multi-threaded mode so that any unhandled race
@@ -1547,11 +1547,27 @@ async fn multishard_publish_template() {
     test.assert_all_validators_committed(tx.id());
 
     // Assert all have the template
-    let template_substate = test
-        .get_validator(&TestAddress::new("1"))
-        .state_store
-        .with_read_tx(|tx| SubstateRecord::get(tx, &VersionedSubstateId::new(template_id, 0).to_substate_address()))
+    let address = SubstateAddress::from_substate_id(&template_id.into(), 0);
+    // Figure out which VN is responsible for the template substate
+    let shard = address.to_shard(TEST_NUM_PRESHARDS);
+    let vn_addr = test
+        .num_preshards()
+        .all_shard_groups_iter(test.num_committees())
+        .enumerate()
+        .find_map(|(i, sg)| {
+            if sg.contains(&shard) {
+                Some(TestAddress::new(((i + 1) * 2).to_string()))
+            } else {
+                None
+            }
+        })
         .unwrap();
+
+    let template_substate = test
+        .get_validator(&vn_addr)
+        .state_store
+        .with_read_tx(|tx| SubstateRecord::get(tx, &address))
+        .unwrap_or_else(|e| panic!("Failed to get template substate from {vn_addr}: {e}"));
     let binary_hash = template_substate
         .substate_value
         .unwrap()

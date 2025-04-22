@@ -387,11 +387,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError> {
         let locked_block = self.db().cf(LockedBlockModel)?.get(&ByteColumn, "locked_block_get")?;
         if locked_block.epoch != epoch {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "locked_block_get: Locked block epoch {} does not match requested epoch {}",
-                    locked_block.epoch, epoch
-                ),
+            return Err(StorageError::NotFound {
+                item: "LockedBlock",
+                key: format!("epoch {epoch}"),
             });
         }
         Ok(locked_block)
@@ -400,11 +398,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
         let leaf_block = self.db().cf(LeafBlockModel)?.get(&ByteColumn, "leaf_block_get")?;
         if leaf_block.epoch != epoch {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "leaf_block_get: Leaf block epoch {} does not match requested epoch {}",
-                    leaf_block.epoch, epoch
-                ),
+            return Err(StorageError::NotFound {
+                item: "LeafBlock",
+                key: format!("epoch {epoch}"),
             });
         }
         Ok(leaf_block)
@@ -413,11 +409,9 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError> {
         let high_qc = self.db().cf(HighQcModel)?.get(&ByteColumn, "high_qc_get")?;
         if high_qc.epoch != epoch {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "high_qc_get: High QC epoch {} does not match requested epoch {}",
-                    high_qc.epoch, epoch
-                ),
+            return Err(StorageError::NotFound {
+                item: "HighQc",
+                key: format!("epoch {epoch}"),
             });
         }
         Ok(high_qc)
@@ -664,11 +658,19 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let iter = query.query_prefix_range_key_iterator(Ordering::Descending, &epoch);
 
         let mut blocks = vec![];
-        for iter in iter.take(n) {
+        for iter in iter {
             let (_, _, block_id) = iter?;
             let block = block_cf.get(&block_id, OPERATION)?;
+            if !block.is_committed() {
+                continue;
+            }
             blocks.push(block);
+            if blocks.len() == n {
+                break;
+            }
         }
+
+        blocks.reverse();
 
         Ok(blocks)
     }

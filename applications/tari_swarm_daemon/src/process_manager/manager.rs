@@ -6,11 +6,13 @@ use std::{
     fs::File,
     net::SocketAddr,
     path::PathBuf,
+    pin::pin,
     time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context};
-use log::info;
+use futures::future::Either;
+use log::{debug, info};
 use minotari_wallet_grpc_client::grpc;
 use tari_common_types::types::FixedHash;
 use tari_dan_engine::wasm::WasmModule;
@@ -23,11 +25,13 @@ use url::Url;
 
 use crate::{
     config::{Config, InstanceType},
+    layer_one_transactions::LayerOneTransactionService,
     process_manager::{
         executables::ExecutableManager,
         handle::{ProcessManagerHandle, ProcessManagerRequest},
         instances::InstanceManager,
         InstanceId,
+        MinotariNodeDetails,
         TemplateData,
     },
 };
@@ -76,7 +80,7 @@ impl ProcessManager {
         (this, ProcessManagerHandle::new(tx_request))
     }
 
-    async fn setup(&mut self) -> anyhow::Result<()> {
+    async fn start_up(&mut self) -> anyhow::Result<()> {
         info!("Starting process manager");
         let executables = self.executable_manager.prepare_all().await?;
         self.instance_manager.fork_all(executables).await?;
@@ -85,6 +89,23 @@ impl ProcessManager {
         sleep(Duration::from_secs(self.instance_manager.num_instances() as u64)).await;
         self.check_instances_running()?;
 
+        Ok(())
+    }
+
+    async fn register_nodes_and_templates_as_required(
+        &mut self,
+        layer_one_transaction_service: &mut LayerOneTransactionService,
+    ) -> anyhow::Result<()> {
+        // Add the watchers
+        for vn in self.instance_manager.validator_nodes() {
+            let l1_tx_path = vn.layer_one_transaction_path();
+            tokio::fs::create_dir_all(&l1_tx_path).await?;
+            layer_one_transaction_service.add_watch(l1_tx_path);
+        }
+
+        if self.skip_registration {
+            return Ok(());
+        }
         let mut templates_to_register = vec![];
         if !self.disable_template_auto_register {
             let registered_templates = self.registered_templates().await?;
@@ -110,17 +131,12 @@ impl ProcessManager {
             }
         }
 
-        let num_blocks = if self.skip_registration {
-            0
-        } else {
-            self.instance_manager.num_validator_nodes() +
-                u64::try_from(templates_to_register.len()).expect("impossibly many templates")
-        };
+        let num_blocks = self.instance_manager.num_validator_nodes() + templates_to_register.len();
 
         if num_blocks > 0 {
             // Mine some initial funds, guessing 10 blocks extra is sufficient for coinbase maturity
             self.mine(num_blocks + 10).await.context("initial mining failed")?;
-            self.wait_for_wallet_funds(num_blocks)
+            self.wait_for_wallet_funds(num_blocks as u64)
                 .await
                 .context("waiting for wallet funds")?;
 
@@ -130,6 +146,35 @@ impl ProcessManager {
             for templates in templates_to_register {
                 self.register_template(templates).await?;
             }
+
+            // We need to process these now so that we can automatically mine once the transactions are submitted
+            let num_validator_nodes = self.instance_manager.num_validator_nodes();
+            let mut transaction_ids = vec![];
+            loop {
+                let transactions = layer_one_transaction_service.process_any().await?;
+                transaction_ids.extend(
+                    transactions
+                        .iter()
+                        .filter(|(transaction, _)| transaction.payload_type.is_validator_registration())
+                        .map(|(_, tx_id)| *tx_id),
+                );
+
+                info!(
+                    "🟢 {}/{} validator node registration submitted",
+                    transaction_ids.len(),
+                    num_validator_nodes
+                );
+                if transaction_ids.len() == num_validator_nodes {
+                    break;
+                }
+                // 1
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+
+            info!("🟢 All validator nodes registrations have been submitted to the wallet");
+
+            // Wait to ensure the wallet has broadcast all transactions before mining
+            self.wait_for_wallet_to_broadcast_transactions(transaction_ids).await?;
 
             // "Mine in" the validators and templates
             // 10 for new epoch + 10 for BL scan lag
@@ -247,34 +292,52 @@ impl ProcessManager {
     }
 
     pub async fn start(mut self) -> anyhow::Result<()> {
-        let mut shutdown_signal = self.shutdown_signal.clone();
+        let shutdown_signal = self.shutdown_signal.clone();
 
-        tokio::select! {
-            result = self.setup() => {
-                 result?;
-            },
-            _ = shutdown_signal.wait() => {
-                info!("Shutting down process manager");
-                return Ok(());
+        {
+            let fut = pin!(self.start_up());
+            match shutdown_signal.clone().select(fut).await {
+                Either::Left(_) => {
+                    info!("Shutting down process manager");
+                    return Ok(());
+                },
+                Either::Right((result, _)) => {
+                    result?;
+                },
             }
         }
 
-        let mut check_interval = time::interval_at(
-            time::Instant::from_std(Instant::now() + Duration::from_secs(10)),
-            Duration::from_secs(10),
+        let mut layer_one_transaction_service = self.create_layer_one_transaction_service().await?;
+
+        {
+            let fut = pin!(self.register_nodes_and_templates_as_required(&mut layer_one_transaction_service));
+            match shutdown_signal.clone().select(fut).await {
+                Either::Left(_) => {
+                    info!("Shutting down process manager");
+                    return Ok(());
+                },
+                Either::Right((result, _)) => {
+                    result?;
+                },
+            }
+        }
+
+        let mut interval = time::interval_at(
+            time::Instant::from_std(Instant::now() + Duration::from_secs(5)),
+            Duration::from_secs(5),
         );
 
         loop {
             tokio::select! {
                 Some(req) = self.rx_request.recv() => {
-                    if let Err(err) = self.handle_request(req).await {
+                    if let Err(err) = self.handle_request(req, &mut layer_one_transaction_service).await {
                         log::error!("Error handling request: {:?}", err);
                     }
                 },
 
-                _ = check_interval.tick() => {
-                    if let Err(err) = self.clear_terminated_instances() {
-                        log::error!("Error checking instances: {:?}", err);
+                _ = interval.tick() => {
+                    if let Err(err) = self.on_tick(&mut layer_one_transaction_service).await {
+                        log::error!("(on_tick) Error: {:?}", err);
                     }
                 },
 
@@ -288,8 +351,42 @@ impl ProcessManager {
         Ok(())
     }
 
+    async fn on_tick(&mut self, layer_one_transaction_service: &mut LayerOneTransactionService) -> anyhow::Result<()> {
+        self.clear_terminated_instances()?;
+
+        // Check for layer one transactions
+        let processed = layer_one_transaction_service.process_any().await?;
+        if processed.is_empty() {
+            info!("🫙 No layer one transactions to process");
+            return Ok(());
+        }
+        for (transaction, tx_id) in processed {
+            info!(
+                "🟢 {} transaction submitted by watcher (id: {})",
+                transaction.payload_type, tx_id
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn create_layer_one_transaction_service(&self) -> anyhow::Result<LayerOneTransactionService> {
+        let wallet = self
+            .instance_manager
+            .minotari_wallets()
+            .next()
+            .ok_or_else(|| anyhow!("No MinoTariConsoleWallet instances found"))?;
+        let client = wallet.connect_client().await?;
+        let service = LayerOneTransactionService::init(client)?;
+        Ok(service)
+    }
+
     #[allow(clippy::too_many_lines)]
-    async fn handle_request(&mut self, req: ProcessManagerRequest) -> anyhow::Result<()> {
+    async fn handle_request(
+        &mut self,
+        req: ProcessManagerRequest,
+        layer_one_transaction_service: &mut LayerOneTransactionService,
+    ) -> anyhow::Result<()> {
         use ProcessManagerRequest::*;
         match req {
             CreateInstance {
@@ -367,7 +464,7 @@ impl ProcessManager {
                 }
             },
             MineBlocks { blocks, reply } => {
-                let result = self.mine(blocks).await;
+                let result = self.mine(blocks as usize).await;
                 if reply.send(result).is_err() {
                     log::warn!("Request cancelled before response could be sent")
                 }
@@ -385,7 +482,15 @@ impl ProcessManager {
                 }
             },
             RegisterValidatorNode { instance_id, reply } => {
-                let result = self.register_validator_node(instance_id).await;
+                let result = self
+                    .register_validator_node(instance_id, layer_one_transaction_service)
+                    .await;
+                if reply.send(result).is_err() {
+                    log::warn!("Request cancelled before response could be sent")
+                }
+            },
+            ExitValidatorNode { instance_id, reply } => {
+                let result = self.exit_validator_node(instance_id).await;
                 if reply.send(result).is_err() {
                     log::warn!("Request cancelled before response could be sent")
                 }
@@ -400,6 +505,20 @@ impl ProcessManager {
                 let result = self
                     .burn_funds_to_wallet_account(amount, wallet_instance_id, account_name, out_path)
                     .await;
+                if reply.send(result).is_err() {
+                    log::warn!("Request cancelled before response could be sent")
+                }
+            },
+            GetMinotariNodeDetails { instance_id, reply } => {
+                let node = self
+                    .instance_manager
+                    .minotari_nodes()
+                    .find(|i| i.instance().id() == instance_id)
+                    .ok_or_else(|| anyhow!("MinotariNode with ID '{}' not found", instance_id))?;
+                let result = node.get_chain_metadata().await.map(|metadata| MinotariNodeDetails {
+                    instance_info: node.instance().into(),
+                    height: metadata.map(|m| m.best_block_height),
+                });
                 if reply.send(result).is_err() {
                     log::warn!("Request cancelled before response could be sent")
                 }
@@ -457,17 +576,6 @@ impl ProcessManager {
             }
         }
 
-        let wallet = self
-            .instance_manager
-            .minotari_wallets()
-            .find(|w| w.instance().is_running())
-            .ok_or_else(|| {
-                anyhow!(
-                    "No running MinoTariConsoleWallet instances found. Please start a wallet before registering \
-                     validator nodes"
-                )
-            })?;
-
         for vn in self.instance_manager.validator_nodes() {
             if skip.contains(&vn.instance().id()) {
                 continue;
@@ -482,18 +590,20 @@ impl ProcessManager {
                 continue;
             }
 
-            let reg_info = vn.get_registration_info().await?;
-            let claim_public_key = reg_info.claim_fees_public_key.clone();
-            let tx_id = wallet.register_validator_node(reg_info).await?;
-            info!("🟢 Registered validator node {vn} with claim key {claim_public_key} in L1 transaction: {tx_id}");
-            // Just wait a bit :shrug: This could be a bug in the console wallet. If we submit too quickly it uses 0
-            // inputs for a transaction.
-            sleep(Duration::from_secs(2)).await;
+            vn.wait_for_initial_scanning_to_complete(Duration::from_secs(10))
+                .await
+                .context("waiting for initial scanning to complete")?;
+
+            vn.prepare_registration_transaction().await?;
         }
         Ok(())
     }
 
-    async fn register_validator_node(&mut self, instance_id: InstanceId) -> anyhow::Result<()> {
+    async fn register_validator_node(
+        &mut self,
+        instance_id: InstanceId,
+        layer_one_transaction_service: &mut LayerOneTransactionService,
+    ) -> anyhow::Result<()> {
         let vn = self
             .instance_manager
             .validator_nodes()
@@ -518,18 +628,43 @@ impl ProcessManager {
             return Ok(());
         }
 
-        let wallet = self.instance_manager.minotari_wallets().next().ok_or_else(|| {
-            anyhow!(
-                "No MinoTariConsoleWallet instances found. Please start a wallet before registering validator nodes"
-            )
-        })?;
+        let l1_tx_path = vn.layer_one_transaction_path();
+        tokio::fs::create_dir_all(&l1_tx_path).await?;
+        // Watch for layer one transactions for this validator node
+        layer_one_transaction_service.add_watch(l1_tx_path);
 
-        let reg_info = vn.get_registration_info().await?;
-        wallet.register_validator_node(reg_info).await?;
+        vn.wait_for_initial_scanning_to_complete(Duration::from_secs(10))
+            .await
+            .context("waiting for initial scanning to complete")?;
+
+        vn.prepare_registration_transaction().await?;
+
         Ok(())
     }
 
-    async fn mine(&mut self, blocks: u64) -> anyhow::Result<()> {
+    async fn exit_validator_node(&mut self, instance_id: InstanceId) -> anyhow::Result<()> {
+        let vn = self
+            .instance_manager
+            .validator_nodes()
+            .find(|vn| vn.instance().id() == instance_id)
+            .ok_or_else(|| anyhow!("Validator node with ID '{}' not found", instance_id))?;
+
+        if !vn.instance().is_running() {
+            log::error!(
+                "Skipping exit for validator node {}: {} since it is not running",
+                vn.instance().id(),
+                vn.instance().name()
+            );
+            return Ok(());
+        }
+
+        // This VN is already watched, so the watcher will submit this
+        vn.prepare_exit_transaction().await?;
+
+        Ok(())
+    }
+
+    async fn mine(&mut self, blocks: usize) -> anyhow::Result<()> {
         if blocks == 0 {
             return Ok(());
         }
@@ -607,6 +742,34 @@ impl ProcessManager {
             }
             sleep(Duration::from_secs(2)).await;
             info!("💱 Waiting for wallet to mine some funds");
+        }
+
+        Ok(())
+    }
+
+    async fn wait_for_wallet_to_broadcast_transactions(&mut self, tx_ids: Vec<u64>) -> anyhow::Result<()> {
+        // WARN: Assumes one wallet
+        let wallet = self.instance_manager.minotari_wallets().next().ok_or_else(|| {
+            anyhow!("No MinoTariConsoleWallet instances found. Please start a wallet before waiting for funds")
+        })?;
+
+        loop {
+            let resp = wallet.get_transaction_info(tx_ids.clone()).await?;
+            if resp.iter().all(|tx| {
+                if tx.status() == grpc::TransactionStatus::Broadcast {
+                    debug!("Transaction {} is broadcast", tx.tx_id);
+                    true
+                } else {
+                    debug!("Transaction {} is {:?}", tx.tx_id, tx.status());
+                    false
+                }
+            }) {
+                info!("📡 Wallet has broadcast all transactions");
+                break;
+            }
+            sleep(Duration::from_secs(2)).await;
+            info!("💱 Waiting for wallet broadcast {} transactions", tx_ids.len());
+            wallet.revalidate_all_transactions().await?;
         }
 
         Ok(())

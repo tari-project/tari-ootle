@@ -146,6 +146,13 @@ impl ValidatorNodeClient {
         self.send_request("get_block", request).await
     }
 
+    pub async fn prepare_layer_one_transaction(
+        &mut self,
+        request: PrepareLayerOneTransactionRequest,
+    ) -> Result<PrepareLayerOneTransactionResponse, ValidatorNodeClientError> {
+        self.send_request("prepare_layer_one_transaction", request).await
+    }
+
     fn next_request_id(&mut self) -> i64 {
         self.request_id += 1;
         self.request_id

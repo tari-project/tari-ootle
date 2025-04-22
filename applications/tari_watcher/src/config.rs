@@ -14,14 +14,14 @@ use crate::{
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
-    /// Allow watcher to restart the validator node if it crashes and stops running
+    /// Network to use
     pub network: Network,
     /// Allow watcher to submit a new validator node registration transaction initially and before
     /// the current registration expires
     pub auto_register: bool,
 
     /// Allow watcher to restart the validator node if it crashes and stops running
-    pub auto_restart: bool,
+    pub auto_start: AutoStart,
 
     /// The Minotari node gRPC URL
     pub base_node_grpc_url: Url,
@@ -42,7 +42,11 @@ pub struct Config {
     pub validator_node_executable_path: PathBuf,
 
     /// The channel configurations for alerting and monitoring
-    pub channel_config: Channels,
+    pub channel_config: ChannelConfig,
+
+    /// The list of _additional_ directories to watch for new layer-1 transactions. The managed validator node
+    /// directory is implicitly watched.
+    pub watch_dirs: Vec<PathBuf>,
 }
 
 impl Config {
@@ -66,19 +70,41 @@ impl Config {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoStart {
+    /// Never start the validator node
+    Never,
+    /// Start the validator node once. If it stops, do not restart it.
+    JustOnce,
+    /// Start the validator node and restart it if it stops
+    #[default]
+    Always,
+}
+
+impl AutoStart {
+    pub fn should_start_initially(&self) -> bool {
+        matches!(self, AutoStart::JustOnce | AutoStart::Always)
+    }
+
+    pub fn should_restart(&self) -> bool {
+        matches!(self, AutoStart::Always)
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ChannelConfig {
+pub struct AlertChannelConfig {
     pub name: String,
     pub enabled: bool,
-    pub server_url: String,
+    pub server_url: Url,
     pub channel_id: String,
     pub credentials: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Channels {
-    pub mattermost: ChannelConfig,
-    pub telegram: ChannelConfig,
+pub struct ChannelConfig {
+    pub mattermost: AlertChannelConfig,
+    pub telegram: AlertChannelConfig,
 }
 
 pub fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
@@ -89,28 +115,29 @@ pub fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
     Ok(Config {
         network,
         auto_register: true,
-        auto_restart: true,
+        auto_start: AutoStart::default(),
         base_node_grpc_url: DEFAULT_BASE_NODE_GRPC_URL.parse()?,
         base_wallet_grpc_url: DEFAULT_BASE_WALLET_GRPC_URL.parse()?,
         base_dir: base_dir.to_path_buf(),
         sidechain_id: None,
         vn_base_dir,
         validator_node_executable_path: DEFAULT_VALIDATOR_NODE_BINARY_PATH.into(),
-        channel_config: Channels {
-            mattermost: ChannelConfig {
+        channel_config: ChannelConfig {
+            mattermost: AlertChannelConfig {
                 name: "mattermost".to_string(),
                 enabled: false,
-                server_url: "https://some.corporation.com".to_string(),
+                server_url: "https://some.corporation.com".parse()?,
                 channel_id: "".to_string(),
                 credentials: "".to_string(),
             },
-            telegram: ChannelConfig {
+            telegram: AlertChannelConfig {
                 name: "telegram".to_string(),
                 enabled: false,
-                server_url: "https://api.telegram.org".to_string(),
+                server_url: "https://api.telegram.org".parse()?,
                 channel_id: "".to_string(),
                 credentials: "".to_string(),
             },
         },
+        watch_dirs: vec![],
     })
 }

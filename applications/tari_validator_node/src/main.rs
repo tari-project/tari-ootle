@@ -81,7 +81,7 @@ async fn main_inner() -> Result<(), ExitError> {
     }
 
     let shutdown = Shutdown::new();
-    match run_validator_node(&config, shutdown).await {
+    match run_validator_node(config, shutdown).await {
         Ok(_) => info!(target: LOG_TARGET, "Validator node shutdown successfully"),
         Err(e) => match e.downcast() {
             Ok(exit_error) => {

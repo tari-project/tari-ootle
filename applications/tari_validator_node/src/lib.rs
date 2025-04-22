@@ -39,7 +39,6 @@ mod file_l1_submitter;
 mod state_bootstrap;
 pub mod transaction_validators;
 mod validator;
-mod validator_registration_file;
 
 use std::{fs, io, process};
 
@@ -58,7 +57,6 @@ use tari_dan_storage_sqlite::{global::SqliteGlobalDbAdapter, SqliteDbFactory};
 use tari_epoch_manager::traits::EpochManagerSpec;
 use tari_epoch_oracles::EpochOracle;
 use tari_shutdown::Shutdown;
-pub use validator_registration_file::ValidatorRegistrationFile;
 
 pub use crate::config::{ApplicationConfig, ValidatorNodeConfig};
 use crate::{
@@ -93,7 +91,7 @@ pub struct ShardKey {
     substate_address: Option<SubstateAddress>,
 }
 
-pub async fn run_validator_node(config: &ApplicationConfig, shutdown: Shutdown) -> Result<(), anyhow::Error> {
+pub async fn run_validator_node(config: ApplicationConfig, shutdown: Shutdown) -> Result<(), anyhow::Error> {
     info!(target: LOG_TARGET, "Starting validator node on network {}", config.network);
     let keypair = setup_keypair_prompt(
         &config.validator_node.identity_file,
@@ -119,7 +117,7 @@ pub async fn run_validator_node(config: &ApplicationConfig, shutdown: Shutdown) 
 
     let consensus_constants = ConsensusConstants::from(config.network);
     let services = spawn_services(
-        config,
+        config.clone(),
         shutdown.to_signal(),
         keypair.clone(),
         global_db,

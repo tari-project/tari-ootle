@@ -166,24 +166,25 @@ pub async fn send_vn_registration_with_claim_wallet(world: &mut TariWorld, vn_na
 
     let mut base_layer_wallet = world.get_wallet(&base_wallet_name).create_client().await;
     world.mark_point_in_logs("before get_registration_info");
-    let registration = vn.get_registration_info();
+    let info = vn.get_registration_info().await;
+    let registration = info.payload;
 
     let response = base_layer_wallet
         .register_validator_node(RegisterValidatorNodeRequest {
             validator_node_public_key: registration.public_key.to_vec(),
             validator_node_signature: Some(Signature {
-                public_nonce: registration
-                    .signature
-                    .signature()
-                    .get_compressed_public_nonce()
-                    .to_vec(),
-                signature: registration.signature.signature().get_signature().to_vec(),
+                public_nonce: registration.signature.public_nonce().as_bytes().to_vec(),
+                signature: registration.signature.signature().as_bytes().to_vec(),
             }),
-            validator_node_claim_public_key: registration.claim_fees_public_key.to_vec(),
-            sidechain_deployment_key: vec![],
+            max_epoch: registration.max_epoch.as_u64(),
+            validator_node_claim_public_key: registration.claim_public_key.as_bytes().to_vec(),
+            sidechain_deployment_key: registration
+                .sidechain_public_key
+                .map(|key| key.to_vec())
+                .unwrap_or_default(),
             fee_per_gram: 1,
             payment_id: PaymentId::Open {
-                user_data: "Register".as_bytes().to_vec(),
+                user_data: "Register by cucumber".as_bytes().to_vec(),
                 tx_type: TxType::ValidatorNodeRegistration,
             }
             .to_bytes(),

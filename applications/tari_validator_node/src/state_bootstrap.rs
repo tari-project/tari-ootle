@@ -7,7 +7,7 @@ use serde::Serialize;
 use tari_bor::cbor;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{shard::Shard, Epoch, NodeAddressable, NumPreshards, ShardGroup, VersionedSubstateId};
+use tari_dan_common_types::{Epoch, NodeAddressable, NumPreshards, ShardGroup, ToSubstateAddress, VersionedSubstateId};
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, SubstateRecord},
     StateStoreReadTransaction,
@@ -160,6 +160,7 @@ where
     );
     let substate_id = substate_id.into();
     let id = VersionedSubstateId::new(substate_id, 0);
+    let shard = id.to_substate_address().to_shard(num_preshards);
     SubstateRecord {
         version: id.version(),
         substate_id: id.into_substate_id(),
@@ -167,10 +168,11 @@ where
         state_hash: Default::default(),
         created_justify: *genesis_block.justify().id(),
         created_block: BlockId::zero(),
-        created_by_shard: Shard::first(),
+        created_by_shard: shard,
         created_at_epoch: Epoch(0),
         destroyed: None,
     }
     .create(tx)?;
+
     Ok(())
 }

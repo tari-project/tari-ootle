@@ -34,6 +34,8 @@ pub struct Config {
     #[serde(default = "default_as_true")]
     pub auto_register_previous_templates: bool,
     pub public_ip: Option<IpAddr>,
+    #[serde(default)]
+    pub log_to_file: bool,
 }
 
 fn default_as_true() -> bool {

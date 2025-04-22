@@ -122,20 +122,11 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("status", "Status"),
             ]);
         },
-        "foreignproposals_proposed_idx" => {
-            // No columns to show - we're interested in the key (automatically added)
-        },
         "foreignproposals_epoch_idx" => {
             table.with_columns([
                 Column::new("block_id", "Block ID"),
                 Column::new("proposed_in_block", "Proposed in"),
             ]);
-        },
-        "foreignproposals_unconfirmed_idx" => {
-            // No columns to show - we're interested in the key
-        },
-        "block_height_idx" => {
-            // No columns to show - we're interested in the key
         },
         s if s == models::quorum_certificate::QuorumCertificateModel::name() => {
             table.with_columns([
@@ -175,7 +166,6 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
         },
         _ => {
             // The data can still be returned to the request, though the columns will not be specified
-            log::warn!("Unsupported column family {cf_name}");
         },
     }
 

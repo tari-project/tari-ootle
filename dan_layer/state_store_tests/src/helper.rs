@@ -316,13 +316,13 @@ where
         block.justify().save(tx).unwrap();
     }
     let len = chain.len();
-    if len < 4 {
+    if len < 3 {
         return;
     }
 
-    chain[len - 4].as_locked_block().set(tx).unwrap();
+    chain[len - 3].as_locked_block().set(tx).unwrap();
 
-    for block in &chain[..len - 4] {
+    for block in &chain[..len - 3] {
         tx.blocks_set_flags(block.id(), Some(true), Some(true)).unwrap();
     }
 

@@ -108,3 +108,11 @@ impl FromByteType<CommitmentSignatureBytes> for CommitmentSignature<RistrettoPub
         Ok(CommitmentSignature::new(public_nonce, signature, v))
     }
 }
+
+impl<T: ToByteType> ToByteType for Option<T> {
+    type ByteType = Option<T::ByteType>;
+
+    fn to_byte_type(&self) -> Self::ByteType {
+        self.as_ref().map(|v| v.to_byte_type())
+    }
+}

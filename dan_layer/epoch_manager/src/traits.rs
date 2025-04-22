@@ -50,7 +50,6 @@ pub trait EpochManagerSpec: Send + 'static {
 }
 
 pub trait EpochManagerWriter: Send + Sync {
-    fn notify_scanning_complete(&mut self) -> impl Future<Output = Result<(), EpochManagerError>> + Send;
     fn add_validator_node_registration(
         &mut self,
         activation_epoch: Epoch,
@@ -99,12 +98,6 @@ pub trait EpochManagerReader: Send + Sync {
         epoch: Epoch,
         substate_address: SubstateAddress,
     ) -> impl Future<Output = Result<Committee<Self::Addr>, EpochManagerError>> + Send;
-
-    fn get_validator_node(
-        &self,
-        epoch: Epoch,
-        addr: &Self::Addr,
-    ) -> impl Future<Output = Result<ValidatorNode<Self::Addr>, EpochManagerError>> + Send;
 
     fn get_validator_node_by_public_key(
         &self,
@@ -242,11 +235,12 @@ pub trait EpochUtxoStore: Send + Sync {
 }
 
 pub trait LayerOneTransactionSubmitter {
+    type Output;
     type Error: std::error::Error;
     fn submit_transaction<T: serde::Serialize + Send>(
         &self,
-        proof: LayerOneTransactionDef<T>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+        transaction: LayerOneTransactionDef<T>,
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 }
 
 pub trait TemplateDownloader {

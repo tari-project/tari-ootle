@@ -308,8 +308,8 @@ impl InstanceManager {
         self.instances().count()
     }
 
-    pub fn num_validator_nodes(&self) -> u64 {
-        self.validator_nodes.len() as u64
+    pub fn num_validator_nodes(&self) -> usize {
+        self.validator_nodes.len()
     }
 
     pub fn validator_nodes_mut(&mut self) -> impl Iterator<Item = &mut ValidatorNodeProcess> + Sized {

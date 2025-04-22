@@ -142,6 +142,8 @@ async fn json_rpc_handler(Extension(context): Extension<Arc<HandlerContext>>, va
         "add_asset_wallet" | "add_wallet_daemon" => call_handler(context, value, rpc::dan_wallets::create).await,
         "add_indexer" => call_handler(context, value, rpc::indexers::create).await,
         "add_validator_node" => call_handler(context, value, rpc::validator_nodes::create).await,
+        "register_validator_node" => call_handler(context, value, rpc::validator_nodes::register).await,
+        "exit_validator_node" => call_handler(context, value, rpc::validator_nodes::exit).await,
         "start_instance" => call_handler(context, value, rpc::instances::start).await,
         "start_all" => call_handler(context, value, rpc::instances::start_all).await,
         "stop_instance" => call_handler(context, value, rpc::instances::stop).await,
@@ -149,6 +151,7 @@ async fn json_rpc_handler(Extension(context): Extension<Arc<HandlerContext>>, va
         "list_instances" => call_handler(context, value, rpc::instances::list).await,
         "delete_data" => call_handler(context, value, rpc::instances::delete_data).await,
         "burn_funds" => call_handler(context, value, rpc::minotari_wallets::burn_funds).await,
+        "get_minotari_node" => call_handler(context, value, rpc::minotari_nodes::get).await,
         _ => Ok(value.method_not_found(&value.method)),
     }
 }

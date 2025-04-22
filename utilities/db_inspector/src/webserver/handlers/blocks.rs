@@ -40,8 +40,13 @@ pub async fn list(
 
     let cf = tx.cf(models::block::BlockModel)?;
     let query_cf = tx.cf(models::block::ByEpochQuery)?;
+    let ordering = if req.asc {
+        Ordering::Ascending
+    } else {
+        Ordering::Descending
+    };
     // let ((epoch, height, block_id), _) = query_cf.query_last(OPERATION)?;
-    let iter = query_cf.query_end_range_key_iterator(Ordering::Descending, &Epoch::max());
+    let iter = query_cf.query_end_range_key_iterator(ordering, &Epoch::max());
     for result in iter.take(req.limit.unwrap_or(1_000_000)) {
         let (_, _, block_id) = result?;
         let block = cf.get(&block_id, OPERATION)?;

@@ -299,7 +299,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                             continue;
                         }
 
-                        info!(target: LOG_TARGET, "🖥️ New validator node registration: {}", reg.public_key());
+                        debug!(target: LOG_TARGET, "🖥️ New validator node registration at height {}: {}", current_height, reg.public_key());
                         self.pending_events.push_back(EpochEvent::NewValidatorRegistered {
                             epoch: current_epoch,
                             claim_public_key: RistrettoPublicKeyBytes::from_bytes(reg.claim_public_key().as_bytes())
@@ -327,7 +327,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                             continue;
                         }
                         let template_address = (*output_hash).into();
-                        info!(
+                        debug!(
                             target: LOG_TARGET,
                             "🌠 new template found with address {} at height {}", template_address, block_info.height
                         );
@@ -377,7 +377,7 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                             continue;
                         }
 
-                        info!(
+                        debug!(
                             target: LOG_TARGET,
                             "⛓️ Found burned output: {} with commitment {}",
                             output_hash,
@@ -418,8 +418,32 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
                         trace!(target: LOG_TARGET, "Eviction proof scanned: {eviction_proof:?}");
                         self.pending_events.push_back(EpochEvent::NewEvictionProof {
                             epoch: current_epoch,
-                            eviction_proof: Box::new(eviction_proof),
+                            eviction_proof,
                         })
+                    },
+                    SideChainFeatureData::ValidatorNodeExit(exit) => {
+                        if sidechain_id.as_ref().map(|s| s.public_key().as_bytes()) !=
+                            self.validator_node_sidechain_id.as_ref().map(|p| p.as_bytes())
+                        {
+                            debug!(
+                                target: LOG_TARGET,
+                                "Ignoring VN exit for sidechain ID {}.",
+                                sidechain_id.as_ref().map(|id| id.public_key()).display()
+                            );
+                            continue;
+                        }
+
+                        debug!(target: LOG_TARGET, "🖥️ validator node exit: {}", exit.public_key());
+                        self.pending_events.push_back(EpochEvent::NewValidatorNodeExit {
+                            epoch: current_epoch,
+                            validator_node_public_key: RistrettoPublicKeyBytes::from_bytes(
+                                exit.public_key().as_bytes(),
+                            )
+                            .expect(
+                                "validator_node_public_key: Compressed<RistrettoPublicKey> and \
+                                 RistrettoPublicKeyBytes must be the same length",
+                            ),
+                        });
                     },
                 }
             }
@@ -484,6 +508,10 @@ impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
             if current_epoch > initial_epoch {
                 constants = self.base_node_client.get_consensus_constants(current_height).await?;
 
+                info!(
+                    target: LOG_TARGET,
+                    "🟩 epoch change {}->{} {} {}", initial_epoch, current_epoch, block_info.height, block_info.hash
+                );
                 self.pending_events.push_back(EpochEvent::EpochChanged {
                     epoch: current_epoch,
                     epoch_hash: self.last_epoch_hash.unwrap_or_default(),
@@ -602,7 +630,7 @@ impl<TStore: EpochOracleStore + Send + 'static> BaseLayerOracle<TStore> {
         loop {
             if let Some(inner_mut) = self.inner.as_mut() {
                 if let Some(event) = inner_mut.pending_events.pop_front() {
-                    trace!(target: LOG_TARGET, "Pop event");
+                    trace!(target: LOG_TARGET, "Pop event {event}");
                     return Poll::Ready(Some(event));
                 }
                 inner_mut.shrink_events();
@@ -614,6 +642,8 @@ impl<TStore: EpochOracleStore + Send + 'static> BaseLayerOracle<TStore> {
                     Poll::Ready((Ok(()), inner)) => {
                         trace!(target: LOG_TARGET, "Sync complete Ok");
                         self.inner = Some(inner);
+                        // There may be events to return, do that straight away
+                        continue;
                     },
                     Poll::Ready((Err(err), inner)) => {
                         debug!(target: LOG_TARGET, "Sync complete Err({err})");

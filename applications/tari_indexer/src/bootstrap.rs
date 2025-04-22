@@ -48,6 +48,7 @@ use tari_epoch_manager::service::{EpochManagerConfig, EpochManagerHandle};
 use tari_epoch_oracles::{base_layer::BaseLayerOracle, configured::ConfiguredEpochOracle, EpochOracle};
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_shutdown::ShutdownSignal;
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
 
@@ -152,10 +153,12 @@ pub async fn spawn_services(
                 .committee_size
                 .try_into()
                 .context("committee_size must be non-zero")?,
-            validator_node_sidechain_id: config.indexer.sidechain_id.clone(),
+            validator_node_sidechain_id: config.indexer.sidechain_id.as_ref().map(|pk| pk.to_byte_type()),
+            // N/A
+            fee_claim_public_key: RistrettoPublicKeyBytes::zero(),
         },
         global_db.clone(),
-        keypair.public_key().clone(),
+        keypair.public_key().to_byte_type(),
         epoch_event_oracle,
         Noop,
         template_queue_sender,

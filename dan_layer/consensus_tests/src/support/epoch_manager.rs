@@ -168,15 +168,6 @@ impl EpochManagerReader for TestEpochManager {
         Ok(self.our_validator_node.clone().unwrap())
     }
 
-    async fn get_validator_node(
-        &self,
-        _epoch: Epoch,
-        addr: &Self::Addr,
-    ) -> Result<ValidatorNode<Self::Addr>, EpochManagerError> {
-        let (vn, _) = self.state_lock().await.validator_nodes[addr].clone();
-        Ok(vn)
-    }
-
     async fn get_all_validator_nodes(
         &self,
         _epoch: Epoch,

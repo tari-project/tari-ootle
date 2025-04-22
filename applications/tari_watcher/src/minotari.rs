@@ -10,7 +10,12 @@ use minotari_node_grpc_client::BaseNodeGrpcClient;
 use minotari_wallet_grpc_client::WalletGrpcClient;
 use tari_core::transactions::transaction_components::encrypted_data::{PaymentId, TxType};
 use tari_crypto::tari_utilities::ByteArray;
-use tari_dan_common_types::layer_one_transaction::{LayerOnePayloadType, LayerOneTransactionDef};
+use tari_dan_common_types::layer_one_transaction::{
+    LayerOnePayloadType,
+    LayerOneTransactionDef,
+    ValidatorExitParams,
+    ValidatorRegistrationParams,
+};
 use tari_sidechain::EvictionProof;
 use tonic::transport::Channel;
 use url::Url;
@@ -132,6 +137,7 @@ impl MinotariNodes {
                     signature: info.signature.signature().to_vec(),
                 }),
                 validator_node_claim_public_key: info.claim_fees_public_key.to_vec(),
+                max_epoch: 0u64,
                 fee_per_gram: 10,
                 sidechain_deployment_key: vec![],
                 payment_id: PaymentId::Open {
@@ -155,8 +161,9 @@ impl MinotariNodes {
         &mut self,
         transaction_def: LayerOneTransactionDef<serde_json::Value>,
     ) -> anyhow::Result<()> {
-        let proof_type = transaction_def.proof_type;
-        let resp = match proof_type {
+        let proof_type = transaction_def.payload_type;
+        let mut client = self.connect_wallet().await?;
+        match proof_type {
             LayerOnePayloadType::EvictionProof => {
                 let proof = serde_json::from_value::<EvictionProof>(transaction_def.payload)?;
                 info!(
@@ -165,21 +172,79 @@ impl MinotariNodes {
                 );
                 let proof_proto = (&proof).into();
 
-                let resp = self
-                    .connect_wallet()
-                    .await?
+                let resp = client
                     .submit_validator_eviction_proof(grpc::SubmitValidatorEvictionProofRequest {
                         proof: Some(proof_proto),
                         fee_per_gram: 10,
                         message: format!("Validator: Automatically submitted {proof_type} transaction"),
+                        // TODO: sidechain_id support
                         sidechain_deployment_key: vec![],
                     })
                     .await?;
-                resp.into_inner()
+
+                let resp = resp.into_inner();
+                info!("{} transaction sent successfully (tx_id={})", proof_type, resp.tx_id);
+            },
+            LayerOnePayloadType::ValidatorRegistration => {
+                let registration = serde_json::from_value::<ValidatorRegistrationParams>(transaction_def.payload)?;
+
+                let resp = client
+                    .register_validator_node(grpc::RegisterValidatorNodeRequest {
+                        validator_node_public_key: registration.public_key.as_bytes().to_vec(),
+                        validator_node_signature: Some(grpc::Signature {
+                            public_nonce: registration.signature.public_nonce().to_vec(),
+                            signature: registration.signature.signature().to_vec(),
+                        }),
+                        validator_node_claim_public_key: registration.claim_public_key.as_bytes().to_vec(),
+                        max_epoch: registration.max_epoch.as_u64(),
+                        fee_per_gram: 10,
+                        payment_id: PaymentId::Open {
+                            user_data: format!("VN registration: {}", registration.public_key).into_bytes(),
+                            tx_type: TxType::ValidatorNodeRegistration,
+                        }
+                        .to_bytes(),
+                        // TODO: This will not work as the deployment key is a secret key.
+                        sidechain_deployment_key: registration
+                            .sidechain_public_key
+                            .map(|key| key.to_vec())
+                            .unwrap_or_default(),
+                    })
+                    .await?;
+
+                let resp = resp.into_inner();
+                if !resp.is_success {
+                    bail!("Failed to register VN: {}", resp.failure_message);
+                }
+                info!(
+                    "{} transaction sent successfully (tx_id={})",
+                    proof_type, resp.transaction_id
+                );
+            },
+            LayerOnePayloadType::ValidatorExit => {
+                let exit = serde_json::from_value::<ValidatorExitParams>(transaction_def.payload)?;
+
+                let resp = client
+                    .submit_validator_node_exit(grpc::SubmitValidatorNodeExitRequest {
+                        validator_node_public_key: exit.public_key.as_bytes().to_vec(),
+                        validator_node_signature: None,
+                        max_epoch: exit.max_epoch.as_u64(),
+                        fee_per_gram: 10,
+                        message: format!("Validator: Automatically submitted {proof_type} transaction").into_bytes(),
+                        // TODO: This will not work as the deployment key is a secret key.
+                        sidechain_deployment_key: exit.sidechain_public_key.map(|key| key.to_vec()).unwrap_or_default(),
+                    })
+                    .await?;
+
+                let resp = resp.into_inner();
+                if !resp.is_success {
+                    bail!("Failed to register VN: {}", resp.failure_message);
+                }
+                info!(
+                    "{} transaction sent successfully (tx_id={})",
+                    proof_type, resp.transaction_id
+                );
             },
         };
-
-        info!("{} transaction sent successfully (tx_id={})", proof_type, resp.tx_id);
 
         Ok(())
     }

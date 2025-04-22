@@ -19,7 +19,6 @@ use tokio::{
 use url::Url;
 
 use crate::{
-    config::Channels,
     constants::DEFAULT_VALIDATOR_PID_PATH,
     monitoring::{monitor_child, ProcessStatus},
 };
@@ -55,7 +54,6 @@ pub struct ChildChannel {
     pub tx_log: mpsc::Sender<ProcessStatus>,
     pub rx_alert: mpsc::Receiver<ProcessStatus>,
     pub tx_alert: mpsc::Sender<ProcessStatus>,
-    pub cfg_alert: Channels,
 }
 
 async fn spawn_validator_node(
@@ -86,7 +84,6 @@ async fn spawn_validator_node(
 pub async fn spawn_validator_node_os(
     binary_path: PathBuf,
     vn_base_dir: PathBuf,
-    cfg_alert: Channels,
     auto_restart: bool,
     minotari_node_grpc_url: Url,
     network: Network,
@@ -160,7 +157,6 @@ pub async fn spawn_validator_node_os(
         tx_log,
         tx_alert,
         rx_alert,
-        cfg_alert,
     })
 }
 
@@ -205,7 +201,6 @@ pub async fn start_validator(
     validator_path: PathBuf,
     vn_base_dir: PathBuf,
     minotari_node_grpc_url: Url,
-    alerting_config: Channels,
     auto_restart: bool,
     network: Network,
 ) -> Option<ChildChannel> {
@@ -221,7 +216,6 @@ pub async fn start_validator(
     let cc = spawn_validator_node_os(
         validator_path,
         vn_base_dir,
-        alerting_config,
         auto_restart,
         minotari_node_grpc_url,
         network,

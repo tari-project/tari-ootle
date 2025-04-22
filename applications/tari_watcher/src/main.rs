@@ -112,9 +112,10 @@ struct Handlers {
 }
 
 async fn spawn_manager(config: Config, shutdown: ShutdownSignal) -> anyhow::Result<Handlers> {
+    let channel_config = config.channel_config.clone();
     let (manager, manager_handle) = ProcessManager::new(config, shutdown);
     let cr = manager.start_request_handler().await?;
-    start_receivers(cr.rx_log, cr.rx_alert, cr.cfg_alert).await;
+    start_receivers(cr.rx_log, cr.rx_alert, channel_config).await;
 
     Ok(Handlers {
         manager_handle,

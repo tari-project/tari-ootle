@@ -287,11 +287,12 @@ impl EpochUtxoStore for Noop {
 
 impl LayerOneTransactionSubmitter for Noop {
     type Error = Infallible;
+    type Output = ();
 
     fn submit_transaction<T: Serialize + Send>(
         &self,
         _proof: LayerOneTransactionDef<T>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         future::ready(Ok(()))
     }
 }

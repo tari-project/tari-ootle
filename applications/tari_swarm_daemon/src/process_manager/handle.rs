@@ -52,6 +52,10 @@ pub enum ProcessManagerRequest {
         instance_id: InstanceId,
         reply: Reply<()>,
     },
+    ExitValidatorNode {
+        instance_id: InstanceId,
+        reply: Reply<()>,
+    },
     BurnFunds {
         amount: u64,
         wallet_instance_id: InstanceId,
@@ -59,6 +63,16 @@ pub enum ProcessManagerRequest {
         out_path: PathBuf,
         reply: Reply<PathBuf>,
     },
+    GetMinotariNodeDetails {
+        instance_id: InstanceId,
+        reply: Reply<MinotariNodeDetails>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct MinotariNodeDetails {
+    pub instance_info: InstanceInfo,
+    pub height: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -70,6 +84,7 @@ pub struct TemplateData {
     pub contents_url: Option<Url>,
 }
 
+#[derive(Debug, Clone)]
 pub struct InstanceInfo {
     pub id: InstanceId,
     pub name: String,
@@ -237,6 +252,18 @@ impl ProcessManagerHandle {
         Ok(intances.into_iter().find(|i| i.id == id))
     }
 
+    pub async fn get_minotari_node_details(&self, id: InstanceId) -> anyhow::Result<MinotariNodeDetails> {
+        let (tx_reply, rx_reply) = oneshot::channel();
+        self.tx_request
+            .send(ProcessManagerRequest::GetMinotariNodeDetails {
+                instance_id: id,
+                reply: tx_reply,
+            })
+            .await?;
+
+        rx_reply.await?
+    }
+
     // pub async fn list_minotari_nodes(&self) -> anyhow::Result<Vec<InstanceInfo>> {
     //     self.list_instances(Some(InstanceType::MinoTariNode)).await
     // }
@@ -322,6 +349,18 @@ impl ProcessManagerHandle {
         let (tx_reply, rx_reply) = oneshot::channel();
         self.tx_request
             .send(ProcessManagerRequest::RegisterValidatorNode {
+                instance_id,
+                reply: tx_reply,
+            })
+            .await?;
+
+        rx_reply.await?
+    }
+
+    pub async fn exit_validator_node(&self, instance_id: InstanceId) -> anyhow::Result<()> {
+        let (tx_reply, rx_reply) = oneshot::channel();
+        self.tx_request
+            .send(ProcessManagerRequest::ExitValidatorNode {
                 instance_id,
                 reply: tx_reply,
             })

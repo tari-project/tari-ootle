@@ -40,13 +40,14 @@ async function jsonRpc2(address: string, method: string, params: any = null) {
   return json.result;
 }
 
-function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }: {
+function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal, node }: {
   name: string,
   url: string,
   addTxToPool: any,
   autoRefresh: boolean,
   state: any,
-  horizontal: boolean
+  horizontal: boolean,
+  node: any
 }) {
   const [epochManagerStats, setEpochManagerStats] = useState<any>(null);
   const [consensusStatus, setConsensusStatus] = useState<any>(null);
@@ -216,6 +217,13 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
     state: consensusState,
   } = consensusStatus || {} as any;
 
+  const handleRegister = () => {
+    jsonRpc("register_validator_node", { instance_id: node.instance_id, mine: false });
+  };
+  const handleOnExit = () => {
+    jsonRpc("exit_validator_node", { instance_id: node.instance_id, mine: false });
+  };
+
   return (
     <div style={{ whiteSpace: "nowrap" }}>
       <hr />
@@ -239,6 +247,13 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal }:
       </div>
       {showPool(pool)}
       {showMissingTx(missingTxStates)}
+      <button style={{ float: "left" }} disabled={consensusState === "Running"}
+              title="Submit a registration for this validator. Manual mining is required."
+              onClick={handleRegister}>Register
+      </button>
+      <button style={{ float: "right" }} disabled={!consensusState || consensusState !== "Running"}
+              title="Submit an exit for this validator. Manual mining is required." onClick={handleOnExit}>Submit Exit
+      </button>
     </div>
   );
 }
@@ -258,6 +273,7 @@ function ShowInfo(params: any) {
     horizontal,
     onReload,
   } = params;
+
 
   const nameInfo = name && (
     <div>
@@ -341,7 +357,7 @@ function ShowInfo(params: any) {
       {grpcInfo}
       {showLogs && logInfo}
       {executable === Executable.ValidatorNode && node?.jrpc &&
-        <ExtraInfoVN name={name} url={node.jrpc} addTxToPool={addTxToPool} autoRefresh={autoRefresh}
+        <ExtraInfoVN name={name} node={node} url={node.jrpc} addTxToPool={addTxToPool} autoRefresh={autoRefresh}
                      state={state}
                      horizontal={horizontal} />}
       {executable !== Executable.Templates &&
@@ -410,7 +426,6 @@ export default function Main() {
   const [indexers, setIndexers] = useState({});
   const [logs, setLogs] = useState<any | null>({});
   const [stdoutLogs, setStdoutLogs] = useState<any | null>({});
-  const [connectorSample, setConnectorSample] = useState(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -477,13 +492,6 @@ export default function Main() {
       .catch((error) => {
         console.log(error);
       });
-    jsonRpc("http_connector")
-      .then((resp) => {
-        setConnectorSample(resp);
-      })
-      .catch((error) => {
-        console.log(error);
-      });
     jsonRpc("get_logs", "node").then((resp) => {
       setLogs((state: any) => ({ ...state, node: resp }));
     });
@@ -541,6 +549,10 @@ export default function Main() {
     jsonRpc("add_validator_node", { name: null, register: true, mine: false }).then(getInfo);
   };
 
+  const mine = () => {
+    jsonRpc("mine", { num_blocks: 1 });
+  };
+
   return (
     <div className="main">
       <button onClick={() => stopAll()}>Stop all VNs</button>
@@ -556,7 +568,7 @@ export default function Main() {
         <MinotariWallet showLogs={showLogs} />
         <ShowInfo executable={Executable.Miner} name="miner" logs={logs?.miner}
                   stdoutLogs={stdoutLogs?.miner} showLogs={showLogs} horizontal={horizontal}>
-          <button onClick={() => jsonRpc("mine", { num_blocks: 1 })}>Mine</button>
+          <button onClick={() => mine()}>Mine</button>
           <h3>Periodic Mining</h3>
           <div>
             <input type="number" placeholder="Mining interval" disabled={isMining}
@@ -596,11 +608,6 @@ export default function Main() {
           <button onClick={handleFileUpload}>Upload template</button>
         </ShowInfo>
       </div>
-      {connectorSample && (
-        <div className="label">
-          <a href={connectorSample}>Connector sample</a>
-        </div>
-      )}
       <div className="label">All Instances</div>
       <div>
         <table>

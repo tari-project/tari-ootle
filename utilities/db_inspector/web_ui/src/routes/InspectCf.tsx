@@ -166,7 +166,6 @@ export default function InspectCf() {
             },
           }}
           sortingOrder={["desc", "asc", null]}
-          disableMultipleRowSelection
           checkboxSelection
         />
       </Grid>

@@ -434,7 +434,6 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
             proposed_by: value.proposed_by().as_bytes().to_vec(),
             state_merkle_root: value.state_merkle_root().as_slice().to_vec(),
             total_leader_fee: value.total_leader_fee(),
-            foreign_indexes: encode(value.foreign_indexes()).unwrap(),
             signature: value.signature().map(Into::into),
             timestamp: value.timestamp(),
             base_layer_block_height: value.base_layer_block_height(),
@@ -483,7 +482,7 @@ fn try_convert_proto_block_header(
         // We calculate the BlockId and command MR locally from remote data. This means that they will
         // always be valid, therefore do not need to be explicitly validated.
         // If there were a mismatch (perhaps due modified data over the wire) the signature verification will fail.
-        Ok(consensus_models::BlockHeader::create(
+        let block = consensus_models::BlockHeader::create(
             network,
             value.parent_id.try_into()?,
             justify_id,
@@ -494,13 +493,18 @@ fn try_convert_proto_block_header(
             value.state_merkle_root.try_into()?,
             commands,
             value.total_leader_fee,
-            decode_exact(&value.foreign_indexes)?,
-            value.signature.map(TryInto::try_into).transpose()?,
+            value
+                .signature
+                .map(TryInto::try_into)
+                .transpose()?
+                .ok_or_else(|| anyhow!("Block conversion: Block signature is missing"))?,
             value.timestamp,
             value.base_layer_block_height,
             value.base_layer_block_hash.try_into()?,
             extra_data,
-        )?)
+        )?;
+
+        Ok(block)
     }
 }
 

@@ -34,7 +34,6 @@ create table blocks
     is_committed            boolean   not NULL default '0',
     is_justified            boolean   not NULL,
     is_dummy                boolean   not NULL,
-    foreign_indexes         text      not NULL,
     signature               text      NULL,
     block_time              bigint    NULL,
     timestamp               bigint    not NULL,
@@ -65,7 +64,6 @@ create table parked_blocks
     command_count           bigint    not NULL,
     commands                text      not NULL,
     total_leader_fee        bigint    not NULL,
-    foreign_indexes         text      not NULL,
     signature               text      NULL,
     timestamp               bigint    not NULL,
     base_layer_block_height bigint    not NULL,
@@ -398,7 +396,6 @@ CREATE TABLE foreign_proposals
     command_count            bigint    not NULL,
     commands                 text      not NULL,
     total_leader_fee         bigint    not NULL,
-    foreign_indexes          text      not NULL,
     signature                text      NULL,
     timestamp                bigint    not NULL,
     base_layer_block_height  bigint    not NULL,
@@ -413,20 +410,6 @@ CREATE TABLE foreign_proposals
     UNIQUE (block_id)
 );
 
-CREATE TABLE foreign_send_counters
-(
-    id         integer   not NULL primary key AUTOINCREMENT,
-    block_id   text      not NULL,
-    counters   text      not NULL,
-    created_at timestamp not NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE foreign_receive_counters
-(
-    id         integer   not NULL primary key AUTOINCREMENT,
-    counters   text      not NULL,
-    created_at timestamp not NULL DEFAULT CURRENT_TIMESTAMP
-);
 
 CREATE TABLE burnt_utxos
 (
@@ -568,7 +551,6 @@ create table diagnostic_deleted_blocks
     is_committed            boolean   not NULL default '0',
     is_justified            boolean   not NULL,
     is_dummy                boolean   not NULL,
-    foreign_indexes         text      not NULL,
     signature               text      NULL,
     block_time              bigint    NULL,
     timestamp               bigint    not NULL,

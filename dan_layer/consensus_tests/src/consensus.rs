@@ -1442,6 +1442,24 @@ async fn leader_failure_node_goes_down_and_gets_evicted() {
             .eviction_proofs()
             .await;
         if !eviction_proofs.is_empty() {
+            for proof in &eviction_proofs {
+                // Uncomment the following to dump the eviction proofs to files for fixtures
+                // std::fs::write(
+                //     format!("/tmp/eviction_proof_{}.json", proof.node_to_evict()),
+                //     serde_json::to_string_pretty(proof).unwrap(),
+                // )
+                // .unwrap();
+                // Check the proof is valid
+                proof
+                    .validate(4, &|pk| {
+                        Ok(test
+                            .validators()
+                            .values()
+                            .any(|vn| vn.public_key.as_bytes() == pk.as_bytes()))
+                    })
+                    .unwrap();
+            }
+
             break;
         }
 

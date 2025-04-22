@@ -2,16 +2,18 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fmt::{Debug, Display, Formatter},
 };
 
+use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
-use tari_dan_common_types::{hashing, shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+use tari_dan_common_types::{hashing, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_engine_types::serde_with;
+use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1};
 use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 
@@ -48,8 +50,6 @@ pub struct BlockHeader {
     command_merkle_root: FixedHash,
     /// If the block is a dummy block.
     is_dummy: bool,
-    /// Counter for each foreign shard for reliable broadcast.
-    foreign_indexes: BTreeMap<Shard, u64>,
     /// Signature of block by the proposer.
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce : string, signature: string} | null"))]
     signature: Option<SchnorrSignatureBytes>,
@@ -76,8 +76,46 @@ impl BlockHeader {
         state_merkle_root: FixedHash,
         commands: &BTreeSet<Command>,
         total_leader_fee: u64,
-        sorted_foreign_indexes: BTreeMap<Shard, u64>,
-        signature: Option<SchnorrSignatureBytes>,
+        signature: SchnorrSignatureBytes,
+        timestamp: u64,
+        base_layer_block_height: u64,
+        base_layer_block_hash: FixedHash,
+        extra_data: ExtraData,
+    ) -> Result<Self, BlockError> {
+        let mut header = Self::create_unsigned(
+            network,
+            parent,
+            justify_id,
+            height,
+            epoch,
+            shard_group,
+            proposed_by,
+            state_merkle_root,
+            commands,
+            total_leader_fee,
+            timestamp,
+            base_layer_block_height,
+            base_layer_block_hash,
+            extra_data,
+        )?;
+
+        header.set_signature(signature);
+
+        Ok(header)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_unsigned(
+        network: Network,
+        parent: BlockId,
+        justify_id: QcId,
+        height: NodeHeight,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+        proposed_by: RistrettoPublicKeyBytes,
+        state_merkle_root: FixedHash,
+        commands: &BTreeSet<Command>,
+        total_leader_fee: u64,
         timestamp: u64,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
@@ -97,8 +135,7 @@ impl BlockHeader {
             command_merkle_root,
             total_leader_fee,
             is_dummy: false,
-            foreign_indexes: sorted_foreign_indexes,
-            signature,
+            signature: None,
             timestamp,
             base_layer_block_height,
             base_layer_block_hash,
@@ -122,7 +159,6 @@ impl BlockHeader {
         state_merkle_root: FixedHash,
         total_leader_fee: u64,
         is_dummy: bool,
-        sorted_foreign_indexes: BTreeMap<Shard, u64>,
         signature: Option<SchnorrSignatureBytes>,
         timestamp: u64,
         base_layer_block_height: u64,
@@ -143,7 +179,6 @@ impl BlockHeader {
             command_merkle_root,
             total_leader_fee,
             is_dummy,
-            foreign_indexes: sorted_foreign_indexes,
             signature,
             timestamp,
             base_layer_block_height,
@@ -167,7 +202,6 @@ impl BlockHeader {
             command_merkle_root: FixedHash::zero(),
             total_leader_fee: 0,
             is_dummy: false,
-            foreign_indexes: BTreeMap::new(),
             signature: None,
             timestamp: EpochTime::now().as_u64(),
             base_layer_block_height: 0,
@@ -203,7 +237,6 @@ impl BlockHeader {
                 .expect("compute_command_merkle_root is infallible for empty commands"),
             total_leader_fee: 0,
             is_dummy: true,
-            foreign_indexes: BTreeMap::new(),
             signature: None,
             timestamp: parent_timestamp,
             base_layer_block_height: parent_base_layer_block_height,
@@ -229,56 +262,55 @@ impl BlockHeader {
         // ```
 
         let header_hash = self.calculate_hash();
-        Self::calculate_block_id(&header_hash, &self.parent)
+        Self::calculate_block_id(&self.parent, &header_hash)
     }
 
-    pub(crate) fn calculate_block_id(contents_hash: &FixedHash, parent_id: &BlockId) -> BlockId {
-        if *contents_hash == FixedHash::zero() && parent_id.is_zero() {
+    pub(crate) fn calculate_block_id(parent_id: &BlockId, header_hash: &FixedHash) -> BlockId {
+        // The zero block is a special case. It has no parent and its ID is always zero.
+        if *header_hash == FixedHash::zero() && parent_id.is_zero() {
             return BlockId::zero();
         }
 
         hashing::block_hasher()
             .chain(parent_id)
-            .chain(contents_hash)
+            .chain(header_hash)
             .finalize_into_array()
             .into()
     }
 
-    pub fn create_extra_data_hash(&self) -> FixedHash {
-        hashing::extra_data_hasher().chain(&self.extra_data).finalize().into()
-    }
-
-    pub fn create_foreign_indexes_hash(&self) -> FixedHash {
-        hashing::foreign_indexes_hasher()
-            .chain(&self.foreign_indexes)
-            .finalize()
-            .into()
+    pub fn calculate_metadata_hash(&self) -> FixedHash {
+        let fields = MetadataHashFields::V1(MetadataHashFieldsV1 {
+            total_leader_fee: self.total_leader_fee,
+            is_dummy: self.is_dummy(),
+            timestamp: self.timestamp,
+            base_layer_block_height: self.base_layer_block_height,
+            base_layer_block_hash: &self.base_layer_block_hash,
+            extra_data: &self.extra_data,
+        });
+        hashing::block_metadata_hasher().chain(&fields).finalize().into()
     }
 
     pub fn calculate_hash(&self) -> FixedHash {
-        // These hashes reduce proof sizes, specifically, a proof-of-commit only needs to include these hashes and not
-        // their data.
-        let extra_data_hash = self.create_extra_data_hash();
-        let foreign_indexes_hash = self.create_foreign_indexes_hash();
+        // This hash reduces proof sizes. A proof-of-commit only needs to include this hash and not
+        // the data.
+        let metadata_hash = self.calculate_metadata_hash();
 
-        hashing::block_hasher()
-            .chain(&self.network.as_byte())
-            .chain(&self.justify_id)
-            .chain(&self.height)
-            .chain(&self.total_leader_fee)
-            .chain(&self.epoch)
-            .chain(&self.shard_group)
-            .chain(&self.proposed_by)
-            .chain(&self.state_merkle_root)
-            .chain(&self.is_dummy)
-            .chain(&self.command_merkle_root)
-            .chain(&foreign_indexes_hash)
-            .chain(&self.timestamp)
-            .chain(&self.base_layer_block_height)
-            .chain(&self.base_layer_block_hash)
-            .chain(&extra_data_hash)
-            .finalize()
-            .into()
+        let fields = BlockHeaderHashFields::V1(BlockHeaderHashFieldsV1 {
+            network: self.network.as_byte(),
+            justify_id: self.justify_id.hash(),
+            height: self.height.as_u64(),
+            epoch: self.epoch.as_u64(),
+            shard_group: tari_sidechain::ShardGroup {
+                start: self.shard_group.start().as_u32(),
+                end_inclusive: self.shard_group.end().as_u32(),
+            },
+            proposed_by: self.proposed_by.as_bytes(),
+            state_merkle_root: &self.state_merkle_root,
+            command_merkle_root: &self.command_merkle_root,
+            metadata_hash: &metadata_hash,
+        });
+
+        hashing::block_hasher().chain(&fields).finalize().into()
     }
 
     pub fn is_genesis(&self) -> bool {
@@ -377,14 +409,6 @@ impl BlockHeader {
         self.is_dummy
     }
 
-    pub fn get_foreign_counter(&self, bucket: &Shard) -> Option<u64> {
-        self.foreign_indexes.get(bucket).copied()
-    }
-
-    pub fn foreign_indexes(&self) -> &BTreeMap<Shard, u64> {
-        &self.foreign_indexes
-    }
-
     pub fn timestamp(&self) -> u64 {
         self.timestamp
     }
@@ -431,4 +455,19 @@ impl Display for BlockHeader {
             self.parent()
         )
     }
+}
+
+#[derive(Debug, BorshSerialize)]
+enum MetadataHashFields<'a> {
+    V1(MetadataHashFieldsV1<'a>),
+}
+
+#[derive(Debug, BorshSerialize)]
+struct MetadataHashFieldsV1<'a> {
+    total_leader_fee: u64,
+    is_dummy: bool,
+    timestamp: u64,
+    base_layer_block_height: u64,
+    base_layer_block_hash: &'a FixedHash,
+    extra_data: &'a ExtraData,
 }

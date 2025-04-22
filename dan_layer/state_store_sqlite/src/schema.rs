@@ -34,7 +34,6 @@ diesel::table! {
         is_committed -> Bool,
         is_justified -> Bool,
         is_dummy -> Bool,
-        foreign_indexes -> Text,
         signature -> Nullable<Text>,
         block_time -> Nullable<BigInt>,
         timestamp -> BigInt,
@@ -77,7 +76,6 @@ diesel::table! {
         is_committed -> Bool,
         is_justified -> Bool,
         is_dummy -> Bool,
-        foreign_indexes -> Text,
         signature -> Nullable<Text>,
         block_time -> Nullable<BigInt>,
         timestamp -> BigInt,
@@ -158,7 +156,6 @@ diesel::table! {
         command_count -> BigInt,
         commands -> Text,
         total_leader_fee -> BigInt,
-        foreign_indexes -> Text,
         signature -> Nullable<Text>,
         timestamp -> BigInt,
         base_layer_block_height -> BigInt,
@@ -169,23 +166,6 @@ diesel::table! {
         proposed_in_block_height -> Nullable<BigInt>,
         status -> Text,
         extra_data -> Nullable<Text>,
-        created_at -> Timestamp,
-    }
-}
-
-diesel::table! {
-    foreign_receive_counters (id) {
-        id -> Integer,
-        counters -> Text,
-        created_at -> Timestamp,
-    }
-}
-
-diesel::table! {
-    foreign_send_counters (id) {
-        id -> Integer,
-        block_id -> Text,
-        counters -> Text,
         created_at -> Timestamp,
     }
 }
@@ -316,7 +296,6 @@ diesel::table! {
         command_count -> BigInt,
         commands -> Text,
         total_leader_fee -> BigInt,
-        foreign_indexes -> Text,
         signature -> Nullable<Text>,
         timestamp -> BigInt,
         base_layer_block_height -> BigInt,
@@ -565,8 +544,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     foreign_missing_transactions,
     foreign_parked_blocks,
     foreign_proposals,
-    foreign_receive_counters,
-    foreign_send_counters,
     foreign_substate_pledges,
     high_qcs,
     last_executed,

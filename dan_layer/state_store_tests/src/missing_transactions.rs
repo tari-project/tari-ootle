@@ -8,6 +8,7 @@ use tari_dan_storage::{
     StateStore,
     StateStoreWriteTransaction,
 };
+use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::helper::{create_block, create_rocksdb, create_sqlite, create_tx_atom};
@@ -48,8 +49,7 @@ fn missing_transactions_operations(db: impl StateStore) {
         [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
         Default::default(),
         Default::default(),
-        Default::default(),
-        None,
+        SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
         0,
         FixedHash::zero(),

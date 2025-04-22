@@ -134,7 +134,8 @@ fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
 }
 
 pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<SidechainBlockHeader, HotStuffError> {
-    // NOTE: if the signature is not validated prior to this, an invariant error could be caused by the block proposer
+    // NOTE: if an invalid signature is not rejected prior to this, an invariant error will be caused by the block
+    // proposer.
     let signature = convert_validator_block_signature(header.signature().expect("checked by caller"))?;
 
     Ok(SidechainBlockHeader {
@@ -150,20 +151,14 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<S
         proposed_by: CompressedPublicKey::from_canonical_bytes(header.proposed_by().as_bytes()).map_err(|_| {
             HotStuffError::InvariantError(format!(
                 "RistrettoPublicKey non-canonical bytes for proposed_by, in convert_block_to_sidechain_block_header \
-                 ({:?})",
+                 ({})",
                 header.proposed_by(),
             ))
         })?,
-        total_leader_fee: header.total_leader_fee(),
         state_merkle_root: *header.state_merkle_root(),
         command_merkle_root: *header.command_merkle_root(),
-        is_dummy: header.is_dummy(),
-        foreign_indexes_hash: header.create_foreign_indexes_hash(),
+        metadata_hash: header.calculate_metadata_hash(),
         signature,
-        timestamp: header.timestamp(),
-        base_layer_block_height: header.base_layer_block_height(),
-        base_layer_block_hash: *header.base_layer_block_hash(),
-        extra_data_hash: header.create_extra_data_hash(),
     })
 }
 
@@ -216,4 +211,78 @@ fn convert_validator_block_signature(
     })?;
 
     Ok(ValidatorBlockSignature::new(public_nonce, signature))
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_common::configuration::Network;
+    use tari_common_types::types::FixedHash;
+    use tari_crypto::tari_utilities::epoch_time::EpochTime;
+    use tari_dan_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+
+    use super::*;
+
+    fn seed_hash(seed: u8) -> FixedHash {
+        let arr = [seed; 32];
+        FixedHash::new(arr)
+    }
+
+    #[test]
+    fn it_hashes_the_header_identically_to_sidechain_header() {
+        let parent_id = seed_hash(1).into_array().into();
+        let qc1 = QuorumCertificate::new(
+            seed_hash(2),
+            parent_id,
+            NodeHeight(1),
+            Epoch(1),
+            ShardGroup::all_shards(NumPreshards::P256),
+            vec![],
+            vec![],
+            QuorumDecision::Accept,
+        );
+
+        let network = Network::LocalNet;
+        let block = BlockHeader::create(
+            network,
+            parent_id,
+            *qc1.id(),
+            NodeHeight(2),
+            Epoch(1),
+            ShardGroup::all_shards(NumPreshards::P256),
+            Default::default(),
+            Default::default(),
+            &Default::default(),
+            1,
+            SchnorrSignatureBytes::zero(),
+            EpochTime::now().as_u64(),
+            0,
+            FixedHash::zero(),
+            ExtraData::new(),
+        )
+        .unwrap();
+
+        let sidechain_header = SidechainBlockHeader {
+            network: network.as_byte(),
+            parent_id: *parent_id.hash(),
+            justify_id: *qc1.id().hash(),
+            height: 2,
+            epoch: 1,
+            shard_group: tari_sidechain::ShardGroup {
+                start: 1,
+                end_inclusive: 256,
+            },
+            proposed_by: Default::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: Default::default(),
+            signature: ValidatorBlockSignature::new(
+                CompressedPublicKey::from_canonical_bytes(block.signature().unwrap().public_nonce().as_bytes())
+                    .unwrap(),
+                RistrettoSecretKey::from_canonical_bytes(block.signature().unwrap().signature().as_bytes()).unwrap(),
+            ),
+            metadata_hash: block.calculate_metadata_hash(),
+        };
+
+        assert_eq!(sidechain_header.calculate_hash(), block.calculate_hash());
+        assert_eq!(sidechain_header.calculate_block_id(), *block.calculate_id().hash());
+    }
 }

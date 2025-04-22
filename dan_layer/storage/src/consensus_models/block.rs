@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fmt::{Debug, Display, Formatter},
     iter,
     ops::Deref,
@@ -43,7 +43,6 @@ use super::{
     EvictNodeAtom,
     ForeignProposal,
     ForeignProposalAtom,
-    ForeignSendCounters,
     HighQc,
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
@@ -117,8 +116,7 @@ impl Block {
         commands: BTreeSet<Command>,
         state_merkle_root: FixedHash,
         total_leader_fee: u64,
-        sorted_foreign_indexes: BTreeMap<Shard, u64>,
-        signature: Option<SchnorrSignatureBytes>,
+        signature: SchnorrSignatureBytes,
         timestamp: u64,
         base_layer_block_height: u64,
         base_layer_block_hash: FixedHash,
@@ -135,7 +133,6 @@ impl Block {
             state_merkle_root,
             &commands,
             total_leader_fee,
-            sorted_foreign_indexes,
             signature,
             timestamp,
             base_layer_block_height,
@@ -174,7 +171,6 @@ impl Block {
         is_dummy: bool,
         is_justified: bool,
         is_committed: bool,
-        sorted_foreign_indexes: BTreeMap<Shard, u64>,
         signature: Option<SchnorrSignatureBytes>,
         created_at: PrimitiveDateTime,
         block_time: Option<u64>,
@@ -195,7 +191,6 @@ impl Block {
             state_merkle_root,
             total_leader_fee,
             is_dummy,
-            sorted_foreign_indexes,
             signature,
             timestamp,
             base_layer_block_height,
@@ -243,8 +238,7 @@ impl Block {
             Default::default(),
             state_merkle_root,
             0,
-            BTreeMap::new(),
-            None,
+            SchnorrSignatureBytes::zero(),
             0,
             0,
             FixedHash::zero(),
@@ -429,20 +423,8 @@ impl Block {
         self.is_committed
     }
 
-    pub fn get_foreign_counter(&self, shard: &Shard) -> Option<u64> {
-        self.header.get_foreign_counter(shard)
-    }
-
-    pub fn foreign_indexes(&self) -> &BTreeMap<Shard, u64> {
-        self.header.foreign_indexes()
-    }
-
     pub fn block_time(&self) -> Option<u64> {
         self.block_time
-    }
-
-    pub fn set_block_time(&mut self, block_time: Option<u64>) {
-        self.block_time = block_time;
     }
 
     pub fn timestamp(&self) -> u64 {
@@ -953,22 +935,6 @@ impl Block {
             locked,
         );
         Ok(false)
-    }
-
-    pub fn save_foreign_send_counters<TTx>(&self, tx: &mut TTx) -> Result<(), StorageError>
-    where
-        TTx: StateStoreWriteTransaction + Deref,
-        TTx::Target: StateStoreReadTransaction,
-    {
-        let mut counters = ForeignSendCounters::get_or_default(&**tx, self.justify().block_id())?;
-        // Add counters for this block and carry over the counters from the justify block, if any
-        for shard in self.foreign_indexes().keys() {
-            counters.increment_counter(*shard);
-        }
-        if !counters.is_empty() {
-            counters.set(tx, self.id())?;
-        }
-        Ok(())
     }
 
     pub fn get_block_pledge<TTx: StateStoreReadTransaction>(

@@ -85,7 +85,6 @@ message BlockHeader {
   bytes proposed_by = 6;
   bytes state_merkle_root = 7;
   uint64 total_leader_fee = 8;
-  bytes foreign_indexes = 9;
   tari.dan.common.Signature signature = 10;
   uint64 timestamp = 11;
   uint64 base_layer_block_height = 12;

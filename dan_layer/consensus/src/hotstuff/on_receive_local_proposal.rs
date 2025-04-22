@@ -548,7 +548,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         valid_block: &ValidBlock,
     ) -> Result<(), HotStuffError> {
-        valid_block.block().save_foreign_send_counters(tx)?;
         valid_block.block().justify().save(tx)?;
         if !valid_block.dummy_blocks().is_empty() {
             info!(target: LOG_TARGET, "Saving {} dummy block(s)", valid_block.dummy_blocks().len());
@@ -600,113 +599,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             Err(e) => Err(e),
         }
     }
-
-    // fn update_foreign_proposal_transactions(
-    //     &self,
-    //     tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
-    //     block: &Block,
-    // ) -> Result<(), HotStuffError> {
-    //     // TODO: Move this to consensus constants
-    //     const FOREIGN_PROPOSAL_TIMEOUT: u64 = 1000;
-    //     let all_proposed = ForeignProposal::get_all_proposed(
-    //         &**tx,
-    //         block.height().saturating_sub(NodeHeight(FOREIGN_PROPOSAL_TIMEOUT)),
-    //     )?;
-    //     for proposal in all_proposed {
-    //         let mut has_unresolved_transactions = false;
-    //
-    //         let (transactions, _missing) = TransactionRecord::get_any(&**tx, &proposal.transactions)?;
-    //         for transaction in transactions {
-    //             if transaction.is_finalized() {
-    //                 // We don't know the transaction at all, or we know it but it's not finalised.
-    //                 let mut tx_rec = self
-    //                     .transaction_pool
-    //                     .get(&**tx, block.as_leaf_block(), transaction.id())?;
-    //                 // If the transaction is still in the pool we have to check if it was at least locally prepared,
-    //                 // otherwise abort it.
-    //                 if tx_rec.current_stage().is_new() || tx_rec.current_stage().is_prepared() {
-    //                     tx_rec.update_local_decision(tx, Decision::Abort)?;
-    //                     has_unresolved_transactions = true;
-    //                 }
-    //             }
-    //         }
-    //         if !has_unresolved_transactions {
-    //             proposal.delete(tx)?;
-    //         }
-    //     }
-    //     Ok(())
-    // }
-
-    // TODO: fix
-    // fn check_foreign_indexes(
-    //     &self,
-    //     tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-    //     num_committees: u32,
-    //     local_shard: Shard,
-    //     block: &Block,
-    //     justify_block: &BlockId,
-    // ) -> Result<(), HotStuffError> {
-    //     let non_local_shards = proposer::get_non_local_shards(tx, block, num_committees, local_shard)?;
-    //     let block_foreign_indexes = block.foreign_indexes();
-    //     if block_foreign_indexes.len() != non_local_shards.len() {
-    //         return Err(ProposalValidationError::InvalidForeignCounters {
-    //             proposed_by: block.proposed_by().to_string(),
-    //             hash: *block.id(),
-    //             details: format!(
-    //                 "Foreign indexes length ({}) does not match non-local shards length ({})",
-    //                 block_foreign_indexes.len(),
-    //                 non_local_shards.len()
-    //             ),
-    //         }
-    //         .into());
-    //     }
-    //
-    //     let mut foreign_counters = ForeignSendCounters::get_or_default(tx, justify_block)?;
-    //     let mut current_shard = None;
-    //     for (shard, foreign_count) in block_foreign_indexes {
-    //         if let Some(current_shard) = current_shard {
-    //             // Check ordering
-    //             if current_shard > shard {
-    //                 return Err(ProposalValidationError::InvalidForeignCounters {
-    //                     proposed_by: block.proposed_by().to_string(),
-    //                     hash: *block.id(),
-    //                     details: format!(
-    //                         "Foreign indexes are not sorted by shard. Current shard: {}, shard: {}",
-    //                         current_shard, shard
-    //                     ),
-    //                 }
-    //                 .into());
-    //             }
-    //         }
-    //
-    //         current_shard = Some(shard);
-    //         // Check that each shard is correct
-    //         if !non_local_shards.contains(shard) {
-    //             return Err(ProposalValidationError::InvalidForeignCounters {
-    //                 proposed_by: block.proposed_by().to_string(),
-    //                 hash: *block.id(),
-    //                 details: format!("Shard {} is not a non-local shard", shard),
-    //             }
-    //             .into());
-    //         }
-    //
-    //         // Check that foreign counters are correct
-    //         let expected_count = foreign_counters.increment_counter(*shard);
-    //         if *foreign_count != expected_count {
-    //             return Err(ProposalValidationError::InvalidForeignCounters {
-    //                 proposed_by: block.proposed_by().to_string(),
-    //                 hash: *block.id(),
-    //                 details: format!(
-    //                     "Foreign counter for shard {} is incorrect. Expected {}, got {}",
-    //                     shard, expected_count, foreign_count
-    //                 ),
-    //             }
-    //             .into());
-    //         }
-    //     }
-    //
-    //     Ok(())
-    // }
 
     /// Perform final block validations (TODO: implement all validations)
     /// We assume at this point that initial stateless validations have been done (in inbound messages)

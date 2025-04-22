@@ -31,7 +31,6 @@ pub struct ForeignProposal {
     pub command_count: i64,
     pub commands: String,
     pub total_leader_fee: i64,
-    pub foreign_indexes: String,
     pub signature: Option<String>,
     pub timestamp: i64,
     pub base_layer_block_height: i64,
@@ -81,7 +80,6 @@ impl ForeignProposal {
             false,
             false,
             false,
-            deserialize_json(&self.foreign_indexes)?,
             self.signature.map(|val| deserialize_json(&val)).transpose()?,
             self.created_at,
             None,
@@ -106,41 +104,6 @@ impl ForeignProposal {
                 .map(deserialize_hex_try_from)
                 .transpose()?,
             status,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Queryable)]
-pub struct ForeignSendCounters {
-    pub id: i32,
-    pub block_id: String,
-    pub counters: String,
-    pub created_at: PrimitiveDateTime,
-}
-
-impl TryFrom<ForeignSendCounters> for consensus_models::ForeignSendCounters {
-    type Error = StorageError;
-
-    fn try_from(value: ForeignSendCounters) -> Result<Self, Self::Error> {
-        Ok(Self {
-            counters: deserialize_json(&value.counters)?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Queryable)]
-pub struct ForeignReceiveCounters {
-    pub id: i32,
-    pub counters: String,
-    pub created_at: PrimitiveDateTime,
-}
-
-impl TryFrom<ForeignReceiveCounters> for consensus_models::ForeignReceiveCounters {
-    type Error = StorageError;
-
-    fn try_from(value: ForeignReceiveCounters) -> Result<Self, Self::Error> {
-        Ok(Self {
-            counters: deserialize_json(&value.counters)?,
         })
     }
 }

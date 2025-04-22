@@ -15,8 +15,6 @@ use tari_dan_storage::{
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalStatus,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -239,35 +237,6 @@ impl<'tx> StateStoreWriteTransaction for AnyStateStoreWriteTransaction<'tx> {
             },
             AnyStateStoreWriteTransaction::Sqlite { write_tx, .. } => {
                 write_tx.foreign_proposals_clear_proposed_in(proposed_in_block)
-            },
-        }
-    }
-
-    fn foreign_send_counters_set(
-        &mut self,
-        foreign_send_counter: &ForeignSendCounters,
-        block_id: &BlockId,
-    ) -> Result<(), StorageError> {
-        match self {
-            AnyStateStoreWriteTransaction::Rocksdb { write_tx, .. } => {
-                write_tx.foreign_send_counters_set(foreign_send_counter, block_id)
-            },
-            AnyStateStoreWriteTransaction::Sqlite { write_tx, .. } => {
-                write_tx.foreign_send_counters_set(foreign_send_counter, block_id)
-            },
-        }
-    }
-
-    fn foreign_receive_counters_set(
-        &mut self,
-        foreign_send_counter: &ForeignReceiveCounters,
-    ) -> Result<(), StorageError> {
-        match self {
-            AnyStateStoreWriteTransaction::Rocksdb { write_tx, .. } => {
-                write_tx.foreign_receive_counters_set(foreign_send_counter)
-            },
-            AnyStateStoreWriteTransaction::Sqlite { write_tx, .. } => {
-                write_tx.foreign_receive_counters_set(foreign_send_counter)
             },
         }
     }

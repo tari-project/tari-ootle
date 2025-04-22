@@ -30,7 +30,6 @@ use tari_dan_storage::{
         Decision,
         EvictNodeAtom,
         ForeignProposal,
-        ForeignSendCounters,
         HighQc,
         LastProposed,
         LeafBlock,
@@ -592,16 +591,7 @@ where TConsensusSpec: ConsensusSpec
         )?;
         timer.done();
 
-        let foreign_counters = ForeignSendCounters::get_or_default(tx, parent_block.block_id())?;
-        let foreign_indexes = substate_store
-            .diff()
-            .iter()
-            .map(|change| change.shard())
-            .filter(|shard| !local_committee_info.shard_group().contains(shard))
-            .map(|shard| (shard, foreign_counters.get_count(shard) + 1))
-            .collect();
-
-        let mut header = BlockHeader::create(
+        let mut header = BlockHeader::create_unsigned(
             self.config.network,
             *parent_block.block_id(),
             *high_qc_certificate.id(),
@@ -612,8 +602,6 @@ where TConsensusSpec: ConsensusSpec
             state_root,
             &commands,
             total_leader_fee,
-            foreign_indexes,
-            None,
             EpochTime::now().as_u64(),
             base_layer_block_height,
             base_layer_block_hash,

@@ -25,61 +25,13 @@
 use tari_hashing::layer2::ValidatorNodeBmtHasherBlake2b;
 pub use tari_hashing::layer2::{
     block_hasher,
+    block_metadata_hasher,
     command_hasher,
-    extra_data_hasher,
-    foreign_indexes_hasher,
     quorum_certificate_hasher,
     vote_signature_hasher,
 };
 use tari_mmr::{BalancedBinaryMerkleProof, BalancedBinaryMerkleTree, MergedBalancedBinaryMerkleProof};
 
-// use blake2::{digest::consts::U32, Blake2b};
-// use tari_crypto::{hash_domain, hashing::DomainSeparatedHasher};
-// use tari_hashing::ValidatorNodeMerkleHashDomain;
-// use tari_mmr::{BalancedBinaryMerkleProof, BalancedBinaryMerkleTree, MergedBalancedBinaryMerkleProof};
-//
-// use crate::hasher::{tari_hasher, TariDomainHasher};
-//
-// hash_domain!(TariDanConsensusHashDomain, "com.tari.dan.consensus", 0);
-//
-// pub type TariHasher = TariDomainHasher<TariDanConsensusHashDomain>;
-//
-// pub fn block_hasher() -> TariHasher {
-//     dan_hasher("Block")
-// }
-// pub fn extra_data_hasher() -> TariHasher {
-//     dan_hasher("ExtraData")
-// }
-//
-// pub fn foreign_indexes_hasher() -> TariHasher {
-//     dan_hasher("ForeignIndexes")
-// }
-//
-// pub fn command_hasher() -> TariHasher {
-//     dan_hasher("Command")
-// }
-//
-// pub fn quorum_certificate_hasher() -> TariHasher {
-//     dan_hasher("QuorumCertificate")
-// }
-//
-// pub fn pledge_hasher() -> TariHasher {
-//     dan_hasher("Pledges")
-// }
-//
-// pub fn vote_hasher() -> TariHasher {
-//     dan_hasher("Vote")
-// }
-//
-// pub fn vote_signature_hasher() -> TariHasher {
-//     dan_hasher("VoteSignature")
-// }
-//
-// fn dan_hasher(label: &'static str) -> TariHasher {
-//     tari_hasher::<TariDanConsensusHashDomain>(label)
-// }
-//
-// pub type ValidatorNodeBmtHasherBlake2b = DomainSeparatedHasher<Blake2b<U32>, ValidatorNodeMerkleHashDomain>;
 pub type ValidatorNodeBalancedMerkleTree = BalancedBinaryMerkleTree<ValidatorNodeBmtHasherBlake2b>;
 pub type ValidatorNodeMerkleProof = BalancedBinaryMerkleProof<ValidatorNodeBmtHasherBlake2b>;
 pub type MergedValidatorNodeMerkleProof = MergedBalancedBinaryMerkleProof<ValidatorNodeBmtHasherBlake2b>;

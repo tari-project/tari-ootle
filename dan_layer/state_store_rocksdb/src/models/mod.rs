@@ -30,8 +30,6 @@ pub mod epoch_checkpoint;
 pub mod evicted_node;
 pub mod foreign_parked_blocks;
 pub mod foreign_proposal;
-pub mod foreign_receive_counter;
-pub mod foreign_send_counter;
 pub mod foreign_substate_pledge;
 
 pub mod lock_conflict;

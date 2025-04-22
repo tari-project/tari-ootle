@@ -11,6 +11,7 @@ use tari_consensus::{
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{ShardGroup, SubstateAddress};
 use tari_dan_storage::consensus_models::TransactionPool;
+use tari_engine_types::ToByteType;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tempfile::TempDir;
@@ -209,6 +210,7 @@ impl ValidatorBuilder {
 
         let validator = Validator {
             address: self.address.clone(),
+            public_key: self.public_key.to_byte_type(),
             _shard_address: self.shard_address,
             shard_group: self.shard_group,
             num_committees: self.num_committees,

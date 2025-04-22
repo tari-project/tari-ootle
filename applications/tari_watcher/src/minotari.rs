@@ -13,6 +13,7 @@ use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::layer_one_transaction::{
     LayerOnePayloadType,
     LayerOneTransactionDef,
+    ValidatorExitParams,
     ValidatorRegistrationParams,
 };
 use tari_sidechain::EvictionProof;
@@ -220,7 +221,7 @@ impl MinotariNodes {
                 );
             },
             LayerOnePayloadType::ValidatorExit => {
-                let exit = serde_json::from_value::<ValidatorRegistrationParams>(transaction_def.payload)?;
+                let exit = serde_json::from_value::<ValidatorExitParams>(transaction_def.payload)?;
 
                 let resp = client
                     .submit_validator_node_exit(grpc::SubmitValidatorNodeExitRequest {

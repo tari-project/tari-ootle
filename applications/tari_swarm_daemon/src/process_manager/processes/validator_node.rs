@@ -85,15 +85,18 @@ impl ValidatorNodeProcess {
         .await
     }
 
-    pub async fn prepare_registration_transaction(&self) -> anyhow::Result<()> {
+    pub async fn prepare_registration_transaction(&self) -> anyhow::Result<PathBuf> {
         let mut client = self.connect_client()?;
-        client
+        let resp = client
             .prepare_layer_one_transaction(PrepareLayerOneTransactionRequest {
                 params: LayerOneTransactionParams::Registration,
             })
             .await?;
-        info!("🟢 Submitted validator node registration prepare request to {self}");
-        Ok(())
+        info!(
+            "🟢 Submitted validator node registration prepare request to {self}: path: {}",
+            resp.path.display()
+        );
+        Ok(resp.path)
     }
 
     pub async fn prepare_exit_transaction(&self) -> anyhow::Result<()> {

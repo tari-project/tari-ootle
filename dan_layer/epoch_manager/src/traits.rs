@@ -239,7 +239,7 @@ pub trait LayerOneTransactionSubmitter {
     type Error: std::error::Error;
     fn submit_transaction<T: serde::Serialize + Send>(
         &self,
-        proof: LayerOneTransactionDef<T>,
+        transaction: LayerOneTransactionDef<T>,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 }
 

@@ -167,6 +167,8 @@ impl ProcessManager {
                 if transaction_ids.len() == num_validator_nodes {
                     break;
                 }
+                // 1
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
 
             info!("🟢 All validator nodes registrations have been submitted to the wallet");

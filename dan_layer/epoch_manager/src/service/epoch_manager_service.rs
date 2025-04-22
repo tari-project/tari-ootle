@@ -36,9 +36,13 @@ use tokio::{
 use crate::{
     epoch_event_oracle::{EpochEvent, EpochEventOracle, ValidatorNodeChange},
     error::EpochManagerError,
-    service::{config::EpochManagerConfig, epoch_manager::EpochManager, types::EpochManagerRequest},
+    service::{
+        config::EpochManagerConfig,
+        epoch_manager::EpochManager,
+        types::EpochManagerRequest,
+        EpochManagerHandle,
+    },
     traits::{EpochManagerSpec, EpochUtxoStore, TemplateDownloader},
-    EpochManagerEvent,
 };
 
 const LOG_TARGET: &str = "tari::dan::epoch_manager";
@@ -55,18 +59,20 @@ pub struct EpochManagerService<TSpec: EpochManagerSpec> {
 impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
     pub fn spawn(
         config: EpochManagerConfig,
-        events: broadcast::Sender<EpochManagerEvent>,
-        rx_request: mpsc::Receiver<EpochManagerRequest<TSpec::Addr>>,
         global_db: GlobalDb<SqliteGlobalDbAdapter<TSpec::Addr>>,
         epoch_events: TSpec::EpochEventOracle,
         utxo_store: TSpec::UtxoStore,
         template_downloader: TSpec::TemplateDownloader,
         layer_one_transaction_submitter: TSpec::LayerOneSubmitter,
         node_public_key: RistrettoPublicKeyBytes,
-        current_epoch_atomic: Arc<AtomicU64>,
         shutdown: ShutdownSignal,
-    ) -> JoinHandle<anyhow::Result<()>> {
-        tokio::spawn(async move {
+    ) -> (EpochManagerHandle<TSpec::Addr>, JoinHandle<anyhow::Result<()>>) {
+        let (tx_request, rx_request) = mpsc::channel(10);
+        let (events, _) = broadcast::channel(100);
+        let current_epoch = Arc::new(AtomicU64::new(0));
+        let epoch_manager_handle = EpochManagerHandle::new(tx_request, events.clone(), current_epoch.clone());
+
+        let task_handle = tokio::spawn(async move {
             Self {
                 rx_request,
                 inner: EpochManager::new(
@@ -75,7 +81,7 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
                     layer_one_transaction_submitter,
                     events,
                     node_public_key,
-                    current_epoch_atomic,
+                    current_epoch,
                 ),
                 epoch_events,
                 template_downloader,
@@ -85,7 +91,9 @@ impl<TSpec: EpochManagerSpec> EpochManagerService<TSpec> {
             .run()
             .await?;
             Ok(())
-        })
+        });
+
+        (epoch_manager_handle, task_handle)
     }
 
     pub async fn run(&mut self) -> Result<(), EpochManagerError> {

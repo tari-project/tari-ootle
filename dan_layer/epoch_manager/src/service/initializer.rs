@@ -24,10 +24,7 @@ use tari_dan_storage::global::GlobalDb;
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_shutdown::ShutdownSignal;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tokio::{
-    sync::{broadcast, mpsc},
-    task::JoinHandle,
-};
+use tokio::task::JoinHandle;
 
 use crate::{
     service::{config::EpochManagerConfig, epoch_manager_service::EpochManagerService, EpochManagerHandle},
@@ -44,21 +41,14 @@ pub fn spawn_service<TSpec: EpochManagerSpec>(
     layer_one_submitter: TSpec::LayerOneSubmitter,
     shutdown_signal: ShutdownSignal,
 ) -> (EpochManagerHandle<TSpec::Addr>, JoinHandle<anyhow::Result<()>>) {
-    let (tx_request, rx_request) = mpsc::channel(10);
-    let (events, _) = broadcast::channel(100);
-    let epoch_manager_handle = EpochManagerHandle::new(tx_request, events.clone());
-
-    let join_handle = EpochManagerService::<TSpec>::spawn(
+    let (epoch_manager_handle, join_handle) = EpochManagerService::<TSpec>::spawn(
         config,
-        events,
-        rx_request,
         global_db,
         epoch_events,
         utxo_store,
         template_downloader,
         layer_one_submitter,
         node_public_key,
-        epoch_manager_handle.get_current_epoch_atomic(),
         shutdown_signal,
     );
     (epoch_manager_handle, join_handle)

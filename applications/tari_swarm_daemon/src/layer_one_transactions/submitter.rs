@@ -111,7 +111,7 @@ impl LayerOneTransactionSubmitter {
 
                 let resp = resp.into_inner();
                 if !resp.is_success {
-                    bail!("Failed to register VN: {}", resp.failure_message);
+                    bail!("Failed to submit VN exit: {}", resp.failure_message);
                 }
                 info!(
                     "{} transaction sent successfully (tx_id={})",

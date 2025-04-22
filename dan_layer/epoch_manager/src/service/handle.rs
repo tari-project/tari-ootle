@@ -37,16 +37,13 @@ impl<TAddr: NodeAddressable> EpochManagerHandle<TAddr> {
     pub fn new(
         tx_request: mpsc::Sender<EpochManagerRequest<TAddr>>,
         events: broadcast::Sender<EpochManagerEvent>,
+        current_epoch: Arc<AtomicU64>,
     ) -> Self {
         Self {
             tx_request,
             events,
-            current_epoch: Arc::new(AtomicU64::new(0)),
+            current_epoch,
         }
-    }
-
-    pub(crate) fn get_current_epoch_atomic(&self) -> Arc<AtomicU64> {
-        self.current_epoch.clone()
     }
 
     pub async fn get_fee_claim_public_key(&self) -> Result<Option<RistrettoPublicKeyBytes>, EpochManagerError> {

@@ -249,7 +249,6 @@ mod block_parent_operations {
 }
 
 mod block_query_operations {
-    use tari_dan_common_types::displayable::Displayable;
 
     use super::*;
 

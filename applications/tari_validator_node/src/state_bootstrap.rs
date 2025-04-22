@@ -3,20 +3,11 @@
 
 use std::ops::Deref;
 
-use log::info;
 use serde::Serialize;
 use tari_bor::cbor;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_dan_common_types::{
-    shard::Shard,
-    Epoch,
-    NodeAddressable,
-    NumPreshards,
-    ShardGroup,
-    ToSubstateAddress,
-    VersionedSubstateId,
-};
+use tari_dan_common_types::{Epoch, NodeAddressable, NumPreshards, ShardGroup, ToSubstateAddress, VersionedSubstateId};
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, SubstateRecord},
     StateStoreReadTransaction,

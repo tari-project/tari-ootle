@@ -42,7 +42,6 @@ use diesel::{
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
 use log::debug;
 use serde::{de::DeserializeOwned, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::Committee,
     hashing::ValidatorNodeBalancedMerkleTree,

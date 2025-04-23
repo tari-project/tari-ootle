@@ -67,7 +67,6 @@ mod basic_block_operations {
             Default::default(),
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -160,7 +159,6 @@ mod block_parent_operations {
             Default::default(),
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -182,7 +180,6 @@ mod block_parent_operations {
             Default::default(),
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -294,7 +291,6 @@ mod block_query_operations {
             Default::default(),
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -319,7 +315,6 @@ mod block_query_operations {
             4,
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -350,7 +345,6 @@ mod block_query_operations {
             5,
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             block3_data.clone(),
         )

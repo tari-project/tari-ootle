@@ -71,7 +71,6 @@ fn foreign_proposals_operations(db: impl StateStore) {
         1,
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::new(),
     )
@@ -105,7 +104,6 @@ fn foreign_proposals_operations(db: impl StateStore) {
         2,
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::new(),
     )
@@ -127,7 +125,6 @@ fn foreign_proposals_operations(db: impl StateStore) {
         5,
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::new(),
     )

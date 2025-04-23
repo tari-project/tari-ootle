@@ -240,7 +240,6 @@ pub fn create_block(parent: Option<&Block>) -> Block {
         Default::default(),
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::default(),
     )
@@ -272,7 +271,6 @@ pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
         Default::default(),
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::default(),
     )

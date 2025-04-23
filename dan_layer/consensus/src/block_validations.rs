@@ -49,7 +49,7 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     //       If not, we need some strategy for "parking" the blocks until we are at least at the provided hash or the
     //       tip. Without this, the check has a race condition between the base layer scanner and consensus.
     //       A simpler suggestion is to use the BL epoch block which does not change within epochs
-    // check_base_layer_block_hash::<TConsensusSpec>(block, epoch_manager, config).await?;
+    // check_epoch_hash::<TConsensusSpec>(block, epoch_manager, config).await?;
     check_network(block, config.network)?;
     if block.is_genesis() {
         return Err(ProposalValidationError::ProposingGenesisBlock {
@@ -112,11 +112,11 @@ pub fn check_network(candidate_block: &Block, network: Network) -> Result<(), Pr
 // TODO: remove allow(dead_code)
 #[allow(dead_code)]
 pub async fn check_epoch_hash(block: &Block, expected_epoch_hash: FixedHash) -> Result<(), HotStuffError> {
-    if *block.base_layer_block_hash() != expected_epoch_hash {
+    if *block.epoch_hash() != expected_epoch_hash {
         Err(ProposalValidationError::InvalidEpochHash {
             epoch: block.epoch(),
             local_epoch_hash: expected_epoch_hash,
-            invalid_epoch_hash: *block.base_layer_block_hash(),
+            invalid_epoch_hash: *block.epoch_hash(),
             block_id: *block.id(),
         })?;
     }

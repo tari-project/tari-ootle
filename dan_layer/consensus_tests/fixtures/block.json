@@ -20,8 +20,7 @@
       "signature": "16f4be46fb4c5736e6b5be0771bf5e108c254a8cf28b2c407b089f466ec73305"
     },
     "timestamp": 1732873628,
-    "base_layer_block_height": 50,
-    "base_layer_block_hash": "19f4b5c0b33894029854b6e9ba922812b7290172d3f48e6dd3a0081444113a70",
+    "epoch_hash": "19f4b5c0b33894029854b6e9ba922812b7290172d3f48e6dd3a0081444113a70",
     "extra_data": {}
   },
   "justify": {

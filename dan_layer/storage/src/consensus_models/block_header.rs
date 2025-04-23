@@ -27,39 +27,54 @@ use crate::consensus_models::{Command, LastExecuted, LastProposed, LastVoted, Le
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct BlockHeader {
+    /// "Cached" block ID/hash. This can be computed from the contents of the block header,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     id: BlockId,
+    /// Network this block belongs to.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     network: Network,
+    /// Parent block ID.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     parent: BlockId,
+    /// The quorum certificate proposed in this block. Note that this QC justifies a previous block.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     justify_id: QcId,
+    /// Block height.
     height: NodeHeight,
+    /// Epoch this block belongs to.
     epoch: Epoch,
+    /// Shard group that created this block.
     shard_group: ShardGroup,
+    /// The public key of the proposer.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     proposed_by: RistrettoPublicKeyBytes,
+    /// The total leader fee for this block. This should match the sum of the leader fees in the block's body.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     total_leader_fee: u64,
+    /// A Merkle root hash committing to all state after this block has been applied.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::hex")]
     state_merkle_root: FixedHash,
+    /// A Merkle root hash committing to commands in this block. It is zero if the block has no commands.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::hex")]
     command_merkle_root: FixedHash,
-    /// If the block is a dummy block.
+    /// True if this block is a dummy block.
     is_dummy: bool,
-    /// Signature of block by the proposer.
+    /// Proposer signature that signs the Block ID
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce : string, signature: string} | null"))]
     signature: Option<SchnorrSignatureBytes>,
+    /// The time indicating the creation time of the block. Currently, this can be chosen arbitrarily and is only
+    /// informational/used for metrics.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     timestamp: u64,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    base_layer_block_height: u64,
+    /// The epoch hash is a hash given by the epoch oracle. E.g. the base layer epoch oracle gives the first block hash
+    /// of the epoch.
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::hex")]
-    base_layer_block_hash: FixedHash,
+    epoch_hash: FixedHash,
+    /// Extra data to allow for potential future data to be provided as necessary without breaking changes.
+    /// Currently, this is used to store the block's sidechain_id (if applicable).
     extra_data: ExtraData,
 }
 
@@ -78,8 +93,7 @@ impl BlockHeader {
         total_leader_fee: u64,
         signature: SchnorrSignatureBytes,
         timestamp: u64,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
         let mut header = Self::create_unsigned(
@@ -94,8 +108,7 @@ impl BlockHeader {
             commands,
             total_leader_fee,
             timestamp,
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             extra_data,
         )?;
 
@@ -117,8 +130,7 @@ impl BlockHeader {
         commands: &BTreeSet<Command>,
         total_leader_fee: u64,
         timestamp: u64,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
         let command_merkle_root = Self::compute_command_merkle_root(commands)?;
@@ -137,8 +149,7 @@ impl BlockHeader {
             is_dummy: false,
             signature: None,
             timestamp,
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             extra_data,
         };
         header.id = header.calculate_id();
@@ -161,8 +172,7 @@ impl BlockHeader {
         is_dummy: bool,
         signature: Option<SchnorrSignatureBytes>,
         timestamp: u64,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         extra_data: ExtraData,
         command_merkle_root: FixedHash,
     ) -> Self {
@@ -181,8 +191,7 @@ impl BlockHeader {
             is_dummy,
             signature,
             timestamp,
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             extra_data,
         }
     }
@@ -204,8 +213,7 @@ impl BlockHeader {
             is_dummy: false,
             signature: None,
             timestamp: EpochTime::now().as_u64(),
-            base_layer_block_height: 0,
-            base_layer_block_hash: FixedHash::zero(),
+            epoch_hash: FixedHash::zero(),
             extra_data: ExtraData::new(),
         }
     }
@@ -220,8 +228,7 @@ impl BlockHeader {
         shard_group: ShardGroup,
         parent_state_merkle_root: FixedHash,
         parent_timestamp: u64,
-        parent_base_layer_block_height: u64,
-        parent_base_layer_block_hash: FixedHash,
+        parent_epoch_hash: FixedHash,
     ) -> Self {
         let mut block = Self {
             id: BlockId::zero(),
@@ -239,8 +246,7 @@ impl BlockHeader {
             is_dummy: true,
             signature: None,
             timestamp: parent_timestamp,
-            base_layer_block_height: parent_base_layer_block_height,
-            base_layer_block_hash: parent_base_layer_block_hash,
+            epoch_hash: parent_epoch_hash,
             extra_data: ExtraData::new(),
         };
         block.id = block.calculate_id();
@@ -283,8 +289,7 @@ impl BlockHeader {
             total_leader_fee: self.total_leader_fee,
             is_dummy: self.is_dummy(),
             timestamp: self.timestamp,
-            base_layer_block_height: self.base_layer_block_height,
-            base_layer_block_hash: &self.base_layer_block_hash,
+            epoch_hash: &self.epoch_hash,
             extra_data: &self.extra_data,
         });
         hashing::block_metadata_hasher().chain(&fields).finalize().into()
@@ -421,12 +426,8 @@ impl BlockHeader {
         self.signature = Some(signature);
     }
 
-    pub fn base_layer_block_height(&self) -> u64 {
-        self.base_layer_block_height
-    }
-
-    pub fn base_layer_block_hash(&self) -> &FixedHash {
-        &self.base_layer_block_hash
+    pub fn epoch_hash(&self) -> &FixedHash {
+        &self.epoch_hash
     }
 
     pub fn extra_data(&self) -> &ExtraData {
@@ -467,7 +468,6 @@ struct MetadataHashFieldsV1<'a> {
     total_leader_fee: u64,
     is_dummy: bool,
     timestamp: u64,
-    base_layer_block_height: u64,
-    base_layer_block_hash: &'a FixedHash,
+    epoch_hash: &'a FixedHash,
     extra_data: &'a ExtraData,
 }

@@ -118,8 +118,7 @@ impl Block {
         total_leader_fee: u64,
         signature: SchnorrSignatureBytes,
         timestamp: u64,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
         let header = BlockHeader::create(
@@ -135,8 +134,7 @@ impl Block {
             total_leader_fee,
             signature,
             timestamp,
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             extra_data,
         )?;
         Ok(Self::new(header, justify, commands))
@@ -175,8 +173,7 @@ impl Block {
         created_at: PrimitiveDateTime,
         block_time: Option<u64>,
         timestamp: u64,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         extra_data: ExtraData,
     ) -> Self {
         let header = BlockHeader::load(
@@ -193,8 +190,7 @@ impl Block {
             is_dummy,
             signature,
             timestamp,
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             extra_data,
             command_merkle_root,
         );
@@ -239,7 +235,6 @@ impl Block {
             state_merkle_root,
             0,
             SchnorrSignatureBytes::zero(),
-            0,
             0,
             FixedHash::zero(),
             extra_data,
@@ -435,12 +430,8 @@ impl Block {
         self.header.signature()
     }
 
-    pub fn base_layer_block_height(&self) -> u64 {
-        self.header.base_layer_block_height()
-    }
-
-    pub fn base_layer_block_hash(&self) -> &FixedHash {
-        self.header.base_layer_block_hash()
+    pub fn epoch_hash(&self) -> &FixedHash {
+        self.header.epoch_hash()
     }
 
     pub fn extra_data(&self) -> &ExtraData {

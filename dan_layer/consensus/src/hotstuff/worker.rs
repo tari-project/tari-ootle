@@ -837,8 +837,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 &self.leader_strategy,
                 local_committee,
                 block.timestamp(),
-                block.base_layer_block_height(),
-                *block.base_layer_block_hash(),
+                *block.epoch_hash(),
             ) {
                 leaf_block = dummy;
             }

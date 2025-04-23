@@ -75,7 +75,6 @@ mod confirm_all_transitions {
             Default::default(),
             SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )

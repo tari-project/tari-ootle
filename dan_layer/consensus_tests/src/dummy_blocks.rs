@@ -50,7 +50,6 @@ fn dummy_blocks() {
         &RoundRobinLeaderStrategy,
         &committee,
         genesis.timestamp(),
-        0,
         FixedHash::zero(),
     );
     let last = calculate_last_dummy_block(
@@ -65,7 +64,6 @@ fn dummy_blocks() {
         &RoundRobinLeaderStrategy,
         &committee,
         genesis.timestamp(),
-        0,
         FixedHash::zero(),
     )
     .expect("last dummy block");
@@ -108,8 +106,7 @@ fn last_matches_generated_using_real_data() {
         &RoundRobinLeaderStrategy,
         &committee,
         justify.timestamp(),
-        justify.base_layer_block_height(),
-        *justify.base_layer_block_hash(),
+        *justify.epoch_hash(),
     )
     .expect("last dummy block");
 

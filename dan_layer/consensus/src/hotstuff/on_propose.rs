@@ -156,8 +156,6 @@ where TConsensusSpec: ConsensusSpec
         }
 
         let epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
-        // TODO: Remove
-        let base_layer_block_height = 0;
 
         let on_propose = self.clone();
 
@@ -182,7 +180,6 @@ where TConsensusSpec: ConsensusSpec
                     &local_committee_info,
                     &local_claim_public_key,
                     false,
-                    base_layer_block_height,
                     epoch_hash,
                     propose_epoch_end,
                 )?;
@@ -405,8 +402,7 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         local_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         dont_propose_transactions: bool,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         can_propose_epoch_end: bool,
     ) -> Result<NextBlock, HotStuffError> {
         // The parent block will only ever not exist if it is a dummy block
@@ -603,8 +599,7 @@ where TConsensusSpec: ConsensusSpec
             &commands,
             total_leader_fee,
             EpochTime::now().as_u64(),
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             ExtraData::new(),
         )?;
 

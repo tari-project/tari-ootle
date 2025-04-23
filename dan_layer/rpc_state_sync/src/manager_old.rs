@@ -319,8 +319,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         block.shard(),
                         *block.merkle_root(),
                         justify_block.timestamp(),
-                        justify_block.base_layer_block_height(),
-                        *justify_block.base_layer_block_hash(),
+                        *justify_block.epoch_hash(),
                     );
                     dummy_block.save(tx)?;
                     last_dummy_block = BlockIdAndHeight { id: *dummy_block.id(), height: next_height };

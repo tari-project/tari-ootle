@@ -54,7 +54,6 @@ use tari_dan_common_types::{
 use tari_dan_storage::{
     global::{
         models::ValidatorNode,
-        DbBaseLayerBlockInfo,
         DbEpoch,
         DbLayer1Transaction,
         DbTemplate,
@@ -71,15 +70,7 @@ use super::{models, models::DbValidatorNode};
 use crate::{
     error::SqliteStorageError,
     global::{
-        models::{
-            DbCommittee,
-            MetadataModel,
-            NewBaseLayerBlockInfo,
-            NewEpoch,
-            NewTemplateModel,
-            TemplateModel,
-            TemplateUpdateModel,
-        },
+        models::{DbCommittee, MetadataModel, NewEpoch, NewTemplateModel, TemplateModel, TemplateUpdateModel},
         serialization::serialize_json,
     },
     SqliteTransaction,
@@ -830,46 +821,6 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
 
         match query_res {
             Some(e) => Ok(Some(e.into())),
-            None => Ok(None),
-        }
-    }
-
-    fn insert_base_layer_block_info(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        info: DbBaseLayerBlockInfo,
-    ) -> Result<(), Self::Error> {
-        use crate::global::schema::base_layer_block_info;
-        let sqlite_base_layer_block_info: NewBaseLayerBlockInfo = info.into();
-
-        diesel::insert_into(base_layer_block_info::table)
-            .values(&sqlite_base_layer_block_info)
-            .on_conflict_do_nothing()
-            .execute(tx.connection())
-            .map_err(|source| SqliteStorageError::DieselError {
-                source,
-                operation: "insert::base_layer_block_info".to_string(),
-            })?;
-
-        Ok(())
-    }
-
-    fn get_base_layer_block_info(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        hash: FixedHash,
-    ) -> Result<Option<DbBaseLayerBlockInfo>, Self::Error> {
-        use crate::global::schema::base_layer_block_info::dsl;
-        let query_res: Option<models::BaseLayerBlockInfo> = dsl::base_layer_block_info
-            .filter(dsl::hash.eq(hash.to_vec()))
-            .first(tx.connection())
-            .optional()
-            .map_err(|source| SqliteStorageError::DieselError {
-                source,
-                operation: "get::base_layer_block_info".to_string(),
-            })?;
-        match query_res {
-            Some(e) => Ok(Some(e.try_into()?)),
             None => Ok(None),
         }
     }

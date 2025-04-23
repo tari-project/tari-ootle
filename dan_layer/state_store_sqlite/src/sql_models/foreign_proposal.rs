@@ -33,8 +33,7 @@ pub struct ForeignProposal {
     pub total_leader_fee: i64,
     pub signature: Option<String>,
     pub timestamp: i64,
-    pub base_layer_block_height: i64,
-    pub base_layer_block_hash: String,
+    pub epoch_hash: String,
     pub justify_qc_id: String,
     pub block_pledge: String,
     pub proposed_in_block: Option<String>,
@@ -84,8 +83,7 @@ impl ForeignProposal {
             self.created_at,
             None,
             self.timestamp as u64,
-            self.base_layer_block_height as u64,
-            deserialize_hex_try_from(&self.base_layer_block_hash)?,
+            deserialize_hex_try_from(&self.epoch_hash)?,
             self.extra_data
                 .map(|val| deserialize_json(&val))
                 .transpose()?

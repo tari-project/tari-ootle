@@ -87,8 +87,7 @@ message BlockHeader {
   uint64 total_leader_fee = 8;
   tari.dan.common.Signature signature = 10;
   uint64 timestamp = 11;
-  uint64 base_layer_block_height = 12;
-  bytes base_layer_block_hash = 13;
+  bytes epoch_hash = 13;
   bool is_dummy = 14;
   ExtraData extra_data = 15;
 }

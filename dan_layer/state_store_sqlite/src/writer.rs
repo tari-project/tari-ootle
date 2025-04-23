@@ -187,8 +187,7 @@ impl<'a, TAddr: NodeAddressable> SqliteStateStoreWriteTransaction<'a, TAddr> {
             parked_blocks::justify.eq(serialize_json(block.justify())?),
             parked_blocks::signature.eq(block.signature().map(serialize_json).transpose()?),
             parked_blocks::timestamp.eq(block.timestamp() as i64),
-            parked_blocks::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-            parked_blocks::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+            parked_blocks::epoch_hash.eq(serialize_hex(block.epoch_hash())),
             parked_blocks::foreign_proposals.eq(serialize_json(foreign_proposals)?),
             parked_blocks::extra_data.eq(serialize_json(block.extra_data())?),
         );
@@ -242,8 +241,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             blocks::is_justified.eq(block.is_justified()),
             blocks::signature.eq(block.signature().map(serialize_json).transpose()?),
             blocks::timestamp.eq(block.timestamp() as i64),
-            blocks::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-            blocks::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+            blocks::epoch_hash.eq(serialize_hex(block.epoch_hash())),
             blocks::extra_data.eq(serialize_json(block.extra_data())?),
         );
 
@@ -613,8 +611,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
                 foreign_proposals::qc.eq(serialize_json(block.justify())?),
                 foreign_proposals::timestamp.eq(block.timestamp() as i64),
-                foreign_proposals::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-                foreign_proposals::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+                foreign_proposals::epoch_hash.eq(serialize_hex(block.epoch_hash())),
                 foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
                 // Extra
                 foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
@@ -644,8 +641,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
                 foreign_proposals::qc.eq(serialize_json(block.justify())?),
                 foreign_proposals::timestamp.eq(block.timestamp() as i64),
-                foreign_proposals::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-                foreign_proposals::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+                foreign_proposals::epoch_hash.eq(serialize_hex(block.epoch_hash())),
                 foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
                 // Extra
                 foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
@@ -1889,7 +1885,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         let values = (
             burnt_utxos::commitment.eq(burnt_utxo.commitment.to_string()),
             burnt_utxos::output.eq(serialize_json(&burnt_utxo.output)?),
-            burnt_utxos::base_layer_block_height.eq(burnt_utxo.base_layer_block_height as i64),
+            burnt_utxos::epoch.eq(burnt_utxo.epoch.as_u64() as i64),
         );
 
         diesel::insert_into(burnt_utxos::table)

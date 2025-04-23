@@ -436,8 +436,7 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
             total_leader_fee: value.total_leader_fee(),
             signature: value.signature().map(Into::into),
             timestamp: value.timestamp(),
-            base_layer_block_height: value.base_layer_block_height(),
-            base_layer_block_hash: value.base_layer_block_hash().as_bytes().to_vec(),
+            epoch_hash: value.epoch_hash().as_bytes().to_vec(),
             is_dummy: value.is_dummy(),
             extra_data: Some(value.extra_data().into()),
         }
@@ -475,8 +474,7 @@ fn try_convert_proto_block_header(
             shard_group,
             value.state_merkle_root.try_into()?,
             value.timestamp,
-            value.base_layer_block_height,
-            value.base_layer_block_hash.try_into()?,
+            value.epoch_hash.try_into()?,
         ))
     } else {
         // We calculate the BlockId and command MR locally from remote data. This means that they will
@@ -499,8 +497,7 @@ fn try_convert_proto_block_header(
                 .transpose()?
                 .ok_or_else(|| anyhow!("Block conversion: Block signature is missing"))?,
             value.timestamp,
-            value.base_layer_block_height,
-            value.base_layer_block_hash.try_into()?,
+            value.epoch_hash.try_into()?,
             extra_data,
         )?;
 

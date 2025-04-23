@@ -96,7 +96,6 @@ fn create_proposal(parent_id: BlockId) -> ForeignProposal {
         1,
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::new(),
     )

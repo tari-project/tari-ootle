@@ -51,7 +51,6 @@ fn missing_transactions_operations(db: impl StateStore) {
         Default::default(),
         SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::default(),
     )

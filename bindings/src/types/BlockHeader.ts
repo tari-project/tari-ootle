@@ -21,7 +21,6 @@ export interface BlockHeader {
   foreign_indexes: Record<Shard, bigint>;
   signature: { public_nonce: string; signature: string } | null;
   timestamp: number;
-  base_layer_block_height: number;
-  base_layer_block_hash: string;
+  epoch_hash: string;
   extra_data: ExtraData;
 }

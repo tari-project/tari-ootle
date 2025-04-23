@@ -59,8 +59,6 @@ pub struct BlockHeader {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     #[serde(with = "serde_with::hex")]
     command_merkle_root: FixedHash,
-    /// True if this block is a dummy block.
-    is_dummy: bool,
     /// Proposer signature that signs the Block ID
     #[cfg_attr(feature = "ts", ts(type = "{public_nonce : string, signature: string} | null"))]
     signature: Option<SchnorrSignatureBytes>,
@@ -146,7 +144,6 @@ impl BlockHeader {
             state_merkle_root,
             command_merkle_root,
             total_leader_fee,
-            is_dummy: false,
             signature: None,
             timestamp,
             epoch_hash,
@@ -169,7 +166,6 @@ impl BlockHeader {
         proposed_by: RistrettoPublicKeyBytes,
         state_merkle_root: FixedHash,
         total_leader_fee: u64,
-        is_dummy: bool,
         signature: Option<SchnorrSignatureBytes>,
         timestamp: u64,
         epoch_hash: FixedHash,
@@ -188,7 +184,6 @@ impl BlockHeader {
             state_merkle_root,
             command_merkle_root,
             total_leader_fee,
-            is_dummy,
             signature,
             timestamp,
             epoch_hash,
@@ -210,8 +205,8 @@ impl BlockHeader {
             state_merkle_root: FixedHash::zero(),
             command_merkle_root: FixedHash::zero(),
             total_leader_fee: 0,
-            is_dummy: false,
-            signature: None,
+            // Not a dummy block
+            signature: Some(SchnorrSignatureBytes::zero()),
             timestamp: EpochTime::now().as_u64(),
             epoch_hash: FixedHash::zero(),
             extra_data: ExtraData::new(),
@@ -243,7 +238,6 @@ impl BlockHeader {
             command_merkle_root: BlockHeader::compute_command_merkle_root(&BTreeSet::new())
                 .expect("compute_command_merkle_root is infallible for empty commands"),
             total_leader_fee: 0,
-            is_dummy: true,
             signature: None,
             timestamp: parent_timestamp,
             epoch_hash: parent_epoch_hash,
@@ -287,7 +281,6 @@ impl BlockHeader {
     pub fn calculate_metadata_hash(&self) -> FixedHash {
         let fields = MetadataHashFields::V1(MetadataHashFieldsV1 {
             total_leader_fee: self.total_leader_fee,
-            is_dummy: self.is_dummy(),
             timestamp: self.timestamp,
             epoch_hash: &self.epoch_hash,
             extra_data: &self.extra_data,
@@ -411,7 +404,7 @@ impl BlockHeader {
     }
 
     pub fn is_dummy(&self) -> bool {
-        self.is_dummy
+        self.signature.is_none()
     }
 
     pub fn timestamp(&self) -> u64 {
@@ -466,7 +459,6 @@ enum MetadataHashFields<'a> {
 #[derive(Debug, BorshSerialize)]
 struct MetadataHashFieldsV1<'a> {
     total_leader_fee: u64,
-    is_dummy: bool,
     timestamp: u64,
     epoch_hash: &'a FixedHash,
     extra_data: &'a ExtraData,

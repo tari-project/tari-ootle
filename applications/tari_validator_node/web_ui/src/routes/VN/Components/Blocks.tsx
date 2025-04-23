@@ -347,7 +347,7 @@ function Blocks() {
                   <DataTableCell>{block.header.height}</DataTableCell>
                   <DataTableCell>
                     <StatusChip
-                      status={block.header.is_dummy ? "Dummy" : block.is_committed ? "Commit" : "Pending"}
+                      status={!block.header.signature ? "Dummy" : block.is_committed ? "Commit" : "Pending"}
                       showTitle
                     />
                   </DataTableCell>

@@ -33,6 +33,7 @@ pub struct Block {
     pub total_leader_fee: i64,
     pub is_committed: bool,
     pub is_justified: bool,
+    #[allow(dead_code)]
     pub is_dummy: bool,
     pub signature: Option<String>,
     pub block_time: Option<i64>,
@@ -71,7 +72,6 @@ impl Block {
             deserialize_json(&self.commands)?,
             deserialize_hex_try_from(&self.command_merkle_root)?,
             self.total_leader_fee as u64,
-            self.is_dummy,
             self.is_justified,
             self.is_committed,
             self.signature.map(|val| deserialize_json(&val)).transpose()?,
@@ -151,7 +151,6 @@ impl TryFrom<ParkedBlock> for (consensus_models::Block, Vec<consensus_models::Fo
             deserialize_json(&value.commands)?,
             deserialize_hex_try_from(&value.command_merkle_root)?,
             value.total_leader_fee as u64,
-            false,
             false,
             false,
             Some(signature),

@@ -88,8 +88,7 @@ message BlockHeader {
   tari.dan.common.Signature signature = 10;
   uint64 timestamp = 11;
   bytes epoch_hash = 13;
-  bool is_dummy = 14;
-  ExtraData extra_data = 15;
+  ExtraData extra_data = 14;
 }
 
 message Block {

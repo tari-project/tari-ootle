@@ -59,6 +59,7 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     check_epoch_hash(block, expected_epoch_hash)?;
     check_sidechain_id(block, config)?;
     check_block_height(block)?;
+    // TODO: we should never have to validate a dummy, they should always be generated locally
     if block.is_dummy() {
         check_dummy(block)?;
     }

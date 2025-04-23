@@ -78,7 +78,6 @@ impl ForeignProposal {
             self.total_leader_fee as u64,
             false,
             false,
-            false,
             self.signature.map(|val| deserialize_json(&val)).transpose()?,
             self.created_at,
             None,

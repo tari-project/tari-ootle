@@ -437,7 +437,6 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
             signature: value.signature().map(Into::into),
             timestamp: value.timestamp(),
             epoch_hash: value.epoch_hash().as_bytes().to_vec(),
-            is_dummy: value.is_dummy(),
             extra_data: Some(value.extra_data().into()),
         }
     }
@@ -463,7 +462,10 @@ fn try_convert_proto_block_header(
         .ok_or_else(|| anyhow!("ExtraData not provided"))?
         .try_into()?;
 
-    if value.is_dummy {
+    // TODO: foreign nodes should never be able to send a block without a signature - currently used to force a view
+    // change in catch up sync
+    // Dummy has no signature
+    if value.signature.is_none() {
         Ok(consensus_models::BlockHeader::dummy_block(
             network,
             value.parent_id.try_into()?,

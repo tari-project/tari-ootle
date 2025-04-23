@@ -28,6 +28,7 @@ fn dummy_blocks() {
     let genesis = Block::genesis(
         Network::LocalNet,
         Epoch(1),
+        FixedHash::zero(),
         ShardGroup::new(0, 127),
         FixedHash::zero(),
         None,
@@ -87,6 +88,7 @@ fn last_matches_generated_using_real_data() {
     let justify = Block::genesis(
         Network::LocalNet,
         candidate.epoch(),
+        FixedHash::zero(),
         candidate.shard_group(),
         FixedHash::zero(),
         None,

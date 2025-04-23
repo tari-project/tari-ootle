@@ -208,6 +208,7 @@ impl Block {
     pub fn genesis(
         network: Network,
         epoch: Epoch,
+        epoch_hash: FixedHash,
         shard_group: ShardGroup,
         state_merkle_root: FixedHash,
         sidechain_id: Option<RistrettoPublicKeyBytes>,
@@ -236,7 +237,7 @@ impl Block {
             0,
             SchnorrSignatureBytes::zero(),
             0,
-            FixedHash::zero(),
+            epoch_hash,
             extra_data,
         )
         .expect("Infallible with empty commands")

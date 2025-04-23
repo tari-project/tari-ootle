@@ -25,6 +25,7 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
     vote_signing_service: &TConsensusSpec::SignatureService,
     leader_strategy: &TConsensusSpec::LeaderStrategy,
     config: &HotstuffConfig,
+    expected_epoch_hash: &FixedHash,
 ) -> Result<(), HotStuffError> {
     check_proposal::<TConsensusSpec>(
         block,
@@ -32,6 +33,7 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
         vote_signing_service,
         leader_strategy,
         config,
+        expected_epoch_hash,
     )?;
     // This proposal is valid, if it is for an epoch ahead of us, we need to sync
     check_current_epoch(block, current_epoch)?;
@@ -44,12 +46,8 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
     vote_signing_service: &TConsensusSpec::SignatureService,
     leader_strategy: &TConsensusSpec::LeaderStrategy,
     config: &HotstuffConfig,
+    expected_epoch_hash: &FixedHash,
 ) -> Result<(), HotStuffError> {
-    // TODO: in order to do the base layer block has validation, we need to ensure that we have synced to the tip.
-    //       If not, we need some strategy for "parking" the blocks until we are at least at the provided hash or the
-    //       tip. Without this, the check has a race condition between the base layer scanner and consensus.
-    //       A simpler suggestion is to use the BL epoch block which does not change within epochs
-    // check_epoch_hash::<TConsensusSpec>(block, epoch_manager, config).await?;
     check_network(block, config.network)?;
     if block.is_genesis() {
         return Err(ProposalValidationError::ProposingGenesisBlock {
@@ -58,15 +56,14 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
         }
         .into());
     }
-    // TODO: cache the epoch hash for the epoch, refresh each time consensus switches to a new epoch and validate here
-    // check_epoch_hash(block, epoch_hash)?;
+    check_epoch_hash(block, expected_epoch_hash)?;
     check_sidechain_id(block, config)?;
+    check_block_height(block)?;
     if block.is_dummy() {
         check_dummy(block)?;
     }
     check_proposed_by_leader(leader_strategy, committee_for_block, block)?;
     check_signature(block)?;
-    check_block(block)?;
     check_quorum_certificate::<TConsensusSpec>(block.justify(), committee_for_block, vote_signing_service)?;
     Ok(())
 }
@@ -109,13 +106,11 @@ pub fn check_network(candidate_block: &Block, network: Network) -> Result<(), Pr
     Ok(())
 }
 
-// TODO: remove allow(dead_code)
-#[allow(dead_code)]
-pub async fn check_epoch_hash(block: &Block, expected_epoch_hash: FixedHash) -> Result<(), HotStuffError> {
-    if *block.epoch_hash() != expected_epoch_hash {
+pub fn check_epoch_hash(block: &Block, expected_epoch_hash: &FixedHash) -> Result<(), HotStuffError> {
+    if block.epoch_hash() != expected_epoch_hash {
         Err(ProposalValidationError::InvalidEpochHash {
             epoch: block.epoch(),
-            local_epoch_hash: expected_epoch_hash,
+            local_epoch_hash: *expected_epoch_hash,
             invalid_epoch_hash: *block.epoch_hash(),
             block_id: *block.id(),
         })?;
@@ -201,7 +196,7 @@ pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidation
     Ok(())
 }
 
-pub fn check_block(candidate_block: &Block) -> Result<(), ProposalValidationError> {
+pub fn check_block_height(candidate_block: &Block) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
     if candidate_block.height() <= qc.block_height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {

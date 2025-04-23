@@ -11,7 +11,7 @@ use log::*;
 use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{
-    committee::{Committee, CommitteeInfo},
+    committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
     Epoch,
@@ -65,6 +65,7 @@ use crate::{
         apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
+        epoch_state::EpochState,
         error::HotStuffError,
         filter_diff_for_committee,
         substate_store::PendingSubstateStore,
@@ -132,14 +133,16 @@ where TConsensusSpec: ConsensusSpec
     #[allow(clippy::too_many_lines)]
     pub async fn handle(
         &mut self,
-        epoch: Epoch,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
         next_height: NodeHeight,
-        local_committee: &Committee<TConsensusSpec::Addr>,
-        local_committee_info: CommitteeInfo,
         local_claim_public_key: RistrettoPublicKeyBytes,
         leaf_block: LeafBlock,
         propose_epoch_end: bool,
     ) -> Result<(), HotStuffError> {
+        let epoch = epoch_state.epoch();
+        let local_committee_info = *epoch_state.local_committee_info();
+        let local_committee = epoch_state.local_committee();
+        let epoch_hash = *epoch_state.epoch_hash();
         let _timer = TraceTimer::info(LOG_TARGET, "OnPropose");
         if let Some(last_proposed) = self.store.with_read_tx(|tx| LastProposed::get(tx)).optional()? {
             if last_proposed.epoch == epoch && last_proposed.height >= next_height {
@@ -154,8 +157,6 @@ where TConsensusSpec: ConsensusSpec
                 return Ok(());
             }
         }
-
-        let epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
 
         let on_propose = self.clone();
 

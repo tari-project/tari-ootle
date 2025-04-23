@@ -33,6 +33,7 @@ use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
         calculate_dummy_blocks_from_justify,
+        epoch_state::EpochState,
         error::HotStuffError,
         eviction_proof::generate_eviction_proofs,
         generate_epoch_checkpoint,
@@ -121,9 +122,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     pub async fn handle(
         &mut self,
-        current_epoch: Epoch,
-        local_committee_info: &CommitteeInfo,
-        local_committee: &Committee<TConsensusSpec::Addr>,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
         msg: ProposalMessage,
     ) -> Result<bool, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveLocalProposalHandler");
@@ -150,7 +149,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 return Ok(None);
             }
 
-            self.validate_block(tx, current_epoch, block, local_committee, local_committee_info)
+            self.validate_block(
+                tx,
+                epoch_state.epoch(),
+                block,
+                epoch_state.local_committee(),
+                epoch_state.local_committee_info(),
+            )
         })?;
 
         let Some(valid_block) = maybe_valid_block else {
@@ -187,10 +192,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     continue;
                 }
 
-                if let Err(err) =
-                    self.on_receive_foreign_proposal
-                        .validate_and_save(tx, &foreign_proposal, local_committee_info)
-                {
+                if let Err(err) = self.on_receive_foreign_proposal.validate_and_save(
+                    tx,
+                    &foreign_proposal,
+                    epoch_state.local_committee_info(),
+                ) {
                     if let Some(err) = err.validation_error() {
                         warn!(target: LOG_TARGET, "⚠️❌ Validation failed for foreign proposal: {}", err);
                         // if a node sent us an invalid foreign proposal, we immediately reject the block
@@ -224,9 +230,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let result = self
             .process_block(
-                current_epoch,
-                *local_committee_info,
-                local_committee,
+                epoch_state.epoch(),
+                *epoch_state.local_committee_info(),
+                epoch_state.local_committee(),
                 proposer_vn.fee_claim_public_key,
                 valid_block,
             )
@@ -365,6 +371,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             if let Some(vn) = self.epoch_manager.get_our_validator_node(next_epoch).await.optional()? {
                 // TODO: Change VN db to include the shard group in the ValidatorNode struct.
                 let num_committees = self.epoch_manager.get_num_committees(next_epoch).await?;
+                let epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
                 let next_shard_group = vn
                     .shard_key
                     .to_shard_group(self.config.consensus_constants.num_preshards, num_committees);
@@ -382,6 +389,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     let mut genesis = Block::genesis(
                         self.config.network,
                         next_epoch,
+                        epoch_hash,
                         next_shard_group,
                         *valid_block.block().state_merkle_root(),
                         self.config.sidechain_id,

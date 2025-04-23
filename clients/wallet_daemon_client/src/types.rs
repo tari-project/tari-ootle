@@ -1482,3 +1482,33 @@ pub struct WebauthnFinishAuthRequest {
     #[cfg_attr(feature = "ts", ts(type = "object"))]
     pub credential: PublicKeyCredential,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct TransferNftRequest {
+    pub nft_ids: Vec<NonFungibleId>,
+    #[serde(deserialize_with = "string_or_struct")]
+    pub source_account: ComponentAddressOrName,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub target_account_public_key: RistrettoPublicKeyBytes,
+    pub max_fee: Amount,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct TransferNftResponse {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub transaction_id: TransactionId,
+    pub fee: Amount,
+    pub fee_refunded: Amount,
+    pub result: FinalizeResult,
+}

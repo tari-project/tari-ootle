@@ -14,20 +14,31 @@ use tari_dan_wallet_sdk::{
     apis::{jwt::JrpcPermission, key_manager},
     models::Account,
 };
-use tari_template_builtin::ACCOUNT_NFT_TEMPLATE_ADDRESS;
+use tari_engine_types::{
+    component::new_component_address_from_public_key,
+    instruction::Instruction,
+    substate::SubstateId,
+};
+use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args,
     models::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
     types::crypto::RistrettoPublicKeyBytes,
 };
 use tari_transaction::TransactionId;
-use tari_wallet_daemon_client::types::{
-    GetAccountNftRequest,
-    GetAccountNftResponse,
-    ListAccountNftRequest,
-    ListAccountNftResponse,
-    MintAccountNftRequest,
-    MintAccountNftResponse,
+use tari_wallet_daemon_client::{
+    types::{
+        AccountsTransferResponse,
+        GetAccountNftRequest,
+        GetAccountNftResponse,
+        ListAccountNftRequest,
+        ListAccountNftResponse,
+        MintAccountNftRequest,
+        MintAccountNftResponse,
+        TransferNftRequest,
+        TransferNftResponse,
+    },
+    ComponentAddressOrName,
 };
 use tokio::sync::broadcast;
 
@@ -257,6 +268,117 @@ async fn create_account_nft(
     }
 
     Ok(event)
+}
+
+pub async fn handle_transfer_nft(
+    context: &HandlerContext,
+    token: Option<String>,
+    req: TransferNftRequest,
+) -> Result<TransferNftResponse, anyhow::Error> {
+    let sdk = context.wallet_sdk();
+    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+
+    // get source/target accounts
+    let source_account = match req.source_account {
+        ComponentAddressOrName::ComponentAddress(address) => sdk
+            .accounts_api()
+            .get_account_by_address(&SubstateId::Component(address)),
+        ComponentAddressOrName::Name(name) => sdk.accounts_api().get_account_by_name(name.as_str()),
+    }
+    .map_err(|error| anyhow!("Failed to get source account: {error}"))?;
+    let source_account_address = source_account
+        .address
+        .as_component_address()
+        .ok_or(anyhow!("Source account address is not a component address!"))?;
+    let target_account_address =
+        new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
+
+    // collect all instructions
+    let mut instructions = vec![];
+    for nft_id in req.nft_ids {
+        // get NFT
+        let non_fungible_api = sdk.non_fungible_api();
+        let nft = non_fungible_api
+            .get_by_id(nft_id)
+            .map_err(|e| anyhow!("Failed to get non fungible token: {}", e))?;
+
+        instructions.extend([
+            Instruction::CallMethod {
+                component_address: source_account_address,
+                method: "withdraw".to_string(),
+                args: args![nft.resource_address, Amount::new(1)],
+            },
+            Instruction::PutLastInstructionOutputOnWorkspace {
+                key: b"bucket".to_vec(),
+            },
+            Instruction::CallMethod {
+                component_address: target_account_address,
+                method: "deposit".to_string(),
+                args: args![Workspace("bucket")],
+            },
+        ])
+    }
+
+    let source_account_secret_key = sdk
+        .key_manager_api()
+        .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
+
+    let transaction = transaction_builder(context)
+        .with_fee_instructions(vec![Instruction::CallMethod {
+            component_address: source_account_address,
+            method: "pay_fee".to_string(),
+            args: args![req.max_fee],
+        }])
+        .with_instructions(instructions)
+        .build_and_seal(&source_account_secret_key.key);
+
+    // if dry run, we can return the result immediately
+    if req.dry_run {
+        let transaction_id = *transaction.id();
+        let execute_result = context
+            .transaction_service()
+            .submit_dry_run_transaction(transaction, vec![])
+            .await?;
+        let finalize = execute_result.finalize;
+        return Ok(TransferNftResponse {
+            transaction_id,
+            fee: finalize.fee_receipt.total_fees_paid,
+            fee_refunded: finalize.fee_receipt.total_fee_payment - finalize.fee_receipt.total_fees_paid,
+            result: finalize,
+        });
+    }
+
+    // execute transaction
+    let mut events = context.notifier().subscribe();
+    let tx_id = context
+        .transaction_service()
+        .submit_transaction(transaction, vec![])
+        .await?;
+
+    let finalized = crate::handlers::helpers::wait_for_result(&mut events, tx_id).await?;
+
+    if let Some(reject) = finalized.finalize.result.fee_reject() {
+        return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
+    }
+    if let Some(reason) = finalized.finalize.any_reject() {
+        return Err(anyhow::anyhow!(
+            "Fee transaction succeeded (fees charged) however the transaction failed: {}",
+            reason
+        ));
+    }
+    info!(
+        target: LOG_TARGET,
+        "✅ Transferring NFT transaction {} finalized. Fee: {}",
+        finalized.transaction_id,
+        finalized.final_fee
+    );
+
+    Ok(TransferNftResponse {
+        transaction_id: tx_id,
+        fee: finalized.final_fee,
+        fee_refunded: req.max_fee - finalized.final_fee,
+        result: finalized.finalize,
+    })
 }
 
 async fn wait_for_result(

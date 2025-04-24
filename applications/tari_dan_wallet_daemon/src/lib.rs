@@ -87,6 +87,7 @@ pub async fn run_tari_dan_wallet_daemon(
         let scanner = recovery_service::Service::new(
             wallet_sdk.clone(),
             services.account_monitor_handle.clone(),
+            config.dan_wallet_daemon.recovery_abandon_count,
             shutdown_signal.clone(),
         );
         tokio::spawn(scanner.scan());

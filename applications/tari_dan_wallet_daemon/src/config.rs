@@ -81,6 +81,9 @@ pub struct WalletDaemonConfig {
     /// utility. If this is not set, the value lookup table will be generated on the fly which will have a large
     /// performance cost when brute forcing high-value outputs.
     pub value_lookup_table_file: Option<PathBuf>,
+    /// The number of contiguous failures to find an account derived from a public key before abandoning recovery and
+    /// assuming that there are no further accounts.
+    pub recovery_abandon_count: usize,
 }
 
 fn return_default_jwt_expiry() -> Duration {
@@ -104,6 +107,7 @@ impl Default for WalletDaemonConfig {
             jwt_secret_key: create_secret_password(),
             web_ui_address: Some("127.0.0.1:5100".parse().unwrap()),
             value_lookup_table_file: None,
+            recovery_abandon_count: 10,
         }
     }
 }

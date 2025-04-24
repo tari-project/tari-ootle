@@ -33,6 +33,7 @@ const LOG_TARGET: &str = "tari::dan_wallet_daemon::resource_scanner";
 pub struct Service<TStore, TNetworkInterface> {
     wallet_sdk: DanWalletSdk<TStore, TNetworkInterface>,
     account_monitor_handle: AccountMonitorHandle,
+    abandon_after_not_found: usize,
     shutdown_signal: ShutdownSignal,
 }
 
@@ -45,18 +46,18 @@ where
     pub fn new(
         wallet_sdk: DanWalletSdk<TStore, TNetworkInterface>,
         account_monitor_handle: AccountMonitorHandle,
+        abandon_after_not_found: usize,
         shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
             wallet_sdk,
             account_monitor_handle,
+            abandon_after_not_found,
             shutdown_signal,
         }
     }
 
     pub async fn scan(self) {
-        // TODO: configurable
-        const ABANDON_AFTER_NOT_FOUND: u64 = 10;
         info!(target: LOG_TARGET, "Waiting for indexer to be ready...");
 
         // wait for indexer to be ready
@@ -120,10 +121,10 @@ where
                     not_found_accounts_count += 1;
                 },
             }
-            if not_found_accounts_count == ABANDON_AFTER_NOT_FOUND {
+            if not_found_accounts_count == self.abandon_after_not_found {
                 info!(
                     target: LOG_TARGET,
-                    "No accounts found for {ABANDON_AFTER_NOT_FOUND} consecutive keys. Assuming that we are done"
+                    "No accounts found for {} consecutive keys. Assuming that we are done", self.abandon_after_not_found
                 );
                 break;
             }

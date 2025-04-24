@@ -22,7 +22,6 @@
 
 use std::fmt::Display;
 
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::Epoch;
 use tari_sidechain::EvictionProof;
 
@@ -38,17 +37,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> BaseLayerDb<'a, 'tx, TGlobalDbA
         Self { backend, tx }
     }
 
-    pub fn insert_base_layer_block_info(&mut self, info: DbBaseLayerBlockInfo) -> Result<(), TGlobalDbAdapter::Error> {
-        self.backend.insert_base_layer_block_info(self.tx, info)
-    }
-
-    pub fn get_base_layer_block_height(
-        &mut self,
-        hash: FixedHash,
-    ) -> Result<Option<DbBaseLayerBlockInfo>, TGlobalDbAdapter::Error> {
-        self.backend.get_base_layer_block_info(self.tx, hash)
-    }
-
     pub fn insert_eviction_proof(&mut self, proof: &EvictionProof) -> Result<(), TGlobalDbAdapter::Error> {
         self.backend.insert_layer_one_transaction(self.tx, DbLayer1Transaction {
             epoch: Epoch(proof.epoch().as_u64()),
@@ -56,12 +44,6 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> BaseLayerDb<'a, 'tx, TGlobalDbA
             payload: proof,
         })
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct DbBaseLayerBlockInfo {
-    pub hash: FixedHash,
-    pub height: u64,
 }
 
 #[derive(Debug, Clone)]

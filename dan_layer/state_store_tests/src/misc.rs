@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use indexmap::IndexMap;
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, NumPreshards, ShardGroup};
+use tari_dan_common_types::{Epoch, NodeHeight, NumPreshards, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,
@@ -12,8 +12,6 @@ use tari_dan_storage::{
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalStatus,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastSentVote,
@@ -168,25 +166,6 @@ fn miscellaneous_operations(db: impl StateStore) {
     tx.high_qc_set(&high_qc).unwrap();
     let res = tx.high_qc_get(epoch).unwrap();
     assert_eq_debug(&res, &high_qc);
-
-    // foreign send counters
-    let shard = Shard::first();
-    let block_id = BlockId::zero();
-    let mut counter = ForeignSendCounters::new();
-    counter.increment_counter(shard);
-
-    tx.foreign_send_counters_set(&counter, &block_id).unwrap();
-    let res = tx.foreign_send_counters_get(&block_id).unwrap();
-    assert_eq_debug(&res, &counter);
-
-    // foreign receive counters
-    let shard_group = ShardGroup::all_shards(NumPreshards::P1);
-    let mut counter = ForeignReceiveCounters::new();
-    counter.increment_group(shard_group);
-
-    tx.foreign_receive_counters_set(&counter).unwrap();
-    let res = tx.foreign_receive_counters_get().unwrap();
-    assert_eq_debug(&res, &counter);
 
     // epoch checkpoints
     let shard_group = ShardGroup::all_shards(NumPreshards::P4);

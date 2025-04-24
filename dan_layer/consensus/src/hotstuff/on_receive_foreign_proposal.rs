@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use log::*;
 use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, ForeignProposal, ForeignProposalStatus, ForeignReceiveCounters},
+    consensus_models::{Block, BlockId, ForeignProposal, ForeignProposalStatus},
     StateStore,
     StorageError,
 };
@@ -282,9 +282,7 @@ where TConsensusSpec: ConsensusSpec
         proposal: &ForeignProposal,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
-        let mut foreign_receive_counter = ForeignReceiveCounters::get_or_default(&**tx)?;
-
-        if let Err(err) = self.validate_proposed_block(proposal, local_committee_info, &foreign_receive_counter) {
+        if let Err(err) = self.validate_proposed_block(proposal, local_committee_info) {
             // TODO: handle this case. Perhaps, by aborting all transactions that are affected by this block (we known
             // the justify QC is valid)
             warn!(
@@ -296,8 +294,6 @@ where TConsensusSpec: ConsensusSpec
             return Err(err.into());
         }
 
-        foreign_receive_counter.increment_group(proposal.block().shard_group());
-
         info!(
             target: LOG_TARGET,
             "🧩 Receive FOREIGN PROPOSAL {}, justify_qc: {}",
@@ -305,7 +301,6 @@ where TConsensusSpec: ConsensusSpec
             proposal.justify_qc(),
         );
 
-        foreign_receive_counter.save(tx)?;
         proposal.save(tx)?;
 
         Ok(())
@@ -315,7 +310,6 @@ where TConsensusSpec: ConsensusSpec
         &self,
         proposal: &ForeignProposal,
         local_committee_info: &CommitteeInfo,
-        _foreign_receive_counter: &ForeignReceiveCounters,
     ) -> Result<(), ProposalValidationError> {
         // TODO: validations specific to the foreign proposal. General block validations (signature etc) are already
         //       performed in on_message_validate.
@@ -353,28 +347,6 @@ where TConsensusSpec: ConsensusSpec
         }
 
         validate_evidence_and_pledges_match(proposal, local_committee_info.shard_group())?;
-
-        // TODO: ignoring for now because this is currently broken
-        // let Some(incoming_count) = candidate_block.get_foreign_counter(&local_shard) else {
-        //     debug!(target:LOG_TARGET, "Our bucket {local_shard:?} is missing reliability index in the proposed block
-        // {candidate_block:?}");     return Err(ProposalValidationError::MissingForeignCounters {
-        //         proposed_by: from.to_string(),
-        //         hash: *candidate_block.id(),
-        //     });
-        // };
-        // let current_count = foreign_receive_counter.get_count(&foreign_shard);
-        // if current_count + 1 != incoming_count {
-        //     debug!(target:LOG_TARGET, "We were expecting the index to be {expected_count}, but the index was
-        // {incoming_count}", expected_count = current_count + 1);     return
-        // Err(ProposalValidationError::InvalidForeignCounters {         proposed_by: from.to_string(),
-        //         hash: *candidate_block.id(),
-        //         details: format!(
-        //             "Expected foreign receive count to be {} but it was {}",
-        //             current_count + 1,
-        //             incoming_count
-        //         ),
-        //     });
-        // }
 
         Ok(())
     }

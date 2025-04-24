@@ -35,6 +35,7 @@ pub async fn list(
         Column::new("commands", "Commands"),
         Column::new("proposed_by", "Proposed by"),
         Column::new("state_hash", "State Hash"),
+        Column::new("epoch_hash", "Epoch Hash"),
     ]);
     let tx = db.read_only_context();
 
@@ -71,6 +72,7 @@ pub async fn list(
             "commands": block.commands(),
             "proposed_by": block.proposed_by(),
             "state_hash": hex::encode(block.header().state_merkle_root()),
+            "epoch_hash": hex::encode(block.header().epoch_hash()),
         }));
     }
     let total = cf.count(OPERATION)?;

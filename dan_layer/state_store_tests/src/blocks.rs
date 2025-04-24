@@ -23,6 +23,7 @@ use tari_utilities::epoch_time::EpochTime;
 use crate::helper::{commit_chain, create_chain, create_rocksdb, create_sqlite, create_tx_atom};
 
 mod basic_block_operations {
+    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
 
@@ -64,10 +65,8 @@ mod basic_block_operations {
             [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -115,6 +114,7 @@ mod basic_block_operations {
 }
 
 mod block_parent_operations {
+    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
 
@@ -157,10 +157,8 @@ mod block_parent_operations {
             [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -180,10 +178,8 @@ mod block_parent_operations {
             [Command::LocalPrepare(atom2.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -249,6 +245,7 @@ mod block_parent_operations {
 }
 
 mod block_query_operations {
+    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
 
@@ -292,10 +289,8 @@ mod block_query_operations {
             [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -318,10 +313,8 @@ mod block_query_operations {
             Default::default(),
             // adding some fee to test blocks_get_total_leader_fee_for_epoch
             4,
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -350,10 +343,8 @@ mod block_query_operations {
             Default::default(),
             // adding some fee to test blocks_get_total_leader_fee_for_epoch
             5,
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             block3_data.clone(),
         )

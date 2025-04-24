@@ -33,13 +33,12 @@ pub struct Block {
     pub total_leader_fee: i64,
     pub is_committed: bool,
     pub is_justified: bool,
+    #[allow(dead_code)]
     pub is_dummy: bool,
-    pub foreign_indexes: String,
     pub signature: Option<String>,
     pub block_time: Option<i64>,
     pub timestamp: i64,
-    pub base_layer_block_height: i64,
-    pub base_layer_block_hash: String,
+    pub epoch_hash: String,
     pub extra_data: Option<String>,
     pub created_at: PrimitiveDateTime,
 }
@@ -73,16 +72,13 @@ impl Block {
             deserialize_json(&self.commands)?,
             deserialize_hex_try_from(&self.command_merkle_root)?,
             self.total_leader_fee as u64,
-            self.is_dummy,
             self.is_justified,
             self.is_committed,
-            deserialize_json(&self.foreign_indexes)?,
             self.signature.map(|val| deserialize_json(&val)).transpose()?,
             self.created_at,
             self.block_time.map(|v| v as u64),
             self.timestamp as u64,
-            self.base_layer_block_height as u64,
-            deserialize_hex_try_from(&self.base_layer_block_hash)?,
+            deserialize_hex_try_from(&self.epoch_hash)?,
             self.extra_data
                 .map(|val| deserialize_json(&val))
                 .transpose()?
@@ -107,11 +103,9 @@ pub struct ParkedBlock {
     pub command_count: i64,
     pub commands: String,
     pub total_leader_fee: i64,
-    pub foreign_indexes: String,
     pub signature: Option<String>,
     pub timestamp: i64,
-    pub base_layer_block_height: i64,
-    pub base_layer_block_hash: String,
+    pub epoch_hash: String,
     pub foreign_proposals: String,
     pub extra_data: Option<String>,
     pub created_at: PrimitiveDateTime,
@@ -126,6 +120,15 @@ impl TryFrom<ParkedBlock> for (consensus_models::Block, Vec<consensus_models::Fo
             item: "block",
             details: format!("Block #{} network byte is not a valid Network", value.id),
         })?;
+        let signature = value
+            .signature
+            .map(|val| deserialize_json(&val))
+            .transpose()?
+            .ok_or_else(|| StorageError::DecodingError {
+                operation: "try_convert",
+                item: "block",
+                details: format!("Parked block #{} is missing a signature", value.id),
+            })?;
         let block = consensus_models::Block::load(
             deserialize_hex_try_from(&value.block_id)?,
             network,
@@ -150,14 +153,11 @@ impl TryFrom<ParkedBlock> for (consensus_models::Block, Vec<consensus_models::Fo
             value.total_leader_fee as u64,
             false,
             false,
-            false,
-            deserialize_json(&value.foreign_indexes)?,
-            value.signature.map(|val| deserialize_json(&val)).transpose()?,
+            Some(signature),
             value.created_at,
             None,
             value.timestamp as u64,
-            value.base_layer_block_height as u64,
-            deserialize_hex_try_from(&value.base_layer_block_hash)?,
+            deserialize_hex_try_from(&value.epoch_hash)?,
             value
                 .extra_data
                 .map(|val| deserialize_json(&val))

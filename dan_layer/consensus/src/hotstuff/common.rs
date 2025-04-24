@@ -62,8 +62,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
-    parent_base_layer_block_height: u64,
-    parent_base_layer_block_hash: FixedHash,
+    parent_epoch_hash: FixedHash,
 ) -> Option<LeafBlock> {
     let mut dummy = None;
     with_dummy_blocks(
@@ -78,8 +77,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
         leader_strategy,
         local_committee,
         parent_timestamp,
-        parent_base_layer_block_height,
-        parent_base_layer_block_hash,
+        parent_epoch_hash,
         |dummy_block| {
             dummy = Some(dummy_block.as_leaf_block());
             ControlFlow::Continue(())
@@ -102,8 +100,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
-    parent_base_layer_block_height: u64,
-    parent_base_layer_block_hash: FixedHash,
+    parent_epoch_hash: FixedHash,
 ) -> Vec<Block> {
     let mut dummies = Vec::with_capacity(new_height.saturating_sub(from_height).as_u64() as usize);
     with_dummy_blocks(
@@ -118,8 +115,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
         leader_strategy,
         local_committee,
         parent_timestamp,
-        parent_base_layer_block_height,
-        parent_base_layer_block_hash,
+        parent_epoch_hash,
         |dummy_block| {
             if dummy_block.id() == expected_parent_block_id {
                 dummies.push(dummy_block);
@@ -154,8 +150,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         leader_strategy,
         local_committee,
         justify_block.timestamp(),
-        justify_block.base_layer_block_height(),
-        *justify_block.base_layer_block_hash(),
+        *justify_block.epoch_hash(),
     )
 }
 
@@ -171,8 +166,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
-    parent_base_layer_block_height: u64,
-    parent_base_layer_block_hash: FixedHash,
+    parent_epoch_hash: FixedHash,
     mut callback: F,
 ) where
     TAddr: NodeAddressable,
@@ -212,8 +206,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
             shard_group,
             parent_merkle_root,
             parent_timestamp,
-            parent_base_layer_block_height,
-            parent_base_layer_block_hash,
+            parent_epoch_hash,
         );
         let dummy_block = Block::new(dummy_header, qc.clone(), Default::default());
         debug!(

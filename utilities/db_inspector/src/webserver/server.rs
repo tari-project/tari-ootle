@@ -85,8 +85,6 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         models::parked_block::ParkedBlockModel,
         models::foreign_parked_blocks::ForeignParkedBlockModel,
         models::foreign_parked_blocks::MissingTransactionsModel,
-        models::foreign_send_counter::ForeignSendCounterModel,
-        models::foreign_receive_counter::ForeignReceiveCounterModel,
         models::substate_locks::SubstateLockModel,
         models::substate_locks::HeadIndex,
         models::substate_locks::BlockIdIndex,

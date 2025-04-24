@@ -154,6 +154,7 @@ where
     let genesis_block = Block::genesis(
         network,
         Epoch(0),
+        FixedHash::zero(),
         ShardGroup::all_shards(num_preshards),
         FixedHash::default(),
         sidechain_id,

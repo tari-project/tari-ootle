@@ -30,9 +30,6 @@ pub use template::*;
 mod epoch;
 pub use epoch::*;
 
-mod base_layer_block_info;
-pub use base_layer_block_info::*;
-
 mod validator_node;
 pub use validator_node::*;
 

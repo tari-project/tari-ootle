@@ -4,12 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use log::*;
-use tari_dan_common_types::{
-    committee::{Committee, CommitteeInfo},
-    optional::Optional,
-    Epoch,
-    NodeHeight,
-};
+use tari_dan_common_types::{committee::Committee, optional::Optional, NodeHeight};
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, LeafBlock, QuorumCertificate},
     StateStore,
@@ -18,7 +13,7 @@ use tari_dan_storage::{
 use super::vote_collector::VoteCollector;
 use crate::{
     block_validations::check_quorum_certificate,
-    hotstuff::{error::HotStuffError, pacemaker_handle::PaceMakerHandle},
+    hotstuff::{epoch_state::EpochState, error::HotStuffError, pacemaker_handle::PaceMakerHandle},
     messages::NewViewMessage,
     tracing::TraceTimer,
     traits::{ConsensusSpec, LeaderStrategy},
@@ -81,12 +76,10 @@ where TConsensusSpec: ConsensusSpec
     #[allow(clippy::too_many_lines)]
     pub async fn handle(
         &mut self,
-        current_epoch: Epoch,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
         from: TConsensusSpec::Addr,
         message: NewViewMessage,
-        local_committee_info: &CommitteeInfo,
-        local_committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveNewView");
 
@@ -108,7 +101,11 @@ where TConsensusSpec: ConsensusSpec
         let is_qc_valid = self.store.with_read_tx(|tx| {
             // If we already have this QC (locally calculated hash matches), we do not need to validate this again
             if !high_qc.exists(tx)? {
-                if let Err(err) = self.validate_qc(&high_qc, local_committee, self.vote_collector.signing_service()) {
+                if let Err(err) = self.validate_qc(
+                    &high_qc,
+                    epoch_state.local_committee(),
+                    self.vote_collector.signing_service(),
+                ) {
                     warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
                     return Ok(false);
                 }
@@ -116,7 +113,7 @@ where TConsensusSpec: ConsensusSpec
 
             if !Block::record_exists(tx, high_qc.block_id())? {
                 // Sync if we do not have the block for this valid QC
-                let local_height = LeafBlock::get(tx, current_epoch)
+                let local_height = LeafBlock::get(tx, epoch_state.epoch())
                     .optional()?
                     .map(|leaf| leaf.height())
                     .unwrap_or_default();
@@ -137,7 +134,7 @@ where TConsensusSpec: ConsensusSpec
         // if quorum is reached and propose a block at new_height + 1.
         let (leader, _) = self
             .leader_strategy
-            .get_leader_for_next_height(local_committee, new_height);
+            .get_leader_for_next_height(epoch_state.local_committee(), new_height);
 
         if *leader != self.local_validator_addr {
             warn!(target: LOG_TARGET, "❌ NEWVIEW failed, leader is {} at {}. Our address is {}", leader, new_height, self.local_validator_addr);
@@ -146,12 +143,12 @@ where TConsensusSpec: ConsensusSpec
 
         // Are nodes requesting to create more than the minimum number of dummy blocks?
         let height_diff = high_qc.block_height().saturating_sub(new_height).as_u64();
-        if height_diff > u64::try_from(local_committee.quorum_threshold()).unwrap_or(u64::MAX) {
+        if height_diff > u64::try_from(epoch_state.local_committee().quorum_threshold()).unwrap_or(u64::MAX) {
             warn!(
                 target: LOG_TARGET,
                 "❌ Validator {from} sent NEWVIEW that attempts to create a larger than necessary number of dummy blocks. Expected requested {} < quorum threshold {}",
                 height_diff,
-                local_committee.quorum_threshold()
+                epoch_state.local_committee().quorum_threshold()
             );
             return Ok(());
         }
@@ -164,7 +161,12 @@ where TConsensusSpec: ConsensusSpec
             );
             if let Err(err) = self
                 .vote_collector
-                .check_and_collect_vote(from.clone(), current_epoch, vote, local_committee_info)
+                .check_and_collect_vote(
+                    from.clone(),
+                    epoch_state.epoch(),
+                    vote,
+                    epoch_state.local_committee_info(),
+                )
                 .await
             {
                 warn!(target: LOG_TARGET, "❌ Error handling vote: {}", err);
@@ -180,7 +182,7 @@ where TConsensusSpec: ConsensusSpec
             high_qc.update_high_qc(tx)
         })?;
 
-        let threshold = local_committee_info.quorum_threshold() as usize;
+        let threshold = epoch_state.local_committee_info().quorum_threshold() as usize;
 
         info!(
             target: LOG_TARGET,
@@ -197,7 +199,7 @@ where TConsensusSpec: ConsensusSpec
             info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_qc: {}) has reached quorum ({}/{})", new_height, latest_high_qc, newview_count, threshold);
 
             self.pacemaker
-                .update_view(current_epoch, new_height, latest_high_qc.block_height())
+                .update_view(epoch_state.epoch(), new_height, latest_high_qc.block_height())
                 .await?;
 
             self.pacemaker.force_beat(new_height);

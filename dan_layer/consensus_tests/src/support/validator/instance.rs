@@ -11,6 +11,7 @@ use tari_dan_storage::{
     StateStore,
     StateStoreReadTransaction,
 };
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction::{Transaction, TransactionId};
 use tokio::{
     sync::{broadcast, mpsc, watch},
@@ -39,6 +40,7 @@ pub struct ValidatorChannels {
 
 pub struct Validator {
     pub address: TestAddress,
+    pub public_key: RistrettoPublicKeyBytes,
     pub _shard_address: SubstateAddress,
     pub shard_group: ShardGroup,
     pub num_committees: u32,

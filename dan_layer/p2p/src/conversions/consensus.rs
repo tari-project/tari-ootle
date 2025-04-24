@@ -434,12 +434,9 @@ impl From<&consensus_models::BlockHeader> for proto::consensus::BlockHeader {
             proposed_by: value.proposed_by().as_bytes().to_vec(),
             state_merkle_root: value.state_merkle_root().as_slice().to_vec(),
             total_leader_fee: value.total_leader_fee(),
-            foreign_indexes: encode(value.foreign_indexes()).unwrap(),
             signature: value.signature().map(Into::into),
             timestamp: value.timestamp(),
-            base_layer_block_height: value.base_layer_block_height(),
-            base_layer_block_hash: value.base_layer_block_hash().as_bytes().to_vec(),
-            is_dummy: value.is_dummy(),
+            epoch_hash: value.epoch_hash().as_bytes().to_vec(),
             extra_data: Some(value.extra_data().into()),
         }
     }
@@ -465,7 +462,10 @@ fn try_convert_proto_block_header(
         .ok_or_else(|| anyhow!("ExtraData not provided"))?
         .try_into()?;
 
-    if value.is_dummy {
+    // TODO: foreign nodes should never be able to send a block without a signature - currently used to force a view
+    // change in catch up sync
+    // Dummy has no signature
+    if value.signature.is_none() {
         Ok(consensus_models::BlockHeader::dummy_block(
             network,
             value.parent_id.try_into()?,
@@ -476,14 +476,13 @@ fn try_convert_proto_block_header(
             shard_group,
             value.state_merkle_root.try_into()?,
             value.timestamp,
-            value.base_layer_block_height,
-            value.base_layer_block_hash.try_into()?,
+            value.epoch_hash.try_into()?,
         ))
     } else {
         // We calculate the BlockId and command MR locally from remote data. This means that they will
         // always be valid, therefore do not need to be explicitly validated.
         // If there were a mismatch (perhaps due modified data over the wire) the signature verification will fail.
-        Ok(consensus_models::BlockHeader::create(
+        let block = consensus_models::BlockHeader::create(
             network,
             value.parent_id.try_into()?,
             justify_id,
@@ -494,13 +493,17 @@ fn try_convert_proto_block_header(
             value.state_merkle_root.try_into()?,
             commands,
             value.total_leader_fee,
-            decode_exact(&value.foreign_indexes)?,
-            value.signature.map(TryInto::try_into).transpose()?,
+            value
+                .signature
+                .map(TryInto::try_into)
+                .transpose()?
+                .ok_or_else(|| anyhow!("Block conversion: Block signature is missing"))?,
             value.timestamp,
-            value.base_layer_block_height,
-            value.base_layer_block_hash.try_into()?,
+            value.epoch_hash.try_into()?,
             extra_data,
-        )?)
+        )?;
+
+        Ok(block)
     }
 }
 

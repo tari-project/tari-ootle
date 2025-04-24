@@ -44,8 +44,6 @@ use tari_dan_storage::{
         EpochCheckpoint,
         ForeignProposal,
         ForeignProposalStatus,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -730,34 +728,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 proposal.try_convert(justify_qc)
             })
             .collect()
-    }
-
-    fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {
-        use crate::schema::foreign_send_counters;
-
-        let counter = foreign_send_counters::table
-            .filter(foreign_send_counters::block_id.eq(serialize_hex(block_id)))
-            .first::<sql_models::ForeignSendCounters>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_send_counters_get",
-                source: e,
-            })?;
-
-        counter.try_into()
-    }
-
-    fn foreign_receive_counters_get(&self) -> Result<ForeignReceiveCounters, StorageError> {
-        use crate::schema::foreign_receive_counters;
-
-        let counter = foreign_receive_counters::table
-            .order_by(foreign_receive_counters::id.desc())
-            .first::<sql_models::ForeignReceiveCounters>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_receive_counters_get",
-                source: e,
-            })?;
-
-        counter.try_into()
     }
 
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError> {

@@ -47,8 +47,6 @@ use tari_dan_storage::{
         BlockTransactionExecution,
         EpochCheckpoint,
         ForeignProposal,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -121,8 +119,6 @@ use crate::{
         foreign_parked_blocks::ForeignParkedBlockModel,
         foreign_proposal,
         foreign_proposal::ForeignProposalModel,
-        foreign_receive_counter::ForeignReceiveCounterModel,
-        foreign_send_counter::ForeignSendCounterModel,
         foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeModel,
         lock_conflict,
@@ -500,21 +496,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         Ok(proposals)
-    }
-
-    fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {
-        const OPERATION: &str = "foreign_send_counters_get";
-        let counters = self.db().cf(ForeignSendCounterModel)?.get(block_id, OPERATION)?;
-
-        Ok(counters)
-    }
-
-    fn foreign_receive_counters_get(&self) -> Result<ForeignReceiveCounters, StorageError> {
-        const OPERATION: &str = "foreign_receive_counters_get";
-        let cf = self.db().cf(ForeignReceiveCounterModel)?;
-        let iter = cf.iterator(Ordering::Ascending, OPERATION);
-        let counters = iter.collect::<Result<_, _>>()?;
-        Ok(ForeignReceiveCounters { counters })
     }
 
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError> {

@@ -39,6 +39,7 @@ either = { workspace = true }
 humantime-serde = { workspace = true }
 futures = { workspace = true }
 include_dir = { workspace = true, optional = true }
+jsonwebtoken = { workspace = true }
 libsqlite3-sys = { workspace = true, features = ["bundled"] }
 log = { workspace = true }
 log4rs = { workspace = true, features = [
@@ -75,6 +76,8 @@ ignored = [
     "libsqlite3-sys",
     # Want to enable some log4rs features
     "log4rs",
+    # Added due to a limitation with machete - this is used in attributes without a `use` import.
+    "humantime-serde",
 ]
 
 [features]

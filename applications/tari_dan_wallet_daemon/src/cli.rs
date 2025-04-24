@@ -25,6 +25,8 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::{Args, Parser};
 use minotari_app_utilities::common_cli_args::CommonCliArgs;
 use tari_common::configuration::{ConfigOverrideProvider, Network};
+use tari_crypto::tari_utilities::SafePassword;
+use tari_key_manager::SeedWords;
 use url::Url;
 
 #[derive(Args, Debug)]
@@ -32,7 +34,7 @@ pub struct WalletRestoreArgs {
     /// Seed words of a wallet to be restored.
     /// If set, wallet daemon tries to restore your wallet based on these seed words.
     #[clap(long)]
-    pub seed_words: Option<String>,
+    pub seed_words: Option<SeedWords>,
 }
 
 #[derive(Parser, Debug)]
@@ -52,6 +54,13 @@ pub struct Cli {
     pub indexer_json_rpc_url: Option<Url>,
     #[clap(flatten)]
     pub wallet_restore: WalletRestoreArgs,
+    /// The OS keyring is used to store and retrieve a randomly generated password. This is used for wallet encryption.
+    /// This setting overrides this functionality, using this password instead of generating and storing one.
+    /// This is useful if a keyring is not available on your platform or if there is some other preference to use a
+    /// specific password.
+    /// NOTE: Once this is set, it must always be set to access the wallet.
+    #[clap(long)]
+    pub override_keyring_password: Option<SafePassword>,
     #[clap(subcommand)]
     pub command: Option<Subcommand>,
 }

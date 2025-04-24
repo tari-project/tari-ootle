@@ -12,6 +12,7 @@ use tari_dan_common_types::{
 use tari_dan_wallet_sdk::{
     apis::{
         accounts::AccountsApiError,
+        config::ConfigKey,
         key_manager::{KeyManagerApiError, TRANSACTION_BRANCH},
     },
     network::WalletNetworkInterface,
@@ -87,6 +88,13 @@ where
         let mut not_found_accounts_count = 0;
         let mut found_accounts_count = 0;
         let mut owner_key_cache = HashMap::new();
+        let initial_key_index = match key_manager_api.get_active_key(TRANSACTION_BRANCH) {
+            Ok((key_index, _)) => key_index,
+            Err(err) => {
+                error!(target: LOG_TARGET, "Error getting active key: {err}. Scanning failed...");
+                return;
+            },
+        };
         let mut last_found_key = None;
         loop {
             let key = match key_manager_api.next_key(TRANSACTION_BRANCH) {
@@ -129,6 +137,23 @@ where
             if let Err(err) = key_manager_api.set_active_key(TRANSACTION_BRANCH, last_found_key) {
                 error!(target: LOG_TARGET, "Error setting active key: {err}");
             }
+        } else {
+            info!(target: LOG_TARGET, "No accounts found. Setting active key to {}", initial_key_index);
+            if let Err(err) = key_manager_api.reset_key_index_to(TRANSACTION_BRANCH, initial_key_index) {
+                error!(target: LOG_TARGET, "Error setting active key: {err}");
+            }
+            if let Err(err) = key_manager_api.set_active_key(TRANSACTION_BRANCH, initial_key_index) {
+                error!(target: LOG_TARGET, "Error setting active key: {err}");
+            }
+        }
+
+        // Set a flag to indicate that the wallet has completed recovery
+        if let Err(err) = self
+            .wallet_sdk
+            .config_api()
+            .set(ConfigKey::RecoveryNeeded, &false, false)
+        {
+            error!(target: LOG_TARGET, "Error setting recovery needed flag: {err}");
         }
 
         info!(target: LOG_TARGET, "✅ Scanning accounts finished! {found_accounts_count} owned account(s) found!");

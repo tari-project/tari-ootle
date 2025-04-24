@@ -126,6 +126,7 @@ pub trait WalletStoreReader {
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
     // Config
     fn config_get<T: serde::de::DeserializeOwned>(&mut self, key: &str) -> Result<Config<T>, WalletStorageError>;
+    fn config_get_string(&mut self, key: &str) -> Result<Config<String>, WalletStorageError>;
     fn config_exists(&mut self, key: &str) -> Result<bool, WalletStorageError>;
     // JWT
     fn jwt_get_all(&mut self) -> Result<Vec<(i32, Option<String>)>, WalletStorageError>;

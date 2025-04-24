@@ -7,9 +7,11 @@ use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json as json;
-use tari_dan_common_types::crypto::create_secret;
-use tari_dan_wallet_sdk::apis::jwt::JrpcPermissions;
+use tari_dan_common_types::crypto::create_secret_password;
+use tari_utilities::SafePassword;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
+
+use crate::permissions::JrpcPermissions;
 
 pub struct Data {
     pub offers: HashMap<u64, json::Value>,
@@ -17,7 +19,7 @@ pub struct Data {
     pub offer_ice_candidates: HashMap<u64, Vec<RTCIceCandidateInit>>,
     pub answer_ice_candidates: HashMap<u64, Vec<RTCIceCandidateInit>>,
     pub expiration: chrono::Duration,
-    pub secret_key: String,
+    pub secret_key: SafePassword,
     // The lowest still probably alive id. They will be cleaned up after expiration, which goes in order.
     pub _low_id: u64,
     pub id: u64,
@@ -39,7 +41,7 @@ impl Data {
             offer_ice_candidates: HashMap::new(),
             answer_ice_candidates: HashMap::new(),
             expiration: chrono::Duration::minutes(5),
-            secret_key: create_secret(),
+            secret_key: create_secret_password(),
             _low_id: 0,
             id: 0,
         }
@@ -61,7 +63,7 @@ impl Data {
         encode(
             &Header::default(),
             &my_claims,
-            &EncodingKey::from_secret(self.secret_key.as_ref()),
+            &EncodingKey::from_secret(self.secret_key.reveal()),
         )
         .map_err(anyhow::Error::new)
     }
@@ -69,7 +71,7 @@ impl Data {
     pub fn check_jwt(&self, token: String) -> anyhow::Result<u64> {
         let token: TokenData<Claims> = decode(
             &token,
-            &DecodingKey::from_secret(self.secret_key.as_ref()),
+            &DecodingKey::from_secret(self.secret_key.reveal()),
             &Validation::default(),
         )?;
         Ok(token.claims.id)

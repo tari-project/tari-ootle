@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 webauthn-rs-proto = { workspace = true }
+zeroize = { workspace = true, features = ["serde"] }
 
 [features]
 ts = ["ts-rs"]

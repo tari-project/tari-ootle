@@ -12,7 +12,7 @@ use tari_engine_types::{
     commit_result::ExecuteResult,
     serde_with as serde_tools,
     substate::{Substate, SubstateId, SubstateValue},
-    template_models::ResourceAddress,
+    template_lib_models::ResourceAddress,
 };
 use tari_template_abi::TemplateDef;
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};

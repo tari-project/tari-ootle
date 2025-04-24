@@ -59,7 +59,7 @@ async fn main() -> Result<(), anyhow::Error> {
         config.dan_wallet_daemon.network = network;
     }
 
-    match cli.command {
+    match &cli.command {
         Some(Subcommand::Run) | None => run(cli, config).await?,
         Some(Subcommand::CreateKey {
             key_index,
@@ -67,15 +67,18 @@ async fn main() -> Result<(), anyhow::Error> {
             output_path,
         }) => {
             let wallet_store = init_wallet_store(&config)?;
-            let sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store)?.sdk;
+            let mut sdk = initialize_wallet_sdk(&cli, &config, wallet_store)?;
+            // TODO: if create key is run before run, then the wallet will never recover - this is a general problem
+            // that can be resolved by a config flag to indicate that the wallet requires a restore
+            sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
             let km = sdk.key_manager_api();
             let secret = if let Some(index) = key_index {
-                km.derive_key(key_manager::TRANSACTION_BRANCH, index)?
+                km.derive_key(key_manager::TRANSACTION_BRANCH, *index)?
             } else {
                 km.next_key(key_manager::TRANSACTION_BRANCH)?
             };
 
-            if set_active {
+            if *set_active {
                 km.set_active_key(key_manager::TRANSACTION_BRANCH, secret.key_index)?;
             }
 
@@ -89,7 +92,7 @@ async fn main() -> Result<(), anyhow::Error> {
                         .create(true)
                         .write(true)
                         .truncate(true)
-                        .open(&path)
+                        .open(path)
                         .context("failed to open file for writing")?;
                     serde_json::to_writer_pretty(&mut file, &json).context("failed to encode key json to file")?;
                     println!("Key written to {}", path.display());
@@ -103,8 +106,8 @@ async fn main() -> Result<(), anyhow::Error> {
         },
         Some(Subcommand::SeedWords) => {
             let wallet_store = init_wallet_store(&config)?;
-            let sdk = initialize_wallet_sdk(&cli.wallet_restore, &config, wallet_store)?.sdk;
-            let seed_words = sdk.seed_words()?;
+            let mut sdk = initialize_wallet_sdk(&cli, &config, wallet_store)?;
+            let seed_words = sdk.load_seed_words()?;
             println!("{}", seed_words.join(" ").reveal())
         },
     }

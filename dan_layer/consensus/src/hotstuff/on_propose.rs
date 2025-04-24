@@ -52,7 +52,7 @@ use tari_engine_types::{
     commit_result::RejectReason,
     confidential::UnclaimedConfidentialOutput,
     substate::Substate,
-    template_models::UnclaimedConfidentialOutputAddress,
+    template_lib_models::UnclaimedConfidentialOutputAddress,
     ToByteType,
 };
 use tari_epoch_manager::EpochManagerReader;

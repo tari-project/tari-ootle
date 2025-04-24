@@ -4,6 +4,7 @@
 mod cli;
 mod data;
 mod jrpc_server;
+mod permissions;
 
 use std::{fs, time::Duration};
 

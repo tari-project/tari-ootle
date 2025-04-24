@@ -1,13 +1,19 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use axum::headers::authorization::Bearer;
 use tari_dan_wallet_sdk::DanWalletSdk;
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
+use tari_shutdown::ShutdownSignal;
+use tari_wallet_daemon_client::permissions::JrpcPermission;
 use webauthn_rs::Webauthn;
 
 use crate::{
     config::WalletDaemonConfig,
-    handlers::auth::WalletAuthenticator,
+    handlers::auth::{
+        jwt::{JwtApi, JwtApiError},
+        WalletAuthenticator,
+    },
     indexer_jrpc_impl::IndexerJsonRpcNetworkInterface,
     notify::Notify,
     services::{AccountMonitorHandle, TransactionServiceHandle, WalletEvent, WebauthnService},
@@ -21,6 +27,7 @@ pub struct HandlerContext {
     account_monitor: AccountMonitorHandle,
     config: WalletDaemonConfig,
     authenticator: WalletAuthenticator,
+    shutdown_signal: ShutdownSignal,
 }
 
 impl HandlerContext {
@@ -31,6 +38,7 @@ impl HandlerContext {
         account_monitor: AccountMonitorHandle,
         config: WalletDaemonConfig,
         authenticator: WalletAuthenticator,
+        shutdown_signal: ShutdownSignal,
     ) -> Self {
         Self {
             wallet_sdk,
@@ -39,6 +47,7 @@ impl HandlerContext {
             account_monitor,
             config,
             authenticator,
+            shutdown_signal,
         }
     }
 
@@ -48,6 +57,24 @@ impl HandlerContext {
 
     pub fn wallet_sdk(&self) -> &DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface> {
         &self.wallet_sdk
+    }
+
+    pub fn check_auth(&self, token: Option<&Bearer>, permissions: &[JrpcPermission]) -> Result<(), JwtApiError> {
+        self.jwt_api().check_auth(token, permissions)
+    }
+
+    pub fn jwt_api(&self) -> JwtApi<'_, SqliteWalletStore> {
+        JwtApi::new(
+            self.wallet_sdk.store(),
+            self.config().jwt_expiry,
+            // TODO: these are the same
+            self.config().jwt_secret_key.clone(),
+            self.config().jwt_secret_key.clone(),
+        )
+    }
+
+    pub fn shutdown_signal(&self) -> &ShutdownSignal {
+        &self.shutdown_signal
     }
 
     pub fn account_monitor(&self) -> &AccountMonitorHandle {

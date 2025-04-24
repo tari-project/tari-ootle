@@ -268,6 +268,9 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         if exists {
             diesel::update(config::table)
                 .set((
+                    // TODO: we should store bytes to allow for encrypted values with the downside of not being able to
+                    // "see" the JSON Or we could have a cleartext string column, and an encrypted
+                    // bytes column
                     config::value.eq(serialize_json(value)?),
                     config::is_encrypted.eq(is_encrypted),
                     config::updated_at.eq(diesel::dsl::now),

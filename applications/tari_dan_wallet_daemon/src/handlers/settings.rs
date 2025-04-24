@@ -1,19 +1,23 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use axum::headers::authorization::Bearer;
 use tari_dan_common_types::optional::Optional;
-use tari_dan_wallet_sdk::apis::{config::ConfigKey, jwt::JrpcPermission};
-use tari_wallet_daemon_client::types::{NetworkInfo, SettingsGetResponse, SettingsSetRequest, SettingsSetResponse};
+use tari_dan_wallet_sdk::apis::config::ConfigKey;
+use tari_wallet_daemon_client::{
+    permissions::JrpcPermission,
+    types::{NetworkInfo, SettingsGetResponse, SettingsSetRequest, SettingsSetResponse},
+};
 
 use crate::handlers::HandlerContext;
 
 pub async fn handle_get(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     _value: serde_json::Value,
 ) -> Result<SettingsGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
     let indexer_url = sdk
         .config_api()
         .get(ConfigKey::IndexerUrl)
@@ -32,11 +36,11 @@ pub async fn handle_get(
 
 pub async fn handle_set(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: SettingsSetRequest,
 ) -> Result<SettingsSetResponse, anyhow::Error> {
     let mut sdk = context.wallet_sdk().clone();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
     sdk.get_network_interface_mut().set_endpoint(&req.indexer_url)?;
     sdk.config_api().set(ConfigKey::IndexerUrl, &req.indexer_url, false)?;
     Ok(SettingsSetResponse {})

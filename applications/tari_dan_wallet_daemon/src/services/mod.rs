@@ -14,7 +14,7 @@ pub use webauthn::*;
 mod session_store;
 mod template_monitor;
 
-pub mod resource_scanner;
+pub mod recovery_service;
 
 // -------------------------------- Spawn -------------------------------- //
 use anyhow::anyhow;

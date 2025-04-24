@@ -156,6 +156,18 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
     // -------------------------------- Config -------------------------------- //
     fn config_get<T: DeserializeOwned>(&mut self, key: &str) -> Result<Config<T>, WalletStorageError> {
+        let config = self.config_get_string(key)?;
+
+        Ok(Config {
+            key: config.key,
+            value: deserialize_json(&config.value)?,
+            is_encrypted: config.is_encrypted,
+            created_at: config.created_at,
+            updated_at: config.updated_at,
+        })
+    }
+
+    fn config_get_string(&mut self, key: &str) -> Result<Config<String>, WalletStorageError> {
         use crate::schema::config;
 
         let config = config::table
@@ -171,7 +183,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
 
         Ok(Config {
             key: config.key,
-            value: deserialize_json(&config.value)?,
+            value: config.value,
             is_encrypted: config.is_encrypted,
             created_at: 0,
             updated_at: 0,

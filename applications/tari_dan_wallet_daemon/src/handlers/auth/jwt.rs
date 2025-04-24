@@ -100,7 +100,7 @@ impl<'a, TStore: WalletStore> JwtApi<'a, TStore> {
         self.get_token_claims(token.token()).map(|claims| claims.permissions)
     }
 
-    pub fn grant(&self, name: String, auth_token: &str) -> Result<String, JwtApiError> {
+    pub fn grant(&self, name: String, auth_token: &str) -> Result<EncodedJwtString, JwtApiError> {
         let auth_claims = self.check_auth_token(auth_token)?;
         let my_claims = Claims {
             id: auth_claims.id,
@@ -115,9 +115,9 @@ impl<'a, TStore: WalletStore> JwtApi<'a, TStore> {
         )?;
         let mut tx = self.store.create_write_tx()?;
 
-        tx.jwt_store_decision(auth_claims.id, Some(permissions_token.clone()))?;
+        tx.jwt_store_decision(auth_claims.id, Some(&permissions_token))?;
         tx.commit()?;
-        Ok(permissions_token)
+        Ok(permissions_token.into())
     }
 
     pub fn deny(&self, auth_token: &str) -> Result<(), JwtApiError> {

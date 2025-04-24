@@ -185,8 +185,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
             key: config.key,
             value: config.value,
             is_encrypted: config.is_encrypted,
-            created_at: 0,
-            updated_at: 0,
+            created_at: config.created_at.and_utc().timestamp(),
+            updated_at: config.updated_at.and_utc().timestamp(),
         })
     }
 

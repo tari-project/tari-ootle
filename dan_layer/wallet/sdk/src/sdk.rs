@@ -82,7 +82,7 @@ where
     /// seed words if provided and necessary. Returns true if the cipher seed was recovered from the seed words,
     /// otherwise false.
     pub fn initialize_cipher_seed(&mut self, seed_words: Option<&SeedWords>) -> Result<bool, WalletSdkError> {
-        match self.load_cipher_seed().optional()? {
+        match self.load_cipher_seed()? {
             Some(_) => {
                 if seed_words.is_some() {
                     warn!(
@@ -115,10 +115,6 @@ where
 
     pub fn store(&self) -> &TStore {
         &self.store
-    }
-
-    pub fn needs_seed_recovery(&self) -> bool {
-        self.loaded_cipher_seed.is_none()
     }
 
     pub fn config_api(&self) -> ConfigApi<'_, TStore> {
@@ -196,16 +192,19 @@ where
     }
 
     /// Tries to get encrypted cipher seed from DB and decrypts it using OS keyring if possible.
-    fn load_cipher_seed(&mut self) -> Result<Arc<CipherSeed>, WalletSdkError> {
+    fn load_cipher_seed(&mut self) -> Result<Option<Arc<CipherSeed>>, WalletSdkError> {
         if let Some(ref cipher_seed) = self.loaded_cipher_seed {
-            return Ok(cipher_seed.clone());
+            return Ok(Some(cipher_seed.clone()));
         }
 
-        let cipher_seed_encrypted: Vec<u8> = self.config_api().get(ConfigKey::CipherSeed)?;
+        let Some(cipher_seed_encrypted) = self.config_api().get::<Vec<u8>>(ConfigKey::CipherSeed).optional()? else {
+            // Cipher seed not found in DB. This is expected if the wallet has not been initialized yet.
+            return Ok(None);
+        };
         let password = self.get_cipher_seed_password()?;
         let cipher_seed = CipherSeed::from_enciphered_bytes(&cipher_seed_encrypted, Some(password))?;
         self.loaded_cipher_seed = Some(Arc::new(cipher_seed));
-        Ok(self.loaded_cipher_seed.clone().expect("set above"))
+        Ok(self.loaded_cipher_seed.clone())
     }
 
     // Generate a new random password.
@@ -252,7 +251,12 @@ where
 
     /// Retrieve the seed words from current cipher seed stored.
     pub fn load_seed_words(&mut self) -> Result<SeedWords, WalletSdkError> {
-        let seed_words = self.load_cipher_seed()?.to_mnemonic(MnemonicLanguage::English, None)?;
+        let seed_words = self
+            .load_cipher_seed()?
+            .ok_or_else(|| WalletSdkError::InvariantError {
+                details: "call to load_cipher_seed without initializing the cipher seed".to_string(),
+            })?
+            .to_mnemonic(MnemonicLanguage::English, None)?;
         Ok(seed_words)
     }
 

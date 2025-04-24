@@ -61,9 +61,7 @@ pub async fn handle_login_accept(
 ) -> Result<AuthLoginAcceptResponse, anyhow::Error> {
     let jwt = context.jwt_api();
     let permissions_token = jwt.grant(auth_accept_request.name, &auth_accept_request.auth_token)?;
-    Ok(AuthLoginAcceptResponse {
-        permissions_token: permissions_token.into(),
-    })
+    Ok(AuthLoginAcceptResponse { permissions_token })
 }
 
 pub async fn handle_login_deny(

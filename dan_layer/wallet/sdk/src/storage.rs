@@ -233,7 +233,7 @@ pub trait WalletStoreWriter {
 
     // JWT
     fn jwt_add_empty_token(&mut self) -> Result<u64, WalletStorageError>;
-    fn jwt_store_decision(&mut self, id: u64, permissions_token: Option<String>) -> Result<(), WalletStorageError>;
+    fn jwt_store_decision(&mut self, id: u64, permissions_token: Option<&str>) -> Result<(), WalletStorageError>;
     fn jwt_is_revoked(&mut self, token: &str) -> Result<bool, WalletStorageError>;
     fn jwt_revoke(&mut self, token_id: i32) -> Result<(), WalletStorageError>;
 

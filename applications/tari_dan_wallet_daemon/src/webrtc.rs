@@ -3,13 +3,13 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use anyhow::Result;
 use axum_jrpc::{JsonRpcAnswer, JsonRpcRequest, JsonRpcResponse};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json as json;
 use serde_json::json;
 use tari_shutdown::ShutdownSignal;
+use tari_wallet_daemon_client::types::EncodedJwtString;
 use webrtc::{
     api::APIBuilder,
     data_channel::{data_channel_message::DataChannelMessage, RTCDataChannel},
@@ -41,7 +41,7 @@ async fn make_request<T: Serialize>(
     token: Option<String>,
     method: String,
     params: T,
-) -> Result<serde_json::Value> {
+) -> anyhow::Result<serde_json::Value> {
     let url = format!("http://{}", address);
     let client = reqwest::Client::new();
     let body = JsonRpcRequest {
@@ -102,7 +102,7 @@ pub async fn on_ice_candidate(
 pub async fn on_message(
     msg: DataChannelMessage,
     d_on_message: Arc<RTCDataChannel>,
-    permissions_token: String,
+    permissions_token: &EncodedJwtString,
     address: SocketAddr,
 ) -> anyhow::Result<()> {
     let request = serde_json::from_reader::<_, Request>(&mut msg.data.as_ref())?;
@@ -128,13 +128,13 @@ pub async fn on_message(
     Ok(())
 }
 
-pub async fn on_data_channel(d: Arc<RTCDataChannel>, permissions_token: String, address: SocketAddr) {
+pub async fn on_data_channel(d: Arc<RTCDataChannel>, permissions_token: EncodedJwtString, address: SocketAddr) {
     let d_on_message = d.clone();
     d.on_message(Box::new(move |msg: DataChannelMessage| {
         let d_on_message = d_on_message.clone();
         let permissions_token = permissions_token.clone();
         Box::pin(async move {
-            if let Err(err) = on_message(msg, d_on_message.clone(), permissions_token.clone(), address).await {
+            if let Err(err) = on_message(msg, d_on_message.clone(), &permissions_token, address).await {
                 log::error!(target: LOG_TARGET, "Error handling message: {}", err);
             }
         })
@@ -143,11 +143,11 @@ pub async fn on_data_channel(d: Arc<RTCDataChannel>, permissions_token: String, 
 
 pub async fn webrtc_start_session(
     signaling_server_token: String,
-    permissions_token: String,
+    permissions_token: EncodedJwtString,
     address: SocketAddr,
     signaling_server_address: SocketAddr,
     shutdown_signal: ShutdownSignal,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let api = APIBuilder::new().build();
 
     let pc = api.new_peer_connection(get_rtc_configuration()).await?;

@@ -68,8 +68,6 @@ async fn main() -> Result<(), anyhow::Error> {
         }) => {
             let wallet_store = init_wallet_store(&config)?;
             let mut sdk = initialize_wallet_sdk(&cli, &config, wallet_store)?;
-            // TODO: if create key is run before run, then the wallet will never recover - this is a general problem
-            // that can be resolved by a config flag to indicate that the wallet requires a restore
             sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
             let km = sdk.key_manager_api();
             let secret = if let Some(index) = key_index {
@@ -107,6 +105,7 @@ async fn main() -> Result<(), anyhow::Error> {
         Some(Subcommand::SeedWords) => {
             let wallet_store = init_wallet_store(&config)?;
             let mut sdk = initialize_wallet_sdk(&cli, &config, wallet_store)?;
+            sdk.initialize_cipher_seed(cli.wallet_restore.seed_words.as_ref())?;
             let seed_words = sdk.load_seed_words()?;
             println!("{}", seed_words.join(" ").reveal())
         },

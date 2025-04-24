@@ -22,14 +22,15 @@
 
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import { useTheme } from "@mui/material/styles";
-import { useAccountsCreateFreeTestCoins } from "../../../api/hooks/useAccounts";
+import {useTheme} from "@mui/material/styles";
+import {useAccountsCreateFreeTestCoins} from "../../../api/hooks/useAccounts";
 import ClaimBurn from "./ClaimBurn";
 import useAccountStore from "../../../store/accountStore";
 import SendMoney from "./SendMoney";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
-import { substateIdToString } from "@tari-project/typescript-bindings";
+import {substateIdToString} from "@tari-project/typescript-bindings";
+import TransferNft from "./TransferNft";
 
 function ActionMenu() {
   const { mutate } = useAccountsCreateFreeTestCoins();
@@ -64,6 +65,7 @@ function ActionMenu() {
       }}
     >
       <SendMoney />
+      <TransferNft />
       <ClaimFees />
       <Button variant="outlined" onClick={onClaimFreeCoins}>
         Claim Free Testnet Coins

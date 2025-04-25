@@ -87,8 +87,8 @@ pub struct WalletDaemonConfig {
 }
 
 fn return_default_jwt_expiry() -> Duration {
-    // TODO: Come up with a reasonable default value
-    Duration::from_secs(500 * 60)
+    // Suggested expiry for access tokens is between 5min and 1h
+    Duration::from_secs(60 * 60)
 }
 
 impl Default for WalletDaemonConfig {

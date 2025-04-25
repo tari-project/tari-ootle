@@ -3,6 +3,13 @@
 
 use std::{collections::BTreeMap, str::FromStr};
 
+use super::{context::HandlerContext, helpers::get_account_or_default};
+use crate::{
+    handlers::helpers::{application_error, get_account, transaction_builder},
+    jrpc_server::ApplicationErrorCode,
+    services::{TransactionFinalizedEvent, WalletEvent},
+    DEFAULT_FEE,
+};
 use anyhow::anyhow;
 use log::info;
 use tari_crypto::{
@@ -10,6 +17,8 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
+use tari_dan_common_types::optional::Optional;
+use tari_dan_common_types::SubstateRequirement;
 use tari_dan_wallet_sdk::{
     apis::{jwt::JrpcPermission, key_manager},
     models::Account,
@@ -41,14 +50,6 @@ use tari_wallet_daemon_client::{
     ComponentAddressOrName,
 };
 use tokio::sync::broadcast;
-
-use super::{context::HandlerContext, helpers::get_account_or_default};
-use crate::{
-    handlers::helpers::{application_error, get_account, transaction_builder},
-    jrpc_server::ApplicationErrorCode,
-    services::{TransactionFinalizedEvent, WalletEvent},
-    DEFAULT_FEE,
-};
 
 const LOG_TARGET: &str = "tari::dan::wallet_daemon::handlers::nfts";
 
@@ -278,7 +279,10 @@ pub async fn handle_transfer_nft(
     let sdk = context.wallet_sdk();
     sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
 
+    info!(target: LOG_TARGET, "Received transfer nft request: {:?}", req);
+
     // get source/target accounts
+    info!(target: LOG_TARGET, "Get source account...");
     let source_account = match req.source_account {
         ComponentAddressOrName::ComponentAddress(address) => sdk
             .accounts_api()
@@ -286,21 +290,49 @@ pub async fn handle_transfer_nft(
         ComponentAddressOrName::Name(name) => sdk.accounts_api().get_account_by_name(name.as_str()),
     }
     .map_err(|error| anyhow!("Failed to get source account: {error}"))?;
+
+    info!(target: LOG_TARGET, "Found source account: {:?}", source_account);
+
     let source_account_address = source_account
         .address
         .as_component_address()
         .ok_or(anyhow!("Source account address is not a component address!"))?;
+
+    info!(target: LOG_TARGET, "Found source account address: {:?}", source_account_address);
+
     let target_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
 
+    let existing_dest_account = sdk
+        .substate_api()
+        .scan_for_substate(&SubstateId::Component(target_account_address), None)
+        .await
+        .optional()?;
+
+    info!(target: LOG_TARGET, "Found target account address: {:?}", target_account_address);
+
     // collect all instructions
     let mut instructions = vec![];
+    let mut inputs = vec![];
+    let non_fungible_api = sdk.non_fungible_api();
     for nft_id in req.nft_ids {
         // get NFT
-        let non_fungible_api = sdk.non_fungible_api();
+        info!(target: LOG_TARGET, "Getting NFT: {:?}", nft_id);
+
         let nft = non_fungible_api
             .get_by_id(nft_id)
             .map_err(|e| anyhow!("Failed to get non fungible token: {}", e))?;
+
+        info!(target: LOG_TARGET, "Got NFT: {:?}", nft);
+
+        // add the input for the source account vault substate
+        let src_vault = sdk
+            .accounts_api()
+            .get_vault_by_resource(&source_account.address, &nft.resource_address)?;
+        let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
+        inputs.push(src_vault_substate.substate_id.into());
+        let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
+        inputs.push(resource_substate_address.clone());
 
         instructions.extend([
             Instruction::CallMethod {
@@ -323,6 +355,8 @@ pub async fn handle_transfer_nft(
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
 
+    info!(target: LOG_TARGET, "Source account secret: {:?}", source_account_secret_key);
+
     let transaction = transaction_builder(context)
         .with_fee_instructions(vec![Instruction::CallMethod {
             component_address: source_account_address,
@@ -330,15 +364,24 @@ pub async fn handle_transfer_nft(
             args: args![req.max_fee],
         }])
         .with_instructions(instructions)
+        .with_inputs(inputs)
         .build_and_seal(&source_account_secret_key.key);
+
+    info!(target: LOG_TARGET, "Transaction built: {:?}", transaction);
 
     // if dry run, we can return the result immediately
     if req.dry_run {
         let transaction_id = *transaction.id();
+
+        info!(target: LOG_TARGET, "Before execute dry run tx: {:?}", transaction_id);
+
         let execute_result = context
             .transaction_service()
             .submit_dry_run_transaction(transaction, vec![])
             .await?;
+
+        info!(target: LOG_TARGET, "After execute dry run tx: {:?}", execute_result);
+
         let finalize = execute_result.finalize;
         return Ok(TransferNftResponse {
             transaction_id,

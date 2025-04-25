@@ -31,6 +31,7 @@ import Box from "@mui/material/Box";
 import {useAccountsGetBalances} from "../../../api/hooks/useAccounts";
 import {useTheme} from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
+import type {NonFungibleId, TransactionResult} from "@tari-project/typescript-bindings";
 import {ResourceAddress, ResourceType, substateIdToString,} from "@tari-project/typescript-bindings";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
@@ -38,8 +39,7 @@ import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
 import {InputLabel} from "@mui/material";
 import {SelectChangeEvent} from "@mui/material/Select/Select";
-import {useListNfts} from "../../../api/hooks/useNfts";
-import type {NonFungibleId} from "@tari-project/typescript-bindings/dist";
+import {useListNfts, useNftsTransfer} from "../../../api/hooks/useNfts";
 
 const XTR2 = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 
@@ -104,7 +104,15 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
   const { data } = useAccountsGetBalances(substateIdToString(account.address));
 
-  // const { mutateAsync: calculateFeeEstimate } = useAccountsTransfer({ ...transfer, dry_run: true, max_fee: 3000 });
+  const { mutateAsync: calculateFeeEstimate } = useNftsTransfer({
+    dry_run: true,
+    max_fee: 3000,
+    nft_ids: transferFormState.nftIds,
+    source_account: {
+      Name: account.name ? account.name : "",
+    },
+    target_account_public_key: transferFormState.targetAccountPublicKey,
+  });
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
     setTransferFormState({
@@ -117,6 +125,50 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         [e.target.name]: e.target.validity.valid,
       });
     }
+  }
+
+  const onTransfer = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!account) {
+      return;
+    }
+
+    setDisabled(true);
+
+    if (!isNaN(parseInt(transferFormState.maxFee))) {
+
+    } else {
+      console.log("Source account:", substateIdToString(account.address).replace("component_", ""));
+      calculateFeeEstimate?.()
+          .then((result) => {
+            if (!("Accept" in result.result.result)) {
+              setPopup({
+                title: "Fee estimate failed",
+                error: true,
+                // TODO: fix this
+                message: JSON.stringify(
+                    unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
+                    unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
+                ),
+              });
+              return;
+            }
+
+            // Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
+            // Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof
+            // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than
+            // accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
+            // TODO: remove once this is no longer an issue
+            const fee = result.fee + 100;
+            setTransferFormState({ ...transferFormState, maxFee: fee.toString() });
+          }).catch((e) => {
+            setPopup({ title: "Fee estimate failed", error: true, message: e.message });
+          })
+          .finally(() => {
+            setDisabled(false);
+          });
+    }
+
   }
 
   // const onTransfer = async (e: FormEvent) => {
@@ -154,11 +206,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   //           });
   //           return;
   //         }
-  //         // Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
-  //         // Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof
-  //         // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than
-  //         // accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
-  //         // TODO: remove once this is no longer an issue
+  //         Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
+  //         Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof
+  //         may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than
+  //         accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
+  //         TODO: remove once this is no longer an issue
   //         const fee = result.fee + 100;
   //         setTransferFormState({ ...transferFormState, maxFee: fee.toString() });
   //       })
@@ -171,19 +223,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   //   }
   // };
 
-  const onTransfer = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!account) {
-      return;
-    }
-
-    console.log("Transfer data:", transferFormState);
-  }
-
   const handleClose = () => {
     // rest states
     setNfts([]);
     setTransferFormState(INITIAL_VALUES);
+    setDisabled(false);
     props.handleClose?.();
   };
 
@@ -239,9 +283,10 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       ["nftIds"]: nftsSelected.length > 0,
     });
 
+    // @ts-ignore
     setTransferFormState({
       ...transferFormState,
-      [nftIds]: nftsSelected.map(item => item?.id),
+      ["nftIds"]: nftsSelected.map(item => item?.id),
     });
 
     setNfts(nftsSelected);
@@ -311,6 +356,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   );
 }
 
-function unionGet<T extends object>(object: T, key: keyof T): T[keyof T] | null {
-  return key in object ? object[key] : null;
-}
+  function unionGet<T extends object>(object: T, key: keyof T): T[keyof T] | null {
+    return key in object ? object[key] : null;
+  }

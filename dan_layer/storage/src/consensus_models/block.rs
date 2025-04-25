@@ -439,13 +439,14 @@ impl Block {
 
     pub fn compute_command_inclusion_proof(&self, command_index: usize) -> Result<SparseMerkleProofExt, BlockError> {
         let hashes = self.commands.iter().map(|cmd| TreeHash::from(cmd.hash().into_array()));
-        let command = self.commands.iter().nth(command_index).ok_or(
-            BlockError::MerkleProofGenerationCommandIndexOutOfBounds {
-                index: command_index,
-                len: self.commands.len(),
-            },
-        )?;
-        let hash = TreeHash::new(command.hash().into_array());
+        let hash =
+            hashes
+                .clone()
+                .nth(command_index)
+                .ok_or(BlockError::MerkleProofGenerationCommandIndexOutOfBounds {
+                    index: command_index,
+                    len: self.commands.len(),
+                })?;
         let (value, proof) = compute_proof_for_hashes(hashes, hash)?;
         value.expect(
             "Value not found in proof. This is a bug because the hash is taken from commands that generate the tree",
@@ -501,14 +502,6 @@ impl Block {
         limit: usize,
     ) -> Result<Vec<Self>, StorageError> {
         tx.blocks_get_all_between(epoch, start_block_height, end_block_height, include_dummy_blocks, limit)
-    }
-
-    pub fn get_last_n_in_epoch<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        n: usize,
-        epoch: Epoch,
-    ) -> Result<Vec<Self>, StorageError> {
-        tx.blocks_get_last_n_in_epoch(n, epoch)
     }
 
     pub fn exists<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {

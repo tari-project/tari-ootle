@@ -3,40 +3,40 @@
 
 use std::{fmt::Display, iter};
 
+use anyhow::anyhow;
+use borsh::{BorshDeserialize, BorshSerialize};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{shard::Shard, Epoch};
+use tari_common_types::types::{CompressedPublicKey, FixedHash};
+use tari_crypto::tari_utilities::ByteArray;
+use tari_dan_common_types::{shard::Shard, Epoch, ShardGroup};
+use tari_sidechain::{CommandCommitProof, SidechainBlockHeader, SidechainProofValidationError, ToCommand};
 use tari_state_tree::{compute_merkle_root_for_hashes, StateTreeError, TreeHash, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 
-use crate::{
-    consensus_models::{Block, QuorumCertificate},
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
-};
+use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpochCheckpoint {
-    block: Block,
-    linked_qcs: Vec<QuorumCertificate>,
+    proof: CommandCommitProof<EndOfEpochCommand>,
     shard_roots: IndexMap<Shard, TreeHash>,
 }
 
 impl EpochCheckpoint {
-    pub fn new(block: Block, linked_qcs: Vec<QuorumCertificate>, shard_roots: IndexMap<Shard, TreeHash>) -> Self {
-        Self {
-            block,
-            linked_qcs,
-            shard_roots,
-        }
+    pub fn new(proof: CommandCommitProof<EndOfEpochCommand>, shard_roots: IndexMap<Shard, TreeHash>) -> Self {
+        Self { proof, shard_roots }
     }
 
-    pub fn qcs(&self) -> &[QuorumCertificate] {
-        &self.linked_qcs
+    pub fn proof(&self) -> &CommandCommitProof<EndOfEpochCommand> {
+        &self.proof
     }
 
-    pub fn block(&self) -> &Block {
-        &self.block
+    pub fn header(&self) -> &SidechainBlockHeader {
+        self.proof.header()
+    }
+
+    pub fn epoch(&self) -> Epoch {
+        Epoch(self.proof.header().epoch)
     }
 
     pub fn shard_roots(&self) -> &IndexMap<Shard, TreeHash> {
@@ -51,11 +51,87 @@ impl EpochCheckpoint {
     }
 
     pub fn compute_state_merkle_root(&self) -> Result<TreeHash, StateTreeError> {
-        let shard_group = self.block().shard_group();
+        let shard_group = convert_sidechain_shard_group_to_shard_group(self.header().shard_group);
         let hashes = iter::once(Shard::global())
             .chain(shard_group.shard_iter())
             .map(|shard| self.get_shard_root(shard));
         compute_merkle_root_for_hashes(hashes)
+    }
+
+    /// Validates that this epoch checkpoint is valid.
+    /// 1. The commit proof is valid
+    ///  - The command is included in the original block
+    ///  - The QCs are signed by a correct quorum of validator nodes
+    ///  - The 3-chain rule is satisfied
+    /// 2. The state merkle root in the block header matches the provided shard hashes.
+    ///  - Not to be confused with validating that some stored sharded state tree matches the epoch checkpoint - simply
+    ///    a sanity check.
+    pub fn validate(
+        &self,
+        epoch: Epoch,
+        quorum_threshold: usize,
+        check_vn: impl Fn(&RistrettoPublicKeyBytes) -> Result<bool, SidechainProofValidationError>,
+    ) -> Result<(), EpochCheckpointValidationError> {
+        if self.proof.header().epoch != epoch.as_u64() {
+            return Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
+                "Expected checkpoint epoch {} but proof epoch is {}",
+                self.epoch(),
+                self.proof.header().epoch
+            )));
+        }
+
+        self.validate_well_formed()?;
+
+        // Validate the proof
+        self.proof
+            .validate_committed(quorum_threshold, &|pk: &CompressedPublicKey| {
+                let pk_bytes = RistrettoPublicKeyBytes::from_bytes(pk.as_bytes())
+                    // Should not be possible - however, since CompressedPublicKey currently represented using a Vec<u8>
+                    // it is possible, in theory, to have a CompressedPublicKey that is any size.
+                    .map_err(SidechainProofValidationError::internal_error)?;
+                check_vn(&pk_bytes)
+            })?;
+
+        Ok(())
+    }
+
+    fn validate_well_formed(&self) -> Result<(), EpochCheckpointValidationError> {
+        let header_shard_group = convert_sidechain_shard_group_to_shard_group(self.header().shard_group);
+        // Basic sanity checks
+        let num_shards = header_shard_group.checked_len().ok_or_else(|| {
+            EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
+                "Invalid shard group: start >= end + 1 {}",
+                header_shard_group
+            ))
+        })?;
+        if num_shards == 0 {
+            return Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
+                "Invalid shard group: end == start {}",
+                header_shard_group
+            )));
+        }
+
+        // 1 + for global shard
+        if self.shard_roots().len() > num_shards + 1 {
+            return Err(
+                EpochCheckpointValidationError::NumberOfShardStateRootsExceedsNumberOfShards {
+                    num_shard_state_roots: self.shard_roots().len(),
+                    num_shards,
+                },
+            );
+        }
+
+        // TODO: more basic checks?
+
+        // Validate state root matches provided header
+        let state_root = self.compute_state_merkle_root()?;
+        if state_root != self.proof.header().state_merkle_root {
+            return Err(EpochCheckpointValidationError::ShardStateRootMerkleTreeRootMismatch {
+                computed: state_root,
+                header_state_root: self.proof.header().state_merkle_root,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -71,10 +147,47 @@ impl EpochCheckpoint {
 
 impl Display for EpochCheckpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "EpochCheckpoint: block={}, qcs=", self.block)?;
-        for qc in self.qcs() {
-            write!(f, "{}, ", qc.id())?;
-        }
-        Ok(())
+        write!(
+            f,
+            "EpochCheckpoint: block_id={}, epoch={}, count(shard_roots)={}",
+            self.proof.header().calculate_block_id(),
+            self.proof.header().epoch,
+            self.shard_roots.len()
+        )
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EpochCheckpointValidationError {
+    #[error(
+        "Shard state root merkle tree root mismatch: computed {computed} != header state root {header_state_root}"
+    )]
+    ShardStateRootMerkleTreeRootMismatch {
+        computed: TreeHash,
+        header_state_root: FixedHash,
+    },
+    #[error("Invalid state tree: {0}")]
+    StateTreeError(#[from] StateTreeError),
+    #[error("Sidechain proof validation error: {0}")]
+    SidechainProofValidationError(#[from] SidechainProofValidationError),
+    #[error("Number of shard state roots ({num_shard_state_roots}) exceeds number of shards ({num_shards})")]
+    NumberOfShardStateRootsExceedsNumberOfShards {
+        num_shard_state_roots: usize,
+        num_shards: usize,
+    },
+    #[error("Invalid epoch checkpoint: {0}")]
+    InvalidEpochCheckpoint(#[from] anyhow::Error),
+}
+
+fn convert_sidechain_shard_group_to_shard_group(shard_group: tari_sidechain::ShardGroup) -> ShardGroup {
+    ShardGroup::new(shard_group.start, shard_group.end_inclusive)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize)]
+pub struct EndOfEpochCommand;
+
+impl ToCommand for EndOfEpochCommand {
+    fn to_command(&self) -> tari_sidechain::Command {
+        tari_sidechain::Command::EndEpoch
     }
 }

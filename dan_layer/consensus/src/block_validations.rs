@@ -7,8 +7,15 @@ use log::{debug, warn};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_common_types::{committee::Committee, DerivableFromPublicKey, Epoch, ExtraFieldKey};
-use tari_dan_storage::consensus_models::{Block, QuorumCertificate, ValidatorSchnorrSignature};
+use tari_dan_common_types::{
+    committee::{Committee, CommitteeInfo},
+    DerivableFromPublicKey,
+    Epoch,
+    ExtraFieldKey,
+    NumPreshards,
+    ShardGroup,
+};
+use tari_dan_storage::consensus_models::{Block, BlockHeader, QuorumCertificate, ValidatorSchnorrSignature};
 use tari_engine_types::FromByteType;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
@@ -20,6 +27,29 @@ use crate::{
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::block_validations";
 pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
     current_epoch: Epoch,
+    block: &Block,
+    committee_for_block: &Committee<TConsensusSpec::Addr>,
+    local_committee_info: &CommitteeInfo,
+    vote_signing_service: &TConsensusSpec::SignatureService,
+    leader_strategy: &TConsensusSpec::LeaderStrategy,
+    config: &HotstuffConfig,
+    expected_epoch_hash: &FixedHash,
+) -> Result<(), HotStuffError> {
+    check_proposal::<TConsensusSpec>(
+        block,
+        committee_for_block,
+        vote_signing_service,
+        leader_strategy,
+        config,
+        expected_epoch_hash,
+    )?;
+    check_shard_group_matches(block.header(), local_committee_info.shard_group())?;
+    // This proposal is valid, if it is for an epoch ahead of us, we need to sync
+    check_current_epoch(block, current_epoch)?;
+    Ok(())
+}
+
+pub fn check_foreign_proposal<TConsensusSpec: ConsensusSpec>(
     block: &Block,
     committee_for_block: &Committee<TConsensusSpec::Addr>,
     vote_signing_service: &TConsensusSpec::SignatureService,
@@ -34,13 +64,10 @@ pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
         leader_strategy,
         config,
         expected_epoch_hash,
-    )?;
-    // This proposal is valid, if it is for an epoch ahead of us, we need to sync
-    check_current_epoch(block, current_epoch)?;
-    Ok(())
+    )
 }
 
-pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
+fn check_proposal<TConsensusSpec: ConsensusSpec>(
     block: &Block,
     committee_for_block: &Committee<TConsensusSpec::Addr>,
     vote_signing_service: &TConsensusSpec::SignatureService,
@@ -56,20 +83,39 @@ pub fn check_proposal<TConsensusSpec: ConsensusSpec>(
         }
         .into());
     }
-    check_epoch_hash(block, expected_epoch_hash)?;
-    check_sidechain_id(block, config)?;
-    check_block_height(block)?;
-    // TODO: we should never have to validate a dummy, they should always be generated locally
+    check_header::<TConsensusSpec>(
+        block.header(),
+        expected_epoch_hash,
+        config,
+        leader_strategy,
+        committee_for_block,
+    )?;
+    check_quorum_certificate::<TConsensusSpec>(block, committee_for_block, vote_signing_service)?;
+    // TODO: we should immediately reject dummy blocks, they should always be generated locally. Currently required to
+    // trigger a view change on catch up.
     if block.is_dummy() {
         check_dummy(block)?;
     }
-    check_proposed_by_leader(leader_strategy, committee_for_block, block)?;
-    check_signature(block)?;
-    check_quorum_certificate::<TConsensusSpec>(block.justify(), committee_for_block, vote_signing_service)?;
+
     Ok(())
 }
 
-pub fn check_current_epoch(candidate_block: &Block, current_epoch: Epoch) -> Result<(), ProposalValidationError> {
+fn check_header<TConsensusSpec: ConsensusSpec>(
+    header: &BlockHeader,
+    expected_epoch_hash: &FixedHash,
+    config: &HotstuffConfig,
+    leader_strategy: &TConsensusSpec::LeaderStrategy,
+    committee_for_block: &Committee<TConsensusSpec::Addr>,
+) -> Result<(), ProposalValidationError> {
+    check_epoch_hash(header, expected_epoch_hash)?;
+    check_shard_group_bounds(header, config.consensus_constants.num_preshards)?;
+    check_proposed_by_leader(leader_strategy, committee_for_block, header)?;
+    check_block_signature(header)?;
+    check_sidechain_id(header, config)?;
+    Ok(())
+}
+
+fn check_current_epoch(candidate_block: &Block, current_epoch: Epoch) -> Result<(), ProposalValidationError> {
     if candidate_block.epoch() > current_epoch {
         warn!(target: LOG_TARGET, "⚠️ Proposal for future epoch {} received. Current epoch is {}", candidate_block.epoch(), current_epoch);
         return Err(ProposalValidationError::FutureEpoch {
@@ -96,7 +142,7 @@ pub fn check_dummy(candidate_block: &Block) -> Result<(), ProposalValidationErro
     Ok(())
 }
 
-pub fn check_network(candidate_block: &Block, network: Network) -> Result<(), ProposalValidationError> {
+fn check_network(candidate_block: &Block, network: Network) -> Result<(), ProposalValidationError> {
     if candidate_block.network() != network {
         return Err(ProposalValidationError::InvalidNetwork {
             block_network: candidate_block.network().to_string(),
@@ -107,62 +153,104 @@ pub fn check_network(candidate_block: &Block, network: Network) -> Result<(), Pr
     Ok(())
 }
 
-pub fn check_epoch_hash(block: &Block, expected_epoch_hash: &FixedHash) -> Result<(), HotStuffError> {
-    if block.epoch_hash() != expected_epoch_hash {
-        Err(ProposalValidationError::InvalidEpochHash {
-            epoch: block.epoch(),
+fn check_epoch_hash(header: &BlockHeader, expected_epoch_hash: &FixedHash) -> Result<(), ProposalValidationError> {
+    if header.epoch_hash() != expected_epoch_hash {
+        return Err(ProposalValidationError::InvalidEpochHash {
+            epoch: header.epoch(),
             local_epoch_hash: *expected_epoch_hash,
-            invalid_epoch_hash: *block.epoch_hash(),
-            block_id: *block.id(),
-        })?;
+            invalid_epoch_hash: *header.epoch_hash(),
+            block_id: *header.id(),
+        });
     }
 
     Ok(())
 }
 
-pub fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
+fn check_shard_group_matches(
+    header: &BlockHeader,
+    expected_shard_group: ShardGroup,
+) -> Result<(), ProposalValidationError> {
+    if header.shard_group() != expected_shard_group {
+        return Err(ProposalValidationError::InvalidShardGroup {
+            block_id: *header.id(),
+            shard_group: header.shard_group(),
+            details: format!(
+                "Expected shard group {} but got {}",
+                expected_shard_group,
+                header.shard_group()
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn check_shard_group_bounds(header: &BlockHeader, num_preshards: NumPreshards) -> Result<(), ProposalValidationError> {
+    let len = header
+        .shard_group()
+        .checked_len()
+        .ok_or_else(|| ProposalValidationError::InvalidShardGroup {
+            block_id: *header.id(),
+            shard_group: header.shard_group(),
+            details: "Shard group bounds are invalid".to_string(),
+        })?;
+
+    if len > num_preshards.num_shards() {
+        return Err(ProposalValidationError::InvalidShardGroup {
+            block_id: *header.id(),
+            shard_group: header.shard_group(),
+            details: format!(
+                "Shard group {} is larger than the number of preshards {}",
+                header.shard_group(),
+                num_preshards.num_shards()
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
-    candidate_block: &Block,
+    header: &BlockHeader,
 ) -> Result<(), ProposalValidationError> {
-    let (leader, _) = leader_strategy.get_leader(local_committee, candidate_block.height());
-    let Ok(proposed_by) = RistrettoPublicKey::try_from_byte_type(candidate_block.proposed_by()) else {
+    let (leader, _) = leader_strategy.get_leader(local_committee, header.height());
+    let Ok(proposed_by) = RistrettoPublicKey::try_from_byte_type(header.proposed_by()) else {
         return Err(ProposalValidationError::MalformedBlock {
-            block_id: *candidate_block.id(),
+            block_id: *header.id(),
             details: format!(
                 "proposed_by {} is not a valid compressed RistrettoPublicKey",
-                candidate_block.proposed_by()
+                header.proposed_by()
             ),
         });
     };
     if !leader.eq_to_public_key(&proposed_by) {
         return Err(ProposalValidationError::NotLeader {
-            proposed_by: candidate_block.proposed_by().to_string(),
+            proposed_by: header.proposed_by().to_string(),
             expected_leader: leader.to_string(),
-            block_id: *candidate_block.id(),
+            block_id: *header.id(),
         });
     }
     Ok(())
 }
 
-pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidationError> {
-    if candidate_block.is_dummy() {
+fn check_block_signature(header: &BlockHeader) -> Result<(), ProposalValidationError> {
+    if header.is_dummy() {
         // Dummy blocks don't have signatures
         return Ok(());
     }
-    if candidate_block.is_genesis() {
+    if header.is_genesis() {
         // Genesis block doesn't have signatures
         return Ok(());
     }
-    let validator_signature = candidate_block
-        .signature()
-        .ok_or(ProposalValidationError::MissingSignature {
-            block_id: *candidate_block.id(),
-            height: candidate_block.height(),
-        })?;
+    let validator_signature = header.signature().ok_or(ProposalValidationError::MissingSignature {
+        block_id: *header.id(),
+        height: header.height(),
+    })?;
     let Ok(validator_signature) = ValidatorSchnorrSignature::try_from_byte_type(validator_signature) else {
         return Err(ProposalValidationError::MalformedBlock {
-            block_id: *candidate_block.id(),
+            block_id: *header.id(),
             details: format!(
                 "signature {} is not a valid compressed Schnorr signature",
                 validator_signature
@@ -173,31 +261,35 @@ pub fn check_signature(candidate_block: &Block) -> Result<(), ProposalValidation
     debug!(
         target: LOG_TARGET,
         "Validating signature block_id={}, P={}, R={}",
-        candidate_block.id(),
-        candidate_block.proposed_by(),
+        header.id(),
+        header.proposed_by(),
         validator_signature.get_public_nonce(),
     );
 
-    let Ok(proposed_by) = RistrettoPublicKey::try_from_byte_type(candidate_block.proposed_by()) else {
+    let Ok(proposed_by) = RistrettoPublicKey::try_from_byte_type(header.proposed_by()) else {
         return Err(ProposalValidationError::MalformedBlock {
-            block_id: *candidate_block.id(),
+            block_id: *header.id(),
             details: format!(
                 "proposed_by {} is not a valid compressed RistrettoPublicKey",
-                candidate_block.proposed_by()
+                header.proposed_by()
             ),
         });
     };
 
-    if !validator_signature.verify(&proposed_by, candidate_block.id()) {
+    if !validator_signature.verify(&proposed_by, header.id()) {
         return Err(ProposalValidationError::InvalidSignature {
-            block_id: *candidate_block.id(),
-            height: candidate_block.height(),
+            block_id: *header.id(),
+            height: header.height(),
         });
     }
     Ok(())
 }
 
-pub fn check_block_height(candidate_block: &Block) -> Result<(), ProposalValidationError> {
+fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
+    candidate_block: &Block,
+    committee: &Committee<TConsensusSpec::Addr>,
+    signing_service: &TConsensusSpec::SignatureService,
+) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
     if candidate_block.height() <= qc.block_height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
@@ -206,10 +298,14 @@ pub fn check_block_height(candidate_block: &Block) -> Result<(), ProposalValidat
         });
     }
 
+    check_quorum_certificate_signatures::<TConsensusSpec>(qc, committee, signing_service)?;
+
     Ok(())
 }
 
-pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
+/// Validates the signatures of the quorum certificate.
+// pub because used in on receive NEWVIEW
+pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
     qc: &QuorumCertificate,
     committee: &Committee<TConsensusSpec::Addr>,
     vote_signing_service: &TConsensusSpec::SignatureService,
@@ -256,39 +352,40 @@ pub fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
     Ok(())
 }
 
-pub fn check_sidechain_id(candidate_block: &Block, config: &HotstuffConfig) -> Result<(), HotStuffError> {
+fn check_sidechain_id(header: &BlockHeader, config: &HotstuffConfig) -> Result<(), ProposalValidationError> {
     // We only require the sidechain id on the genesis block
-    if !candidate_block.is_genesis() {
+    if !header.is_genesis() {
         return Ok(());
     }
 
     // If we are using a sidechain id in the network, we need to check it matches the candidate block one
-    if let Some(expected_sidechain_id) = &config.sidechain_id {
-        // Extract the sidechain id from the candidate block
-        let extra_data = candidate_block.extra_data();
-        let sidechain_id_bytes = extra_data.get(&ExtraFieldKey::SidechainId).ok_or::<HotStuffError>(
-            ProposalValidationError::InvalidSidechainId {
-                block_id: *candidate_block.id(),
-                reason: "SidechainId key not present".to_owned(),
-            }
-            .into(),
-        )?;
-        let sidechain_id = RistrettoPublicKeyBytes::from_bytes(sidechain_id_bytes.as_ref()).map_err(|e| {
-            ProposalValidationError::InvalidSidechainId {
-                block_id: *candidate_block.id(),
-                reason: e.to_string(),
-            }
-        })?;
+    let Some(expected_sidechain_id) = &config.sidechain_id else {
+        return Ok(());
+    };
 
-        // The sidechain id must match the sidechain of the current network
-        if sidechain_id != *expected_sidechain_id {
-            return Err(ProposalValidationError::MismatchedSidechainId {
-                block_id: *candidate_block.id(),
-                expected_sidechain_id: *expected_sidechain_id,
-                sidechain_id,
-            }
-            .into());
+    // Extract the sidechain id from the candidate block
+    let extra_data = header.extra_data();
+    let sidechain_id_bytes =
+        extra_data
+            .get(&ExtraFieldKey::SidechainId)
+            .ok_or(ProposalValidationError::InvalidSidechainId {
+                block_id: *header.id(),
+                reason: "SidechainId key not present".to_owned(),
+            })?;
+    let sidechain_id = RistrettoPublicKeyBytes::from_bytes(sidechain_id_bytes.as_ref()).map_err(|e| {
+        ProposalValidationError::InvalidSidechainId {
+            block_id: *header.id(),
+            reason: e.to_string(),
         }
+    })?;
+
+    // The sidechain id must match the sidechain of the current network
+    if sidechain_id != *expected_sidechain_id {
+        return Err(ProposalValidationError::MismatchedSidechainId {
+            block_id: *header.id(),
+            expected_sidechain_id: *expected_sidechain_id,
+            sidechain_id,
+        });
     }
 
     Ok(())

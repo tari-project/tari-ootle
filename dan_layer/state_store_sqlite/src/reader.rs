@@ -943,38 +943,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         block.try_convert(qc)
     }
 
-    fn blocks_get_last_n_in_epoch(&self, n: usize, epoch: Epoch) -> Result<Vec<Block>, StorageError> {
-        use crate::schema::{blocks, quorum_certificates};
-
-        let blocks = blocks::table
-            .left_join(quorum_certificates::table.on(blocks::qc_id.eq(quorum_certificates::qc_id)))
-            .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
-            .filter(blocks::epoch.eq(epoch.as_u64() as i64))
-            .filter(blocks::is_committed.eq(true))
-            .order_by(blocks::height.desc())
-            .limit(n as i64)
-            .get_results::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "blocks_get_last_n_in_epoch",
-                source: e,
-            })?;
-
-        blocks
-            .into_iter()
-            // Order from lowest to highest height
-            .rev()
-            .map(|(b, qc)| {
-                qc.ok_or_else(|| StorageError::DataInconsistency {
-                    details: format!(
-                        "blocks_get_last_n_in_epoch: block {} references non-existent quorum certificate {}",
-                        b.block_id, b.qc_id
-                    ),
-                })
-                    .and_then(|qc| b.try_convert(qc))
-            })
-            .collect()
-    }
-
     fn blocks_get_all_between(
         &self,
         epoch: Epoch,

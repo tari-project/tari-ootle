@@ -230,9 +230,8 @@ message GetCheckpointResponse {
 }
 
 message EpochCheckpoint {
-  tari.dan.consensus.Block block = 1;
-  repeated tari.dan.consensus.QuorumCertificate qcs = 2;
-  map<uint32, bytes> shard_roots = 3;
+  bytes proof = 1;
+  map<uint32, bytes> shard_roots = 2;
 }
 
 message SyncStateRequest {

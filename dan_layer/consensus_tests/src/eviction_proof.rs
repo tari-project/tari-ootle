@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::CompressedPublicKey;
-use tari_consensus::hotstuff::eviction_proof::convert_block_to_sidechain_block_header;
+use tari_consensus::hotstuff::commit_proofs::convert_block_to_sidechain_block_header;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_storage::consensus_models::Block;
 

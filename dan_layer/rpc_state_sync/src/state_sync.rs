@@ -23,6 +23,7 @@ use tari_dan_common_types::{
 use tari_dan_p2p::proto::rpc::{GetCheckpointRequest, GetCheckpointResponse, SyncStateRequest};
 use tari_dan_storage::{
     consensus_models::{
+        BlockId,
         EpochCheckpoint,
         LeafBlock,
         QcId,
@@ -122,6 +123,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             info!(target: LOG_TARGET, "Checkpoint state root indicates no state changes. Nothing to sync for {shard}");
             return Ok(None);
         }
+
+        let checkpoint_block_id = BlockId::new(checkpoint.header().calculate_block_id());
 
         let current_epoch = self.epoch_manager.current_epoch().await?;
 
@@ -265,7 +268,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
 
                     info!(target: LOG_TARGET, "🛜 Applying state update (v{}) {}", current_version, transition);
-                    self.commit_update(store.transaction(), checkpoint, transition)?;
+                    self.commit_update(store.transaction(), checkpoint, checkpoint_block_id, transition)?;
 
                     tree_changes.push(change);
                     if tree_changes.len() == BATCH_SIZE {
@@ -334,6 +337,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         &self,
         tx: &mut TTx,
         checkpoint: &EpochCheckpoint,
+        checkpoint_block_id: BlockId,
         transition: StateTransition,
     ) -> Result<(), StorageError> {
         match transition.update {
@@ -344,10 +348,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     substate.value,
                     transition.id.shard(),
                     transition.id.epoch(),
-                    *checkpoint.block().id(),
+                    checkpoint_block_id,
                     // TODO: correct QC ID
                     QcId::zero(),
-                    // *created_qc.id(),
                 )
                 .create(tx)?;
             },
@@ -357,8 +360,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     VersionedSubstateId::new(substate_id, version),
                     transition.id.shard(),
                     transition.id.epoch(),
+                    checkpoint.header().height.into(),
                     // TODO
-                    checkpoint.block().height(),
                     &QcId::zero(),
                 )?;
             },
@@ -396,34 +399,22 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         Ok(committees)
     }
 
-    fn validate_checkpoint(&self, checkpoint: &EpochCheckpoint) -> Result<(), CommsRpcConsensusSyncError> {
-        // TODO: validate checkpoint
+    fn validate_checkpoint(
+        &self,
+        checkpoint: &EpochCheckpoint,
+        committee: &Committee<PeerAddress>,
+        epoch: Epoch,
+    ) -> Result<(), CommsRpcConsensusSyncError> {
+        let quorum_threshold = committee.quorum_threshold();
+        checkpoint
+            .validate(epoch, quorum_threshold, |pk| Ok(committee.contains_public_key(pk)))
+            .map_err(|err| CommsRpcConsensusSyncError::InvalidResponse(anyhow!("Checkpoint is not valid: {err}",)))?;
 
-        if !checkpoint.block().is_epoch_end() {
-            return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
-                "Checkpoint block is not an Epoch End block"
-            )));
-        }
-        // 1 + for global shard
-        if checkpoint.shard_roots().len() > checkpoint.block().shard_group().len() + 1 {
-            return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
-                "Checkpoint has more shard root hashes ({}) than shards applicable to the block ({})",
-                checkpoint.shard_roots().len(),
-                checkpoint.block().shard_group().len() + 1
-            )));
-        }
-
-        // Sanity check that the calculated merkle root matches the provided shard roots
-        // Note this allows us to use each of the provided shard MRs assuming we trust the provided block that has been
-        // signed by a BFT majority of registered VNs
-        let calculated_root = checkpoint.compute_state_merkle_root()?;
-        if calculated_root != *checkpoint.block().state_merkle_root() {
-            return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
-                "Checkpoint merkle root mismatch. Expected {expected} but got {actual}",
-                expected = checkpoint.block().state_merkle_root(),
-                actual = calculated_root,
-            )));
-        }
+        info!(
+            target: LOG_TARGET,
+            "🛜 ✅ Checkpoint {} is valid",
+            checkpoint,
+        );
 
         Ok(())
     }
@@ -432,14 +423,14 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     pub async fn sync_shard(
         &mut self,
         shard: Shard,
-        current_epoch: Epoch,
-        committee: &Committee<PeerAddress>,
+        epoch: Epoch,
+        prev_committee: &Committee<PeerAddress>,
         our_vn_addr: &PeerAddress,
     ) -> Result<(), CommsRpcConsensusSyncError> {
-        let mut remaining_members = committee.len();
+        let mut remaining_members = prev_committee.len();
 
-        info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", current_epoch.saturating_sub(Epoch(1)));
-        for addr in committee.addresses() {
+        info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", epoch.saturating_sub(Epoch(1)));
+        for addr in prev_committee.addresses() {
             remaining_members = remaining_members.saturating_sub(1);
             if our_vn_addr == addr {
                 continue;
@@ -459,7 +450,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             };
 
             // fetch checkpoint
-            let checkpoint = match self.fetch_epoch_checkpoint(&mut client, current_epoch).await {
+            // TODO: NB refactor to fetch the checkpoint once for the shard group - instead of for each shard and each
+            // attempt - once it's validated, there is no need to fetch it again
+            let checkpoint = match self.fetch_epoch_checkpoint(&mut client, epoch).await {
                 Ok(Some(cp)) => cp,
                 Ok(None) => {
                     // TODO: we should check with f + 1 validators in this case. If a single validator reports
@@ -468,7 +461,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     // TODO: we should instead ask the base layer if this is the first epoch in the network
                     warn!(
                         target: LOG_TARGET,
-                        "❓No checkpoint for epoch {current_epoch}. This may mean that this is the first epoch in the network"
+                        "❓No checkpoint for epoch {epoch}. This may mean that this is the first epoch in the network"
                     );
                     return Ok(());
                 },
@@ -483,9 +476,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     continue;
                 },
             };
-            info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
 
-            self.validate_checkpoint(&checkpoint)?;
+            info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
+            self.validate_checkpoint(&checkpoint, prev_committee, epoch)?;
             self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
             let mut template_changes = vec![];
 
@@ -495,7 +488,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             {
                 Ok(_) => {
                     // We only enqueue these if state sync succeeds and the state root matches
-                    self.template_manager.enqueue_template_changes(template_changes).await?;
+                    if !template_changes.is_empty() {
+                        self.template_manager.enqueue_template_changes(template_changes).await?;
+                    }
+                    break;
                 },
                 Err(err) => {
                     warn!(
@@ -509,8 +505,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     continue;
                 },
             }
-
-            break;
         }
 
         Ok(())
@@ -519,14 +513,14 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     async fn sync_global_shard(
         &mut self,
         current_epoch: Epoch,
-        committees: &[(ShardGroup, Committee<PeerAddress>)],
+        prev_committees: &[(ShardGroup, Committee<PeerAddress>)],
         our_vn_address: &PeerAddress,
     ) -> Result<(), CommsRpcConsensusSyncError> {
         let mut last_error = None;
 
-        for (sg, committee) in committees {
+        for (sg, prev_committee) in prev_committees {
             if let Err(err) = self
-                .sync_shard(Shard::global(), current_epoch, committee, our_vn_address)
+                .sync_shard(Shard::global(), current_epoch, prev_committee, our_vn_address)
                 .await
             {
                 warn!(target: LOG_TARGET, "⚠️ Failed to sync global shard from {sg}: {err}. Attempting another committee if available");

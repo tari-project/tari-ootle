@@ -19,7 +19,10 @@ use tari_dan_storage::consensus_models::{
 use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_jellyfish::TreeHash;
 
-use crate::proto;
+use crate::{
+    encoding::{decode_from_slice, encode_to_vec},
+    proto,
+};
 
 impl TryFrom<proto::rpc::SubstateCreatedProof> for SubstateCreatedProof {
     type Error = anyhow::Error;
@@ -214,19 +217,14 @@ impl TryFrom<proto::rpc::EpochCheckpoint> for EpochCheckpoint {
             .map(|(k, v)| TreeHash::try_from_bytes(&v).map(|h| (Shard::from(k), h)))
             .collect::<Result<_, _>>()?;
 
-        Ok(Self::new(
-            value.block.ok_or_else(|| anyhow!("block not provided"))?.try_into()?,
-            value.qcs.into_iter().map(TryInto::try_into).collect::<Result<_, _>>()?,
-            shard_roots,
-        ))
+        Ok(Self::new(decode_from_slice(&value.proof)?, shard_roots))
     }
 }
 
 impl From<EpochCheckpoint> for proto::rpc::EpochCheckpoint {
     fn from(value: EpochCheckpoint) -> Self {
         Self {
-            block: Some(value.block().into()),
-            qcs: value.qcs().iter().map(Into::into).collect(),
+            proof: encode_to_vec(value.proof()).unwrap(),
             shard_roots: value
                 .shard_roots()
                 .iter()

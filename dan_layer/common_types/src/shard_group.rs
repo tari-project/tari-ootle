@@ -42,8 +42,22 @@ impl ShardGroup {
         Self::new(Shard::first(), Shard::from(num_preshards.as_u32()))
     }
 
+    /// Returns the number of shards in the shard group.
+    /// WARN: If the bounds are invalid this will panic/underflow.
+    /// If this comes from an untrusted source, `checked_len` should be used to verify the bounds.
     pub const fn len(&self) -> usize {
         (self.end_inclusive.as_u32() + 1 - self.start.as_u32()) as usize
+    }
+
+    /// Returns the length of the shard group, or None if the bounds are invalid
+    /// The minimum length returned is 1 since the bounds are inclusive.
+    pub fn checked_len(&self) -> Option<usize> {
+        let len = self
+            .end_inclusive
+            .as_u32()
+            .checked_add(1)?
+            .checked_sub(self.start.as_u32())?;
+        Some(len as usize).filter(|len| *len > 0)
     }
 
     pub const fn is_empty(&self) -> bool {

@@ -460,13 +460,13 @@ CREATE UNIQUE INDEX pending_state_tree_diffs_uniq_idx_block_id_shard on pending_
 
 CREATE TABLE epoch_checkpoints
 (
-    id           integer   not NULL primary key AUTOINCREMENT,
-    epoch        bigint    not NULL,
-    commit_block text      not NULL,
-    qcs          text      not NULL,
-    shard_roots  text      not NULL,
-    created_at   timestamp not NULL DEFAULT CURRENT_TIMESTAMP
+    id          integer   not NULL primary key AUTOINCREMENT,
+    epoch       bigint    not NULL,
+    proof       text      not NULL,
+    shard_roots text      not NULL,
+    created_at  timestamp not NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX epoch_checkpoints_uniq_idx_epoch on epoch_checkpoints (epoch);
 
 -- An append-only store of state transitions
 CREATE TABLE state_transitions

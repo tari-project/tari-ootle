@@ -214,8 +214,10 @@ impl EventScanner {
                             epoch,
                         })
                     })
-                    .collect();
-                self.template_manager.enqueue_template_changes(new_templates).await?;
+                    .collect::<Vec<_>>();
+                if !new_templates.is_empty() {
+                    self.template_manager.enqueue_template_changes(new_templates).await?;
+                }
             }
         }
 

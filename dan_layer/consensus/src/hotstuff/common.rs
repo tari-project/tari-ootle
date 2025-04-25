@@ -32,7 +32,6 @@ use tari_dan_storage::{
     },
     StateStore,
     StateStoreReadTransaction,
-    StorageError,
 };
 use tari_engine_types::{substate::SubstateDiff, template_lib_models::Amount, ValidatorFeePool};
 use tari_state_tree::{JellyfishMerkleTree, StateTreeError, SPARSE_MERKLE_PLACEHOLDER_HASH};
@@ -40,6 +39,7 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     hotstuff::{
+        commit_proofs::generate_end_of_epoch_commit_proof,
         substate_store::{PendingSubstateStore, ShardScopedTreeStoreReader, ShardedStateTree},
         HotStuffError,
     },
@@ -245,23 +245,14 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
 
 pub(crate) fn generate_epoch_checkpoint<TTx>(
     tx: &TTx,
-    epoch: Epoch,
-    shard_group: ShardGroup,
+    eoe_block: &Block,
+    tip_qc: &QuorumCertificate,
 ) -> Result<EpochCheckpoint, HotStuffError>
 where
     TTx: StateStoreReadTransaction,
 {
-    // Get the last 3 blocks in the previous epoch. These blocks should end the epoch.
-    let mut blocks = Block::get_last_n_in_epoch(tx, 3, epoch)?;
-    if blocks.is_empty() {
-        return Err(HotStuffError::StorageError(StorageError::NotFound {
-            item: "Block::get_last_n_in_epoch",
-            key: epoch.to_string(),
-        }));
-    }
-
-    let commit_block = blocks.pop().unwrap();
-    let qcs = blocks.into_iter().map(|b| b.into_justify()).collect();
+    let commit_proof = generate_end_of_epoch_commit_proof(tx, tip_qc, eoe_block)?;
+    let shard_group = eoe_block.shard_group();
 
     // Fetch the state roots of the shards in the shard group
     let mut shard_roots = IndexMap::with_capacity(shard_group.len() + 1);
@@ -294,17 +285,8 @@ where
 
         shard_roots.insert(shard, root_hash);
     }
-    let checkpoint = EpochCheckpoint::new(commit_block, qcs, shard_roots);
-    let calculated_mr = checkpoint.compute_state_merkle_root()?;
-    if calculated_mr != checkpoint.block().state_merkle_root() {
-        return Err(HotStuffError::InvariantError(format!(
-            "Epoch checkpoint state merkle root mismatch. Expected: {}, Calculated: {}, block: {}",
-            checkpoint.block().state_merkle_root(),
-            calculated_mr,
-            checkpoint.block()
-        )));
-    }
 
+    let checkpoint = EpochCheckpoint::new(commit_proof, shard_roots);
     Ok(checkpoint)
 }
 

@@ -195,6 +195,20 @@ fn check_shard_group_bounds(header: &BlockHeader, num_preshards: NumPreshards) -
             details: "Shard group bounds are invalid".to_string(),
         })?;
 
+    if header.shard_group().start().as_u32() as usize > num_preshards.num_shards() ||
+        header.shard_group().end().as_u32() as usize > num_preshards.num_shards()
+    {
+        return Err(ProposalValidationError::InvalidShardGroup {
+            block_id: *header.id(),
+            shard_group: header.shard_group(),
+            details: format!(
+                "Shard group {} is out of bounds for {} preshards",
+                header.shard_group(),
+                num_preshards.num_shards()
+            ),
+        });
+    }
+
     if len > num_preshards.num_shards() {
         return Err(ProposalValidationError::InvalidShardGroup {
             block_id: *header.id(),

@@ -429,7 +429,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 // Technically not needed, but this will make it clear for debugging purposes if the checkpoint is
                 // invalid To validate the entire proof requires the quorum threshold and the committee,
                 // so we'll just skip it
-                let calculated_mr = checkpoint.compute_state_merkle_root()?;
+                let calculated_mr = checkpoint.compute_state_merkle_root().map_err(|e| {
+                    HotStuffError::InvariantError(format!("Generated an invalid epoch checkpoint: {e}"))
+                })?;
                 if calculated_mr != eoe_block.state_merkle_root() {
                     return Err(HotStuffError::InvariantError(format!(
                         "Epoch checkpoint state merkle root mismatch. Expected: {}, Calculated: {}, block: {}",

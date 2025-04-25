@@ -50,12 +50,13 @@ impl EpochCheckpoint {
             .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH)
     }
 
-    pub fn compute_state_merkle_root(&self) -> Result<TreeHash, StateTreeError> {
-        let shard_group = convert_sidechain_shard_group_to_shard_group(self.header().shard_group);
+    pub fn compute_state_merkle_root(&self) -> Result<TreeHash, EpochCheckpointValidationError> {
+        let shard_group = convert_sidechain_shard_group_to_shard_group(self.header().shard_group)?;
         let hashes = iter::once(Shard::global())
             .chain(shard_group.shard_iter())
             .map(|shard| self.get_shard_root(shard));
-        compute_merkle_root_for_hashes(hashes)
+        let root = compute_merkle_root_for_hashes(hashes)?;
+        Ok(root)
     }
 
     /// Validates that this epoch checkpoint is valid.
@@ -96,14 +97,9 @@ impl EpochCheckpoint {
     }
 
     fn validate_well_formed(&self) -> Result<(), EpochCheckpointValidationError> {
-        let header_shard_group = convert_sidechain_shard_group_to_shard_group(self.header().shard_group);
         // Basic sanity checks
-        let num_shards = header_shard_group.checked_len().ok_or_else(|| {
-            EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
-                "Invalid shard group: start >= end + 1 {}",
-                header_shard_group
-            ))
-        })?;
+        let header_shard_group = convert_sidechain_shard_group_to_shard_group(self.header().shard_group)?;
+        let num_shards = header_shard_group.len();
         if num_shards == 0 {
             return Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
                 "Invalid shard group: end == start {}",
@@ -179,8 +175,16 @@ pub enum EpochCheckpointValidationError {
     InvalidEpochCheckpoint(#[from] anyhow::Error),
 }
 
-fn convert_sidechain_shard_group_to_shard_group(shard_group: tari_sidechain::ShardGroup) -> ShardGroup {
-    ShardGroup::new(shard_group.start, shard_group.end_inclusive)
+fn convert_sidechain_shard_group_to_shard_group(
+    shard_group: tari_sidechain::ShardGroup,
+) -> Result<ShardGroup, EpochCheckpointValidationError> {
+    ShardGroup::checked_new(shard_group.start, shard_group.end_inclusive).ok_or_else(|| {
+        EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
+            "Invalid shard group: start >= end + 1 ({}-{})",
+            shard_group.start,
+            shard_group.end_inclusive
+        ))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, BorshSerialize, BorshDeserialize)]

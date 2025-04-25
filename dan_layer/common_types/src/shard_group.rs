@@ -28,14 +28,21 @@ pub struct ShardGroup {
 impl ShardGroup {
     const MAX_ENCODED_VALUE: u32 = (NumPreshards::MAX.as_u32() << 16) + NumPreshards::MAX.as_u32();
 
+    /// Creates a new ShardGroup with the given start and end inclusive shards.
+    /// ## Panics
+    /// Panics if the start shard is greater than the end shard.
     pub fn new<T: Into<Shard> + Copy>(start: T, end_inclusive: T) -> Self {
+        Self::checked_new(start, end_inclusive)
+            .expect("INVARIANT: start shard must be less than or equal to end_inclusive")
+    }
+
+    pub fn checked_new<T: Into<Shard> + Copy>(start: T, end_inclusive: T) -> Option<Self> {
         let start = start.into();
         let end_inclusive = end_inclusive.into();
-        assert!(
-            start <= end_inclusive,
-            "INVARIANT: start shard must be less than or equal to end_inclusive"
-        );
-        Self { start, end_inclusive }
+        if start > end_inclusive {
+            return None;
+        }
+        Some(Self { start, end_inclusive })
     }
 
     pub fn all_shards(num_preshards: NumPreshards) -> Self {
@@ -80,7 +87,7 @@ impl ShardGroup {
 
         let start = n >> 16;
         let end = n & 0xFFFF;
-        Some(Self::new(start, end))
+        Self::checked_new(start, end)
     }
 
     pub fn shard_iter(self) -> impl Iterator<Item = Shard> + 'static {
@@ -168,7 +175,7 @@ impl FromStr for ShardGroup {
         let start = start.parse::<u32>().map_err(|_| ShardGroupParseError(s.to_string()))?;
         let end = parts.next().ok_or_else(|| ShardGroupParseError(s.to_string()))?;
         let end = end.parse::<u32>().map_err(|_| ShardGroupParseError(s.to_string()))?;
-        Ok(ShardGroup::new(start, end))
+        ShardGroup::checked_new(start, end).ok_or_else(|| ShardGroupParseError(s.to_string()))
     }
 }
 
@@ -213,6 +220,8 @@ mod tests {
 
         let n = u64::from(u32::MAX) + 1;
         format!("{n}-999").parse::<ShardGroup>().unwrap_err();
+
+        "100-1".parse::<ShardGroup>().unwrap_err();
     }
 
     #[test]

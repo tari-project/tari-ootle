@@ -22,6 +22,7 @@
 mod component_address;
 pub use component_address::*;
 pub mod error;
+pub mod permissions;
 pub mod serialize;
 pub mod types;
 
@@ -93,6 +94,7 @@ use crate::{
         ConfidentialTransferResponse,
         ConfidentialViewVaultBalanceRequest,
         ConfidentialViewVaultBalanceResponse,
+        EncodedJwtString,
         GetValidatorFeesRequest,
         GetValidatorFeesResponse,
         KeyBranch,
@@ -127,11 +129,11 @@ pub struct WalletDaemonClient {
     client: reqwest::Client,
     endpoint: Url,
     request_id: i64,
-    token: Option<String>,
+    token: Option<EncodedJwtString>,
 }
 
 impl WalletDaemonClient {
-    pub fn connect<T: IntoUrl>(endpoint: T, token: Option<String>) -> Result<Self, WalletDaemonClientError> {
+    pub fn connect<T: IntoUrl>(endpoint: T, token: Option<EncodedJwtString>) -> Result<Self, WalletDaemonClientError> {
         let client = reqwest::Client::builder()
             .default_headers({
                 let mut headers = HeaderMap::with_capacity(1);
@@ -148,7 +150,7 @@ impl WalletDaemonClient {
         })
     }
 
-    pub fn set_auth_token(&mut self, token: String) -> &mut Self {
+    pub fn set_auth_token(&mut self, token: EncodedJwtString) -> &mut Self {
         self.token = Some(token);
         self
     }
@@ -457,7 +459,7 @@ impl WalletDaemonClient {
         let mut builder = self.client.post(self.endpoint.clone());
         if let Some(token) = &self.token {
             // If we don't have the token and the method is anything else than "auth.login" it will fail.
-            builder = builder.header(AUTHORIZATION, format!("Bearer {}", token));
+            builder = builder.header(AUTHORIZATION, format!("Bearer {}", token.as_str()));
         }
         let resp = builder.body(request_json.to_string()).send().await?;
         let val = resp.json().await?;

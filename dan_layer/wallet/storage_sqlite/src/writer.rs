@@ -100,7 +100,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(last_inserted_id as u64)
     }
 
-    fn jwt_store_decision(&mut self, id: u64, permissions_token: Option<String>) -> Result<(), WalletStorageError> {
+    fn jwt_store_decision(&mut self, id: u64, permissions_token: Option<&str>) -> Result<(), WalletStorageError> {
         use crate::schema::auth_status;
         // let values = match token {
         //     Some(token) => (auth_status::user_decided.eq(true),auth_status::granted.eq(true),auth_status::token)
@@ -268,6 +268,9 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         if exists {
             diesel::update(config::table)
                 .set((
+                    // TODO: we should store bytes to allow for encrypted values with the downside of not being able to
+                    // "see" the JSON Or we could have a cleartext string column, and an encrypted
+                    // bytes column
                     config::value.eq(serialize_json(value)?),
                     config::is_encrypted.eq(is_encrypted),
                     config::updated_at.eq(diesel::dsl::now),

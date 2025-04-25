@@ -15,6 +15,7 @@ use crate::{
 };
 
 pub mod anonym;
+pub mod jwt;
 pub mod webauthn;
 
 pub trait Authenticator {

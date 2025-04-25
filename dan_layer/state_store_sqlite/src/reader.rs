@@ -74,7 +74,7 @@ use tari_dan_storage::{
 use tari_engine_types::{
     confidential::UnclaimedConfidentialOutput,
     substate::SubstateId,
-    template_models::UnclaimedConfidentialOutputAddress,
+    template_lib_models::UnclaimedConfidentialOutputAddress,
 };
 use tari_state_tree::{Node, NodeKey, TreeNode, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;

@@ -1,11 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{convert::Infallible, time::Duration};
+use std::{convert::Infallible, str::FromStr};
 
 use async_trait::async_trait;
 use tari_common::configuration::Network;
-use tari_crypto::commitment::HomomorphicCommitmentFactory;
+use tari_crypto::{commitment::HomomorphicCommitmentFactory, tari_utilities::SafePassword};
 use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{
     models::{ConfidentialOutputModel, ConfidentialProofId, OutputStatus},
@@ -146,19 +146,13 @@ impl Test {
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
 
-        let sdk_init_result = DanWalletSdk::initialize(
-            Network::LocalNet,
-            store.clone(),
-            PanicIndexer,
-            WalletSdkConfig {
-                password: None,
-                jwt_expiry: Duration::from_secs(60),
-                jwt_secret_key: "secret_key".to_string(),
-            },
-            None,
-        )
+        let mut sdk = DanWalletSdk::initialize(store.clone(), PanicIndexer, WalletSdkConfig {
+            network: Network::LocalNet,
+            override_keyring_password: Some(SafePassword::from_str("SuuuCh Sekret W0W").unwrap()),
+        })
         .unwrap();
-        let accounts_api = sdk_init_result.sdk.accounts_api();
+        sdk.initialize_cipher_seed(None).unwrap();
+        let accounts_api = sdk.accounts_api();
         accounts_api
             .add_account(Some("test"), &Test::test_account_address(), 0, true)
             .unwrap();
@@ -174,7 +168,7 @@ impl Test {
 
         Self {
             store,
-            sdk: sdk_init_result.sdk,
+            sdk,
             _temp: temp,
         }
     }

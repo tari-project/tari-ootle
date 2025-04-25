@@ -23,7 +23,6 @@
 use std::time::Duration;
 
 use clap::{Args, Subcommand};
-use tari_dan_wallet_sdk::apis::jwt::JrpcPermissions;
 use tari_wallet_daemon_client::{
     types::{
         AuthGetAllJwtRequest,
@@ -44,16 +43,12 @@ pub enum AuthSubcommand {
     List,
 }
 
-// TODO: Add permissions
 #[derive(Debug, Args, Clone)]
 pub struct RequestArgs {
-    permissions: JrpcPermissions,
+    permissions: Vec<String>,
     validity_in_seconds: Option<u64>,
 }
 
-// TODO: We have to implement some wallet password for granting access. Only granting and denying access will need
-// password, everything else is based on the JWT tokens. Currently you can just call "auth.request" and then grant
-// yourself access by calling "auth.accept".
 #[derive(Debug, Args, Clone)]
 pub struct GrantArgs {
     auth_token: String,
@@ -76,32 +71,32 @@ impl AuthSubcommand {
         use AuthSubcommand::*;
         match self {
             Request(args) => {
-                if args.permissions.no_permissions() {
+                if args.permissions.is_empty() {
                     println!("You forgot add permissions");
                 } else {
                     let resp = client
                         .auth_request(AuthLoginRequest {
-                            permissions: args.permissions.0.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                            permissions: args.permissions,
                             duration: args.validity_in_seconds.map(Duration::from_secs),
                             webauthn_finish_auth_request: None,
                         })
                         .await?;
-                    println!("Auth token {}", resp.auth_token);
+                    println!("Auth token {}", resp.auth_token.as_str());
                 }
             },
             Grant(args) => {
                 let resp = client
                     .auth_accept(AuthLoginAcceptRequest {
-                        auth_token: args.auth_token,
+                        auth_token: args.auth_token.into(),
                         name: args.name,
                     })
                     .await?;
-                println!("Access granted. Your JRPC token : {}", resp.permissions_token);
+                println!("Access granted. Your JRPC token : {}", resp.permissions_token.as_str());
             },
             Deny(args) => {
                 client
                     .auth_deny(AuthLoginDenyRequest {
-                        auth_token: args.auth_token,
+                        auth_token: args.auth_token.into(),
                     })
                     .await?;
                 println!("Access denied!");

@@ -20,10 +20,11 @@ pub mod webrtc;
 
 use std::future::Future;
 
-use axum::async_trait;
+use axum::{async_trait, headers::authorization::Bearer};
 pub use context::HandlerContext;
 use error::HandlerError;
 
+// NOTE: async_trait is needed even with stabilization of async traits due to this Rust limitation: https://github.com/rust-lang/rust/issues/100013
 #[async_trait]
 pub trait Handler<'a, TReq> {
     type Response;
@@ -31,7 +32,7 @@ pub trait Handler<'a, TReq> {
     async fn handle(
         &mut self,
         context: &'a HandlerContext,
-        token: Option<String>,
+        token: Option<&'a Bearer>,
         req: TReq,
     ) -> Result<Self::Response, HandlerError>;
 }
@@ -39,7 +40,7 @@ pub trait Handler<'a, TReq> {
 #[async_trait]
 impl<'a, F, TReq, TResp, TFut, TErr> Handler<'a, TReq> for F
 where
-    F: FnMut(&'a HandlerContext, Option<String>, TReq) -> TFut + Sync + Send,
+    F: FnMut(&'a HandlerContext, Option<&'a Bearer>, TReq) -> TFut + Sync + Send,
     TFut: Future<Output = Result<TResp, TErr>> + Send,
     TReq: Send + 'static,
     TErr: Into<HandlerError>,
@@ -49,7 +50,7 @@ where
     async fn handle(
         &mut self,
         context: &'a HandlerContext,
-        token: Option<String>,
+        token: Option<&'a Bearer>,
         req: TReq,
     ) -> Result<Self::Response, HandlerError> {
         let resp = self(context, token, req).await.map_err(Into::into)?;

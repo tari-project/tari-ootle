@@ -1,6 +1,7 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+use axum::headers::authorization::Bearer;
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_wallet_daemon_client::types::{
     WebauthnAlreadyRegisteredRequest,
@@ -47,7 +48,7 @@ fn webauthn_service(context: &HandlerContext) -> Result<&WebauthnService<SqliteW
 
 pub async fn handle_already_registered(
     context: &HandlerContext,
-    _token: Option<String>,
+    _token: Option<&Bearer>,
     request: WebauthnAlreadyRegisteredRequest,
 ) -> Result<WebauthnAlreadyRegisteredResponse, anyhow::Error> {
     webauthn(context)?;
@@ -57,7 +58,7 @@ pub async fn handle_already_registered(
 
 pub async fn handle_start_registration(
     context: &HandlerContext,
-    _token: Option<String>,
+    _token: Option<&Bearer>,
     request: WebauthnStartRegisterRequest,
 ) -> Result<WebauthnStartRegisterResponse, anyhow::Error> {
     let webauthn = webauthn(context)?;
@@ -81,7 +82,7 @@ pub async fn handle_start_registration(
 
 pub async fn handle_finish_registration(
     context: &HandlerContext,
-    _token: Option<String>,
+    _token: Option<&Bearer>,
     request: WebauthnFinishRegisterRequest,
 ) -> Result<WebauthnFinishRegisterResponse, anyhow::Error> {
     let webauthn = webauthn(context)?;
@@ -97,7 +98,7 @@ pub async fn handle_finish_registration(
 
 pub async fn handle_start_auth(
     context: &HandlerContext,
-    _token: Option<String>,
+    _token: Option<&Bearer>,
     request: WebauthnStartAuthRequest,
 ) -> Result<WebauthnStartAuthResponse, anyhow::Error> {
     let webauthn = webauthn(context)?;

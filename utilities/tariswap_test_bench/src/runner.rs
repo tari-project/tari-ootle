@@ -1,10 +1,11 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{path::Path, time::Duration};
+use std::{path::Path, str::FromStr, time::Duration};
 
 use log::info;
 use tari_common::configuration::Network;
+use tari_crypto::tari_utilities::SafePassword;
 use tari_dan_wallet_daemon::indexer_jrpc_impl::IndexerJsonRpcNetworkInterface;
 use tari_dan_wallet_sdk::{DanWalletSdk, WalletSdkConfig};
 use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
@@ -115,11 +116,11 @@ fn initialize_wallet_sdk<P: AsRef<Path>>(db_path: P, indexer_url: Url) -> Result
     store.run_migrations()?;
 
     let sdk_config = WalletSdkConfig {
-        password: None,
-        jwt_expiry: Duration::from_secs(100_000),
-        jwt_secret_key: "secret".to_string(),
+        network: Network::LocalNet,
+        override_keyring_password: Some(SafePassword::from_str("N3Va g0nn4 gu355").unwrap()),
     };
     let indexer = IndexerJsonRpcNetworkInterface::new(indexer_url);
-    let wallet = DanWalletSdk::initialize(Network::LocalNet, store, indexer, sdk_config, None)?;
-    Ok(wallet.sdk)
+    let mut sdk = DanWalletSdk::initialize(store, indexer, sdk_config)?;
+    sdk.initialize_cipher_seed(None)?;
+    Ok(sdk)
 }

@@ -3,44 +3,46 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
+use axum::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use futures::{future, future::Either};
 use log::*;
 use tari_common::configuration::Network;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{optional::Optional, Epoch};
-use tari_dan_wallet_sdk::apis::{config::ConfigKey, jwt::JrpcPermission, key_manager};
+use tari_dan_wallet_sdk::apis::{config::ConfigKey, key_manager};
 use tari_engine_types::{instruction::Instruction, ToByteType};
 use tari_template_lib::{args, models::Amount};
 use tari_transaction::Transaction;
 use tari_transaction_manifest::parse_manifest;
-use tari_wallet_daemon_client::types::{
-    AccountGetRequest,
-    AccountGetResponse,
-    CallInstructionRequest,
-    PublishTemplateRequest,
-    PublishTemplateResponse,
-    TransactionGetAllRequest,
-    TransactionGetAllResponse,
-    TransactionGetRequest,
-    TransactionGetResponse,
-    TransactionGetResultRequest,
-    TransactionGetResultResponse,
-    TransactionSubmitDryRunRequest,
-    TransactionSubmitDryRunResponse,
-    TransactionSubmitManifestRequest,
-    TransactionSubmitManifestResponse,
-    TransactionSubmitRequest,
-    TransactionSubmitResponse,
-    TransactionWaitResultRequest,
-    TransactionWaitResultResponse,
+use tari_wallet_daemon_client::{
+    permissions::JrpcPermission,
+    types::{
+        CallInstructionRequest,
+        PublishTemplateRequest,
+        PublishTemplateResponse,
+        TransactionGetAllRequest,
+        TransactionGetAllResponse,
+        TransactionGetRequest,
+        TransactionGetResponse,
+        TransactionGetResultRequest,
+        TransactionGetResultResponse,
+        TransactionSubmitDryRunRequest,
+        TransactionSubmitDryRunResponse,
+        TransactionSubmitManifestRequest,
+        TransactionSubmitManifestResponse,
+        TransactionSubmitRequest,
+        TransactionSubmitResponse,
+        TransactionWaitResultRequest,
+        TransactionWaitResultResponse,
+    },
 };
 use tokio::time;
 
-use super::{accounts, context::HandlerContext};
+use super::context::HandlerContext;
 use crate::{
     handlers::{
-        helpers::{get_account_or_default, invalid_params, transaction_builder},
+        helpers::{get_account, get_account_or_default, invalid_params, transaction_builder},
         HandlerError,
     },
     services::WalletEvent,
@@ -50,31 +52,23 @@ const LOG_TARGET: &str = "tari::dan::wallet_daemon::handlers::transaction";
 
 pub async fn handle_submit_instruction(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: CallInstructionRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
+    // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
+    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let mut builder = transaction_builder(context).with_instructions(req.instructions);
+    let sdk = context.wallet_sdk();
 
-    if let Some(dump_account) = req.dump_outputs_into {
-        let AccountGetResponse {
-            account: dump_account, ..
-        } = accounts::handle_get(context, token.clone(), AccountGetRequest {
-            name_or_address: dump_account,
-        })
-        .await?;
-
+    if let Some(ref dump_account) = req.dump_outputs_into {
+        let dump_account = get_account(dump_account, &sdk.accounts_api())?;
         builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
             dump_account.address.as_component_address().unwrap(),
             "deposit",
             args![Variable("bucket")],
         );
     }
-    let AccountGetResponse {
-        account: fee_account, ..
-    } = accounts::handle_get(context, token.clone(), AccountGetRequest {
-        name_or_address: req.fee_account,
-    })
-    .await?;
+    let fee_account = get_account(&req.fee_account, &sdk.accounts_api())?;
 
     let transaction = builder
         .fee_transaction_pay_from_component(
@@ -98,13 +92,12 @@ pub async fn handle_submit_instruction(
 
 pub async fn handle_submit(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: TransactionSubmitRequest,
 ) -> Result<TransactionSubmitResponse, anyhow::Error> {
-    let sdk = context.wallet_sdk();
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
-    sdk.jwt_api()
-        .check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    let sdk = context.wallet_sdk();
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
     // TODO: Ideally the SDK should take care of signing the transaction internally
@@ -179,13 +172,12 @@ pub async fn handle_submit(
 
 pub async fn handle_submit_dry_run(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: TransactionSubmitDryRunRequest,
 ) -> Result<TransactionSubmitDryRunResponse, anyhow::Error> {
-    let sdk = context.wallet_sdk();
     // TODO: fine-grained checks of individual addresses involved (resources, components, etc)
-    sdk.jwt_api()
-        .check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
+    let sdk = context.wallet_sdk();
     let key_api = sdk.key_manager_api();
     // Fetch the key to sign the transaction
     // TODO: Ideally the SDK should take care of signing the transaction internally
@@ -240,12 +232,11 @@ pub async fn handle_submit_dry_run(
 
 pub async fn handle_submit_manifest(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: TransactionSubmitManifestRequest,
 ) -> Result<TransactionSubmitManifestResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
-    sdk.jwt_api()
-        .check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
 
     let variables = req
         .variables
@@ -347,13 +338,10 @@ pub async fn handle_submit_manifest(
 
 pub async fn handle_get(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: TransactionGetRequest,
 ) -> Result<TransactionGetResponse, anyhow::Error> {
-    context
-        .wallet_sdk()
-        .jwt_api()
-        .check_auth(token, &[JrpcPermission::TransactionGet])?;
+    context.check_auth(token, &[JrpcPermission::TransactionGet])?;
     let transaction = context
         .wallet_sdk()
         .transaction_api()
@@ -371,13 +359,10 @@ pub async fn handle_get(
 
 pub async fn handle_get_all(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: TransactionGetAllRequest,
 ) -> Result<TransactionGetAllResponse, anyhow::Error> {
-    context
-        .wallet_sdk()
-        .jwt_api()
-        .check_auth(token, &[JrpcPermission::TransactionGet])?;
+    context.check_auth(token, &[JrpcPermission::TransactionGet])?;
     let transactions = context
         .wallet_sdk()
         .transaction_api()
@@ -392,13 +377,10 @@ pub async fn handle_get_all(
 
 pub async fn handle_get_result(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: TransactionGetResultRequest,
 ) -> Result<TransactionGetResultResponse, anyhow::Error> {
-    context
-        .wallet_sdk()
-        .jwt_api()
-        .check_auth(token, &[JrpcPermission::TransactionGet])?;
+    context.check_auth(token, &[JrpcPermission::TransactionGet])?;
     let transaction = context
         .wallet_sdk()
         .transaction_api()
@@ -415,13 +397,10 @@ pub async fn handle_get_result(
 
 pub async fn handle_wait_result(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: TransactionWaitResultRequest,
 ) -> Result<TransactionWaitResultResponse, anyhow::Error> {
-    context
-        .wallet_sdk()
-        .jwt_api()
-        .check_auth(token, &[JrpcPermission::TransactionGet])?;
+    context.check_auth(token, &[JrpcPermission::TransactionGet])?;
     let mut events = context.notifier().subscribe();
     let transaction = context
         .wallet_sdk()
@@ -492,9 +471,10 @@ pub async fn handle_wait_result(
 
 pub async fn handle_publish_template(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: PublishTemplateRequest,
 ) -> Result<PublishTemplateResponse, anyhow::Error> {
+    context.check_auth(token, &[JrpcPermission::TransactionSend(None)])?;
     let sdk = context.wallet_sdk();
 
     let fee_account = get_account_or_default(req.fee_account, &sdk.accounts_api())?;

@@ -177,10 +177,13 @@ function valueGetter(field: string) {
   return (row: any) => {
     const parts = field.split(".");
     let value = row;
+    if (value === undefined || value === null) {
+      return field + " null";
+    }
     for (const part of parts) {
       value = value[part];
       if (value === undefined) {
-        return "Error: invalid value at path " + field;
+        return field + " undefined";
       }
     }
 

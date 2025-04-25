@@ -5,11 +5,11 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{DefaultBodyLimit, Extension},
-    http::{Request, StatusCode},
-    middleware::Next,
-    response::Response,
+    headers,
+    headers::authorization::Bearer,
     routing::post,
     Router,
+    TypedHeader,
 };
 use axum_jrpc::{
     error::{JsonRpcError, JsonRpcErrorReason},
@@ -21,14 +21,13 @@ use axum_jrpc::{
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
-use tari_dan_wallet_sdk::apis::jwt::JwtApiError;
-use tari_shutdown::ShutdownSignal;
 use tokio::task;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 use super::handlers::{substates, templates, webauthn, HandlerContext};
 use crate::handlers::{
     accounts,
+    auth::jwt::JwtApiError,
     confidential,
     error::HandlerError,
     keys,
@@ -43,27 +42,12 @@ use crate::handlers::{
 
 const LOG_TARGET: &str = "tari::dan::wallet_daemon::json_rpc";
 
-// We need to extract the token, because the first call is without any token. So we don't have to have two handlers.
-async fn extract_token<B>(mut request: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
-    let mut token_ext = None;
-    if let Some(token) = request.headers().get("authorization") {
-        if let Ok(token) = token.to_str() {
-            if let Some(token) = token.strip_prefix("Bearer ") {
-                token_ext = Some(token.to_string());
-            }
-        }
-    }
-    request.extensions_mut().insert::<Option<String>>(token_ext);
-    let response = next.run(request).await;
-    Ok(response)
-}
-
 pub fn spawn_listener(
     preferred_address: SocketAddr,
     signaling_server_address: SocketAddr,
     context: HandlerContext,
-    shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<(SocketAddr, task::JoinHandle<anyhow::Result<()>>)> {
+    let shutdown_signal = context.shutdown_signal().clone();
     let router = Router::new()
         .route("/", post(handler))
         .route("/json_rpc", post(handler))
@@ -71,11 +55,9 @@ pub fn spawn_listener(
         .layer(TraceLayer::new_for_http())
         .layer(Extension(Arc::new(context)))
         .layer(Extension((preferred_address,signaling_server_address)))
-        .layer(Extension(Arc::new(shutdown_signal.clone())))
         .layer(CorsLayer::permissive())
         // Limit the body size to 5MB to allow for wasm uploads
-        .layer(DefaultBodyLimit::max(5*1024*1024))
-        .layer(axum::middleware::from_fn(extract_token));
+        .layer(DefaultBodyLimit::max(5*1024*1024));
 
     let server = axum::Server::try_bind(&preferred_address)?;
     let server = server.serve(router.into_make_service());
@@ -91,13 +73,14 @@ pub fn spawn_listener(
     Ok((listen_addr, task))
 }
 
+#[allow(clippy::too_many_lines)]
 async fn handler(
     Extension(context): Extension<Arc<HandlerContext>>,
     Extension(addresses): Extension<(SocketAddr, SocketAddr)>,
-    Extension(shutdown_signal): Extension<Arc<ShutdownSignal>>,
-    Extension(token): Extension<Option<String>>,
+    authorization_header: Option<TypedHeader<headers::Authorization<Bearer>>>,
     value: JsonRpcExtractor,
 ) -> JrpcResult {
+    let token = authorization_header.map(|auth| auth.0 .0);
     info!(target: LOG_TARGET, "🌐 JSON-RPC request: {}", value.method);
     debug!(target: LOG_TARGET, "🌐 JSON-RPC request: {:?}", value);
     match value.method.as_str().split_once('.') {
@@ -122,7 +105,7 @@ async fn handler(
             "set" => call_handler(context, value, token, settings::handle_set).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
-        Some(("webrtc", "start")) => webrtc::handle_start(context, value, token, shutdown_signal, addresses),
+        Some(("webrtc", "start")) => webrtc::handle_start(context, value, token.as_ref(), addresses),
         Some(("rpc", "discover")) => call_handler(context, value, token, rpc::handle_discover).await,
         Some(("keys", method)) => match method {
             "create" => call_handler(context, value, token, keys::handle_create).await,
@@ -201,7 +184,7 @@ async fn handler(
 async fn call_handler<H, TReq, TResp>(
     context: Arc<HandlerContext>,
     value: JsonRpcExtractor,
-    token: Option<String>,
+    token: Option<Bearer>,
     mut handler: H,
 ) -> JrpcResult
 where
@@ -213,7 +196,7 @@ where
     let resp = handler
         .handle(
             &context,
-            token,
+            token.as_ref(),
             value.parse_params().inspect_err(|e| match &e.result {
                 JsonRpcAnswer::Result(_) => {
                     unreachable!("parse_params() error should not return a result")

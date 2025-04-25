@@ -34,7 +34,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StorageError,
 };
-use tari_engine_types::{substate::SubstateDiff, template_models::Amount, ValidatorFeePool};
+use tari_engine_types::{substate::SubstateDiff, template_lib_models::Amount, ValidatorFeePool};
 use tari_state_tree::{JellyfishMerkleTree, StateTreeError, SPARSE_MERKLE_PLACEHOLDER_HASH};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 

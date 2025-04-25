@@ -41,6 +41,6 @@ pub use argument_parser::parse_arg;
 pub use byte_types::*;
 pub use validator_fee::*;
 
-pub mod template_models {
+pub mod template_lib_models {
     pub use tari_template_lib::models::*;
 }

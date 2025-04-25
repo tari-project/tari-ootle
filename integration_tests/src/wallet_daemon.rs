@@ -80,8 +80,11 @@ pub async fn spawn_wallet_daemon(world: &mut TariWorld, wallet_daemon_name: Stri
     config.dan_wallet_daemon.signaling_server_address = Some(signaling_server_addr);
     config.dan_wallet_daemon.indexer_json_rpc_url = indexer_url.parse().unwrap();
     config.dan_wallet_daemon.network = Network::LocalNet;
+    let mut cli = Cli::init();
+    // Avoid using keyring in cucumber tests
+    cli.override_keyring_password = Some("secret".into());
 
-    let handle = task::spawn(run_tari_dan_wallet_daemon(Cli::init(), config, shutdown_signal));
+    let handle = task::spawn(run_tari_dan_wallet_daemon(cli, config, shutdown_signal));
 
     // Wait for node to start up
     let handle = wait_listener_on_local_port(handle, json_rpc_port).await;

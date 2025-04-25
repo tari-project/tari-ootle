@@ -29,7 +29,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 use tari_sidechain::{CommandCommitProof, SidechainBlockCommitProof, SidechainBlockHeader};
-use tari_state_tree::{memory_store::MemoryTreeStore, JellyfishMerkleTree, LeafKey, TreeHash};
+use tari_state_tree::{compute_proof_for_hashes, TreeHash};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
@@ -174,12 +174,8 @@ fn miscellaneous_operations(db: impl StateStore) {
     let block = Block::zero_block(Default::default(), NumPreshards::P4);
     let mut shard_roots = IndexMap::new();
     shard_roots.insert(shard_group.start(), TreeHash::zero());
-    let store = MemoryTreeStore::new();
-    let tree = JellyfishMerkleTree::new(&store);
-    let key = LeafKey::new(TreeHash::new([1; 32]));
-    tree.batch_put_value_set([(key, Some((TreeHash::new([1; 32]), 1)))], None, None, 1)
-        .unwrap();
-    let (_, inclusion_proof) = tree.get_with_proof_ext(key.as_ref(), 1).unwrap();
+    let key = TreeHash::new([1; 32]);
+    let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
     let commit_proof = SidechainBlockCommitProof {
         header: SidechainBlockHeader {
             network: 0,

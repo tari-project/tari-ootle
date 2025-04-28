@@ -114,6 +114,16 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     target_account_public_key: transferFormState.targetAccountPublicKey,
   });
 
+  const { mutateAsync: sendTransferNftsTx } = useNftsTransfer({
+    nft_ids: transferFormState.nftIds,
+    source_account: {
+      Name: account.name ? account.name : "",
+    },
+    target_account_public_key: transferFormState.targetAccountPublicKey,
+    dry_run: false,
+    max_fee: parseInt(transferFormState.maxFee),
+  });
+
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
     setTransferFormState({
       ...transferFormState,
@@ -136,9 +146,31 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     setDisabled(true);
 
     if (!isNaN(parseInt(transferFormState.maxFee))) {
-
+      console.log("Send transaction");
+      sendTransferNftsTx?.()
+          .then().then((result) => {
+        if (!("Accept" in result.result.result)) {
+          setPopup({
+            title: "Sending transfer transaction failed",
+            error: true,
+            message: JSON.stringify(
+                unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
+                unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
+            ),
+          });
+          return;
+        }
+        setNfts([]);
+        setTransferFormState(INITIAL_VALUES);
+        props.onSendComplete?.();
+        setPopup({ title: "NFT transfer transaction", error: false, message: "Sent successfully!" });
+      }).catch((e) => {
+        setPopup({ title: "NFT transfer failed", error: true, message: e.message });
+      })
+          .finally(() => {
+            setDisabled(false);
+          });
     } else {
-      console.log("Source account:", substateIdToString(account.address).replace("component_", ""));
       calculateFeeEstimate?.()
           .then((result) => {
             if (!("Accept" in result.result.result)) {

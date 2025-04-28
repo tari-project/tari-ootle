@@ -1,9 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::BTreeMap, str::FromStr};
-
 use super::{context::HandlerContext, helpers::get_account_or_default};
+use crate::handlers::helpers::get_account_with_inputs;
 use crate::{
     handlers::helpers::{application_error, get_account, transaction_builder},
     jrpc_server::ApplicationErrorCode,
@@ -11,7 +10,9 @@ use crate::{
     DEFAULT_FEE,
 };
 use anyhow::anyhow;
-use log::info;
+use log::{info, warn};
+use std::collections::HashSet;
+use std::{collections::BTreeMap, str::FromStr};
 use tari_crypto::{
     keys::PublicKey as PK,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
@@ -19,6 +20,7 @@ use tari_crypto::{
 };
 use tari_dan_common_types::optional::Optional;
 use tari_dan_common_types::SubstateRequirement;
+use tari_dan_wallet_sdk::apis::substate::ValidatorScanResult;
 use tari_dan_wallet_sdk::{
     apis::{jwt::JrpcPermission, key_manager},
     models::Account,
@@ -271,6 +273,90 @@ async fn create_account_nft(
     Ok(event)
 }
 
+async fn fill_in_target_account_vault(
+    context: &HandlerContext,
+    inputs: &mut HashSet<SubstateRequirement>,
+    instructions: &mut Vec<Instruction>,
+    target_account_address: ComponentAddress,
+    target_account_public_key: RistrettoPublicKeyBytes,
+    target_resource_address: ResourceAddress,
+) -> anyhow::Result<()> {
+    let sdk = context.wallet_sdk();
+    let existing_target_account = sdk
+        .substate_api()
+        .scan_for_substate(&SubstateId::Component(target_account_address), None)
+        .await
+        .optional()?;
+
+    match existing_target_account {
+        Some(ValidatorScanResult { address, substate }) => {
+            inputs.insert(address.into());
+
+            // Figure out which vault to add as an input
+            let Some(component) = substate.component() else {
+                return Err(anyhow::anyhow!(
+                "The target account {} is not a component. This is unexpected.",
+                target_account_address
+            ));
+            };
+            let indexed = component.body.to_indexed_well_known_types()?;
+            let mut found_dest_vault = None;
+            for vault_id in indexed.vault_ids() {
+                // Local vault?
+                match sdk.accounts_api().get_vault(vault_id).optional()? {
+                    Some(vault) => {
+                        if vault.resource_address != target_resource_address {
+                            // Continue searching for a vault for the resource address
+                            continue;
+                        }
+                        // Found it - we're sending to our own vault
+                        found_dest_vault = Some(*vault_id);
+                        break;
+                    },
+                    None => {
+                        // TODO(perf): slow with lots of vaults
+                        let vault = sdk
+                            .substate_api()
+                            .scan_for_substate(&SubstateId::Vault(*vault_id), None)
+                            .await
+                            .optional()?;
+
+                        let Some(vault) = vault.and_then(|scan| scan.substate.into_vault()) else {
+                            warn!(
+                            target: LOG_TARGET,
+                            "❓️ The target account {target_account_address} contains a vault {vault_id} that was not found. This is unexpected.",
+                        );
+                            continue;
+                        };
+
+                        if *vault.resource_address() != target_resource_address {
+                            // Continue searching for a vault for the resource address
+                            continue;
+                        }
+
+                        // Found it
+                        found_dest_vault = Some(*vault_id);
+                    },
+                }
+            }
+
+            if let Some(found) = found_dest_vault {
+                inputs.insert(SubstateRequirement::unversioned(found));
+            }
+        }
+        None => {
+            instructions.push(Instruction::CreateAccount {
+                public_key_address: target_account_public_key,
+                owner_rule: None,
+                access_rules: None,
+                workspace_bucket: None,
+            });
+        }
+    }
+    
+    Ok(())
+}
+
 pub async fn handle_transfer_nft(
     context: &HandlerContext,
     token: Option<String>,
@@ -281,16 +367,9 @@ pub async fn handle_transfer_nft(
 
     info!(target: LOG_TARGET, "Received transfer nft request: {:?}", req);
 
-    // get source/target accounts
-    info!(target: LOG_TARGET, "Get source account...");
-    let source_account = match req.source_account {
-        ComponentAddressOrName::ComponentAddress(address) => sdk
-            .accounts_api()
-            .get_account_by_address(&SubstateId::Component(address)),
-        ComponentAddressOrName::Name(name) => sdk.accounts_api().get_account_by_name(name.as_str()),
-    }
-    .map_err(|error| anyhow!("Failed to get source account: {error}"))?;
+    let mut instructions = vec![];
 
+    let (source_account, mut inputs) = get_account_with_inputs(Some(req.source_account), &sdk)?;
     info!(target: LOG_TARGET, "Found source account: {:?}", source_account);
 
     let source_account_address = source_account
@@ -303,24 +382,16 @@ pub async fn handle_transfer_nft(
     let target_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
 
-    let existing_dest_account = sdk
-        .substate_api()
-        .scan_for_substate(&SubstateId::Component(target_account_address), None)
-        .await
-        .optional()?;
-
     info!(target: LOG_TARGET, "Found target account address: {:?}", target_account_address);
 
     // collect all instructions
-    let mut instructions = vec![];
-    let mut inputs = vec![];
     let non_fungible_api = sdk.non_fungible_api();
     for nft_id in req.nft_ids {
         // get NFT
         info!(target: LOG_TARGET, "Getting NFT: {:?}", nft_id);
 
         let nft = non_fungible_api
-            .get_by_id(nft_id)
+            .get_by_id(nft_id.clone())
             .map_err(|e| anyhow!("Failed to get non fungible token: {}", e))?;
 
         info!(target: LOG_TARGET, "Got NFT: {:?}", nft);
@@ -330,15 +401,24 @@ pub async fn handle_transfer_nft(
             .accounts_api()
             .get_vault_by_resource(&source_account.address, &nft.resource_address)?;
         let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
-        inputs.push(src_vault_substate.substate_id.into());
+        inputs.insert(src_vault_substate.substate_id.into());
         let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
-        inputs.push(resource_substate_address.clone());
+        inputs.insert(resource_substate_address.clone());
+
+        fill_in_target_account_vault(
+            context,
+            &mut inputs,
+            &mut instructions,
+            target_account_address,
+            req.target_account_public_key,
+            nft.resource_address,
+        ).await?;
 
         instructions.extend([
             Instruction::CallMethod {
                 component_address: source_account_address,
-                method: "withdraw".to_string(),
-                args: args![nft.resource_address, Amount::new(1)],
+                method: "withdraw_non_fungible".to_string(),
+                args: args![nft.resource_address, nft_id],
             },
             Instruction::PutLastInstructionOutputOnWorkspace {
                 key: b"bucket".to_vec(),

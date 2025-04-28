@@ -917,7 +917,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             let checkpoint = EpochCheckpoint::get(&**tx, previous_epoch).optional()?;
             let state_merkle_root = checkpoint
                 .map(|cp| cp.compute_state_merkle_root())
-                .transpose()?
+                .transpose()
+                .map_err(|e| HotStuffError::InvariantError(format!("Invalid checkpoint was stored for {epoch}: {e}")))?
                 .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH);
             // The parent for genesis blocks refer to this zero block
             let mut zero_block = Block::zero_block(self.config.network, self.config.consensus_constants.num_preshards);

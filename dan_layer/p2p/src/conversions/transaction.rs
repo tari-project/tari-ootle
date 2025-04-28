@@ -23,7 +23,6 @@
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::{anyhow, Context};
-use tari_bor::{decode_exact, encode};
 use tari_dan_common_types::{SubstateRequirement, SubstateRequirementRef, VersionedSubstateId};
 use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
@@ -46,6 +45,7 @@ use tari_template_lib::{
 use tari_transaction::Transaction;
 
 use crate::{
+    encoding::{decode_from_slice, encode_to_vec},
     proto::{
         self,
         transaction::{instruction::InstructionType, OptionalVersion},
@@ -53,7 +53,6 @@ use crate::{
     utils::checked_copy_fixed,
     NewTransactionMessage,
 };
-
 // -------------------------------- NewTransactionMessage -------------------------------- //
 
 impl From<NewTransactionMessage> for proto::transaction::NewTransactionMessage {
@@ -82,14 +81,15 @@ impl TryFrom<proto::transaction::Transaction> for Transaction {
     type Error = anyhow::Error;
 
     fn try_from(transaction: proto::transaction::Transaction) -> Result<Self, Self::Error> {
-        decode_exact(&transaction.bor_encoded).map_err(|e| anyhow!("tari_bor::decode failed for transaction: {}", e))
+        decode_from_slice(&transaction.bor_encoded)
     }
 }
 
 impl From<&Transaction> for proto::transaction::Transaction {
     fn from(transaction: &Transaction) -> Self {
         proto::transaction::Transaction {
-            bor_encoded: encode(transaction).expect("tari_bor::encode failed for transaction"),
+            // TODO: no panic
+            bor_encoded: encode_to_vec(transaction).expect("Failed to encode transaction"),
         }
     }
 }
@@ -385,7 +385,7 @@ impl TryFrom<proto::transaction::Arg> for Arg {
     fn try_from(request: proto::transaction::Arg) -> Result<Self, Self::Error> {
         let data = request.data;
         let arg = match request.arg_type {
-            0 => Arg::Literal(decode_exact(&data)?),
+            0 => Arg::Literal(decode_from_slice(&data)?),
             1 => Arg::Workspace(data),
             _ => return Err(anyhow!("invalid arg_type")),
         };
@@ -401,7 +401,8 @@ impl From<Arg> for proto::transaction::Arg {
         match arg {
             Arg::Literal(data) => {
                 result.arg_type = 0;
-                result.data = tari_bor::encode(&data).unwrap();
+                // TODO: no panic
+                result.data = encode_to_vec(&data).unwrap();
             },
             Arg::Workspace(data) => {
                 result.arg_type = 1;
@@ -651,7 +652,8 @@ impl From<ViewableBalanceProof> for proto::transaction::ViewableBalanceProof {
 impl From<OwnerRule> for proto::transaction::OwnerRule {
     fn from(value: OwnerRule) -> Self {
         Self {
-            encoded_owner_rule: encode(&value).unwrap(),
+            // TODO: no panic
+            encoded_owner_rule: encode_to_vec(&value).unwrap(),
         }
     }
 }
@@ -660,7 +662,7 @@ impl TryFrom<proto::transaction::OwnerRule> for OwnerRule {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::transaction::OwnerRule) -> Result<Self, Self::Error> {
-        Ok(decode_exact(&value.encoded_owner_rule)?)
+        decode_from_slice(&value.encoded_owner_rule)
     }
 }
 
@@ -669,7 +671,8 @@ impl TryFrom<proto::transaction::OwnerRule> for OwnerRule {
 impl From<AccessRules> for proto::transaction::AccessRules {
     fn from(value: AccessRules) -> Self {
         Self {
-            encoded_access_rules: encode(&value).unwrap(),
+            // TODO: no panic
+            encoded_access_rules: encode_to_vec(&value).unwrap(),
         }
     }
 }
@@ -678,6 +681,6 @@ impl TryFrom<proto::transaction::AccessRules> for AccessRules {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::transaction::AccessRules) -> Result<Self, Self::Error> {
-        Ok(decode_exact(&value.encoded_access_rules)?)
+        decode_from_slice(&value.encoded_access_rules)
     }
 }

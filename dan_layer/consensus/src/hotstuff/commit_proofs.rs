@@ -5,7 +5,7 @@ use log::*;
 use tari_common_types::types::CompressedPublicKey;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockHeader, QuorumCertificate, QuorumDecision},
+    consensus_models::{Block, BlockHeader, EndOfEpochCommand, QuorumCertificate, QuorumDecision},
     StateStoreReadTransaction,
 };
 use tari_sidechain::{
@@ -62,6 +62,31 @@ pub fn generate_eviction_proofs<TTx: StateStoreReadTransaction>(
     }
 
     Ok(proofs)
+}
+
+pub fn generate_end_of_epoch_commit_proof<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    tip_qc: &QuorumCertificate,
+    // committed_eoe_blocks: &[Block],
+    commit_block: &Block,
+) -> Result<CommandCommitProof<EndOfEpochCommand>, HotStuffError> {
+    if commit_block.commands().len() != 1 {
+        return Err(HotStuffError::InvariantError(format!(
+            "End of epoch block must have exactly one command, but found {}",
+            commit_block.commands().len()
+        )));
+    }
+
+    if !commit_block.is_epoch_end() {
+        return Err(HotStuffError::InvariantError(format!(
+            "Block is not an end-of-epoch block: {commit_block}"
+        )));
+    }
+
+    let proof = generate_block_commit_proof(tx, tip_qc, commit_block)?;
+    let inclusion_proof = commit_block.compute_command_inclusion_proof(0)?;
+    let command_commit_proof = CommandCommitProof::new(EndOfEpochCommand, proof, inclusion_proof);
+    Ok(command_commit_proof)
 }
 
 fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(

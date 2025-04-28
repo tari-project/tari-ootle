@@ -26,7 +26,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use tari_bor::{decode_exact, encode};
 use tari_consensus::messages::{
     ForeignProposalMessage,
     ForeignProposalNotificationMessage,
@@ -69,7 +68,10 @@ use tari_engine_types::substate::{SubstateId, SubstateValue};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
-use crate::proto::{self};
+use crate::{
+    encoding::{decode_from_slice, encode_to_vec},
+    proto::{self},
+};
 // -------------------------------- HotstuffMessage -------------------------------- //
 
 impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
@@ -212,7 +214,7 @@ impl TryFrom<proto::consensus::ForeignProposalMessage> for ForeignProposalMessag
                 .justify_qc
                 .ok_or_else(|| anyhow!("Justify QC is missing"))?
                 .try_into()?,
-            block_pledge: decode_exact(&proposal.encoded_block_pledge).context("Failed to decode block pledge")?,
+            block_pledge: decode_from_slice(&proposal.encoded_block_pledge).context("Failed to decode block pledge")?,
         })
     }
 }
@@ -222,7 +224,7 @@ impl From<&ForeignProposalMessage> for proto::consensus::ForeignProposal {
         Self {
             block: Some(proto::consensus::Block::from(&value.block)),
             justify_qc: Some(proto::consensus::QuorumCertificate::from(&value.justify_qc)),
-            encoded_block_pledge: encode(&value.block_pledge).expect("Failed to encode block pledge"),
+            encoded_block_pledge: encode_to_vec(&value.block_pledge).expect("Failed to encode block pledge"),
         }
     }
 }
@@ -232,7 +234,7 @@ impl From<&ForeignProposal> for proto::consensus::ForeignProposal {
         Self {
             block: Some(proto::consensus::Block::from(&value.block)),
             justify_qc: Some(proto::consensus::QuorumCertificate::from(&value.justify_qc)),
-            encoded_block_pledge: encode(&value.block_pledge).expect("Failed to encode block pledge"),
+            encoded_block_pledge: encode_to_vec(&value.block_pledge).expect("Failed to encode block pledge"),
         }
     }
 }
@@ -243,7 +245,7 @@ impl TryFrom<proto::consensus::ForeignProposal> for ForeignProposal {
     fn try_from(value: proto::consensus::ForeignProposal) -> Result<Self, Self::Error> {
         Ok(Self::new(
             value.block.ok_or_else(|| anyhow!("Block is missing"))?.try_into()?,
-            decode_exact(&value.encoded_block_pledge).context("Failed to decode block pledge")?,
+            decode_from_slice(&value.encoded_block_pledge).context("Failed to decode block pledge")?,
             value
                 .justify_qc
                 .ok_or_else(|| anyhow!("Justify QC is missing"))?
@@ -546,7 +548,7 @@ impl TryFrom<proto::consensus::Block> for consensus_models::Block {
 impl From<&ExtraData> for proto::consensus::ExtraData {
     fn from(value: &ExtraData) -> Self {
         Self {
-            encoded_extra_data: encode(value).unwrap(),
+            encoded_extra_data: encode_to_vec(value).unwrap(),
         }
     }
 }
@@ -555,7 +557,7 @@ impl TryFrom<proto::consensus::ExtraData> for ExtraData {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::ExtraData) -> Result<Self, Self::Error> {
-        Ok(decode_exact(&value.encoded_extra_data)?)
+        decode_from_slice(&value.encoded_extra_data)
     }
 }
 
@@ -814,7 +816,7 @@ impl From<&Evidence> for proto::consensus::Evidence {
     fn from(value: &Evidence) -> Self {
         // TODO: we may want to write out the protobuf here
         Self {
-            encoded_evidence: encode(value).unwrap(),
+            encoded_evidence: encode_to_vec(value).unwrap(),
         }
     }
 }
@@ -823,7 +825,7 @@ impl TryFrom<proto::consensus::Evidence> for Evidence {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::Evidence) -> Result<Self, Self::Error> {
-        Ok(decode_exact(&value.encoded_evidence)?)
+        decode_from_slice(&value.encoded_evidence)
     }
 }
 

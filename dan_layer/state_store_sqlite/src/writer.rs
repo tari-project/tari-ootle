@@ -1862,9 +1862,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::epoch_checkpoints;
 
         let values = (
-            epoch_checkpoints::epoch.eq(checkpoint.block().epoch().as_u64() as i64),
-            epoch_checkpoints::commit_block.eq(serialize_json(checkpoint.block())?),
-            epoch_checkpoints::qcs.eq(serialize_json(checkpoint.qcs())?),
+            epoch_checkpoints::epoch.eq(checkpoint.epoch().as_u64() as i64),
+            epoch_checkpoints::proof.eq(serialize_json(checkpoint.proof())?),
             epoch_checkpoints::shard_roots.eq(serialize_json(checkpoint.shard_roots())?),
         );
 

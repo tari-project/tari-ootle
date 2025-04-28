@@ -8,6 +8,7 @@ use tari_dan_storage::{
         Block,
         BlockId,
         BlockPledge,
+        EndOfEpochCommand,
         EpochCheckpoint,
         ForeignParkedProposal,
         ForeignProposal,
@@ -27,7 +28,8 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-use tari_state_tree::TreeHash;
+use tari_sidechain::{CommandCommitProof, SidechainBlockCommitProof, SidechainBlockHeader};
+use tari_state_tree::{compute_proof_for_hashes, TreeHash};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
 use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
@@ -170,10 +172,31 @@ fn miscellaneous_operations(db: impl StateStore) {
     // epoch checkpoints
     let shard_group = ShardGroup::all_shards(NumPreshards::P4);
     let block = Block::zero_block(Default::default(), NumPreshards::P4);
-    let qc = QuorumCertificate::genesis(Epoch::zero(), shard_group);
     let mut shard_roots = IndexMap::new();
     shard_roots.insert(shard_group.start(), TreeHash::zero());
-    let epoch_checkpoint = EpochCheckpoint::new(block.clone(), vec![qc], shard_roots);
+    let key = TreeHash::new([1; 32]);
+    let (_, inclusion_proof) = compute_proof_for_hashes([key].into_iter(), key).unwrap();
+    let commit_proof = SidechainBlockCommitProof {
+        header: SidechainBlockHeader {
+            network: 0,
+            parent_id: Default::default(),
+            justify_id: Default::default(),
+            height: 0,
+            epoch: 0,
+            shard_group: tari_sidechain::ShardGroup {
+                start: 0,
+                end_inclusive: 1,
+            },
+            proposed_by: Default::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: Default::default(),
+            signature: Default::default(),
+            metadata_hash: Default::default(),
+        },
+        proof_elements: vec![],
+    };
+    let proof = CommandCommitProof::new(EndOfEpochCommand, commit_proof, inclusion_proof);
+    let epoch_checkpoint = EpochCheckpoint::new(proof, shard_roots);
 
     tx.epoch_checkpoint_save(&epoch_checkpoint).unwrap();
     let res = tx.epoch_checkpoint_get(block.epoch()).unwrap();

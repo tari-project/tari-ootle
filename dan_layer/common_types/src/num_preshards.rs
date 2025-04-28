@@ -32,6 +32,10 @@ impl NumPreshards {
         self as u32
     }
 
+    pub const fn num_shards(self) -> usize {
+        self as usize
+    }
+
     pub fn is_one(self) -> bool {
         self == Self::P1
     }

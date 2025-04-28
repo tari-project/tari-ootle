@@ -632,30 +632,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(block)
     }
 
-    fn blocks_get_last_n_in_epoch(&self, n: usize, epoch: Epoch) -> Result<Vec<Block>, StorageError> {
-        const OPERATION: &str = "blocks_get_last_n_in_epoch";
-        let query = self.db().cf(block::ByEpochQuery)?;
-        let block_cf = self.db().cf(BlockModel)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::Descending, &epoch);
-
-        let mut blocks = vec![];
-        for iter in iter {
-            let (_, _, block_id) = iter?;
-            let block = block_cf.get(&block_id, OPERATION)?;
-            if !block.is_committed() {
-                continue;
-            }
-            blocks.push(block);
-            if blocks.len() == n {
-                break;
-            }
-        }
-
-        blocks.reverse();
-
-        Ok(blocks)
-    }
-
     fn blocks_get_all_between(
         &self,
         query_epoch: Epoch,

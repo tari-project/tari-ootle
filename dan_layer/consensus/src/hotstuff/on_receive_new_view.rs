@@ -12,7 +12,7 @@ use tari_dan_storage::{
 
 use super::vote_collector::VoteCollector;
 use crate::{
-    block_validations::check_quorum_certificate,
+    block_validations::check_quorum_certificate_signatures,
     hotstuff::{epoch_state::EpochState, error::HotStuffError, pacemaker_handle::PaceMakerHandle},
     messages::NewViewMessage,
     tracing::TraceTimer,
@@ -214,7 +214,7 @@ where TConsensusSpec: ConsensusSpec
         committee: &Committee<TConsensusSpec::Addr>,
         vote_signing_service: &TConsensusSpec::SignatureService,
     ) -> Result<(), HotStuffError> {
-        check_quorum_certificate::<TConsensusSpec>(qc, committee, vote_signing_service)?;
+        check_quorum_certificate_signatures::<TConsensusSpec>(qc, committee, vote_signing_service)?;
         Ok(())
     }
 }

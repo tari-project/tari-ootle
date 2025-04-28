@@ -1471,7 +1471,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         self.db()
             .cf(EpochCheckpointModel)?
-            .put(&checkpoint.block().epoch(), checkpoint, OPERATION)?;
+            .put(&checkpoint.epoch(), checkpoint, OPERATION)?;
 
         Ok(())
     }

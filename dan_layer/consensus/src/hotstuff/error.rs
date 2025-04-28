@@ -297,4 +297,10 @@ pub enum ProposalValidationError {
         current_epoch: Epoch,
         block_epoch: Epoch,
     },
+    #[error("Invalid shard group {shard_group} for block {block_id}: {details}")]
+    InvalidShardGroup {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        details: String,
+    },
 }

@@ -9,7 +9,7 @@ use std::{
 
 use indexmap::IndexMap;
 use log::*;
-use tari_dan_common_types::{displayable::Displayable, optional::Optional, shard::Shard, Epoch, ShardGroup};
+use tari_dan_common_types::{displayable::Displayable, optional::Optional, shard::Shard, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,
@@ -60,9 +60,9 @@ pub struct BlockDecision {
     /// Contains newly-locked non-dummy blocks
     pub locked_blocks: Vec<Block>,
     pub finalized_transactions: Vec<Vec<TransactionPoolRecord>>,
-    pub end_of_epoch: Option<Epoch>,
     pub high_qc: HighQc,
     pub committed_blocks_with_evictions: Vec<Block>,
+    pub committed_end_of_epoch_block: Option<Block>,
 }
 
 impl BlockDecision {
@@ -422,7 +422,7 @@ impl ProposedBlockChangeSet {
         Ok(())
     }
 
-    pub fn log_everything(&self) {
+    pub fn log_everything_dropped(&self) {
         if !log_enabled!(log::Level::Debug) {
             return;
         }

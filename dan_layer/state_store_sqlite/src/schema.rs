@@ -99,8 +99,7 @@ diesel::table! {
     epoch_checkpoints (id) {
         id -> Integer,
         epoch -> BigInt,
-        commit_block -> Text,
-        qcs -> Text,
+        proof -> Text,
         shard_roots -> Text,
         created_at -> Timestamp,
     }

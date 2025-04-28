@@ -181,9 +181,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Discard);
         }
 
-        if let Err(err) =
-            self.check_local_proposal(&proposal.block, epoch_state.local_committee(), epoch_state.epoch_hash())
-        {
+        if let Err(err) = self.check_local_proposal(&proposal.block, epoch_state) {
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::Proposal(proposal),
@@ -238,17 +236,17 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
     fn check_local_proposal(
         &self,
         block: &Block,
-        committee_for_block: &Committee<TConsensusSpec::Addr>,
-        expected_epoch_hash: &FixedHash,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
         block_validations::check_local_proposal::<TConsensusSpec>(
             self.current_view.get_epoch(),
             block,
-            committee_for_block,
+            epoch_state.local_committee(),
+            epoch_state.local_committee_info(),
             &self.vote_signing_service,
             &self.leader_strategy,
             &self.config,
-            expected_epoch_hash,
+            epoch_state.epoch_hash(),
         )
     }
 
@@ -258,7 +256,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         committee_for_block: &Committee<TConsensusSpec::Addr>,
         expected_epoch_hash: &FixedHash,
     ) -> Result<(), HotStuffError> {
-        block_validations::check_proposal::<TConsensusSpec>(
+        block_validations::check_foreign_proposal::<TConsensusSpec>(
             block,
             committee_for_block,
             &self.vote_signing_service,

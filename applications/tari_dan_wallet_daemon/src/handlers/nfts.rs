@@ -1,28 +1,21 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use super::{context::HandlerContext, helpers::get_account_or_default};
-use crate::handlers::helpers::get_account_with_inputs;
-use crate::{
-    handlers::helpers::{application_error, get_account, transaction_builder},
-    jrpc_server::ApplicationErrorCode,
-    services::{TransactionFinalizedEvent, WalletEvent},
-    DEFAULT_FEE,
+use std::{
+    collections::{BTreeMap, HashSet},
+    str::FromStr,
 };
+
 use anyhow::anyhow;
 use log::{info, warn};
-use std::collections::HashSet;
-use std::{collections::BTreeMap, str::FromStr};
 use tari_crypto::{
     keys::PublicKey as PK,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
-use tari_dan_common_types::optional::Optional;
-use tari_dan_common_types::SubstateRequirement;
-use tari_dan_wallet_sdk::apis::substate::ValidatorScanResult;
+use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{
-    apis::{jwt::JrpcPermission, key_manager},
+    apis::{jwt::JrpcPermission, key_manager, substate::ValidatorScanResult},
     models::Account,
 };
 use tari_engine_types::{
@@ -52,6 +45,14 @@ use tari_wallet_daemon_client::{
     ComponentAddressOrName,
 };
 use tokio::sync::broadcast;
+
+use super::{context::HandlerContext, helpers::get_account_or_default};
+use crate::{
+    handlers::helpers::{application_error, get_account, get_account_with_inputs, transaction_builder},
+    jrpc_server::ApplicationErrorCode,
+    services::{TransactionFinalizedEvent, WalletEvent},
+    DEFAULT_FEE,
+};
 
 const LOG_TARGET: &str = "tari::dan::wallet_daemon::handlers::nfts";
 
@@ -295,9 +296,9 @@ async fn fill_in_target_account_vault(
             // Figure out which vault to add as an input
             let Some(component) = substate.component() else {
                 return Err(anyhow::anyhow!(
-                "The target account {} is not a component. This is unexpected.",
-                target_account_address
-            ));
+                    "The target account {} is not a component. This is unexpected.",
+                    target_account_address
+                ));
             };
             let indexed = component.body.to_indexed_well_known_types()?;
             let mut found_dest_vault = None;
@@ -323,9 +324,9 @@ async fn fill_in_target_account_vault(
 
                         let Some(vault) = vault.and_then(|scan| scan.substate.into_vault()) else {
                             warn!(
-                            target: LOG_TARGET,
-                            "❓️ The target account {target_account_address} contains a vault {vault_id} that was not found. This is unexpected.",
-                        );
+                                target: LOG_TARGET,
+                                "❓️ The target account {target_account_address} contains a vault {vault_id} that was not found. This is unexpected.",
+                            );
                             continue;
                         };
 
@@ -343,7 +344,7 @@ async fn fill_in_target_account_vault(
             if let Some(found) = found_dest_vault {
                 inputs.insert(SubstateRequirement::unversioned(found));
             }
-        }
+        },
         None => {
             instructions.push(Instruction::CreateAccount {
                 public_key_address: target_account_public_key,
@@ -351,9 +352,9 @@ async fn fill_in_target_account_vault(
                 access_rules: None,
                 workspace_bucket: None,
             });
-        }
+        },
     }
-    
+
     Ok(())
 }
 
@@ -400,7 +401,8 @@ pub async fn handle_transfer_nft(
             target_account_address,
             req.target_account_public_key,
             nft.resource_address,
-        ).await?;
+        )
+        .await?;
 
         instructions.extend([
             Instruction::CallMethod {

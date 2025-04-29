@@ -16,7 +16,7 @@ export const useListNfts = (request: ListAccountNftsReq) => {
   return useQuery({
     queryKey: ["list_nfts"],
     queryFn: async () => {
-      const limit = 1;
+      const limit = 10;
       let offset = 0;
       let nfts = await nftList({
         account: request.account,

@@ -365,36 +365,24 @@ pub async fn handle_transfer_nft(
     let sdk = context.wallet_sdk();
     sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
 
-    info!(target: LOG_TARGET, "Received transfer nft request: {:?}", req);
-
     let mut instructions = vec![];
-
     let (source_account, mut inputs) = get_account_with_inputs(Some(req.source_account), &sdk)?;
-    info!(target: LOG_TARGET, "Found source account: {:?}", source_account);
-
     let source_account_address = source_account
         .address
         .as_component_address()
         .ok_or(anyhow!("Source account address is not a component address!"))?;
 
-    info!(target: LOG_TARGET, "Found source account address: {:?}", source_account_address);
-
     let target_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
-
-    info!(target: LOG_TARGET, "Found target account address: {:?}", target_account_address);
 
     // collect all instructions
     let non_fungible_api = sdk.non_fungible_api();
     for nft_id in req.nft_ids {
         // get NFT
-        info!(target: LOG_TARGET, "Getting NFT: {:?}", nft_id);
 
         let nft = non_fungible_api
             .get_by_id(nft_id.clone())
             .map_err(|e| anyhow!("Failed to get non fungible token: {}", e))?;
-
-        info!(target: LOG_TARGET, "Got NFT: {:?}", nft);
 
         // add the input for the source account vault substate
         let src_vault = sdk
@@ -435,8 +423,6 @@ pub async fn handle_transfer_nft(
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
 
-    info!(target: LOG_TARGET, "Source account secret: {:?}", source_account_secret_key);
-
     let transaction = transaction_builder(context)
         .with_fee_instructions(vec![Instruction::CallMethod {
             component_address: source_account_address,
@@ -447,21 +433,13 @@ pub async fn handle_transfer_nft(
         .with_inputs(inputs)
         .build_and_seal(&source_account_secret_key.key);
 
-    info!(target: LOG_TARGET, "Transaction built: {:?}", transaction);
-
     // if dry run, we can return the result immediately
     if req.dry_run {
         let transaction_id = *transaction.id();
-
-        info!(target: LOG_TARGET, "Before execute dry run tx: {:?}", transaction_id);
-
         let execute_result = context
             .transaction_service()
             .submit_dry_run_transaction(transaction, vec![])
             .await?;
-
-        info!(target: LOG_TARGET, "After execute dry run tx: {:?}", execute_result);
-
         let finalize = execute_result.finalize;
         return Ok(TransferNftResponse {
             transaction_id,

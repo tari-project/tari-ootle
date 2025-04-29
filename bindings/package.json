@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build-dist": "tsc --project tsconfig.prod.json",
-    "build": "sh build.sh && pnpm npx tsc --project tsconfig.prod.json && pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn"
+    "build": "sh build.sh && tsc --project tsconfig.prod.json && pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn && tsc"
   },
   "files": [
     "/dist"

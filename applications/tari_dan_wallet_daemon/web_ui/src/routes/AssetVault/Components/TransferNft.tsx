@@ -20,28 +20,25 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import {FormEvent, useEffect, useState} from "react";
-import {Form} from "react-router-dom";
+import { FormEvent, useEffect, useState } from "react";
+import { Form } from "react-router-dom";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
-import {useAccountsGetBalances} from "../../../api/hooks/useAccounts";
-import {useTheme} from "@mui/material/styles";
+import { useTheme } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
-import type {NonFungibleId, TransactionResult} from "@tari-project/typescript-bindings";
-import {ResourceAddress, ResourceType, substateIdToString,} from "@tari-project/typescript-bindings";
+import type { NonFungibleId, TransactionResult } from "@tari-project/typescript-bindings";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
 import ListItemText from "@mui/material/ListItemText";
-import {InputLabel} from "@mui/material";
-import {SelectChangeEvent} from "@mui/material/Select/Select";
-import {useListNfts, useNftsTransfer} from "../../../api/hooks/useNfts";
-
-const XTR2 = "resource_0101010101010101010101010101010101010101010101010101010101010101";
+import { InputLabel } from "@mui/material";
+import { SelectChangeEvent } from "@mui/material/Select/Select";
+import { useListNfts, useNftsTransfer } from "../../../api/hooks/useNfts";
+import { substateIdToString } from "../../../utils/helpers";
 
 export default function TransferNft() {
   const [open, setOpen] = useState(false);
@@ -51,28 +48,20 @@ export default function TransferNft() {
       <Button variant="outlined" onClick={() => setOpen(true)}>
         Transfer NFT
       </Button>
-      <TransferNftDialog
-        open={open}
-        handleClose={() => setOpen(false)}
-        onSendComplete={() => setOpen(false)}
-        resource_type="Confidential"
-        resource_address={XTR2}
-      />
+      <TransferNftDialog open={open} handleClose={() => setOpen(false)} onSendComplete={() => setOpen(false)} />
     </>
   );
 }
 
 export interface TransferNftDialogProps {
   open: boolean;
-  resource_address?: ResourceAddress;
-  resource_type?: ResourceType;
   onSendComplete?: () => void;
   handleClose: () => void;
 }
 
 interface NftListItem {
-  id: NonFungibleId,
-  name: string,
+  id: NonFungibleId;
+  name: string;
 }
 
 function nftIdToString(nftId: NonFungibleId): string {
@@ -83,7 +72,7 @@ function nftIdToString(nftId: NonFungibleId): string {
 
 export function TransferNftDialog(props: TransferNftDialogProps) {
   const INITIAL_VALUES = {
-    nftIds: [],
+    nftIds: new Array<NonFungibleId>(),
     targetAccountPublicKey: "",
     maxFee: "",
   };
@@ -100,25 +89,33 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     return null;
   }
 
-  const theme = useTheme();
+  const accountSelector = account.name
+    ? {
+        Name: account.name,
+      }
+    : {
+        ComponentAddress: substateIdToString(account.address),
+      };
 
-  const { data } = useAccountsGetBalances(substateIdToString(account.address));
+  const { data: accountNfts, refetch: refetchNfts } = useListNfts({
+    account: accountSelector,
+  });
+
+  refetchNfts().catch(console.error);
+
+  const theme = useTheme();
 
   const { mutateAsync: calculateFeeEstimate } = useNftsTransfer({
     dry_run: true,
     max_fee: 3000,
     nft_ids: transferFormState.nftIds,
-    source_account: {
-      Name: account.name ? account.name : "",
-    },
+    source_account: accountSelector,
     target_account_public_key: transferFormState.targetAccountPublicKey,
   });
 
   const { mutateAsync: sendTransferNftsTx } = useNftsTransfer({
     nft_ids: transferFormState.nftIds,
-    source_account: {
-      Name: account.name ? account.name : "",
-    },
+    source_account: accountSelector,
     target_account_public_key: transferFormState.targetAccountPublicKey,
     dry_run: false,
     max_fee: parseInt(transferFormState.maxFee),
@@ -146,114 +143,63 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     setDisabled(true);
 
     if (!isNaN(parseInt(transferFormState.maxFee))) {
-      console.log("Send transaction");
       sendTransferNftsTx?.()
-          .then().then((result) => {
-        if (!("Accept" in result.result.result)) {
-          setPopup({
-            title: "Sending transfer transaction failed",
-            error: true,
-            message: JSON.stringify(
+        .then()
+        .then((result) => {
+          if (!("Accept" in result.result.result)) {
+            setPopup({
+              title: "Sending transfer transaction failed",
+              error: true,
+              message: JSON.stringify(
                 unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
-                unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
-            ),
-          });
-          return;
-        }
-        setNfts([]);
-        setTransferFormState(INITIAL_VALUES);
-        props.onSendComplete?.();
-        setPopup({ title: "NFT transfer transaction", error: false, message: "Sent successfully!" });
-      }).catch((e) => {
-        setPopup({ title: "NFT transfer failed", error: true, message: e.message });
-      })
-          .finally(() => {
-            setDisabled(false);
-          });
+                  unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
+              ),
+            });
+            return;
+          }
+          setNfts([]);
+          setTransferFormState(INITIAL_VALUES);
+          props.onSendComplete?.();
+          setPopup({ title: "NFT transfer transaction", error: false, message: "Sent successfully!" });
+        })
+        .catch((e) => {
+          setPopup({ title: "NFT transfer failed", error: true, message: e.message });
+        })
+        .finally(() => {
+          setDisabled(false);
+        });
     } else {
       calculateFeeEstimate?.()
-          .then((result) => {
-            if (!("Accept" in result.result.result)) {
-              setPopup({
-                title: "Fee estimate failed",
-                error: true,
-                // TODO: fix this
-                message: JSON.stringify(
-                    unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
-                    unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
-                ),
-              });
-              return;
-            }
+        .then((result) => {
+          if (!("Accept" in result.result.result)) {
+            setPopup({
+              title: "Fee estimate failed",
+              error: true,
+              // TODO: fix this
+              message: JSON.stringify(
+                unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
+                  unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
+              ),
+            });
+            return;
+          }
 
-            // Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
-            // Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof
-            // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than
-            // accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
-            // TODO: remove once this is no longer an issue
-            const fee = result.fee + 100;
-            setTransferFormState({ ...transferFormState, maxFee: fee.toString() });
-          }).catch((e) => {
-            setPopup({ title: "Fee estimate failed", error: true, message: e.message });
-          })
-          .finally(() => {
-            setDisabled(false);
-          });
+          // Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
+          // Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof
+          // may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than
+          // accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
+          // TODO: remove once this is no longer an issue
+          const fee = result.fee + 100;
+          setTransferFormState({ ...transferFormState, maxFee: fee.toString() });
+        })
+        .catch((e) => {
+          setPopup({ title: "Fee estimate failed", error: true, message: e.message });
+        })
+        .finally(() => {
+          setDisabled(false);
+        });
     }
-
-  }
-
-  // const onTransfer = async (e: FormEvent) => {
-  //   e.preventDefault();
-  //   if (!account) {
-  //     return;
-  //   }
-  //
-  //   setDisabled(true);
-  //   if (!isNaN(parseInt(transferFormState.maxFee))) {
-  //     sendIt?.()
-  //       .then(() => {
-  //         setTransferFormState(INITIAL_VALUES);
-  //         props.onSendComplete?.();
-  //         setPopup({ title: "Send successful", error: false });
-  //       })
-  //       .catch((e) => {
-  //         setPopup({ title: "Send failed", error: true, message: e.message });
-  //       })
-  //       .finally(() => {
-  //         setDisabled(false);
-  //       });
-  //   } else {
-  //     // calculateFeeEstimate?.()
-  //       .then((result) => {
-  //         if (!("Accept" in result.result.result)) {
-  //           setPopup({
-  //             title: "Fee estimate failed",
-  //             error: true,
-  //             // TODO: fix this
-  //             message: JSON.stringify(
-  //               unionGet(result.result.result, "Reject" as keyof TransactionResult) ||
-  //                 unionGet(result.result.result, "AcceptFeeRejectRest" as keyof TransactionResult)?.[1],
-  //             ),
-  //           });
-  //           return;
-  //         }
-  //         Simple fix for the estimated fee differing between the dry-run and non-dry-run transactions.
-  //         Since fees are charged for the transaction byte size and for confidential transfers, the rangeproof
-  //         may differ in length and, therefore in fees. The fees may differ typically by 2/3, this more than
-  //         accounts for that. See https://github.com/tari-project/tari-dan/issues/1312
-  //         TODO: remove once this is no longer an issue
-  //         const fee = result.fee + 100;
-  //         setTransferFormState({ ...transferFormState, maxFee: fee.toString() });
-  //       })
-  //       .catch((e) => {
-  //         setPopup({ title: "Fee estimate failed", error: true, message: e.message });
-  //       })
-  //       .finally(() => {
-  //         setDisabled(false);
-  //       });
-  //   }
-  // };
+  };
 
   const handleClose = () => {
     // rest states
@@ -268,33 +214,30 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   }, [validity]);
 
   // NFT listing
-  const {data: accountNfts} = useListNfts({
-    account: account.name?.toString(),
-    limit: 1000,
-    offset: 0
-  });
   const [nfts, setNfts] = useState<NftListItem[]>([]);
   const [availableNfts, setAvailableNfts] = useState<NftListItem[]>([]);
   useEffect(() => {
     if (accountNfts !== undefined) {
-      setAvailableNfts(accountNfts.nfts.map(nft => {
-        let nftName = "";
+      setAvailableNfts(
+        accountNfts.map((nft) => {
+          let nftName = "";
 
-        const nftData: {Text: string}[][] = nft.data.Tag[1].Map;
-        nftData.forEach(data => {
-          const key = data[0].Text;
-          const value = data[1].Text;
-          if (key === "name") {
-            nftName = value;
-            return;
+          const nftData: { Text: string }[][] = nft.data.Tag[1].Map;
+          nftData.forEach((data) => {
+            const key = data[0].Text;
+            const value = data[1].Text;
+            if (key === "name") {
+              nftName = value;
+              return;
+            }
+          });
+          if (nftName !== "") {
+            return { id: nft.nft_id, name: nftName };
           }
-        });
-        if (nftName !== "") {
-          return {id: nft.nft_id, name: nftName};
-        }
 
-        return {id: nft.nft_id, name: nftIdToString(nft.nft_id)};
-      }))
+          return { id: nft.nft_id, name: nftIdToString(nft.nft_id) };
+        }),
+      );
     }
   }, [accountNfts]);
 
@@ -303,25 +246,25 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       return;
     }
     const nftNamesSelected = event.target.value;
-    const nftsSelected = nftNamesSelected.map(itemName => {
-      return availableNfts.find(nft => {
-        return nft.name === itemName;
-      });
-    })
-        .filter(value => value !== undefined);
+    const nftsSelected = nftNamesSelected
+      .map((itemName) => {
+        return availableNfts.find((nft) => {
+          return nft.name === itemName;
+        });
+      })
+      .filter((value) => value != undefined);
 
     setValidity({
       ...validity,
-      ["nftIds"]: nftsSelected.length > 0,
+      nftIds: nftsSelected.length > 0,
     });
 
-    // @ts-ignore
     setTransferFormState({
       ...transferFormState,
-      ["nftIds"]: nftsSelected.map(item => item?.id),
+      nftIds: nftsSelected.map((item) => item?.id!),
     });
 
-    setNfts(nftsSelected);
+    setNfts(nftsSelected.map((item) => item!));
   };
 
   return (
@@ -351,21 +294,21 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
           <InputLabel id="nft-select-label">Select NFT(s)</InputLabel>
           <Select
-              labelId="nft-select-label"
-              name="nftIds"
-              id="nft-select"
-              multiple
-              value={nfts.map(value => value.name)}
-              required
-              disabled={disabled}
-              onChange={handleChange}
-              renderValue={(selected) => selected.map(item => item).join(', ')}
+            labelId="nft-select-label"
+            name="nftIds"
+            id="nft-select"
+            multiple
+            value={nfts.map((value) => value.name)}
+            required
+            disabled={disabled}
+            onChange={handleChange}
+            renderValue={(selected) => selected.map((item) => item).join(", ")}
           >
             {availableNfts.map((nft) => (
-                <MenuItem key={nftIdToString(nft.id)} value={nft.name}>
-                  <Checkbox checked={nfts.includes(nft)} />
-                  <ListItemText primary={nft.name} />
-                </MenuItem>
+              <MenuItem key={nftIdToString(nft.id)} value={nft.name}>
+                <Checkbox checked={nfts.includes(nft)} />
+                <ListItemText primary={nft.name} />
+              </MenuItem>
             ))}
           </Select>
 
@@ -388,6 +331,6 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   );
 }
 
-  function unionGet<T extends object>(object: T, key: keyof T): T[keyof T] | null {
-    return key in object ? object[key] : null;
-  }
+function unionGet<T extends object>(object: T, key: keyof T): T[keyof T] | null {
+  return key in object ? object[key] : null;
+}

@@ -97,11 +97,11 @@ import type {
   WebauthnStartRegisterRequest,
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
-  WebRtcStartResponse
+  WebRtcStartResponse,
 } from "@tari-project/typescript-bindings";
-import {WalletDaemonClient} from "@tari-project/wallet_jrpc_client";
+import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import useAuthStore from "../store/authStore";
-import {AUTH_TOKEN_FOR_NONE_AUTH} from "../routes/Auth/Auth";
+import { AUTH_TOKEN_FOR_NONE_AUTH } from "../routes/Auth/Auth";
 
 let clientInstance: WalletDaemonClient | null = null;
 let pendingClientInstance: Promise<WalletDaemonClient> | null = null;
@@ -295,7 +295,7 @@ export const nftList = (request: ListAccountNftRequest): Promise<ListAccountNftR
   client().then((c) => c.nftsList(request));
 
 export const nftTransfer = (request: TransferNftRequest): Promise<TransferNftResponse> =>
-    client().then((c) => c.nftTransfer(request));
+  client().then((c) => c.nftTransfer(request));
 
 // validators
 

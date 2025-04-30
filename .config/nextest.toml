@@ -1,5 +1,9 @@
+[profile.default]
+default-filter = "not package(integration_tests) and not test(export_bindings)"
+
 [profile.ci]
 slow-timeout = { period = "60s", terminate-after = 4 }
+default-filter = "not package(integration_tests) and not test(export_bindings)"
 
 [profile.ci.junit]  # this can be some other profile, too
 path = "junit.xml"

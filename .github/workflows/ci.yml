@@ -240,7 +240,7 @@ jobs:
         run: cargo test --no-run --locked --all-features --release
 
       - name: cargo test
-        run: cargo nextest run --all-features --release -E "not package(integration_tests)" --profile ci
+        run: cargo nextest run --all-features --release --profile ci
 
       - name: upload artifact
         uses: actions/upload-artifact@v4 # upload test results as artifact

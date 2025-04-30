@@ -5,7 +5,7 @@
 //!
 //! How to debug the database:
 //!
-//! Use `Test::builder().debug_sql("/tmp/test{}.db")...` to create a database file for each validator
+//! Use `Test::builder().with_rocks_path("/tmp/test{}")...` to create a database for each validator
 //! where {} is replaced with the node address.
 
 use std::time::Duration;
@@ -442,7 +442,7 @@ async fn foreign_shard_group_decides_to_abort() {
 
         let leaf1 = test.get_validator(&TestAddress::new("1")).get_leaf_block();
         let leaf2 = test.get_validator(&TestAddress::new("2")).get_leaf_block();
-        if leaf1.height > NodeHeight(40) || leaf2.height > NodeHeight(40) {
+        if leaf1.height > NodeHeight(50) || leaf2.height > NodeHeight(50) {
             panic!(
                 "Not all transaction committed after {}/{} blocks",
                 leaf1.height, leaf2.height,

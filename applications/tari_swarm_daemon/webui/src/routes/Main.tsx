@@ -194,7 +194,7 @@ function ExtraInfoVN({ name, url, addTxToPool, autoRefresh, state, horizontal, n
           {pool.map((rec, i) => (
             <tr key={i}>
               <td
-                onClick={() => copyToClipboard(rec.transaction_id)}>{copied && "Copied" || shorten(rec.transaction_id)}</td>
+                onClick={() => copyToClipboard(rec.transaction_id)}>{copied == rec.transaction_id && "Copied" || shorten(rec.transaction_id)}</td>
               <td>{(rec.is_ready) ? "Yes" : "No"}</td>
               <td>{getDecision(rec)}</td>
               <td>{rec.stage}</td>

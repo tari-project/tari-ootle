@@ -154,13 +154,15 @@ impl CommandsCommitProofV1 {
     }
 
     fn validate_well_formed(&self) -> Result<(), ForeignProposalCommitProofError> {
+        const MAX_COMMANDS: usize = 1000;
+
         if self.commands.is_empty() {
             return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
                 "CommandsCommitProofV1 must have at least one command"
             )));
         }
 
-        if self.commands.len() > 1000 {
+        if self.commands.len() > MAX_COMMANDS {
             return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
                 "CommandsCommitProofV1 must have at most 1000 commands but has {}",
                 self.commands.len()
@@ -213,7 +215,7 @@ impl CommandsCommitProofV1 {
                 CommitProofElement::QuorumCertificate(qc) => {
                     if qc.signatures.is_empty() {
                         return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
-                            "QuorumCertificate is has no signatures"
+                            "QuorumCertificate has no signatures"
                         )));
                     }
                     if qc

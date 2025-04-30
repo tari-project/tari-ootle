@@ -20,12 +20,13 @@ use tari_dan_storage::{
 };
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
+use crate::helpers::{create_rocksdb, create_sqlite, create_tx_atom};
 
 mod basic_block_operations {
-    use tari_template_lib::prelude::SchnorrSignatureBytes;
+    use tari_dan_storage::consensus_models::QcId;
 
     use super::*;
+    use crate::helpers::{commit_chain, create_chain};
 
     // TODO: sqlite fails due to missing foreign key values
     #[ignore]
@@ -46,32 +47,11 @@ mod basic_block_operations {
         let mut tx = db.create_write_tx().unwrap();
 
         // insert multiple blocks
-        let network = Default::default();
-        let atom1 = create_tx_atom();
-
-        let zero_block = Block::zero_block(network, NumPreshards::P64);
-        zero_block.insert(&mut tx).unwrap();
-
-        let block1 = Block::create(
-            network,
-            *zero_block.id(),
-            zero_block.justify().clone(),
-            NodeHeight(1),
-            Epoch(0),
-            ShardGroup::all_shards(NumPreshards::P64),
-            Default::default(),
-            // Need to have a command in, otherwise this block will not be included internally in the query because it
-            // cannot cause a state change without any commands
-            [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
-            Default::default(),
-            Default::default(),
-            SchnorrSignatureBytes::zero(),
-            EpochTime::now().as_u64(),
-            FixedHash::zero(),
-            ExtraData::default(),
-        )
-        .unwrap();
-        block1.insert(&mut tx).unwrap();
+        let mut chain = create_chain(3);
+        commit_chain(&mut tx, &chain);
+        let block1 = chain.pop().unwrap();
+        let block2 = chain.pop().unwrap();
+        let zero_block = chain.pop().unwrap();
 
         // fetch blocks by id
         let res = tx.blocks_get(zero_block.id()).unwrap();
@@ -87,33 +67,33 @@ mod basic_block_operations {
         // let res = tx.blocks_get_count().unwrap();
         // assert_eq!(res, 2);
 
-        // set is_justified flag
+        // set qcs
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(!block1_from_db.is_justified());
-        tx.blocks_set_flags(block1_from_db.id(), None, Some(true)).unwrap();
+        tx.blocks_set_qcs(block1_from_db.id(), None, Some(&QcId::zero()))
+            .unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(block1_from_db.is_justified());
 
         // set is_commited flag
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(!block1_from_db.is_committed());
-        tx.blocks_set_flags(block1_from_db.id(), Some(true), None).unwrap();
+        tx.blocks_set_qcs(block1_from_db.id(), Some(&QcId::zero()), None)
+            .unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
         assert!(block1_from_db.is_committed());
 
-        // delete one of the blocks - mark the block as not committed, so that we can delete it
-        tx.blocks_set_flags(block1_from_db.id(), Some(false), None).unwrap();
-        tx.blocks_delete(block1.id()).unwrap();
-        // let res = tx.blocks_get_count().unwrap();
-        // assert_eq!(res, 1);
-        assert!(tx.blocks_get(block1.id()).optional().unwrap().is_none());
-        assert!(!tx.blocks_exists(block1.id()).unwrap());
+        let _ignore = tx.blocks_get(block2.id()).unwrap();
+        tx.blocks_delete(block2.id()).unwrap();
+        assert!(tx.blocks_get(block2.id()).optional().unwrap().is_none());
+        assert!(!tx.blocks_exists(block2.id()).unwrap());
 
         tx.rollback().unwrap();
     }
 }
 
 mod block_parent_operations {
+    use tari_dan_storage::consensus_models::QcId;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
@@ -215,9 +195,9 @@ mod block_parent_operations {
         assert_eq!(res, vec![]);
 
         // commit the blocks
-        tx.blocks_set_flags(zero_block.id(), Some(true), None).unwrap();
-        tx.blocks_set_flags(block1.id(), Some(true), None).unwrap();
-        tx.blocks_set_flags(block2.id(), Some(true), None).unwrap();
+        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), None).unwrap();
+        tx.blocks_set_qcs(block1.id(), Some(&QcId::zero()), None).unwrap();
+        tx.blocks_set_qcs(block2.id(), Some(&QcId::zero()), None).unwrap();
 
         // blocks_get_all_by_parent
         let res = tx.blocks_get_committed_by_parent(zero_block.id()).unwrap();
@@ -245,6 +225,7 @@ mod block_parent_operations {
 }
 
 mod block_query_operations {
+    use tari_dan_storage::consensus_models::QcId;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
@@ -272,7 +253,8 @@ mod block_query_operations {
 
         let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
-        tx.blocks_set_flags(zero_block.id(), Some(true), Some(true)).unwrap();
+        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+            .unwrap();
 
         let block1 = Block::create(
             network,
@@ -294,7 +276,8 @@ mod block_query_operations {
         )
         .unwrap();
         block1.insert(&mut tx).unwrap();
-        tx.blocks_set_flags(block1.id(), Some(true), Some(true)).unwrap();
+        tx.blocks_set_qcs(block1.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+            .unwrap();
         block1.as_locked_block().set(&mut tx).unwrap();
 
         let block2 = Block::create(
@@ -318,7 +301,8 @@ mod block_query_operations {
         )
         .unwrap();
         block2.insert(&mut tx).unwrap();
-        tx.blocks_set_flags(block2.id(), Some(true), Some(true)).unwrap();
+        tx.blocks_set_qcs(block2.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+            .unwrap();
         block2.justify().save(&mut tx).unwrap();
 
         let mut block3_data = ExtraData::new();

@@ -639,15 +639,12 @@ impl TestBuilder {
     }
 
     pub fn add_committee(mut self, committee_num: u32, addresses: Vec<&'static str>) -> Self {
-        let entry = self
-            .committees
-            .entry(committee_num)
-            .or_insert_with(|| Committee::new(vec![]));
+        let entry = self.committees.entry(committee_num).or_insert_with(Committee::empty);
 
         for addr in addresses {
             let addr = TestAddress::new(addr);
             let (_, pk) = helpers::derive_keypair_from_address(&addr);
-            entry.members.push((addr, pk.to_byte_type()));
+            entry.members_mut().push((addr, pk.to_byte_type()));
         }
         self
     }

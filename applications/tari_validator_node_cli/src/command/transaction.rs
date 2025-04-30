@@ -43,6 +43,7 @@ use tari_engine_types::{
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
 };
+use tari_sidechain::QuorumDecision;
 use tari_template_lib::{
     arg,
     args::Arg,
@@ -273,7 +274,6 @@ pub async fn submit_transaction(
         summarize(&result, timer.elapsed());
         // Hack: submit response never returns a result unless it's a dry run - however cucumbers expect a result so add
         // it to the response here to satisfy that We'll remove these handlers eventually anyway
-        use tari_dan_storage::consensus_models::QuorumDecision;
         resp.dry_run_result = Some(DryRunTransactionFinalizeResult {
             decision: if final_decision.unwrap().is_commit() {
                 QuorumDecision::Accept

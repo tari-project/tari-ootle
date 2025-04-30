@@ -63,9 +63,8 @@ message ForeignProposalRequestByTransactionId {
 }
 
 message ForeignProposal {
-  Block block = 1;
-  QuorumCertificate justify_qc = 2;
-  bytes encoded_block_pledge = 3;
+  bytes encoded_commit_proof = 1;
+  bytes encoded_block_pledge = 2;
 }
 
 message VoteMessage {
@@ -173,9 +172,8 @@ message QuorumCertificate {
   uint64 block_height = 3;
   uint64 epoch = 4;
   repeated tari.dan.common.SignatureAndPublicKey signatures = 5;
-  repeated bytes leaf_hashes = 7;
-  QuorumDecision decision = 8;
-  uint32 shard_group = 9;
+  QuorumDecision decision = 7;
+  uint32 shard_group = 8;
 }
 
 message ValidatorMetadata {

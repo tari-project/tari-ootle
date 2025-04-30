@@ -10,7 +10,7 @@ use tari_dan_storage::{
 };
 
 use crate::{
-    helper::{create_block_with_qc, create_rocksdb, create_sqlite, gen_substates},
+    helpers::{create_block_with_qc, create_rocksdb, create_sqlite, gen_substates},
     TEST_NUM_PRESHARDS,
 };
 

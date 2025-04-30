@@ -2,7 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_common_types::NodeHeight;
-use tari_dan_storage::consensus_models::{QuorumDecision, TransactionAtom, ValidBlock};
+use tari_dan_storage::consensus_models::{TransactionAtom, ValidBlock};
+use tari_sidechain::QuorumDecision;
 use tari_transaction::TransactionId;
 
 use crate::{hotstuff::HotStuffError, messages::HotstuffMessage};

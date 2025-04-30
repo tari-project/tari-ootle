@@ -41,11 +41,12 @@ use super::{
     BlockDiff,
     BlockPledge,
     EvictNodeAtom,
-    ForeignProposal,
     ForeignProposalAtom,
+    ForeignProposalRecord,
     HighQc,
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
+    QcId,
     QuorumCertificate,
     SubstateChange,
     SubstateDestroyedProof,
@@ -90,10 +91,12 @@ pub struct Block {
     /// Commands in the block. These are in canonical order to ensure a deterministic block hash.
     commands: BTreeSet<Command>,
     // Metadata - not included in the block hash
-    /// Flag that indicates that the block has been justified by a new high QC.
-    is_justified: bool,
-    /// Flag that indicates that the block has been committed.
-    is_committed: bool,
+    /// The QC that justified this block
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    justify_qc_id: Option<QcId>,
+    /// The QC that caused this block to be committed
+    #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+    commit_qc_id: Option<QcId>,
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     block_time: Option<u64>,
     /// Timestamp when was this stored.
@@ -145,8 +148,8 @@ impl Block {
             header,
             justify,
             commands,
-            is_justified: false,
-            is_committed: false,
+            justify_qc_id: None,
+            commit_qc_id: None,
             block_time: None,
             stored_at: None,
         }
@@ -166,8 +169,8 @@ impl Block {
         commands: BTreeSet<Command>,
         command_merkle_root: FixedHash,
         total_leader_fee: u64,
-        is_justified: bool,
-        is_committed: bool,
+        justify_qc_id: Option<QcId>,
+        commit_qc_id: Option<QcId>,
         signature: Option<SchnorrSignatureBytes>,
         created_at: PrimitiveDateTime,
         block_time: Option<u64>,
@@ -196,8 +199,8 @@ impl Block {
             header,
             justify,
             commands,
-            is_justified,
-            is_committed,
+            justify_qc_id,
+            commit_qc_id,
             block_time,
             stored_at: Some(created_at),
         }
@@ -243,12 +246,13 @@ impl Block {
 
     /// This is the parent block for all genesis blocks. Its block ID is always zero.
     pub fn zero_block(network: Network, num_preshards: NumPreshards) -> Self {
+        let qc = QuorumCertificate::genesis(Epoch::zero(), ShardGroup::all_shards(num_preshards));
         Self {
             header: BlockHeader::zero_block(network, num_preshards),
-            justify: QuorumCertificate::genesis(Epoch::zero(), ShardGroup::all_shards(num_preshards)),
+            commit_qc_id: Some(*qc.id()),
+            justify: qc,
             commands: Default::default(),
-            is_justified: false,
-            is_committed: true,
+            justify_qc_id: None,
             stored_at: None,
             block_time: None,
         }
@@ -410,11 +414,15 @@ impl Block {
     }
 
     pub fn is_justified(&self) -> bool {
-        self.is_justified
+        self.justify_qc_id.is_some()
+    }
+
+    pub fn justify_qc_id(&self) -> Option<QcId> {
+        self.justify_qc_id
     }
 
     pub fn is_committed(&self) -> bool {
-        self.is_committed
+        self.commit_qc_id.is_some()
     }
 
     pub fn block_time(&self) -> Option<u64> {
@@ -454,12 +462,12 @@ impl Block {
         Ok(proof)
     }
 
-    pub fn set_is_justified(&mut self, is_justified: bool) {
-        self.is_justified = is_justified;
+    pub fn set_justify_qc(&mut self, justify_qc_id: QcId) {
+        self.justify_qc_id = Some(justify_qc_id);
     }
 
-    pub fn set_is_committed(&mut self, is_committed: bool) {
-        self.is_committed = is_committed;
+    pub fn set_commit_qc(&mut self, commit_qc_id: QcId) {
+        self.commit_qc_id = Some(commit_qc_id);
     }
 }
 
@@ -518,7 +526,7 @@ impl Block {
     ) -> Result<bool, StorageError> {
         // TODO: consider optimising
         let b = Self::get(tx, block_id)?;
-        Ok(b.is_justified)
+        Ok(b.is_justified())
     }
 
     pub fn record_exists<TTx: StateStoreReadTransaction>(tx: &TTx, block_id: &BlockId) -> Result<bool, StorageError> {
@@ -588,7 +596,7 @@ impl Block {
         tx.blocks_delete(block_id)
     }
 
-    pub fn commit_diff<TTx>(&self, tx: &mut TTx, block_diff: BlockDiff) -> Result<(), StorageError>
+    pub fn commit_diff<TTx>(&self, tx: &mut TTx, commit_qc_id: &QcId, block_diff: BlockDiff) -> Result<(), StorageError>
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
@@ -639,16 +647,22 @@ impl Block {
             }
         }
 
-        tx.blocks_set_flags(self.id(), Some(true), None)
+        // Set the QC that committed this block, marking it as committed
+        tx.blocks_set_qcs(self.id(), Some(commit_qc_id), None)?;
+        Ok(())
     }
 
     pub fn get_diff<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<BlockDiff, StorageError> {
         tx.block_diffs_get(self.id())
     }
 
-    pub fn set_as_justified<TTx: StateStoreWriteTransaction>(&mut self, tx: &mut TTx) -> Result<(), StorageError> {
-        self.is_justified = true;
-        tx.blocks_set_flags(self.id(), None, Some(true))
+    pub fn set_as_justified<TTx: StateStoreWriteTransaction>(
+        &mut self,
+        tx: &mut TTx,
+        qc_id: &QcId,
+    ) -> Result<(), StorageError> {
+        self.justify_qc_id = Some(*qc_id);
+        tx.blocks_set_qcs(self.id(), None, Some(qc_id))
     }
 
     pub fn extends<TTx: StateStoreReadTransaction>(&self, tx: &TTx, ancestor: &BlockId) -> Result<bool, StorageError> {
@@ -813,7 +827,17 @@ impl Block {
 
     /// Returns the QC that justifies this block
     pub fn get_justify_qc<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<QuorumCertificate, StorageError> {
-        tx.quorum_certificates_get_by_block_id(self.id())
+        let justify_qc_id = self.justify_qc_id.as_ref().ok_or_else(|| StorageError::QueryError {
+            reason: format!("get_justify_qc: Block {} has not been justified", self.id()),
+        })?;
+        QuorumCertificate::get(tx, justify_qc_id)
+    }
+
+    pub fn get_commit_qc<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<QuorumCertificate, StorageError> {
+        let commit_qc_id = self.commit_qc_id.as_ref().ok_or_else(|| StorageError::QueryError {
+            reason: format!("get_commit_qc: Block {} has not been committed", self.as_leaf_block()),
+        })?;
+        QuorumCertificate::get(tx, commit_qc_id)
     }
 
     pub fn update_nodes<TTx, TFnOnLock, TFnOnCommit, E>(
@@ -926,7 +950,11 @@ impl Block {
         for_shard_group: ShardGroup,
     ) -> Result<BlockPledge, StorageError> {
         if self.is_committed() {
-            // TODO: this is only a problem if we do not preserve DOWN substates "for some reasonable time".
+            // TODO: we could preserve DOWN substates "for some reasonable time" (currently we do for the whole epoch so
+            // this isnt a problem). However, this case applies to nodes that are catching up only
+            // (otherwise the transaction would not be committed and therefore the pledges still available).
+            // This would not be a concern if we were able to force commits without having to execute everything
+            // historically.
             warn!(
                 target: LOG_TARGET,
                 "get_block_pledge: Block {} is already committed. Some substates may be DOWN and therefore these pledges will not be provided", self.as_leaf_block()
@@ -1015,8 +1043,8 @@ impl Block {
     pub fn get_foreign_proposals<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
-    ) -> Result<Vec<ForeignProposal>, StorageError> {
-        ForeignProposal::get_any(tx, self.all_foreign_proposals().map(|p| &p.block_id))
+    ) -> Result<Vec<ForeignProposalRecord>, StorageError> {
+        ForeignProposalRecord::get_any(tx, self.all_foreign_proposals().map(|p| &p.block_id))
     }
 
     pub fn increment_leader_failure_count<TTx: StateStoreWriteTransaction>(
@@ -1052,9 +1080,10 @@ impl Display for Block {
         }
         write!(
             f,
-            "[{}, justify: {} ({}), {}, {}, {} cmd(s), {}->{}]",
+            "[{}, justify: {}/{} ({}), {}, {}, {} cmd(s), {}->{}]",
             self.height(),
             self.justify().block_height(),
+            self.justify().epoch(),
             if self.justifies_parent() { "🟢" } else { "🟡" },
             self.epoch(),
             self.shard_group(),

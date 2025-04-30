@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_engine_types::serde_with;
+use tari_sidechain::QuorumDecision;
 
 use crate::{
-    consensus_models::{BlockId, QuorumDecision, ValidatorSignature},
+    consensus_models::{BlockId, ValidatorSignature},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,

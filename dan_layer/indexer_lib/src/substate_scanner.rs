@@ -183,7 +183,7 @@ where
 
         committee.shuffle();
 
-        let f = (committee.members.len() - 1) / 3;
+        let f = (committee.len() - 1) / 3;
         let mut num_nexist_substate_results = 0;
         let mut last_error = None;
         for vn_addr in committee.addresses() {

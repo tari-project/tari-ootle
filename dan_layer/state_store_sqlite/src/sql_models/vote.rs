@@ -3,7 +3,7 @@
 
 use diesel::Queryable;
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::{consensus_models, consensus_models::QuorumDecision, StorageError};
+use tari_dan_storage::{consensus_models, StorageError};
 use time::PrimitiveDateTime;
 
 use crate::{
@@ -30,16 +30,16 @@ impl TryFrom<Vote> for consensus_models::Vote {
         Ok(Self {
             epoch: Epoch(value.epoch as u64),
             block_id: deserialize_hex_try_from(&value.block_id)?,
-            decision: QuorumDecision::from_u8(u8::try_from(value.decision).map_err(|_| {
-                SqliteStorageError::MalformedDbData {
+            decision: u8::try_from(value.decision)
+                .map_err(|_| SqliteStorageError::MalformedDbData {
                     operation: "TryFrom<Vote> decision",
                     details: format!("Could not convert {} to u8", value.decision),
-                }
-            })?)
-            .ok_or_else(|| SqliteStorageError::MalformedDbData {
-                operation: "TryFrom<Vote> decision",
-                details: format!("Could not convert {} to QuorumDecision", value.decision),
-            })?,
+                })?
+                .try_into()
+                .map_err(|e| SqliteStorageError::MalformedDbData {
+                    operation: "TryFrom<Vote> decision",
+                    details: format!("Could not convert {} to QuorumDecision: {e}", value.decision),
+                })?,
             sender_leaf_hash: deserialize_hex_try_from(&value.sender)?,
             signature: deserialize_json(&value.signature)?,
         })

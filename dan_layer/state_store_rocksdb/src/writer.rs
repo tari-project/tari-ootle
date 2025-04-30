@@ -50,6 +50,7 @@ use tari_dan_storage::{
         Evidence,
         ForeignParkedProposal,
         ForeignProposal,
+        ForeignProposalRecord,
         ForeignProposalStatus,
         HighQc,
         LastExecuted,
@@ -118,7 +119,7 @@ use crate::{
         foreign_parked_blocks,
         foreign_parked_blocks::ForeignParkedBlockModel,
         foreign_proposal,
-        foreign_proposal::{EpochIndexData, ForeignProposalModel},
+        foreign_proposal::{ForeignProposalEpochIndexData, ForeignProposalModel},
         foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeModel,
         lock_conflict,
@@ -299,14 +300,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn blocks_set_flags(
+    fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        set_is_committed: Option<bool>,
-        set_is_justified: Option<bool>,
+        commit_qc_id: Option<&QcId>,
+        justify_qc_id: Option<&QcId>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "blocks_set_flags";
-        if set_is_committed.is_none() && set_is_justified.is_none() {
+        if commit_qc_id.is_none() && justify_qc_id.is_none() {
             return Ok(());
         }
 
@@ -314,29 +315,27 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let mut block = cf.get(block_id, OPERATION)?;
 
         // set the flags
-        if let Some(is_committed) = set_is_committed {
-            block.set_is_committed(is_committed);
-            if is_committed {
-                // If the block is committed, remove it from the pending chain
-                self.db().cf(PendingChainIndex)?.delete(block_id, OPERATION)?;
-                self.db()
-                    .cf(chain::PendingParentChildIndex)?
-                    .delete(&(*block.parent(), *block_id), OPERATION)?;
-                self.db()
-                    .cf(chain::CommittedParentChildChainIndex)?
-                    .put(block.parent(), block_id, OPERATION)?;
-                self.db().cf(CommitBlockModel)?.put(
-                    &ByteColumn,
-                    &CommitBlock {
-                        block_id: *block.id(),
-                        parent_id: *block.parent(),
-                    },
-                    OPERATION,
-                )?;
-            }
+        if let Some(qc_id) = commit_qc_id {
+            block.set_commit_qc(*qc_id);
+            // The block is committed, remove it from the pending chain
+            self.db().cf(PendingChainIndex)?.delete(block_id, OPERATION)?;
+            self.db()
+                .cf(chain::PendingParentChildIndex)?
+                .delete(&(*block.parent(), *block_id), OPERATION)?;
+            self.db()
+                .cf(chain::CommittedParentChildChainIndex)?
+                .put(block.parent(), block_id, OPERATION)?;
+            self.db().cf(CommitBlockModel)?.put(
+                &ByteColumn,
+                &CommitBlock {
+                    block_id: *block.id(),
+                    parent_id: *block.parent(),
+                },
+                OPERATION,
+            )?;
         }
-        if let Some(value) = set_is_justified {
-            block.set_is_justified(value)
+        if let Some(value) = justify_qc_id {
+            block.set_justify_qc(*value)
         }
 
         cf.put(block_id, &block, OPERATION)?;
@@ -453,46 +452,42 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposal) -> Result<(), StorageError> {
+    fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposalRecord) -> Result<(), StorageError> {
         const OPERATION: &str = "foreign_proposals_save";
         let db = self.db();
         let cf = db.cf(ForeignProposalModel)?;
 
-        if !cf.exists(foreign_proposal.block.id(), OPERATION)? {
-            cf.put(foreign_proposal.block.id(), foreign_proposal, OPERATION)?;
+        if !cf.exists(foreign_proposal.block_id(), OPERATION)? {
+            cf.put(foreign_proposal.block_id(), foreign_proposal, OPERATION)?;
 
             db.cf(foreign_proposal::EpochIndex)?.put(
-                &(foreign_proposal.block.epoch(), *foreign_proposal.block.id()),
-                &EpochIndexData {
-                    block_id: *foreign_proposal.block.id(),
-                    proposed_in_block: foreign_proposal.proposed_by_block,
+                &(foreign_proposal.epoch(), *foreign_proposal.block_id()),
+                &ForeignProposalEpochIndexData {
+                    block_id: *foreign_proposal.block_id(),
+                    proposed_in_block: foreign_proposal.proposed_in_block().copied(),
                 },
                 OPERATION,
             )?;
         }
 
         // Update indexes as required
-        if let Some(proposed_block_id) = foreign_proposal.proposed_by_block {
+        if let Some(proposed_block_id) = foreign_proposal.proposed_in_block() {
             db.cf(foreign_proposal::ProposedInBlockIndex)?.put(
-                &(proposed_block_id, *foreign_proposal.block().id()),
+                &(*proposed_block_id, *foreign_proposal.block_id()),
                 &(),
                 OPERATION,
             )?;
         }
 
-        if foreign_proposal.status.is_unconfirmed() {
+        if foreign_proposal.status().is_unconfirmed() {
             db.cf(foreign_proposal::UnconfirmedIndex)?.put(
-                &(foreign_proposal.block.epoch(), *foreign_proposal.block.id()),
+                &(foreign_proposal.epoch(), *foreign_proposal.block_id()),
                 &(),
                 OPERATION,
             )?;
         } else {
             db.cf(foreign_proposal::UnconfirmedIndex)?
-                .delete_or_not_found(
-                    &(foreign_proposal.block.epoch(), *foreign_proposal.block.id()),
-                    OPERATION,
-                )
-                .optional()?;
+                .delete(&(foreign_proposal.epoch(), *foreign_proposal.block_id()), OPERATION)?;
         }
 
         Ok(())
@@ -504,16 +499,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         // TODO: to avoid loading the decoded proposal, an block_id -> epoch index could be made
         // We should also consider keeping foreign proposals out of persistence and in memory
         let fp = db.cf(ForeignProposalModel)?.get(block_id, OPERATION)?;
-        db.cf(ForeignProposalModel)?.delete_or_not_found(block_id, OPERATION)?;
+        db.cf(ForeignProposalModel)?.delete(block_id, OPERATION)?;
         db.cf(foreign_proposal::EpochIndex)?
-            .delete_or_not_found(&(fp.block.epoch(), *block_id), OPERATION)?;
+            .delete_or_not_found(&(fp.epoch(), *block_id), OPERATION)?;
         db.cf(foreign_proposal::UnconfirmedIndex)?
-            .delete_or_not_found(&(fp.block.epoch(), *block_id), OPERATION)
-            .optional()?;
-        if let Some(proposed_block_id) = fp.proposed_by_block {
+            .delete(&(fp.epoch(), *block_id), OPERATION)?;
+        if let Some(proposed_block_id) = fp.proposed_in_block() {
             db.cf(foreign_proposal::ProposedInBlockIndex)?
-                .delete_or_not_found(&(proposed_block_id, *fp.block.id()), OPERATION)
-                .optional()?;
+                .delete(&(*proposed_block_id, *fp.block_id()), OPERATION)?;
         }
         Ok(())
     }
@@ -526,17 +519,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         for result in iter {
             let (epoch, data) = result?;
-            db.cf(ForeignProposalModel)?
-                .delete_or_not_found(&data.block_id, OPERATION)?;
+            db.cf(ForeignProposalModel)?.delete(&data.block_id, OPERATION)?;
             db.cf(foreign_proposal::EpochIndex)?
-                .delete_or_not_found(&(epoch, data.block_id), OPERATION)?;
+                .delete(&(epoch, data.block_id), OPERATION)?;
             db.cf(foreign_proposal::UnconfirmedIndex)?
-                .delete_or_not_found(&(epoch, data.block_id), OPERATION)
-                .optional()?;
+                .delete(&(epoch, data.block_id), OPERATION)?;
             if let Some(proposed_block_id) = data.proposed_in_block {
                 db.cf(foreign_proposal::ProposedInBlockIndex)?
-                    .delete_or_not_found(&(proposed_block_id, data.block_id), OPERATION)
-                    .optional()?;
+                    .delete(&(proposed_block_id, data.block_id), OPERATION)?;
             }
         }
 
@@ -553,35 +543,35 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let mut fp = self.db().cf(ForeignProposalModel)?.get(block_id, OPERATION)?;
         let db = self.db();
 
-        if fp.status.is_unconfirmed() && !status.is_unconfirmed() {
+        if fp.status().is_unconfirmed() && !status.is_unconfirmed() {
             db.cf(foreign_proposal::UnconfirmedIndex)?
-                .delete_or_not_found(&(fp.block.epoch(), *block_id), OPERATION)?;
-        } else if !fp.status.is_unconfirmed() && status.is_unconfirmed() {
+                .delete_or_not_found(&(fp.epoch(), *block_id), OPERATION)?;
+        } else if !fp.status().is_unconfirmed() && status.is_unconfirmed() {
             db.cf(foreign_proposal::UnconfirmedIndex)?
-                .put(&(fp.block.epoch(), *block_id), &(), OPERATION)?;
+                .put(&(fp.epoch(), *block_id), &(), OPERATION)?;
         } else {
             // no change in unconfirmed status
         }
 
-        fp.status = status;
+        fp.set_proposal_status(status);
 
         if let Some(proposed_in_block) = set_proposed_in_block {
             let index_cf = db.cf(foreign_proposal::ProposedInBlockIndex)?;
-            if let Some(prev_id) = fp.proposed_by_block.as_ref() {
+            if let Some(prev_id) = fp.proposed_in_block() {
                 if prev_id != proposed_in_block.block_id() {
-                    index_cf.delete_or_not_found(&(*prev_id, *fp.block.id()), OPERATION)?;
+                    index_cf.delete_or_not_found(&(*prev_id, *fp.block_id()), OPERATION)?;
                 }
             }
-            index_cf.put(&(*proposed_in_block.block_id(), *fp.block.id()), &(), OPERATION)?;
+            index_cf.put(&(*proposed_in_block.block_id(), *fp.block_id()), &(), OPERATION)?;
 
             // Update the epoch index
             let epoch_index_cf = db.cf(foreign_proposal::EpochIndex)?;
-            let key = (fp.block.epoch(), *block_id);
+            let key = (fp.epoch(), *block_id);
             let mut index = epoch_index_cf.get(&key, OPERATION)?;
             index.proposed_in_block = Some(*proposed_in_block.block_id());
             epoch_index_cf.put(&key, &index, OPERATION)?;
 
-            fp.proposed_by_block = Some(*proposed_in_block.block_id());
+            fp.set_proposed_in_block(*proposed_in_block.block_id());
         }
 
         // Update the record
@@ -600,18 +590,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         for result in proposed_iter {
             let (proposed_in_block, fp_id) = result?;
             let mut fp = db.cf(ForeignProposalModel)?.get(&fp_id, OPERATION)?;
-            if fp.proposed_by_block.as_ref() == Some(&proposed_in_block) {
+            if fp.proposed_in_block() == Some(&proposed_in_block) {
                 // Setting the status to New in this case
-                if !fp.status.is_unconfirmed() {
-                    db.cf(foreign_proposal::UnconfirmedIndex)?.put(
-                        &(fp.block.epoch(), *fp.block().id()),
-                        &(),
-                        OPERATION,
-                    )?;
+                if !fp.status().is_unconfirmed() {
+                    db.cf(foreign_proposal::UnconfirmedIndex)?
+                        .put(&(fp.epoch(), *fp.block_id()), &(), OPERATION)?;
                 }
 
-                fp.proposed_by_block = None;
-                fp.status = ForeignProposalStatus::New;
+                fp.reset_proposed();
                 db.cf(ForeignProposalModel)?.put(&fp_id, &fp, OPERATION)?;
             }
 
@@ -893,7 +879,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn missing_transactions_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
+    fn parked_block_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         block: &Block,
         foreign_proposals: &[ForeignProposal],
@@ -922,7 +908,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn missing_transactions_remove(
+    fn parked_block_remove_missing_transaction(
         &mut self,
         _current_height: NodeHeight,
         transaction_id: &TransactionId,
@@ -969,7 +955,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "foreign_parked_blocks_insert";
         self.db()
             .cf(ForeignParkedBlockModel)?
-            .put(park_block.block().id(), park_block, OPERATION)?;
+            .put(park_block.block_id(), park_block, OPERATION)?;
         Ok(())
     }
 

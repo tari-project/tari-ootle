@@ -58,7 +58,6 @@ use tari_dan_storage::{
         MintConfidentialOutputAtom,
         QcId,
         QuorumCertificate,
-        QuorumDecision,
         SubstateDestroyed,
         SubstateRecord,
         TransactionAtom,
@@ -198,7 +197,7 @@ impl TryFrom<proto::consensus::ProposalMessage> for ProposalMessage {
 impl From<&ForeignProposalMessage> for proto::consensus::ForeignProposalMessage {
     fn from(value: &ForeignProposalMessage) -> Self {
         Self {
-            proposal: Some(proto::consensus::ForeignProposal::from(value)),
+            proposal: Some(proto::consensus::ForeignProposal::from(&*value.proposal)),
         }
     }
 }
@@ -209,32 +208,16 @@ impl TryFrom<proto::consensus::ForeignProposalMessage> for ForeignProposalMessag
     fn try_from(value: proto::consensus::ForeignProposalMessage) -> Result<Self, Self::Error> {
         let proposal = value.proposal.ok_or_else(|| anyhow!("Proposal is missing"))?;
         Ok(ForeignProposalMessage {
-            block: proposal.block.ok_or_else(|| anyhow!("Block is missing"))?.try_into()?,
-            justify_qc: proposal
-                .justify_qc
-                .ok_or_else(|| anyhow!("Justify QC is missing"))?
-                .try_into()?,
-            block_pledge: decode_from_slice(&proposal.encoded_block_pledge).context("Failed to decode block pledge")?,
+            proposal: Box::new(proposal.try_into()?),
         })
-    }
-}
-
-impl From<&ForeignProposalMessage> for proto::consensus::ForeignProposal {
-    fn from(value: &ForeignProposalMessage) -> Self {
-        Self {
-            block: Some(proto::consensus::Block::from(&value.block)),
-            justify_qc: Some(proto::consensus::QuorumCertificate::from(&value.justify_qc)),
-            encoded_block_pledge: encode_to_vec(&value.block_pledge).expect("Failed to encode block pledge"),
-        }
     }
 }
 
 impl From<&ForeignProposal> for proto::consensus::ForeignProposal {
     fn from(value: &ForeignProposal) -> Self {
         Self {
-            block: Some(proto::consensus::Block::from(&value.block)),
-            justify_qc: Some(proto::consensus::QuorumCertificate::from(&value.justify_qc)),
-            encoded_block_pledge: encode_to_vec(&value.block_pledge).expect("Failed to encode block pledge"),
+            encoded_commit_proof: encode_to_vec(value.commit_proof()).expect("Failed to encode commit proof"),
+            encoded_block_pledge: encode_to_vec(value.block_pledge()).expect("Failed to encode block pledge"),
         }
     }
 }
@@ -244,12 +227,8 @@ impl TryFrom<proto::consensus::ForeignProposal> for ForeignProposal {
 
     fn try_from(value: proto::consensus::ForeignProposal) -> Result<Self, Self::Error> {
         Ok(Self::new(
-            value.block.ok_or_else(|| anyhow!("Block is missing"))?.try_into()?,
+            decode_from_slice(&value.encoded_commit_proof).context("Failed to decode commit proof")?,
             decode_from_slice(&value.encoded_block_pledge).context("Failed to decode block pledge")?,
-            value
-                .justify_qc
-                .ok_or_else(|| anyhow!("Justify QC is missing"))?
-                .try_into()?,
         ))
     }
 }
@@ -357,8 +336,7 @@ impl TryFrom<proto::consensus::VoteMessage> for VoteMessage {
             epoch: Epoch(value.epoch),
             block_id: BlockId::try_from(value.block_id)?,
             unverified_block_height: NodeHeight(value.block_height),
-            decision: QuorumDecision::from_u8(u8::try_from(value.decision)?)
-                .ok_or_else(|| anyhow!("Invalid decision byte {}", value.decision))?,
+            decision: u8::try_from(value.decision)?.try_into()?,
             signature: value
                 .signature
                 .ok_or_else(|| anyhow!("Signature is missing"))?
@@ -840,7 +818,6 @@ impl From<&QuorumCertificate> for proto::consensus::QuorumCertificate {
             epoch: source.epoch().as_u64(),
             shard_group: source.shard_group().encode_as_u32(),
             signatures: source.signatures().iter().map(Into::into).collect(),
-            leaf_hashes: source.leaf_hashes().iter().map(|h| h.to_vec()).collect(),
             decision: i32::from(source.decision().as_u8()),
         }
     }
@@ -863,13 +840,7 @@ impl TryFrom<proto::consensus::QuorumCertificate> for QuorumCertificate {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
-            value
-                .leaf_hashes
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
-            QuorumDecision::from_u8(u8::try_from(value.decision)?)
-                .ok_or_else(|| anyhow!("Invalid Decision byte {}", value.decision))?,
+            u8::try_from(value.decision)?.try_into()?,
         ))
     }
 }

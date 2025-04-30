@@ -4,7 +4,6 @@
 use std::collections::HashSet;
 
 use log::*;
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     Epoch,
@@ -21,11 +20,11 @@ use tokio::sync::broadcast;
 
 use super::config::HotstuffConfig;
 use crate::{
-    block_validations,
     hotstuff::{epoch_state::EpochState, error::HotStuffError, CurrentView, HotstuffEvent, ProposalValidationError},
     messages::{ForeignProposalMessage, HotstuffMessage, MissingTransactionsRequest, ProposalMessage},
     tracing::TraceTimer,
     traits::{ConsensusSpec, OutboundMessaging},
+    validations,
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_message_validate";
@@ -205,7 +204,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             for transaction_id in transaction_ids {
                 debug!(target: LOG_TARGET, "🔍 Checking if transaction {} unparks any blocks", transaction_id);
                 if let Some((unparked_block, foreign_proposals)) =
-                    tx.missing_transactions_remove(current_height + NodeHeight(1), transaction_id)?
+                    tx.parked_block_remove_missing_transaction(current_height + NodeHeight(1), transaction_id)?
                 {
                     info!(target: LOG_TARGET, "♻️ all transactions for local block {unparked_block} are ready for consensus");
 
@@ -238,7 +237,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         block: &Block,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
-        block_validations::check_local_proposal::<TConsensusSpec>(
+        validations::check_local_proposal::<TConsensusSpec>(
             self.current_view.get_epoch(),
             block,
             epoch_state.local_committee(),
@@ -252,18 +251,10 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
     fn check_foreign_proposal(
         &self,
-        block: &Block,
-        committee_for_block: &Committee<TConsensusSpec::Addr>,
-        expected_epoch_hash: &FixedHash,
+        proposal: &ForeignProposal,
+        committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
-        block_validations::check_foreign_proposal::<TConsensusSpec>(
-            block,
-            committee_for_block,
-            &self.vote_signing_service,
-            &self.leader_strategy,
-            &self.config,
-            expected_epoch_hash,
-        )
+        validations::check_foreign_proposal::<TConsensusSpec>(proposal, committee, &self.leader_strategy, &self.config)
     }
 
     fn handle_missing_transactions_local_block(
@@ -331,7 +322,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             "⏳ Block {} has {} missing transactions", proposal.block, missing_tx_ids.len(),
         );
 
-        tx.missing_transactions_insert(&proposal.block, &proposal.foreign_proposals, &missing_tx_ids)?;
+        tx.parked_block_insert(&proposal.block, &proposal.foreign_proposals, &missing_tx_ids)?;
 
         Ok(missing_tx_ids)
     }
@@ -349,12 +340,12 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             from
         );
 
-        if msg.block.commands().is_empty() {
+        if msg.proposal.commit_proof().commands().is_empty() {
             warn!(
                 target: LOG_TARGET,
-                "❌ Foreign proposal block {} is empty therefore it cannot involve the local shard group", msg.block
+                "❌ Foreign proposal block {} is empty; therefore, it cannot involve the local shard group", msg.proposal,
             );
-            let block_id = *msg.block.id();
+            let block_id = msg.proposal.calculate_block_id();
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::ForeignProposal(msg),
@@ -366,10 +357,10 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
         let committee = self
             .epoch_manager
-            .get_committee_by_validator_public_key(msg.block.epoch(), *msg.block.proposed_by())
+            .get_committee_by_validator_public_key(msg.proposal.epoch(), msg.proposal.proposed_by())
             .await?;
 
-        if let Err(err) = self.check_foreign_proposal(&msg.block, &committee, epoch_state.epoch_hash()) {
+        if let Err(err) = self.check_foreign_proposal(&msg.proposal, &committee) {
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::ForeignProposal(msg),
@@ -379,18 +370,18 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
         self.store.with_write_tx(|tx| {
             let all_involved_transactions = msg
-                .block
+                .proposal
                 .all_transaction_ids_in_committee(epoch_state.local_committee_info());
             // CASE: all foreign proposals must include evidence
             let num_transactions = all_involved_transactions.clone().count();
             if num_transactions == 0 {
                 warn!(
                     target: LOG_TARGET,
-                    "❌ Foreign Block {} has no transactions involving our committee", msg.block
+                    "❌ Foreign Block {} has no transactions involving our committee", msg.proposal
                 );
                 // drop the borrow of msg.block
                 drop(all_involved_transactions);
-                let block_id = *msg.block.id();
+                let block_id = msg.proposal.calculate_block_id();
                 return Ok(MessageValidationResult::Invalid {
                     from,
                     message: HotstuffMessage::ForeignProposal(msg),
@@ -405,7 +396,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             if missing_tx_ids.is_empty() {
                 debug!(
                     target: LOG_TARGET,
-                    "✅ Foreign Block {} has no missing transactions (out of {} transaction(s) involving this shard group)", msg.block,
+                    "✅ Foreign Block {} has no missing transactions (out of {} transaction(s) involving this shard group)", msg.proposal,
                     num_transactions
                 );
                 return Ok(MessageValidationResult::Ready {
@@ -416,7 +407,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
 
             info!(
                 target: LOG_TARGET,
-                "⏳ Foreign Block {} has {} missing transactions", msg.block, missing_tx_ids.len(),
+                "⏳ Foreign Block {} has {} missing transactions", msg.proposal, missing_tx_ids.len(),
             );
 
             let parked_block = ForeignParkedProposal::from(msg);
@@ -425,8 +416,8 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             }
 
             Ok(MessageValidationResult::ParkedProposal {
-                block_id: *parked_block.block().id(),
-                epoch: parked_block.block().epoch(),
+                block_id: *parked_block.block_id(),
+                epoch: parked_block.epoch(),
                 missing_txs: missing_tx_ids,
             })
         })
@@ -439,7 +430,6 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         proposal: &ForeignProposal,
     ) -> Result<HashSet<TransactionId>, HotStuffError> {
         let mut all_involved_transactions = proposal
-            .block()
             .all_transaction_ids_in_committee(local_committee_info)
             .peekable();
 

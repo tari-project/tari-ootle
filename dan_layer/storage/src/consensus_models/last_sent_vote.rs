@@ -3,8 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{Epoch, NodeHeight};
+use tari_sidechain::QuorumDecision;
 
-use super::{QuorumDecision, ValidatorSignature};
+use super::ValidatorSignature;
 use crate::{consensus_models::BlockId, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -11,7 +11,7 @@ use tari_dan_storage::{
 use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helper::{create_block, create_rocksdb, create_sqlite, create_tx_atom};
+use crate::helpers::{create_block, create_rocksdb, create_sqlite, create_tx_atom};
 
 #[test]
 fn missing_transactions_sqlite() {
@@ -58,8 +58,7 @@ fn missing_transactions_operations(db: impl StateStore) {
 
     // missing_transactions_insert
     let missing_transaction_ids = vec![&atom1.id];
-    tx.missing_transactions_insert(&block1, &[], missing_transaction_ids)
-        .unwrap();
+    tx.parked_block_insert(&block1, &[], missing_transaction_ids).unwrap();
 
     // blocks_get_pending_transactions
     // let res = tx.blocks_get_pending_transactions(block1.id()).unwrap();
@@ -67,7 +66,8 @@ fn missing_transactions_operations(db: impl StateStore) {
     // assert_eq!(res[0], atom1.id);
 
     // missing_transactions_remove
-    tx.missing_transactions_remove(block1.height(), atom1.id()).unwrap();
+    tx.parked_block_remove_missing_transaction(block1.height(), atom1.id())
+        .unwrap();
     // let res = tx.blocks_get_pending_transactions(block1.id()).unwrap();
     // assert_eq!(res.len(), 0);
 

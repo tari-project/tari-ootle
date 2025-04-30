@@ -577,7 +577,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             committees
                 .entry(ShardGroup::new(shard_start as u32, shard_end as u32))
                 .or_insert_with(Committee::empty)
-                .members
+                .members_mut()
                 .push((addr, pk));
         }
 
@@ -697,7 +697,7 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
                 .entry(committee.as_shard_group())
                 .or_insert_with(|| Committee::empty());
 
-            validators.members.push((
+            validators.members_mut().push((
                 DbValidatorNode::try_parse_address(&vn.address)?,
                 RistrettoPublicKeyBytes::from_bytes(&vn.public_key).map_err(|_| {
                     SqliteStorageError::MalformedDbData(format!(

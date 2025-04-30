@@ -17,13 +17,12 @@ use tari_dan_storage::{
         BlockId,
         BlockTransactionExecution,
         BurntUtxo,
-        ForeignProposal,
+        ForeignProposalRecord,
         ForeignProposalStatus,
         HighQc,
         LeafBlock,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        QuorumDecision,
         SubstateChange,
         SubstateLock,
         SubstatePledge,
@@ -40,6 +39,7 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
+use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -57,17 +57,34 @@ const MEM_MAX_PROPOSED_UTXO_MINTS_SIZE: usize = 1000;
 #[derive(Debug, Clone)]
 pub struct BlockDecision {
     pub quorum_decision: Option<QuorumDecision>,
-    /// Contains newly-locked non-dummy blocks
-    pub locked_blocks: Vec<Block>,
+    /// Contains newly-committed non-dummy blocks
+    pub commit_blocks: Vec<Block>,
     pub finalized_transactions: Vec<Vec<TransactionPoolRecord>>,
     pub high_qc: HighQc,
-    pub committed_blocks_with_evictions: Vec<Block>,
-    pub committed_end_of_epoch_block: Option<Block>,
 }
 
 impl BlockDecision {
     pub fn is_accept(&self) -> bool {
         matches!(self.quorum_decision, Some(QuorumDecision::Accept))
+    }
+
+    pub fn is_epoch_end(&self) -> bool {
+        self.commit_blocks.iter().any(|block| block.is_epoch_end())
+    }
+
+    pub fn take_end_of_epoch_block(&mut self) -> Option<Block> {
+        if let Some(pos) = self.commit_blocks.iter().position(|block| block.is_epoch_end()) {
+            let block = self.commit_blocks.remove(pos);
+            Some(block)
+        } else {
+            None
+        }
+    }
+
+    pub fn commit_blocks_with_evictions_iter(&self) -> impl Iterator<Item = &Block> + Clone + '_ {
+        self.commit_blocks
+            .iter()
+            .filter(|block| block.all_node_evictions().next().is_some())
     }
 }
 
@@ -408,7 +425,7 @@ impl ProposedBlockChangeSet {
         }
 
         for block_id in &self.proposed_foreign_proposals {
-            ForeignProposal::set_status_by_id(tx, block_id, ForeignProposalStatus::Proposed, Some(&self.block))?;
+            ForeignProposalRecord::set_status_by_id(tx, block_id, ForeignProposalStatus::Proposed, Some(&self.block))?;
         }
 
         for mint in &self.proposed_utxo_mints {

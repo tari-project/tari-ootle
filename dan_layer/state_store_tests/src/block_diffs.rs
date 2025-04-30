@@ -10,7 +10,7 @@ use tari_dan_storage::{
 };
 use tari_engine_types::substate::{hash_substate, Substate};
 
-use crate::helper::{
+use crate::helpers::{
     build_substate_record,
     build_substate_value,
     commit_chain,

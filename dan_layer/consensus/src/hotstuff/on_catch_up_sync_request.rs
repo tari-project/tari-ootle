@@ -137,7 +137,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                         from.clone(),
                         HotstuffMessage::Proposal(ProposalMessage {
                             block,
-                            foreign_proposals,
+                            foreign_proposals: foreign_proposals.into_iter().map(|p| p.into_proposal()).collect(),
                         }),
                     )
                     .await

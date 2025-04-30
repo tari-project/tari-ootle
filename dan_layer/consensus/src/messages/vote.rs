@@ -5,7 +5,8 @@ use std::fmt::Display;
 
 use serde::Serialize;
 use tari_dan_common_types::{Epoch, NodeHeight};
-use tari_dan_storage::consensus_models::{BlockId, LastSentVote, QuorumDecision, ValidatorSignature};
+use tari_dan_storage::consensus_models::{BlockId, LastSentVote, ValidatorSignature};
+use tari_sidechain::QuorumDecision;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct VoteMessage {

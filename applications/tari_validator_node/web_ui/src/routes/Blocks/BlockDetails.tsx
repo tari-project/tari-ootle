@@ -208,7 +208,7 @@ export default function BlockDetails() {
                           <TableRow>
                             <TableCell>Status</TableCell>
                             <DataTableCell>
-                              <StatusChip status={block!.is_committed ? "Commit" : "Pending"} />
+                              <StatusChip status={block!.commit_qc_id ? "Commit" : "Pending"} />
                             </DataTableCell>
                           </TableRow>
                           <TableRow>

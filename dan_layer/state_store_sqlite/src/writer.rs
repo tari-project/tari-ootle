@@ -41,6 +41,7 @@ use tari_dan_storage::{
         Evidence,
         ForeignParkedProposal,
         ForeignProposal,
+        ForeignProposalRecord,
         ForeignProposalStatus,
         HighQc,
         LastExecuted,
@@ -75,6 +76,7 @@ use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConf
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeNode, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
+use tari_utilities::ByteArray;
 use time::{OffsetDateTime, PrimitiveDateTime};
 
 use crate::{
@@ -238,7 +240,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             blocks::qc_id.eq(serialize_hex(block.justify().id())),
             blocks::qc_height.eq(block.justify().block_height().as_u64() as i64),
             blocks::is_dummy.eq(block.is_dummy()),
-            blocks::is_justified.eq(block.is_justified()),
             blocks::signature.eq(block.signature().map(serialize_json).transpose()?),
             blocks::timestamp.eq(block.timestamp() as i64),
             blocks::epoch_hash.eq(serialize_hex(block.epoch_hash())),
@@ -304,23 +305,23 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn blocks_set_flags(
+    fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        is_committed: Option<bool>,
-        is_justified: Option<bool>,
+        commit_qc_id: Option<&QcId>,
+        justify_qc_id: Option<&QcId>,
     ) -> Result<(), StorageError> {
         use crate::schema::blocks;
 
         #[derive(AsChangeset)]
         #[diesel(table_name = blocks)]
         struct Changes {
-            is_committed: Option<bool>,
-            is_justified: Option<bool>,
+            commit_qc_id: Option<String>,
+            justify_qc_id: Option<String>,
         }
         let changes = Changes {
-            is_committed,
-            is_justified,
+            commit_qc_id: commit_qc_id.map(serialize_hex),
+            justify_qc_id: justify_qc_id.map(serialize_hex),
         };
 
         diesel::update(blocks::table)
@@ -580,11 +581,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposal) -> Result<(), StorageError> {
+    fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposalRecord) -> Result<(), StorageError> {
         use crate::schema::foreign_proposals;
-        let block = foreign_proposal.block();
+        let proposal = foreign_proposal.proposal();
+        let header = &proposal.commit_proof().sidechain_block_commit_proof().header;
 
-        let block_id_hex = serialize_hex(block.id());
+        let block_id_hex = serialize_hex(foreign_proposal.block_id());
 
         let count = foreign_proposals::table
             .count()
@@ -595,26 +597,22 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 source: e,
             })?;
 
+        let shard_group = proposal.shard_group_unchecked();
         if count == 0 {
             let values = (
                 foreign_proposals::block_id.eq(block_id_hex),
-                foreign_proposals::parent_block_id.eq(serialize_hex(block.parent())),
-                foreign_proposals::state_merkle_root.eq(block.state_merkle_root().to_string()),
-                foreign_proposals::command_merkle_root.eq(block.command_merkle_root().to_string()),
-                foreign_proposals::network.eq(block.network().to_string()),
-                foreign_proposals::height.eq(block.height().as_u64() as i64),
-                foreign_proposals::epoch.eq(block.epoch().as_u64() as i64),
-                foreign_proposals::shard_group.eq(block.shard_group().encode_as_u32() as i32),
-                foreign_proposals::proposed_by.eq(serialize_hex(block.proposed_by().as_bytes())),
-                foreign_proposals::command_count.eq(block.commands().len() as i64),
-                foreign_proposals::commands.eq(serialize_json(block.commands())?),
-                foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
-                foreign_proposals::qc.eq(serialize_json(block.justify())?),
-                foreign_proposals::timestamp.eq(block.timestamp() as i64),
-                foreign_proposals::epoch_hash.eq(serialize_hex(block.epoch_hash())),
-                foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
-                // Extra
-                foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
+                foreign_proposals::parent_block_id.eq(serialize_hex(header.parent_id)),
+                foreign_proposals::state_merkle_root.eq(serialize_hex(header.state_merkle_root)),
+                foreign_proposals::command_merkle_root.eq(header.command_merkle_root.to_string()),
+                foreign_proposals::network.eq(header.network.to_string()),
+                foreign_proposals::height.eq(header.height as i64),
+                foreign_proposals::epoch.eq(header.epoch as i64),
+                foreign_proposals::shard_group.eq(shard_group.encode_as_u32() as i32),
+                foreign_proposals::proposed_by.eq(serialize_hex(header.proposed_by.as_bytes())),
+                foreign_proposals::command_count.eq(foreign_proposal.commands().len() as i64),
+                foreign_proposals::commands.eq(serialize_json(foreign_proposal.commands())?),
+                foreign_proposals::metadata_hash.eq(serialize_hex(header.metadata_hash)),
+                foreign_proposals::commit_proof.eq(serialize_json(foreign_proposal.proposal().commit_proof())?),
                 foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
                 foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
             );
@@ -628,23 +626,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 })?;
         } else {
             let values = (
-                foreign_proposals::parent_block_id.eq(serialize_hex(block.parent())),
-                foreign_proposals::state_merkle_root.eq(block.state_merkle_root().to_string()),
-                foreign_proposals::command_merkle_root.eq(block.command_merkle_root().to_string()),
-                foreign_proposals::network.eq(block.network().to_string()),
-                foreign_proposals::height.eq(block.height().as_u64() as i64),
-                foreign_proposals::epoch.eq(block.epoch().as_u64() as i64),
-                foreign_proposals::shard_group.eq(block.shard_group().encode_as_u32() as i32),
-                foreign_proposals::proposed_by.eq(serialize_hex(block.proposed_by().as_bytes())),
-                foreign_proposals::command_count.eq(block.commands().len() as i64),
-                foreign_proposals::commands.eq(serialize_json(block.commands())?),
-                foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
-                foreign_proposals::qc.eq(serialize_json(block.justify())?),
-                foreign_proposals::timestamp.eq(block.timestamp() as i64),
-                foreign_proposals::epoch_hash.eq(serialize_hex(block.epoch_hash())),
-                foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
-                // Extra
-                foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
+                foreign_proposals::parent_block_id.eq(serialize_hex(header.parent_id)),
+                foreign_proposals::state_merkle_root.eq(serialize_hex(header.state_merkle_root)),
+                foreign_proposals::command_merkle_root.eq(serialize_hex(header.command_merkle_root)),
+                foreign_proposals::network.eq(header.network.to_string()),
+                foreign_proposals::height.eq(header.height as i64),
+                foreign_proposals::epoch.eq(header.epoch as i64),
+                foreign_proposals::shard_group.eq(shard_group.encode_as_u32() as i32),
+                foreign_proposals::proposed_by.eq(serialize_hex(header.proposed_by.as_bytes())),
+                foreign_proposals::command_count.eq(proposal.commands().len() as i64),
+                foreign_proposals::commands.eq(serialize_json(proposal.commands())?),
+                foreign_proposals::metadata_hash.eq(serialize_hex(header.metadata_hash)),
+                foreign_proposals::commit_proof.eq(serialize_json(foreign_proposal.proposal().commit_proof())?),
                 foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
                 foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
             );
@@ -1122,7 +1115,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn missing_transactions_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
+    fn parked_block_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         block: &Block,
         foreign_proposals: &[ForeignProposal],
@@ -1160,7 +1153,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         Ok(())
     }
 
-    fn missing_transactions_remove(
+    fn parked_block_remove_missing_transaction(
         &mut self,
         height: NodeHeight,
         transaction_id: &TransactionId,
@@ -1207,8 +1200,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                     operation: "missing_transactions_remove",
                     source: e,
                 })?;
-            let block = self.parked_blocks_remove(&block_id)?;
-            return Ok(Some(block));
+            let block_and_foreign_proposals = self.parked_blocks_remove(&block_id)?;
+            return Ok(Some(block_and_foreign_proposals));
         }
 
         Ok(None)
@@ -1218,10 +1211,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::foreign_parked_blocks;
 
         let values = (
-            foreign_parked_blocks::block_id.eq(serialize_hex(park_block.block().id())),
-            foreign_parked_blocks::block.eq(serialize_json(park_block.block())?),
+            foreign_parked_blocks::block_id.eq(serialize_hex(park_block.block_id())),
+            foreign_parked_blocks::commit_proof.eq(serialize_json(park_block.commit_proof())?),
             foreign_parked_blocks::block_pledges.eq(serialize_json(park_block.block_pledge())?),
-            foreign_parked_blocks::justify_qc.eq(serialize_json(park_block.justify_qc())?),
         );
 
         diesel::insert_into(foreign_parked_blocks::table)

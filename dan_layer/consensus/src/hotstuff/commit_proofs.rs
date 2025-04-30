@@ -5,7 +5,7 @@ use log::*;
 use tari_common_types::types::CompressedPublicKey;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockHeader, EndOfEpochCommand, QuorumCertificate, QuorumDecision},
+    consensus_models::{Block, BlockHeader, EndOfEpochCommand, QuorumCertificate},
     StateStoreReadTransaction,
 };
 use tari_sidechain::{
@@ -25,13 +25,18 @@ use crate::hotstuff::HotStuffError;
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::eviction_proof";
 
-pub fn generate_eviction_proofs<TTx: StateStoreReadTransaction>(
+pub fn generate_eviction_proofs<'a, TTx, I>(
     tx: &TTx,
     tip_qc: &QuorumCertificate,
-    committed_blocks_with_evictions: &[Block],
-) -> Result<Vec<EvictionProof>, HotStuffError> {
+    committed_blocks_with_evictions: I,
+) -> Result<Vec<EvictionProof>, HotStuffError>
+where
+    TTx: StateStoreReadTransaction,
+    I: IntoIterator<Item = &'a Block> + Clone,
+{
     let num_evictions = committed_blocks_with_evictions
-        .iter()
+        .clone()
+        .into_iter()
         .map(|b| b.all_node_evictions().count())
         .sum();
 
@@ -67,7 +72,6 @@ pub fn generate_eviction_proofs<TTx: StateStoreReadTransaction>(
 pub fn generate_end_of_epoch_commit_proof<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     tip_qc: &QuorumCertificate,
-    // committed_eoe_blocks: &[Block],
     commit_block: &Block,
 ) -> Result<CommandCommitProof<EndOfEpochCommand>, HotStuffError> {
     if commit_block.commands().len() != 1 {
@@ -89,9 +93,9 @@ pub fn generate_end_of_epoch_commit_proof<TTx: StateStoreReadTransaction>(
     Ok(command_commit_proof)
 }
 
-fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
+pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
     tx: &TTx,
-    tip_qc: &QuorumCertificate,
+    commit_qc: &QuorumCertificate,
     commit_block: &Block,
 ) -> Result<SidechainBlockCommitProof, HotStuffError> {
     let mut proof_elements = Vec::with_capacity(3);
@@ -102,10 +106,10 @@ fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
         )));
     }
 
-    debug!(target: LOG_TARGET, "Add tip_qc: {tip_qc}");
-    proof_elements.push(convert_qc_to_proof_element(tip_qc)?);
+    debug!(target: LOG_TARGET, "Add commit_qc: {commit_qc}");
+    proof_elements.push(convert_qc_to_proof_element(commit_qc)?);
 
-    let mut block = tip_qc.get_block(tx)?;
+    let mut block = commit_qc.get_block(tx)?;
     while block.id() != commit_block.id() {
         if block.justifies_parent() {
             debug!(target: LOG_TARGET, "Add justify: {}", block.justify());
@@ -210,10 +214,7 @@ fn convert_qc_to_proof_element(qc: &QuorumCertificate) -> Result<CommitProofElem
                     })
                 })
                 .collect::<Result<_, HotStuffError>>()?,
-            decision: match qc.decision() {
-                QuorumDecision::Accept => tari_sidechain::QuorumDecision::Accept,
-                QuorumDecision::Reject => tari_sidechain::QuorumDecision::Reject,
-            },
+            decision: qc.decision(),
         },
     ))
 }
@@ -244,6 +245,7 @@ mod tests {
     use tari_common_types::types::FixedHash;
     use tari_crypto::tari_utilities::epoch_time::EpochTime;
     use tari_dan_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
+    use tari_sidechain::QuorumDecision;
 
     use super::*;
 
@@ -261,7 +263,6 @@ mod tests {
             NodeHeight(1),
             Epoch(1),
             ShardGroup::all_shards(NumPreshards::P256),
-            vec![],
             vec![],
             QuorumDecision::Accept,
         );

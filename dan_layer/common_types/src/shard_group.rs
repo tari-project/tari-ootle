@@ -32,17 +32,26 @@ impl ShardGroup {
     /// ## Panics
     /// Panics if the start shard is greater than the end shard.
     pub fn new<T: Into<Shard> + Copy>(start: T, end_inclusive: T) -> Self {
-        Self::checked_new(start, end_inclusive)
+        Self::new_checked(start, end_inclusive)
             .expect("INVARIANT: start shard must be less than or equal to end_inclusive")
     }
 
-    pub fn checked_new<T: Into<Shard> + Copy>(start: T, end_inclusive: T) -> Option<Self> {
+    pub fn new_checked<T: Into<Shard> + Copy>(start: T, end_inclusive: T) -> Option<Self> {
         let start = start.into();
         let end_inclusive = end_inclusive.into();
         if start > end_inclusive {
             return None;
         }
         Some(Self { start, end_inclusive })
+    }
+
+    /// Creates a new ShardGroup. The shard group bounds are not checked.
+    /// Prepare checked_new unless the bounds have already been checked by the caller.
+    pub fn new_unchecked<T: Into<Shard> + Copy>(start: T, end_inclusive: T) -> Self {
+        Self {
+            start: start.into(),
+            end_inclusive: end_inclusive.into(),
+        }
     }
 
     pub fn all_shards(num_preshards: NumPreshards) -> Self {
@@ -87,7 +96,7 @@ impl ShardGroup {
 
         let start = n >> 16;
         let end = n & 0xFFFF;
-        Self::checked_new(start, end)
+        Self::new_checked(start, end)
     }
 
     pub fn shard_iter(self) -> impl Iterator<Item = Shard> + 'static {
@@ -175,7 +184,7 @@ impl FromStr for ShardGroup {
         let start = start.parse::<u32>().map_err(|_| ShardGroupParseError(s.to_string()))?;
         let end = parts.next().ok_or_else(|| ShardGroupParseError(s.to_string()))?;
         let end = end.parse::<u32>().map_err(|_| ShardGroupParseError(s.to_string()))?;
-        ShardGroup::checked_new(start, end).ok_or_else(|| ShardGroupParseError(s.to_string()))
+        ShardGroup::new_checked(start, end).ok_or_else(|| ShardGroupParseError(s.to_string()))
     }
 }
 

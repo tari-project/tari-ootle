@@ -8,6 +8,7 @@ use axum::{
     Extension,
     Json,
 };
+use log::warn;
 use serde_json::json;
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::Ordering;
@@ -46,9 +47,14 @@ pub async fn list(
     } else {
         Ordering::Descending
     };
-    // let ((epoch, height, block_id), _) = query_cf.query_last(OPERATION)?;
+    if req.query_prefix_hex.is_some() {
+        warn!("The start parameter is not supported for blocks");
+    }
+
+    let page_size = req.limit.unwrap_or(1_000);
+    let skip = req.page.unwrap_or(0) * page_size;
     let iter = query_cf.query_end_range_key_iterator(ordering, &Epoch::max());
-    for result in iter.take(req.limit.unwrap_or(1_000_000)) {
+    for result in iter.skip(skip).take(page_size) {
         let (_, _, block_id) = result?;
         let block = cf.get(&block_id, OPERATION)?;
         let mut flags = Vec::new();

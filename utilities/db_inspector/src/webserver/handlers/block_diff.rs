@@ -40,8 +40,11 @@ pub async fn list(
     } else {
         Ordering::Descending
     };
+
+    let page_size = req.limit.unwrap_or(1_000);
+    let skip = req.page.unwrap_or(0) * page_size;
     let iter = cf.iterator(ordering, OPERATION);
-    for result in iter.take(req.limit.unwrap_or(1_000_000)) {
+    for result in iter.skip(skip).take(page_size) {
         let (id, data) = result?;
         let encoded_key = cf.encode_key(&id);
         table.add_row(json!({

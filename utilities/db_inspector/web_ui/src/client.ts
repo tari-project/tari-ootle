@@ -3,7 +3,7 @@
 
 const URL = import.meta.env.VITE_API_ADDRESS || "http://localhost:9090/api";
 
-type Params = { [key: string]: string | number | boolean | null };
+export type Params = { [key: string]: string | number | boolean | null };
 
 function getUrl(entity: string, params: Params = {}) {
   function toQueryString(params: Params): string {

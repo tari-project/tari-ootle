@@ -16,7 +16,7 @@ use tari_state_store_rocksdb::models;
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{Column, TableRequest, TableResponse},
+    handlers::types::{decode_hex_prefix, Column, TableRequest, TableResponse},
 };
 
 pub async fn list(
@@ -38,14 +38,24 @@ pub async fn list(
     let tx = db.read_only_context();
 
     let cf = tx.cf(models::state_transition::StateTransitionModel)?;
+
     let substate_cf = tx.cf(models::substate::SubstateModel)?;
     let ordering = if req.asc {
         Ordering::Ascending
     } else {
         Ordering::Descending
     };
-    let iter = cf.iterator(ordering, OPERATION);
-    for result in iter.take(req.limit.unwrap_or(1_000_000)) {
+    let iter = if let Some(prefix_hex) = req.query_prefix_hex.as_ref() {
+        let key_prefix = decode_hex_prefix(prefix_hex)?;
+        cf.range_iterator(ordering, key_prefix.as_slice()..)
+    } else {
+        let empty = Vec::<u8>::new();
+        cf.range_iterator(ordering, empty.as_slice()..)
+    };
+
+    let page_size = req.limit.unwrap_or(1_000);
+    let skip = req.page.unwrap_or(0) * page_size;
+    for result in iter.skip(skip).take(page_size) {
         let (id, data) = result?;
         let encoded_key = cf.encode_key(&id);
         let substate = substate_cf.get(&data.substate_address, OPERATION).optional()?;

@@ -216,6 +216,7 @@ impl TryFrom<proto::consensus::ForeignProposalMessage> for ForeignProposalMessag
 impl From<&ForeignProposal> for proto::consensus::ForeignProposal {
     fn from(value: &ForeignProposal) -> Self {
         Self {
+            // TODO: remove panics
             encoded_commit_proof: encode_to_vec(value.commit_proof()).expect("Failed to encode commit proof"),
             encoded_block_pledge: encode_to_vec(value.block_pledge()).expect("Failed to encode block pledge"),
         }
@@ -526,6 +527,7 @@ impl TryFrom<proto::consensus::Block> for consensus_models::Block {
 impl From<&ExtraData> for proto::consensus::ExtraData {
     fn from(value: &ExtraData) -> Self {
         Self {
+            // TODO: remove panics
             encoded_extra_data: encode_to_vec(value).unwrap(),
         }
     }
@@ -792,8 +794,8 @@ impl TryFrom<proto::consensus::Decision> for Decision {
 
 impl From<&Evidence> for proto::consensus::Evidence {
     fn from(value: &Evidence) -> Self {
-        // TODO: we may want to write out the protobuf here
         Self {
+            // TODO: remove panics
             encoded_evidence: encode_to_vec(value).unwrap(),
         }
     }

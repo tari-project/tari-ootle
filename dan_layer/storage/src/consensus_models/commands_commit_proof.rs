@@ -144,7 +144,7 @@ impl CommandsCommitProofV1 {
         // data for applicable commands, such a multi-proof may not be worthwhile.
         let command_hashes = self.commands.iter().map(|cmd| TreeHash::new(cmd.hash().into_array()));
         let root_hash = compute_merkle_root_for_hashes(command_hashes)?;
-        if root_hash != self.commit_proof.header.command_merkle_root {
+        if FixedHash::from(root_hash.into_array()) != self.commit_proof.header.command_merkle_root {
             return Err(ForeignProposalCommitProofError::InvalidCommandMerkleRoot {
                 calculated: root_hash,
                 expected: self.commit_proof.header.command_merkle_root,

@@ -96,12 +96,8 @@ fn foreign_proposals_operations(db: impl StateStore) {
     assert!(!res);
 
     // foreign_proposals_get_all_new
-    tx.foreign_proposals_set_status(
-        proposal1.block_id(),
-        ForeignProposalStatus::Proposed,
-        Some(&block1.as_leaf_block()),
-    )
-    .unwrap();
+    tx.foreign_proposals_set_status(proposal1.block_id(), ForeignProposalStatus::Proposed, Some(block1.id()))
+        .unwrap();
     let res = tx.foreign_proposals_get_all_new(block1.id(), 10).unwrap();
     assert_eq!(res.len(), 0);
     let res = tx.foreign_proposals_get_all_new(fork_block.id(), 10).unwrap();
@@ -121,7 +117,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
 
     // foreign_proposals_set_status
     let updated_status = ForeignProposalStatus::Confirmed;
-    tx.foreign_proposals_set_status(proposal1.block_id(), updated_status, Some(&block1.as_leaf_block()))
+    tx.foreign_proposals_set_status(proposal1.block_id(), updated_status, Some(block1.id()))
         .unwrap();
     let res = tx.foreign_proposals_get_any(vec![proposal1.block_id()]).unwrap();
     let confirmed_proposal = res[0].clone();

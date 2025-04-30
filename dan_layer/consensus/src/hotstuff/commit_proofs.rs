@@ -32,16 +32,14 @@ pub fn generate_eviction_proofs<'a, TTx, I>(
 ) -> Result<Vec<EvictionProof>, HotStuffError>
 where
     TTx: StateStoreReadTransaction,
-    I: IntoIterator<Item = &'a Block> + Clone,
+    I: IntoIterator<Item = &'a Block>,
+    I::IntoIter: Clone,
 {
-    let num_evictions = committed_blocks_with_evictions
-        .clone()
-        .into_iter()
-        .map(|b| b.all_node_evictions().count())
-        .sum();
+    let evictions_iter = committed_blocks_with_evictions.into_iter();
+    let num_evictions = evictions_iter.clone().map(|b| b.all_node_evictions().count()).sum();
 
     let mut proofs = Vec::with_capacity(num_evictions);
-    for block in committed_blocks_with_evictions {
+    for block in evictions_iter {
         // First generate a commit proof for the block which is shared by all EvictionProofs
         let block_commit_proof = generate_block_commit_proof(tx, tip_qc, block)?;
 

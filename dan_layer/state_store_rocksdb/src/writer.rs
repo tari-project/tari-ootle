@@ -306,7 +306,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         commit_qc_id: Option<&QcId>,
         justify_qc_id: Option<&QcId>,
     ) -> Result<(), StorageError> {
-        const OPERATION: &str = "blocks_set_flags";
+        const OPERATION: &str = "blocks_set_qcs";
         if commit_qc_id.is_none() && justify_qc_id.is_none() {
             return Ok(());
         }
@@ -457,7 +457,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let db = self.db();
         let cf = db.cf(ForeignProposalModel)?;
 
-        if !cf.exists(foreign_proposal.block_id(), OPERATION)? {
+        if cf.exists(foreign_proposal.block_id(), OPERATION)? {
+            self.foreign_proposals_set_status(
+                foreign_proposal.block_id(),
+                foreign_proposal.status(),
+                foreign_proposal.proposed_in_block(),
+            )?;
+        } else {
             cf.put(foreign_proposal.block_id(), foreign_proposal, OPERATION)?;
 
             db.cf(foreign_proposal::EpochIndex)?.put(
@@ -468,26 +474,27 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 },
                 OPERATION,
             )?;
-        }
+            // Update indexes as required - you cannot use foreign_proposals_set_status because it compares the current
+            // record (the one we've just set above) to the changes, which will always be equal, therefore,
+            // no indexes will be updated.
+            if let Some(proposed_block_id) = foreign_proposal.proposed_in_block() {
+                db.cf(foreign_proposal::ProposedInBlockIndex)?.put(
+                    &(*proposed_block_id, *foreign_proposal.block_id()),
+                    &(),
+                    OPERATION,
+                )?;
+            }
 
-        // Update indexes as required
-        if let Some(proposed_block_id) = foreign_proposal.proposed_in_block() {
-            db.cf(foreign_proposal::ProposedInBlockIndex)?.put(
-                &(*proposed_block_id, *foreign_proposal.block_id()),
-                &(),
-                OPERATION,
-            )?;
-        }
-
-        if foreign_proposal.status().is_unconfirmed() {
-            db.cf(foreign_proposal::UnconfirmedIndex)?.put(
-                &(foreign_proposal.epoch(), *foreign_proposal.block_id()),
-                &(),
-                OPERATION,
-            )?;
-        } else {
-            db.cf(foreign_proposal::UnconfirmedIndex)?
-                .delete(&(foreign_proposal.epoch(), *foreign_proposal.block_id()), OPERATION)?;
+            if foreign_proposal.status().is_unconfirmed() {
+                db.cf(foreign_proposal::UnconfirmedIndex)?.put(
+                    &(foreign_proposal.epoch(), *foreign_proposal.block_id()),
+                    &(),
+                    OPERATION,
+                )?;
+            } else {
+                db.cf(foreign_proposal::UnconfirmedIndex)?
+                    .delete(&(foreign_proposal.epoch(), *foreign_proposal.block_id()), OPERATION)?;
+            }
         }
 
         Ok(())
@@ -537,7 +544,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         &mut self,
         block_id: &BlockId,
         status: ForeignProposalStatus,
-        set_proposed_in_block: Option<&LeafBlock>,
+        set_proposed_in_block: Option<&BlockId>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "foreign_proposals_set_status";
         let mut fp = self.db().cf(ForeignProposalModel)?.get(block_id, OPERATION)?;
@@ -545,7 +552,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         if fp.status().is_unconfirmed() && !status.is_unconfirmed() {
             db.cf(foreign_proposal::UnconfirmedIndex)?
-                .delete_or_not_found(&(fp.epoch(), *block_id), OPERATION)?;
+                .delete(&(fp.epoch(), *block_id), OPERATION)?;
         } else if !fp.status().is_unconfirmed() && status.is_unconfirmed() {
             db.cf(foreign_proposal::UnconfirmedIndex)?
                 .put(&(fp.epoch(), *block_id), &(), OPERATION)?;
@@ -558,20 +565,20 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         if let Some(proposed_in_block) = set_proposed_in_block {
             let index_cf = db.cf(foreign_proposal::ProposedInBlockIndex)?;
             if let Some(prev_id) = fp.proposed_in_block() {
-                if prev_id != proposed_in_block.block_id() {
-                    index_cf.delete_or_not_found(&(*prev_id, *fp.block_id()), OPERATION)?;
+                if prev_id != proposed_in_block {
+                    index_cf.delete(&(*prev_id, *fp.block_id()), OPERATION)?;
                 }
             }
-            index_cf.put(&(*proposed_in_block.block_id(), *fp.block_id()), &(), OPERATION)?;
+            index_cf.put(&(*proposed_in_block, *fp.block_id()), &(), OPERATION)?;
 
             // Update the epoch index
             let epoch_index_cf = db.cf(foreign_proposal::EpochIndex)?;
             let key = (fp.epoch(), *block_id);
             let mut index = epoch_index_cf.get(&key, OPERATION)?;
-            index.proposed_in_block = Some(*proposed_in_block.block_id());
+            index.proposed_in_block = Some(*proposed_in_block);
             epoch_index_cf.put(&key, &index, OPERATION)?;
 
-            fp.set_proposed_in_block(*proposed_in_block.block_id());
+            fp.set_proposed_in_block(*proposed_in_block);
         }
 
         // Update the record

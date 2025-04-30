@@ -155,7 +155,6 @@ diesel::table! {
         signature -> Nullable<Text>,
         block_pledge -> Text,
         proposed_in_block -> Nullable<Text>,
-        proposed_in_block_height -> Nullable<BigInt>,
         status -> Text,
         created_at -> Timestamp,
     }

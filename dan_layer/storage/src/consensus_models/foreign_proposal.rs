@@ -149,11 +149,11 @@ impl ForeignProposalRecord {
         &mut self,
         tx: &mut TTx,
         status: ForeignProposalStatus,
-        set_proposed_in_block: Option<&LeafBlock>,
+        set_proposed_in_block: Option<&BlockId>,
     ) -> Result<(), StorageError> {
         self.status = status;
         if let Some(proposed_in_block) = set_proposed_in_block {
-            self.proposed_in_block = Some(proposed_in_block.block_id);
+            self.proposed_in_block = Some(*proposed_in_block);
         }
         tx.foreign_proposals_set_status(self.block_id(), status, set_proposed_in_block)
     }
@@ -162,7 +162,7 @@ impl ForeignProposalRecord {
         tx: &mut TTx,
         block_id: &BlockId,
         status: ForeignProposalStatus,
-        set_proposed_in_block: Option<&LeafBlock>,
+        set_proposed_in_block: Option<&BlockId>,
     ) -> Result<(), StorageError> {
         tx.foreign_proposals_set_status(block_id, status, set_proposed_in_block)
     }
@@ -258,7 +258,7 @@ impl ForeignProposalAtom {
         &self,
         tx: &mut TTx,
         status: ForeignProposalStatus,
-        set_proposed_in: Option<&LeafBlock>,
+        set_proposed_in: Option<&BlockId>,
     ) -> Result<(), StorageError> {
         tx.foreign_proposals_set_status(&self.block_id, status, set_proposed_in)
     }

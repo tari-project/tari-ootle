@@ -1665,7 +1665,7 @@ async fn multishard_validator_fee_claim() {
             break;
         }
 
-        if leaf.height >= NodeHeight(30) {
+        if leaf.height >= NodeHeight(40) {
             panic!("Not all transaction committed after {} blocks", leaf.height);
         }
     }

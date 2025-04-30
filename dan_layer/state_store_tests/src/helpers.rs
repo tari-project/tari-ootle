@@ -362,10 +362,10 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
     .unwrap();
     let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
         header: SidechainBlockHeader {
-            network: 0,
-            parent_id: Default::default(),
+            network: foreign_block.network().as_byte(),
+            parent_id: *parent_id.hash(),
             justify_id: *qc1.id().hash(),
-            height: 0,
+            height: foreign_block.height().as_u64(),
             epoch: epoch.as_u64(),
             shard_group: tari_sidechain::ShardGroup {
                 start: shard_group.start().as_u32(),

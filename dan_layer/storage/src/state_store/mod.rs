@@ -371,7 +371,7 @@ pub trait StateStoreWriteTransaction {
         &mut self,
         block_id: &BlockId,
         status: ForeignProposalStatus,
-        set_proposed_in_block: Option<&LeafBlock>,
+        set_proposed_in_block: Option<&BlockId>,
     ) -> Result<(), StorageError>;
 
     fn foreign_proposals_clear_proposed_in(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError>;

@@ -424,8 +424,14 @@ impl ProposedBlockChangeSet {
             }
         }
 
+        // TODO(perf): batch this update
         for block_id in &self.proposed_foreign_proposals {
-            ForeignProposalRecord::set_status_by_id(tx, block_id, ForeignProposalStatus::Proposed, Some(&self.block))?;
+            ForeignProposalRecord::set_status_by_id(
+                tx,
+                block_id,
+                ForeignProposalStatus::Proposed,
+                Some(self.block.block_id()),
+            )?;
         }
 
         for mint in &self.proposed_utxo_mints {

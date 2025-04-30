@@ -603,16 +603,16 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 foreign_proposals::block_id.eq(block_id_hex),
                 foreign_proposals::parent_block_id.eq(serialize_hex(header.parent_id)),
                 foreign_proposals::state_merkle_root.eq(serialize_hex(header.state_merkle_root)),
-                foreign_proposals::command_merkle_root.eq(header.command_merkle_root.to_string()),
+                foreign_proposals::command_merkle_root.eq(serialize_hex(header.command_merkle_root)),
                 foreign_proposals::network.eq(header.network.to_string()),
                 foreign_proposals::height.eq(header.height as i64),
                 foreign_proposals::epoch.eq(header.epoch as i64),
                 foreign_proposals::shard_group.eq(shard_group.encode_as_u32() as i32),
                 foreign_proposals::proposed_by.eq(serialize_hex(header.proposed_by.as_bytes())),
-                foreign_proposals::command_count.eq(foreign_proposal.commands().len() as i64),
-                foreign_proposals::commands.eq(serialize_json(foreign_proposal.commands())?),
+                foreign_proposals::command_count.eq(proposal.commands().len() as i64),
+                foreign_proposals::commands.eq(serialize_json(proposal.commands())?),
                 foreign_proposals::metadata_hash.eq(serialize_hex(header.metadata_hash)),
-                foreign_proposals::commit_proof.eq(serialize_json(foreign_proposal.proposal().commit_proof())?),
+                foreign_proposals::commit_proof.eq(serialize_json(proposal.commit_proof())?),
                 foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
                 foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
             );
@@ -637,7 +637,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 foreign_proposals::command_count.eq(proposal.commands().len() as i64),
                 foreign_proposals::commands.eq(serialize_json(proposal.commands())?),
                 foreign_proposals::metadata_hash.eq(serialize_hex(header.metadata_hash)),
-                foreign_proposals::commit_proof.eq(serialize_json(foreign_proposal.proposal().commit_proof())?),
+                foreign_proposals::commit_proof.eq(serialize_json(proposal.commit_proof())?),
                 foreign_proposals::block_pledge.eq(serialize_json(foreign_proposal.block_pledge())?),
                 foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
             );
@@ -687,7 +687,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         &mut self,
         block_id: &BlockId,
         status: ForeignProposalStatus,
-        set_proposed_in_block: Option<&LeafBlock>,
+        set_proposed_in_block: Option<&BlockId>,
     ) -> Result<(), StorageError> {
         use crate::schema::foreign_proposals;
 
@@ -696,8 +696,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 .filter(foreign_proposals::block_id.eq(serialize_hex(block_id)))
                 .set((
                     foreign_proposals::status.eq(status.to_string()),
-                    foreign_proposals::proposed_in_block.eq(serialize_hex(proposed_in_block.block_id())),
-                    foreign_proposals::proposed_in_block_height.eq(proposed_in_block.height().as_u64() as i64),
+                    foreign_proposals::proposed_in_block.eq(serialize_hex(proposed_in_block)),
                 ))
                 .execute(self.connection())
                 .map_err(|e| SqliteStorageError::DieselError {
@@ -732,7 +731,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             .filter(foreign_proposals::proposed_in_block.eq(serialize_hex(proposed_in_block)))
             .set((
                 foreign_proposals::proposed_in_block.eq(None::<String>),
-                foreign_proposals::proposed_in_block_height.eq(None::<i64>),
                 foreign_proposals::status.eq(ForeignProposalStatus::New.to_string()),
             ))
             .execute(self.connection())

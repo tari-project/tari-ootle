@@ -42,8 +42,6 @@ pub struct ForeignProposal {
     pub signature: Option<String>,
     pub block_pledge: String,
     pub proposed_in_block: Option<String>,
-    #[allow(dead_code)]
-    pub proposed_in_block_height: Option<i64>,
     pub status: String,
     #[allow(dead_code)]
     pub created_at: PrimitiveDateTime,

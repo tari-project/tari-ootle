@@ -694,8 +694,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 foreign_proposals::proposed_in_block
                     .is_null()
                     .or(foreign_proposals::proposed_in_block
-                        .ne_all(pending_block_ids)
-                        .and(foreign_proposals::proposed_in_block_height.gt(locked.height.as_u64() as i64))),
+                        .ne_all(pending_block_ids))
             )
             .limit(i64::try_from(limit).unwrap_or(i64::MAX))
             .get_results::<sql_models::ForeignProposal >(self.connection())

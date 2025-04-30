@@ -207,7 +207,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         foreign_proposal.set_status(
                             tx,
                             ForeignProposalStatus::Invalid,
-                            Some(&valid_block.block().as_leaf_block()),
+                            Some(valid_block.block().id()),
                         )?;
                         return Ok(false);
                     }

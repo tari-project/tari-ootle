@@ -272,7 +272,7 @@ where TConsensusSpec: ConsensusSpec
                     "🌐 FOREIGN PROPOSAL REPLY to {} foreign proposal {} with {} pledge(s).",
                     for_shard_group,
                     proposal.calculate_block_id(),
-                    proposal. block_pledge().len(),
+                    proposal.block_pledge().len(),
                 );
 
                 outbound_messaging

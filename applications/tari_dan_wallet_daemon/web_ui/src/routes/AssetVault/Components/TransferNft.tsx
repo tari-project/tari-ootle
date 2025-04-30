@@ -30,7 +30,12 @@ import DialogTitle from "@mui/material/DialogTitle";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import useAccountStore from "../../../store/accountStore";
-import type { NonFungibleId, TransactionResult } from "@tari-project/typescript-bindings";
+import type {
+  Account,
+  ComponentAddressOrName,
+  NonFungibleId,
+  TransactionResult,
+} from "@tari-project/typescript-bindings";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
 import Checkbox from "@mui/material/Checkbox";
@@ -39,6 +44,7 @@ import { InputLabel } from "@mui/material";
 import { SelectChangeEvent } from "@mui/material/Select/Select";
 import { useListNfts, useNftsTransfer } from "../../../api/hooks/useNfts";
 import { substateIdToString } from "../../../utils/helpers";
+import { useAccountsList } from "../../../api/hooks/useAccounts";
 
 export default function TransferNft() {
   const [open, setOpen] = useState(false);
@@ -70,8 +76,19 @@ function nftIdToString(nftId: NonFungibleId): string {
   return nftId[key].toString();
 }
 
+function getAccountSelector(account: Account): ComponentAddressOrName {
+  return account.name
+    ? {
+        Name: account.name,
+      }
+    : {
+        ComponentAddress: substateIdToString(account.address),
+      };
+}
+
 export function TransferNftDialog(props: TransferNftDialogProps) {
   const INITIAL_VALUES = {
+    payerAccount: "",
     nftIds: new Array<NonFungibleId>(),
     targetAccountPublicKey: "",
     maxFee: "",
@@ -79,6 +96,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   const [disabled, setDisabled] = useState(false);
   const [transferFormState, setTransferFormState] = useState(INITIAL_VALUES);
   const [validity, setValidity] = useState<object>({
+    payerAccount: true,
     nftIds: false,
     targetAccountPublicKey: false,
   });
@@ -89,17 +107,22 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     return null;
   }
 
-  const accountSelector = account.name
-    ? {
-        Name: account.name,
-      }
-    : {
-        ComponentAddress: substateIdToString(account.address),
-      };
+  //payer account
+  const [payerAccount, setPayerAccount] = useState(getAccountSelector(account));
+  useEffect(() => {
+    setPayerAccount({
+      ComponentAddress: substateIdToString(transferFormState.payerAccount),
+    });
+  }, [transferFormState.payerAccount]);
 
+  // list NFTs
   const { data: accountNfts, refetch: refetchNfts } = useListNfts({
-    account: accountSelector,
+    account: getAccountSelector(account),
   });
+
+  // list all accounts for payer account selection
+  let { data: accountsResp } = useAccountsList(0, 1000);
+  let accounts = accountsResp?.accounts;
 
   refetchNfts().catch(console.error);
 
@@ -109,16 +132,18 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     dry_run: true,
     max_fee: 3000,
     nft_ids: transferFormState.nftIds,
-    source_account: accountSelector,
+    source_account: getAccountSelector(account),
     target_account_public_key: transferFormState.targetAccountPublicKey,
+    fee_payer_account: payerAccount,
   });
 
   const { mutateAsync: sendTransferNftsTx } = useNftsTransfer({
     nft_ids: transferFormState.nftIds,
-    source_account: accountSelector,
+    source_account: getAccountSelector(account),
     target_account_public_key: transferFormState.targetAccountPublicKey,
     dry_run: false,
     max_fee: parseInt(transferFormState.maxFee),
+    fee_payer_account: payerAccount,
   });
 
   function setFormValue(e: React.ChangeEvent<HTMLInputElement>) {
@@ -241,7 +266,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
   }, [accountNfts]);
 
-  const handleChange = (event: SelectChangeEvent<string[]>) => {
+  const handleNftsChange = (event: SelectChangeEvent<string[]>) => {
     if (typeof event.target.value == "string") {
       return;
     }
@@ -267,11 +292,54 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     setNfts(nftsSelected.map((item) => item!));
   };
 
+  const handlePayerAccountChange = (event: SelectChangeEvent<string[]>) => {
+    if (typeof event.target.value != "string") {
+      return;
+    }
+    const payerAccountSelected = {
+      ComponentAddress: event.target.value,
+    };
+
+    if (payerAccountSelected.ComponentAddress != "") {
+      setValidity({
+        ...validity,
+        payerAccount: true,
+      });
+
+      setTransferFormState({
+        ...transferFormState,
+        payerAccount: event.target.value,
+      });
+    }
+  };
+
   return (
     <Dialog open={props.open} onClose={handleClose}>
       <DialogTitle>Transfer NFT</DialogTitle>
       <DialogContent className="dialog-content">
         <Form onSubmit={onTransfer} className="flex-container-vertical" style={{ paddingTop: theme.spacing(1) }}>
+          {accounts && (
+            <>
+              <InputLabel id="select-payer-account">Account (to pay fees)</InputLabel>
+              <Select
+                id="select-payer-account"
+                name="payerAccount"
+                disabled={disabled}
+                displayEmpty
+                value={
+                  transferFormState.payerAccount || accounts.find((a) => a.account.is_default)?.account.address || ""
+                }
+                onChange={handlePayerAccountChange}
+                variant="outlined"
+              >
+                {accounts.map((account, i) => (
+                  <MenuItem key={account.account.name} value={substateIdToString(account.account.address)}>
+                    {account.account.name} {account.account.is_default ? "(default)" : ""}
+                  </MenuItem>
+                ))}
+              </Select>
+            </>
+          )}
           <TextField
             name="targetAccountPublicKey"
             label="Target Account Public Key"
@@ -301,7 +369,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
             value={nfts.map((value) => value.name)}
             required
             disabled={disabled}
-            onChange={handleChange}
+            onChange={handleNftsChange}
             renderValue={(selected) => selected.map((item) => item).join(", ")}
           >
             {availableNfts.map((nft) => (

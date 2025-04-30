@@ -1492,6 +1492,8 @@ pub struct WebauthnFinishAuthRequest {
 pub struct TransferNftRequest {
     pub nft_ids: Vec<NonFungibleId>,
     #[serde(deserialize_with = "string_or_struct")]
+    pub fee_payer_account: ComponentAddressOrName,
+    #[serde(deserialize_with = "string_or_struct")]
     pub source_account: ComponentAddressOrName,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub target_account_public_key: RistrettoPublicKeyBytes,

@@ -5,6 +5,7 @@ import type { NonFungibleId } from "../NonFungibleId";
 
 export interface TransferNftRequest {
   nft_ids: Array<NonFungibleId>;
+  fee_payer_account: ComponentAddressOrName;
   source_account: ComponentAddressOrName;
   target_account_public_key: string;
   max_fee: Amount;

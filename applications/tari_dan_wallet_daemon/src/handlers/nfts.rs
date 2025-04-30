@@ -22,6 +22,7 @@ use tari_engine_types::{
     component::new_component_address_from_public_key,
     instruction::Instruction,
     substate::SubstateId,
+    ToByteType,
 };
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
@@ -366,12 +367,22 @@ pub async fn handle_transfer_nft(
     let sdk = context.wallet_sdk();
     sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
 
+    // fetch accounts and its inputs
+    info!(target: LOG_TARGET, "fetch accounts and its inputs...");
     let mut instructions = vec![];
-    let (source_account, mut inputs) = get_account_with_inputs(Some(req.source_account), &sdk)?;
+    let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(req.fee_payer_account), sdk)?;
+    let fee_payer_account_address = fee_payer_account
+        .address
+        .as_component_address()
+        .ok_or(anyhow!("Fee payer account address is not a component address!"))?;
+    let (source_account, mut inputs) = get_account_with_inputs(Some(req.source_account), sdk)?;
+    inputs.extend(fee_payer_account_inputs);
     let source_account_address = source_account
         .address
         .as_component_address()
         .ok_or(anyhow!("Source account address is not a component address!"))?;
+
+    info!(target: LOG_TARGET, "Account addresses: {}, {}", source_account_address, fee_payer_account_address);
 
     let target_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
@@ -380,7 +391,6 @@ pub async fn handle_transfer_nft(
     let non_fungible_api = sdk.non_fungible_api();
     for nft_id in req.nft_ids {
         // get NFT
-
         let nft = non_fungible_api
             .get_by_id(nft_id.clone())
             .map_err(|e| anyhow!("Failed to get non fungible token: {}", e))?;
@@ -421,19 +431,29 @@ pub async fn handle_transfer_nft(
         ])
     }
 
+    let fee_payer_account_secret_key = sdk
+        .key_manager_api()
+        .derive_key(key_manager::TRANSACTION_BRANCH, fee_payer_account.key_index)?;
+    let fee_payer_account_public_key = RistrettoPublicKey::from_secret_key(&fee_payer_account_secret_key.key);
+
     let source_account_secret_key = sdk
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
+    let source_account_public_key = RistrettoPublicKey::from_secret_key(&source_account_secret_key.key);
 
     let transaction = transaction_builder(context)
         .with_fee_instructions(vec![Instruction::CallMethod {
-            component_address: source_account_address,
+            component_address: fee_payer_account_address,
             method: "pay_fee".to_string(),
             args: args![req.max_fee],
         }])
         .with_instructions(instructions)
         .with_inputs(inputs)
-        .build_and_seal(&source_account_secret_key.key);
+        .add_signature(
+            &fee_payer_account_public_key.to_byte_type(),
+            &source_account_secret_key.key,
+        )
+        .build_and_seal(&fee_payer_account_secret_key.key);
 
     // if dry run, we can return the result immediately
     if req.dry_run {

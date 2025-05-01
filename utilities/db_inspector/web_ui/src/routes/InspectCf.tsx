@@ -79,6 +79,7 @@ export default function InspectCf() {
   const theme = useTheme();
   const { dbName, cfName } = useParams();
   const [data, setData] = useState<ColumnFamilyData | null>(null);
+  const [queryString, setQueryString] = useState<string>("");
   const [pagination, setPagination] = useState<PaginationModel>({ page: 0, pageSize: 20 });
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -145,6 +146,7 @@ export default function InspectCf() {
               style={{ marginLeft: theme.spacing(2), width: "600px" }}
               onChange={(e) => {
                 const hex = e.target.value;
+                setQueryString(hex);
                 // check if valid hex
                 if (hex && !/^[0-9a-fA-F]*$/.test(hex)) {
                   setError("Invalid hex string");
@@ -152,15 +154,18 @@ export default function InspectCf() {
                 }
                 setPagination({ ...pagination, page: 0, query: e.target.value });
               }}
-              value={pagination.query || ""}
+              value={queryString}
               placeholder="Enter a key prefix in hex"
             />
             <Button
               variant="outlined"
               color="secondary"
-              onClick={() => setPagination({ ...pagination, page: 0, query: "" })}
+              onClick={() => {
+                setQueryString("");
+                setPagination({ ...pagination, page: 0, query: "" });
+              }}
               style={{ marginLeft: theme.spacing(2) }}
-              disabled={!pagination.query}
+              disabled={!queryString}
             >
               Clear
             </Button>

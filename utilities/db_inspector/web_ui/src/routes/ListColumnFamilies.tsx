@@ -5,7 +5,7 @@ import { Box, Button, Divider, Grid, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { useDatabaseCfsList } from "../store/databases.ts";
 import { Link as RouterLink, useParams } from "react-router-dom";
-import { DataGrid } from "@mui/x-data-grid";
+import { DataGrid, GridSortModel } from "@mui/x-data-grid";
 import { useState } from "react";
 import prettyBytes from "pretty-bytes";
 
@@ -13,6 +13,9 @@ export default function ListColumnFamilies() {
   const theme = useTheme();
   const { dbName } = useParams();
   const [selectedCf, setSelectedCf] = useState<string | number | null>(null);
+  const [sortModel, setSortModel] = useState<GridSortModel>([
+    { field: "name", sort: "asc" },
+  ]);
 
   const { data: cfs, isLoading } = useDatabaseCfsList(dbName || "<NOTHING>");
 
@@ -90,7 +93,8 @@ export default function ListColumnFamilies() {
               },
             },
           }}
-          sortModel={[{ field: "name", sort: "asc" }]}
+          sortModel={sortModel}
+          onSortModelChange={setSortModel}
           sortingOrder={["desc", "asc", null]}
           disableMultipleRowSelection
           onRowSelectionModelChange={(selections) => {

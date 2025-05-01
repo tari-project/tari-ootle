@@ -749,11 +749,7 @@ async fn multishard_output_conflict_abort() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn single_shard_inputs_from_previous_outputs() {
     setup_logger();
-    let mut test = Test::builder()
-        .with_rocks_path("/tmp/test{}")
-        .add_committee(0, vec!["1", "2"])
-        .start()
-        .await;
+    let mut test = Test::builder().add_committee(0, vec!["1", "2"]).start().await;
 
     let (tx1, _, outputs) = test.send_transaction_to_all(Decision::Commit, 1, 5, 5).await;
     let prev_outputs = outputs

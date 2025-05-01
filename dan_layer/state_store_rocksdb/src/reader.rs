@@ -1293,8 +1293,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let index_cf = self.db().cf(substate::HeadIndex)?;
         let cf = self.db().cf(SubstateModel)?;
 
-        let mut substates = vec![];
-        for substate_id in substate_ids {
+        let iter = substate_ids.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut substates = Vec::with_capacity(lower);
+        for substate_id in iter {
             let head = index_cf.get(substate_id, OPERATION)?;
             let address = SubstateAddress::from_substate_id(substate_id, head.version);
             let substate = cf.get(&address, OPERATION)?;

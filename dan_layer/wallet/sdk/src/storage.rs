@@ -126,6 +126,7 @@ pub trait WalletStoreReader {
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
     // Config
     fn config_get<T: serde::de::DeserializeOwned>(&mut self, key: &str) -> Result<Config<T>, WalletStorageError>;
+    fn config_get_string(&mut self, key: &str) -> Result<Config<String>, WalletStorageError>;
     fn config_exists(&mut self, key: &str) -> Result<bool, WalletStorageError>;
     // JWT
     fn jwt_get_all(&mut self) -> Result<Vec<(i32, Option<String>)>, WalletStorageError>;
@@ -232,7 +233,7 @@ pub trait WalletStoreWriter {
 
     // JWT
     fn jwt_add_empty_token(&mut self) -> Result<u64, WalletStorageError>;
-    fn jwt_store_decision(&mut self, id: u64, permissions_token: Option<String>) -> Result<(), WalletStorageError>;
+    fn jwt_store_decision(&mut self, id: u64, permissions_token: Option<&str>) -> Result<(), WalletStorageError>;
     fn jwt_is_revoked(&mut self, token: &str) -> Result<bool, WalletStorageError>;
     fn jwt_revoke(&mut self, token_id: i32) -> Result<(), WalletStorageError>;
 

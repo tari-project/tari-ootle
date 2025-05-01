@@ -42,8 +42,6 @@ use tari_dan_storage::{
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalStatus,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -73,7 +71,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
+use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeNode, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
@@ -187,11 +185,9 @@ impl<'a, TAddr: NodeAddressable> SqliteStateStoreWriteTransaction<'a, TAddr> {
             parked_blocks::commands.eq(serialize_json(block.commands())?),
             parked_blocks::total_leader_fee.eq(block.total_leader_fee() as i64),
             parked_blocks::justify.eq(serialize_json(block.justify())?),
-            parked_blocks::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
             parked_blocks::signature.eq(block.signature().map(serialize_json).transpose()?),
             parked_blocks::timestamp.eq(block.timestamp() as i64),
-            parked_blocks::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-            parked_blocks::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+            parked_blocks::epoch_hash.eq(serialize_hex(block.epoch_hash())),
             parked_blocks::foreign_proposals.eq(serialize_json(foreign_proposals)?),
             parked_blocks::extra_data.eq(serialize_json(block.extra_data())?),
         );
@@ -244,10 +240,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             blocks::is_dummy.eq(block.is_dummy()),
             blocks::is_justified.eq(block.is_justified()),
             blocks::signature.eq(block.signature().map(serialize_json).transpose()?),
-            blocks::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
             blocks::timestamp.eq(block.timestamp() as i64),
-            blocks::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-            blocks::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+            blocks::epoch_hash.eq(serialize_hex(block.epoch_hash())),
             blocks::extra_data.eq(serialize_json(block.extra_data())?),
         );
 
@@ -616,10 +610,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 foreign_proposals::commands.eq(serialize_json(block.commands())?),
                 foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
                 foreign_proposals::qc.eq(serialize_json(block.justify())?),
-                foreign_proposals::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
                 foreign_proposals::timestamp.eq(block.timestamp() as i64),
-                foreign_proposals::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-                foreign_proposals::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+                foreign_proposals::epoch_hash.eq(serialize_hex(block.epoch_hash())),
                 foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
                 // Extra
                 foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
@@ -648,10 +640,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 foreign_proposals::commands.eq(serialize_json(block.commands())?),
                 foreign_proposals::total_leader_fee.eq(block.total_leader_fee() as i64),
                 foreign_proposals::qc.eq(serialize_json(block.justify())?),
-                foreign_proposals::foreign_indexes.eq(serialize_json(block.foreign_indexes())?),
                 foreign_proposals::timestamp.eq(block.timestamp() as i64),
-                foreign_proposals::base_layer_block_height.eq(block.base_layer_block_height() as i64),
-                foreign_proposals::base_layer_block_hash.eq(serialize_hex(block.base_layer_block_hash())),
+                foreign_proposals::epoch_hash.eq(serialize_hex(block.epoch_hash())),
                 foreign_proposals::extra_data.eq(serialize_json(foreign_proposal.block().extra_data())?),
                 // Extra
                 foreign_proposals::justify_qc_id.eq(serialize_hex(foreign_proposal.justify_qc().id())),
@@ -764,48 +754,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
                 key: serialize_hex(proposed_in_block),
             });
         }
-
-        Ok(())
-    }
-
-    fn foreign_send_counters_set(
-        &mut self,
-        foreign_send_counter: &ForeignSendCounters,
-        block_id: &BlockId,
-    ) -> Result<(), StorageError> {
-        use crate::schema::foreign_send_counters;
-
-        let insert = (
-            foreign_send_counters::block_id.eq(serialize_hex(block_id)),
-            foreign_send_counters::counters.eq(serialize_json(&foreign_send_counter.counters)?),
-        );
-
-        diesel::insert_into(foreign_send_counters::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_send_counters_set",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
-    fn foreign_receive_counters_set(
-        &mut self,
-        foreign_receive_counter: &ForeignReceiveCounters,
-    ) -> Result<(), StorageError> {
-        use crate::schema::foreign_receive_counters;
-
-        let insert = (foreign_receive_counters::counters.eq(serialize_json(&foreign_receive_counter.counters)?),);
-
-        diesel::insert_into(foreign_receive_counters::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "foreign_receive_counters_set",
-                source: e,
-            })?;
 
         Ok(())
     }
@@ -1914,9 +1862,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         use crate::schema::epoch_checkpoints;
 
         let values = (
-            epoch_checkpoints::epoch.eq(checkpoint.block().epoch().as_u64() as i64),
-            epoch_checkpoints::commit_block.eq(serialize_json(checkpoint.block())?),
-            epoch_checkpoints::qcs.eq(serialize_json(checkpoint.qcs())?),
+            epoch_checkpoints::epoch.eq(checkpoint.epoch().as_u64() as i64),
+            epoch_checkpoints::proof.eq(serialize_json(checkpoint.proof())?),
             epoch_checkpoints::shard_roots.eq(serialize_json(checkpoint.shard_roots())?),
         );
 
@@ -1937,7 +1884,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
         let values = (
             burnt_utxos::commitment.eq(burnt_utxo.commitment.to_string()),
             burnt_utxos::output.eq(serialize_json(&burnt_utxo.output)?),
-            burnt_utxos::base_layer_block_height.eq(burnt_utxo.base_layer_block_height as i64),
+            burnt_utxos::epoch.eq(burnt_utxo.epoch.as_u64() as i64),
         );
 
         diesel::insert_into(burnt_utxos::table)

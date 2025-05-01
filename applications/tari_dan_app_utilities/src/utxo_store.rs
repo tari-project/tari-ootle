@@ -41,7 +41,7 @@ impl<TStore: StateStore + Send + Sync> EpochUtxoStore for StateUtxoStore<TStore>
                 return Ok(());
             }
 
-            BurntUtxo::new(address, substate, epoch.as_u64()).insert(tx)
+            BurntUtxo::new(address, substate, epoch).insert(tx)
         })?;
         Ok(())
     }

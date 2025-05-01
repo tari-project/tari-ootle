@@ -76,7 +76,7 @@ impl QuorumCertificate {
         leaf_hashes.sort();
         let mut qc = Self {
             qc_id: QcId::zero(),
-            block_id: BlockHeader::calculate_block_id(&header_hash, &parent_id),
+            block_id: BlockHeader::calculate_block_id(&parent_id, &header_hash),
             header_hash,
             parent_id,
             block_height,
@@ -94,7 +94,7 @@ impl QuorumCertificate {
     pub fn genesis(epoch: Epoch, shard_group: ShardGroup) -> Self {
         let mut qc = Self {
             qc_id: QcId::zero(),
-            block_id: BlockHeader::calculate_block_id(&FixedHash::zero(), &BlockId::zero()),
+            block_id: BlockId::zero(),
             header_hash: FixedHash::zero(),
             parent_id: BlockId::zero(),
             block_height: NodeHeight::zero(),

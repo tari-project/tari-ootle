@@ -37,8 +37,6 @@ use crate::{
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalStatus,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -127,8 +125,6 @@ pub trait StateStoreReadTransaction: Sized {
         limit: usize,
     ) -> Result<Vec<ForeignProposal>, StorageError>;
 
-    fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError>;
-    fn foreign_receive_counters_get(&self) -> Result<ForeignReceiveCounters, StorageError>;
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError>;
     fn transactions_exists(&self, tx_id: &TransactionId) -> Result<bool, StorageError>;
 
@@ -151,7 +147,6 @@ pub trait StateStoreReadTransaction: Sized {
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError>;
     fn blocks_get_all_ids_by_height(&self, epoch: Epoch, height: NodeHeight) -> Result<Vec<BlockId>, StorageError>;
     fn blocks_get_genesis_for_epoch(&self, epoch: Epoch) -> Result<Block, StorageError>;
-    fn blocks_get_last_n_in_epoch(&self, n: usize, epoch: Epoch) -> Result<Vec<Block>, StorageError>;
     /// Returns all blocks from and excluding the start block (lower height) to the end block (inclusive)
     fn blocks_get_all_between(
         &self,
@@ -379,15 +374,6 @@ pub trait StateStoreWriteTransaction {
     ) -> Result<(), StorageError>;
 
     fn foreign_proposals_clear_proposed_in(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError>;
-    fn foreign_send_counters_set(
-        &mut self,
-        foreign_send_counter: &ForeignSendCounters,
-        block_id: &BlockId,
-    ) -> Result<(), StorageError>;
-    fn foreign_receive_counters_set(
-        &mut self,
-        foreign_send_counter: &ForeignReceiveCounters,
-    ) -> Result<(), StorageError>;
 
     // -------------------------------- Transaction -------------------------------- //
     fn transactions_insert(&mut self, transaction: &TransactionRecord) -> Result<(), StorageError>;

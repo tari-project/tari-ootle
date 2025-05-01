@@ -93,10 +93,6 @@ impl TemplateManagerHandle {
         &self,
         template_changes: Vec<TemplateChange>,
     ) -> Result<(), TemplateManagerError> {
-        if template_changes.is_empty() {
-            return Ok(());
-        }
-
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(TemplateManagerRequest::EnqueueTemplateChanges {

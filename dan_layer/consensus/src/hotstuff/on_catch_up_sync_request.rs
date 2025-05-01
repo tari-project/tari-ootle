@@ -80,6 +80,8 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                 );
                 // NOTE: We have to send dummy blocks, because the messaging will ignore heights > current_view + 1,
                 // until eventually the syncing node's pacemaker leader-fails a few times.
+                // TODO: A Block containing a higher QC that justifies the previous non-dummy block should be enough to cause a view change and allow the dummies to be generated locally.
+                // sending dummies is problematic as they are unsigned and generally, you cannot prove their validity.
                 let blocks = Block::get_all_blocks_between(
                     tx,
                     leaf_block.epoch(),

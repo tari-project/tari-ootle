@@ -31,10 +31,11 @@ use tokio::{sync::broadcast, task};
 
 use crate::{
     hotstuff::{
-        block_change_set::ProposedBlockChangeSet,
+        block_change_set::{BlockDecision, ProposedBlockChangeSet},
         calculate_dummy_blocks_from_justify,
+        commit_proofs::generate_eviction_proofs,
+        epoch_state::EpochState,
         error::HotStuffError,
-        eviction_proof::generate_eviction_proofs,
         generate_epoch_checkpoint,
         get_next_block_height_and_leader,
         on_ready_to_vote_on_local_block::OnReadyToVoteOnLocalBlock,
@@ -121,9 +122,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     pub async fn handle(
         &mut self,
-        current_epoch: Epoch,
-        local_committee_info: &CommitteeInfo,
-        local_committee: &Committee<TConsensusSpec::Addr>,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
         msg: ProposalMessage,
     ) -> Result<bool, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveLocalProposalHandler");
@@ -150,7 +149,13 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 return Ok(None);
             }
 
-            self.validate_block(tx, current_epoch, block, local_committee, local_committee_info)
+            self.validate_block(
+                tx,
+                epoch_state.epoch(),
+                block,
+                epoch_state.local_committee(),
+                epoch_state.local_committee_info(),
+            )
         })?;
 
         let Some(valid_block) = maybe_valid_block else {
@@ -187,10 +192,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     continue;
                 }
 
-                if let Err(err) =
-                    self.on_receive_foreign_proposal
-                        .validate_and_save(tx, &foreign_proposal, local_committee_info)
-                {
+                if let Err(err) = self.on_receive_foreign_proposal.validate_and_save(
+                    tx,
+                    &foreign_proposal,
+                    epoch_state.local_committee_info(),
+                ) {
                     if let Some(err) = err.validation_error() {
                         warn!(target: LOG_TARGET, "⚠️❌ Validation failed for foreign proposal: {}", err);
                         // if a node sent us an invalid foreign proposal, we immediately reject the block
@@ -216,7 +222,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             return Ok(false);
         }
 
-        // TODO: perf - we may want to cache this
         let proposer_vn = self
             .epoch_manager
             .get_validator_node_by_public_key(valid_block.epoch(), *valid_block.proposed_by())
@@ -224,9 +229,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let result = self
             .process_block(
-                current_epoch,
-                *local_committee_info,
-                local_committee,
+                epoch_state.epoch(),
+                *epoch_state.local_committee_info(),
+                epoch_state.local_committee(),
                 proposer_vn.fee_claim_public_key,
                 valid_block,
             )
@@ -246,7 +251,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     async fn process_block(
         &mut self,
         current_epoch: Epoch,
@@ -263,47 +267,73 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let mut on_ready_to_vote_on_local_block = self.on_ready_to_vote_on_local_block.clone();
 
-        let (mut block_decision, valid_block, mut change_set) = task::spawn_blocking({
-            // Reusing the change set allocated memory (pointers in the Vec types are passed onto the thread stack).
-            let mut change_set = self
-                .change_set
-                .take()
-                .map(|mut c| {
-                    c.set_block(valid_block.block().as_leaf_block());
-                    c
-                })
-                .unwrap_or_else(|| ProposedBlockChangeSet::new(valid_block.block().as_leaf_block()));
+        // Reusing the change set allocated memory (pointers in the Vec types are passed onto the thread stack).
+        let mut change_set = self
+            .change_set
+            .take()
+            .map(|mut c| {
+                c.set_block(valid_block.block().as_leaf_block());
+                c
+            })
+            .unwrap_or_else(|| ProposedBlockChangeSet::new(valid_block.block().as_leaf_block()));
 
-            let store = self.store.clone();
+        let store = self.store.clone();
 
-            // Task closure
-            move || {
-                store.with_write_tx(|tx| {
-                    let decision = on_ready_to_vote_on_local_block.handle(
-                        tx,
-                        &valid_block,
-                        &local_committee_info,
-                        &proposer_claim_public_key_bytes,
-                        can_propose_epoch_end,
-                        &mut change_set,
-                    )?;
+        let (process_result, mut change_set) = task::spawn_blocking(move || {
+            store.with_write_tx(|tx| {
+                let decision = on_ready_to_vote_on_local_block.handle(
+                    tx,
+                    &valid_block,
+                    &local_committee_info,
+                    &proposer_claim_public_key_bytes,
+                    can_propose_epoch_end,
+                    &mut change_set,
+                )?;
 
-                    Ok::<_, HotStuffError>((decision, valid_block, change_set))
-                })
-            }
+                Ok::<_, HotStuffError>((
+                    ProcessBlockResult {
+                        block_decision: decision,
+                        valid_block,
+                    },
+                    change_set,
+                ))
+            })
         })
         .await??;
 
-        if !block_decision.is_accept() {
-            change_set.log_everything();
+        // If accepted, the changeset is already saved, otherwise we log everything here for debugging
+        if !process_result.block_decision.is_accept() {
+            change_set.log_everything_dropped();
         }
-        // Reuse the changeset allocations after clearing it
+        // Clear and reuse the memory allocated for changeset
         change_set.clear();
         self.change_set = Some(change_set);
+
+        let is_accept = self
+            .process_block_decision(local_committee_info, local_committee, process_result, is_epoch_end)
+            .await?;
+
+        Ok(is_accept)
+    }
+
+    async fn process_block_decision(
+        &mut self,
+        local_committee_info: CommitteeInfo,
+        local_committee: &Committee<TConsensusSpec::Addr>,
+        process_block_result: ProcessBlockResult,
+        is_epoch_end: bool,
+    ) -> Result<bool, HotStuffError> {
+        let _timer = TraceTimer::debug(LOG_TARGET, "process-block-decision").with_excessive_threshold(200);
+
+        let ProcessBlockResult {
+            mut block_decision,
+            valid_block,
+        } = process_block_result;
 
         let is_accept_decision = block_decision.is_accept();
 
         if is_accept_decision && !block_decision.committed_blocks_with_evictions.is_empty() {
+            // Generate eviction proofs for the evicted blocks
             let store = self.store.clone();
             let qc = valid_block.justify().clone();
             let committed_blocks_with_evictions = mem::take(&mut block_decision.committed_blocks_with_evictions);
@@ -317,7 +347,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             }
         }
 
-        if block_decision.end_of_epoch.is_none() {
+        if block_decision.committed_end_of_epoch_block.is_none() {
             if let Some(decision) = block_decision.quorum_decision {
                 let (next_height, next_leader_addr, num_skipped) = self.store.with_read_tx(|tx| {
                     get_next_block_height_and_leader(
@@ -358,33 +388,69 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
         self.propose_newly_locked_blocks(local_committee_info, block_decision.locked_blocks);
 
-        if let Some(prev_epoch) = block_decision.end_of_epoch {
-            let next_epoch = prev_epoch + Epoch(1);
+        // THere should only be one committed block with end of epoch
+        if let Some(eoe_block) = block_decision.committed_end_of_epoch_block.take() {
+            self.process_end_of_epoch(eoe_block, valid_block).await?;
+        }
 
-            // If we're registered for the next epoch. Create a new genesis block.
-            if let Some(vn) = self.epoch_manager.get_our_validator_node(next_epoch).await.optional()? {
-                // TODO: Change VN db to include the shard group in the ValidatorNode struct.
-                let num_committees = self.epoch_manager.get_num_committees(next_epoch).await?;
-                let next_shard_group = vn
-                    .shard_key
-                    .to_shard_group(self.config.consensus_constants.num_preshards, num_committees);
-                self.store.with_write_tx(|tx| {
-                    // Generate checkpoint
-                    let checkpoint = generate_epoch_checkpoint(&**tx, prev_epoch, local_committee_info.shard_group())?;
-                    checkpoint.save(tx)?;
-                    // Prune all DOWNed values
-                    // TODO: we cannot prune downed values during the epoch because nodes currently need to provide
-                    // historical values for catch up, and for validator fees pledging as vnfp's are able to be downed
-                    // while locked. This may be fine or we may need to improve this (potentially by requesting FPs from
-                    // local nodes during catch up)
-                    SubstateRecord::prune_downed_values(tx, prev_epoch)?;
+        // Propose quickly for the end-of-epoch chain
+        if is_accept_decision && is_epoch_end {
+            self.pacemaker.beat();
+        }
+
+        Ok(is_accept_decision)
+    }
+
+    async fn process_end_of_epoch(
+        &mut self,
+        eoe_block: Block,
+        valid_tip_block: ValidBlock,
+    ) -> Result<(), HotStuffError> {
+        let _timer = TraceTimer::debug(LOG_TARGET, "process-end-of-epoch");
+        let prev_epoch = eoe_block.epoch();
+        let next_epoch = prev_epoch + Epoch(1);
+
+        // We're registered for the next epoch. Checkpoint and create a new genesis block.
+        let num_committees = self.epoch_manager.get_num_committees(next_epoch).await?;
+        let epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
+        let our_vn_for_next_epoch = self.epoch_manager.get_our_validator_node(next_epoch).await.optional()?;
+        let next_shard_group = our_vn_for_next_epoch.map(|vn| {
+            vn.shard_key
+                .to_shard_group(self.config.consensus_constants.num_preshards, num_committees)
+        });
+        let store = self.store.clone();
+        let network = self.config.network;
+        let sidechain_id = self.config.sidechain_id;
+        task::spawn_blocking(move || {
+            store.with_write_tx(|tx| {
+                let tip_qc = valid_tip_block.justify();
+                // Generate checkpoint
+                let checkpoint = generate_epoch_checkpoint(&**tx, &eoe_block, tip_qc)?;
+                // Technically not needed, but this will make it clear for debugging purposes if the checkpoint is
+                // invalid To validate the entire proof requires the quorum threshold and the committee,
+                // so we'll just skip it
+                let calculated_mr = checkpoint.compute_state_merkle_root().map_err(|e| {
+                    HotStuffError::InvariantError(format!("Generated an invalid epoch checkpoint: {e}"))
+                })?;
+                if calculated_mr != eoe_block.state_merkle_root() {
+                    return Err(HotStuffError::InvariantError(format!(
+                        "Epoch checkpoint state merkle root mismatch. Expected: {}, Calculated: {}, block: {}",
+                        eoe_block.state_merkle_root(),
+                        calculated_mr,
+                        eoe_block
+                    )));
+                }
+                checkpoint.save(tx)?;
+
+                if let Some(next_shard_group) = next_shard_group {
                     // Create the next genesis
                     let mut genesis = Block::genesis(
-                        self.config.network,
+                        network,
                         next_epoch,
+                        epoch_hash,
                         next_shard_group,
-                        *valid_block.block().state_merkle_root(),
-                        self.config.sidechain_id,
+                        *valid_tip_block.block().state_merkle_root(),
+                        sidechain_id,
                     );
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
                     genesis.justify().insert(tx)?;
@@ -396,39 +462,32 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     genesis.as_last_executed().set(tx)?;
                     genesis.as_last_voted().set(tx)?;
                     genesis.justify().as_high_qc().set(tx)?;
+                }
 
-                    cleanup_epoch(tx, prev_epoch)?;
+                cleanup_epoch(tx, prev_epoch)?;
 
-                    Ok::<_, HotStuffError>(())
-                })?;
+                Ok::<_, HotStuffError>(())
+            })
+        })
+        .await??;
 
-                // TODO: We should exit consensus to sync for the epoch - when this is implemented, we will not
-                // need to create the genesis, set the pacemaker, etc.
-                self.pacemaker.set_epoch(next_epoch).await?;
-                self.publish_event(HotstuffEvent::EpochChanged {
-                    epoch: next_epoch,
-                    registered_shard_group: Some(next_shard_group),
-                });
-            } else {
-                info!(
-                    target: LOG_TARGET,
-                    "💤 Our validator node is not registered for epoch {next_epoch}.",
-                );
+        self.pacemaker.set_epoch(next_epoch).await?;
+        self.publish_event(HotstuffEvent::EpochChanged {
+            epoch: next_epoch,
+            registered_shard_group: next_shard_group,
+        });
 
-                self.publish_event(HotstuffEvent::EpochChanged {
-                    epoch: next_epoch,
-                    registered_shard_group: None,
-                });
-                return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch: next_epoch });
-            }
+        if next_shard_group.is_some() {
+            Ok(())
+        } else {
+            info!(
+                target: LOG_TARGET,
+                "💤 Our validator node is not registered for epoch {next_epoch}.",
+            );
+
+            // Exit consensus and transition to idle
+            Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch: next_epoch })
         }
-
-        // Propose quickly for the end of epoch chain
-        if is_accept_decision && is_epoch_end {
-            self.pacemaker.beat();
-        }
-
-        Ok(is_accept_decision)
     }
 
     fn publish_event(&self, event: HotstuffEvent) {
@@ -548,7 +607,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         valid_block: &ValidBlock,
     ) -> Result<(), HotStuffError> {
-        valid_block.block().save_foreign_send_counters(tx)?;
         valid_block.block().justify().save(tx)?;
         if !valid_block.dummy_blocks().is_empty() {
             info!(target: LOG_TARGET, "Saving {} dummy block(s)", valid_block.dummy_blocks().len());
@@ -600,113 +658,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             Err(e) => Err(e),
         }
     }
-
-    // fn update_foreign_proposal_transactions(
-    //     &self,
-    //     tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
-    //     block: &Block,
-    // ) -> Result<(), HotStuffError> {
-    //     // TODO: Move this to consensus constants
-    //     const FOREIGN_PROPOSAL_TIMEOUT: u64 = 1000;
-    //     let all_proposed = ForeignProposal::get_all_proposed(
-    //         &**tx,
-    //         block.height().saturating_sub(NodeHeight(FOREIGN_PROPOSAL_TIMEOUT)),
-    //     )?;
-    //     for proposal in all_proposed {
-    //         let mut has_unresolved_transactions = false;
-    //
-    //         let (transactions, _missing) = TransactionRecord::get_any(&**tx, &proposal.transactions)?;
-    //         for transaction in transactions {
-    //             if transaction.is_finalized() {
-    //                 // We don't know the transaction at all, or we know it but it's not finalised.
-    //                 let mut tx_rec = self
-    //                     .transaction_pool
-    //                     .get(&**tx, block.as_leaf_block(), transaction.id())?;
-    //                 // If the transaction is still in the pool we have to check if it was at least locally prepared,
-    //                 // otherwise abort it.
-    //                 if tx_rec.current_stage().is_new() || tx_rec.current_stage().is_prepared() {
-    //                     tx_rec.update_local_decision(tx, Decision::Abort)?;
-    //                     has_unresolved_transactions = true;
-    //                 }
-    //             }
-    //         }
-    //         if !has_unresolved_transactions {
-    //             proposal.delete(tx)?;
-    //         }
-    //     }
-    //     Ok(())
-    // }
-
-    // TODO: fix
-    // fn check_foreign_indexes(
-    //     &self,
-    //     tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-    //     num_committees: u32,
-    //     local_shard: Shard,
-    //     block: &Block,
-    //     justify_block: &BlockId,
-    // ) -> Result<(), HotStuffError> {
-    //     let non_local_shards = proposer::get_non_local_shards(tx, block, num_committees, local_shard)?;
-    //     let block_foreign_indexes = block.foreign_indexes();
-    //     if block_foreign_indexes.len() != non_local_shards.len() {
-    //         return Err(ProposalValidationError::InvalidForeignCounters {
-    //             proposed_by: block.proposed_by().to_string(),
-    //             hash: *block.id(),
-    //             details: format!(
-    //                 "Foreign indexes length ({}) does not match non-local shards length ({})",
-    //                 block_foreign_indexes.len(),
-    //                 non_local_shards.len()
-    //             ),
-    //         }
-    //         .into());
-    //     }
-    //
-    //     let mut foreign_counters = ForeignSendCounters::get_or_default(tx, justify_block)?;
-    //     let mut current_shard = None;
-    //     for (shard, foreign_count) in block_foreign_indexes {
-    //         if let Some(current_shard) = current_shard {
-    //             // Check ordering
-    //             if current_shard > shard {
-    //                 return Err(ProposalValidationError::InvalidForeignCounters {
-    //                     proposed_by: block.proposed_by().to_string(),
-    //                     hash: *block.id(),
-    //                     details: format!(
-    //                         "Foreign indexes are not sorted by shard. Current shard: {}, shard: {}",
-    //                         current_shard, shard
-    //                     ),
-    //                 }
-    //                 .into());
-    //             }
-    //         }
-    //
-    //         current_shard = Some(shard);
-    //         // Check that each shard is correct
-    //         if !non_local_shards.contains(shard) {
-    //             return Err(ProposalValidationError::InvalidForeignCounters {
-    //                 proposed_by: block.proposed_by().to_string(),
-    //                 hash: *block.id(),
-    //                 details: format!("Shard {} is not a non-local shard", shard),
-    //             }
-    //             .into());
-    //         }
-    //
-    //         // Check that foreign counters are correct
-    //         let expected_count = foreign_counters.increment_counter(*shard);
-    //         if *foreign_count != expected_count {
-    //             return Err(ProposalValidationError::InvalidForeignCounters {
-    //                 proposed_by: block.proposed_by().to_string(),
-    //                 hash: *block.id(),
-    //                 details: format!(
-    //                     "Foreign counter for shard {} is incorrect. Expected {}, got {}",
-    //                     shard, expected_count, foreign_count
-    //                 ),
-    //             }
-    //             .into());
-    //         }
-    //     }
-    //
-    //     Ok(())
-    // }
 
     /// Perform final block validations (TODO: implement all validations)
     /// We assume at this point that initial stateless validations have been done (in inbound messages)
@@ -1012,8 +963,20 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
     Ok(())
 }
 
-fn cleanup_epoch<TTx: StateStoreWriteTransaction>(tx: &mut TTx, _epoch: Epoch) -> Result<(), HotStuffError> {
+fn cleanup_epoch<TTx: StateStoreWriteTransaction>(tx: &mut TTx, epoch: Epoch) -> Result<(), HotStuffError> {
+    // Prune all DOWNed values
+    // TODO: we cannot prune downed values during the epoch because nodes currently need to provide
+    // historical values for catch up, and for validator fees pledging as vnfp's are able to be downed
+    // while locked. This may be fine or we may need to improve this (potentially by requesting FPs from
+    // local nodes during catch up)
+    SubstateRecord::prune_downed_values(tx, epoch)?;
     Vote::delete_all(tx)?;
+    // TODO: when can we delete the foreign proposals?
     // ForeignProposal::delete_in_epoch(tx, epoch)?;
     Ok(())
+}
+
+struct ProcessBlockResult {
+    pub block_decision: BlockDecision,
+    pub valid_block: ValidBlock,
 }

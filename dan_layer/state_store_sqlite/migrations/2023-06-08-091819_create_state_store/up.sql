@@ -15,33 +15,31 @@ create unique index quorum_certificates_uniq_idx_id on quorum_certificates (qc_i
 
 create table blocks
 (
-    id                      integer   not null primary key AUTOINCREMENT,
-    block_id                text      not NULL,
-    parent_block_id         text      not NULL REFERENCES blocks (block_id),
-    state_merkle_root       text      not NULL,
-    command_merkle_root     text      not NULL,
-    network                 text      not NULL,
-    height                  bigint    not NULL,
-    epoch                   bigint    not NULL,
-    shard_group             integer   not NULL,
-    proposed_by             text      not NULL,
-    qc_id                   text      not NULL,
+    id                  integer   not null primary key AUTOINCREMENT,
+    block_id            text      not NULL,
+    parent_block_id     text      not NULL REFERENCES blocks (block_id),
+    state_merkle_root   text      not NULL,
+    command_merkle_root text      not NULL,
+    network             text      not NULL,
+    height              bigint    not NULL,
+    epoch               bigint    not NULL,
+    shard_group         integer   not NULL,
+    proposed_by         text      not NULL,
+    qc_id               text      not NULL,
     -- used for debugging purposes to make it easier to know which block is justified
-    qc_height               bigint    not NULL,
-    command_count           bigint    not NULL,
-    commands                text      not NULL,
-    total_leader_fee        bigint    not NULL,
-    is_committed            boolean   not NULL default '0',
-    is_justified            boolean   not NULL,
-    is_dummy                boolean   not NULL,
-    foreign_indexes         text      not NULL,
-    signature               text      NULL,
-    block_time              bigint    NULL,
-    timestamp               bigint    not NULL,
-    base_layer_block_height bigint    not NULL,
-    base_layer_block_hash   text      not NULL,
-    extra_data              text      NULL,
-    created_at              timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    qc_height           bigint    not NULL,
+    command_count       bigint    not NULL,
+    commands            text      not NULL,
+    total_leader_fee    bigint    not NULL,
+    is_committed        boolean   not NULL default '0',
+    is_justified        boolean   not NULL,
+    is_dummy            boolean   not NULL,
+    signature           text      NULL,
+    block_time          bigint    NULL,
+    timestamp           bigint    not NULL,
+    epoch_hash          text      not NULL,
+    extra_data          text      NULL,
+    created_at          timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (qc_id) REFERENCES quorum_certificates (qc_id)
 );
 
@@ -51,28 +49,26 @@ create index blocks_idx_epoch_height on blocks (epoch, height);
 
 create table parked_blocks
 (
-    id                      integer   not null primary key AUTOINCREMENT,
-    block_id                text      not NULL,
-    parent_block_id         text      not NULL,
-    state_merkle_root       text      not NULL,
-    command_merkle_root     text      not NULL,
-    network                 text      not NULL,
-    height                  bigint    not NULL,
-    epoch                   bigint    not NULL,
-    shard_group             integer   not NULL,
-    proposed_by             text      not NULL,
-    justify                 text      not NULL,
-    command_count           bigint    not NULL,
-    commands                text      not NULL,
-    total_leader_fee        bigint    not NULL,
-    foreign_indexes         text      not NULL,
-    signature               text      NULL,
-    timestamp               bigint    not NULL,
-    base_layer_block_height bigint    not NULL,
-    base_layer_block_hash   text      not NULL,
-    foreign_proposals       text      not NULL,
-    extra_data              text      NULL,
-    created_at              timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                  integer   not null primary key AUTOINCREMENT,
+    block_id            text      not NULL,
+    parent_block_id     text      not NULL,
+    state_merkle_root   text      not NULL,
+    command_merkle_root text      not NULL,
+    network             text      not NULL,
+    height              bigint    not NULL,
+    epoch               bigint    not NULL,
+    shard_group         integer   not NULL,
+    proposed_by         text      not NULL,
+    justify             text      not NULL,
+    command_count       bigint    not NULL,
+    commands            text      not NULL,
+    total_leader_fee    bigint    not NULL,
+    signature           text      NULL,
+    timestamp           bigint    not NULL,
+    epoch_hash          text      not NULL,
+    foreign_proposals   text      not NULL,
+    extra_data          text      NULL,
+    created_at          timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- block_id must be unique. Optimise fetching by block_id
@@ -398,11 +394,9 @@ CREATE TABLE foreign_proposals
     command_count            bigint    not NULL,
     commands                 text      not NULL,
     total_leader_fee         bigint    not NULL,
-    foreign_indexes          text      not NULL,
     signature                text      NULL,
     timestamp                bigint    not NULL,
-    base_layer_block_height  bigint    not NULL,
-    base_layer_block_hash    text      not NULL,
+    epoch_hash               text      not NULL,
     justify_qc_id            text      not NULL REFERENCES quorum_certificates (qc_id),
     block_pledge             text      not NULL,
     proposed_in_block        text      NULL REFERENCES blocks (block_id),
@@ -413,27 +407,13 @@ CREATE TABLE foreign_proposals
     UNIQUE (block_id)
 );
 
-CREATE TABLE foreign_send_counters
-(
-    id         integer   not NULL primary key AUTOINCREMENT,
-    block_id   text      not NULL,
-    counters   text      not NULL,
-    created_at timestamp not NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE foreign_receive_counters
-(
-    id         integer   not NULL primary key AUTOINCREMENT,
-    counters   text      not NULL,
-    created_at timestamp not NULL DEFAULT CURRENT_TIMESTAMP
-);
 
 CREATE TABLE burnt_utxos
 (
     id                       integer   not null primary key AUTOINCREMENT,
     commitment               text      not NULL,
     output                   text      not NULL,
-    base_layer_block_height  bigint    not NULL,
+    epoch                    bigint    not NULL,
     proposed_in_block        text      NULL REFERENCES blocks (block_id),
     proposed_in_block_height bigint    NULL,
     created_at               timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -480,13 +460,13 @@ CREATE UNIQUE INDEX pending_state_tree_diffs_uniq_idx_block_id_shard on pending_
 
 CREATE TABLE epoch_checkpoints
 (
-    id           integer   not NULL primary key AUTOINCREMENT,
-    epoch        bigint    not NULL,
-    commit_block text      not NULL,
-    qcs          text      not NULL,
-    shard_roots  text      not NULL,
-    created_at   timestamp not NULL DEFAULT CURRENT_TIMESTAMP
+    id          integer   not NULL primary key AUTOINCREMENT,
+    epoch       bigint    not NULL,
+    proof       text      not NULL,
+    shard_roots text      not NULL,
+    created_at  timestamp not NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX epoch_checkpoints_uniq_idx_epoch on epoch_checkpoints (epoch);
 
 -- An append-only store of state transitions
 CREATE TABLE state_transitions
@@ -549,33 +529,31 @@ CREATE TABLE diagnostics_no_votes
 
 create table diagnostic_deleted_blocks
 (
-    id                      integer   not null primary key AUTOINCREMENT,
-    block_id                text      not NULL,
-    parent_block_id         text      not NULL,
-    state_merkle_root       text      not NULL,
-    command_merkle_root     text      not NULL,
-    network                 text      not NULL,
-    height                  bigint    not NULL,
-    epoch                   bigint    not NULL,
-    shard_group             integer   not NULL,
-    proposed_by             text      not NULL,
-    qc_id                   text      not NULL,
+    id                  integer   not null primary key AUTOINCREMENT,
+    block_id            text      not NULL,
+    parent_block_id     text      not NULL,
+    state_merkle_root   text      not NULL,
+    command_merkle_root text      not NULL,
+    network             text      not NULL,
+    height              bigint    not NULL,
+    epoch               bigint    not NULL,
+    shard_group         integer   not NULL,
+    proposed_by         text      not NULL,
+    qc_id               text      not NULL,
     -- used for debugging purposes to make it easier to know which block is justified
-    qc_height               bigint    not NULL,
-    command_count           bigint    not NULL,
-    commands                text      not NULL,
-    total_leader_fee        bigint    not NULL,
-    is_committed            boolean   not NULL default '0',
-    is_justified            boolean   not NULL,
-    is_dummy                boolean   not NULL,
-    foreign_indexes         text      not NULL,
-    signature               text      NULL,
-    block_time              bigint    NULL,
-    timestamp               bigint    not NULL,
-    base_layer_block_height bigint    not NULL,
-    base_layer_block_hash   text      not NULL,
-    extra_data              text      NULL,
-    created_at              timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+    qc_height           bigint    not NULL,
+    command_count       bigint    not NULL,
+    commands            text      not NULL,
+    total_leader_fee    bigint    not NULL,
+    is_committed        boolean   not NULL default '0',
+    is_justified        boolean   not NULL,
+    is_dummy            boolean   not NULL,
+    signature           text      NULL,
+    block_time          bigint    NULL,
+    timestamp           bigint    not NULL,
+    epoch_hash          text      not NULL,
+    extra_data          text      NULL,
+    created_at          timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Debug Triggers

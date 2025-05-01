@@ -42,6 +42,7 @@ impl<'a, TStore: WalletStore> ConfigApi<'a, TStore> {
     where T: DeserializeOwned {
         let mut tx = self.store.create_read_tx()?;
         let record = tx.config_get(key.as_key_str())?;
+        // TODO: decryption if record.is_encrypted
         Ok(record.value)
     }
 
@@ -66,9 +67,14 @@ impl<'a, TStore: WalletStore> ConfigApi<'a, TStore> {
 }
 
 pub enum ConfigKey {
+    /// The network the wallet is running on. type: String
     Network,
+    /// The cipher seed used to encrypt the wallet. type: Vec<u8>
     CipherSeed,
+    /// The URL of the indexer. type: String
     IndexerUrl,
+    /// Indicates whether the wallet needs to be recovered. type: bool
+    RecoveryNeeded,
 }
 
 impl ConfigKey {
@@ -77,6 +83,7 @@ impl ConfigKey {
             ConfigKey::Network => "network",
             ConfigKey::CipherSeed => "cipher_seed",
             ConfigKey::IndexerUrl => "indexer_url",
+            ConfigKey::RecoveryNeeded => "recovery_needed",
         }
     }
 }

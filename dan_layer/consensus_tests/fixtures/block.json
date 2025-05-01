@@ -14,15 +14,12 @@
     "total_leader_fee": 0,
     "state_merkle_root": "e709b60df2ab56c5a4b6021cc9f75cdc8a1fd84a9dd84a3d0111ff86463f603b",
     "command_merkle_root": "e709b60df2ab56c5a4b6021cc9f75cdc8a1fd84a9dd84a3d0111ff86463f603b",
-    "is_dummy": false,
-    "foreign_indexes": {},
     "signature": {
       "public_nonce": "2846178a36d464460afc23c230cd5b5ed537fc214126e0ed4a2c972580068828",
       "signature": "16f4be46fb4c5736e6b5be0771bf5e108c254a8cf28b2c407b089f466ec73305"
     },
     "timestamp": 1732873628,
-    "base_layer_block_height": 50,
-    "base_layer_block_hash": "19f4b5c0b33894029854b6e9ba922812b7290172d3f48e6dd3a0081444113a70",
+    "epoch_hash": "19f4b5c0b33894029854b6e9ba922812b7290172d3f48e6dd3a0081444113a70",
     "extra_data": {}
   },
   "justify": {

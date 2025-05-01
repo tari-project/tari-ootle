@@ -11,7 +11,7 @@ use log::*;
 use tari_common_types::types::FixedHash;
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{
-    committee::{Committee, CommitteeInfo},
+    committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
     Epoch,
@@ -30,7 +30,6 @@ use tari_dan_storage::{
         Decision,
         EvictNodeAtom,
         ForeignProposal,
-        ForeignSendCounters,
         HighQc,
         LastProposed,
         LeafBlock,
@@ -53,7 +52,7 @@ use tari_engine_types::{
     commit_result::RejectReason,
     confidential::UnclaimedConfidentialOutput,
     substate::Substate,
-    template_models::UnclaimedConfidentialOutputAddress,
+    template_lib_models::UnclaimedConfidentialOutputAddress,
     ToByteType,
 };
 use tari_epoch_manager::EpochManagerReader;
@@ -66,6 +65,7 @@ use crate::{
         apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         calculate_state_merkle_root,
+        epoch_state::EpochState,
         error::HotStuffError,
         filter_diff_for_committee,
         substate_store::PendingSubstateStore,
@@ -133,14 +133,16 @@ where TConsensusSpec: ConsensusSpec
     #[allow(clippy::too_many_lines)]
     pub async fn handle(
         &mut self,
-        epoch: Epoch,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
         next_height: NodeHeight,
-        local_committee: &Committee<TConsensusSpec::Addr>,
-        local_committee_info: CommitteeInfo,
         local_claim_public_key: RistrettoPublicKeyBytes,
         leaf_block: LeafBlock,
         propose_epoch_end: bool,
     ) -> Result<(), HotStuffError> {
+        let epoch = epoch_state.epoch();
+        let local_committee_info = *epoch_state.local_committee_info();
+        let local_committee = epoch_state.local_committee();
+        let epoch_hash = *epoch_state.epoch_hash();
         let _timer = TraceTimer::info(LOG_TARGET, "OnPropose");
         if let Some(last_proposed) = self.store.with_read_tx(|tx| LastProposed::get(tx)).optional()? {
             if last_proposed.epoch == epoch && last_proposed.height >= next_height {
@@ -155,10 +157,6 @@ where TConsensusSpec: ConsensusSpec
                 return Ok(());
             }
         }
-
-        let epoch_hash = self.epoch_manager.get_current_epoch_hash().await?;
-        // TODO: Remove
-        let base_layer_block_height = 0;
 
         let on_propose = self.clone();
 
@@ -183,7 +181,6 @@ where TConsensusSpec: ConsensusSpec
                     &local_committee_info,
                     &local_claim_public_key,
                     false,
-                    base_layer_block_height,
                     epoch_hash,
                     propose_epoch_end,
                 )?;
@@ -406,8 +403,7 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
         local_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         dont_propose_transactions: bool,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         can_propose_epoch_end: bool,
     ) -> Result<NextBlock, HotStuffError> {
         // The parent block will only ever not exist if it is a dummy block
@@ -592,16 +588,7 @@ where TConsensusSpec: ConsensusSpec
         )?;
         timer.done();
 
-        let foreign_counters = ForeignSendCounters::get_or_default(tx, parent_block.block_id())?;
-        let foreign_indexes = substate_store
-            .diff()
-            .iter()
-            .map(|change| change.shard())
-            .filter(|shard| !local_committee_info.shard_group().contains(shard))
-            .map(|shard| (shard, foreign_counters.get_count(shard) + 1))
-            .collect();
-
-        let mut header = BlockHeader::create(
+        let mut header = BlockHeader::create_unsigned(
             self.config.network,
             *parent_block.block_id(),
             *high_qc_certificate.id(),
@@ -612,11 +599,8 @@ where TConsensusSpec: ConsensusSpec
             state_root,
             &commands,
             total_leader_fee,
-            foreign_indexes,
-            None,
             EpochTime::now().as_u64(),
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             ExtraData::new(),
         )?;
 

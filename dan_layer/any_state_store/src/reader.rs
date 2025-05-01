@@ -23,8 +23,6 @@ use tari_dan_storage::{
         BurntUtxo,
         EpochCheckpoint,
         ForeignProposal,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -151,20 +149,6 @@ impl<'tx> StateStoreReadTransaction for AnyStateStoreReadTransaction<'tx> {
         match self {
             Self::Rocksdb(tx) | Self::RocksdbRef(tx) => tx.foreign_proposals_get_all_new(block_id, limit),
             Self::Sqlite(tx) | Self::SqliteRef(tx) => tx.foreign_proposals_get_all_new(block_id, limit),
-        }
-    }
-
-    fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {
-        match self {
-            Self::Rocksdb(tx) | Self::RocksdbRef(tx) => tx.foreign_send_counters_get(block_id),
-            Self::Sqlite(tx) | Self::SqliteRef(tx) => tx.foreign_send_counters_get(block_id),
-        }
-    }
-
-    fn foreign_receive_counters_get(&self) -> Result<ForeignReceiveCounters, StorageError> {
-        match self {
-            Self::Rocksdb(tx) | Self::RocksdbRef(tx) => tx.foreign_receive_counters_get(),
-            Self::Sqlite(tx) | Self::SqliteRef(tx) => tx.foreign_receive_counters_get(),
         }
     }
 

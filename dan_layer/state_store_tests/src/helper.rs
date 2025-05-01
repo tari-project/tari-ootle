@@ -53,7 +53,7 @@ use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::{
     auth::OwnerRule,
     models::ComponentAddress,
-    prelude::{ComponentAccessRules, TemplateAddress},
+    prelude::{ComponentAccessRules, SchnorrSignatureBytes, TemplateAddress},
     types::{ComponentKey, EntityId, ObjectKey},
 };
 use tari_transaction::TransactionId;
@@ -238,10 +238,8 @@ pub fn create_block(parent: Option<&Block>) -> Block {
         [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
         random_merkle_root,
         Default::default(),
-        Default::default(),
-        None,
+        SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::default(),
     )
@@ -271,10 +269,8 @@ pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
         [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
         random_merkle_root,
         Default::default(),
-        Default::default(),
-        None,
+        SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::default(),
     )

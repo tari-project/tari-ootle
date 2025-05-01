@@ -11,6 +11,7 @@ use crate::process_definitions::{ProcessContext, ProcessDefinition};
 
 pub const WALLET_DAEMON_AUTH_SETTINGS_KEY: &str = "wallet_daemon_auth";
 pub const WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY: &str = "wallet_daemon_seed_words";
+const OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY: &str = "override_keyring_password";
 const WALLET_DAEMON_AUTH_DEFAULT: &str = "none";
 
 #[derive(Debug, Default)]
@@ -66,6 +67,10 @@ impl ProcessDefinition for WalletDaemon {
 
         if let Some(seed_words) = context.get_setting(WALLET_DAEMON_SEED_WORDS_SETTINGS_KEY) {
             command.arg(format!("--seed-words={seed_words}"));
+        }
+
+        if let Some(override_keyring_password) = context.get_setting(OVERRIDE_KEYRING_PASSWORD_SETTINGS_KEY) {
+            command.arg(format!("--override-keyring-password='{override_keyring_password}'"));
         }
 
         // A signaling server is not required for startup of the wallet daemon,

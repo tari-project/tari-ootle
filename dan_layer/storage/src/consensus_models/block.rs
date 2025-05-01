@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fmt::{Debug, Display, Formatter},
     iter,
     ops::Deref,
@@ -43,7 +43,6 @@ use super::{
     EvictNodeAtom,
     ForeignProposal,
     ForeignProposalAtom,
-    ForeignSendCounters,
     HighQc,
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
@@ -117,11 +116,9 @@ impl Block {
         commands: BTreeSet<Command>,
         state_merkle_root: FixedHash,
         total_leader_fee: u64,
-        sorted_foreign_indexes: BTreeMap<Shard, u64>,
-        signature: Option<SchnorrSignatureBytes>,
+        signature: SchnorrSignatureBytes,
         timestamp: u64,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         extra_data: ExtraData,
     ) -> Result<Self, BlockError> {
         let header = BlockHeader::create(
@@ -135,11 +132,9 @@ impl Block {
             state_merkle_root,
             &commands,
             total_leader_fee,
-            sorted_foreign_indexes,
             signature,
             timestamp,
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             extra_data,
         )?;
         Ok(Self::new(header, justify, commands))
@@ -171,16 +166,13 @@ impl Block {
         commands: BTreeSet<Command>,
         command_merkle_root: FixedHash,
         total_leader_fee: u64,
-        is_dummy: bool,
         is_justified: bool,
         is_committed: bool,
-        sorted_foreign_indexes: BTreeMap<Shard, u64>,
         signature: Option<SchnorrSignatureBytes>,
         created_at: PrimitiveDateTime,
         block_time: Option<u64>,
         timestamp: u64,
-        base_layer_block_height: u64,
-        base_layer_block_hash: FixedHash,
+        epoch_hash: FixedHash,
         extra_data: ExtraData,
     ) -> Self {
         let header = BlockHeader::load(
@@ -194,12 +186,9 @@ impl Block {
             proposed_by,
             state_merkle_root,
             total_leader_fee,
-            is_dummy,
-            sorted_foreign_indexes,
             signature,
             timestamp,
-            base_layer_block_height,
-            base_layer_block_hash,
+            epoch_hash,
             extra_data,
             command_merkle_root,
         );
@@ -217,6 +206,7 @@ impl Block {
     pub fn genesis(
         network: Network,
         epoch: Epoch,
+        epoch_hash: FixedHash,
         shard_group: ShardGroup,
         state_merkle_root: FixedHash,
         sidechain_id: Option<RistrettoPublicKeyBytes>,
@@ -243,11 +233,9 @@ impl Block {
             Default::default(),
             state_merkle_root,
             0,
-            BTreeMap::new(),
-            None,
+            SchnorrSignatureBytes::zero(),
             0,
-            0,
-            FixedHash::zero(),
+            epoch_hash,
             extra_data,
         )
         .expect("Infallible with empty commands")
@@ -429,20 +417,8 @@ impl Block {
         self.is_committed
     }
 
-    pub fn get_foreign_counter(&self, shard: &Shard) -> Option<u64> {
-        self.header.get_foreign_counter(shard)
-    }
-
-    pub fn foreign_indexes(&self) -> &BTreeMap<Shard, u64> {
-        self.header.foreign_indexes()
-    }
-
     pub fn block_time(&self) -> Option<u64> {
         self.block_time
-    }
-
-    pub fn set_block_time(&mut self, block_time: Option<u64>) {
-        self.block_time = block_time;
     }
 
     pub fn timestamp(&self) -> u64 {
@@ -453,12 +429,8 @@ impl Block {
         self.header.signature()
     }
 
-    pub fn base_layer_block_height(&self) -> u64 {
-        self.header.base_layer_block_height()
-    }
-
-    pub fn base_layer_block_hash(&self) -> &FixedHash {
-        self.header.base_layer_block_hash()
+    pub fn epoch_hash(&self) -> &FixedHash {
+        self.header.epoch_hash()
     }
 
     pub fn extra_data(&self) -> &ExtraData {
@@ -467,13 +439,14 @@ impl Block {
 
     pub fn compute_command_inclusion_proof(&self, command_index: usize) -> Result<SparseMerkleProofExt, BlockError> {
         let hashes = self.commands.iter().map(|cmd| TreeHash::from(cmd.hash().into_array()));
-        let command = self.commands.iter().nth(command_index).ok_or(
-            BlockError::MerkleProofGenerationCommandIndexOutOfBounds {
-                index: command_index,
-                len: self.commands.len(),
-            },
-        )?;
-        let hash = TreeHash::new(command.hash().into_array());
+        let hash =
+            hashes
+                .clone()
+                .nth(command_index)
+                .ok_or(BlockError::MerkleProofGenerationCommandIndexOutOfBounds {
+                    index: command_index,
+                    len: self.commands.len(),
+                })?;
         let (value, proof) = compute_proof_for_hashes(hashes, hash)?;
         value.expect(
             "Value not found in proof. This is a bug because the hash is taken from commands that generate the tree",
@@ -529,14 +502,6 @@ impl Block {
         limit: usize,
     ) -> Result<Vec<Self>, StorageError> {
         tx.blocks_get_all_between(epoch, start_block_height, end_block_height, include_dummy_blocks, limit)
-    }
-
-    pub fn get_last_n_in_epoch<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        n: usize,
-        epoch: Epoch,
-    ) -> Result<Vec<Self>, StorageError> {
-        tx.blocks_get_last_n_in_epoch(n, epoch)
     }
 
     pub fn exists<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
@@ -953,22 +918,6 @@ impl Block {
             locked,
         );
         Ok(false)
-    }
-
-    pub fn save_foreign_send_counters<TTx>(&self, tx: &mut TTx) -> Result<(), StorageError>
-    where
-        TTx: StateStoreWriteTransaction + Deref,
-        TTx::Target: StateStoreReadTransaction,
-    {
-        let mut counters = ForeignSendCounters::get_or_default(&**tx, self.justify().block_id())?;
-        // Add counters for this block and carry over the counters from the justify block, if any
-        for shard in self.foreign_indexes().keys() {
-            counters.increment_counter(*shard);
-        }
-        if !counters.is_empty() {
-            counters.set(tx, self.id())?;
-        }
-        Ok(())
     }
 
     pub fn get_block_pledge<TTx: StateStoreReadTransaction>(

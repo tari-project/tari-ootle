@@ -31,6 +31,8 @@ use tari_utilities::epoch_time::EpochTime;
 use crate::helper::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_sqlite, create_tx_atom};
 
 mod confirm_all_transitions {
+    use tari_template_lib::prelude::SchnorrSignatureBytes;
+
     use super::*;
 
     #[test]
@@ -71,10 +73,8 @@ mod confirm_all_transitions {
             [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )

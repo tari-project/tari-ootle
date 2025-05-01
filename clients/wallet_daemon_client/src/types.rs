@@ -32,7 +32,7 @@ use tari_dan_common_types::{
     SubstateRequirement,
 };
 use tari_dan_wallet_sdk::{
-    apis::{confidential_transfer::ConfidentialTransferInputSelection, jwt::Claims, key_manager},
+    apis::{confidential_transfer::ConfidentialTransferInputSelection, key_manager},
     models::{Account, AuthoredTemplateModel, ConfidentialProofId, NonFungibleToken, TransactionStatus},
 };
 use tari_engine_types::{
@@ -60,8 +60,10 @@ use webauthn_rs_proto::{
     RegisterPublicKeyCredential,
     RequestChallengeResponse,
 };
+use zeroize::Zeroizing;
 
 use crate::{
+    permissions::Claims,
     serialize::{opt_string_or_struct, string_or_struct},
     ComponentAddressOrName,
 };
@@ -945,6 +947,9 @@ pub struct AuthLoginRequest {
     pub webauthn_finish_auth_request: Option<WebauthnFinishAuthRequest>,
 }
 
+/// Represents a JWT token. The token is zeroized from memory on drop.
+pub type EncodedJwtString = Zeroizing<String>;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(
     feature = "ts",
@@ -952,7 +957,8 @@ pub struct AuthLoginRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct AuthLoginResponse {
-    pub auth_token: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub auth_token: EncodedJwtString,
     pub valid_for_secs: u64,
 }
 
@@ -963,7 +969,8 @@ pub struct AuthLoginResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct AuthLoginAcceptRequest {
-    pub auth_token: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub auth_token: EncodedJwtString,
     pub name: String,
 }
 
@@ -974,7 +981,8 @@ pub struct AuthLoginAcceptRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct AuthLoginAcceptResponse {
-    pub permissions_token: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub permissions_token: EncodedJwtString,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -984,7 +992,8 @@ pub struct AuthLoginAcceptResponse {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct AuthLoginDenyRequest {
-    pub auth_token: String,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub auth_token: EncodedJwtString,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

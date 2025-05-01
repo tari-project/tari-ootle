@@ -7,6 +7,8 @@ use std::{
 };
 
 use anyhow::anyhow;
+use axum::headers::authorization::Bearer;
+use log::info;
 use log::{info, warn};
 use tari_crypto::{
     keys::PublicKey as PK,
@@ -25,6 +27,8 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
+use tari_dan_wallet_sdk::{apis::key_manager, models::Account};
+use tari_template_builtin::ACCOUNT_NFT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args,
     models::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
@@ -40,6 +44,16 @@ use tari_wallet_daemon_client::types::{
     MintAccountNftResponse,
     TransferNftRequest,
     TransferNftResponse,
+use tari_wallet_daemon_client::{
+    permissions::JrpcPermission,
+    types::{
+        GetAccountNftRequest,
+        GetAccountNftResponse,
+        ListAccountNftRequest,
+        ListAccountNftResponse,
+        MintAccountNftRequest,
+        MintAccountNftResponse,
+    },
 };
 use tokio::sync::broadcast;
 
@@ -55,11 +69,11 @@ const LOG_TARGET: &str = "tari::dan::wallet_daemon::handlers::nfts";
 
 pub async fn handle_get_nft(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: GetAccountNftRequest,
 ) -> Result<GetAccountNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let non_fungible_api = sdk.non_fungible_api();
 
@@ -72,14 +86,14 @@ pub async fn handle_get_nft(
 
 pub async fn handle_list_nfts(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: ListAccountNftRequest,
 ) -> Result<ListAccountNftResponse, anyhow::Error> {
     let ListAccountNftRequest { account, limit, offset } = req;
     let sdk = context.wallet_sdk();
     let account = get_account_or_default(account, &sdk.accounts_api())?;
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let non_fungible_api = sdk.non_fungible_api();
 
@@ -91,12 +105,12 @@ pub async fn handle_list_nfts(
 
 pub async fn handle_mint_account_nft(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: MintAccountNftRequest,
 ) -> Result<MintAccountNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
     let key_manager_api = sdk.key_manager_api();
-    sdk.jwt_api().check_auth(token.clone(), &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let account = get_account(&req.account, &sdk.accounts_api())?;
 
@@ -119,7 +133,7 @@ pub async fn handle_mint_account_nft(
                 &signing_key.key,
                 owner_token,
                 req.create_account_nft_fee.unwrap_or(DEFAULT_FEE),
-                token.clone(),
+                token,
             )
             .await?;
 
@@ -185,7 +199,7 @@ pub async fn handle_mint_account_nft(
 
 async fn mint_account_nft(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     account: Account,
     component_address: ComponentAddress,
     owner_sk: &RistrettoSecretKey,
@@ -193,7 +207,7 @@ async fn mint_account_nft(
     metadata: Metadata,
 ) -> Result<TransactionFinalizedEvent, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let inputs = sdk
         .substate_api()
@@ -233,10 +247,10 @@ async fn create_account_nft(
     owner_sk: &RistrettoSecretKey,
     owner_token: NonFungibleAddress,
     fee: Amount,
-    token: Option<String>,
+    token: Option<&Bearer>,
 ) -> Result<TransactionFinalizedEvent, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let inputs = sdk
         .substate_api()

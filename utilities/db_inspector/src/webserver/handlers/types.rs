@@ -4,8 +4,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json as json;
 
+use crate::webserver::error::WebError;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct TableRequest {
+    pub query_prefix_hex: Option<String>,
+    pub page: Option<usize>,
     pub limit: Option<usize>,
     #[serde(default)]
     pub asc: bool,
@@ -70,5 +74,17 @@ impl TableResponse {
 macro_rules! row {
     ($($s:expr),*$(,)?) => {
         vec![$(::serde_json::to_value(&$s).unwrap()),*]
+    }
+}
+
+pub fn decode_hex_prefix(prefix_hex: &str) -> Result<Vec<u8>, WebError> {
+    if prefix_hex.len() % 2 == 0 {
+        hex::decode(prefix_hex)
+            .map_err(|e| WebError::bad_request(format!("Failed to decode hex prefix: {}. Error: {}", prefix_hex, e)))
+    } else {
+        let mut p = prefix_hex.to_string();
+        p.push('0');
+        hex::decode(p)
+            .map_err(|e| WebError::bad_request(format!("Failed to decode hex prefix: {}. Error: {}", prefix_hex, e)))
     }
 }

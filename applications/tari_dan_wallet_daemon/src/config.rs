@@ -30,7 +30,8 @@ use tari_common::{
     DefaultConfigLoader,
     SubConfigPath,
 };
-use tari_dan_common_types::crypto::create_secret;
+use tari_crypto::tari_utilities::SafePassword;
+use tari_dan_common_types::crypto::create_secret_password;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -66,10 +67,12 @@ pub struct WalletDaemonConfig {
     /// The indexer JSON-RPC url
     pub indexer_json_rpc_url: Url,
     /// Expiration duration of the JWT token
-    #[serde(with = "humantime_serde::option")]
-    pub jwt_expiry: Option<Duration>,
+    #[serde(with = "humantime_serde")]
+    #[serde(default = "return_default_jwt_expiry")]
+    pub jwt_expiry: Duration,
     /// Secret key for the JWT token.
-    pub jwt_secret_key: Option<String>,
+    #[serde(default = "create_secret_password")]
+    pub jwt_secret_key: SafePassword,
     /// The address of the Web UI
     pub web_ui_address: Option<SocketAddr>,
     /// The path to the value lookup table binary file used for brute force value lookups. This setting
@@ -78,6 +81,14 @@ pub struct WalletDaemonConfig {
     /// utility. If this is not set, the value lookup table will be generated on the fly which will have a large
     /// performance cost when brute forcing high-value outputs.
     pub value_lookup_table_file: Option<PathBuf>,
+    /// The number of contiguous failures to find an account derived from a public key before abandoning recovery and
+    /// assuming that there are no further accounts.
+    pub recovery_abandon_count: usize,
+}
+
+fn return_default_jwt_expiry() -> Duration {
+    // Suggested expiry for access tokens is between 5min and 1h
+    Duration::from_secs(60 * 60)
 }
 
 impl Default for WalletDaemonConfig {
@@ -92,11 +103,11 @@ impl Default for WalletDaemonConfig {
             indexer_json_rpc_url: "http://127.0.0.1:18300/json_rpc"
                 .parse()
                 .expect("failed to parse default indexer_json_rpc_url"),
-            // TODO: Come up with a reasonable default value
-            jwt_expiry: Some(Duration::from_secs(500 * 60)),
-            jwt_secret_key: Some(create_secret()),
+            jwt_expiry: return_default_jwt_expiry(),
+            jwt_secret_key: create_secret_password(),
             web_ui_address: Some("127.0.0.1:5100".parse().unwrap()),
             value_lookup_table_file: None,
+            recovery_abandon_count: 10,
         }
     }
 }

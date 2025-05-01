@@ -18,6 +18,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
+use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::helper::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
@@ -68,10 +69,8 @@ fn foreign_proposals_operations(db: impl StateStore) {
         Default::default(),
         Default::default(),
         1,
-        Default::default(),
-        None,
+        SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::new(),
     )
@@ -103,10 +102,8 @@ fn foreign_proposals_operations(db: impl StateStore) {
         .collect(),
         Default::default(),
         2,
-        Default::default(),
-        None,
+        SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::new(),
     )
@@ -126,10 +123,8 @@ fn foreign_proposals_operations(db: impl StateStore) {
         Default::default(),
         Default::default(),
         5,
-        Default::default(),
-        None,
+        SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::new(),
     )

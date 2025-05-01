@@ -145,9 +145,9 @@ where TConsensusSpec: ConsensusSpec
 
         let mut locked_blocks = Vec::new();
         let mut finalized_transactions = Vec::new();
-        let mut end_of_epoch = None;
         let mut maybe_high_qc = None;
         let mut committed_blocks_with_evictions = Vec::new();
+        let mut committed_end_of_epoch_block = None;
 
         if change_set.is_accept() {
             // Update nodes
@@ -162,10 +162,19 @@ where TConsensusSpec: ConsensusSpec
                 |tx, last_exec, commit_block| {
                     let committed = self.on_commit(tx, last_exec, &commit_block, local_committee_info)?;
                     if commit_block.is_epoch_end() {
-                        end_of_epoch = Some(commit_block.epoch());
-                    }
-                    if commit_block.all_node_evictions().next().is_some() {
+                        if committed_end_of_epoch_block.is_some() {
+                            // There should only be one end of epoch commit block
+                            error!(
+                                target: LOG_TARGET,
+                                "❌ Multiple end of epoch blocks committed. This should not happen. Committed blocks: {:?}",
+                                committed_end_of_epoch_block
+                            );
+                        }
+                        committed_end_of_epoch_block = Some(commit_block);
+                    } else if commit_block.all_node_evictions().next().is_some() {
                         committed_blocks_with_evictions.push(commit_block);
+                    } else {
+                        // nothing to do
                     }
                     if !committed.is_empty() {
                         finalized_transactions.push(committed);
@@ -188,6 +197,7 @@ where TConsensusSpec: ConsensusSpec
                 quorum_decision,
                 change_set
             );
+            change_set.save(tx)?;
         } else {
             warn!(
                 target: LOG_TARGET,
@@ -196,7 +206,6 @@ where TConsensusSpec: ConsensusSpec
                 change_set,
             );
         }
-        change_set.save(tx)?;
 
         let high_qc = maybe_high_qc
             .map(Ok)
@@ -206,9 +215,9 @@ where TConsensusSpec: ConsensusSpec
             quorum_decision,
             locked_blocks,
             finalized_transactions,
-            end_of_epoch,
             high_qc,
             committed_blocks_with_evictions,
+            committed_end_of_epoch_block,
         })
     }
 

@@ -11,8 +11,7 @@ use crate::serialization::deserialize_json;
 pub struct EpochCheckpoint {
     pub id: i32,
     pub epoch: i64,
-    pub commit_block: String,
-    pub qcs: String,
+    pub proof: String,
     pub shard_roots: String,
     pub created_at: PrimitiveDateTime,
 }
@@ -21,10 +20,9 @@ impl TryFrom<EpochCheckpoint> for consensus_models::EpochCheckpoint {
     type Error = StorageError;
 
     fn try_from(value: EpochCheckpoint) -> Result<Self, Self::Error> {
-        let commit_block = deserialize_json(&value.commit_block)?;
-        let qcs = deserialize_json(&value.qcs)?;
+        let proof = deserialize_json(&value.proof)?;
         let shard_roots = deserialize_json(&value.shard_roots)?;
 
-        Ok(Self::new(commit_block, qcs, shard_roots))
+        Ok(Self::new(proof, shard_roots))
     }
 }

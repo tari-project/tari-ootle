@@ -5,6 +5,7 @@ use std::{collections::HashMap, hash::Hash, io::Write};
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
+use tari_dan_common_types::Epoch;
 use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
 
@@ -15,21 +16,20 @@ pub struct BurntUtxo {
     pub commitment: UnclaimedConfidentialOutputAddress,
     pub output: UnclaimedConfidentialOutput,
     pub proposed_in_block: Option<BlockId>,
-    // TODO: remove not used - rockdb impl sets this to 0
-    pub base_layer_block_height: u64,
+    pub epoch: Epoch,
 }
 
 impl BurntUtxo {
     pub fn new(
         commitment: UnclaimedConfidentialOutputAddress,
         output: UnclaimedConfidentialOutput,
-        base_layer_block_height: u64,
+        epoch: Epoch,
     ) -> Self {
         Self {
             commitment,
             output,
             proposed_in_block: None,
-            base_layer_block_height,
+            epoch,
         }
     }
 

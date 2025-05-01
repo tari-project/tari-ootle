@@ -4,7 +4,7 @@
 use tari_dan_storage::consensus_models::BlockId;
 use tari_engine_types::{
     confidential::UnclaimedConfidentialOutput,
-    template_models::UnclaimedConfidentialOutputAddress,
+    template_lib_models::UnclaimedConfidentialOutputAddress,
 };
 
 use crate::{

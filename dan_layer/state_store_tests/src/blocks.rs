@@ -20,9 +20,10 @@ use tari_dan_storage::{
 };
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helper::{commit_chain, create_chain, create_rocksdb, create_sqlite, create_tx_atom};
+use crate::helper::{create_rocksdb, create_sqlite, create_tx_atom};
 
 mod basic_block_operations {
+    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
 
@@ -64,10 +65,8 @@ mod basic_block_operations {
             [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -115,6 +114,7 @@ mod basic_block_operations {
 }
 
 mod block_parent_operations {
+    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
 
@@ -157,10 +157,8 @@ mod block_parent_operations {
             [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -180,10 +178,8 @@ mod block_parent_operations {
             [Command::LocalPrepare(atom2.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -249,6 +245,7 @@ mod block_parent_operations {
 }
 
 mod block_query_operations {
+    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
 
@@ -256,14 +253,12 @@ mod block_query_operations {
     fn block_query_operations_sqlite() {
         let db = create_sqlite();
         block_query_operations(&db);
-        get_last_n_in_epoch(&db);
     }
 
     #[test]
     fn block_query_operations_rocksdb() {
         let (db, _tmp) = create_rocksdb();
         block_query_operations(&db);
-        get_last_n_in_epoch(&db);
     }
 
     #[allow(clippy::too_many_lines)]
@@ -292,10 +287,8 @@ mod block_query_operations {
             [Command::LocalPrepare(atom1.clone())].into_iter().collect(),
             Default::default(),
             Default::default(),
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -318,10 +311,8 @@ mod block_query_operations {
             Default::default(),
             // adding some fee to test blocks_get_total_leader_fee_for_epoch
             4,
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             ExtraData::default(),
         )
@@ -350,10 +341,8 @@ mod block_query_operations {
             Default::default(),
             // adding some fee to test blocks_get_total_leader_fee_for_epoch
             5,
-            Default::default(),
-            None,
+            SchnorrSignatureBytes::zero(),
             EpochTime::now().as_u64(),
-            0,
             FixedHash::zero(),
             block3_data.clone(),
         )
@@ -372,14 +361,6 @@ mod block_query_operations {
         let res = tx.blocks_get_genesis_for_epoch(Epoch(0)).unwrap();
         assert_eq!(res.to_string(), zero_block.to_string());
         // TODO: try with another epoch
-
-        // blocks_get_last_n_in_epoch
-        let res = tx.blocks_get_last_n_in_epoch(2, Epoch(0)).unwrap();
-        assert_eq!(res.len(), 2);
-        // assert_eq!(res[0].height(), block1.height());
-        // assert_eq!(res[1].height(), block3.height());
-        // assert_eq!(res[0].id(), block1.id());
-        // assert_eq!(res[1].calculate_id(), *block2.id());
 
         let res = tx
             .blocks_get_all_between(Epoch(0), NodeHeight(0), NodeHeight(1), true, 10)
@@ -416,25 +397,6 @@ mod block_query_operations {
         assert_eq!(res, 4);
         let res = tx.filtered_blocks_get_count(Some(2), Some(1_u64.to_string())).unwrap();
         assert_eq!(res, 1);
-
-        tx.rollback().unwrap();
-    }
-
-    fn get_last_n_in_epoch(db: &impl StateStore) {
-        let mut tx = db.create_write_tx().unwrap();
-
-        let chain = create_chain(10);
-        commit_chain(&mut tx, &chain);
-
-        // blocks_get_last_n_in_epoch
-        let res = tx.blocks_get_last_n_in_epoch(2, Epoch(0)).unwrap();
-        // Committed blocks - TODO: refactor epoch checkpoint to a commit proof of EndOfEpoch, which will result in this
-        // call going away
-        assert_eq!(res[0].height(), chain[6].height());
-        assert_eq!(res[1].height(), chain[7].height());
-        assert_eq!(res[0].id(), chain[6].id());
-        assert_eq!(res[1].calculate_id(), *chain[7].id());
-        assert_eq!(res.len(), 2);
 
         tx.rollback().unwrap();
     }

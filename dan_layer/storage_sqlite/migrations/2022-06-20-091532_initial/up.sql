@@ -89,12 +89,6 @@ create table bmt_cache
     bmt   blob               not null
 );
 
-create table base_layer_block_info
-(
-    hash   blob primary key not null,
-    height bigint           not null
-);
-
 CREATE TABLE layer_one_transactions
 (
     id           INTEGER PRIMARY KEY autoincrement NOT NULL,

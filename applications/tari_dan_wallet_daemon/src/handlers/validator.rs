@@ -4,20 +4,24 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use axum::headers::authorization::Bearer;
 use either::Either;
 use log::*;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{derive_fee_pool_address, optional::Optional, SubstateRequirement};
-use tari_dan_wallet_sdk::apis::{jwt::JrpcPermission, key_manager};
+use tari_dan_wallet_sdk::apis::key_manager;
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_template_lib::args;
-use tari_wallet_daemon_client::types::{
-    AccountOrKeyIndex,
-    ClaimValidatorFeesRequest,
-    ClaimValidatorFeesResponse,
-    FeePoolDetails,
-    GetValidatorFeesRequest,
-    GetValidatorFeesResponse,
+use tari_wallet_daemon_client::{
+    permissions::JrpcPermission,
+    types::{
+        AccountOrKeyIndex,
+        ClaimValidatorFeesRequest,
+        ClaimValidatorFeesResponse,
+        FeePoolDetails,
+        GetValidatorFeesRequest,
+        GetValidatorFeesResponse,
+    },
 };
 
 use crate::{
@@ -39,11 +43,11 @@ const LOG_TARGET: &str = "tari::dan::walletd::handlers::validator";
 
 pub async fn handle_get_validator_fees(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: GetValidatorFeesRequest,
 ) -> Result<GetValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let claim_key = match req.account_or_key {
         AccountOrKeyIndex::Account(acc) => {
@@ -99,11 +103,11 @@ pub async fn handle_get_validator_fees(
 #[allow(clippy::too_many_lines)]
 pub async fn handle_claim_validator_fees(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: ClaimValidatorFeesRequest,
 ) -> Result<ClaimValidatorFeesResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     if req.shards.is_empty() {
         return Err(invalid_params("shards", Some("At least one shard must be specified")));

@@ -4,6 +4,7 @@
 use std::{convert::TryInto, fs};
 
 use anyhow::anyhow;
+use axum::headers::authorization::Bearer;
 use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
 use log::*;
 use rand::rngs::OsRng;
@@ -11,20 +12,23 @@ use serde_json::json;
 use tari_crypto::{commitment::HomomorphicCommitmentFactory, keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_wallet_crypto::{AlwaysMissLookupTable, ConfidentialProofStatement, IoReaderValueLookup};
 use tari_dan_wallet_sdk::{
-    apis::{jwt::JrpcPermission, key_manager},
+    apis::key_manager,
     models::{ConfidentialOutputModel, OutputStatus},
 };
 use tari_engine_types::{confidential::get_commitment_factory, ToByteType};
 use tari_template_lib::models::Amount;
-use tari_wallet_daemon_client::types::{
-    ConfidentialCreateOutputProofRequest,
-    ConfidentialCreateOutputProofResponse,
-    ConfidentialViewVaultBalanceRequest,
-    ConfidentialViewVaultBalanceResponse,
-    ProofsCancelRequest,
-    ProofsCancelResponse,
-    ProofsGenerateRequest,
-    ProofsGenerateResponse,
+use tari_wallet_daemon_client::{
+    permissions::JrpcPermission,
+    types::{
+        ConfidentialCreateOutputProofRequest,
+        ConfidentialCreateOutputProofResponse,
+        ConfidentialViewVaultBalanceRequest,
+        ConfidentialViewVaultBalanceResponse,
+        ProofsCancelRequest,
+        ProofsCancelResponse,
+        ProofsGenerateRequest,
+        ProofsGenerateResponse,
+    },
 };
 use tokio::{task::block_in_place, time::Instant};
 
@@ -38,11 +42,11 @@ const LOG_TARGET: &str = "tari::dan::wallet_daemon::json_rpc::confidential";
 #[allow(clippy::too_many_lines)]
 pub async fn handle_create_transfer_proof(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: ProofsGenerateRequest,
 ) -> Result<ProofsGenerateResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     if req.amount.is_negative() || req.reveal_amount.is_negative() {
         return Err(JsonRpcError::new(
@@ -179,11 +183,11 @@ pub async fn handle_create_transfer_proof(
 
 pub async fn handle_finalize_transfer(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: ProofsCancelRequest,
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     sdk.confidential_outputs_api()
         .finalize_locked_revealed_funds(req.proof_id)?;
@@ -194,22 +198,22 @@ pub async fn handle_finalize_transfer(
 
 pub async fn handle_cancel_transfer(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: ProofsCancelRequest,
 ) -> Result<ProofsCancelResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
     sdk.confidential_outputs_api().release_proof_outputs(req.proof_id)?;
     Ok(ProofsCancelResponse {})
 }
 
 pub async fn handle_create_output_proof(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: ConfidentialCreateOutputProofRequest,
 ) -> Result<ConfidentialCreateOutputProofResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     if req.amount.is_negative() {
         return Err(invalid_params("amount", Some("must be positive")));
@@ -241,11 +245,11 @@ pub async fn handle_create_output_proof(
 
 pub async fn handle_view_vault_balance(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: ConfidentialViewVaultBalanceRequest,
 ) -> Result<ConfidentialViewVaultBalanceResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     let substate = sdk.substate_api().scan_for_substate(&req.vault_id.into(), None).await?;
     let vault = substate

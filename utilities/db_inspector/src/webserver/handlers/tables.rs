@@ -18,7 +18,7 @@ use tari_state_store_rocksdb::{codecs::DbCodec, models, traits::Cf};
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{Column, TableRequest, TableResponse},
+    handlers::types::{decode_hex_prefix, Column, TableRequest, TableResponse},
 };
 
 pub fn list<CF, F, B, S>(cf: F) -> impl Handler<(), S, B>
@@ -46,8 +46,18 @@ where
                 } else {
                     Ordering::Descending
                 };
-                let iter = cf.iterator(ordering, OPERATION);
-                for result in iter.take(req.limit.unwrap_or(1_000_000)) {
+                let iter = if let Some(prefix_hex) = req.query_prefix_hex.as_ref() {
+                    let key_prefix = decode_hex_prefix(prefix_hex)?;
+                    cf.range_iterator(ordering, key_prefix.as_slice()..)
+                } else {
+                    let empty = Vec::<u8>::new();
+                    cf.range_iterator(ordering, empty.as_slice()..)
+                };
+
+                let page_size = req.limit.unwrap_or(1_000);
+                let skip = req.page.unwrap_or(0) * page_size;
+
+                for result in iter.skip(skip).take(page_size) {
                     let (key, value) = result?;
                     let mut value =
                         serde_json::to_value(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;

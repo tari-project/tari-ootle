@@ -51,8 +51,6 @@ use tari_dan_storage::{
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalStatus,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -84,7 +82,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
     StorageError,
 };
-use tari_engine_types::{substate::SubstateId, template_models::UnclaimedConfidentialOutputAddress};
+use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
@@ -121,8 +119,6 @@ use crate::{
         foreign_parked_blocks::ForeignParkedBlockModel,
         foreign_proposal,
         foreign_proposal::{EpochIndexData, ForeignProposalModel},
-        foreign_receive_counter::ForeignReceiveCounterModel,
-        foreign_send_counter::ForeignSendCounterModelRef,
         foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeModel,
         lock_conflict,
@@ -623,31 +619,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 .delete(&(proposed_in_block, fp_id), OPERATION)?;
         }
 
-        Ok(())
-    }
-
-    fn foreign_send_counters_set(
-        &mut self,
-        foreign_send_counter: &ForeignSendCounters,
-        block_id: &BlockId,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "foreign_send_counters_set";
-        self.db()
-            .cf(ForeignSendCounterModelRef::default())?
-            .put(block_id, &foreign_send_counter, OPERATION)?;
-
-        Ok(())
-    }
-
-    fn foreign_receive_counters_set(
-        &mut self,
-        foreign_receive_counter: &ForeignReceiveCounters,
-    ) -> Result<(), StorageError> {
-        const OPERATION: &str = "foreign_receive_counters_set";
-        let cf = self.db().cf(ForeignReceiveCounterModel)?;
-        for (shard, count) in &foreign_receive_counter.counters {
-            cf.put(shard, count, OPERATION)?;
-        }
         Ok(())
     }
 
@@ -1500,7 +1471,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         self.db()
             .cf(EpochCheckpointModel)?
-            .put(&checkpoint.block().epoch(), checkpoint, OPERATION)?;
+            .put(&checkpoint.epoch(), checkpoint, OPERATION)?;
 
         Ok(())
     }

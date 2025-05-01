@@ -47,8 +47,6 @@ use tari_dan_storage::{
         BlockTransactionExecution,
         EpochCheckpoint,
         ForeignProposal,
-        ForeignReceiveCounters,
-        ForeignSendCounters,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -84,7 +82,7 @@ use tari_dan_storage::{
 use tari_engine_types::{
     confidential::UnclaimedConfidentialOutput,
     substate::SubstateId,
-    template_models::UnclaimedConfidentialOutputAddress,
+    template_lib_models::UnclaimedConfidentialOutputAddress,
 };
 use tari_state_tree::{Node, NodeKey, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -121,8 +119,6 @@ use crate::{
         foreign_parked_blocks::ForeignParkedBlockModel,
         foreign_proposal,
         foreign_proposal::ForeignProposalModel,
-        foreign_receive_counter::ForeignReceiveCounterModel,
-        foreign_send_counter::ForeignSendCounterModel,
         foreign_substate_pledge,
         foreign_substate_pledge::ForeignSubstatePledgeModel,
         lock_conflict,
@@ -502,21 +498,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(proposals)
     }
 
-    fn foreign_send_counters_get(&self, block_id: &BlockId) -> Result<ForeignSendCounters, StorageError> {
-        const OPERATION: &str = "foreign_send_counters_get";
-        let counters = self.db().cf(ForeignSendCounterModel)?.get(block_id, OPERATION)?;
-
-        Ok(counters)
-    }
-
-    fn foreign_receive_counters_get(&self) -> Result<ForeignReceiveCounters, StorageError> {
-        const OPERATION: &str = "foreign_receive_counters_get";
-        let cf = self.db().cf(ForeignReceiveCounterModel)?;
-        let iter = cf.iterator(Ordering::Ascending, OPERATION);
-        let counters = iter.collect::<Result<_, _>>()?;
-        Ok(ForeignReceiveCounters { counters })
-    }
-
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError> {
         const OPERATION: &str = "transactions_get";
         let tx = self.db().cf(TransactionModel)?.get(tx_id, OPERATION)?;
@@ -649,30 +630,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let (_, _, block_id) = key;
         let block = self.blocks_get(&block_id)?;
         Ok(block)
-    }
-
-    fn blocks_get_last_n_in_epoch(&self, n: usize, epoch: Epoch) -> Result<Vec<Block>, StorageError> {
-        const OPERATION: &str = "blocks_get_last_n_in_epoch";
-        let query = self.db().cf(block::ByEpochQuery)?;
-        let block_cf = self.db().cf(BlockModel)?;
-        let iter = query.query_prefix_range_key_iterator(Ordering::Descending, &epoch);
-
-        let mut blocks = vec![];
-        for iter in iter {
-            let (_, _, block_id) = iter?;
-            let block = block_cf.get(&block_id, OPERATION)?;
-            if !block.is_committed() {
-                continue;
-            }
-            blocks.push(block);
-            if blocks.len() == n {
-                break;
-            }
-        }
-
-        blocks.reverse();
-
-        Ok(blocks)
     }
 
     fn blocks_get_all_between(

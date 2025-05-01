@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::CompressedPublicKey;
-use tari_consensus::hotstuff::eviction_proof::convert_block_to_sidechain_block_header;
+use tari_consensus::hotstuff::commit_proofs::convert_block_to_sidechain_block_header;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_storage::consensus_models::Block;
 
@@ -12,16 +12,7 @@ use crate::support::load_json_fixture;
 fn it_produces_a_summarized_header_that_hashes_to_the_original() {
     let block = load_json_fixture::<Block>("block.json");
     let sidechain_block = convert_block_to_sidechain_block_header(block.header()).unwrap();
-    assert_eq!(sidechain_block.extra_data_hash, block.header().create_extra_data_hash());
-    assert_eq!(
-        sidechain_block.base_layer_block_hash,
-        *block.header().base_layer_block_hash()
-    );
-    assert_eq!(
-        sidechain_block.base_layer_block_height,
-        block.header().base_layer_block_height()
-    );
-    assert_eq!(sidechain_block.timestamp, block.header().timestamp());
+    assert_eq!(sidechain_block.metadata_hash, block.header().calculate_metadata_hash());
     assert_eq!(
         sidechain_block.signature.get_compressed_public_nonce().as_bytes(),
         block
@@ -41,16 +32,10 @@ fn it_produces_a_summarized_header_that_hashes_to_the_original() {
             .as_bytes()
     );
     assert_eq!(
-        sidechain_block.foreign_indexes_hash,
-        block.header().create_foreign_indexes_hash()
-    );
-    assert_eq!(sidechain_block.is_dummy, block.header().is_dummy());
-    assert_eq!(
         sidechain_block.command_merkle_root,
         *block.header().command_merkle_root()
     );
     assert_eq!(sidechain_block.state_merkle_root, *block.header().state_merkle_root());
-    assert_eq!(sidechain_block.total_leader_fee, block.header().total_leader_fee());
     assert_eq!(
         sidechain_block.proposed_by,
         CompressedPublicKey::from_canonical_bytes(block.header().proposed_by().as_bytes()).unwrap()

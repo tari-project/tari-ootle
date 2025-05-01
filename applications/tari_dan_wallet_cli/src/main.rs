@@ -36,7 +36,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let endpoint = multiaddr_to_http_url(endpoint)?;
 
     log::info!("🌍️ Connecting to {}", endpoint);
-    let client = WalletDaemonClient::connect(endpoint, cli.token)?;
+    let client = WalletDaemonClient::connect(endpoint, cli.token.map(Into::into))?;
 
     if let Err(err) = handle_command(cli.command, client).await {
         eprintln!("👮 Command failed with error \"{}\"", err);

@@ -28,6 +28,7 @@ fn dummy_blocks() {
     let genesis = Block::genesis(
         Network::LocalNet,
         Epoch(1),
+        FixedHash::zero(),
         ShardGroup::new(0, 127),
         FixedHash::zero(),
         None,
@@ -50,7 +51,6 @@ fn dummy_blocks() {
         &RoundRobinLeaderStrategy,
         &committee,
         genesis.timestamp(),
-        0,
         FixedHash::zero(),
     );
     let last = calculate_last_dummy_block(
@@ -65,7 +65,6 @@ fn dummy_blocks() {
         &RoundRobinLeaderStrategy,
         &committee,
         genesis.timestamp(),
-        0,
         FixedHash::zero(),
     )
     .expect("last dummy block");
@@ -89,6 +88,7 @@ fn last_matches_generated_using_real_data() {
     let justify = Block::genesis(
         Network::LocalNet,
         candidate.epoch(),
+        FixedHash::zero(),
         candidate.shard_group(),
         FixedHash::zero(),
         None,
@@ -108,8 +108,7 @@ fn last_matches_generated_using_real_data() {
         &RoundRobinLeaderStrategy,
         &committee,
         justify.timestamp(),
-        justify.base_layer_block_height(),
-        *justify.base_layer_block_hash(),
+        *justify.epoch_hash(),
     )
     .expect("last dummy block");
 

@@ -17,6 +17,7 @@ use tari_dan_storage::{
     StateStore,
     StateStoreWriteTransaction,
 };
+use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
 use crate::{
@@ -93,10 +94,8 @@ fn create_proposal(parent_id: BlockId) -> ForeignProposal {
         Default::default(),
         Default::default(),
         1,
-        Default::default(),
-        None,
+        SchnorrSignatureBytes::zero(),
         EpochTime::now().as_u64(),
-        0,
         FixedHash::zero(),
         ExtraData::new(),
     )

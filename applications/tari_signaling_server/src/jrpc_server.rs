@@ -26,12 +26,11 @@ use axum_jrpc::{
 use log::*;
 use serde_json as json;
 use serde_json::json;
-use tari_dan_wallet_sdk::apis::jwt::JrpcPermissions;
 use tari_shutdown::ShutdownSignal;
 use tower_http::cors::CorsLayer;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 
-use crate::data::Data;
+use crate::{data::Data, permissions::JrpcPermissions};
 
 const LOG_TARGET: &str = "tari::signaling_server::json_rpc";
 

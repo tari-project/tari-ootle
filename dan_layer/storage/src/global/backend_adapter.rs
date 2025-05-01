@@ -23,7 +23,6 @@
 use std::collections::HashMap;
 
 use serde::{de::DeserializeOwned, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     committee::Committee,
     hashing::ValidatorNodeBalancedMerkleTree,
@@ -34,7 +33,7 @@ use tari_dan_common_types::{
 };
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 
-use super::{DbBaseLayerBlockInfo, DbEpoch, TemplateStatus};
+use super::{DbEpoch, TemplateStatus};
 use crate::{
     atomic::AtomicDb,
     global::{
@@ -184,17 +183,6 @@ pub trait GlobalDbAdapter: AtomicDb + Send + Sync + Clone {
 
     fn insert_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: DbEpoch) -> Result<(), Self::Error>;
     fn get_epoch(&self, tx: &mut Self::DbTransaction<'_>, epoch: u64) -> Result<Option<DbEpoch>, Self::Error>;
-
-    fn insert_base_layer_block_info(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        info: DbBaseLayerBlockInfo,
-    ) -> Result<(), Self::Error>;
-    fn get_base_layer_block_info(
-        &self,
-        tx: &mut Self::DbTransaction<'_>,
-        hash: FixedHash,
-    ) -> Result<Option<DbBaseLayerBlockInfo>, Self::Error>;
 
     fn insert_bmt(
         &self,

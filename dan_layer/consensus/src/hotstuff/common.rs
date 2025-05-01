@@ -32,14 +32,14 @@ use tari_dan_storage::{
     },
     StateStore,
     StateStoreReadTransaction,
-    StorageError,
 };
-use tari_engine_types::{substate::SubstateDiff, template_models::Amount, ValidatorFeePool};
+use tari_engine_types::{substate::SubstateDiff, template_lib_models::Amount, ValidatorFeePool};
 use tari_state_tree::{JellyfishMerkleTree, StateTreeError, SPARSE_MERKLE_PLACEHOLDER_HASH};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     hotstuff::{
+        commit_proofs::generate_end_of_epoch_commit_proof,
         substate_store::{PendingSubstateStore, ShardScopedTreeStoreReader, ShardedStateTree},
         HotStuffError,
     },
@@ -62,8 +62,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
-    parent_base_layer_block_height: u64,
-    parent_base_layer_block_hash: FixedHash,
+    parent_epoch_hash: FixedHash,
 ) -> Option<LeafBlock> {
     let mut dummy = None;
     with_dummy_blocks(
@@ -78,8 +77,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
         leader_strategy,
         local_committee,
         parent_timestamp,
-        parent_base_layer_block_height,
-        parent_base_layer_block_hash,
+        parent_epoch_hash,
         |dummy_block| {
             dummy = Some(dummy_block.as_leaf_block());
             ControlFlow::Continue(())
@@ -102,8 +100,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
-    parent_base_layer_block_height: u64,
-    parent_base_layer_block_hash: FixedHash,
+    parent_epoch_hash: FixedHash,
 ) -> Vec<Block> {
     let mut dummies = Vec::with_capacity(new_height.saturating_sub(from_height).as_u64() as usize);
     with_dummy_blocks(
@@ -118,8 +115,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
         leader_strategy,
         local_committee,
         parent_timestamp,
-        parent_base_layer_block_height,
-        parent_base_layer_block_hash,
+        parent_epoch_hash,
         |dummy_block| {
             if dummy_block.id() == expected_parent_block_id {
                 dummies.push(dummy_block);
@@ -154,8 +150,7 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
         leader_strategy,
         local_committee,
         justify_block.timestamp(),
-        justify_block.base_layer_block_height(),
-        *justify_block.base_layer_block_hash(),
+        *justify_block.epoch_hash(),
     )
 }
 
@@ -171,8 +166,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     parent_timestamp: u64,
-    parent_base_layer_block_height: u64,
-    parent_base_layer_block_hash: FixedHash,
+    parent_epoch_hash: FixedHash,
     mut callback: F,
 ) where
     TAddr: NodeAddressable,
@@ -212,8 +206,7 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
             shard_group,
             parent_merkle_root,
             parent_timestamp,
-            parent_base_layer_block_height,
-            parent_base_layer_block_hash,
+            parent_epoch_hash,
         );
         let dummy_block = Block::new(dummy_header, qc.clone(), Default::default());
         debug!(
@@ -252,23 +245,14 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
 
 pub(crate) fn generate_epoch_checkpoint<TTx>(
     tx: &TTx,
-    epoch: Epoch,
-    shard_group: ShardGroup,
+    eoe_block: &Block,
+    tip_qc: &QuorumCertificate,
 ) -> Result<EpochCheckpoint, HotStuffError>
 where
     TTx: StateStoreReadTransaction,
 {
-    // Get the last 3 blocks in the previous epoch. These blocks should end the epoch.
-    let mut blocks = Block::get_last_n_in_epoch(tx, 3, epoch)?;
-    if blocks.is_empty() {
-        return Err(HotStuffError::StorageError(StorageError::NotFound {
-            item: "Block::get_last_n_in_epoch",
-            key: epoch.to_string(),
-        }));
-    }
-
-    let commit_block = blocks.pop().unwrap();
-    let qcs = blocks.into_iter().map(|b| b.into_justify()).collect();
+    let commit_proof = generate_end_of_epoch_commit_proof(tx, tip_qc, eoe_block)?;
+    let shard_group = eoe_block.shard_group();
 
     // Fetch the state roots of the shards in the shard group
     let mut shard_roots = IndexMap::with_capacity(shard_group.len() + 1);
@@ -301,17 +285,8 @@ where
 
         shard_roots.insert(shard, root_hash);
     }
-    let checkpoint = EpochCheckpoint::new(commit_block, qcs, shard_roots);
-    let calculated_mr = checkpoint.compute_state_merkle_root()?;
-    if calculated_mr != checkpoint.block().state_merkle_root() {
-        return Err(HotStuffError::InvariantError(format!(
-            "Epoch checkpoint state merkle root mismatch. Expected: {}, Calculated: {}, block: {}",
-            checkpoint.block().state_merkle_root(),
-            calculated_mr,
-            checkpoint.block()
-        )));
-    }
 
+    let checkpoint = EpochCheckpoint::new(commit_proof, shard_roots);
     Ok(checkpoint)
 }
 

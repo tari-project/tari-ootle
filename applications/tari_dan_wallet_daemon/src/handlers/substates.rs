@@ -1,24 +1,28 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_wallet_sdk::{apis::jwt::JrpcPermission, network::WalletNetworkInterface};
-use tari_wallet_daemon_client::types::{
-    SubstatesGetRequest,
-    SubstatesGetResponse,
-    SubstatesListRequest,
-    SubstatesListResponse,
-    WalletSubstateRecord,
+use axum::headers::authorization::Bearer;
+use tari_dan_wallet_sdk::network::WalletNetworkInterface;
+use tari_wallet_daemon_client::{
+    permissions::JrpcPermission,
+    types::{
+        SubstatesGetRequest,
+        SubstatesGetResponse,
+        SubstatesListRequest,
+        SubstatesListResponse,
+        WalletSubstateRecord,
+    },
 };
 
 use crate::handlers::HandlerContext;
 
 pub async fn handle_get(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: SubstatesGetRequest,
 ) -> Result<SubstatesGetResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::SubstatesRead])?;
+    context.check_auth(token, &[JrpcPermission::SubstatesRead])?;
 
     let record = sdk.substate_api().get_substate(&req.substate_id)?;
 
@@ -45,11 +49,11 @@ pub async fn handle_get(
 
 pub async fn handle_list(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: SubstatesListRequest,
 ) -> Result<SubstatesListResponse, anyhow::Error> {
     let sdk = context.wallet_sdk().clone();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::SubstatesRead])?;
+    context.check_auth(token, &[JrpcPermission::SubstatesRead])?;
 
     let result = sdk
         .get_network_interface()

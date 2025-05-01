@@ -1,13 +1,14 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-import { Box, Button, Divider, Grid, Typography } from "@mui/material";
+import { Box, Button, Divider, Grid, TextField, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { client } from "../store/databases.ts";
 import { Link as RouterLink, useParams } from "react-router-dom";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
-import { useEffect, useState } from "react";
+import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Refresh } from "@mui/icons-material";
+import { Params } from "../client.ts";
 
 
 type Row = Record<string, string | object>;
@@ -20,6 +21,11 @@ interface Column {
 interface ColumnFamilyData {
   columns: Column[];
   rows: Row[];
+  total_entries: number;
+}
+
+interface PaginationModel extends GridPaginationModel {
+  query?: string;
 }
 
 function estimateWidth(labelLength: number, data: Row[], getter: (row: Row) => any): number {
@@ -73,17 +79,37 @@ export default function InspectCf() {
   const theme = useTheme();
   const { dbName, cfName } = useParams();
   const [data, setData] = useState<ColumnFamilyData | null>(null);
+  const [pagination, setPagination] = useState<PaginationModel>({ page: 0, pageSize: 20 });
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const fetch = () => {
-    client.listCfItems(dbName!, cfName!, { limit: 500 }).then((res) => {
+    setError(null);
+    setIsLoading(true);
+
+    const query = { limit: pagination.pageSize, page: pagination.page, query_prefix_hex: pagination.query || "" };
+    client.listCfItems(dbName!, cfName!, query as Params).then((res) => {
       setData(res);
     }).catch((err) => {
       setError(err.message);
+    }).finally(() => {
+      setIsLoading(false);
     });
   };
 
-  useEffect(fetch, [dbName, cfName]);
+  useEffect(fetch, [dbName, cfName, pagination]);
+
+  const columns = data ? generateColumns(data) : [];
+  // Following lines are here to prevent `rowCount` from being undefined during the loading
+  const rowCountRef = useRef(data?.total_entries || 0);
+
+  const rowCount = useMemo(() => {
+    if (data?.total_entries !== undefined) {
+      rowCountRef.current = data.total_entries;
+    }
+    return rowCountRef.current;
+  }, [data?.total_entries]);
+
 
   if (error) {
     return (
@@ -115,13 +141,6 @@ export default function InspectCf() {
     );
   }
 
-  if (!data) {
-    return <div>Loading...</div>;
-  }
-
-
-  const columns = generateColumns(data);
-
   return (
     <>
       <Grid size={{ xs: 12, md: 12, lg: 12 }}>
@@ -149,6 +168,23 @@ export default function InspectCf() {
             >
               <Refresh />
             </Button>
+            <TextField
+              variant="outlined"
+              size="small"
+              label="Prefix key query"
+              style={{ marginLeft: theme.spacing(2) }}
+              onChange={(e) => setPagination({ ...pagination, page: 0, query: e.target.value })}
+              value={pagination.query || ""}
+              placeholder="Enter a key prefix in hex"
+            />
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => setPagination({ ...pagination, page: 0, query: "" })}
+              style={{ marginLeft: theme.spacing(2) }}
+            >
+              Clear
+            </Button>
           </Typography>
         </Box>
         <Divider />
@@ -156,15 +192,19 @@ export default function InspectCf() {
 
       <Grid container spacing={3}>
         <DataGrid
-          rows={data.rows}
+          rows={data?.rows || []}
           columns={columns}
+          loading={isLoading}
+          rowCount={rowCount}
           initialState={{
             pagination: {
               paginationModel: {
-                pageSize: 20,
+                pageSize: pagination.pageSize,
               },
             },
           }}
+          paginationMode="server"
+          onPaginationModelChange={setPagination}
           sortingOrder={["desc", "asc", null]}
           checkboxSelection
         />

@@ -91,6 +91,7 @@ pub fn spawn_listener(
     Ok((listen_addr, task))
 }
 
+#[allow(clippy::too_many_lines)]
 async fn handler(
     Extension(context): Extension<Arc<HandlerContext>>,
     Extension(addresses): Extension<(SocketAddr, SocketAddr)>,

@@ -31,19 +31,15 @@ use tari_template_lib::{
     types::crypto::RistrettoPublicKeyBytes,
 };
 use tari_transaction::TransactionId;
-use tari_wallet_daemon_client::{
-    types::{
-        AccountsTransferResponse,
-        GetAccountNftRequest,
-        GetAccountNftResponse,
-        ListAccountNftRequest,
-        ListAccountNftResponse,
-        MintAccountNftRequest,
-        MintAccountNftResponse,
-        TransferNftRequest,
-        TransferNftResponse,
-    },
-    ComponentAddressOrName,
+use tari_wallet_daemon_client::types::{
+    GetAccountNftRequest,
+    GetAccountNftResponse,
+    ListAccountNftRequest,
+    ListAccountNftResponse,
+    MintAccountNftRequest,
+    MintAccountNftResponse,
+    TransferNftRequest,
+    TransferNftResponse,
 };
 use tokio::sync::broadcast;
 
@@ -359,6 +355,7 @@ async fn fill_in_target_account_vault(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn handle_transfer_nft(
     context: &HandlerContext,
     token: Option<String>,
@@ -439,7 +436,6 @@ pub async fn handle_transfer_nft(
     let source_account_secret_key = sdk
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
-    let source_account_public_key = RistrettoPublicKey::from_secret_key(&source_account_secret_key.key);
 
     let transaction = transaction_builder(context)
         .with_fee_instructions(vec![Instruction::CallMethod {
@@ -449,6 +445,7 @@ pub async fn handle_transfer_nft(
         }])
         .with_instructions(instructions)
         .with_inputs(inputs)
+        .with_authorized_seal_signer()
         .add_signature(
             &fee_payer_account_public_key.to_byte_type(),
             &source_account_secret_key.key,

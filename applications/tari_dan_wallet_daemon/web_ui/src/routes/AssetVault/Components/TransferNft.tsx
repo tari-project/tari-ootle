@@ -108,11 +108,14 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
   }
 
   //payer account
-  const [payerAccount, setPayerAccount] = useState(getAccountSelector(account));
+  const currentAccountSelector = getAccountSelector(account);
+  const [payerAccount, setPayerAccount] = useState(currentAccountSelector);
   useEffect(() => {
-    setPayerAccount({
-      ComponentAddress: substateIdToString(transferFormState.payerAccount),
-    });
+    if (transferFormState.payerAccount != "") {
+      setPayerAccount({
+        ComponentAddress: transferFormState.payerAccount,
+      });
+    }
   }, [transferFormState.payerAccount]);
 
   // list NFTs
@@ -266,6 +269,16 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     }
   }, [accountNfts]);
 
+  useEffect(() => {
+    console.log();
+    if (transferFormState.payerAccount != "") {
+      setTransferFormState({
+        ...transferFormState,
+        payerAccount: substateIdToString(account.address),
+      });
+    }
+  }, [open]);
+
   const handleNftsChange = (event: SelectChangeEvent<string[]>) => {
     if (typeof event.target.value == "string") {
       return;
@@ -326,8 +339,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
                 name="payerAccount"
                 disabled={disabled}
                 displayEmpty
+                // @ts-ignore
                 value={
-                  transferFormState.payerAccount || accounts.find((a) => a.account.is_default)?.account.address || ""
+                  transferFormState.payerAccount ||
+                  substateIdToString(accounts.find((a) => a.account.is_default)?.account.address) ||
+                  ""
                 }
                 onChange={handlePayerAccountChange}
                 variant="outlined"

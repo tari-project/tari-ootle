@@ -5,41 +5,31 @@ use std::fmt::{Display, Formatter};
 
 use serde::Serialize;
 use tari_dan_common_types::{Epoch, ShardGroup};
-use tari_dan_storage::consensus_models::{
-    Block,
-    BlockId,
-    BlockPledge,
-    ForeignParkedProposal,
-    ForeignProposal,
-    QuorumCertificate,
-};
+use tari_dan_storage::consensus_models::{BlockId, ForeignParkedProposal, ForeignProposal, ForeignProposalRecord};
 use tari_transaction::TransactionId;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ForeignProposalMessage {
-    pub block: Block,
-    pub justify_qc: QuorumCertificate,
-    pub block_pledge: BlockPledge,
+    pub proposal: Box<ForeignProposal>,
 }
 
 impl From<ForeignProposalMessage> for ForeignParkedProposal {
     fn from(msg: ForeignProposalMessage) -> Self {
-        ForeignParkedProposal::new(msg.into())
+        let (commit_proof, block_pledge) = msg.proposal.into_parts();
+        ForeignParkedProposal::new(commit_proof, block_pledge)
     }
 }
 
-impl From<ForeignProposalMessage> for ForeignProposal {
+impl From<ForeignProposalMessage> for ForeignProposalRecord {
     fn from(msg: ForeignProposalMessage) -> Self {
-        ForeignProposal::new(msg.block, msg.block_pledge, msg.justify_qc)
+        ForeignProposalRecord::new(*msg.proposal)
     }
 }
 
 impl From<ForeignProposal> for ForeignProposalMessage {
     fn from(proposal: ForeignProposal) -> Self {
         ForeignProposalMessage {
-            block: proposal.block,
-            justify_qc: proposal.justify_qc,
-            block_pledge: proposal.block_pledge,
+            proposal: Box::new(proposal),
         }
     }
 }
@@ -48,22 +38,14 @@ impl From<ForeignParkedProposal> for ForeignProposalMessage {
     fn from(proposal: ForeignParkedProposal) -> Self {
         let proposal = proposal.into_proposal();
         ForeignProposalMessage {
-            block: proposal.block,
-            justify_qc: proposal.justify_qc,
-            block_pledge: proposal.block_pledge,
+            proposal: Box::new(proposal),
         }
     }
 }
 
 impl Display for ForeignProposalMessage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "ForeignProposalMessage({}, {}, {} pledged substate(s))",
-            self.block,
-            self.justify_qc,
-            self.block_pledge.len()
-        )
+        write!(f, "ForeignProposalMessage({})", self.proposal,)
     }
 }
 

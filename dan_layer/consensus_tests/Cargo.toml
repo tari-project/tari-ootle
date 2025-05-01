@@ -39,6 +39,3 @@ humantime = { workspace = true }
 itertools = "0.13.0"
 serde_json = { workspace = true }
 tempfile = { workspace = true }
-
-[features]
-sqlite_backend = []

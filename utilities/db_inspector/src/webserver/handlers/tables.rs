@@ -13,7 +13,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::json;
 use tari_dan_storage::Ordering;
-use tari_state_store_rocksdb::{codecs::DbCodec, models, traits::Cf};
+use tari_state_store_rocksdb::{codecs::DbCodec, error::RocksDbStorageError, models, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
@@ -46,13 +46,14 @@ where
                 } else {
                     Ordering::Descending
                 };
-                let iter = if let Some(prefix_hex) = req.query_prefix_hex.as_ref() {
-                    let key_prefix = decode_hex_prefix(prefix_hex)?;
-                    cf.range_iterator(ordering, key_prefix.as_slice()..)
-                } else {
-                    let empty = Vec::<u8>::new();
-                    cf.range_iterator(ordering, empty.as_slice()..)
-                };
+                #[allow(clippy::type_complexity)]
+                let iter: Box<dyn Iterator<Item = Result<(CF::Key, CF::Value), RocksDbStorageError>>> =
+                    if let Some(prefix_hex) = req.query_prefix_hex.as_ref() {
+                        let key_prefix = decode_hex_prefix(prefix_hex)?;
+                        Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
+                    } else {
+                        Box::new(cf.iterator(ordering, OPERATION))
+                    };
 
                 let page_size = req.limit.unwrap_or(1_000);
                 let skip = req.page.unwrap_or(0) * page_size;

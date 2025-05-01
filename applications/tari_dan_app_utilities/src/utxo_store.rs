@@ -33,7 +33,7 @@ impl<TStore: StateStore + Send + Sync> EpochUtxoStore for StateUtxoStore<TStore>
             "⛓️ Burnt UTXO {address} registered at {epoch}",
         );
         self.state_store.with_write_tx(|tx| {
-            if SubstateRecord::exists(&**tx, &VersionedSubstateId::new(address, 0))? {
+            if SubstateRecord::exists(&**tx, VersionedSubstateId::new(address, 0).as_ref())? {
                 warn!(
                     target: LOG_TARGET,
                     "❓️ Burnt UTXO {address} already exists. Ignoring.",

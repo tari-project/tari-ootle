@@ -2,14 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_storage::{
-    consensus_models::PendingShardStateTreeDiff,
+    consensus_models::{PendingShardStateTreeDiff, QcId},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
 use tari_state_tree::StateHashTreeDiff;
 
-use crate::helper::{create_block, create_rocksdb, create_sqlite};
+use crate::helpers::{create_block, create_rocksdb, create_sqlite};
 
 #[test]
 fn pending_state_tree_diff_sqlite() {
@@ -28,15 +28,16 @@ fn pending_state_tree_diff_operations(db: impl StateStore) {
 
     // add some (committed) blocks to the database
     let mut genesis = create_block(None);
-    genesis.set_is_committed(true);
+    genesis.set_commit_qc(QcId::zero());
     genesis.insert(&mut tx).unwrap();
-    tx.blocks_set_flags(genesis.id(), Some(true), Some(true)).unwrap();
+    tx.blocks_set_qcs(genesis.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+        .unwrap();
     genesis.justify().save(&mut tx).unwrap();
     genesis.as_locked_block().set(&mut tx).unwrap();
     genesis.as_leaf_block().set(&mut tx).unwrap();
 
     let mut block_1 = create_block(Some(&genesis));
-    block_1.set_is_committed(true);
+    block_1.set_commit_qc(QcId::zero());
     block_1.insert(&mut tx).unwrap();
 
     let block_2 = create_block(Some(&block_1));

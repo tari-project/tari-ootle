@@ -28,9 +28,10 @@ use tari_template_lib::models::Amount;
 use tari_transaction::{Instruction, Transaction};
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helper::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_sqlite, create_tx_atom};
+use crate::helpers::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_sqlite, create_tx_atom};
 
 mod confirm_all_transitions {
+    use tari_dan_storage::consensus_models::QcId;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
@@ -58,7 +59,8 @@ mod confirm_all_transitions {
         let zero_block = Block::zero_block(network, NumPreshards::P64);
         zero_block.insert(&mut tx).unwrap();
         zero_block.justify().save(&mut tx).unwrap();
-        tx.blocks_set_flags(zero_block.id(), Some(true), Some(true)).unwrap();
+        tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+            .unwrap();
 
         let block1 = Block::create(
             network,
@@ -249,7 +251,7 @@ mod transaction_execution_operations {
     use tari_template_lib::types::Hash;
 
     use super::*;
-    use crate::helper::{commit_chain, create_chain};
+    use crate::helpers::{commit_chain, create_chain};
 
     #[test]
     fn transaction_execution_operations_sqlite() {

@@ -40,10 +40,9 @@ pub struct ValidatorBuilder {
     pub shard_address: SubstateAddress,
     pub fee_claim_public_key: RistrettoPublicKeyBytes,
     pub shard_group: ShardGroup,
+    #[allow(dead_code)]
     pub sql_url: String,
-    #[allow(dead_code)]
     pub rocks_tmp_path: TempDir,
-    #[allow(dead_code)]
     pub rocks_override_path: Option<PathBuf>,
     pub leader_strategy: RoundRobinLeaderStrategy,
     pub num_committees: u32,
@@ -147,18 +146,14 @@ impl ValidatorBuilder {
             TestOutboundMessaging::create(epoch_manager.clone(), tx_leader, tx_broadcast);
         let inbound_messaging = TestInboundMessaging::new(self.address.clone(), rx_hs_message, rx_loopback);
 
-        #[cfg(not(feature = "sqlite_backend"))]
         let store = {
             let rocks_path = self
                 .rocks_override_path
-                .as_ref()
-                .map(|p| p.as_path())
+                .as_deref()
                 .unwrap_or_else(|| self.rocks_tmp_path.path());
             log::info!("Rocksdb path {}", rocks_path.display());
             TestStore::open(rocks_path).unwrap()
         };
-        #[cfg(feature = "sqlite_backend")]
-        let store = TestStore::connect(&self.sql_url).unwrap();
         let signing_service = TestVoteSignatureService::new(self.address.clone());
         let transaction_pool = TransactionPool::new();
         let (tx_events, _) = broadcast::channel(100);

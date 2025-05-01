@@ -5,7 +5,8 @@ use rand::rngs::OsRng;
 use tari_consensus::traits::{ValidatorSignatureService, VoteSignatureService};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_app_utilities::keypair::RistrettoKeypair;
-use tari_dan_storage::consensus_models::{BlockId, QuorumDecision, ValidatorSchnorrSignature, ValidatorSignature};
+use tari_dan_storage::consensus_models::{BlockId, ValidatorSchnorrSignature, ValidatorSignature};
+use tari_sidechain::QuorumDecision;
 
 #[derive(Debug, Clone)]
 pub struct TariSignatureService {

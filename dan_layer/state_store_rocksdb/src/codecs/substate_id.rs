@@ -4,6 +4,7 @@
 use std::io;
 
 use borsh::BorshDeserialize;
+use tari_dan_common_types::VersionedSubstateIdRef;
 use tari_engine_types::substate::SubstateId;
 
 use crate::{
@@ -15,7 +16,8 @@ use crate::{
 pub struct SubstateIdCodec;
 
 impl SubstateIdCodec {
-    fn encode_substate_id(self, len: usize, value: &SubstateId) -> Result<EncodeVec, RocksDbStorageError> {
+    fn encode_substate_id(self, value: &SubstateId) -> Result<EncodeVec, RocksDbStorageError> {
+        let len = borsh::object_length(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
         if len < EncodeVec::FIXED_SIZE {
             let mut buf = EncodeVec::make_stack_buf();
             borsh::to_writer(buf.as_mut_slice(), value)
@@ -35,8 +37,7 @@ impl SubstateIdCodec {
 
 impl DbCodec<SubstateId> for SubstateIdCodec {
     fn encode(&self, value: &SubstateId) -> Result<EncodeVec, RocksDbStorageError> {
-        let len = borsh::object_length(value).map_err(|e| RocksDbStorageError::EncodeError { source: e.into() })?;
-        self.encode_substate_id(len, value)
+        self.encode_substate_id(value)
     }
 
     fn decode(&self, mut bytes: &[u8]) -> Result<SubstateId, RocksDbStorageError> {
@@ -54,6 +55,21 @@ impl<'a> DbCodec<&'a SubstateId> for SubstateIdCodec {
     }
 }
 
+impl<'a> DbCodec<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
+    fn encode(&self, value: &VersionedSubstateIdRef<'a>) -> Result<EncodeVec, RocksDbStorageError> {
+        let enc_substate_id = self.encode_substate_id(value.substate_id())?;
+        let version = value.version().to_be_bytes();
+        Ok(EncodeVec::from_slices(&[
+            enc_substate_id.as_slice(),
+            version.as_slice(),
+        ]))
+    }
+
+    fn decode(&self, _bytes: &[u8]) -> Result<VersionedSubstateIdRef<'a>, RocksDbStorageError> {
+        panic!("Attempt to decode a reference to a VersionedSubstateIdRef which is not possible.")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tari_common_types::types::FixedHash;
@@ -62,7 +78,10 @@ mod tests {
     use tari_template_lib_types::ObjectKey;
 
     use super::*;
-    use crate::{codecs::BlockDiffKeyCodec, models::block_diff::BlockDiffKey};
+    use crate::{
+        codecs::{BlockDiffKeyCodec, SubstateIdBlockIdVersionSeq},
+        models::block_diff::BlockDiffKey,
+    };
 
     fn new_substate_id(seed: u8) -> SubstateId {
         let component = ComponentAddress::from_array([seed; ObjectKey::LENGTH]);
@@ -85,18 +104,24 @@ mod tests {
     #[test]
     fn check_with_prefix() {
         // This codec happens to encode {len}||{substate_id} as a prefix
-        let compound_codec = BlockDiffKeyCodec::default();
+        let block_diff_codec = BlockDiffKeyCodec::<SubstateIdBlockIdVersionSeq>::default();
         let key = BlockDiffKey {
             block_id: new_block_id(1),
             substate_id: new_substate_id(2),
             version: 3,
+            is_up: true,
+            sequence: 0,
         };
 
-        let compound_encoding = compound_codec.encode(&key).unwrap();
+        let compound_encoding = block_diff_codec.encode(&key).unwrap();
         let codec = SubstateIdCodec;
         let encoded = codec.encode(&key.substate_id).unwrap();
         assert_eq!(&compound_encoding.as_slice()[..encoded.len()], encoded.as_slice());
-        let decoded = compound_codec.decode(&compound_encoding).unwrap();
+        let decoded = block_diff_codec.decode(&compound_encoding).unwrap();
         assert_eq!(key.substate_id, decoded.substate_id);
+        assert_eq!(key.version, decoded.version);
+        assert_eq!(key.is_up, decoded.is_up);
+        assert_eq!(key.sequence, decoded.sequence);
+        assert_eq!(key.block_id, decoded.block_id);
     }
 }

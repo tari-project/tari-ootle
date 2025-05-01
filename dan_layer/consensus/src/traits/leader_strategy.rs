@@ -23,13 +23,12 @@
 use tari_dan_common_types::{committee::Committee, NodeHeight};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-pub trait LeaderStrategy<TAddr> {
+pub trait LeaderStrategy<TAddr: PartialEq> {
     fn calculate_leader(&self, committee: &Committee<TAddr>, height: NodeHeight) -> u32;
 
-    fn is_leader(&self, validator_addr: &TAddr, committee: &Committee<TAddr>, height: NodeHeight) -> bool
-    where TAddr: PartialEq {
+    fn is_leader(&self, validator_addr: &TAddr, committee: &Committee<TAddr>, height: NodeHeight) -> bool {
         let position = self.calculate_leader(committee, height);
-        if let Some((addr, _)) = committee.members.get(position as usize) {
+        if let Some((addr, _)) = committee.get(position as usize) {
             addr == validator_addr
         } else {
             false
@@ -41,10 +40,7 @@ pub trait LeaderStrategy<TAddr> {
         validator_addr: &TAddr,
         committee: &Committee<TAddr>,
         height: NodeHeight,
-    ) -> bool
-    where
-        TAddr: PartialEq,
-    {
+    ) -> bool {
         self.is_leader(validator_addr, committee, height + NodeHeight(1))
     }
 
@@ -54,7 +50,7 @@ pub trait LeaderStrategy<TAddr> {
         height: NodeHeight,
     ) -> (&'b TAddr, &'b RistrettoPublicKeyBytes) {
         let index = self.calculate_leader(committee, height);
-        let (addr, pk) = committee.members.get(index as usize).unwrap();
+        let (addr, pk) = committee.get(index as usize).unwrap();
         (addr, pk)
     }
 

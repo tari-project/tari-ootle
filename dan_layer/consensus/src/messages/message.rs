@@ -53,7 +53,7 @@ impl HotstuffMessage {
         match self {
             Self::NewView(msg) => msg.high_qc.epoch(),
             Self::Proposal(msg) => msg.block.epoch(),
-            Self::ForeignProposal(msg) => msg.block.epoch(),
+            Self::ForeignProposal(msg) => msg.proposal.epoch(),
             Self::ForeignProposalNotification(msg) => msg.epoch,
             Self::ForeignProposalRequest(msg) => msg.epoch(),
             Self::Vote(msg) => msg.epoch,

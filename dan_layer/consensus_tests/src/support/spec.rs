@@ -13,10 +13,7 @@ use crate::support::{
     RoundRobinLeaderStrategy,
 };
 
-#[cfg(not(feature = "sqlite_backend"))]
 pub type TestStore = tari_state_store_rocksdb::RocksDbStateStore<TestAddress>;
-#[cfg(feature = "sqlite_backend")]
-pub type TestStore = tari_state_store_sqlite::SqliteStateStore<TestAddress>;
 
 #[derive(Clone)]
 pub struct TestConsensusSpec;

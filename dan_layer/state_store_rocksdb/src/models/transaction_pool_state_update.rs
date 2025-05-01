@@ -76,7 +76,7 @@ impl Cf for TransactionPoolStateUpdateModel {
     type ValueCodec = DefaultCodec<TransactionPoolStateUpdateModelData>;
 
     fn name() -> &'static str {
-        "tx_pool_updates"
+        "transaction_pool_updates"
     }
 }
 

@@ -432,7 +432,7 @@ impl Test {
                 .state_store
                 .with_read_tx(|tx| tx.transactions_get_paginated(10000, 0, None))
                 .unwrap();
-            log::info!("{} has {} transactions in pool", vn.address, transactions.len());
+            log::info!("{} has {} transactions", vn.address, transactions.len());
             transactions.iter().filter(|tx| tx.is_finalized()).count() >= n
         })
         .await
@@ -639,15 +639,12 @@ impl TestBuilder {
     }
 
     pub fn add_committee(mut self, committee_num: u32, addresses: Vec<&'static str>) -> Self {
-        let entry = self
-            .committees
-            .entry(committee_num)
-            .or_insert_with(|| Committee::new(vec![]));
+        let entry = self.committees.entry(committee_num).or_insert_with(Committee::empty);
 
         for addr in addresses {
             let addr = TestAddress::new(addr);
             let (_, pk) = helpers::derive_keypair_from_address(&addr);
-            entry.members.push((addr, pk.to_byte_type()));
+            entry.members_mut().push((addr, pk.to_byte_type()));
         }
         self
     }

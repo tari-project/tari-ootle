@@ -2,14 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::{
-    consensus_models::{QuorumDecision, Vote},
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-};
+use tari_dan_storage::{consensus_models::Vote, StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
+use tari_sidechain::QuorumDecision;
 
-use crate::helper::{
+use crate::helpers::{
     assert_eq_debug,
     create_random_block_id,
     create_random_hash,

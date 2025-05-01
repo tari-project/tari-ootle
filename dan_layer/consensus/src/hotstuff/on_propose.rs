@@ -30,6 +30,7 @@ use tari_dan_storage::{
         Decision,
         EvictNodeAtom,
         ForeignProposal,
+        ForeignProposalRecord,
         HighQc,
         LastProposed,
         LeafBlock,
@@ -626,7 +627,7 @@ where TConsensusSpec: ConsensusSpec
         start_of_chain_block: LeafBlock,
     ) -> Result<ProposalBatch, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "fetch_next_proposal_batch");
-        let foreign_proposals = ForeignProposal::get_all_new(
+        let foreign_proposals = ForeignProposalRecord::get_all_new(
             tx,
             start_of_chain_block.block_id(),
             self.config.consensus_constants.max_block_size / 4,
@@ -700,7 +701,7 @@ where TConsensusSpec: ConsensusSpec
         };
 
         Ok(ProposalBatch {
-            foreign_proposals,
+            foreign_proposals: foreign_proposals.into_iter().map(|fp| fp.into_proposal()).collect(),
             burnt_utxos,
             transactions,
             evict_nodes,

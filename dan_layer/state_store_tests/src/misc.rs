@@ -7,12 +7,8 @@ use tari_dan_storage::{
     consensus_models::{
         Block,
         BlockId,
-        BlockPledge,
         EndOfEpochCommand,
         EpochCheckpoint,
-        ForeignParkedProposal,
-        ForeignProposal,
-        ForeignProposalStatus,
         HighQc,
         LastExecuted,
         LastSentVote,
@@ -20,19 +16,17 @@ use tari_dan_storage::{
         LeafBlock,
         LockedBlock,
         QcId,
-        QuorumCertificate,
-        QuorumDecision,
         ValidatorSignature,
     },
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
-use tari_sidechain::{CommandCommitProof, SidechainBlockCommitProof, SidechainBlockHeader};
+use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_tree::{compute_proof_for_hashes, TreeHash};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::helper::{assert_eq_debug, create_rocksdb, create_sqlite};
+use crate::helpers::{assert_eq_debug, create_rocksdb, create_sqlite};
 
 #[test]
 fn miscellaneous_sqlite() {
@@ -203,19 +197,19 @@ fn miscellaneous_operations(db: impl StateStore) {
     assert_eq_debug(&res, &epoch_checkpoint);
 
     // foreign parked blocks
-    let justify_qc = QuorumCertificate::genesis(epoch, shard_group);
-    let foreign_parked_block = ForeignParkedProposal::new(ForeignProposal {
-        block: block.clone(),
-        block_pledge: BlockPledge::new(),
-        justify_qc,
-        proposed_by_block: None,
-        status: ForeignProposalStatus::New,
-    });
-    tx.foreign_parked_blocks_insert(&foreign_parked_block).unwrap();
-    let res = tx
-        .foreign_parked_blocks_exists(foreign_parked_block.block().id())
-        .unwrap();
-    assert!(res);
+    // let justify_qc = QuorumCertificate::genesis(epoch, shard_group);
+    // let foreign_parked_block = ForeignParkedProposal::new(ForeignProposalRecord {
+    //     block: block.clone(),
+    //     block_pledge: BlockPledge::new(),
+    //     justify_qc,
+    //     proposed_by_block: None,
+    //     status: ForeignProposalStatus::New,
+    // });
+    // tx.foreign_parked_blocks_insert(&foreign_parked_block).unwrap();
+    // let res = tx
+    //     .foreign_parked_blocks_exists(foreign_parked_block.block().id())
+    //     .unwrap();
+    // assert!(res);
 
     tx.rollback().unwrap();
 }

@@ -42,7 +42,7 @@ use tari_dan_storage::{
         BlockTransactionExecution,
         BurntUtxo,
         EpochCheckpoint,
-        ForeignProposal,
+        ForeignProposalRecord,
         ForeignProposalStatus,
         HighQc,
         LastExecuted,
@@ -339,7 +339,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> SqliteState
 
         let (block_id, height, epoch) = blocks::table
             .select((blocks::block_id, blocks::height, blocks::epoch))
-            .filter(blocks::is_committed.eq(true))
+            .filter(blocks::commit_qc_id.is_not_null())
             .order_by(blocks::id.desc())
             .first::<(String, i64, i64)>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -610,8 +610,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
-    ) -> Result<Vec<ForeignProposal>, StorageError> {
-        use crate::schema::{foreign_proposals, quorum_certificates};
+    ) -> Result<Vec<ForeignProposalRecord>, StorageError> {
+        use crate::schema::foreign_proposals;
 
         let mut block_ids = block_ids.into_iter().peekable();
         if block_ids.peek().is_none() {
@@ -619,9 +619,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         let foreign_proposals = foreign_proposals::table
-            .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
             .filter(foreign_proposals::block_id.eq_any(block_ids.map(serialize_hex)))
-            .get_results::<(sql_models::ForeignProposal, Option<sql_models::QuorumCertificate>)>(self.connection())
+            .get_results::<sql_models::ForeignProposal>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "foreign_proposals_get_any",
                 source: e,
@@ -629,16 +628,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         foreign_proposals
             .into_iter()
-            .map(|(proposal, qc)| {
-                let justify_qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "foreign_proposals_get_any",
-                    details: format!(
-                        "foreign proposal {} references non-existent quorum certificate {}",
-                        proposal.block_id, proposal.justify_qc_id
-                    ),
-                })?;
-                proposal.try_convert(justify_qc)
-            })
+            .map(|proposal| proposal.try_convert())
             .collect()
     }
 
@@ -683,8 +673,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         block_id: &BlockId,
         limit: usize,
-    ) -> Result<Vec<ForeignProposal>, StorageError> {
-        use crate::schema::{foreign_proposals, quorum_certificates};
+    ) -> Result<Vec<ForeignProposalRecord>, StorageError> {
+        use crate::schema::foreign_proposals;
 
         if !self.blocks_exists(block_id)? {
             return Err(StorageError::QueryError {
@@ -696,7 +686,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let pending_block_ids = self.get_block_ids_with_commands_between(&locked.block_id, block_id)?;
 
         let foreign_proposals = foreign_proposals::table
-            .left_join(quorum_certificates::table.on(foreign_proposals::justify_qc_id.eq(quorum_certificates::qc_id)))
             // We don't want to propose fps from future epochs until we've progressed to that epoch
             .filter(foreign_proposals::epoch.le(locked.epoch.as_u64() as i64))
             .filter(foreign_proposals::status.ne(ForeignProposalStatus::Confirmed.to_string()))
@@ -705,11 +694,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 foreign_proposals::proposed_in_block
                     .is_null()
                     .or(foreign_proposals::proposed_in_block
-                        .ne_all(pending_block_ids)
-                        .and(foreign_proposals::proposed_in_block_height.gt(locked.height.as_u64() as i64))),
+                        .ne_all(pending_block_ids))
             )
             .limit(i64::try_from(limit).unwrap_or(i64::MAX))
-            .get_results::<(sql_models::ForeignProposal, Option<sql_models::QuorumCertificate>)>(self.connection())
+            .get_results::<sql_models::ForeignProposal >(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "foreign_proposals_get_all_new",
                 source: e,
@@ -717,16 +705,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         foreign_proposals
             .into_iter()
-            .map(|(proposal, qc)| {
-                let justify_qc = qc.ok_or_else(|| SqliteStorageError::DbInconsistency {
-                    operation: "foreign_proposals_get_all_new",
-                    details: format!(
-                        "foreign proposal {} references non-existent quorum certificate {}",
-                        proposal.block_id, proposal.justify_qc_id
-                    ),
-                })?;
-                proposal.try_convert(justify_qc)
-            })
+            .map(|proposal| proposal.try_convert())
             .collect()
     }
 
@@ -855,7 +834,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .inner_join(
                 blocks::table.on(transaction_executions::block_id
                     .eq(blocks::block_id)
-                    .and(blocks::is_committed.eq(true))),
+                    .and(blocks::commit_qc_id.is_not_null())),
             )
             .inner_join(
                 transactions::table.on(transactions::transaction_id
@@ -1061,7 +1040,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             .select((blocks::all_columns, quorum_certificates::all_columns.nullable()))
             .filter(blocks::parent_block_id.eq(serialize_hex(parent_id)))
             .filter(blocks::block_id.ne(blocks::parent_block_id)) // Exclude the genesis block
-            .filter(blocks::is_committed.eq(true))
+            .filter(blocks::commit_qc_id.is_not_null())
             .first::<(sql_models::Block, Option<sql_models::QuorumCertificate>)>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "blocks_get_by_parent",
@@ -1085,7 +1064,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let results = blocks::table
             .select(blocks::block_id)
             .filter(blocks::parent_block_id.eq(serialize_hex(parent_id)))
-            .filter(blocks::is_committed.eq(false))
+            .filter(blocks::commit_qc_id.is_null())
             .filter(blocks::block_id.ne(blocks::parent_block_id)) // Exclude the genesis block
             .get_results::<String>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
@@ -1282,6 +1261,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let block_diff = block_diffs::table
             .filter(block_diffs::block_id.eq(serialize_hex(block_id)))
+            // Order by insertion
+            .order_by(block_diffs::id.asc())
             .get_results::<sql_models::BlockDiff>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "block_diffs_get",

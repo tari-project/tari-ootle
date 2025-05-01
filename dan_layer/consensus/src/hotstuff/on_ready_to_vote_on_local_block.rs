@@ -25,7 +25,6 @@ use tari_dan_storage::{
         NoVoteReason,
         PendingShardStateTreeDiff,
         QcId,
-        QuorumDecision,
         SubstateChange,
         SubstateRecord,
         TransactionAtom,
@@ -39,6 +38,7 @@ use tari_dan_storage::{
     StateStore,
 };
 use tari_engine_types::{commit_result::RejectReason, substate::Substate};
+use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::broadcast;
 
@@ -128,7 +128,7 @@ where TConsensusSpec: ConsensusSpec
                     local_committee_info,
                     change_set,
                 )?;
-                justified_block.set_as_justified(tx)?;
+                justified_block.set_as_justified(tx, valid_block.justify().id())?;
             }
 
             self.decide_what_to_vote(
@@ -143,38 +143,23 @@ where TConsensusSpec: ConsensusSpec
             change_set.no_vote(NoVoteReason::AlreadyVotedAtHeight);
         }
 
-        let mut locked_blocks = Vec::new();
+        let mut commit_blocks = Vec::new();
         let mut finalized_transactions = Vec::new();
         let mut maybe_high_qc = None;
-        let mut committed_blocks_with_evictions = Vec::new();
-        let mut committed_end_of_epoch_block = None;
 
         if change_set.is_accept() {
             // Update nodes
             let high_qc = valid_block.block().update_nodes(
                 tx,
-                |tx, _prev_locked, block, _justify_qc| {
-                    if !block.is_dummy() {
-                        locked_blocks.push(block.clone());
-                    }
-                    self.on_lock_block(tx, block)
-                },
-                |tx, last_exec, commit_block| {
-                    let committed = self.on_commit(tx, last_exec, &commit_block, local_committee_info)?;
-                    if commit_block.is_epoch_end() {
-                        if committed_end_of_epoch_block.is_some() {
-                            // There should only be one end of epoch commit block
-                            error!(
-                                target: LOG_TARGET,
-                                "❌ Multiple end of epoch blocks committed. This should not happen. Committed blocks: {:?}",
-                                committed_end_of_epoch_block
-                            );
-                        }
-                        committed_end_of_epoch_block = Some(commit_block);
-                    } else if commit_block.all_node_evictions().next().is_some() {
-                        committed_blocks_with_evictions.push(commit_block);
-                    } else {
-                        // nothing to do
+                |tx, _prev_locked, block, _justify_qc| self.on_lock_block(tx, block),
+                |tx, last_exec, mut commit_block| {
+                    let commit_qc_id = valid_block.block().justify().id();
+                    let committed = self.on_commit(tx, commit_qc_id, last_exec, &commit_block, local_committee_info)?;
+                    // NOTE: update the commit QC in the local copy so that foreign proposals can obtain the commit QC
+                    // on_commit already sets the persisted commit_qc for the block
+                    commit_block.set_commit_qc(*commit_qc_id);
+                    if !commit_block.is_dummy() {
+                        commit_blocks.push(commit_block);
                     }
                     if !committed.is_empty() {
                         finalized_transactions.push(committed);
@@ -213,11 +198,9 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(BlockDecision {
             quorum_decision,
-            locked_blocks,
+            commit_blocks,
             finalized_transactions,
             high_qc,
-            committed_blocks_with_evictions,
-            committed_end_of_epoch_block,
         })
     }
 
@@ -1596,11 +1579,12 @@ where TConsensusSpec: ConsensusSpec
     fn on_commit(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
+        commit_qc_id: &QcId,
         last_executed: &LastExecuted,
         block: &Block,
         local_committee_info: &CommitteeInfo,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
-        let committed_transactions = self.finalize_block(tx, block, local_committee_info)?;
+        let committed_transactions = self.finalize_block(tx, commit_qc_id, block, local_committee_info)?;
         debug!(
             target: LOG_TARGET,
             "✅ COMMIT block {}, last executed height = {}",
@@ -1650,6 +1634,7 @@ where TConsensusSpec: ConsensusSpec
     fn finalize_block(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
+        commit_qc_id: &QcId,
         block: &Block,
         local_committee_info: &CommitteeInfo,
     ) -> Result<Vec<TransactionPoolRecord>, HotStuffError> {
@@ -1660,15 +1645,11 @@ where TConsensusSpec: ConsensusSpec
             )?;
 
             // Nothing to do here for empty dummy blocks. Just mark the block as committed.
-            block.commit_diff(tx, BlockDiff::empty(*block.id()))?;
+            block.commit_diff(tx, commit_qc_id, BlockDiff::empty(*block.id()))?;
             return Ok(vec![]);
         }
 
-        let diff = block.get_diff(&**tx)?;
-        info!(
-            target: LOG_TARGET,
-            "🌳 Committing block {} with {} substate change(s)", block, diff.len()
-        );
+        info!(target: LOG_TARGET, "🌳 Finalizing block {}", block);
 
         // This moves the stage update from pending to current for all transactions on the commit block
         self.transaction_pool
@@ -1693,8 +1674,13 @@ where TConsensusSpec: ConsensusSpec
         state_tree.commit_diffs(pending)?;
         let tx = state_tree.into_transaction();
 
+        let diff = block.get_diff(&**tx)?;
+        info!(
+            target: LOG_TARGET,
+            "🌳 COMMIT block {} with {} substate change(s)", block, diff.len()
+        );
         let local_diff = diff.into_filtered(local_committee_info);
-        block.commit_diff(tx, local_diff)?;
+        block.commit_diff(tx, commit_qc_id, local_diff)?;
 
         let finalized_transactions = self
             .transaction_pool

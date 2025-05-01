@@ -13,6 +13,7 @@ use crate::{
     StorageError,
 };
 
+#[derive(Debug, Clone)]
 pub struct ValidBlock {
     block: Block,
     dummy_blocks: Vec<Block>,

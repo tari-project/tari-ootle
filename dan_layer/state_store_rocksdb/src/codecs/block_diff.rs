@@ -12,31 +12,46 @@ use crate::{
     utils::read_to_fixed,
 };
 
-#[derive(Default)]
-pub struct BlockIdSubstateIdVersionCodec {
+/// Variant for BlockDiffKeyCodec that encodes in block_id, seq, substate_id, and version order.
+pub struct BlockIdSeqSubstateIdVersion;
+/// Variant for BlockDiffKeyCodec that encodes in substate_id, block_id, version, and seq order.
+pub struct SubstateIdBlockIdVersionSeq;
+
+pub struct BlockDiffKeyCodec<T> {
     substate_id_codec: SubstateIdCodec,
+    _phantom: std::marker::PhantomData<T>,
 }
 
-impl DbCodec<BlockDiffKey> for BlockIdSubstateIdVersionCodec {
+impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion> {
     fn encode(&self, value: &BlockDiffKey) -> Result<EncodeVec, RocksDbStorageError> {
         let block_id_bytes = value.block_id.as_bytes();
+        let sequence_bytes = value.sequence.to_be_bytes();
         let substate_id_bytes = self.substate_id_codec.encode(&value.substate_id)?;
         let version_bytes = value.version.to_be_bytes();
+        let bool_byte = [u8::from(value.is_up)];
         Ok(EncodeVec::from_slices(&[
             block_id_bytes,
+            &sequence_bytes,
             &substate_id_bytes,
             &version_bytes,
+            bool_byte.as_slice(),
         ]))
     }
 
     fn decode(&self, mut bytes: &[u8]) -> Result<BlockDiffKey, RocksDbStorageError> {
         let reader = &mut bytes;
-        let hash = FixedHash::new(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+        let block_id = FixedHash::new(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!(
                 "BlockIdSubstateIdVersionCodec: Invalid bytes len={} for FixedHash",
                 reader.len()
             ),
         })?);
+        let sequence = u32::from_be_bytes(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+            source: anyhow!(
+                "BlockIdSubstateIdVersionCodec: not enough bytes for sequence, remaining={}",
+                reader.len()
+            ),
+        })?);
         let substate_id = self.substate_id_codec.decode_reader(reader)?;
         let version = u32::from_be_bytes(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!(
@@ -44,49 +59,78 @@ impl DbCodec<BlockDiffKey> for BlockIdSubstateIdVersionCodec {
                 reader.len()
             ),
         })?);
+        let is_up: [u8; 1] = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+            source: anyhow!(
+                "BlockIdSubstateIdVersionCodec: not enough bytes for bool, remaining={}",
+                reader.len()
+            ),
+        })?;
+
         Ok(BlockDiffKey {
-            block_id: BlockId::from(hash),
+            block_id: BlockId::from(block_id),
             substate_id,
             version,
+            is_up: is_up[0] != 0,
+            sequence,
         })
     }
 }
 
-/// Codec for the BlockDiffKey. Encodes in substate_id, block_id, and version order.
-#[derive(Default)]
-pub struct BlockDiffKeyCodec {
-    substate_id_codec: SubstateIdCodec,
-}
-
-impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec {
+impl DbCodec<BlockDiffKey> for BlockDiffKeyCodec<SubstateIdBlockIdVersionSeq> {
     fn encode(&self, value: &BlockDiffKey) -> Result<EncodeVec, RocksDbStorageError> {
         let substate_id_bytes = self.substate_id_codec.encode(&value.substate_id)?;
         let block_id_bytes = value.block_id.as_bytes();
         let version_bytes = value.version.to_be_bytes();
+        let is_up_bytes = [u8::from(value.is_up)];
+        let sequence_bytes = value.sequence.to_be_bytes();
         Ok(EncodeVec::from_slices(&[
             &substate_id_bytes,
             block_id_bytes,
             &version_bytes,
+            is_up_bytes.as_slice(),
+            &sequence_bytes,
         ]))
     }
 
     fn decode(&self, mut bytes: &[u8]) -> Result<BlockDiffKey, RocksDbStorageError> {
         let reader = &mut bytes;
         let substate_id = self.substate_id_codec.decode_reader(reader)?;
-        let hash = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+        let block_id = FixedHash::new(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!("BlockIdSubstateIdVersionCodec: Invalid bytes for FixedHash",),
-        })?;
-        let hash = FixedHash::new(hash);
+        })?);
         let version = u32::from_be_bytes(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
             source: anyhow!(
                 "BlockIdSubstateIdVersionCodec: Invalid bytes len={} for u32",
                 reader.len()
             ),
         })?);
+        let is_up: [u8; 1] = read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+            source: anyhow!(
+                "BlockIdSubstateIdVersionCodec: not enough bytes for bool, remaining={}",
+                reader.len()
+            ),
+        })?;
+        let sequence = u32::from_be_bytes(read_to_fixed(reader).ok_or_else(|| RocksDbStorageError::DecodeError {
+            source: anyhow!(
+                "BlockIdSubstateIdVersionCodec: not enough bytes for sequence, remaining={}",
+                reader.len()
+            ),
+        })?);
         Ok(BlockDiffKey {
-            block_id: BlockId::from(hash),
+            block_id: BlockId::from(block_id),
             substate_id,
             version,
+            is_up: is_up[0] != 0,
+            sequence,
         })
+    }
+}
+
+impl<T> Default for BlockDiffKeyCodec<T> {
+    fn default() -> Self {
+        Self {
+            substate_id_codec: SubstateIdCodec,
+            _phantom: std::marker::PhantomData,
+        }
     }
 }

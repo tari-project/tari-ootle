@@ -31,12 +31,15 @@ use tari_dan_storage::{
     consensus_models::{
         Block,
         BlockId,
+        BlockPledge,
         Command,
+        CommandsCommitProof,
         Decision,
+        ForeignProposal,
+        ForeignProposalRecord,
         LeafBlock,
         QcId,
         QuorumCertificate,
-        QuorumDecision,
         SubstateRecord,
         TransactionAtom,
         ValidatorSignature,
@@ -48,6 +51,7 @@ use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{hash_substate, Substate, SubstateId, SubstateValue},
 };
+use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::{
@@ -59,6 +63,8 @@ use tari_template_lib::{
 use tari_transaction::TransactionId;
 use tari_utilities::epoch_time::EpochTime;
 use tempfile::TempDir;
+
+use crate::TEST_NUM_PRESHARDS;
 
 pub const fn num_preshards() -> NumPreshards {
     NumPreshards::P256
@@ -284,7 +290,6 @@ pub fn create_qc(block: &LeafBlock) -> QuorumCertificate {
         block.epoch(),
         ShardGroup::all_shards(num_preshards()),
         vec![],
-        vec![],
         QuorumDecision::Accept,
     )
 }
@@ -319,8 +324,68 @@ where
     chain[len - 3].as_locked_block().set(tx).unwrap();
 
     for block in &chain[..len - 3] {
-        tx.blocks_set_flags(block.id(), Some(true), Some(true)).unwrap();
+        tx.blocks_set_qcs(block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
+            .unwrap();
     }
 
     chain.last().unwrap().as_leaf_block().set(tx).unwrap();
+}
+
+pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignProposalRecord {
+    let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
+    let qc1 = QuorumCertificate::new(
+        *parent_id.hash(),
+        parent_id,
+        NodeHeight(1),
+        epoch,
+        shard_group,
+        vec![],
+        QuorumDecision::Accept,
+    );
+
+    let foreign_block = Block::create(
+        Default::default(),
+        parent_id,
+        qc1.clone(),
+        NodeHeight(2),
+        epoch,
+        shard_group,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        1,
+        SchnorrSignatureBytes::zero(),
+        EpochTime::now().as_u64(),
+        FixedHash::zero(),
+        ExtraData::new(),
+    )
+    .unwrap();
+    let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+        header: SidechainBlockHeader {
+            network: foreign_block.network().as_byte(),
+            parent_id: *parent_id.hash(),
+            justify_id: *qc1.id().hash(),
+            height: foreign_block.height().as_u64(),
+            epoch: epoch.as_u64(),
+            shard_group: tari_sidechain::ShardGroup {
+                start: shard_group.start().as_u32(),
+                end_inclusive: shard_group.end().as_u32(),
+            },
+            proposed_by: Default::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: Default::default(),
+            signature: Default::default(),
+            metadata_hash: Default::default(),
+        },
+        proof_elements: vec![CommitProofElement::QuorumCertificate(
+            tari_sidechain::QuorumCertificate {
+                header_hash: foreign_block.header().calculate_hash(),
+                parent_id: *parent_id.hash(),
+                signatures: vec![],
+                decision: QuorumDecision::Accept,
+            },
+        )],
+    });
+
+    ForeignProposalRecord::new(ForeignProposal::new(commit_proof, BlockPledge::default()))
 }

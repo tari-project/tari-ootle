@@ -395,7 +395,7 @@ impl EventScanner {
             shard_group
         );
 
-        for member in committee.members() {
+        for member in committee.address_iter() {
             debug!(
                 target: LOG_TARGET,
                 "Trying to get blocks from VN {} (epoch={}, shard_group={})",

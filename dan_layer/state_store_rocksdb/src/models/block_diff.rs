@@ -9,9 +9,10 @@ use crate::{
     codecs::{
         BlockDiffKeyCodec,
         BlockIdCodec,
-        BlockIdSubstateIdVersionCodec,
+        BlockIdSeqSubstateIdVersion,
         DefaultCodec,
         DefaultCodecRef,
+        SubstateIdBlockIdVersionSeq,
         SubstateIdCodec,
         UnitCodec,
     },
@@ -35,12 +36,19 @@ pub struct BlockDiffKey {
     pub block_id: BlockId,
     pub substate_id: SubstateId,
     pub version: u32,
+    pub is_up: bool,
+    /// Retains the ordering of the substate changes in the block. This limits the mximum number of substate changes in
+    /// a block to u32::MAX (4,294,967,295).
+    pub sequence: u32,
 }
+
+/// Ordered substate transitions for a block.
+/// Schema: (BlockId, Seq, SubstateId, Version, IsUp) -> Vec<SubstateChange>
 pub struct BlockDiffModel;
 
 impl Cf for BlockDiffModel {
     type Key = BlockDiffKey;
-    type KeyCodec = BlockIdSubstateIdVersionCodec;
+    type KeyCodec = BlockDiffKeyCodec<BlockIdSeqSubstateIdVersion>;
     type Value = SubstateChange;
     type ValueCodec = DefaultCodec<Self::Value>;
 
@@ -50,10 +58,12 @@ impl Cf for BlockDiffModel {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(transparent)]
 pub struct BlockDiffRef<'a> {
     pub change: &'a SubstateChange,
 }
 
+/// Allows insertions into the block diffs CF without cloning the substate changes.
 #[derive(Default)]
 pub struct BlockDiffModelRef<'a> {
     _phantom: std::marker::PhantomData<&'a ()>,
@@ -70,6 +80,8 @@ impl<'a> Cf for BlockDiffModelRef<'a> {
     }
 }
 
+/// Query for block diffs by block id. Since the sequence number is the second part of the key, iterating over this
+/// query will return them in the original order.
 pub struct ByBlockIdQuery;
 
 impl QueryCf for ByBlockIdQuery {
@@ -78,11 +90,13 @@ impl QueryCf for ByBlockIdQuery {
     type KeyCodec = BlockIdCodec;
 }
 
+/// Query for block diffs by substate id. This is a secondary index that allows querying by substate id.
+/// Schema: (SubstateId, BlockId, Version, Seq) -> ()
 pub struct SubstateIdIndex;
 
 impl Cf for SubstateIdIndex {
     type Key = BlockDiffKey;
-    type KeyCodec = BlockDiffKeyCodec;
+    type KeyCodec = BlockDiffKeyCodec<SubstateIdBlockIdVersionSeq>;
     type Value = ();
     type ValueCodec = UnitCodec;
 

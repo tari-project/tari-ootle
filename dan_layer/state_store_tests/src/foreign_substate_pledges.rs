@@ -9,7 +9,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 
-use crate::helper::{
+use crate::helpers::{
     build_substate_value,
     create_random_substate_id,
     create_rocksdb,

@@ -33,12 +33,12 @@ pub fn deserialize_hex(s: &str) -> Result<Vec<u8>, StorageError> {
     })
 }
 
-pub fn deserialize_hex_try_from<T>(s: &str) -> Result<T, StorageError>
+pub fn deserialize_hex_try_from<T, U: AsRef<str>>(s: U) -> Result<T, StorageError>
 where
     for<'a> T: TryFrom<&'a [u8]>,
     for<'a> <T as TryFrom<&'a [u8]>>::Error: std::fmt::Display,
 {
-    let bytes = deserialize_hex(s)?;
+    let bytes = deserialize_hex(s.as_ref())?;
     T::try_from(&bytes).map_err(|e| StorageError::DecodingError {
         operation: "deserialize_hex_try_from",
         item: type_name::<T>(),

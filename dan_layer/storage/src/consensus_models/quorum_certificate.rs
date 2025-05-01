@@ -15,6 +15,7 @@ use tari_dan_common_types::{
     NodeHeight,
     ShardGroup,
 };
+use tari_sidechain::QuorumDecision;
 
 use crate::{
     consensus_models::{
@@ -24,7 +25,6 @@ use crate::{
         HighQc,
         LastVoted,
         LeafBlock,
-        QuorumDecision,
         ValidatorSignature,
         ValidatorStatsUpdate,
     },
@@ -55,9 +55,7 @@ pub struct QuorumCertificate {
     epoch: Epoch,
     shard_group: ShardGroup,
     signatures: Vec<ValidatorSignature>,
-    #[serde(with = "serde_with::hex::vec")]
-    #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
-    leaf_hashes: Vec<FixedHash>,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     decision: QuorumDecision,
     is_shares_processed: bool,
 }
@@ -70,10 +68,8 @@ impl QuorumCertificate {
         epoch: Epoch,
         shard_group: ShardGroup,
         signatures: Vec<ValidatorSignature>,
-        mut leaf_hashes: Vec<FixedHash>,
         decision: QuorumDecision,
     ) -> Self {
-        leaf_hashes.sort();
         let mut qc = Self {
             qc_id: QcId::zero(),
             block_id: BlockHeader::calculate_block_id(&parent_id, &header_hash),
@@ -83,7 +79,6 @@ impl QuorumCertificate {
             epoch,
             shard_group,
             signatures,
-            leaf_hashes,
             decision,
             is_shares_processed: false,
         };
@@ -101,7 +96,6 @@ impl QuorumCertificate {
             epoch,
             shard_group,
             signatures: vec![],
-            leaf_hashes: vec![],
             decision: QuorumDecision::Accept,
             is_shares_processed: false,
         };
@@ -112,12 +106,9 @@ impl QuorumCertificate {
     pub fn calculate_id(&self) -> QcId {
         quorum_certificate_hasher()
             .chain(&self.epoch)
-            .chain(&self.shard_group)
             .chain(&self.header_hash)
             .chain(&self.parent_id)
-            .chain(&self.block_height)
             .chain(&self.signatures)
-            .chain(&self.leaf_hashes)
             .chain(&self.decision)
             .finalize_into_array()
             .into()
@@ -139,10 +130,6 @@ impl QuorumCertificate {
 
     pub fn shard_group(&self) -> ShardGroup {
         self.shard_group
-    }
-
-    pub fn leaf_hashes(&self) -> &[FixedHash] {
-        &self.leaf_hashes
     }
 
     pub fn signatures(&self) -> &[ValidatorSignature] {

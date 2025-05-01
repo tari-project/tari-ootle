@@ -15,9 +15,10 @@ use tari_dan_storage::{
         BlockDiff,
         BurntUtxo,
         EpochCheckpoint,
-        ForeignProposal,
+        ForeignProposalRecord,
         HighQc,
         LeafBlock,
+        QcId,
         TransactionPool,
         TransactionRecord,
     },
@@ -675,7 +676,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         let propose_now = self.state_store.with_read_tx(|tx| {
             // Propose quickly if there are UTXOs to mint or transactions to propose
-            let propose_now = ForeignProposal::has_unconfirmed(tx, epoch_state.epoch())? ||
+            let propose_now = ForeignProposalRecord::has_unconfirmed(tx, epoch_state.epoch())? ||
                 BurntUtxo::has_unproposed(tx)? ||
                 self.transaction_pool
                     .has_ready_or_pending_transaction_updates(tx, leaf_block.block_id())?;
@@ -926,8 +927,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 debug!(target: LOG_TARGET, "Creating zero block");
                 zero_block.justify().insert(tx)?;
                 zero_block.insert(tx)?;
-                zero_block.set_as_justified(tx)?;
-                zero_block.commit_diff(tx, BlockDiff::empty(*zero_block.id()))?;
+                zero_block.set_as_justified(tx, &QcId::zero())?;
+                zero_block.commit_diff(tx, zero_block.justify().id(), BlockDiff::empty(*zero_block.id()))?;
             }
 
             let mut genesis = Block::genesis(
@@ -942,13 +943,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");
                 genesis.justify().save(tx)?;
                 genesis.insert(tx)?;
-                genesis.set_as_justified(tx)?;
+                genesis.set_as_justified(tx, &QcId::zero())?;
                 genesis.as_locked_block().set(tx)?;
                 genesis.as_leaf_block().set(tx)?;
                 genesis.as_last_executed().set(tx)?;
                 genesis.as_last_voted().set(tx)?;
                 genesis.justify().as_high_qc().set(tx)?;
-                genesis.commit_diff(tx, BlockDiff::empty(*genesis.id()))?;
+                genesis.commit_diff(tx, genesis.justify().id(), BlockDiff::empty(*genesis.id()))?;
             }
 
             Ok(())

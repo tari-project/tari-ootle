@@ -36,6 +36,7 @@ use crate::{
         Evidence,
         ForeignParkedProposal,
         ForeignProposal,
+        ForeignProposalRecord,
         ForeignProposalStatus,
         HighQc,
         LastExecuted,
@@ -116,14 +117,14 @@ pub trait StateStoreReadTransaction: Sized {
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
-    ) -> Result<Vec<ForeignProposal>, StorageError>;
+    ) -> Result<Vec<ForeignProposalRecord>, StorageError>;
     fn foreign_proposals_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
     fn foreign_proposals_has_unconfirmed(&self, epoch: Epoch) -> Result<bool, StorageError>;
     fn foreign_proposals_get_all_new(
         &self,
         block_id: &BlockId,
         limit: usize,
-    ) -> Result<Vec<ForeignProposal>, StorageError>;
+    ) -> Result<Vec<ForeignProposalRecord>, StorageError>;
 
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError>;
     fn transactions_exists(&self, tx_id: &TransactionId) -> Result<bool, StorageError>;
@@ -339,11 +340,11 @@ pub trait StateStoreWriteTransaction {
     // -------------------------------- Block -------------------------------- //
     fn blocks_insert(&mut self, block: &Block) -> Result<(), StorageError>;
     fn blocks_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
-    fn blocks_set_flags(
+    fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
-        is_committed: Option<bool>,
-        is_justified: Option<bool>,
+        commit_qc_id: Option<&QcId>,
+        justify_qc_id: Option<&QcId>,
     ) -> Result<(), StorageError>;
 
     // -------------------------------- BlockDiff -------------------------------- //
@@ -362,7 +363,7 @@ pub trait StateStoreWriteTransaction {
     fn leaf_block_set(&mut self, leaf_node: &LeafBlock) -> Result<(), StorageError>;
     fn locked_block_set(&mut self, locked_block: &LockedBlock) -> Result<(), StorageError>;
     fn high_qc_set(&mut self, high_qc: &HighQc) -> Result<(), StorageError>;
-    fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposal) -> Result<(), StorageError>;
+    fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposalRecord) -> Result<(), StorageError>;
     fn foreign_proposals_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
 
     fn foreign_proposals_delete_in_epoch(&mut self, epoch: Epoch) -> Result<(), StorageError>;
@@ -370,7 +371,7 @@ pub trait StateStoreWriteTransaction {
         &mut self,
         block_id: &BlockId,
         status: ForeignProposalStatus,
-        set_proposed_in_block: Option<&LeafBlock>,
+        set_proposed_in_block: Option<&BlockId>,
     ) -> Result<(), StorageError>;
 
     fn foreign_proposals_clear_proposed_in(&mut self, proposed_in_block: &BlockId) -> Result<(), StorageError>;
@@ -414,21 +415,22 @@ pub trait StateStoreWriteTransaction {
     fn transaction_pool_state_updates_remove_any_by_block_id(&mut self, block_id: &BlockId)
         -> Result<(), StorageError>;
 
-    // -------------------------------- Missing Transactions -------------------------------- //
+    // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
 
-    fn missing_transactions_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
+    fn parked_block_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         park_block: &Block,
         foreign_proposals: &[ForeignProposal],
         missing_transaction_ids: IMissing,
     ) -> Result<(), StorageError>;
 
-    fn missing_transactions_remove(
+    fn parked_block_remove_missing_transaction(
         &mut self,
         height: NodeHeight,
         transaction_id: &TransactionId,
     ) -> Result<Option<(Block, Vec<ForeignProposal>)>, StorageError>;
 
+    // -------------------------------- Foreign parked block -------------------------------- //
     fn foreign_parked_blocks_insert(&mut self, park_block: &ForeignParkedProposal) -> Result<(), StorageError>;
 
     fn foreign_parked_blocks_insert_missing_transactions<'a, I: IntoIterator<Item = &'a TransactionId>>(

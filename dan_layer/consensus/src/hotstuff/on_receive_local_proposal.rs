@@ -21,7 +21,6 @@ use tari_dan_storage::{
         SubstateRecord,
         TransactionPool,
         ValidBlock,
-        Vote,
     },
     StateStore,
     StateStoreWriteTransaction,
@@ -945,14 +944,8 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
 
 fn cleanup_epoch<TTx: StateStoreWriteTransaction>(tx: &mut TTx, epoch: Epoch) -> Result<(), HotStuffError> {
     // Prune all DOWNed values
-    // TODO: we cannot prune downed values during the epoch because nodes currently need to provide
-    // historical values for catch up, and for validator fees pledging as vnfp's are able to be downed
-    // while locked. This may be fine or we may need to improve this (potentially by requesting FPs from
-    // local nodes during catch up)
     SubstateRecord::prune_downed_values(tx, epoch)?;
-    Vote::delete_all(tx)?;
-    // TODO: when can we delete the foreign proposals?
-    // ForeignProposal::delete_in_epoch(tx, epoch)?;
+    ForeignProposalRecord::delete_in_epoch(tx, epoch)?;
     Ok(())
 }
 

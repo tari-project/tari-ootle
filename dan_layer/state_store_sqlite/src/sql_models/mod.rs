@@ -18,7 +18,6 @@ mod substate_lock;
 mod transaction;
 mod transaction_execution;
 mod transaction_pool;
-mod vote;
 
 pub use block::*;
 pub use block_diff::*;
@@ -37,4 +36,3 @@ pub use substate_lock::*;
 pub use transaction::*;
 pub use transaction_execution::*;
 pub use transaction_pool::*;
-pub use vote::*;

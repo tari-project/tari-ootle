@@ -76,7 +76,6 @@ use tari_dan_storage::{
         TransactionRecord,
         ValidatorConsensusStats,
         ValidatorStatsUpdate,
-        Vote,
     },
     Ordering,
     StateStoreReadTransaction,
@@ -144,7 +143,6 @@ use crate::{
         transaction_pool_state_update,
         transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData},
         validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
-        vote::VoteModel,
     },
     reader::RocksDbStateStoreReadTransaction,
 };
@@ -1040,29 +1038,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         }
 
         Ok(blocks)
-    }
-
-    fn votes_insert(&mut self, vote: &Vote) -> Result<(), StorageError> {
-        const OPERATION: &str = "votes_insert";
-        self.db()
-            .cf(VoteModel)?
-            .put(&(vote.block_id, vote.get_hash()), vote, OPERATION)?;
-        Ok(())
-    }
-
-    fn votes_delete_all(&mut self) -> Result<(), StorageError> {
-        const OPERATION: &str = "votes_delete_all";
-        // RockDB allows runtime dropping and creation of column families in constant time (data reclaimed later)
-        // However, we do not have a mutable reference to the DB, so we cannot drop and recreate the column family.
-        // Anyhow, it is not completely clear if this is safe + we may remove votes from persistence
-
-        let cf = self.db().cf(VoteModel)?;
-        let iter = cf.key_iterator(Ordering::default(), OPERATION);
-        for result in iter {
-            let key = result?;
-            cf.delete(&key, OPERATION)?;
-        }
-        Ok(())
     }
 
     fn substate_locks_insert_all<'a, I: IntoIterator<Item = (&'a SubstateId, &'a Vec<SubstateLock>)>>(

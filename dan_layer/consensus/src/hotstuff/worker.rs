@@ -118,7 +118,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     ) -> Self {
         let (tx_missing_transactions, rx_missing_transactions) = mpsc::unbounded_channel();
         let pacemaker = PaceMaker::new(config.consensus_constants.pacemaker_block_time);
-        let vote_receiver = VoteCollector::new(
+        let vote_collector = VoteCollector::new(
             config.network,
             state_store.clone(),
             epoch_manager.clone(),
@@ -171,13 +171,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 pacemaker.clone_handle(),
                 outbound_messaging.clone(),
             ),
-            on_receive_vote: OnReceiveVoteHandler::new(pacemaker.clone_handle(), vote_receiver.clone()),
+            on_receive_vote: OnReceiveVoteHandler::new(pacemaker.clone_handle(), vote_collector.clone()),
             on_receive_new_view: OnReceiveNewViewHandler::new(
                 local_validator_addr,
                 state_store.clone(),
                 leader_strategy.clone(),
                 pacemaker.clone_handle(),
-                vote_receiver,
+                vote_collector,
             ),
             on_receive_request_missing_txs: OnReceiveRequestMissingTransactions::new(
                 state_store.clone(),
@@ -846,7 +846,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             HotstuffMessage::Vote(msg) => log_err(
                 "on_receive_vote",
                 self.on_receive_vote
-                    .handle(from, epoch_state.epoch(), msg, epoch_state.local_committee_info())
+                    .handle(
+                        from,
+                        current_height,
+                        epoch_state.epoch(),
+                        msg,
+                        epoch_state.local_committee_info(),
+                    )
                     .await,
             ),
             HotstuffMessage::MissingTransactionsRequest(msg) => log_err(

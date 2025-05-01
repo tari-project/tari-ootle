@@ -164,6 +164,7 @@ where TConsensusSpec: ConsensusSpec
                 .vote_collector
                 .check_and_collect_vote(
                     from.clone(),
+                    current_height,
                     epoch_state.epoch(),
                     vote,
                     epoch_state.local_committee_info(),

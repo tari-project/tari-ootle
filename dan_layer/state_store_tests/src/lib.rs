@@ -34,5 +34,3 @@ mod substate_locks;
 mod substates;
 #[cfg(test)]
 mod transactions;
-#[cfg(test)]
-mod votes;

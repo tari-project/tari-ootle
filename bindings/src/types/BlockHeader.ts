@@ -4,4 +4,20 @@ import type { ExtraData } from "./ExtraData";
 import type { NodeHeight } from "./NodeHeight";
 import type { ShardGroup } from "./ShardGroup";
 
-export interface BlockHeader { id: string, network: string, parent: string, justify_id: string, height: NodeHeight, epoch: Epoch, shard_group: ShardGroup, proposed_by: string, total_leader_fee: number, state_merkle_root: string, command_merkle_root: string, signature: {public_nonce : string, signature: string} | null, timestamp: number, epoch_hash: string, extra_data: ExtraData, }
+export interface BlockHeader {
+  id: string;
+  network: string;
+  parent: string;
+  justify_id: string;
+  height: NodeHeight;
+  epoch: Epoch;
+  shard_group: ShardGroup;
+  proposed_by: string;
+  total_leader_fee: number;
+  state_merkle_root: string;
+  command_merkle_root: string;
+  signature: { public_nonce: string; signature: string } | null;
+  timestamp: number;
+  epoch_hash: string;
+  extra_data: ExtraData;
+}

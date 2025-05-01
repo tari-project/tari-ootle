@@ -8,7 +8,6 @@ use std::{
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
-use log::info;
 use log::{info, warn};
 use tari_crypto::{
     keys::PublicKey as PK,
@@ -17,7 +16,7 @@ use tari_crypto::{
 };
 use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{
-    apis::{jwt::JrpcPermission, key_manager, substate::ValidatorScanResult},
+    apis::{key_manager, substate::ValidatorScanResult},
     models::Account,
 };
 use tari_engine_types::{
@@ -27,23 +26,12 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
-use tari_dan_wallet_sdk::{apis::key_manager, models::Account};
-use tari_template_builtin::ACCOUNT_NFT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     args,
     models::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
     types::crypto::RistrettoPublicKeyBytes,
 };
 use tari_transaction::TransactionId;
-use tari_wallet_daemon_client::types::{
-    GetAccountNftRequest,
-    GetAccountNftResponse,
-    ListAccountNftRequest,
-    ListAccountNftResponse,
-    MintAccountNftRequest,
-    MintAccountNftResponse,
-    TransferNftRequest,
-    TransferNftResponse,
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -53,6 +41,8 @@ use tari_wallet_daemon_client::{
         ListAccountNftResponse,
         MintAccountNftRequest,
         MintAccountNftResponse,
+        TransferNftRequest,
+        TransferNftResponse,
     },
 };
 use tokio::sync::broadcast;
@@ -372,11 +362,11 @@ async fn fill_in_target_account_vault(
 #[allow(clippy::too_many_lines)]
 pub async fn handle_transfer_nft(
     context: &HandlerContext,
-    token: Option<String>,
+    token: Option<&Bearer>,
     req: TransferNftRequest,
 ) -> Result<TransferNftResponse, anyhow::Error> {
     let sdk = context.wallet_sdk();
-    sdk.jwt_api().check_auth(token, &[JrpcPermission::Admin])?;
+    context.check_auth(token, &[JrpcPermission::Admin])?;
 
     // fetch accounts and its inputs
     info!(target: LOG_TARGET, "fetch accounts and its inputs...");

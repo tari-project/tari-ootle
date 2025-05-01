@@ -2,4 +2,7 @@
 import type { SubstateStatus } from "./SubstateStatus";
 import type { SubstateValue } from "../SubstateValue";
 
-export interface VNGetSubstateResponse { value: SubstateValue | null, status: SubstateStatus, }
+export interface VNGetSubstateResponse {
+  value: SubstateValue | null;
+  status: SubstateStatus;
+}

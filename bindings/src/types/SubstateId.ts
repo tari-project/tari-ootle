@@ -9,4 +9,13 @@ import type { UnclaimedConfidentialOutputAddress } from "./UnclaimedConfidential
 import type { ValidatorFeePoolAddress } from "./ValidatorFeePoolAddress";
 import type { VaultId } from "./VaultId";
 
-export type SubstateId = { "Component": ComponentAddress } | { "Resource": ResourceAddress } | { "Vault": VaultId } | { "UnclaimedConfidentialOutput": UnclaimedConfidentialOutputAddress } | { "NonFungible": NonFungibleAddress } | { "NonFungibleIndex": NonFungibleIndexAddress } | { "TransactionReceipt": TransactionReceiptAddress } | { "Template": PublishedTemplateAddress } | { "ValidatorFeePool": ValidatorFeePoolAddress };
+export type SubstateId =
+  | { Component: ComponentAddress }
+  | { Resource: ResourceAddress }
+  | { Vault: VaultId }
+  | { UnclaimedConfidentialOutput: UnclaimedConfidentialOutputAddress }
+  | { NonFungible: NonFungibleAddress }
+  | { NonFungibleIndex: NonFungibleIndexAddress }
+  | { TransactionReceipt: TransactionReceiptAddress }
+  | { Template: PublishedTemplateAddress }
+  | { ValidatorFeePool: ValidatorFeePoolAddress };

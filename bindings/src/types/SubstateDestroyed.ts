@@ -2,4 +2,9 @@
 import type { Epoch } from "./Epoch";
 import type { Shard } from "./Shard";
 
-export interface SubstateDestroyed { justify: string, by_block: string, at_epoch: Epoch, by_shard: Shard, }
+export interface SubstateDestroyed {
+  justify: string;
+  by_block: string;
+  at_epoch: Epoch;
+  by_shard: Shard;
+}

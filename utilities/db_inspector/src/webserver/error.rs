@@ -6,6 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use log::error;
 use serde::Serialize;
 use tari_state_store_rocksdb::error::RocksDbStorageError;
 
@@ -40,6 +41,8 @@ impl WebError {
 
 impl IntoResponse for WebError {
     fn into_response(self) -> Response {
+        error!("WebError({}): {}", self.code, self.message);
+
         (
             StatusCode::from_u16(self.code).expect("invalid status code"),
             Json(self),

@@ -1650,22 +1650,30 @@ async fn multishard_validator_fee_claim() {
     test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
 
     test.start_epoch(Epoch(1)).await;
-    let mut tx_sent = false;
 
     loop {
         test.on_block_committed().await;
 
         let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
 
-        if !tx_sent && (test.is_transaction_pool_empty() || leaf.height >= NodeHeight(15)) {
-            // Send a claim
-            test.send_transaction_to_destination(TestVnDestination::All, claim_tx.clone())
-                .await;
-            test.wait_for_pool_count(TestVnDestination::All, 1).await;
-            tx_sent = true;
+        if test.is_transaction_pool_empty() {
+            break;
         }
 
-        if tx_sent && test.is_transaction_pool_empty() {
+        if leaf.height >= NodeHeight(40) {
+            panic!("Not all transaction committed after {} blocks", leaf.height);
+        }
+    }
+
+    // Send a claim
+    test.send_transaction_to_destination(TestVnDestination::All, claim_tx.clone())
+        .await;
+    loop {
+        test.on_block_committed().await;
+
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+
+        if test.is_transaction_pool_empty() {
             break;
         }
 

@@ -90,6 +90,7 @@ export default function ListColumnFamilies() {
               },
             },
           }}
+          sortModel={[{ field: "name", sort: "asc" }]}
           sortingOrder={["desc", "asc", null]}
           disableMultipleRowSelection
           onRowSelectionModelChange={(selections) => {

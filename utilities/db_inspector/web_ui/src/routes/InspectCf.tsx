@@ -111,36 +111,6 @@ export default function InspectCf() {
   }, [data?.total_entries]);
 
 
-  if (error) {
-    return (
-      <>
-        <Grid size={{ xs: 12, md: 12, lg: 12 }}>
-          <Box
-            className="flex-container"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <Typography
-              variant="h4"
-              style={{
-                paddingBottom: theme.spacing(2),
-              }}
-            >
-              <RouterLink to={`/databases/${dbName}`}>{dbName}</RouterLink> - {cfName}
-            </Typography>
-          </Box>
-          <Divider />
-        </Grid>
-        <Typography variant="h6" color="error">
-          Error: {error}
-        </Typography>
-      </>
-    );
-  }
-
   return (
     <>
       <Grid size={{ xs: 12, md: 12, lg: 12 }}>
@@ -152,6 +122,7 @@ export default function InspectCf() {
             alignItems: "center",
           }}
         >
+
           <Typography
             variant="h4"
             style={{
@@ -159,7 +130,6 @@ export default function InspectCf() {
             }}
           >
             <RouterLink to={`/databases/${dbName}`}>{dbName}</RouterLink> - {cfName}
-            {/*  Refresh button*/}
             <Button
               variant="outlined"
               color="primary"
@@ -172,8 +142,16 @@ export default function InspectCf() {
               variant="outlined"
               size="small"
               label="Prefix key query"
-              style={{ marginLeft: theme.spacing(2) }}
-              onChange={(e) => setPagination({ ...pagination, page: 0, query: e.target.value })}
+              style={{ marginLeft: theme.spacing(2), width: "600px" }}
+              onChange={(e) => {
+                const hex = e.target.value;
+                // check if valid hex
+                if (hex && !/^[0-9a-fA-F]*$/.test(hex)) {
+                  setError("Invalid hex string");
+                  return;
+                }
+                setPagination({ ...pagination, page: 0, query: e.target.value });
+              }}
               value={pagination.query || ""}
               placeholder="Enter a key prefix in hex"
             />
@@ -182,12 +160,28 @@ export default function InspectCf() {
               color="secondary"
               onClick={() => setPagination({ ...pagination, page: 0, query: "" })}
               style={{ marginLeft: theme.spacing(2) }}
+              disabled={!pagination.query}
             >
               Clear
             </Button>
           </Typography>
+
         </Box>
         <Divider />
+        {error && (
+          <Box
+            className="flex-container"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <Typography variant="h6" color="error">
+              Error: {error}
+            </Typography>
+          </Box>
+        )}
       </Grid>
 
       <Grid container spacing={3}>
@@ -204,7 +198,7 @@ export default function InspectCf() {
             },
           }}
           paginationMode="server"
-          onPaginationModelChange={setPagination}
+          onPaginationModelChange={(p) => setPagination({ ...pagination, ...p })}
           sortingOrder={["desc", "asc", null]}
           checkboxSelection
         />

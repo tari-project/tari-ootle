@@ -26,8 +26,8 @@ mod substate_id;
 mod substate_lock;
 mod tuple;
 
-/// Prevent heap allocations when the key is very small
-pub type EncodeVec = small_bytes::SmallBytes<64>;
+/// When the key is smaller than 100 bytes, it will be stack-allocated. Otherwise, it will be heap-allocated.
+pub type EncodeVec = small_bytes::SmallBytes<100>;
 
 pub trait DbCodec<T> {
     fn encode(&self, value: &T) -> Result<EncodeVec, RocksDbStorageError>;

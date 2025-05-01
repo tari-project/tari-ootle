@@ -932,10 +932,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError> {
         // const OPERATION: &str = "block_diffs_get";
         let cf = self.db().cf(block_diff::ByBlockIdQuery)?;
-        let iter = cf.query_prefix_range_iterator(Ordering::default(), block_id);
-        let mut changes = vec![];
+        let count = cf.count_prefix(block_id)?;
+        let iter = cf.query_prefix_range_value_iterator(Ordering::default(), block_id);
+        let mut changes = Vec::with_capacity(count);
         for result in iter {
-            let (_, change) = result?;
+            let change = result?;
             changes.push(change);
         }
 

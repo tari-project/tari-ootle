@@ -7,7 +7,7 @@ use borsh::BorshSerialize;
 use tari_bor::{Deserialize, Serialize};
 use tari_engine_types::substate::SubstateId;
 
-use crate::{SubstateAddress, ToSubstateAddress, VersionedSubstateId};
+use crate::{SubstateAddress, ToSubstateAddress, VersionedSubstateIdRef};
 
 pub trait LockIntent {
     fn substate_id(&self) -> &SubstateId;
@@ -15,8 +15,8 @@ pub trait LockIntent {
     fn version_to_lock(&self) -> u32;
     fn requested_version(&self) -> Option<u32>;
 
-    fn to_versioned_substate_id(&self) -> VersionedSubstateId {
-        VersionedSubstateId::new(self.substate_id().clone(), self.version_to_lock())
+    fn to_versioned_substate_id_ref(&self) -> VersionedSubstateIdRef<'_> {
+        VersionedSubstateIdRef::new(self.substate_id(), self.version_to_lock())
     }
 }
 

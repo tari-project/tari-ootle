@@ -344,18 +344,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     }
 
     fn block_diffs_insert(&mut self, block_id: &BlockId, changes: &[SubstateChange]) -> Result<(), StorageError> {
+        const OPERATION: &str = "block_diffs_insert";
         let cf = self.db().cf(BlockDiffModelRef::default())?;
         let index_cf = self.db().cf(block_diff::SubstateIdIndex)?;
 
-        for change in changes {
+        assert!(
+            changes.len() <= u32::MAX as usize,
+            "BlockDiffs cannot exceed u32::MAX (>4 billion) changes, got {}",
+            changes.len()
+        );
+        for (seq, change) in changes.iter().enumerate() {
             let key = BlockDiffKey {
                 block_id: *block_id,
+                sequence: seq as u32,
                 substate_id: change.versioned_substate_id().substate_id().clone(),
                 version: change.versioned_substate_id().version(),
+                is_up: change.is_up(),
             };
-            cf.put(&key, &BlockDiffRef { change }, "block_diffs_insert")?;
+            cf.put(&key, &BlockDiffRef { change }, OPERATION)?;
             // Note: the key is encoded with substate id first
-            index_cf.put(&key, &(), "block_diffs_insert")?;
+            index_cf.put(&key, &(), OPERATION)?;
         }
 
         Ok(())

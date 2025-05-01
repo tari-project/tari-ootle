@@ -432,7 +432,7 @@ impl Test {
                 .state_store
                 .with_read_tx(|tx| tx.transactions_get_paginated(10000, 0, None))
                 .unwrap();
-            log::info!("{} has {} transactions in pool", vn.address, transactions.len());
+            log::info!("{} has {} transactions", vn.address, transactions.len());
             transactions.iter().filter(|tx| tx.is_finalized()).count() >= n
         })
         .await

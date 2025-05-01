@@ -1261,6 +1261,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let block_diff = block_diffs::table
             .filter(block_diffs::block_id.eq(serialize_hex(block_id)))
+            // Order by insertion
+            .order_by(block_diffs::id.asc())
             .get_results::<sql_models::BlockDiff>(self.connection())
             .map_err(|e| SqliteStorageError::DieselError {
                 operation: "block_diffs_get",

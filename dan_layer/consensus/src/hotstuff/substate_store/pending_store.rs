@@ -207,7 +207,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
                 }
             },
             SubstateChange::Down { id, .. } => {
-                self.assert_is_up(id)?;
+                self.assert_is_up(id.as_ref())?;
             },
         }
 
@@ -235,7 +235,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
             }
             let addr = SubstateAddress::from_substate_id(id, substate.version());
             let shard = addr.to_shard(self.num_preshards);
-            debug!(target: LOG_TARGET, "🔼️ Up: {id} {shard} value hash: {}", substate.to_value_hash());
+            debug!(target: LOG_TARGET, "🔼️ Up: {} v{} {} value hash: {}", id, substate.version(), shard, substate.to_value_hash());
             self.put(SubstateChange::Up {
                 id: id.clone(),
                 shard,
@@ -425,18 +425,18 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             requested_lock
         );
 
-        let versioned_substate_id = requested_lock.to_versioned_substate_id();
+        let versioned_substate_id = requested_lock.to_versioned_substate_id_ref();
 
         let Some(existing) = self.get_latest_lock_by_id(versioned_substate_id.substate_id())? else {
             if requested_lock_type.is_output() {
-                self.lock_assert_not_exist(&versioned_substate_id)?;
+                self.lock_assert_not_exist(versioned_substate_id)?;
             } else {
-                self.lock_assert_is_up(&versioned_substate_id)?;
+                self.lock_assert_is_up(versioned_substate_id)?;
             }
 
             let version = versioned_substate_id.version();
             self.add_new_lock(
-                versioned_substate_id.into_substate_id(),
+                versioned_substate_id.substate_id().clone(),
                 SubstateLock::new(transaction_id, version, requested_lock_type, is_local_only),
             );
             return Ok(());
@@ -450,7 +450,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         debug!(
             target: LOG_TARGET,
             "🔒️ Found existing lock: {} {}",
-            versioned_substate_id,
+            versioned_substate_id.substate_id(),
             existing
         );
 
@@ -481,7 +481,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                         is_local_only
                     );
                     return Err(LockFailedError::LockConflict {
-                        substate_id: versioned_substate_id,
+                        substate_id: versioned_substate_id.to_owned(),
                         conflict: LockConflict {
                             existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
@@ -502,7 +502,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                         is_local_only
                     );
                     return Err(LockFailedError::LockConflict {
-                        substate_id: versioned_substate_id,
+                        substate_id: versioned_substate_id.to_owned(),
                         conflict: LockConflict {
                             existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
@@ -523,7 +523,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                         is_local_only
                     );
                     return Err(LockFailedError::LockConflict {
-                        substate_id: versioned_substate_id,
+                        substate_id: versioned_substate_id.to_owned(),
                         conflict: LockConflict {
                             existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
@@ -536,7 +536,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
 
                 let version = versioned_substate_id.version();
                 self.add_new_lock(
-                    versioned_substate_id.into_substate_id(),
+                    versioned_substate_id.substate_id().clone(),
                     SubstateLock::new(transaction_id, version, requested_lock_type, is_local_only),
                 );
             },
@@ -559,7 +559,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                         transaction_id,
                     );
                     return Err(LockFailedError::LockConflict {
-                        substate_id: versioned_substate_id,
+                        substate_id: versioned_substate_id.to_owned(),
                         conflict: LockConflict {
                             existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
@@ -580,7 +580,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                         is_local_only
                     );
                     return Err(LockFailedError::LockConflict {
-                        substate_id: versioned_substate_id,
+                        substate_id: versioned_substate_id.to_owned(),
                         conflict: LockConflict {
                             existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
@@ -593,7 +593,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
 
                 let version = versioned_substate_id.version();
                 self.add_new_lock(
-                    versioned_substate_id.into_substate_id(),
+                    versioned_substate_id.substate_id().clone(),
                     SubstateLock::new(transaction_id, version, SubstateLockType::Output, is_local_only),
                 );
             },
@@ -614,7 +614,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                         is_local_only
                     );
                     return Err(LockFailedError::LockConflict {
-                        substate_id: versioned_substate_id,
+                        substate_id: versioned_substate_id.to_owned(),
                         conflict: LockConflict {
                             existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
@@ -635,7 +635,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
                         is_local_only
                     );
                     return Err(LockFailedError::LockConflict {
-                        substate_id: versioned_substate_id,
+                        substate_id: versioned_substate_id.to_owned(),
                         conflict: LockConflict {
                             existing_lock: existing.lock_type(),
                             requested_lock: requested_lock_type,
@@ -648,7 +648,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
 
                 let version = versioned_substate_id.version();
                 self.add_new_lock(
-                    versioned_substate_id.into_substate_id(),
+                    versioned_substate_id.substate_id().clone(),
                     SubstateLock::new(
                         transaction_id,
                         version,
@@ -699,7 +699,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         self.new_locks.entry(substate_id).or_default().push(lock);
     }
 
-    fn assert_is_up(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
+    fn assert_is_up(&self, id: VersionedSubstateIdRef<'_>) -> Result<(), SubstateStoreError> {
         trace!(
             target: LOG_TARGET,
             "assert_is_up: id: {}, pending: {}, head: {}",
@@ -709,7 +709,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         );
         if let Some(change) = self.get_pending(&id.to_substate_address()) {
             if change.is_down() {
-                return Err(SubstateStoreError::SubstateIsDown { id: id.clone() });
+                return Err(SubstateStoreError::SubstateIsDown { id: id.to_owned() });
             }
             return Ok(());
         }
@@ -726,7 +726,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
             if change.is_up() {
                 return Ok(());
             }
-            return Err(SubstateStoreError::SubstateIsDown { id: id.clone() });
+            return Err(SubstateStoreError::SubstateIsDown { id: id.to_owned() });
         }
 
         trace!(
@@ -737,12 +737,12 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
 
         match SubstateRecord::substate_is_up(self.read_transaction(), &id.to_substate_address()).optional()? {
             Some(true) => Ok(()),
-            Some(false) => Err(SubstateStoreError::SubstateIsDown { id: id.clone() }),
-            None => Err(SubstateStoreError::SubstateNotFound { id: id.clone() }),
+            Some(false) => Err(SubstateStoreError::SubstateIsDown { id: id.to_owned() }),
+            None => Err(SubstateStoreError::SubstateNotFound { id: id.to_owned() }),
         }
     }
 
-    pub fn lock_assert_is_up(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
+    pub fn lock_assert_is_up(&self, id: VersionedSubstateIdRef<'_>) -> Result<(), SubstateStoreError> {
         match self.assert_is_up(id) {
             Ok(_) => Ok(()),
             // Converts a substate store error to a LockFailedError (TODO: improve)
@@ -781,11 +781,11 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         Ok(())
     }
 
-    fn lock_assert_not_exist(&self, id: &VersionedSubstateId) -> Result<(), SubstateStoreError> {
+    fn lock_assert_not_exist(&self, id: VersionedSubstateIdRef<'_>) -> Result<(), SubstateStoreError> {
         if let Some(change) = self.get_pending(&id.to_substate_address()) {
             if change.is_up() {
                 return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
-                    id: id.clone(),
+                    id: id.to_owned(),
                 }));
             }
             return Ok(());
@@ -796,7 +796,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
         {
             if change.is_up() {
                 return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
-                    id: id.clone(),
+                    id: id.to_owned(),
                 }));
             }
             return Ok(());
@@ -804,7 +804,7 @@ impl<'store, 'tx, TStore: StateStore + 'store + 'tx> PendingSubstateStore<'store
 
         if SubstateRecord::exists(self.read_transaction(), id)? {
             return Err(SubstateStoreError::LockFailed(LockFailedError::SubstateIsUp {
-                id: id.clone(),
+                id: id.to_owned(),
             }));
         }
 

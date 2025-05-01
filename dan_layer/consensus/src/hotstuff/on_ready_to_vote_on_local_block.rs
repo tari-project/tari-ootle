@@ -1649,11 +1649,7 @@ where TConsensusSpec: ConsensusSpec
             return Ok(vec![]);
         }
 
-        let diff = block.get_diff(&**tx)?;
-        info!(
-            target: LOG_TARGET,
-            "🌳 Committing block {} with {} substate change(s)", block, diff.len()
-        );
+        info!(target: LOG_TARGET, "🌳 Finalizing block {}", block);
 
         // This moves the stage update from pending to current for all transactions on the commit block
         self.transaction_pool
@@ -1678,6 +1674,11 @@ where TConsensusSpec: ConsensusSpec
         state_tree.commit_diffs(pending)?;
         let tx = state_tree.into_transaction();
 
+        let diff = block.get_diff(&**tx)?;
+        info!(
+            target: LOG_TARGET,
+            "🌳 COMMIT block {} with {} substate change(s)", block, diff.len()
+        );
         let local_diff = diff.into_filtered(local_committee_info);
         block.commit_diff(tx, commit_qc_id, local_diff)?;
 

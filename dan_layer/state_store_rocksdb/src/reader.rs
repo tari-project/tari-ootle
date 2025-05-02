@@ -46,7 +46,7 @@ use tari_dan_storage::{
         BlockId,
         BlockTransactionExecution,
         EpochCheckpoint,
-        ForeignProposal,
+        ForeignProposalRecord,
         HighQc,
         LastExecuted,
         LastProposed,
@@ -416,7 +416,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
-    ) -> Result<Vec<ForeignProposal>, StorageError> {
+    ) -> Result<Vec<ForeignProposalRecord>, StorageError> {
         const OPERATION: &str = "foreign_proposals_get_any";
         let mut block_ids = block_ids.into_iter().peekable();
         if block_ids.peek().is_none() {
@@ -449,7 +449,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         &self,
         block_id: &BlockId,
         limit: usize,
-    ) -> Result<Vec<ForeignProposal>, StorageError> {
+    ) -> Result<Vec<ForeignProposalRecord>, StorageError> {
         const OPERATION: &str = "foreign_proposals_get_all_new";
 
         if !self.blocks_exists(block_id)? {
@@ -932,10 +932,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn block_diffs_get(&self, block_id: &BlockId) -> Result<BlockDiff, StorageError> {
         // const OPERATION: &str = "block_diffs_get";
         let cf = self.db().cf(block_diff::ByBlockIdQuery)?;
-        let iter = cf.query_prefix_range_iterator(Ordering::default(), block_id);
-        let mut changes = vec![];
+        let count = cf.count_prefix(block_id)?;
+        let iter = cf.query_prefix_range_value_iterator(Ordering::default(), block_id);
+        let mut changes = Vec::with_capacity(count);
         for result in iter {
-            let (_, change) = result?;
+            let change = result?;
             changes.push(change);
         }
 
@@ -1164,9 +1165,14 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn transaction_pool_has_pending_state_updates(&self, block_id: &BlockId) -> Result<bool, StorageError> {
         // const OPERATION: &str = "transaction_pool_has_pending_state_updates";
+        let pending_chain = self.get_pending_chain_ordered(block_id)?;
         let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
-        let mut iter = query.prefix_range_key_iterator(Ordering::default(), block_id);
-        Ok(iter.next().transpose()?.is_some())
+        for block_id in pending_chain {
+            if query.exists_prefix(&block_id)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn transaction_pool_count(
@@ -1217,7 +1223,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 }
             }
 
-            // TODO: we can return here if we just check for existence
             count += 1;
         }
 
@@ -1288,8 +1293,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let index_cf = self.db().cf(substate::HeadIndex)?;
         let cf = self.db().cf(SubstateModel)?;
 
-        let mut substates = vec![];
-        for substate_id in substate_ids {
+        let iter = substate_ids.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut substates = Vec::with_capacity(lower);
+        for substate_id in iter {
             let head = index_cf.get(substate_id, OPERATION)?;
             let address = SubstateAddress::from_substate_id(substate_id, head.version);
             let substate = cf.get(&address, OPERATION)?;

@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use log::*;
-use tari_dan_common_types::{committee::Committee, optional::Optional, NodeHeight};
+use tari_dan_common_types::{optional::Optional, NodeHeight};
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, LeafBlock, QuorumCertificate},
     StateStore,
@@ -12,11 +12,16 @@ use tari_dan_storage::{
 
 use super::vote_collector::VoteCollector;
 use crate::{
-    block_validations::check_quorum_certificate_signatures,
-    hotstuff::{epoch_state::EpochState, error::HotStuffError, pacemaker_handle::PaceMakerHandle},
+    hotstuff::{
+        epoch_state::EpochState,
+        error::HotStuffError,
+        pacemaker_handle::PaceMakerHandle,
+        ProposalValidationError,
+    },
     messages::NewViewMessage,
     tracing::TraceTimer,
     traits::{ConsensusSpec, LeaderStrategy},
+    validations::check_quorum_certificate_signatures,
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_new_view";
@@ -100,16 +105,12 @@ where TConsensusSpec: ConsensusSpec
 
         let is_qc_valid = self.store.with_read_tx(|tx| {
             // If we already have this QC (locally calculated hash matches), we do not need to validate this again
-            if !high_qc.exists(tx)? {
-                if let Err(err) = self.validate_qc(
-                    &high_qc,
-                    epoch_state.local_committee(),
-                    self.vote_collector.signing_service(),
-                ) {
-                    warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
-                    return Ok(false);
-                }
+            // if !high_qc.exists(tx)? {
+            if let Err(err) = self.validate_qc(&high_qc, epoch_state, self.vote_collector.signing_service()) {
+                warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
+                return Ok(false);
             }
+            // }
 
             if !Block::record_exists(tx, high_qc.block_id())? {
                 // Sync if we do not have the block for this valid QC
@@ -211,10 +212,18 @@ where TConsensusSpec: ConsensusSpec
     fn validate_qc(
         &self,
         qc: &QuorumCertificate,
-        committee: &Committee<TConsensusSpec::Addr>,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
         vote_signing_service: &TConsensusSpec::SignatureService,
-    ) -> Result<(), HotStuffError> {
-        check_quorum_certificate_signatures::<TConsensusSpec>(qc, committee, vote_signing_service)?;
+    ) -> Result<(), ProposalValidationError> {
+        if qc.epoch() != epoch_state.epoch() {
+            return Err(ProposalValidationError::InvalidEpochInQc {
+                block_id: *qc.block_id(),
+                qc_id: *qc.id(),
+                qc_epoch: qc.epoch(),
+                current_epoch: epoch_state.epoch(),
+            });
+        }
+        check_quorum_certificate_signatures::<TConsensusSpec>(qc, epoch_state.local_committee(), vote_signing_service)?;
         Ok(())
     }
 }

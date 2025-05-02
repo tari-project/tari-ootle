@@ -17,9 +17,8 @@ use crate::{Epoch, NumPreshards, ShardGroup, SubstateAddress};
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct Committee<TAddr> {
-    // TODO: not pub
     #[cfg_attr(feature = "ts", ts(type = "Array<[string, string]>"))]
-    pub members: Vec<(TAddr, RistrettoPublicKeyBytes)>,
+    members: Vec<(TAddr, RistrettoPublicKeyBytes)>,
 }
 
 impl<TAddr: PartialEq> Committee<TAddr> {
@@ -35,8 +34,12 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         Self { members }
     }
 
-    pub fn members(&self) -> impl Iterator<Item = &TAddr> + '_ {
+    pub fn address_iter(&self) -> impl Iterator<Item = &TAddr> + '_ {
         self.members.iter().map(|(addr, _)| addr)
+    }
+
+    pub fn members_mut(&mut self) -> &mut Vec<(TAddr, RistrettoPublicKeyBytes)> {
+        &mut self.members
     }
 
     pub fn max_failures(&self) -> usize {
@@ -61,7 +64,17 @@ impl<TAddr: PartialEq> Committee<TAddr> {
     }
 
     pub fn contains(&self, member: &TAddr) -> bool {
+        // TODO(perf); O(n) lookup
         self.members.iter().any(|(addr, _)| addr == member)
+    }
+
+    pub fn contains_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> bool {
+        // TODO(perf); O(n) lookup
+        self.members.iter().any(|(_, pk)| pk == public_key)
+    }
+
+    pub fn get(&self, index: usize) -> Option<&(TAddr, RistrettoPublicKeyBytes)> {
+        self.members.get(index)
     }
 
     pub fn shuffle(&mut self) {
@@ -125,10 +138,6 @@ impl<TAddr: PartialEq> Committee<TAddr> {
 
     pub fn into_public_keys(self) -> impl Iterator<Item = RistrettoPublicKeyBytes> {
         self.members.into_iter().map(|(_, pk)| pk)
-    }
-
-    pub fn contains_public_key(&self, public_key: &RistrettoPublicKeyBytes) -> bool {
-        self.members.iter().any(|(_, pk)| pk == public_key)
     }
 }
 

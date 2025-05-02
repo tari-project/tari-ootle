@@ -80,7 +80,7 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
             .get_pinned_cf(self.handle, &key)
             .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
         let bytes = value.ok_or_else(|| RocksDbStorageError::NotFound {
-            key: key.clone(),
+            key: Box::new(key),
             operation,
         })?;
         let value = self.value_codec.decode(&bytes)?;
@@ -275,6 +275,14 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         self.range_iterator(ordering, rocksdb::PrefixRange(key))
     }
 
+    pub fn prefix_range_iterator_raw_key(
+        &self,
+        ordering: Ordering,
+        key: impl Into<Vec<u8>>,
+    ) -> impl Iterator<Item = Result<(CF::Key, CF::Value), RocksDbStorageError>> + '_ {
+        self.range_iterator(ordering, rocksdb::PrefixRange(key))
+    }
+
     pub fn prefix_range_key_iterator(
         &self,
         ordering: Ordering,
@@ -295,7 +303,7 @@ impl<CF: Cf, DB: RocksWriter> CfContext<'_, DB, CF> {
         if self.exists(key, operation)? {
             let key = self.encode_key(key);
             return Err(RocksDbStorageError::ConflictingInsert {
-                key,
+                key: Box::new(key),
                 details: "Key already exists".to_string(),
             });
         }
@@ -322,7 +330,7 @@ impl<CF: Cf, DB: RocksWriter> CfContext<'_, DB, CF> {
     pub fn delete_or_not_found(&self, key: &CF::Key, operation: &'static str) -> Result<(), RocksDbStorageError> {
         if !self.exists(key, operation)? {
             return Err(RocksDbStorageError::NotFound {
-                key: self.key_codec.encode(key)?,
+                key: Box::new(self.key_codec.encode(key)?),
                 operation,
             });
         }
@@ -365,14 +373,27 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
     ) -> impl Iterator<Item = Result<QueryCfKv<TQuery>, RocksDbStorageError>> + 'a {
         let key = self.encode_key(prefix);
         self.range_iterator_with_codecs::<
-                <<TQuery as QueryCf>::Cf as Cf>::KeyCodec,
-                <<TQuery as QueryCf>::Cf as Cf>::ValueCodec,
-                <<TQuery as QueryCf>::Cf as Cf>::Key,
-                <<TQuery as QueryCf>::Cf as Cf>::Value,
-            >(
-                ordering,
-                rocksdb::PrefixRange(key),
-            )
+            <<TQuery as QueryCf>::Cf as Cf>::KeyCodec,
+            <<TQuery as QueryCf>::Cf as Cf>::ValueCodec,
+            <<TQuery as QueryCf>::Cf as Cf>::Key,
+            <<TQuery as QueryCf>::Cf as Cf>::Value,
+        >(
+            ordering,
+            rocksdb::PrefixRange(key),
+        )
+    }
+
+    pub fn query_prefix_range_value_iterator<'a>(
+        &'a self,
+        ordering: Ordering,
+        prefix: &TQuery::Key,
+    ) -> impl Iterator<Item = Result<<<TQuery as QueryCf>::Cf as Cf>::Value, RocksDbStorageError>> + 'a {
+        let key = self.encode_key(prefix);
+        let iter = self.range_iterator_with_codecs::<UnitCodec, <<TQuery as QueryCf>::Cf as Cf>::ValueCodec, (), <<TQuery as QueryCf>::Cf as Cf>::Value, >( ordering, rocksdb::PrefixRange(key) );
+        iter.map(|res| {
+            let (_, v) = res?;
+            Ok::<_, RocksDbStorageError>(v)
+        })
     }
 
     pub fn query_start_range_key_iterator(

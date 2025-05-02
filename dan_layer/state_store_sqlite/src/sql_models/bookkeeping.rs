@@ -4,7 +4,7 @@
 use diesel::Queryable;
 use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_dan_storage::{
-    consensus_models::{self, QuorumDecision},
+    consensus_models::{self},
     StorageError,
 };
 use time::PrimitiveDateTime;
@@ -119,16 +119,16 @@ impl TryFrom<LastSentVote> for consensus_models::LastSentVote {
             epoch: Epoch(value.epoch as u64),
             block_id: deserialize_hex_try_from(&value.block_id)?,
             block_height: NodeHeight(value.block_height as u64),
-            decision: QuorumDecision::from_u8(u8::try_from(value.decision).map_err(|_| {
-                SqliteStorageError::MalformedDbData {
+            decision: u8::try_from(value.decision)
+                .map_err(|_| SqliteStorageError::MalformedDbData {
                     operation: "TryFrom<Vote> decision",
                     details: format!("Could not convert {} to u8", value.decision),
-                }
-            })?)
-            .ok_or_else(|| SqliteStorageError::MalformedDbData {
-                operation: "TryFrom<Vote> decision",
-                details: format!("Could not convert {} to QuorumDecision", value.decision),
-            })?,
+                })?
+                .try_into()
+                .map_err(|e| SqliteStorageError::MalformedDbData {
+                    operation: "TryFrom<Vote> decision",
+                    details: format!("Could not convert {} to QuorumDecision: {}", value.decision, e),
+                })?,
             signature: deserialize_json(&value.signature)?,
         })
     }

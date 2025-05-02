@@ -78,10 +78,10 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
 
             match input.version() {
                 Some(version) => {
-                    let id = input.with_version(version).to_owned();
-                    store.lock_assert_is_up(&id)?;
+                    let id = input.with_version(version);
+                    store.lock_assert_is_up(id)?;
                     info!(target: LOG_TARGET, "Resolved LOCAL substate: {id}");
-                    resolved_substates.insert(id.into(), version);
+                    resolved_substates.insert(id.to_owned().into(), version);
                 },
                 None => {
                     let latest = store.get_latest_version(input.substate_id())?;

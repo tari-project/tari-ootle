@@ -10,12 +10,12 @@ use axum::{
 };
 use serde_json::json;
 use tari_dan_storage::Ordering;
-use tari_state_store_rocksdb::models;
+use tari_state_store_rocksdb::{error::RocksDbStorageError, models, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{Column, TableRequest, TableResponse},
+    handlers::types::{decode_hex_prefix, Column, TableRequest, TableResponse},
 };
 
 pub async fn list(
@@ -40,10 +40,18 @@ pub async fn list(
     } else {
         Ordering::Descending
     };
+    type Key = <models::block_diff::BlockDiffModel as Cf>::Key;
+    type Value = <models::block_diff::BlockDiffModel as Cf>::Value;
+    let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
+        if let Some(prefix_hex) = req.query_prefix_hex.as_ref() {
+            let key_prefix = decode_hex_prefix(prefix_hex)?;
+            Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
+        } else {
+            Box::new(cf.iterator(ordering, OPERATION))
+        };
 
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0) * page_size;
-    let iter = cf.iterator(ordering, OPERATION);
     for result in iter.skip(skip).take(page_size) {
         let (id, data) = result?;
         let encoded_key = cf.encode_key(&id);

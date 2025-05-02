@@ -4,7 +4,15 @@
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError};
 use tari_dan_storage::{
-    consensus_models::{BlockError, BlockId, LeafBlock, LockedBlock, QcId, TransactionPoolError},
+    consensus_models::{
+        BlockError,
+        BlockId,
+        ForeignProposalCommitProofError,
+        LeafBlock,
+        LockedBlock,
+        QcId,
+        TransactionPoolError,
+    },
     StorageError,
 };
 use tari_epoch_manager::EpochManagerError;
@@ -130,14 +138,6 @@ pub enum ProposalValidationError {
     StorageError(#[from] StorageError),
     #[error("Node proposed by {proposed_by} with hash {hash} did not satisfy the safeNode predicate")]
     NotSafeBlock { proposed_by: String, hash: BlockId },
-    #[error("Node proposed by {proposed_by} with hash {hash} is missing foreign index")]
-    MissingForeignCounters { proposed_by: String, hash: BlockId },
-    #[error("Node proposed by {proposed_by} with hash {hash} has invalid foreign counters: {details}")]
-    InvalidForeignCounters {
-        proposed_by: String,
-        hash: BlockId,
-        details: String,
-    },
     #[error("Node proposed by {proposed_by} with hash {hash} is the genesis block")]
     ProposingGenesisBlock { proposed_by: String, hash: BlockId },
     #[error("Parent {parent_id} not found in block {block_id} proposed by {proposed_by}")]
@@ -231,8 +231,21 @@ pub enum ProposalValidationError {
         local_epoch_hash: FixedHash,
         invalid_epoch_hash: FixedHash,
     },
+
+    #[error("Foreign node in {shard_group} submitted invalid proposal for block {block_id}: {details}")]
+    ForeignProposalInvalid {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        details: anyhow::Error,
+    },
+
+    #[error("Foreign proposal commit proof error: {0}")]
+    ForeignProposalCommitProofError(#[from] ForeignProposalCommitProofError),
+
+    // TODO: remove some foreign proposal validation variants
     #[error("Foreign node in {shard_group} submitted malformed BlockPledge for block {block_id}")]
     ForeignMalformedPledges { block_id: BlockId, shard_group: ShardGroup },
+
     #[error(
         "Foreign node in {shard_group} submitted invalid pledge for block {block}, transaction {transaction_id}: \
          {details}"
@@ -242,24 +255,6 @@ pub enum ProposalValidationError {
         transaction_id: TransactionId,
         shard_group: ShardGroup,
         details: String,
-    },
-    #[error(
-        "Foreign node in {shard_group} submitted invalid epoch for block {block_id}. Current epoch: {current_epoch}, \
-         block epoch: {block_epoch}"
-    )]
-    ForeignInvalidEpoch {
-        block_id: BlockId,
-        shard_group: ShardGroup,
-        current_epoch: Epoch,
-        block_epoch: Epoch,
-    },
-    #[error(
-        "Foreign node in {shard_group} submitted proposal {block_id} but justify QC justifies {justify_qc_block_id}"
-    )]
-    ForeignJustifyQcDoesNotJustifyProposal {
-        block_id: BlockId,
-        justify_qc_block_id: BlockId,
-        shard_group: ShardGroup,
     },
     #[error(
         "Foreign node submitted an foreign proposal {block_id} that did not contain any transaction evidence for this \
@@ -283,6 +278,13 @@ pub enum ProposalValidationError {
     InvalidEpochInBlock {
         block_id: BlockId,
         block_epoch: Epoch,
+        current_epoch: Epoch,
+    },
+    #[error("Invalid epoch in QC {qc_id} in {block_id}. Expected: {current_epoch}, given: {qc_epoch}")]
+    InvalidEpochInQc {
+        block_id: BlockId,
+        qc_id: QcId,
+        qc_epoch: Epoch,
         current_epoch: Epoch,
     },
     #[error("Dummy block {block_id} includes a signature")]

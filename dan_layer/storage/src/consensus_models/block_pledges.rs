@@ -124,11 +124,11 @@ impl SubstatePledge {
         match lock_intent.lock_type() {
             SubstateLockType::Write | SubstateLockType::Read => Some(Self::Input {
                 is_write: lock_intent.lock_type().is_write(),
-                substate_id: lock_intent.to_versioned_substate_id(),
+                substate_id: lock_intent.to_versioned_substate_id_ref().to_owned(),
                 substate: substate?,
             }),
             SubstateLockType::Output => Some(Self::Output {
-                substate_id: lock_intent.to_versioned_substate_id(),
+                substate_id: lock_intent.to_versioned_substate_id_ref().to_owned(),
             }),
         }
     }

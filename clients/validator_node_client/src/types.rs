@@ -35,7 +35,7 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, Decision, ExecutedTransaction, QuorumDecision, TransactionPoolRecord},
+    consensus_models::{Block, BlockId, Decision, ExecutedTransaction, TransactionPoolRecord},
     global::models,
     Ordering,
 };
@@ -45,6 +45,7 @@ use tari_engine_types::{
     serde_with,
     substate::{SubstateId, SubstateValue},
 };
+use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
 use tari_transaction::{Transaction, TransactionId};
 #[cfg(feature = "ts")]
@@ -215,6 +216,7 @@ pub struct SubmitTransactionResponse {
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct DryRunTransactionFinalizeResult {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub decision: QuorumDecision,
     pub finalize: FinalizeResult,
     pub fee_breakdown: Option<FeeCostBreakdown>,

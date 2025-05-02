@@ -3,14 +3,14 @@
 
 use log::*;
 use tari_common::configuration::Network;
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch};
 use tari_dan_storage::{
-    consensus_models::{Block, HighQc, QuorumCertificate, QuorumDecision, ValidatorSignature, Vote},
+    consensus_models::{Block, HighQc, QuorumCertificate, ValidatorSignature, Vote},
     global::models::ValidatorNode,
     StateStore,
 };
 use tari_epoch_manager::EpochManagerReader;
+use tari_sidechain::QuorumDecision;
 
 use crate::{
     hotstuff::error::HotStuffError,
@@ -191,23 +191,15 @@ where TConsensusSpec: ConsensusSpec
             };
 
             let mut signatures = Vec::with_capacity(votes.len());
-            let mut leaf_hashes = Vec::with_capacity(votes.len());
             for vote in votes {
                 if vote.decision != quorum_decision {
                     // We don't include votes that don't match the quorum decision
                     continue;
                 }
                 signatures.push(vote.signature);
-                leaf_hashes.push(vote.sender_leaf_hash);
             }
 
-            let vote_data = VoteData {
-                signatures,
-                leaf_hashes,
-                quorum_decision,
-                block,
-            };
-            let new_qc = create_qc(vote_data);
+            let new_qc = create_qc(signatures, quorum_decision, block);
             let high_qc = new_qc.update_high_qc(tx)?;
 
             Ok(Some((new_qc, high_qc)))
@@ -258,13 +250,7 @@ where TConsensusSpec: ConsensusSpec
     }
 }
 
-fn create_qc(vote_data: VoteData) -> QuorumCertificate {
-    let VoteData {
-        signatures,
-        leaf_hashes,
-        quorum_decision,
-        block,
-    } = vote_data;
+fn create_qc(signatures: Vec<ValidatorSignature>, quorum_decision: QuorumDecision, block: Block) -> QuorumCertificate {
     QuorumCertificate::new(
         block.header().calculate_hash(),
         *block.parent(),
@@ -272,14 +258,6 @@ fn create_qc(vote_data: VoteData) -> QuorumCertificate {
         block.epoch(),
         block.shard_group(),
         signatures,
-        leaf_hashes,
         quorum_decision,
     )
-}
-
-struct VoteData {
-    signatures: Vec<ValidatorSignature>,
-    leaf_hashes: Vec<FixedHash>,
-    quorum_decision: QuorumDecision,
-    block: Block,
 }

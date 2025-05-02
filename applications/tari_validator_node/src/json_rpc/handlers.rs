@@ -49,7 +49,7 @@ use tari_dan_common_types::{
 };
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
-    consensus_models::{Block, ExecutedTransaction, LeafBlock, QuorumDecision, SubstateRecord, TransactionRecord},
+    consensus_models::{Block, ExecutedTransaction, LeafBlock, SubstateRecord, TransactionRecord},
     global::GlobalDb,
     Ordering,
     StateStore,
@@ -60,6 +60,7 @@ use tari_engine_types::{FromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, traits::LayerOneTransactionSubmitter, EpochManagerReader};
 use tari_epoch_oracles::{configured::calc_static_epoch_hash, store::StoreKey};
 use tari_networking::{is_supported_multiaddr, NetworkingHandle, NetworkingService};
+use tari_sidechain::QuorumDecision;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_client::types::{

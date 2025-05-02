@@ -22,7 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::consensus_models::{BlockId, ForeignProposal};
+use tari_dan_storage::consensus_models::{BlockId, ForeignProposalRecord};
 
 use crate::{
     codecs::{BlockIdCodec, DefaultCodec, EpochCodec, UnitCodec},
@@ -34,7 +34,7 @@ pub struct ForeignProposalModel;
 impl Cf for ForeignProposalModel {
     type Key = BlockId;
     type KeyCodec = BlockIdCodec;
-    type Value = ForeignProposal;
+    type Value = ForeignProposalRecord;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
@@ -43,7 +43,7 @@ impl Cf for ForeignProposalModel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EpochIndexData {
+pub struct ForeignProposalEpochIndexData {
     pub block_id: BlockId,
     pub proposed_in_block: Option<BlockId>,
 }
@@ -54,7 +54,7 @@ pub struct EpochIndex;
 impl Cf for EpochIndex {
     type Key = (Epoch, BlockId);
     type KeyCodec = (EpochCodec, BlockIdCodec);
-    type Value = EpochIndexData;
+    type Value = ForeignProposalEpochIndexData;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {

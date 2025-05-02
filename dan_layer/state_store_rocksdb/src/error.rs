@@ -35,7 +35,10 @@ pub enum RocksDbStorageError {
         operation: &'static str,
     },
     #[error("Entry {key:#} not found during operation {operation}")]
-    NotFound { key: EncodeVec, operation: &'static str },
+    NotFound {
+        key: Box<EncodeVec>,
+        operation: &'static str,
+    },
     #[error("Encode error: {source}")]
     EncodeError { source: anyhow::Error },
     #[error("Encode error: {source}")]
@@ -45,7 +48,7 @@ pub enum RocksDbStorageError {
     #[error("General error: {message}")]
     GeneralError { message: String },
     #[error("Conflicting insert: {details}")]
-    ConflictingInsert { key: EncodeVec, details: String },
+    ConflictingInsert { key: Box<EncodeVec>, details: String },
     #[error("[{operation}] Query error: {details}")]
     QueryError { operation: &'static str, details: String },
     #[error("[{operation}] Column family not found: {cf}")]

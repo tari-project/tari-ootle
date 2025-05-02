@@ -7,9 +7,10 @@ use prometheus::{core::Collector, IntCounter, IntGauge, IntGaugeVec, Opts, Regis
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage, traits::hooks::ConsensusHooks};
 use tari_dan_common_types::NodeHeight;
 use tari_dan_storage::{
-    consensus_models::{Decision, QuorumDecision, TransactionAtom, ValidBlock},
+    consensus_models::{Decision, TransactionAtom, ValidBlock},
     StateStore,
 };
+use tari_sidechain::QuorumDecision;
 use tari_transaction::TransactionId;
 
 use crate::{

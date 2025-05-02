@@ -4,10 +4,11 @@
 use std::{fmt::Display, ops::Deref};
 
 use serde::{Deserialize, Serialize};
+use tari_dan_common_types::Epoch;
 use tari_transaction::TransactionId;
 
 use crate::{
-    consensus_models::{Block, BlockPledge, ForeignProposal, QuorumCertificate},
+    consensus_models::{BlockId, BlockPledge, CommandsCommitProof, ForeignProposal},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
@@ -15,28 +16,39 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignParkedProposal {
-    proposal: ForeignProposal,
+    block_id: BlockId,
+    commit_proof: CommandsCommitProof,
+    block_pledge: BlockPledge,
 }
 
 impl ForeignParkedProposal {
-    pub fn new(proposal: ForeignProposal) -> Self {
-        Self { proposal }
+    pub fn new(commit_proof: CommandsCommitProof, block_pledge: BlockPledge) -> Self {
+        let block_id = commit_proof.calculate_block_id();
+        Self {
+            block_id: block_id.into(),
+            commit_proof,
+            block_pledge,
+        }
+    }
+
+    pub fn commit_proof(&self) -> &CommandsCommitProof {
+        &self.commit_proof
     }
 
     pub fn into_proposal(self) -> ForeignProposal {
-        self.proposal
+        ForeignProposal::new(self.commit_proof, self.block_pledge)
     }
 
-    pub fn block(&self) -> &Block {
-        self.proposal.block()
+    pub fn block_id(&self) -> &BlockId {
+        &self.block_id
+    }
+
+    pub fn epoch(&self) -> Epoch {
+        Epoch(self.commit_proof.sidechain_block_commit_proof().header.epoch)
     }
 
     pub fn block_pledge(&self) -> &BlockPledge {
-        self.proposal.block_pledge()
-    }
-
-    pub fn justify_qc(&self) -> &QuorumCertificate {
-        self.proposal.justify_qc()
+        &self.block_pledge
     }
 }
 
@@ -59,7 +71,7 @@ impl ForeignParkedProposal {
     }
 
     pub fn exists<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
-        tx.foreign_parked_blocks_exists(self.block().id())
+        tx.foreign_parked_blocks_exists(self.block_id())
     }
 
     pub fn add_missing_transactions<'a, TTx: StateStoreWriteTransaction, I: IntoIterator<Item = &'a TransactionId>>(
@@ -67,7 +79,7 @@ impl ForeignParkedProposal {
         tx: &mut TTx,
         transaction_ids: I,
     ) -> Result<(), StorageError> {
-        tx.foreign_parked_blocks_insert_missing_transactions(self.block().id(), transaction_ids)
+        tx.foreign_parked_blocks_insert_missing_transactions(self.block_id(), transaction_ids)
     }
 
     pub fn remove_by_transaction_id<TTx: StateStoreWriteTransaction>(
@@ -82,10 +94,12 @@ impl Display for ForeignParkedProposal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ForeignParkedBlock: block={}, block_pledge=[{}], justify_qc={}",
-            self.block(),
+            "ForeignParkedBlock: {}, Epoch({}), Height({}), prf: {}, block_pledge=[{}]",
+            self.commit_proof.calculate_block_id(),
+            self.commit_proof.sidechain_block_commit_proof().header.epoch,
+            self.commit_proof.sidechain_block_commit_proof().header.height,
+            self.commit_proof.sidechain_block_commit_proof().proof_elements.len(),
             self.block_pledge(),
-            self.justify_qc()
         )
     }
 }

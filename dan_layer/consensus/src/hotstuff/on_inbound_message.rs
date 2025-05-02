@@ -95,10 +95,10 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         while let Some(result) = self.inbound_messaging.next_message().await {
             let (from, msg) = result?;
 
-            // If we receive an FP that is greater than our current epoch, we buffer it
+            // If we receive an FP that is greater than our current epoch, we buffer it. The height is not relevant.
             if let HotstuffMessage::ForeignProposal(ref m) = msg {
-                if m.justify_qc.epoch() > current_epoch {
-                    self.push_to_buffer(m.justify_qc.epoch(), NodeHeight::zero(), from, msg);
+                if m.proposal.epoch() > current_epoch {
+                    self.push_to_buffer(m.proposal.epoch(), NodeHeight::zero(), from, msg);
                     continue;
                 }
             }

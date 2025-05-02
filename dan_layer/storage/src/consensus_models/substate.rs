@@ -175,8 +175,11 @@ impl SubstateRecord {
         Ok(())
     }
 
-    pub fn exists<TTx: StateStoreReadTransaction>(tx: &TTx, id: &VersionedSubstateId) -> Result<bool, StorageError> {
-        Self::any_exist(tx, Some(id.as_ref()))
+    pub fn exists<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        id: VersionedSubstateIdRef<'_>,
+    ) -> Result<bool, StorageError> {
+        Self::any_exist(tx, Some(id))
     }
 
     pub fn any_exist<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = VersionedSubstateIdRef<'a>>>(

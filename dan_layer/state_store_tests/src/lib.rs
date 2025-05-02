@@ -15,7 +15,7 @@ mod foreign_proposals;
 #[cfg(test)]
 mod foreign_substate_pledges;
 #[cfg(test)]
-mod helper;
+mod helpers;
 #[cfg(test)]
 mod misc;
 #[cfg(test)]

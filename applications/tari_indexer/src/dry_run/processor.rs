@@ -218,7 +218,7 @@ where TSubstateCache: SubstateCache + 'static
             nexist_count,
             err_count,
             max_failures,
-            committee_size: committee.members().count(),
+            committee_size: committee.len(),
         })
     }
 

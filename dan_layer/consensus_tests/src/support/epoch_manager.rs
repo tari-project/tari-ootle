@@ -49,7 +49,6 @@ impl TestEpochManager {
         self.current_epoch = current_epoch;
         {
             let mut lock = self.inner.lock().await;
-            log::error!("Current epoch {} -> {}", lock.current_epoch, current_epoch);
             lock.current_epoch = current_epoch;
         }
 
@@ -98,7 +97,7 @@ impl TestEpochManager {
     pub async fn add_committees(&self, committees: HashMap<ShardGroup, Committee<TestAddress>>) -> &Self {
         let mut state = self.state_lock().await;
         for (shard_group, committee) in committees {
-            for (address, pk) in &committee.members {
+            for (address, pk) in committee.iter() {
                 let substate_id = random_substate_in_shard_group(shard_group, TEST_NUM_PRESHARDS);
                 let substate_id = VersionedSubstateId::new(substate_id, 0);
                 state.validator_nodes.insert(
@@ -250,7 +249,7 @@ impl EpochManagerReader for TestEpochManager {
         };
 
         if let Some(limit) = limit {
-            committee.members.truncate(limit);
+            committee.members_mut().truncate(limit);
         }
 
         Ok(committee)

@@ -1,6 +1,5 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
-
 use std::collections::HashSet;
 
 use log::{debug, warn};
@@ -8,7 +7,7 @@ use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
-    committee::{Committee, CommitteeInfo},
+    committee::Committee,
     DerivableFromPublicKey,
     Epoch,
     ExtraFieldKey,
@@ -20,102 +19,16 @@ use tari_engine_types::FromByteType;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
-    hotstuff::{HotStuffError, HotstuffConfig, ProposalValidationError},
+    hotstuff::{HotstuffConfig, ProposalValidationError},
     traits::{ConsensusSpec, LeaderStrategy, VoteSignatureService},
 };
 
-const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::block_validations";
-pub fn check_local_proposal<TConsensusSpec: ConsensusSpec>(
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::validations";
+
+pub(super) fn check_current_epoch(
+    candidate_block: &Block,
     current_epoch: Epoch,
-    block: &Block,
-    committee_for_block: &Committee<TConsensusSpec::Addr>,
-    local_committee_info: &CommitteeInfo,
-    vote_signing_service: &TConsensusSpec::SignatureService,
-    leader_strategy: &TConsensusSpec::LeaderStrategy,
-    config: &HotstuffConfig,
-    expected_epoch_hash: &FixedHash,
-) -> Result<(), HotStuffError> {
-    check_proposal::<TConsensusSpec>(
-        block,
-        committee_for_block,
-        vote_signing_service,
-        leader_strategy,
-        config,
-        expected_epoch_hash,
-    )?;
-    check_shard_group_matches(block.header(), local_committee_info.shard_group())?;
-    // This proposal is valid, if it is for an epoch ahead of us, we need to sync
-    check_current_epoch(block, current_epoch)?;
-    Ok(())
-}
-
-pub fn check_foreign_proposal<TConsensusSpec: ConsensusSpec>(
-    block: &Block,
-    committee_for_block: &Committee<TConsensusSpec::Addr>,
-    vote_signing_service: &TConsensusSpec::SignatureService,
-    leader_strategy: &TConsensusSpec::LeaderStrategy,
-    config: &HotstuffConfig,
-    expected_epoch_hash: &FixedHash,
-) -> Result<(), HotStuffError> {
-    check_proposal::<TConsensusSpec>(
-        block,
-        committee_for_block,
-        vote_signing_service,
-        leader_strategy,
-        config,
-        expected_epoch_hash,
-    )
-}
-
-fn check_proposal<TConsensusSpec: ConsensusSpec>(
-    block: &Block,
-    committee_for_block: &Committee<TConsensusSpec::Addr>,
-    vote_signing_service: &TConsensusSpec::SignatureService,
-    leader_strategy: &TConsensusSpec::LeaderStrategy,
-    config: &HotstuffConfig,
-    expected_epoch_hash: &FixedHash,
-) -> Result<(), HotStuffError> {
-    check_network(block, config.network)?;
-    if block.is_genesis() {
-        return Err(ProposalValidationError::ProposingGenesisBlock {
-            proposed_by: block.proposed_by().to_string(),
-            hash: *block.id(),
-        }
-        .into());
-    }
-    check_header::<TConsensusSpec>(
-        block.header(),
-        expected_epoch_hash,
-        config,
-        leader_strategy,
-        committee_for_block,
-    )?;
-    check_quorum_certificate::<TConsensusSpec>(block, committee_for_block, vote_signing_service)?;
-    // TODO: we should immediately reject dummy blocks, they should always be generated locally. Currently required to
-    // trigger a view change on catch up.
-    if block.is_dummy() {
-        check_dummy(block)?;
-    }
-
-    Ok(())
-}
-
-fn check_header<TConsensusSpec: ConsensusSpec>(
-    header: &BlockHeader,
-    expected_epoch_hash: &FixedHash,
-    config: &HotstuffConfig,
-    leader_strategy: &TConsensusSpec::LeaderStrategy,
-    committee_for_block: &Committee<TConsensusSpec::Addr>,
 ) -> Result<(), ProposalValidationError> {
-    check_epoch_hash(header, expected_epoch_hash)?;
-    check_shard_group_bounds(header, config.consensus_constants.num_preshards)?;
-    check_proposed_by_leader(leader_strategy, committee_for_block, header)?;
-    check_block_signature(header)?;
-    check_sidechain_id(header, config)?;
-    Ok(())
-}
-
-fn check_current_epoch(candidate_block: &Block, current_epoch: Epoch) -> Result<(), ProposalValidationError> {
     if candidate_block.epoch() > current_epoch {
         warn!(target: LOG_TARGET, "⚠️ Proposal for future epoch {} received. Current epoch is {}", candidate_block.epoch(), current_epoch);
         return Err(ProposalValidationError::FutureEpoch {
@@ -128,7 +41,7 @@ fn check_current_epoch(candidate_block: &Block, current_epoch: Epoch) -> Result<
     Ok(())
 }
 
-pub fn check_dummy(candidate_block: &Block) -> Result<(), ProposalValidationError> {
+pub(super) fn check_dummy(candidate_block: &Block) -> Result<(), ProposalValidationError> {
     if candidate_block.signature().is_some() {
         return Err(ProposalValidationError::DummyBlockWithSignature {
             block_id: *candidate_block.id(),
@@ -142,7 +55,7 @@ pub fn check_dummy(candidate_block: &Block) -> Result<(), ProposalValidationErro
     Ok(())
 }
 
-fn check_network(candidate_block: &Block, network: Network) -> Result<(), ProposalValidationError> {
+pub(super) fn check_network(candidate_block: &Block, network: Network) -> Result<(), ProposalValidationError> {
     if candidate_block.network() != network {
         return Err(ProposalValidationError::InvalidNetwork {
             block_network: candidate_block.network().to_string(),
@@ -153,7 +66,10 @@ fn check_network(candidate_block: &Block, network: Network) -> Result<(), Propos
     Ok(())
 }
 
-fn check_epoch_hash(header: &BlockHeader, expected_epoch_hash: &FixedHash) -> Result<(), ProposalValidationError> {
+pub(super) fn check_epoch_hash(
+    header: &BlockHeader,
+    expected_epoch_hash: &FixedHash,
+) -> Result<(), ProposalValidationError> {
     if header.epoch_hash() != expected_epoch_hash {
         return Err(ProposalValidationError::InvalidEpochHash {
             epoch: header.epoch(),
@@ -166,7 +82,7 @@ fn check_epoch_hash(header: &BlockHeader, expected_epoch_hash: &FixedHash) -> Re
     Ok(())
 }
 
-fn check_shard_group_matches(
+pub(super) fn check_shard_group_matches(
     header: &BlockHeader,
     expected_shard_group: ShardGroup,
 ) -> Result<(), ProposalValidationError> {
@@ -185,7 +101,10 @@ fn check_shard_group_matches(
     Ok(())
 }
 
-fn check_shard_group_bounds(header: &BlockHeader, num_preshards: NumPreshards) -> Result<(), ProposalValidationError> {
+pub(super) fn check_shard_group_bounds(
+    header: &BlockHeader,
+    num_preshards: NumPreshards,
+) -> Result<(), ProposalValidationError> {
     let len = header
         .shard_group()
         .checked_len()
@@ -224,7 +143,7 @@ fn check_shard_group_bounds(header: &BlockHeader, num_preshards: NumPreshards) -
     Ok(())
 }
 
-fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
+pub(super) fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
     header: &BlockHeader,
@@ -249,7 +168,7 @@ fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: Lead
     Ok(())
 }
 
-fn check_block_signature(header: &BlockHeader) -> Result<(), ProposalValidationError> {
+pub(super) fn check_block_signature(header: &BlockHeader) -> Result<(), ProposalValidationError> {
     if header.is_dummy() {
         // Dummy blocks don't have signatures
         return Ok(());
@@ -299,7 +218,7 @@ fn check_block_signature(header: &BlockHeader) -> Result<(), ProposalValidationE
     Ok(())
 }
 
-fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
+pub(super) fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
     candidate_block: &Block,
     committee: &Committee<TConsensusSpec::Addr>,
     signing_service: &TConsensusSpec::SignatureService,
@@ -366,7 +285,7 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
     Ok(())
 }
 
-fn check_sidechain_id(header: &BlockHeader, config: &HotstuffConfig) -> Result<(), ProposalValidationError> {
+pub(super) fn check_sidechain_id(header: &BlockHeader, config: &HotstuffConfig) -> Result<(), ProposalValidationError> {
     // We only require the sidechain id on the genesis block
     if !header.is_genesis() {
         return Ok(());

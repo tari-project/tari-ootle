@@ -3,13 +3,14 @@
 
 use tari_dan_common_types::{Epoch, NodeHeight, NumPreshards, ShardGroup};
 use tari_dan_storage::{
-    consensus_models::{QuorumCertificate, QuorumDecision},
+    consensus_models::QuorumCertificate,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
 };
+use tari_sidechain::QuorumDecision;
 
-use crate::helper::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
+use crate::helpers::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
 
 #[test]
 fn quorum_certificates_sqlite() {
@@ -38,7 +39,6 @@ fn quorum_certificates_operations(db: impl StateStore) {
         genesis_qc.block_height() + NodeHeight(1),
         epoch,
         shard_group,
-        vec![],
         vec![],
         QuorumDecision::Accept,
     );

@@ -178,7 +178,7 @@ pub enum EpochCheckpointValidationError {
 fn convert_sidechain_shard_group_to_shard_group(
     shard_group: tari_sidechain::ShardGroup,
 ) -> Result<ShardGroup, EpochCheckpointValidationError> {
-    ShardGroup::checked_new(shard_group.start, shard_group.end_inclusive).ok_or_else(|| {
+    ShardGroup::new_checked(shard_group.start, shard_group.end_inclusive).ok_or_else(|| {
         EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
             "Invalid shard group: start >= end + 1 ({}-{})",
             shard_group.start,

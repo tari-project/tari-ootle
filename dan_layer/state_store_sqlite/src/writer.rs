@@ -66,7 +66,6 @@ use tari_dan_storage::{
         TransactionPoolStatusUpdate,
         TransactionRecord,
         ValidatorStatsUpdate,
-        Vote,
     },
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -1320,42 +1319,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for SqliteSta
             })?;
 
         blocks.into_iter().map(TryInto::try_into).collect()
-    }
-
-    fn votes_insert(&mut self, vote: &Vote) -> Result<(), StorageError> {
-        use crate::schema::votes;
-
-        let insert = (
-            votes::siphash.eq(vote.get_hash() as i64),
-            votes::epoch.eq(vote.epoch.as_u64() as i64),
-            votes::block_id.eq(serialize_hex(vote.block_id)),
-            votes::sender_leaf_hash.eq(serialize_hex(vote.sender_leaf_hash)),
-            votes::decision.eq(i32::from(vote.decision.as_u8())),
-            votes::signature.eq(serialize_json(&vote.signature)?),
-        );
-
-        diesel::insert_into(votes::table)
-            .values(insert)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "votes_insert",
-                source: e,
-            })?;
-
-        Ok(())
-    }
-
-    fn votes_delete_all(&mut self) -> Result<(), StorageError> {
-        use crate::schema::votes;
-
-        diesel::delete(votes::table)
-            .execute(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "votes_delete_all",
-                source: e,
-            })?;
-
-        Ok(())
     }
 
     fn substate_locks_insert_all<'a, I: IntoIterator<Item = (&'a SubstateId, &'a Vec<SubstateLock>)>>(

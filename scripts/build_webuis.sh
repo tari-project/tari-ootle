@@ -26,7 +26,7 @@ function usage() {
   echo "Usage: $0 [-h|--help] [-t|--check-typescript] [-k|--skip-bindings]"
   echo "  -h|--help    This help"
   echo "  -t|--check-typescript    Check that typescript compiles without building"
-  echo "  -k|--skip-bindings     Skip building bindings"
+  echo "  -k|--skip-bindings     Skip generating bindings (only build the typescript)"
   exit 1
 }
 
@@ -60,14 +60,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Build bindings
+pushd $base_path/bindings > /dev/null
 if [ -z "${skip_bindings}" ]; then
-  echo "Building Bindings..."
-  pushd $base_path/bindings > /dev/null
-  pnpm install
+	# Build bindings
+	echo "Building Bindings..."
+	pnpm install
   pnpm run build
-  popd > /dev/null
+else
+	echo "Building Bindings (Dist only)..."
+	pnpm install
+  pnpm run build-dist
 fi
+popd > /dev/null
 
 function build() {
   pushd $base_path/$1 > /dev/null

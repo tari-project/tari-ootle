@@ -363,20 +363,6 @@ create table transaction_pool_state_updates
 create unique index transaction_pool_state_updates_uniq_block_id_transaction_id on transaction_pool_state_updates (block_id, transaction_id);
 create index transaction_pool_state_updates_idx_is_applied on transaction_pool_state_updates (is_applied);
 
-create table votes
-(
-    id               integer   not null primary key AUTOINCREMENT,
-    siphash          bigint    not null,
-    epoch            bigint    not null,
-    block_id         text      not NULL,
-    decision         integer   not null,
-    sender_leaf_hash text      not NULL,
-    signature        text      not NULL,
-    created_at       timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX votes_idx_block_id ON votes (block_id);
-
 CREATE TABLE foreign_proposals
 (
     id                  integer   not null primary key AUTOINCREMENT,

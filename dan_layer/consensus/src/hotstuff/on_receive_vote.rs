@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::CommitteeInfo, Epoch};
+use tari_dan_common_types::{committee::CommitteeInfo, Epoch, NodeHeight};
 
 use super::vote_collector::VoteCollector;
 use crate::{
@@ -32,6 +32,7 @@ where TConsensusSpec: ConsensusSpec
     pub async fn handle(
         &self,
         from: TConsensusSpec::Addr,
+        current_height: NodeHeight,
         current_epoch: Epoch,
         message: VoteMessage,
         local_committee_info: &CommitteeInfo,
@@ -39,7 +40,7 @@ where TConsensusSpec: ConsensusSpec
         let _timer = TraceTimer::info(LOG_TARGET, "OnReceiveVote");
         match self
             .vote_collector
-            .check_and_collect_vote(from, current_epoch, message, local_committee_info)
+            .check_and_collect_vote(from, current_height, current_epoch, message, local_committee_info)
             .await
         {
             Ok(Some((_, high_qc))) => {

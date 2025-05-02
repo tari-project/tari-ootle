@@ -10,7 +10,6 @@ tsconfig.tsbuildinfo
 
 node_modules
 dist/*
-!dist/.gitkeep
 dist-ssr
 *.local
 

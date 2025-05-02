@@ -66,7 +66,6 @@ use crate::{
         SubstateCreatedProof,
         SubstateUpdate,
         TransactionRecord,
-        Vote,
     },
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -691,10 +690,6 @@ impl Block {
         Block::get(tx, self.parent())
     }
 
-    pub fn get_votes<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<Vec<Vote>, StorageError> {
-        Vote::get_for_block(tx, self.id())
-    }
-
     pub fn get_transactions<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
@@ -1107,7 +1102,7 @@ impl BlockId {
         Self(hash.into())
     }
 
-    pub const fn hash(&self) -> &FixedHash {
+    pub const fn as_hash(&self) -> &FixedHash {
         &self.0
     }
 

@@ -24,7 +24,7 @@ use std::{env, fs, process::Command};
 
 const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["install"]),
-    ("../../bindings", &["run", "build-dist"]),
+    ("../../bindings", &["run", "build-dev"]),
     ("../../clients/javascript/wallet_daemon_client", &["install"]),
     ("../../clients/javascript/wallet_daemon_client", &["run", "build"]),
     ("./web_ui", &["install"]),

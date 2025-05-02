@@ -26,18 +26,17 @@ use std::{fs, panic, process};
 
 use clap::Parser;
 use log::*;
-use tari_common::{
-    exit_codes::{ExitCode, ExitError},
-    initialize_logging,
-};
+use tari_common::initialize_logging;
 use tari_dan_app_utilities::configuration::load_configuration;
 use tari_shutdown::Shutdown;
-use tari_validator_node::{cli::Cli, run_validator_node, ApplicationConfig};
+use tari_validator_node::{run_validator_node, ApplicationConfig};
+
+use crate::cli::Cli;
 
 const LOG_TARGET: &str = "tari::validator_node::app";
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     // Uncomment to enable tokio tracing via tokio-console
     // console_subscriber::init();
 
@@ -49,25 +48,9 @@ async fn main() {
         process::exit(1);
     }));
 
-    if let Err(err) = main_inner().await {
-        let exit_code = err.exit_code;
-        eprintln!("{:?}", err);
-        error!(
-            target: LOG_TARGET,
-            "Exiting with code ({}) {:?}: {}",
-            exit_code as i32,
-            exit_code,
-            err.details.unwrap_or_default()
-        );
-        process::exit(exit_code as i32);
-    }
-}
-
-async fn main_inner() -> Result<(), ExitError> {
     let cli = Cli::parse();
     let config_path = cli.common.config_path();
-    let cfg = load_configuration(config_path, true, &cli, cli.common.network)
-        .map_err(|e| ExitError::new(ExitCode::ConfigError, e))?;
+    let cfg = load_configuration(config_path, true, &cli, cli.common.network)?;
     let config = ApplicationConfig::load_from(&cfg)?;
 
     // Remove the pid file if it exists
@@ -80,18 +63,27 @@ async fn main_inner() -> Result<(), ExitError> {
         eprintln!("{}", e);
     }
 
-    let shutdown = Shutdown::new();
-    match run_validator_node(config, shutdown).await {
-        Ok(_) => info!(target: LOG_TARGET, "Validator node shutdown successfully"),
-        Err(e) => match e.downcast() {
-            Ok(exit_error) => {
-                error!(target: LOG_TARGET, "Validator node shutdown with an error: {:?}", exit_error);
-                return Err(exit_error);
-            },
-            Err(e) => {
-                error!(target: LOG_TARGET, "Validator node shutdown with an error: {:?}", e);
-                return Err(ExitError::new(ExitCode::UnknownError, e));
-            },
+    match cli.command {
+        Some(cli::Subcommand::CompactDb) => {
+            let timer = std::time::Instant::now();
+            #[cfg(feature = "sqlite_backend")]
+            info!("sqlite backend does not support compaction");
+            #[cfg(not(feature = "sqlite_backend"))]
+            tari_validator_node::consensus::spec::ValidatorNodeStateStore::compact_all(
+                &config.validator_node.state_db_path,
+            )?;
+
+            info!(
+                target: LOG_TARGET,
+                "Compacted state database in {:.2?}",
+                timer.elapsed()
+            );
+            return Ok(());
+        },
+        Some(cli::Subcommand::Start) | None => {
+            let shutdown = Shutdown::new();
+            run_validator_node(config, shutdown).await?;
+            info!(target: LOG_TARGET, "Validator node shutdown successfully");
         },
     }
 

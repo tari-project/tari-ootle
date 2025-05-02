@@ -17,11 +17,15 @@ export default function ListColumnFamilies() {
     { field: "name", sort: "asc" },
   ]);
 
-  const { data: cfs, isLoading } = useDatabaseCfsList(dbName || "<NOTHING>");
+  const { data, isLoading } = useDatabaseCfsList(dbName || "<NOTHING>");
 
-  if (isLoading || !cfs) {
+  if (isLoading || !data) {
     return <div>Loading...</div>;
   }
+
+  const cfs = data?.cfs;
+  const dirSize = data?.dir_size;
+  const totalBytes = cfs.reduce((acc, cf: any) => acc + cf.total_entries_bytes, 0);
 
   const cols = [
     {
@@ -102,6 +106,16 @@ export default function ListColumnFamilies() {
           }}
           checkboxSelection
         />
+      </Grid>
+      <Grid container spacing={3}>
+        <Grid size={{ xs: 12, md: 12, lg: 12 }}>
+          <Typography variant="h6" style={{ paddingBottom: theme.spacing(2) }}>
+            Total Bytes: {prettyBytes(totalBytes)}
+          </Typography>
+          <Typography variant="h6" style={{ paddingBottom: theme.spacing(2) }}>
+            Directory Size: {prettyBytes(dirSize)}
+          </Typography>
+        </Grid>
       </Grid>
     </>
   );

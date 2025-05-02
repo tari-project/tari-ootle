@@ -170,7 +170,7 @@ impl PaceMaker {
                     leader_timeout.as_mut().reset(self.leader_timeout());
 
                     if leader_failure_suspended {
-                        info!(target: LOG_TARGET, "🧿 Leader timeout while suspended. Current view: {}", self.current_view);
+                        warn!(target: LOG_TARGET, "🧿 Leader timeout while suspended. Current view: {}", self.current_view);
                         leader_failure_triggered_during_suspension = true;
                     } else {
                         info!(target: LOG_TARGET, "⚠️ Leader timeout! Current view: {}, Delta: {:.2?}", self.current_view, self.delta_time());

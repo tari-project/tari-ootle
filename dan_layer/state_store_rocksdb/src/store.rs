@@ -46,7 +46,6 @@ use crate::{
         foreign_proposal,
         foreign_proposal::ForeignProposalModel,
         foreign_substate_pledge::ForeignSubstatePledgeModel,
-        lock_conflict,
         lock_conflict::LockConflictModel,
         missing_transactions::MissingTransactionModel,
         parked_block::ParkedBlockModel,
@@ -118,7 +117,6 @@ pub fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
         BurntUtxoModel::name(),
         burnt_utxo::ProposedInBlockIndex::name(),
         LockConflictModel::name(),
-        lock_conflict::ByBlockIdQuery::name(),
         EvictedNodeModel::name(),
         ValidatorNodeEpochStatsModel::name(),
     ]
@@ -129,6 +127,7 @@ fn build_default_store_opts() -> rocksdb::Options {
     let mut opts = rocksdb::Options::default();
     opts.set_error_if_exists(false);
     opts.create_if_missing(true);
+    opts.set_periodic_compaction_seconds(60);
     opts.create_missing_column_families(true);
     // TODO: evaluate - might depend on cores?
     opts.set_avoid_unnecessary_blocking_io(true);
@@ -155,6 +154,23 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
             db: Arc::new(db),
             _addr: PhantomData,
         })
+    }
+
+    /// Force compact all column families in the database.
+    /// This is not typically needed but can be useful for experimentation.
+    pub fn compact_all<P: AsRef<Path>>(path: P) -> Result<(), StorageError> {
+        let options = build_default_store_opts();
+        let cf_names = all_column_families_iter();
+        let db = DB::open_cf(&options, path, cf_names).map_err(|e| StorageError::ConnectionError {
+            reason: e.into_string(),
+        })?;
+        for name in all_column_families_iter() {
+            let handle = db.cf_handle(name).ok_or_else(|| StorageError::ConnectionError {
+                reason: format!("Column family {} not found", name),
+            })?;
+            db.compact_range_cf(handle, None::<Vec<u8>>, None::<Vec<u8>>);
+        }
+        Ok(())
     }
 
     pub fn snapshot(&self) -> SnapshotContext<'_, TransactionDB> {

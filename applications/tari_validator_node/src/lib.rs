@@ -21,9 +21,8 @@
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 mod bootstrap;
-pub mod cli;
 mod config;
-mod consensus;
+pub mod consensus;
 mod dan_node;
 mod dry_run_transaction_processor;
 mod event_subscription;

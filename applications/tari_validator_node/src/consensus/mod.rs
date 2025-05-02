@@ -36,7 +36,7 @@ mod leader_selection;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 mod signature_service;
-pub(crate) mod spec;
+pub mod spec;
 
 pub use block_transaction_executor::*;
 pub use handle::*;

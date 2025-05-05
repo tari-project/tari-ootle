@@ -16,4 +16,4 @@
 # indexer_json_rpc_url = "http://127.0.0.1:18200/json_rpc"
 [igor.dan_wallet_daemon]
 # Indexer JSON-RPC url for Igor.
-indexer_json_rpc_url = "http://18.217.22.26:12006/json_rpc"
+indexer_json_rpc_url = "http://18.217.22.26:12008/json_rpc"

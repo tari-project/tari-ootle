@@ -361,22 +361,17 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         let msg = request.into_message();
         let current_epoch = self.consensus.current_epoch();
 
-        let prev_epoch = current_epoch.saturating_sub(Epoch(1));
-        if prev_epoch.is_zero() {
-            return Err(RpcStatus::not_found("Cannot generate checkpoint for genesis epoch"));
-        }
-
-        if msg.current_epoch != current_epoch {
+        if msg.epoch >= current_epoch.as_u64() {
             // This may occur if one of the nodes has not fully scanned the base layer
             return Err(RpcStatus::bad_request(format!(
-                "Peer requested checkpoint with epoch {} but current epoch is {}",
-                msg.current_epoch, current_epoch
+                "Peer requested checkpoint with epoch {} but the current epoch is {}",
+                msg.epoch, current_epoch
             )));
         }
 
         let checkpoint = self
             .state_store
-            .with_read_tx(|tx| EpochCheckpoint::get(tx, prev_epoch))
+            .with_read_tx(|tx| EpochCheckpoint::get(tx, Epoch(msg.epoch)))
             .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 

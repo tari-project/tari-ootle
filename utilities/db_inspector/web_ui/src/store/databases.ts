@@ -22,11 +22,19 @@ export const useDatabasesList = () => {
   });
 };
 
+interface ListColumnFamiliesResponse {
+  cfs: {
+    name: string;
+    num_entries: number;
+    total_entries_bytes: number;
+  }[];
+  dir_size: number;
+}
 
 export const useDatabaseCfsList = (dbName: string) => {
-  return useQuery<unknown[], Error>({
+  return useQuery<ListColumnFamiliesResponse, Error>({
     queryKey: ["dbs-cfs", dbName],
-    queryFn: () => client.listColumnFamilies(dbName).then((res) => res.cfs),
+    queryFn: () => client.listColumnFamilies(dbName),
     refetchOnMount: false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,

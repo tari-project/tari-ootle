@@ -15,6 +15,7 @@ pub mod substates;
 pub mod templates;
 pub mod transaction;
 pub mod validator;
+pub mod wallet;
 pub mod webauthn;
 pub mod webrtc;
 

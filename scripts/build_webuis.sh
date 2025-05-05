@@ -69,7 +69,7 @@ if [ -z "${skip_bindings}" ]; then
 else
 	echo "Building Bindings (Dist only)..."
 	pnpm install
-  pnpm run build-dist
+  pnpm run build-dev # build with the TS definitions included
 fi
 popd > /dev/null
 
@@ -85,6 +85,7 @@ function build() {
   popd > /dev/null
 }
 
+set +e
 echo "Building Wallet client..."
 build clients/javascript/wallet_daemon_client
 

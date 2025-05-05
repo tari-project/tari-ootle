@@ -222,7 +222,7 @@ message GetHighQcResponse {
 }
 
 message GetCheckpointRequest {
-  uint64 current_epoch = 1;
+  uint64 epoch = 1;
 }
 
 message GetCheckpointResponse {

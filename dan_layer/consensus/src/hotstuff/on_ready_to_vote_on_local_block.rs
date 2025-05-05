@@ -1679,18 +1679,24 @@ where TConsensusSpec: ConsensusSpec
             target: LOG_TARGET,
             "🌳 COMMIT block {} with {} substate change(s)", block, diff.len()
         );
-        let local_diff = diff.into_filtered(local_committee_info);
-        block.commit_diff(tx, commit_qc_id, local_diff)?;
+        {
+            let _timer = TraceTimer::debug(LOG_TARGET, "commit_block");
+            let local_diff = diff.into_filtered(local_committee_info);
+            block.commit_diff(tx, commit_qc_id, local_diff)?;
+        }
 
-        let finalized_transactions = self
-            .transaction_pool
-            .remove_all(tx, block.all_finalising_transactions_ids())?;
+        let finalized_transactions = {
+            let _timer = TraceTimer::debug(LOG_TARGET, "remove finalized transactions");
+            self.transaction_pool
+                .remove_all(tx, block.all_finalising_transactions_ids())?
+        };
 
         // Whenever we commit a block that will result in an abort for a transaction, we can remove lock conflicts to
         // allow other "blocked" transactions to be proposed.
         TransactionLockConflicts::remove_for_transactions(tx, block.all_aborting_transaction_ids())?;
 
         if !finalized_transactions.is_empty() {
+            let _timer = TraceTimer::debug(LOG_TARGET, "unlock and finalized transactions");
             // Remove locks for finalized transactions
             SubstateRecord::unlock_all(tx, finalized_transactions.iter().map(|t| t.transaction_id()))?;
             TransactionRecord::finalize_all(tx, *block.id(), &finalized_transactions)?;

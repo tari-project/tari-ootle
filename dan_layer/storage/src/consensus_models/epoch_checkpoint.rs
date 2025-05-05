@@ -73,7 +73,7 @@ impl EpochCheckpoint {
         quorum_threshold: usize,
         check_vn: impl Fn(&RistrettoPublicKeyBytes) -> Result<bool, SidechainProofValidationError>,
     ) -> Result<(), EpochCheckpointValidationError> {
-        if self.proof.header().epoch != epoch.as_u64() {
+        if self.epoch() != epoch {
             return Err(EpochCheckpointValidationError::InvalidEpochCheckpoint(anyhow!(
                 "Expected checkpoint epoch {} but proof epoch is {}",
                 self.epoch(),

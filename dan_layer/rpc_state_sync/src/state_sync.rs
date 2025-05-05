@@ -89,12 +89,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     async fn fetch_epoch_checkpoint(
         &self,
         client: &mut ValidatorNodeRpcClient,
-        current_epoch: Epoch,
+        epoch: Epoch,
     ) -> Result<Option<EpochCheckpoint>, CommsRpcConsensusSyncError> {
         match client
-            .get_checkpoint(GetCheckpointRequest {
-                current_epoch: current_epoch.as_u64(),
-            })
+            .get_checkpoint(GetCheckpointRequest { epoch: epoch.as_u64() })
             .await
         {
             Ok(GetCheckpointResponse {
@@ -452,7 +450,10 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             // fetch checkpoint
             // TODO: NB refactor to fetch the checkpoint once for the shard group - instead of for each shard and each
             // attempt - once it's validated, there is no need to fetch it again
-            let checkpoint = match self.fetch_epoch_checkpoint(&mut client, epoch).await {
+            let prev_epoch = epoch
+                .checked_sub(Epoch(1))
+                .ok_or_else(|| CommsRpcConsensusSyncError::InvalidResponse(anyhow!("Epoch is zero")))?;
+            let checkpoint = match self.fetch_epoch_checkpoint(&mut client, prev_epoch).await {
                 Ok(Some(cp)) => cp,
                 Ok(None) => {
                     // TODO: we should check with f + 1 validators in this case. If a single validator reports
@@ -478,7 +479,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             };
 
             info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
-            self.validate_checkpoint(&checkpoint, prev_committee, epoch)?;
+            self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
             self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
             let mut template_changes = vec![];
 

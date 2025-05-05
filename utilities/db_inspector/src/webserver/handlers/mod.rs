@@ -4,7 +4,7 @@
 pub mod block_diff;
 pub mod blocks;
 pub mod bookkeeping;
-pub mod databases;
+pub mod column_families;
 pub mod state_transitions;
 pub mod tables;
 mod types;

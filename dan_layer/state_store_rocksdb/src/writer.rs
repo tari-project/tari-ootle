@@ -1400,35 +1400,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             debug!(target: LOG_TARGET, "Deleted {num_deleted}/{limit} stale nodes");
         }
 
-        // let cf = self.db().cf(StateTreeModel)?;
-        //
-        // let iter = stale_cf.key_iterator(Ordering::default(), OPERATION);
-        // for result in iter.take(limit) {
-        //     let (shard, key) = result?;
-        //     stale_cf.delete(&(shard, key.clone()), OPERATION)?;
-        //
-        //     let mut queue = VecDeque::new();
-        //     queue.push_back(key);
-        //
-        //     while let Some(node_key) = queue.pop_front() {
-        //         debug!( target: LOG_TARGET, "Deleting stale node {node_key} from shard {shard}", );
-        //         if let Some(node) = cf.get(&(shard, node_key.clone()), OPERATION).optional()? {
-        //             cf.delete(&(shard, node_key.clone()), OPERATION)?;
-        //             match node {
-        //                 Node::Internal(x) => {
-        //                     for (nibble, child) in x.into_children() {
-        //                         let child_key = node_key.gen_child_node_key(child.version, nibble);
-        //                         debug!( target: LOG_TARGET, "Internal node: child: {child_key}");
-        //                         queue.push_back(child_key)
-        //                     }
-        //                 },
-        //                 Node::Leaf(_) => {},
-        //                 Node::Null => {},
-        //             }
-        //         }
-        //     }
-        // }
-
         Ok(())
     }
 

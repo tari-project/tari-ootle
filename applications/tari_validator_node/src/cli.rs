@@ -59,6 +59,8 @@ pub struct Cli {
     /// FOR DEBUGGING PURPOSES ONLY
     #[clap(long, short = 'd')]
     pub debug_templates: Vec<String>,
+    #[clap(subcommand)]
+    pub command: Option<Subcommand>,
 }
 
 impl ConfigOverrideProvider for Cli {
@@ -112,4 +114,12 @@ impl ConfigOverrideProvider for Cli {
         }
         overrides
     }
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum Subcommand {
+    /// Start the validator node
+    Start,
+    /// Compact the database and exit
+    CompactDb,
 }

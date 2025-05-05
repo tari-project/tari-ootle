@@ -38,10 +38,10 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     let bind_address = context.config().webserver.bind_address;
 
     let mut api = Router::new()
-        .route("/databases", get(handlers::databases::list))
+        .route("/databases", get(handlers::column_families::list))
         .route(
             "/databases/:db_name/column-families",
-            get(handlers::databases::list_column_families),
+            get(handlers::column_families::list_column_families),
         )
         // Special cases
         .route(

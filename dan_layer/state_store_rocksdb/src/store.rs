@@ -65,7 +65,6 @@ use crate::{
         transaction_pool::TransactionPoolModel,
         transaction_pool_state_update::TransactionPoolStateUpdateModel,
         validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
-        vote::VoteModel,
     },
     read_only::ReadOnlyContext,
     reader::RocksDbStateStoreReadTransaction,
@@ -79,7 +78,6 @@ const LOG_TARGET: &str = "tari::dan::storage::rocksdb::state_store";
 pub fn all_column_families_iter() -> impl Iterator<Item = &'static str> {
     [
         bookkeeping::CF_NAME,
-        VoteModel::name(),
         chain::PendingChainIndex::name(),
         chain::CommittedParentChildChainIndex::name(),
         chain::PendingParentChildIndex::name(),

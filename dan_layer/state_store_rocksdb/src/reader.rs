@@ -28,7 +28,6 @@ use std::{
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
 use serde::{de::DeserializeOwned, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -73,7 +72,6 @@ use tari_dan_storage::{
         TransactionPoolStage,
         TransactionRecord,
         ValidatorConsensusStats,
-        Vote,
     },
     Ordering,
     StateStoreReadTransaction,
@@ -138,7 +136,6 @@ use crate::{
         transaction_pool_state_update,
         validator_node_epoch_stats,
         validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
-        vote,
     },
 };
 
@@ -1227,41 +1224,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         }
 
         Ok(count)
-    }
-
-    fn votes_get_by_block_and_sender(
-        &self,
-        block_id: &BlockId,
-        sender_leaf_hash: &FixedHash,
-    ) -> Result<Vote, StorageError> {
-        // const OPERATION: &str = "votes_get_by_block_and_sender";
-        let cf = self.db().cf(vote::ByBlockId)?;
-        let iter = cf.query_prefix_range_iterator(Ordering::default(), block_id);
-
-        for result in iter {
-            let (_, vote) = result?;
-            if vote.sender_leaf_hash == *sender_leaf_hash {
-                return Ok(vote);
-            }
-        }
-
-        Err(StorageError::NotFound {
-            item: "Vote",
-            key: format!("{block_id} by {sender_leaf_hash}"),
-        })
-    }
-
-    fn votes_count_for_block(&self, block_id: &BlockId) -> Result<u64, StorageError> {
-        let cf = self.db().cf(vote::ByBlockId)?;
-        let count = cf.count_prefix(block_id)?;
-        Ok(count as u64)
-    }
-
-    fn votes_get_for_block(&self, block_id: &BlockId) -> Result<Vec<Vote>, StorageError> {
-        let cf = self.db().cf(vote::ByBlockId)?;
-        let iter = cf.query_prefix_range_iterator(Ordering::default(), block_id);
-        let votes = iter.map(|r| r.map(|(_, vote)| vote)).collect::<Result<_, _>>()?;
-        Ok(votes)
     }
 
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError> {

@@ -20,7 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{env, process::Command};
+use std::{env, fs, process::Command};
 
 const NPM_COMMANDS: &[(&str, &[&str])] = &[
     ("../../bindings", &["install"]),
@@ -34,6 +34,8 @@ const NPM_COMMANDS: &[(&str, &[&str])] = &[
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=./web_ui/src");
     println!("cargo:rerun-if-changed=./web_ui/public");
+
+    fs::create_dir_all("./web_ui/dist")?;
 
     if env::var("CARGO_FEATURE_TS").is_ok() {
         println!("cargo:warning=The web ui is not being built because the tx feature is enabled.");

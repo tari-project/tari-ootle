@@ -21,15 +21,11 @@
     "jsx": "react-jsx"
   },
   "include": [
-    "src",
-    "../../bindings/**/*"
+    "src"
   ],
   "references": [
     {
       "path": "./tsconfig.node.json"
-    },
-    {
-      "path": "../../../bindings"
     }
   ]
 }

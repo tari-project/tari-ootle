@@ -127,7 +127,6 @@ fn build_default_store_opts() -> rocksdb::Options {
     let mut opts = rocksdb::Options::default();
     opts.set_error_if_exists(false);
     opts.create_if_missing(true);
-    opts.set_periodic_compaction_seconds(60);
     opts.create_missing_column_families(true);
     // TODO: evaluate - might depend on cores?
     opts.set_avoid_unnecessary_blocking_io(true);

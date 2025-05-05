@@ -544,10 +544,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        let block_ids = self.get_pending_chain_ordered(from_block_id)?;
-
         let cf = self.db().cf(BlockTransactionExecutionModel)?;
         let query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
+
+        // Is the execution is in the queried block
+        if let Some(exec) = cf.get(&(*from_block_id, *transaction_id), OPERATION).optional()? {
+            return Ok(exec);
+        }
+
+        let block_ids = self.get_pending_chain_ordered(from_block_id)?;
 
         // Find any in pending chain?
         for block_id in &block_ids {

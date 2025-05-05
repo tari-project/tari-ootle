@@ -369,7 +369,6 @@ pub async fn handle_transfer_nft(
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     // fetch accounts and its inputs
-    info!(target: LOG_TARGET, "fetch accounts and its inputs...");
     let mut instructions = vec![];
     let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(req.fee_payer_account), sdk)?;
     let fee_payer_account_address = fee_payer_account
@@ -383,17 +382,17 @@ pub async fn handle_transfer_nft(
         .as_component_address()
         .ok_or(anyhow!("Source account address is not a component address!"))?;
 
-    info!(target: LOG_TARGET, "Account addresses: {}, {}", source_account_address, fee_payer_account_address);
-
     let target_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
 
     // collect all instructions
     let non_fungible_api = sdk.non_fungible_api();
-    for nft_id in req.nft_ids {
+    for nft_address in req.nfts {
+        let nft_address = NonFungibleAddress::from_str(nft_address.as_str())
+            .map_err(|error| anyhow!("Invalid NFT address: {error}"))?;
         // get NFT
         let nft = non_fungible_api
-            .get_by_id(nft_id.clone())
+            .get_by_address(nft_address.clone())
             .map_err(|e| anyhow!("Failed to get non fungible token: {}", e))?;
 
         // add the input for the source account vault substate
@@ -419,7 +418,7 @@ pub async fn handle_transfer_nft(
             Instruction::CallMethod {
                 component_address: source_account_address,
                 method: "withdraw_non_fungible".to_string(),
-                args: args![nft.resource_address, nft_id],
+                args: args![nft.resource_address, nft_address.id()],
             },
             Instruction::PutLastInstructionOutputOnWorkspace {
                 key: b"bucket".to_vec(),

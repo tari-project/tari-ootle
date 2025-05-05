@@ -1499,7 +1499,8 @@ pub struct WebauthnFinishAuthRequest {
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
 pub struct TransferNftRequest {
-    pub nft_ids: Vec<NonFungibleId>,
+    // NonFungibleAddress as String
+    pub nfts: Vec<String>,
     #[serde(deserialize_with = "string_or_struct")]
     pub fee_payer_account: ComponentAddressOrName,
     #[serde(deserialize_with = "string_or_struct")]

@@ -221,6 +221,9 @@ function valueGetter(field: string) {
     }
     for (const part of parts) {
       value = value[part];
+      if (value === null) {
+        return "null";
+      }
       if (value === undefined) {
         return field + " undefined";
       }

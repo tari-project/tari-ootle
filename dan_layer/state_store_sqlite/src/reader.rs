@@ -21,7 +21,6 @@ use diesel::{
 use indexmap::IndexMap;
 use log::*;
 use serde::{de::DeserializeOwned, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -65,7 +64,6 @@ use tari_dan_storage::{
         TransactionPoolStage,
         TransactionRecord,
         ValidatorConsensusStats,
-        Vote,
     },
     Ordering,
     StateStoreReadTransaction,
@@ -1685,54 +1683,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 })?;
 
         Ok(count as usize)
-    }
-
-    fn votes_get_by_block_and_sender(
-        &self,
-        block_id: &BlockId,
-        sender_leaf_hash: &FixedHash,
-    ) -> Result<Vote, StorageError> {
-        use crate::schema::votes;
-
-        let vote = votes::table
-            .filter(votes::block_id.eq(serialize_hex(block_id)))
-            .filter(votes::sender_leaf_hash.eq(serialize_hex(sender_leaf_hash)))
-            .first::<sql_models::Vote>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "votes_get",
-                source: e,
-            })?;
-
-        Vote::try_from(vote)
-    }
-
-    fn votes_count_for_block(&self, block_id: &BlockId) -> Result<u64, StorageError> {
-        use crate::schema::votes;
-
-        let count = votes::table
-            .filter(votes::block_id.eq(serialize_hex(block_id)))
-            .count()
-            .first::<i64>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "votes_count_for_block",
-                source: e,
-            })?;
-
-        Ok(count as u64)
-    }
-
-    fn votes_get_for_block(&self, block_id: &BlockId) -> Result<Vec<Vote>, StorageError> {
-        use crate::schema::votes;
-
-        let votes = votes::table
-            .filter(votes::block_id.eq(serialize_hex(block_id)))
-            .get_results::<sql_models::Vote>(self.connection())
-            .map_err(|e| SqliteStorageError::DieselError {
-                operation: "votes_get_for_block",
-                source: e,
-            })?;
-
-        votes.into_iter().map(Vote::try_from).collect()
     }
 
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError> {

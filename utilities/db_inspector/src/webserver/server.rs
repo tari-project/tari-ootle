@@ -63,7 +63,6 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
 
     add_cf_routes!(
         api,
-        models::vote::VoteModel,
         models::chain::PendingChainIndex,
         models::chain::CommittedParentChildChainIndex,
         models::chain::PendingParentChildIndex,

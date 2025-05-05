@@ -5,7 +5,6 @@ use std::{collections::HashMap, ops::Deref};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
     shard::Shard,
     Epoch,
@@ -63,7 +62,6 @@ use crate::{
         TransactionRecord,
         ValidatorConsensusStats,
         ValidatorStatsUpdate,
-        Vote,
     },
     StorageError,
 };
@@ -221,14 +219,6 @@ pub trait StateStoreReadTransaction: Sized {
         skip_lock_conflicted: bool,
     ) -> Result<usize, StorageError>;
 
-    // -------------------------------- Votes -------------------------------- //
-    fn votes_get_by_block_and_sender(
-        &self,
-        block_id: &BlockId,
-        sender_leaf_hash: &FixedHash,
-    ) -> Result<Vote, StorageError>;
-    fn votes_count_for_block(&self, block_id: &BlockId) -> Result<u64, StorageError>;
-    fn votes_get_for_block(&self, block_id: &BlockId) -> Result<Vec<Vote>, StorageError>;
     //---------------------------------- Substates --------------------------------------------//
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError>;
     fn substates_get_any<'a, I: IntoIterator<Item = &'a VersionedSubstateIdRef<'a>>>(
@@ -443,11 +433,6 @@ pub trait StateStoreWriteTransaction {
         &mut self,
         transaction_id: &TransactionId,
     ) -> Result<Vec<ForeignParkedProposal>, StorageError>;
-
-    // -------------------------------- Votes -------------------------------- //
-    fn votes_insert(&mut self, vote: &Vote) -> Result<(), StorageError>;
-
-    fn votes_delete_all(&mut self) -> Result<(), StorageError>;
 
     //---------------------------------- Substates --------------------------------------------//
     fn substate_locks_insert_all<'a, I: IntoIterator<Item = (&'a SubstateId, &'a Vec<SubstateLock>)>>(

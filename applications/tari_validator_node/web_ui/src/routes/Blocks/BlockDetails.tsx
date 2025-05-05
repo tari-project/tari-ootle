@@ -55,9 +55,6 @@ const COMMANDS = [
 ];
 
 type OtherCommands = Record<string, Array<any>>;
-// interface OtherCommands {
-//   [key: string]: Array<any>;
-// }
 
 export default function BlockDetails() {
   const { blockId } = useParams();
@@ -208,6 +205,8 @@ export default function BlockDetails() {
                           <TableRow>
                             <TableCell>Status</TableCell>
                             <DataTableCell>
+                              {/* For some reason, typescript cannot find the commit_qc_id  in Block even though it is there
+                              @ts-ignore */}
                               <StatusChip status={block!.commit_qc_id ? "Commit" : "Pending"} />
                             </DataTableCell>
                           </TableRow>

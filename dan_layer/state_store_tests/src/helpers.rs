@@ -25,7 +25,6 @@ use std::{io::Write, ops::Deref};
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_bor::cbor;
 use tari_common_types::types::FixedHash;
-use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
 use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
@@ -42,7 +41,6 @@ use tari_dan_storage::{
         QuorumCertificate,
         SubstateRecord,
         TransactionAtom,
-        ValidatorSignature,
     },
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -213,12 +211,6 @@ pub fn create_random_hash() -> FixedHash {
     FixedHash::new(rand_bytes)
 }
 
-pub fn create_random_vn_signature() -> ValidatorSignature {
-    let message = OsRng.gen::<[u8; FixedHash::byte_size()]>();
-    let secret_key = RistrettoSecretKey::random(&mut OsRng);
-    ValidatorSignature::sign(&secret_key, message)
-}
-
 pub fn create_block(parent: Option<&Block>) -> Block {
     let network = Default::default();
 
@@ -284,7 +276,7 @@ pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
 }
 pub fn create_qc(block: &LeafBlock) -> QuorumCertificate {
     QuorumCertificate::new(
-        *block.block_id().hash(),
+        *block.block_id().as_hash(),
         *block.block_id(),
         block.height(),
         block.epoch(),
@@ -334,7 +326,7 @@ where
 pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignProposalRecord {
     let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
     let qc1 = QuorumCertificate::new(
-        *parent_id.hash(),
+        *parent_id.as_hash(),
         parent_id,
         NodeHeight(1),
         epoch,
@@ -363,7 +355,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
     let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
         header: SidechainBlockHeader {
             network: foreign_block.network().as_byte(),
-            parent_id: *parent_id.hash(),
+            parent_id: *parent_id.as_hash(),
             justify_id: *qc1.id().hash(),
             height: foreign_block.height().as_u64(),
             epoch: epoch.as_u64(),
@@ -380,7 +372,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
         proof_elements: vec![CommitProofElement::QuorumCertificate(
             tari_sidechain::QuorumCertificate {
                 header_hash: foreign_block.header().calculate_hash(),
-                parent_id: *parent_id.hash(),
+                parent_id: *parent_id.as_hash(),
                 signatures: vec![],
                 decision: QuorumDecision::Accept,
             },

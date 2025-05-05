@@ -117,7 +117,7 @@ pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
             block = block.get_parent(tx)?;
             let mut dummy_chain = vec![ChainLink {
                 header_hash: block.header().calculate_hash(),
-                parent_id: *block.parent().hash(),
+                parent_id: *block.parent().as_hash(),
             }];
             debug!(target: LOG_TARGET, "add dummy chain: {block}");
             let parent_id = *block.parent();
@@ -127,7 +127,7 @@ pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
                 debug!(target: LOG_TARGET, "add dummy chain: {block} QC: {qc}");
                 dummy_chain.push(ChainLink {
                     header_hash: block.header().calculate_hash(),
-                    parent_id: *block.parent().hash(),
+                    parent_id: *block.parent().as_hash(),
                 });
 
                 block = block.get_parent(tx)?;
@@ -167,7 +167,7 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<S
 
     Ok(SidechainBlockHeader {
         network: header.network().as_byte(),
-        parent_id: *header.parent().hash(),
+        parent_id: *header.parent().as_hash(),
         justify_id: *header.justify_id().hash(),
         height: header.height().as_u64(),
         epoch: header.epoch().as_u64(),
@@ -193,7 +193,7 @@ fn convert_qc_to_proof_element(qc: &QuorumCertificate) -> Result<CommitProofElem
     Ok(CommitProofElement::QuorumCertificate(
         tari_sidechain::QuorumCertificate {
             header_hash: *qc.header_hash(),
-            parent_id: *qc.parent_id().hash(),
+            parent_id: *qc.parent_id().as_hash(),
             signatures: qc
                 .signatures()
                 .iter()
@@ -286,7 +286,7 @@ mod tests {
 
         let sidechain_header = SidechainBlockHeader {
             network: network.as_byte(),
-            parent_id: *parent_id.hash(),
+            parent_id: *parent_id.as_hash(),
             justify_id: *qc1.id().hash(),
             height: 2,
             epoch: 1,
@@ -306,6 +306,6 @@ mod tests {
         };
 
         assert_eq!(sidechain_header.calculate_hash(), block.calculate_hash());
-        assert_eq!(sidechain_header.calculate_block_id(), *block.calculate_id().hash());
+        assert_eq!(sidechain_header.calculate_block_id(), *block.calculate_id().as_hash());
     }
 }

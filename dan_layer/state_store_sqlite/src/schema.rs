@@ -507,19 +507,6 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    votes (id) {
-        id -> Integer,
-        siphash -> BigInt,
-        epoch -> BigInt,
-        block_id -> Text,
-        decision -> Integer,
-        sender_leaf_hash -> Text,
-        signature -> Text,
-        created_at -> Timestamp,
-    }
-}
-
 diesel::joinable!(foreign_missing_transactions -> foreign_parked_blocks (parked_block_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -557,5 +544,4 @@ diesel::allow_tables_to_appear_in_same_query!(
     transaction_pool_state_updates,
     transactions,
     validator_epoch_stats,
-    votes,
 );

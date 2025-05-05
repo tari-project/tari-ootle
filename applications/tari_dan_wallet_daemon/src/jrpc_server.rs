@@ -177,10 +177,7 @@ async fn handler(
             "claim_fees" => call_handler(context, value, token, validator::handle_claim_validator_fees).await,
             _ => Ok(value.method_not_found(&value.method)),
         },
-        Some(("wallet", method)) => match method {
-            "get_info" => call_handler(context, value, token, wallet::handle_get_info).await,
-            _ => Ok(value.method_not_found(&value.method)),
-        },
+        Some(("wallet", "get_info")) => call_handler(context, value, token, wallet::handle_get_info).await,
         _ => Ok(value.method_not_found(&value.method)),
     }
 }

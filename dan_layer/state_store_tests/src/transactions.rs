@@ -28,19 +28,13 @@ use tari_template_lib::models::Amount;
 use tari_transaction::{Instruction, Transaction};
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helpers::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_sqlite, create_tx_atom};
+use crate::helpers::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_tx_atom};
 
 mod confirm_all_transitions {
     use tari_dan_storage::consensus_models::QcId;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
-
-    #[test]
-    fn it_sets_pending_stage_to_stage_sqlite() {
-        let db = create_sqlite();
-        it_sets_pending_stage_to_stage(db);
-    }
 
     #[test]
     fn it_sets_pending_stage_to_stage_rocksdb() {
@@ -159,13 +153,6 @@ mod transaction_operations {
 
     use super::*;
 
-    #[ignore]
-    #[test]
-    fn transaction_operations_sqlite() {
-        let db = create_sqlite();
-        transaction_operations(db);
-    }
-
     #[test]
     fn transaction_operations_rocksdb() {
         let (db, _tmp) = create_rocksdb();
@@ -252,12 +239,6 @@ mod transaction_execution_operations {
 
     use super::*;
     use crate::helpers::{commit_chain, create_chain};
-
-    #[test]
-    fn transaction_execution_operations_sqlite() {
-        let db = create_sqlite();
-        transaction_execution_operations(db);
-    }
 
     #[test]
     fn transaction_execution_operations_rocksdb() {

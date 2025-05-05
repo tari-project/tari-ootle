@@ -9,20 +9,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 
-use crate::helpers::{
-    build_substate_value,
-    create_random_substate_id,
-    create_rocksdb,
-    create_sqlite,
-    transaction_id_from_seed,
-};
-
-#[test]
-fn foreign_substate_pledges_sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    foreign_substate_pledges_operations(db);
-}
+use crate::helpers::{build_substate_value, create_random_substate_id, create_rocksdb, transaction_id_from_seed};
 
 #[test]
 fn foreign_substate_pledges_rocksdb() {

@@ -32,7 +32,6 @@ members = [
     "dan_layer/p2p",
     "dan_layer/rpc_state_sync",
     "dan_layer/state_store_rocksdb",
-    "dan_layer/state_store_sqlite",
     "dan_layer/state_tree",
     "dan_layer/storage_sqlite",
     "dan_layer/storage",
@@ -105,7 +104,6 @@ tari_indexer_client = { path = "clients/tari_indexer_client" }
 tari_networking = { path = "networking/core" }
 tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }
-tari_state_store_sqlite = { path = "dan_layer/state_store_sqlite" }
 tari_state_tree = { path = "dan_layer/state_tree" }
 tari_swarm = { path = "networking/swarm" }
 tari_template_abi = { version = "0.9.0", path = "dan_layer/template_abi", default-features = false }
@@ -172,7 +170,6 @@ chacha20poly1305 = "0.10.1"
 chrono = "0.4.24"
 config = "0.14.0"
 convert_case = "0.6.0"
-d3ne = { git = "https://github.com/stringhandler/d3ne-rs.git", tag = "v0.8.0-pre.3" }
 dashmap = "5.5.0"
 diesel = { version = "2.2.6", default-features = false }
 diesel_migrations = "2.2.0"

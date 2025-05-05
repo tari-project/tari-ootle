@@ -20,22 +20,13 @@ use tari_dan_storage::{
 };
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helpers::{create_rocksdb, create_sqlite, create_tx_atom};
+use crate::helpers::{create_rocksdb, create_tx_atom};
 
 mod basic_block_operations {
     use tari_dan_storage::consensus_models::QcId;
 
     use super::*;
     use crate::helpers::{commit_chain, create_chain};
-
-    // TODO: sqlite fails due to missing foreign key values
-    #[ignore]
-    #[test]
-    fn basic_block_operations_sqlite() {
-        let db = create_sqlite();
-        db.foreign_keys_off().unwrap();
-        basic_block_operations(db);
-    }
 
     #[test]
     fn basic_block_operations_rocksdb() {
@@ -97,15 +88,6 @@ mod block_parent_operations {
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
-
-    // TODO: sqlite fails due to missing foreign key values
-    #[ignore]
-    #[test]
-    fn block_parent_operations_sqlite() {
-        let db = create_sqlite();
-        db.foreign_keys_off().unwrap();
-        block_parent_operations(db);
-    }
 
     #[test]
     fn block_parent_operations_rocksdb() {
@@ -229,12 +211,6 @@ mod block_query_operations {
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
-
-    #[test]
-    fn block_query_operations_sqlite() {
-        let db = create_sqlite();
-        block_query_operations(&db);
-    }
 
     #[test]
     fn block_query_operations_rocksdb() {

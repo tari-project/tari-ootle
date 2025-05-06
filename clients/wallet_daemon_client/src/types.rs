@@ -1498,6 +1498,26 @@ pub struct WebauthnFinishAuthRequest {
     derive(TS),
     ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
 )]
+pub struct WalletGetInfoRequest {}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
+pub struct WalletGetInfoResponse {
+    pub version: String,
+    pub network: String,
+    pub network_byte: u8,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(TS),
+    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
+)]
 pub struct TransferNftRequest {
     // NonFungibleAddress as String
     pub nfts: Vec<String>,

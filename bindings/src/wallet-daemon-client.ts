@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 export * from "./types/wallet-daemon-client/AccountsListResponse";
+export * from "./types/wallet-daemon-client/WalletGetInfoRequest";
 export * from "./types/wallet-daemon-client/RevealFundsRequest";
 export * from "./types/wallet-daemon-client/ClaimBurnResponse";
 export * from "./types/wallet-daemon-client/KeysSetActiveRequest";
@@ -43,6 +44,7 @@ export * from "./types/wallet-daemon-client/WebauthnStartRegisterRequest";
 export * from "./types/wallet-daemon-client/WebRtcStartRequest";
 export * from "./types/wallet-daemon-client/WebRtcStartResponse";
 export * from "./types/wallet-daemon-client/TransactionSubmitDryRunRequest";
+export * from "./types/wallet-daemon-client/WalletGetInfoResponse";
 export * from "./types/wallet-daemon-client/MintAccountNftResponse";
 export * from "./types/wallet-daemon-client/AuthoredTemplate";
 export * from "./types/wallet-daemon-client/TransactionSubmitManifestResponse";

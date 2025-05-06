@@ -38,11 +38,13 @@ use tari_wallet_daemon_client::{
     },
 };
 use tokio::time;
+use wasm_opt::OptimizationOptions;
 
 use super::context::HandlerContext;
 use crate::{
     handlers::{
         helpers::{get_account, get_account_or_default, invalid_params, transaction_builder},
+        wasm_optimizer::{Error, WasmTemplateOptimizer},
         HandlerError,
     },
     services::WalletEvent,
@@ -479,12 +481,24 @@ pub async fn handle_publish_template(
 
     let fee_account = get_account_or_default(req.fee_account, &sdk.accounts_api())?;
 
+    // trying to optimize WASM binary
+    let wasm_binary = match WasmTemplateOptimizer::new().optimize(req.binary.as_slice()).await {
+        Ok(optimized) => {
+            info!(target: LOG_TARGET, "WASM template optimized, original size: {} bytes, new size: {} bytes", req.binary.len(), optimized.len());
+            optimized
+        },
+        Err(error) => {
+            warn!(target: LOG_TARGET, "Error while optimizing WASM template (using original version now): {}", error);
+            req.binary
+        },
+    };
+
     let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(
             fee_account.address.as_component_address().unwrap(),
             req.max_fee.try_into()?,
         )
-        .publish_template(req.binary)
+        .publish_template(wasm_binary)
         .build_unsigned_transaction();
 
     if req.dry_run {

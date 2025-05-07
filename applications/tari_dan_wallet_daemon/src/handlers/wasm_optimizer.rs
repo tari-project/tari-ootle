@@ -12,13 +12,27 @@ use wasm_opt::{OptimizationError, OptimizationOptions};
 pub enum Error {
     #[error("I/O error: {0}")]
     IO(#[from] io::Error),
-    #[error("I/O error: {0}")]
+    #[error("Optimization error: {0}")]
     Optimization(#[from] OptimizationError),
     #[error("Invalid file after optimization: {0}")]
     InvalidFile(String),
 }
 
-/// Optimizes WASM templates
+/// Optimizes a WebAssembly (WASM) template binary to reduce its size.
+///
+/// # Arguments
+///
+/// * `template_binary` - The original WASM binary to optimize
+///
+/// # Returns
+///
+/// A `Result` containing either the optimized WASM binary as a `Vec<u8>` or an `Error`
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - There are I/O errors when creating temporary files
+/// - The optimization process fails
 pub struct WasmTemplateOptimizer {}
 
 impl WasmTemplateOptimizer {

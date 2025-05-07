@@ -17,7 +17,14 @@ use tari_dan_storage::consensus_models::QuorumCertificate;
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
 use tari_template_lib::{
     models::{Amount, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, ResourceAddress, RistrettoPublicKeyBytes},
+    prelude::{
+        ComponentAddress,
+        NonFungibleAddress,
+        NonFungibleId,
+        PedersenCommitmentBytes,
+        ResourceAddress,
+        RistrettoPublicKeyBytes,
+    },
     types::TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
@@ -192,6 +199,11 @@ pub trait WalletStoreReader {
     fn non_fungible_token_get_by_nft_id(
         &mut self,
         nft_id: NonFungibleId,
+    ) -> Result<NonFungibleToken, WalletStorageError>;
+
+    fn non_fungible_token_get_by_nft_address(
+        &mut self,
+        nft_address: NonFungibleAddress,
     ) -> Result<NonFungibleToken, WalletStorageError>;
 
     fn non_fungible_token_get_ids_by_vault_id(

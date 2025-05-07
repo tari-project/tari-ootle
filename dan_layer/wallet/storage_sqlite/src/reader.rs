@@ -43,7 +43,7 @@ use tari_dan_wallet_sdk::{
 use tari_engine_types::substate::{InvalidSubstateIdFormat, SubstateId};
 use tari_template_lib::{
     models::{ResourceAddress, VaultId},
-    prelude::{ComponentAddress, NonFungibleId, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
+    prelude::{ComponentAddress, NonFungibleAddress, NonFungibleId, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
     types::TemplateAddress,
 };
 use tari_transaction::TransactionId;
@@ -768,6 +768,44 @@ impl WalletStoreReader for ReadTransaction<'_> {
             details: e.to_string(),
             item: "non_fungible_tokens",
             operation: "non_fungible_token_get_by_nft_id",
+        })?;
+        non_fungible_token.try_into_non_fungible_token(vault_address)
+    }
+
+    fn non_fungible_token_get_by_nft_address(
+        &mut self,
+        nft_address: NonFungibleAddress,
+    ) -> Result<NonFungibleToken, WalletStorageError> {
+        use crate::schema::{non_fungible_tokens, vaults};
+
+        let non_fungible_token = non_fungible_tokens::table
+            .filter(non_fungible_tokens::nft_id.eq(nft_address.id().to_string()))
+            .filter(non_fungible_tokens::resource_id.eq(nft_address.resource_address().to_string()))
+            .first::<crate::models::NonFungibleToken>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general("non_fungible_token_get_by_nft_address", e))?;
+        let non_fungible_token = non_fungible_token.ok_or_else(|| WalletStorageError::NotFound {
+            operation: "non_fungible_token_get_by_nft_address",
+            entity: "non_fungible_tokens".to_string(),
+            key: nft_address.to_string(),
+        })?;
+
+        let vault_id = non_fungible_token.vault_id;
+        let vault_address = vaults::table
+            .select(vaults::address)
+            .filter(vaults::id.eq(vault_id))
+            .first::<String>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general("accounts_get_by_vault", e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: "non_fungible_token_get_by_nft_address",
+                entity: "non_fungible_tokens".to_string(),
+                key: format!("{}", vault_id),
+            })?;
+        let vault_address = VaultId::from_str(&vault_address).map_err(|e| WalletStorageError::DecodingError {
+            details: e.to_string(),
+            item: "non_fungible_tokens",
+            operation: "non_fungible_token_get_by_nft_address",
         })?;
         non_fungible_token.try_into_non_fungible_token(vault_address)
     }

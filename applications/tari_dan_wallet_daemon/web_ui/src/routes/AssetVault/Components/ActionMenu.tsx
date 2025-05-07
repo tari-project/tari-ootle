@@ -30,6 +30,7 @@ import SendMoney from "./SendMoney";
 import ClaimFees from "./ClaimFees";
 import PublishTemplate from "./PublishTemplate";
 import { substateIdToString } from "@tari-project/typescript-bindings";
+import TransferNft from "./TransferNft";
 
 function ActionMenu() {
   const { mutate } = useAccountsCreateFreeTestCoins();
@@ -64,6 +65,7 @@ function ActionMenu() {
       }}
     >
       <SendMoney />
+      <TransferNft />
       <ClaimFees />
       <Button variant="outlined" onClick={onClaimFreeCoins}>
         Claim Free Testnet Coins

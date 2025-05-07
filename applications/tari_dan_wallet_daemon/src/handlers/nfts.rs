@@ -1,18 +1,31 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::BTreeMap, str::FromStr};
+use std::{
+    collections::{BTreeMap, HashSet},
+    str::FromStr,
+};
 
 use anyhow::anyhow;
 use axum::headers::authorization::Bearer;
-use log::info;
+use log::{info, warn};
 use tari_crypto::{
     keys::PublicKey as PK,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::ByteArray,
 };
-use tari_dan_wallet_sdk::{apis::key_manager, models::Account};
-use tari_template_builtin::ACCOUNT_NFT_TEMPLATE_ADDRESS;
+use tari_dan_common_types::{optional::Optional, SubstateRequirement};
+use tari_dan_wallet_sdk::{
+    apis::{key_manager, substate::ValidatorScanResult},
+    models::Account,
+};
+use tari_engine_types::{
+    component::new_component_address_from_public_key,
+    instruction::Instruction,
+    substate::SubstateId,
+    ToByteType,
+};
+use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args,
     models::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
@@ -28,13 +41,15 @@ use tari_wallet_daemon_client::{
         ListAccountNftResponse,
         MintAccountNftRequest,
         MintAccountNftResponse,
+        TransferNftRequest,
+        TransferNftResponse,
     },
 };
 use tokio::sync::broadcast;
 
 use super::{context::HandlerContext, helpers::get_account_or_default};
 use crate::{
-    handlers::helpers::{application_error, get_account, transaction_builder},
+    handlers::helpers::{application_error, get_account, get_account_with_inputs, transaction_builder},
     jrpc_server::ApplicationErrorCode,
     services::{TransactionFinalizedEvent, WalletEvent},
     DEFAULT_FEE,
@@ -258,6 +273,235 @@ async fn create_account_nft(
     }
 
     Ok(event)
+}
+
+async fn fill_in_target_account_vault(
+    context: &HandlerContext,
+    inputs: &mut HashSet<SubstateRequirement>,
+    instructions: &mut Vec<Instruction>,
+    target_account_address: ComponentAddress,
+    target_account_public_key: RistrettoPublicKeyBytes,
+    target_resource_address: ResourceAddress,
+) -> anyhow::Result<()> {
+    let sdk = context.wallet_sdk();
+    let existing_target_account = sdk
+        .substate_api()
+        .scan_for_substate(&SubstateId::Component(target_account_address), None)
+        .await
+        .optional()?;
+
+    match existing_target_account {
+        Some(ValidatorScanResult { address, substate }) => {
+            inputs.insert(address.into());
+
+            // Figure out which vault to add as an input
+            let Some(component) = substate.component() else {
+                return Err(anyhow::anyhow!(
+                    "The target account {} is not a component. This is unexpected.",
+                    target_account_address
+                ));
+            };
+            let indexed = component.body.to_indexed_well_known_types()?;
+            let mut found_dest_vault = None;
+            for vault_id in indexed.vault_ids() {
+                // Local vault?
+                match sdk.accounts_api().get_vault(vault_id).optional()? {
+                    Some(vault) => {
+                        if vault.resource_address != target_resource_address {
+                            // Continue searching for a vault for the resource address
+                            continue;
+                        }
+                        // Found it - we're sending to our own vault
+                        found_dest_vault = Some(*vault_id);
+                        break;
+                    },
+                    None => {
+                        // TODO(perf): slow with lots of vaults
+                        let vault = sdk
+                            .substate_api()
+                            .scan_for_substate(&SubstateId::Vault(*vault_id), None)
+                            .await
+                            .optional()?;
+
+                        let Some(vault) = vault.and_then(|scan| scan.substate.into_vault()) else {
+                            warn!(
+                                target: LOG_TARGET,
+                                "❓️ The target account {target_account_address} contains a vault {vault_id} that was not found. This is unexpected.",
+                            );
+                            continue;
+                        };
+
+                        if *vault.resource_address() != target_resource_address {
+                            // Continue searching for a vault for the resource address
+                            continue;
+                        }
+
+                        // Found it
+                        found_dest_vault = Some(*vault_id);
+                    },
+                }
+            }
+
+            if let Some(found) = found_dest_vault {
+                inputs.insert(SubstateRequirement::unversioned(found));
+            }
+        },
+        None => {
+            instructions.push(Instruction::CreateAccount {
+                public_key_address: target_account_public_key,
+                owner_rule: None,
+                access_rules: None,
+                workspace_bucket: None,
+            });
+        },
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+pub async fn handle_transfer_nft(
+    context: &HandlerContext,
+    token: Option<&Bearer>,
+    req: TransferNftRequest,
+) -> Result<TransferNftResponse, anyhow::Error> {
+    let sdk = context.wallet_sdk();
+    context.check_auth(token, &[JrpcPermission::Admin])?;
+
+    // fetch accounts and its inputs
+    let mut instructions = vec![];
+    let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(req.fee_payer_account), sdk)?;
+    let fee_payer_account_address = fee_payer_account
+        .address
+        .as_component_address()
+        .ok_or(anyhow!("Fee payer account address is not a component address!"))?;
+    let (source_account, mut inputs) = get_account_with_inputs(Some(req.source_account), sdk)?;
+    inputs.extend(fee_payer_account_inputs);
+    let source_account_address = source_account
+        .address
+        .as_component_address()
+        .ok_or(anyhow!("Source account address is not a component address!"))?;
+
+    let target_account_address =
+        new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
+
+    // collect all instructions
+    let non_fungible_api = sdk.non_fungible_api();
+    for nft_address in req.nfts {
+        let nft_address = NonFungibleAddress::from_str(nft_address.as_str())
+            .map_err(|error| anyhow!("Invalid NFT address: {error}"))?;
+        // get NFT
+        let nft = non_fungible_api
+            .get_by_address(nft_address.clone())
+            .map_err(|e| anyhow!("Failed to get non fungible token: {}", e))?;
+
+        // add the input for the source account vault substate
+        let src_vault = sdk
+            .accounts_api()
+            .get_vault_by_resource(&source_account.address, &nft.resource_address)?;
+        let src_vault_substate = sdk.substate_api().get_substate(&src_vault.address)?;
+        inputs.insert(src_vault_substate.substate_id.into());
+        let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
+        inputs.insert(resource_substate_address.clone());
+
+        fill_in_target_account_vault(
+            context,
+            &mut inputs,
+            &mut instructions,
+            target_account_address,
+            req.target_account_public_key,
+            nft.resource_address,
+        )
+        .await?;
+
+        instructions.extend([
+            Instruction::CallMethod {
+                component_address: source_account_address,
+                method: "withdraw_non_fungible".to_string(),
+                args: args![nft.resource_address, nft_address.id()],
+            },
+            Instruction::PutLastInstructionOutputOnWorkspace {
+                key: b"bucket".to_vec(),
+            },
+            Instruction::CallMethod {
+                component_address: target_account_address,
+                method: "deposit".to_string(),
+                args: args![Workspace("bucket")],
+            },
+        ])
+    }
+
+    let fee_payer_account_secret_key = sdk
+        .key_manager_api()
+        .derive_key(key_manager::TRANSACTION_BRANCH, fee_payer_account.key_index)?;
+    let fee_payer_account_public_key = RistrettoPublicKey::from_secret_key(&fee_payer_account_secret_key.key);
+
+    let source_account_secret_key = sdk
+        .key_manager_api()
+        .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
+
+    let transaction = transaction_builder(context)
+        .with_fee_instructions(vec![Instruction::CallMethod {
+            component_address: fee_payer_account_address,
+            method: "pay_fee".to_string(),
+            args: args![req.max_fee],
+        }])
+        .with_instructions(instructions)
+        .with_inputs(inputs)
+        .with_authorized_seal_signer()
+        .add_signature(
+            &fee_payer_account_public_key.to_byte_type(),
+            &source_account_secret_key.key,
+        )
+        .build_and_seal(&fee_payer_account_secret_key.key);
+
+    // if dry run, we can return the result immediately
+    if req.dry_run {
+        let transaction_id = *transaction.id();
+        let execute_result = context
+            .transaction_service()
+            .submit_dry_run_transaction(transaction, vec![])
+            .await?;
+        let finalize = execute_result.finalize;
+        return Ok(TransferNftResponse {
+            transaction_id,
+            fee: finalize.fee_receipt.total_fees_paid,
+            fee_refunded: finalize.fee_receipt.total_fee_payment - finalize.fee_receipt.total_fees_paid,
+            result: finalize,
+        });
+    }
+
+    // execute transaction
+    let mut events = context.notifier().subscribe();
+    let tx_id = context
+        .transaction_service()
+        .submit_transaction(transaction, vec![])
+        .await?;
+
+    let finalized = crate::handlers::helpers::wait_for_result(&mut events, tx_id).await?;
+
+    if let Some(reject) = finalized.finalize.result.fee_reject() {
+        return Err(anyhow::anyhow!("Fee transaction rejected: {}", reject));
+    }
+    if let Some(reason) = finalized.finalize.any_reject() {
+        return Err(anyhow::anyhow!(
+            "Fee transaction succeeded (fees charged) however the transaction failed: {}",
+            reason
+        ));
+    }
+    info!(
+        target: LOG_TARGET,
+        "✅ Transferring NFT transaction {} finalized. Fee: {}",
+        finalized.transaction_id,
+        finalized.final_fee
+    );
+
+    Ok(TransferNftResponse {
+        transaction_id: tx_id,
+        fee: finalized.final_fee,
+        fee_refunded: req.max_fee - finalized.final_fee,
+        result: finalized.finalize,
+    })
 }
 
 async fn wait_for_result(

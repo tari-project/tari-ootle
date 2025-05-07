@@ -67,12 +67,16 @@ import type {
   TransactionGetResponse,
   TransactionGetResultRequest,
   TransactionGetResultResponse,
-  TransactionSubmitRequest,
-  TransactionSubmitResponse,
+  TransactionSubmitDryRunRequest,
+  TransactionSubmitDryRunResponse,
   TransactionSubmitManifestRequest,
   TransactionSubmitManifestResponse,
+  TransactionSubmitRequest,
+  TransactionSubmitResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
+  TransferNftRequest,
+  TransferNftResponse,
   WebauthnAlreadyRegisteredRequest,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
@@ -83,11 +87,9 @@ import type {
   WebauthnStartRegisterRequest,
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
-  WebRtcStartResponse,
-  TransactionSubmitDryRunRequest,
-  TransactionSubmitDryRunResponse,
+  WebRtcStartResponse
 } from "@tari-project/typescript-bindings";
-import { FetchRpcTransport, RpcTransport } from "./transports";
+import {FetchRpcTransport, RpcTransport} from "./transports";
 
 export * as transports from "./transports";
 
@@ -268,6 +270,10 @@ export class WalletDaemonClient {
 
   public nftsList(params: ListAccountNftRequest): Promise<ListAccountNftResponse> {
     return this.__invokeRpc("nfts.list", params);
+  }
+
+  public nftTransfer(params: TransferNftRequest): Promise<TransferNftResponse> {
+    return this.__invokeRpc("nfts.transfer", params);
   }
 
   public validatorsClaimFees(params: ClaimValidatorFeesRequest): Promise<ClaimValidatorFeesResponse> {

@@ -14,6 +14,8 @@ pub enum Error {
     IO(#[from] io::Error),
     #[error("I/O error: {0}")]
     Optimization(#[from] OptimizationError),
+    #[error("Invalid file after optimization: {0}")]
+    InvalidFile(String),
 }
 
 /// Optimizes WASM templates
@@ -37,6 +39,10 @@ impl WasmTemplateOptimizer {
         OptimizationOptions::new_optimize_for_size().run(input_file_path, output_file_path.as_path())?;
 
         let result = tokio::fs::read(output_file_path).await?;
+
+        if result.is_empty() {
+            return Err(Error::InvalidFile("Empty file".to_string()));
+        }
 
         temp_dir.close()?;
 

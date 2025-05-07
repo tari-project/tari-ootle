@@ -5,7 +5,6 @@ use std::io;
 
 use tempfile::tempdir;
 use thiserror::Error;
-use tokio::{fs::File, io::AsyncWriteExt};
 use wasm_opt::{OptimizationError, OptimizationOptions};
 
 #[derive(Debug, Error)]
@@ -33,33 +32,23 @@ pub enum Error {
 /// Returns an error if:
 /// - There are I/O errors when creating temporary files
 /// - The optimization process fails
-pub struct WasmTemplateOptimizer {}
+pub async fn optimize_wasm_template(template_binary: &[u8]) -> Result<Vec<u8>, Error> {
+    let temp_dir = tempdir()?;
 
-impl WasmTemplateOptimizer {
-    pub fn new() -> Self {
-        Self {}
+    // create temporary input file
+    let input_file_path = temp_dir.path().join("input.wasm");
+    let output_file_path = temp_dir.path().join("output.wasm");
+    tokio::fs::write(&input_file_path, template_binary).await?;
+
+    OptimizationOptions::new_optimize_for_size().run(input_file_path, output_file_path.as_path())?;
+
+    let result = tokio::fs::read(output_file_path).await?;
+
+    if result.is_empty() {
+        return Err(Error::InvalidFile("Empty file".to_string()));
     }
 
-    pub async fn optimize(&self, template_binary: &[u8]) -> Result<Vec<u8>, Error> {
-        let temp_dir = tempdir()?;
+    temp_dir.close()?;
 
-        // create temporary input file
-        let input_file_path = temp_dir.path().join("input.wasm");
-        let output_file_path = temp_dir.path().join("output.wasm");
-        let mut input_file = File::create(input_file_path.as_path()).await?;
-        input_file.write_all(template_binary).await?;
-        input_file.flush().await?;
-
-        OptimizationOptions::new_optimize_for_size().run(input_file_path, output_file_path.as_path())?;
-
-        let result = tokio::fs::read(output_file_path).await?;
-
-        if result.is_empty() {
-            return Err(Error::InvalidFile("Empty file".to_string()));
-        }
-
-        temp_dir.close()?;
-
-        Ok(result)
-    }
+    Ok(result)
 }

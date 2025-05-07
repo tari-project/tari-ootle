@@ -43,7 +43,7 @@ use super::context::HandlerContext;
 use crate::{
     handlers::{
         helpers::{get_account, get_account_or_default, invalid_params, transaction_builder},
-        wasm_optimizer::WasmTemplateOptimizer,
+        wasm_optimizer::optimize_wasm_template,
         HandlerError,
     },
     services::WalletEvent,
@@ -481,7 +481,7 @@ pub async fn handle_publish_template(
     let fee_account = get_account_or_default(req.fee_account, &sdk.accounts_api())?;
 
     // trying to optimize WASM binary
-    let wasm_binary = match WasmTemplateOptimizer::new().optimize(req.binary.as_slice()).await {
+    let wasm_binary = match optimize_wasm_template(req.binary.as_slice()).await {
         Ok(optimized) => {
             info!(target: LOG_TARGET, "WASM template optimized, original size: {} bytes, new size: {} bytes", req.binary.len(), optimized.len());
             optimized

@@ -987,7 +987,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -1668,6 +1668,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "codespan-reporting"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe6d2e5af09e8c8ad56c969f2157a3d4238cebc7c55f0a517728c38f7b200f81"
+dependencies = [
+ "serde",
+ "termcolor",
+ "unicode-width 0.2.0",
+]
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2298,6 +2309,65 @@ checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
 dependencies = [
  "proc-macro2",
  "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
+name = "cxx"
+version = "1.0.158"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a71ea7f29c73f7ffa64c50b83c9fe4d3a6d4be89a86b009eb80d5a6d3429d741"
+dependencies = [
+ "cc",
+ "cxxbridge-cmd",
+ "cxxbridge-flags",
+ "cxxbridge-macro",
+ "foldhash",
+ "link-cplusplus",
+]
+
+[[package]]
+name = "cxx-build"
+version = "1.0.158"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36a8232661d66dcf713394726157d3cfe0a89bfc85f52d6e9f9bbc2306797fe7"
+dependencies = [
+ "cc",
+ "codespan-reporting",
+ "proc-macro2",
+ "quote",
+ "scratch",
+ "syn 2.0.100",
+]
+
+[[package]]
+name = "cxxbridge-cmd"
+version = "1.0.158"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f44296c8693e9ea226a48f6a122727f77aa9e9e338380cb021accaeeb7ee279"
+dependencies = [
+ "clap 4.5.35",
+ "codespan-reporting",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
+name = "cxxbridge-flags"
+version = "1.0.158"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c42f69c181c176981ae44ba9876e2ea41ce8e574c296b38d06925ce9214fb8e4"
+
+[[package]]
+name = "cxxbridge-macro"
+version = "1.0.158"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8faff5d4467e0709448187df29ccbf3b0982cc426ee444a193f87b11afb565a8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustversion",
  "syn 2.0.100",
 ]
 
@@ -5800,6 +5870,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "link-cplusplus"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a6f6da007f968f9def0d65a05b187e2960183de70c160204ecfccf0ee330212"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7869,7 +7948,7 @@ checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes 1.10.1",
  "heck 0.5.0",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -7889,7 +7968,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -7935,7 +8014,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.100",
@@ -7948,7 +8027,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.100",
@@ -8979,6 +9058,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "scratch"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f6280af86e5f559536da57a45ebc84948833b3bee313a7dd25232e09c878a52"
+
+[[package]]
 name = "sct"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9711,6 +9796,12 @@ dependencies = [
 
 [[package]]
 name = "strum"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
+
+[[package]]
+name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
@@ -9724,6 +9815,19 @@ dependencies = [
  "heck 0.3.3",
  "proc-macro2",
  "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.24.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e385be0d24f186b4ce2f9982191e7101bb737312ad61c1f2f984f34bcf85d59"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "rustversion",
  "syn 1.0.109",
 ]
 
@@ -10551,11 +10655,13 @@ dependencies = [
  "tari_transaction_manifest",
  "tari_utilities",
  "tari_wallet_daemon_client",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tower-http",
  "url",
  "uuid 1.16.0",
+ "wasm-opt",
  "webauthn-rs",
  "webrtc",
 ]
@@ -12734,6 +12840,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ba64e81215916eaeb48fee292f29401d69235d62d8b8fd92a7b2844ec5ae5f7"
 dependencies = [
  "leb128",
+]
+
+[[package]]
+name = "wasm-opt"
+version = "0.116.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fd87a4c135535ffed86123b6fb0f0a5a0bc89e50416c942c5f0662c645f679c"
+dependencies = [
+ "anyhow",
+ "libc",
+ "strum 0.24.1",
+ "strum_macros 0.24.3",
+ "tempfile",
+ "thiserror 1.0.69",
+ "wasm-opt-cxx-sys",
+ "wasm-opt-sys",
+]
+
+[[package]]
+name = "wasm-opt-cxx-sys"
+version = "0.116.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c57b28207aa724318fcec6575fe74803c23f6f266fce10cbc9f3f116762f12e"
+dependencies = [
+ "anyhow",
+ "cxx",
+ "cxx-build",
+ "wasm-opt-sys",
+]
+
+[[package]]
+name = "wasm-opt-sys"
+version = "0.116.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a1cce564dc768dacbdb718fc29df2dba80bd21cb47d8f77ae7e3d95ceb98cbe"
+dependencies = [
+ "anyhow",
+ "cc",
+ "cxx",
+ "cxx-build",
 ]
 
 [[package]]

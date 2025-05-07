@@ -38,13 +38,12 @@ use tari_wallet_daemon_client::{
     },
 };
 use tokio::time;
-use wasm_opt::OptimizationOptions;
 
 use super::context::HandlerContext;
 use crate::{
     handlers::{
         helpers::{get_account, get_account_or_default, invalid_params, transaction_builder},
-        wasm_optimizer::{Error, WasmTemplateOptimizer},
+        wasm_optimizer::WasmTemplateOptimizer,
         HandlerError,
     },
     services::WalletEvent,

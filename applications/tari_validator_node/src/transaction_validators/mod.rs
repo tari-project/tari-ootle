@@ -8,6 +8,9 @@ mod network;
 mod signature;
 mod template_exists;
 
+mod dry_run;
+
+pub use dry_run::*;
 pub use epoch_range::*;
 pub use fee::*;
 pub use has_inputs::*;

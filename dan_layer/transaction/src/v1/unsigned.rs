@@ -31,6 +31,7 @@ pub struct UnsignedTransactionV1 {
     pub min_epoch: Option<Epoch>,
     pub max_epoch: Option<Epoch>,
     pub is_seal_signer_authorized: bool,
+    pub dry_run: bool,
 }
 
 impl UnsignedTransactionV1 {
@@ -45,6 +46,7 @@ impl UnsignedTransactionV1 {
         inputs: IndexSet<SubstateRequirement>,
         min_epoch: Option<Epoch>,
         max_epoch: Option<Epoch>,
+        dry_run: bool,
     ) -> Self {
         Self {
             network: network.into(),
@@ -54,11 +56,17 @@ impl UnsignedTransactionV1 {
             min_epoch,
             max_epoch,
             is_seal_signer_authorized: false,
+            dry_run,
         }
     }
 
     pub fn set_network<N: Into<u8>>(&mut self, network: N) -> &mut Self {
         self.network = network.into();
+        self
+    }
+
+    pub fn set_dry_run(&mut self, dry_run: bool) -> &mut Self {
+        self.dry_run = dry_run;
         self
     }
 

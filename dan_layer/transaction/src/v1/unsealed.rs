@@ -56,6 +56,10 @@ impl UnsealedTransactionV1 {
         self
     }
 
+    pub fn is_dry_run(&self) -> bool {
+        self.transaction.dry_run
+    }
+
     pub fn unsigned_transaction(&self) -> &UnsignedTransactionV1 {
         &self.transaction
     }

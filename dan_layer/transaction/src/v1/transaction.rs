@@ -79,6 +79,10 @@ impl TransactionV1 {
             .into()
     }
 
+    pub fn is_dry_run(&self) -> bool {
+        self.body.is_dry_run()
+    }
+
     pub fn id(&self) -> &TransactionId {
         &self.id
     }

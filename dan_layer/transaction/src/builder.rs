@@ -45,6 +45,11 @@ impl TransactionBuilder {
         self
     }
 
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.unsigned_transaction.set_dry_run(dry_run);
+        self
+    }
+
     pub fn with_authorized_seal_signer(mut self) -> Self {
         self.unsigned_transaction = self.unsigned_transaction.authorized_sealed_signer();
         self.clear_signatures();

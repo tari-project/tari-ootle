@@ -24,12 +24,12 @@ import type {
   AccountGetDefaultRequest,
   AccountGetRequest,
   AccountGetResponse,
-  AccountSetDefaultRequest,
-  AccountSetDefaultResponse,
   AccountsCreateFreeTestCoinsRequest,
   AccountsCreateFreeTestCoinsResponse,
   AccountsCreateRequest,
   AccountsCreateResponse,
+  AccountSetDefaultRequest,
+  AccountSetDefaultResponse,
   AccountsGetBalancesRequest,
   AccountsGetBalancesResponse,
   AccountsListRequest,
@@ -86,8 +86,8 @@ import type {
   TransactionSubmitResponse,
   TransactionWaitResultRequest,
   TransactionWaitResultResponse,
-  WebRtcStartRequest,
-  WebRtcStartResponse,
+  TransferNftRequest,
+  TransferNftResponse,
   WebauthnAlreadyRegisteredResponse,
   WebauthnFinishAuthRequest,
   WebauthnFinishRegisterRequest,
@@ -96,6 +96,8 @@ import type {
   WebauthnStartAuthResponse,
   WebauthnStartRegisterRequest,
   WebauthnStartRegisterResponse,
+  WebRtcStartRequest,
+  WebRtcStartResponse,
 } from "@tari-project/typescript-bindings";
 import { WalletDaemonClient } from "@tari-project/wallet_jrpc_client";
 import useAuthStore from "../store/authStore";
@@ -291,6 +293,9 @@ export const confidentialViewVaultBalance = (
 // nfts
 export const nftList = (request: ListAccountNftRequest): Promise<ListAccountNftResponse> =>
   client().then((c) => c.nftsList(request));
+
+export const nftTransfer = (request: TransferNftRequest): Promise<TransferNftResponse> =>
+  client().then((c) => c.nftTransfer(request));
 
 // validators
 

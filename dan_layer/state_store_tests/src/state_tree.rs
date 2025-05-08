@@ -6,16 +6,9 @@ use tari_dan_storage::{StateStore, StateStoreReadTransaction, StateStoreWriteTra
 use tari_state_tree::{NibblePath, Node, NodeKey, StaleTreeNode, Version};
 
 use crate::{
-    helpers::{assert_eq_debug, create_rocksdb, create_sqlite},
+    helpers::{assert_eq_debug, create_rocksdb},
     TEST_NUM_PRESHARDS,
 };
-
-#[test]
-fn state_tree_sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    state_tree_operations(db, 1000);
-}
 
 #[test]
 fn state_tree_rocksdb() {

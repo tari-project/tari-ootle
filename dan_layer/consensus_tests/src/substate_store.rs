@@ -6,14 +6,7 @@ use tari_consensus::{
     hotstuff::substate_store::{LockFailedError, PendingSubstateStore, SubstateStoreError},
     traits::{ReadableSubstateStore, WriteableSubstateStore},
 };
-use tari_dan_common_types::{
-    shard::Shard,
-    NodeAddressable,
-    NumPreshards,
-    PeerAddress,
-    SubstateLockType,
-    VersionedSubstateId,
-};
+use tari_dan_common_types::{shard::Shard, NumPreshards, PeerAddress, SubstateLockType, VersionedSubstateId};
 use tari_dan_storage::{
     consensus_models::{Block, BlockId, QcId, RequireLockIntentRef, SubstateChange, SubstateRecord},
     StateStore,
@@ -22,25 +15,26 @@ use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{Substate, SubstateId, SubstateValue},
 };
-use tari_state_store_sqlite::SqliteStateStore;
+use tari_state_store_rocksdb::RocksDbStateStore;
 use tari_template_lib::{
     models::ComponentAddress,
     types::{EntityId, ObjectKey},
 };
+use tempfile::TempDir;
 
 use crate::support::{logging::setup_logger, TEST_NUM_PRESHARDS};
 
-type TestStore = SqliteStateStore<PeerAddress>;
+type TestStore = RocksDbStateStore<PeerAddress>;
 
 #[test]
 fn it_allows_substate_up_for_v0() {
-    let store = create_store();
+    let (store, _tmp) = create_store();
 
     let id = new_substate_id(0);
     let value = new_substate_value(0);
 
     let tx = store.create_read_tx().unwrap();
-    let mut store = create_pending_store(&tx);
+    let mut store = create_pending_store::<TestStore>(&tx);
     // Cannot put version 1
     store
         .put(SubstateChange::Up {
@@ -65,12 +59,12 @@ fn it_allows_substate_up_for_v0() {
 #[test]
 fn it_allows_down_then_up() {
     setup_logger();
-    let store = create_store();
+    let (store, _tmp) = create_store();
 
     let id = add_substate(&store, 0, 0);
 
     let tx = store.create_read_tx().unwrap();
-    let mut store = create_pending_store(&tx);
+    let mut store = create_pending_store::<TestStore>(&tx);
 
     let s = store.get_latest_change(id.substate_id()).unwrap().into_up().unwrap();
     assert_substate_eq(s, new_substate(0, 0));
@@ -99,12 +93,12 @@ fn it_allows_down_then_up() {
 
 #[test]
 fn it_fails_if_previous_version_is_not_down() {
-    let store = create_store();
+    let (store, _tmp) = create_store();
 
     let id = add_substate(&store, 0, 0);
 
     let tx = store.create_read_tx().unwrap();
-    let mut store = create_pending_store(&tx);
+    let mut store = create_pending_store::<TestStore>(&tx);
     let err = store
         .put(SubstateChange::Up {
             id: id.substate_id().clone(),
@@ -118,12 +112,12 @@ fn it_fails_if_previous_version_is_not_down() {
 
 #[test]
 fn it_disallows_more_than_one_write_lock_non_local_only() {
-    let store = create_store();
+    let (store, _tmp) = create_store();
 
     let id = add_substate(&store, 0, 0);
 
     let tx = store.create_read_tx().unwrap();
-    let mut store = create_pending_store(&tx);
+    let mut store = create_pending_store::<TestStore>(&tx);
 
     store
         .try_lock(
@@ -160,12 +154,12 @@ fn it_disallows_more_than_one_write_lock_non_local_only() {
 
 #[test]
 fn it_allows_requesting_the_same_lock_within_one_transaction() {
-    let store = create_store();
+    let (store, _tmp) = create_store();
 
     let id = add_substate(&store, 0, 0);
 
     let tx = store.create_read_tx().unwrap();
-    let mut store = create_pending_store(&tx);
+    let mut store = create_pending_store::<TestStore>(&tx);
 
     store
         .try_lock(
@@ -224,8 +218,9 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
     VersionedSubstateId::new(id, version)
 }
 
-fn create_store() -> TestStore {
-    let store = SqliteStateStore::connect(":memory:").unwrap();
+fn create_store() -> (TestStore, TempDir) {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let store = RocksDbStateStore::open(&temp_dir).unwrap();
     store
         .with_write_tx(|tx| {
             let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
@@ -233,12 +228,12 @@ fn create_store() -> TestStore {
             zero.insert(tx)
         })
         .unwrap();
-    store
+    (store, temp_dir)
 }
 
-fn create_pending_store<'a, 'tx, TAddr: NodeAddressable>(
-    tx: &'a <SqliteStateStore<TAddr> as StateStore>::ReadTransaction<'tx>,
-) -> PendingSubstateStore<'a, 'tx, SqliteStateStore<TAddr>> {
+fn create_pending_store<'a, 'tx, TStore: StateStore>(
+    tx: &'a TStore::ReadTransaction<'tx>,
+) -> PendingSubstateStore<'a, 'tx, TStore> {
     PendingSubstateStore::new(tx, BlockId::zero(), TEST_NUM_PRESHARDS)
 }
 

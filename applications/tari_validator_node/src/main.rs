@@ -66,9 +66,6 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(cli::Subcommand::CompactDb) => {
             let timer = std::time::Instant::now();
-            #[cfg(feature = "sqlite_backend")]
-            info!("sqlite backend does not support compaction");
-            #[cfg(not(feature = "sqlite_backend"))]
             tari_validator_node::consensus::spec::ValidatorNodeStateStore::compact_all(
                 &config.validator_node.state_db_path,
             )?;

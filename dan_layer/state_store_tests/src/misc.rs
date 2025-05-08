@@ -26,14 +26,7 @@ use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitPro
 use tari_state_tree::{compute_proof_for_hashes, TreeHash};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::helpers::{assert_eq_debug, create_rocksdb, create_sqlite};
-
-#[test]
-fn miscellaneous_sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    miscellaneous_operations(db);
-}
+use crate::helpers::{assert_eq_debug, create_rocksdb};
 
 #[test]
 fn miscellaneous_rocksdb() {

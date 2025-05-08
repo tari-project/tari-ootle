@@ -142,9 +142,6 @@ impl Default for ValidatorNodeConfig {
             shard_key_file: PathBuf::from("shard_key.json"),
             identity_file: PathBuf::from("validator_node_id.json"),
             data_dir: PathBuf::from("data/validator_node"),
-            #[cfg(feature = "sqlite_backend")]
-            state_db_path: PathBuf::from("state.db"),
-            #[cfg(not(feature = "sqlite_backend"))]
             state_db_path: PathBuf::from("rocksdb"),
             // database: tari_any_state_store::Config {
             //     database_type: AnyDatabaseType::Sqlite,

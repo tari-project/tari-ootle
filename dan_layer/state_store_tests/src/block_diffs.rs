@@ -17,15 +17,7 @@ use crate::helpers::{
     create_chain,
     create_random_substate_id,
     create_rocksdb,
-    create_sqlite,
 };
-
-#[test]
-fn block_diffs_sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    block_diffs_operations(db);
-}
 
 #[test]
 fn block_diffs_rocksdb() {

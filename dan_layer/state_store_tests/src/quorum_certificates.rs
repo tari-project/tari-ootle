@@ -10,14 +10,7 @@ use tari_dan_storage::{
 };
 use tari_sidechain::QuorumDecision;
 
-use crate::helpers::{assert_eq_debug, create_random_block_id, create_rocksdb, create_sqlite};
-
-#[test]
-fn quorum_certificates_sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    quorum_certificates_operations(db);
-}
+use crate::helpers::{assert_eq_debug, create_random_block_id, create_rocksdb};
 
 #[test]
 fn quorum_certificates_rocksdb() {

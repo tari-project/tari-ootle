@@ -25,10 +25,7 @@ use crate::{
     },
 };
 
-#[cfg(not(feature = "sqlite_backend"))]
 pub type ValidatorNodeStateStore = tari_state_store_rocksdb::RocksDbStateStore<PeerAddress>;
-#[cfg(feature = "sqlite_backend")]
-pub type ValidatorNodeStateStore = tari_state_store_sqlite::SqliteStateStore<PeerAddress>;
 #[derive(Clone)]
 pub struct TariConsensusSpec;
 

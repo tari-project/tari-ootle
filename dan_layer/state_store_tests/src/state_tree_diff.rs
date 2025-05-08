@@ -9,13 +9,7 @@ use tari_dan_storage::{
 };
 use tari_state_tree::StateHashTreeDiff;
 
-use crate::helpers::{create_block, create_rocksdb, create_sqlite};
-
-#[test]
-fn pending_state_tree_diff_sqlite() {
-    let db = create_sqlite();
-    pending_state_tree_diff_operations(db);
-}
+use crate::helpers::{create_block, create_rocksdb};
 
 #[test]
 fn pending_state_tree_diff_rocksdb() {

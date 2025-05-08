@@ -35,12 +35,13 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, Decision, ExecutedTransaction, TransactionPoolRecord},
+    consensus_models::{Block, BlockId, Decision, TransactionExecution, TransactionPoolRecord},
     global::models,
+    time::PrimitiveDateTime,
     Ordering,
 };
 use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult},
+    commit_result::FinalizeResult,
     fees::FeeCostBreakdown,
     serde_with,
     substate::{SubstateId, SubstateValue},
@@ -322,7 +323,7 @@ pub struct GetTransactionRequest {
     ts(export, export_to = "../../bindings/src/types/validator-node-client/")
 )]
 pub struct GetTransactionResponse {
-    pub transaction: ExecutedTransaction,
+    pub transaction: Transaction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -351,12 +352,10 @@ pub struct GetTransactionResultRequest {
     )
 )]
 pub struct GetTransactionResultResponse {
-    pub result: Option<ExecuteResult>,
-    pub final_decision: Option<Decision>,
-    #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
-    pub finalized_time: Option<Duration>,
-    #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
-    pub execution_time: Option<Duration>,
+    pub transaction_execution: TransactionExecution,
+    pub final_decision: Decision,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub finalize_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

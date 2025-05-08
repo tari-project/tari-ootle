@@ -9,7 +9,7 @@ export type IndexerTransactionFinalizedResult =
         final_decision: Decision;
         execution_result: ExecuteResult | null;
         execution_time: { secs: number; nanos: number };
-        finalized_time: { secs: number; nanos: number };
+        finalized_time: string;
         abort_details: string | null;
       };
     };

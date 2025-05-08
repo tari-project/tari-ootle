@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
+use tari_dan_common_types::NodeHeight;
 use tari_dan_storage::consensus_models::{
     BlockId,
     HighQc,
@@ -100,6 +101,7 @@ impl Cf for LastSentVoteModel {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitBlock {
+    pub height: NodeHeight,
     pub block_id: BlockId,
     pub parent_id: BlockId,
 }

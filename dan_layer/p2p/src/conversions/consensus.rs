@@ -45,7 +45,6 @@ use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, ShardGro
 use tari_dan_storage::{
     consensus_models,
     consensus_models::{
-        AbortReason,
         BlockId,
         Command,
         Decision,
@@ -63,7 +62,10 @@ use tari_dan_storage::{
         TransactionAtom,
     },
 };
-use tari_engine_types::substate::{SubstateId, SubstateValue};
+use tari_engine_types::{
+    commit_result::AbortReason,
+    substate::{SubstateId, SubstateValue},
+};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
@@ -733,41 +735,30 @@ impl From<Decision> for proto::consensus::decision::Decision {
 impl From<AbortReason> for proto::consensus::AbortReason {
     fn from(value: AbortReason) -> Self {
         match value {
-            AbortReason::None => Self::None,
-            AbortReason::TransactionAtomMustBeAbort => Self::TransactionAtomMustBeAbort,
-            AbortReason::TransactionAtomMustBeCommit => Self::TransactionAtomMustBeCommit,
-            AbortReason::InputLockConflict => Self::InputLockConflict,
             AbortReason::LockOutputsFailed => Self::LockOutputsFailed,
             AbortReason::LockInputsOutputsFailed => Self::LockInputsOutputsFailed,
             AbortReason::LockInputsFailed => Self::LockInputsFailed,
-            AbortReason::InvalidTransaction => Self::InvalidTransaction,
             AbortReason::ExecutionFailure => Self::ExecutionFailure,
             AbortReason::OneOrMoreInputsNotFound => Self::OneOrMoreInputsNotFound,
-            AbortReason::ForeignShardGroupDecidedToAbort => Self::ForeignShardGroupDecidedToAbort,
             AbortReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
             AbortReason::InsufficientFeesPaid => Self::InsufficientFeesPaid,
-            AbortReason::EarlyAbort => Self::EarlyAbort,
         }
     }
 }
 
-impl From<proto::consensus::AbortReason> for AbortReason {
-    fn from(proto_reason: proto::consensus::AbortReason) -> Self {
+impl TryFrom<proto::consensus::AbortReason> for AbortReason {
+    type Error = anyhow::Error;
+
+    fn try_from(proto_reason: proto::consensus::AbortReason) -> Result<Self, Self::Error> {
         match proto_reason {
-            proto::consensus::AbortReason::None => Self::None,
-            proto::consensus::AbortReason::TransactionAtomMustBeAbort => Self::TransactionAtomMustBeAbort,
-            proto::consensus::AbortReason::TransactionAtomMustBeCommit => Self::TransactionAtomMustBeCommit,
-            proto::consensus::AbortReason::InputLockConflict => Self::InputLockConflict,
-            proto::consensus::AbortReason::LockInputsFailed => Self::LockInputsFailed,
-            proto::consensus::AbortReason::LockOutputsFailed => Self::LockOutputsFailed,
-            proto::consensus::AbortReason::LockInputsOutputsFailed => Self::LockInputsOutputsFailed,
-            proto::consensus::AbortReason::InvalidTransaction => Self::InvalidTransaction,
-            proto::consensus::AbortReason::ExecutionFailure => Self::ExecutionFailure,
-            proto::consensus::AbortReason::OneOrMoreInputsNotFound => Self::OneOrMoreInputsNotFound,
-            proto::consensus::AbortReason::ForeignShardGroupDecidedToAbort => Self::ForeignShardGroupDecidedToAbort,
-            proto::consensus::AbortReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
-            proto::consensus::AbortReason::InsufficientFeesPaid => Self::InsufficientFeesPaid,
-            proto::consensus::AbortReason::EarlyAbort => Self::EarlyAbort,
+            proto::consensus::AbortReason::None => Err(anyhow!("AbortReason not provided/None")),
+            proto::consensus::AbortReason::LockInputsFailed => Ok(Self::LockInputsFailed),
+            proto::consensus::AbortReason::LockOutputsFailed => Ok(Self::LockOutputsFailed),
+            proto::consensus::AbortReason::LockInputsOutputsFailed => Ok(Self::LockInputsOutputsFailed),
+            proto::consensus::AbortReason::ExecutionFailure => Ok(Self::ExecutionFailure),
+            proto::consensus::AbortReason::OneOrMoreInputsNotFound => Ok(Self::OneOrMoreInputsNotFound),
+            proto::consensus::AbortReason::ForeignPledgeInputConflict => Ok(Self::ForeignPledgeInputConflict),
+            proto::consensus::AbortReason::InsufficientFeesPaid => Ok(Self::InsufficientFeesPaid),
         }
     }
 }
@@ -784,7 +775,7 @@ impl TryFrom<proto::consensus::Decision> for Decision {
             proto::consensus::decision::Decision::Commit(_) => Ok(Decision::Commit),
             proto::consensus::decision::Decision::Abort(reason) => {
                 let reason = proto::consensus::AbortReason::try_from(*reason)?;
-                Ok(Decision::Abort(reason.into()))
+                Ok(Decision::Abort(reason.try_into()?))
             },
         }
     }

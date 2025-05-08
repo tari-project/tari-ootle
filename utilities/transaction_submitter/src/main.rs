@@ -191,30 +191,27 @@ async fn fetch_result_summary(
                         .optional()
                     {
                         Ok(Some(result)) => {
-                            if let Some(ref exec_result) = result.result {
-                                let result = if let Some(diff) = exec_result.finalize.result.accept() {
-                                    TxFinalized {
-                                        is_committed: true,
-                                        is_error: false,
-                                        num_up_substates: diff.up_len(),
-                                        num_down_substates: diff.down_len(),
-                                        execution_time: result.execution_time.unwrap_or_default(),
-                                    }
-                                } else {
-                                    TxFinalized {
-                                        is_committed: false,
-                                        is_error: false,
-                                        num_up_substates: 0,
-                                        num_down_substates: 0,
-                                        execution_time: result.execution_time.unwrap_or_default(),
-                                    }
-                                };
-
-                                results_tx.send(result).await.unwrap();
-                                break;
+                            let exec_result = result.transaction_execution.result();
+                            let result = if let Some(diff) = exec_result.finalize.result.accept() {
+                                TxFinalized {
+                                    is_committed: true,
+                                    is_error: false,
+                                    num_up_substates: diff.up_len(),
+                                    num_down_substates: diff.down_len(),
+                                    execution_time: result.transaction_execution.execution_time(),
+                                }
                             } else {
-                                sleep(Duration::from_secs(1)).await;
-                            }
+                                TxFinalized {
+                                    is_committed: false,
+                                    is_error: false,
+                                    num_up_substates: 0,
+                                    num_down_substates: 0,
+                                    execution_time: result.transaction_execution.execution_time(),
+                                }
+                            };
+
+                            results_tx.send(result).await.unwrap();
+                            break;
                         },
                         Ok(None) => {
                             println!(

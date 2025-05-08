@@ -4,10 +4,9 @@
 use log::*;
 use tari_dan_common_types::{committee::CommitteeInfo, Epoch};
 use tari_dan_storage::{
-    consensus_models::{TransactionPool, TransactionRecord},
+    consensus_models::{Decision, TransactionPool, TransactionRecord},
     StateStore,
 };
-use tari_engine_types::commit_result::RejectReason;
 use tari_transaction::TransactionId;
 use tokio::sync::mpsc;
 
@@ -58,16 +57,16 @@ where TConsensusSpec: ConsensusSpec
             let mut batch = Vec::with_capacity(recs.len());
             debug!(target: LOG_TARGET, "Processing {} requested transactions", recs.len());
             for transaction in recs {
-                if let Some((rec, is_ready)) =
+                if let Some(validate_data) =
                     self.validate_new_transaction(tx, current_epoch, transaction, local_committee_info)?
                 {
                     debug!(
                         target: LOG_TARGET,
-                        "Transaction {} is ready: {}. Adding to pool",
-                        rec.id(),
-                        is_ready
+                        "Transaction {} must sequence: {}.",
+                        validate_data.transaction.id(),
+                        validate_data.must_sequence
                     );
-                    batch.push((rec, is_ready));
+                    batch.push(validate_data);
                 }
             }
             debug!(target: LOG_TARGET, "🎱 Adding {} transactions to pool", batch.len());
@@ -76,14 +75,17 @@ where TConsensusSpec: ConsensusSpec
                 tx,
                 local_committee_info.num_preshards(),
                 local_committee_info.num_committees(),
-                batch.iter().map(|(t, is_ready)| (t, *is_ready)),
+                batch
+                    .iter()
+                    .filter(|data| data.must_sequence)
+                    .map(|data| (&data.transaction, data.decision, true)),
             )?;
 
             // TODO: Could this cause a race-condition? Transaction could be proposed as LocalPrepare before the
             // unparked block is processed (however, if there's a parked block it's probably not our turn to
             // propose). Ideally we remove this channel because it's a work around
             self.tx_missing_transactions
-                .send(batch.iter().map(|(t, _)| *t.id()).collect())
+                .send(batch.iter().map(|data| *data.transaction.id()).collect())
                 .map_err(|_| HotStuffError::InternalChannelClosed {
                     context: "process_requested",
                 })?;
@@ -98,13 +100,27 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
     ) -> Result<Option<TransactionRecord>, HotStuffError> {
         self.store.with_write_tx(|tx| {
-            let Some((transaction, is_ready)) =
+            let Some(validate_data) =
                 self.validate_new_transaction(tx, current_epoch, transaction, local_committee_info)?
             else {
                 return Ok(None);
             };
+            let NewTransactionValidation {
+                transaction,
+                decision,
+                must_sequence,
+            } = validate_data;
 
-            self.add_to_pool(tx, &transaction, local_committee_info, is_ready)?;
+            debug!(
+                target: LOG_TARGET,
+                "Transaction {} must sequence: {}.",
+                transaction.id(),
+                must_sequence
+            );
+
+            if must_sequence {
+                self.add_to_pool(tx, &transaction, decision, local_committee_info, true)?;
+            }
             Ok(Some(transaction))
         })
     }
@@ -113,16 +129,16 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &mut <<TConsensusSpec as ConsensusSpec>::StateStore as StateStore>::WriteTransaction<'_>,
         current_epoch: Epoch,
-        mut rec: TransactionRecord,
+        rec: TransactionRecord,
         local_committee_info: &CommitteeInfo,
-    ) -> Result<Option<(TransactionRecord, bool)>, HotStuffError> {
+    ) -> Result<Option<NewTransactionValidation>, HotStuffError> {
         if self.transaction_pool.exists(&**tx, rec.id())? {
             return Ok(None);
         }
 
         // Edge case: a validator sends a transaction that is already finalized as a missing transaction or via
         // propagation
-        if rec.is_finalized() {
+        if rec.is_finalized(&**tx)? {
             warn!(
                 target: LOG_TARGET, "Transaction {} is already finalized. Consensus will ignore it.", rec.id()
             );
@@ -134,10 +150,9 @@ where TConsensusSpec: ConsensusSpec
         if let Err(err) = result {
             warn!(
                 target: LOG_TARGET,
-                "Transaction {} failed validation: {}", rec.id(), err
+                "Transaction {} received from validator (missing transactions) failed validation and will be ignored: {}", rec.id(), err
             );
-            rec.abort(RejectReason::InvalidTransaction(err.to_string())).save(tx)?;
-            return Ok(Some((rec, true)));
+            return Ok(None);
         }
 
         rec.save(tx)?;
@@ -153,27 +168,35 @@ where TConsensusSpec: ConsensusSpec
             );
         }
 
-        Ok(Some((rec, has_some_local_inputs_or_all_foreign_inputs)))
+        Ok(Some(NewTransactionValidation {
+            transaction: rec,
+            decision: Decision::Commit,
+            // If we dont have the required data, dont add to pool yet. We will add it once we have processed the
+            // LocalAccept foreign proposal
+            must_sequence: has_some_local_inputs_or_all_foreign_inputs,
+        }))
     }
 
     fn add_to_pool(
         &self,
         tx: &mut <TConsensusSpec::StateStore as StateStore>::WriteTransaction<'_>,
         transaction: &TransactionRecord,
+        decision: Decision,
         local_committee_info: &CommitteeInfo,
         is_ready: bool,
     ) -> Result<(), HotStuffError> {
         info!(
             target: LOG_TARGET,
-            "🔥 Adding transaction {} ({} input(s)) to pool. Is ready: {}",
+            "🔥 Adding transaction {} {} ({} input(s)) to pool. Is ready: {}",
             transaction.id(),
+            decision,
             transaction.transaction().inputs().len(),
             is_ready
         );
         self.transaction_pool.insert_new(
             tx,
             *transaction.id(),
-            transaction.current_decision(),
+            decision,
             &transaction.to_initial_evidence(
                 local_committee_info.num_preshards(),
                 local_committee_info.num_committees(),
@@ -183,4 +206,10 @@ where TConsensusSpec: ConsensusSpec
         )?;
         Ok(())
     }
+}
+
+struct NewTransactionValidation {
+    pub transaction: TransactionRecord,
+    pub decision: Decision,
+    pub must_sequence: bool,
 }

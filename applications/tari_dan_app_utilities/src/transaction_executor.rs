@@ -29,7 +29,7 @@ pub trait TransactionExecutor {
 
     fn execute(
         &self,
-        transaction: Transaction,
+        transaction: &Transaction,
         state_store: ReadOnlyMemoryStateStore,
         virtual_substates: VirtualSubstates,
     ) -> Result<ExecutionOutput, Self::Error>;
@@ -37,7 +37,6 @@ pub trait TransactionExecutor {
 
 #[derive(Debug, Clone)]
 pub struct ExecutionOutput {
-    pub transaction: Transaction,
     pub result: ExecuteResult,
 }
 
@@ -106,7 +105,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
 
     fn execute(
         &self,
-        transaction: Transaction,
+        transaction: &Transaction,
         state_store: ReadOnlyMemoryStateStore,
         virtual_substates: VirtualSubstates,
     ) -> Result<ExecutionOutput, Self::Error> {
@@ -136,7 +135,7 @@ where TTemplateProvider: TemplateProvider<Template = LoadedTemplate>
         );
         let result = processor.execute(transaction.clone())?;
 
-        Ok(ExecutionOutput { transaction, result })
+        Ok(ExecutionOutput { result })
     }
 }
 

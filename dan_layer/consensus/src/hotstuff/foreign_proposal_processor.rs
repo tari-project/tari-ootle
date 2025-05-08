@@ -6,19 +6,24 @@ use tari_dan_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
     optional::Optional,
+    NumPreshards,
     ShardGroup,
     SubstateAddress,
+    VersionedSubstateId,
 };
 use tari_dan_storage::{
     consensus_models::{
+        BlockId,
         BlockPledge,
         Command,
         Decision,
+        Evidence,
         ForeignProposalRecord,
         LeafBlock,
         LockedSubstateValue,
         QcId,
         TransactionAtom,
+        TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
         TransactionRecord,
@@ -27,6 +32,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
 };
 use tari_engine_types::commit_result::RejectReason;
+use tari_transaction::TransactionId;
 
 use crate::{
     hotstuff::{
@@ -44,21 +50,21 @@ const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::foreign_proposal_proce
 pub fn process_foreign_block<TStore: StateStore>(
     tx: &TStore::ReadTransaction<'_>,
     local_leaf: &LeafBlock,
-    rec: &ForeignProposalRecord,
+    foreign_proposal: &ForeignProposalRecord,
     local_committee_info: &CommitteeInfo,
     substate_store: &mut PendingSubstateStore<TStore>,
     proposed_block_change_set: &mut ProposedBlockChangeSet,
 ) -> Result<(), HotStuffError> {
     let _timer = TraceTimer::info(LOG_TARGET, "process_foreign_block");
 
-    let foreign_shard_group = rec.proposal().shard_group_unchecked();
+    let foreign_shard_group = foreign_proposal.proposal().shard_group_unchecked();
     info!(
         target: LOG_TARGET,
         "🧩 Processing FOREIGN PROPOSAL {}",
-        rec,
+        foreign_proposal,
     );
 
-    let proposal = rec.proposal();
+    let proposal = foreign_proposal.proposal();
     let block_pledge = proposal.block_pledge();
     let mut command_count = 0usize;
 
@@ -73,7 +79,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     warn!(
                         target: LOG_TARGET,
                         "🧩 FOREIGN PROPOSAL: Command: LocalPrepare({}, {}), block: {} not relevant to local committee",
-                        atom.id, atom.decision, rec.block_id(),
+                        atom.id, atom.decision, foreign_proposal.block_id(),
                     );
                     continue;
                 }
@@ -81,46 +87,24 @@ pub fn process_foreign_block<TStore: StateStore>(
                 debug!(
                     target: LOG_TARGET,
                     "🧩 FOREIGN PROPOSAL: Command: LocalPrepare({}, {}), block: {}",
-                    atom.id,atom.decision, rec.block_id(),
+                    atom.id,atom.decision, foreign_proposal.block_id(),
                 );
 
-                let Some(mut tx_rec) = proposed_block_change_set
-                    .get_transaction(tx, local_leaf, &atom.id)
-                    .optional()?
+                let Some(mut tx_rec) = get_or_sequence_transaction(
+                    tx,
+                    local_committee_info.num_preshards(),
+                    local_committee_info.num_committees(),
+                    &atom.id,
+                    local_leaf,
+                    foreign_proposal.block_id(),
+                    proposed_block_change_set,
+                )?
                 else {
-                    // CASE: the transaction was already aborted by this node when locking outputs (LocalAccept) and
-                    // the transaction was finalized and therefore not in the pool.
-                    if let Some(transaction) = TransactionRecord::get(tx, &atom.id).optional()? {
-                        if transaction.is_finalized() {
-                            info!(
-                                target: LOG_TARGET,
-                                "❓️Foreign proposal {} received for transaction {} but this transaction is already finalized.",
-                                rec.block_id(),
-                                atom.id
-                            );
-                        } else {
-                            // Not finalized but also not in the pool??
-                            // Might be a bug in the foreign missing transaction handling as this should have sequenced
-                            // the transaction
-                            error!(
-                                target: LOG_TARGET,
-                                "❌ NEVER HAPPEN: Foreign proposal {} received for transaction {} but this transaction is not in the pool and not finalized.",
-                                rec.block_id(),
-                                atom.id
-                            );
-                        }
-                    } else {
-                        // Might be a bug in the foreign missing transaction handling
-                        error!(
-                            target: LOG_TARGET,
-                            "❌ NEVER HAPPEN: Foreign proposal {} received for transaction {} but this transaction is not in the pool.",
-                                rec.block_id(),
-                            atom.id
-                        );
-                    }
+                    // TODO: evaluate this case - None is returned if the transaction is already finalized, which could
+                    // be a race condition however, gracefully handling an error is more correct
+                    // than just ignoring and continuing
                     continue;
                 };
-
                 command_count += 1;
 
                 if tx_rec.current_stage() > TransactionPoolStage::LocalPrepared {
@@ -128,8 +112,9 @@ pub fn process_foreign_block<TStore: StateStore>(
                     warn!(
                         target: LOG_TARGET,
                         "⚠️ Foreign LocalPrepare proposal ({}) received LOCAL_PREPARE for transaction {} but current transaction stage is {}. Ignoring.",
-                        rec,
-                        tx_rec.transaction_id(), tx_rec.current_stage()
+                        foreign_proposal,
+                        tx_rec.transaction_id(),
+                        tx_rec.current_stage()
                     );
                     continue;
                 }
@@ -145,22 +130,23 @@ pub fn process_foreign_block<TStore: StateStore>(
                         );
 
                         // Add an abort execution since we previously decided to commit
-                        let mut transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
-                        transaction.abort(RejectReason::ForeignShardGroupDecidedToAbort {
-                            start_shard: foreign_shard_group.start().as_u32(),
-                            end_shard: foreign_shard_group.end().as_u32(),
-                            abort_reason: abort_reason.to_string(),
-                        });
-                        tx_rec.set_local_decision(transaction.current_decision());
-                        let exec = transaction.into_execution().expect("ABORT set above");
-                        proposed_block_change_set.add_transaction_execution(exec)?;
+                        let exec = TransactionExecution::abort(
+                            tx_rec.transaction_id(),
+                            RejectReason::ForeignShardGroupDecidedToAbort {
+                                start_shard: foreign_shard_group.start().as_u32(),
+                                end_shard: foreign_shard_group.end().as_u32(),
+                                abort_reason,
+                            },
+                        );
+                        tx_rec.set_local_decision(exec.decision());
+                        proposed_block_change_set.add_transaction_execution(*tx_rec.transaction_id(), exec)?;
                     }
                 }
 
                 // Update the transaction record with any new information provided by this foreign block
                 let Some(foreign_evidence) = atom.evidence.get(&foreign_shard_group) else {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block: rec.as_leaf_block(),
+                        block: foreign_proposal.as_leaf_block(),
                         transaction_id: atom.id,
                         shard_group: foreign_shard_group,
                         details: "Foreign proposal did not contain evidence for its own shard group".to_string(),
@@ -175,7 +161,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         HotStuffError::InvariantError(format!(
                             "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
                              been rejected by validations",
-                            rec.block_id(),
+                            foreign_proposal.block_id(),
                             foreign_shard_group
                         ))
                     })?;
@@ -213,8 +199,11 @@ pub fn process_foreign_block<TStore: StateStore>(
                         // and wait for the conflicting transaction to be finalised before pledging, using the outputs
                         // of this transaction. If not, resolving the conflict is more
                         // complex/unsafe, and we need to abort.
-                        let conflicting_tx =
-                            proposed_block_change_set.get_transaction(tx, local_leaf, &conflicting_transaction_id)?;
+                        let conflicting_tx = proposed_block_change_set.get_transaction_pool_record(
+                            tx,
+                            local_leaf,
+                            &conflicting_transaction_id,
+                        )?;
                         let has_conflicts = conflicting_tx
                             .evidence()
                             .iter()
@@ -247,17 +236,18 @@ pub fn process_foreign_block<TStore: StateStore>(
                             warn!(
                                 target: LOG_TARGET,
                                 "⚠️ Foreign proposal {} received for transaction {} but a conflicting transaction ({}) has already been prepared by this node. Abort.",
-                                rec,
+                                foreign_proposal,
                                 tx_rec.transaction_id(),
                                 conflicting_transaction_id
                             );
 
                             // Add an abort execution since we previously decided to commit
-                            let mut transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
-                            transaction.abort(RejectReason::ForeignPledgeInputConflict);
-                            tx_rec.set_local_decision(transaction.current_decision());
-                            let exec = transaction.into_execution().expect("ABORT set above");
-                            proposed_block_change_set.add_transaction_execution(exec)?;
+                            let exec = TransactionExecution::abort(
+                                tx_rec.transaction_id(),
+                                RejectReason::ForeignPledgeInputConflict,
+                            );
+                            tx_rec.set_local_decision(exec.decision());
+                            proposed_block_change_set.add_transaction_execution(*tx_rec.transaction_id(), exec)?;
                         } else {
                             info!(
                                 target: LOG_TARGET,
@@ -271,7 +261,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 add_pledges(
                     &tx_rec,
-                    rec.as_leaf_block(),
+                    foreign_proposal.as_leaf_block(),
                     atom,
                     block_pledge,
                     foreign_shard_group,
@@ -363,28 +353,22 @@ pub fn process_foreign_block<TStore: StateStore>(
                 debug!(
                     target: LOG_TARGET,
                     "🧩 FOREIGN PROPOSAL: Command: LocalAccept({}, {}), block: {}",
-                    atom.id, atom.decision, rec.block_id(),
+                    atom.id, atom.decision, foreign_proposal.block_id(),
                 );
 
-                let Some(mut tx_rec) = proposed_block_change_set
-                    .get_transaction(tx, local_leaf, &atom.id)
-                    .optional()?
+                let Some(mut tx_rec) = get_or_sequence_transaction(
+                    tx,
+                    local_committee_info.num_preshards(),
+                    local_committee_info.num_committees(),
+                    &atom.id,
+                    local_leaf,
+                    foreign_proposal.block_id(),
+                    proposed_block_change_set,
+                )?
                 else {
-                    if TransactionRecord::exists(tx, &atom.id)? {
-                        info!(
-                            target: LOG_TARGET,
-                            "❓️Foreign proposal {} received for transaction {} but this transaction is already (presumably) finalized.",
-                            rec.block_id(),
-                            atom.id
-                        );
-                    } else {
-                        warn!(
-                            target: LOG_TARGET,
-                            "⚠️ NEVER HAPPEN: Foreign proposal {} received for transaction {} but this transaction is not in the pool.",
-                            rec.block_id(),
-                            atom.id
-                        );
-                    }
+                    // TODO: evaluate this case - None is returned if the transaction is already finalized, which could
+                    // be a race condition however, gracefully handling an error is more correct
+                    // than just ignoring and continuing
                     continue;
                 };
 
@@ -394,7 +378,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     warn!(
                         target: LOG_TARGET,
                         "⚠️ Foreign proposal {} received LOCAL_ACCEPT for transaction {} but current transaction stage is {}. Ignoring.",
-                        rec,
+                        foreign_proposal,
                         tx_rec.transaction_id(),
                         tx_rec.current_stage(),
                     );
@@ -411,22 +395,23 @@ pub fn process_foreign_block<TStore: StateStore>(
                             tx_rec.transaction_id(), tx_rec.current_stage(), local_leaf
                         );
                         // Add an abort execution since we previously decided to commit
-                        let mut transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
-                        transaction.abort(RejectReason::ForeignShardGroupDecidedToAbort {
-                            start_shard: foreign_shard_group.start().as_u32(),
-                            end_shard: foreign_shard_group.end().as_u32(),
-                            abort_reason: abort_reason.to_string(),
-                        });
-                        tx_rec.set_local_decision(transaction.current_decision());
-                        let exec = transaction.into_execution().expect("ABORT set above");
-                        proposed_block_change_set.add_transaction_execution(exec)?;
+                        let exec = TransactionExecution::abort(
+                            tx_rec.transaction_id(),
+                            RejectReason::ForeignShardGroupDecidedToAbort {
+                                start_shard: foreign_shard_group.start().as_u32(),
+                                end_shard: foreign_shard_group.end().as_u32(),
+                                abort_reason,
+                            },
+                        );
+                        tx_rec.set_local_decision(exec.decision());
+                        proposed_block_change_set.add_transaction_execution(*tx_rec.transaction_id(), exec)?;
                     }
                 }
 
                 // Update the transaction record with any new information provided by this foreign block
                 let Some(foreign_evidence) = atom.evidence.get(&foreign_shard_group) else {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block: rec.as_leaf_block(),
+                        block: foreign_proposal.as_leaf_block(),
                         transaction_id: atom.id,
                         shard_group: foreign_shard_group,
                         details: "Foreign proposal did not contain evidence for its own shard group".to_string(),
@@ -440,7 +425,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                         HotStuffError::InvariantError(format!(
                             "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
                              already been validated",
-                            rec.block_id(),
+                            foreign_proposal.block_id(),
                             foreign_shard_group
                         ))
                     })?;
@@ -454,7 +439,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 add_pledges(
                     &tx_rec,
-                    rec.as_leaf_block(),
+                    foreign_proposal.as_leaf_block(),
                     atom,
                     block_pledge,
                     foreign_shard_group,
@@ -540,11 +525,12 @@ pub fn process_foreign_block<TStore: StateStore>(
                 warn!(
                     target: LOG_TARGET,
                     "❓️ NEVER HAPPEN: Foreign proposal received for block {} contains an EndEpoch command. This is invalid behaviour.",
-                    rec.block_id()
+                    foreign_proposal.block_id()
                 );
                 continue;
             },
-            // TODO(perf): Can we find a way to exclude these unused commands to reduce message size?
+            // These are not included
+            // TODO: validate that these are not included in the foreign proposal
             Command::AllAccept(_) |
             Command::SomeAccept(_) |
             Command::LocalOnly(_) |
@@ -561,13 +547,13 @@ pub fn process_foreign_block<TStore: StateStore>(
         target: LOG_TARGET,
         "🧩 FOREIGN PROPOSAL: Processed {} commands from foreign block {}",
         command_count,
-        rec.block_id()
+        foreign_proposal.block_id()
     );
     if command_count == 0 {
         warn!(
             target: LOG_TARGET,
             "⚠️ FOREIGN PROPOSAL: No commands were applicable for foreign block {}. Ignoring.",
-            rec.block_id()
+            foreign_proposal.block_id()
         );
     }
 
@@ -727,4 +713,62 @@ fn has_all_foreign_input_pledges<TTx: StateStoreReadTransaction>(
     }
 
     Ok(true)
+}
+
+fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    num_preshards: NumPreshards,
+    num_committees: u32,
+    transaction_id: &TransactionId,
+    local_leaf: &LeafBlock,
+    foreign_block_id: &BlockId,
+    proposed_block_change_set: &mut ProposedBlockChangeSet,
+) -> Result<Option<TransactionPoolRecord>, HotStuffError> {
+    match proposed_block_change_set
+        .get_transaction_pool_record(tx, local_leaf, transaction_id)
+        .optional()?
+    {
+        Some(tx_rec) => Ok(Some(tx_rec)),
+        None => match TransactionRecord::get(tx, transaction_id).optional()? {
+            Some(transaction) => {
+                if transaction.is_finalized(tx)? {
+                    info!(
+                        target: LOG_TARGET,
+                        "❓️Foreign proposal {} received for transaction {} but this transaction is already finalized.",
+                        foreign_block_id,
+                        transaction_id
+                    );
+                    return Ok(None);
+                }
+                info!(
+                    target: LOG_TARGET,
+                    "❓️Foreign proposal {} received for transaction {} but it has yet to be sequenced.",
+                    foreign_block_id,
+                    transaction_id
+                );
+
+                // When sequencing the transaction for the first time it is very important to add initial evidence
+                // since we use it to determine if we have all foreign pledges ready for execution.
+                let initial_evidence = Evidence::from_inputs_and_outputs(
+                    num_preshards,
+                    num_committees,
+                    transaction.transaction.all_inputs_iter(),
+                    [VersionedSubstateId::new(transaction_id.into_receipt_address(), 0)],
+                );
+
+                let pool_tx =
+                    proposed_block_change_set.sequence_new_transaction(transaction.transaction(), initial_evidence);
+                Ok(Some(pool_tx))
+            },
+            None => {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ NEVER HAPPEN: Foreign proposal {} received for transaction {} but this transaction is unknown and not in the pool.",
+                    foreign_block_id,
+                    transaction_id
+                );
+                Ok(None)
+            },
+        },
+    }
 }

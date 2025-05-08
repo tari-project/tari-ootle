@@ -27,7 +27,6 @@ use std::{
     sync::Arc,
 };
 
-use chrono::Utc;
 use log::*;
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{
@@ -41,7 +40,10 @@ use tari_dan_engine::{
     wasm::WasmModule,
 };
 use tari_dan_p2p::proto::rpc::TemplateType;
-use tari_dan_storage::global::{DbTemplate, DbTemplateType, DbTemplateUpdate, GlobalDb, TemplateStatus};
+use tari_dan_storage::{
+    global::{DbTemplate, DbTemplateType, DbTemplateUpdate, GlobalDb, TemplateStatus},
+    time::{PrimitiveDateTime, UtcDateTime},
+};
 use tari_dan_storage_sqlite::global::SqliteGlobalDbAdapter;
 use tari_engine_types::{calculate_template_binary_hash, hashing::hash_template_code};
 use tari_template_builtin::{
@@ -291,7 +293,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
                 url: None,
                 status: TemplateStatus::Pending,
                 epoch,
-                added_at: Default::default(),
+                added_at: now(),
             };
             templates_db.insert_template(template)?
         }
@@ -341,7 +343,7 @@ impl<TAddr: NodeAddressable> TemplateManager<TAddr> {
             expected_hash: template_hash,
             status: template_status.unwrap_or(TemplateStatus::New),
             code,
-            added_at: Utc::now().naive_utc(),
+            added_at: now(),
             template_type,
             url: template_url,
             epoch,
@@ -434,4 +436,9 @@ impl<TAddr> Clone for TemplateManager<TAddr> {
             cmap_semaphore: self.cmap_semaphore.clone(),
         }
     }
+}
+
+fn now() -> PrimitiveDateTime {
+    let now = UtcDateTime::now();
+    PrimitiveDateTime::new(now.date(), now.time())
 }

@@ -49,11 +49,12 @@ use tari_dan_common_types::{
 };
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
-    consensus_models::{Block, ExecutedTransaction, LeafBlock, SubstateRecord, TransactionRecord},
+    consensus_models::{Block, Decision, LeafBlock, SubstateRecord, TransactionExecution, TransactionRecord},
     global::GlobalDb,
     Ordering,
     StateStore,
     StateStoreReadTransaction,
+    StorageError,
 };
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
 use tari_engine_types::{FromByteType, ToByteType};
@@ -362,18 +363,21 @@ impl JsonRpcHandlers {
         let answer_id = value.get_answer_id();
         let request: GetTransactionResultRequest = value.parse_params()?;
 
-        let transaction = self
+        let (execution, finalize_at) = self
             .state_store
-            .with_read_tx(|tx| TransactionRecord::get(tx, &request.transaction_id))
+            .with_read_tx(|tx| {
+                let exec = TransactionExecution::get_finalized(tx, &request.transaction_id)?;
+                let time = TransactionExecution::get_finalized_time(tx, &request.transaction_id)?;
+                Ok::<_, StorageError>((exec, time))
+            })
             .optional()
             .map_err(internal_error(answer_id))?
             .ok_or_else(|| not_found(answer_id, format!("Transaction {} not found", request.transaction_id)))?;
 
         let response = GetTransactionResultResponse {
-            final_decision: transaction.final_decision(),
-            finalized_time: transaction.finalized_time(),
-            execution_time: transaction.execution_time(),
-            result: transaction.into_final_result(),
+            final_decision: Decision::from(&execution.result.finalize.result),
+            transaction_execution: execution,
+            finalize_at,
         };
         Ok(JsonRpcResponse::success(answer_id, response))
     }
@@ -384,12 +388,12 @@ impl JsonRpcHandlers {
 
         let transaction = self
             .state_store
-            .with_read_tx(|tx| ExecutedTransaction::get(tx, &data.transaction_id).optional())
+            .with_read_tx(|tx| TransactionRecord::get(tx, &data.transaction_id).optional())
             .map_err(internal_error(answer_id))?
             .ok_or_else(|| not_found(answer_id, format!("Transaction {} not found", data.transaction_id)))?;
 
         Ok(JsonRpcResponse::success(answer_id, GetTransactionResponse {
-            transaction,
+            transaction: transaction.into_transaction(),
         }))
     }
 

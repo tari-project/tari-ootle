@@ -737,13 +737,7 @@ async fn successful_transaction(world: &mut TariWorld) {
                         vn_ps.name
                     )
                 });
-            let finalized_tx = get_transaction_res.result.unwrap_or_else(|| {
-                panic!(
-                    "Transaction result was rejected for tx hash {} and vn = {}",
-                    tx.id(),
-                    vn_ps.name
-                )
-            });
+            let finalized_tx = get_transaction_res.transaction_execution.result;
             finalized_tx.expect_success();
         }
     }

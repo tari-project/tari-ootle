@@ -6,9 +6,12 @@ use std::{collections::HashMap, sync::Arc};
 use log::info;
 use tari_consensus::traits::{BlockTransactionExecutor, BlockTransactionExecutorError};
 use tari_dan_app_utilities::transaction_executor::TransactionExecutor;
-use tari_dan_common_types::{Epoch, SubstateRequirement};
+use tari_dan_common_types::{Epoch, SubstateRequirement, VersionedSubstateId};
 use tari_dan_engine::state_store::{memory::MemoryStateStore, new_memory_store, StateWriter};
-use tari_dan_storage::{consensus_models::ExecutedTransaction, StateStore};
+use tari_dan_storage::{
+    consensus_models::{TransactionExecution, VersionedSubstateIdLockIntent},
+    StateStore,
+};
 use tari_engine_types::{
     substate::Substate,
     virtual_substate::{VirtualSubstate, VirtualSubstateId, VirtualSubstates},
@@ -70,10 +73,10 @@ where
 
     fn execute(
         &self,
-        transaction: Transaction,
+        transaction: &Transaction,
         current_epoch: Epoch,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
-    ) -> Result<ExecutedTransaction, BlockTransactionExecutorError> {
+    ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
         let id = *transaction.id();
 
         info!(target: LOG_TARGET, "Transaction {} executing. {} input(s)", id, resolved_inputs.len());
@@ -98,9 +101,27 @@ where
         // execution
         let resolved_inputs = exec_output.resolve_input_locks(resolved_inputs);
 
-        let executed = ExecutedTransaction::new(exec_output.transaction, exec_output.result, resolved_inputs);
-        info!(target: LOG_TARGET, "Transaction {} executed. {}", id,executed.result().finalize.result);
-        Ok(executed)
+        let resulting_outputs = exec_output
+            .result
+            .finalize
+            .result
+            .accept()
+            .map(|diff| {
+                diff.up_iter()
+                    .map(|(addr, substate)| {
+                        VersionedSubstateIdLockIntent::output(VersionedSubstateId::new(
+                            addr.clone(),
+                            substate.version(),
+                        ))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let exec = TransactionExecution::new(exec_output.result, resolved_inputs, resulting_outputs);
+
+        info!(target: LOG_TARGET, "Transaction {} executed. {}", id, exec.result().finalize.result);
+        Ok(exec)
     }
 }
 

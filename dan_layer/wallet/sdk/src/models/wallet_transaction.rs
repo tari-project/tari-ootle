@@ -4,35 +4,44 @@
 use std::{fmt::Display, str::FromStr, time::Duration};
 
 use anyhow::anyhow;
-use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::SubstateRequirement;
-use tari_dan_storage::consensus_models::QuorumCertificate;
+use tari_dan_storage::{consensus_models::QuorumCertificate, time::PrimitiveDateTime};
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_template_lib::models::Amount;
 use tari_transaction::Transaction;
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::models::NewAccountInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct WalletTransaction {
     pub transaction: Transaction,
     pub status: TransactionStatus,
     pub finalize: Option<FinalizeResult>,
     pub final_fee: Option<Amount>,
     pub qcs: Vec<QuorumCertificate>,
+    #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub execution_time: Option<Duration>,
+    #[cfg_attr(feature = "ts", ts(type = "{secs: number, nanos: number} | null"))]
     pub finalized_time: Option<Duration>,
     pub required_substates: Vec<SubstateRequirement>,
     pub new_account_info: Option<NewAccountInfo>,
     pub is_dry_run: bool,
-    pub last_update_time: NaiveDateTime,
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub last_update_time: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum TransactionStatus {
     #[default]
     New,

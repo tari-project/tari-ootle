@@ -10,6 +10,7 @@ pub use public_key::*;
 pub use state_tree::*;
 pub use substate_id::*;
 pub use substate_lock::*;
+pub use time::*;
 pub use tuple::*;
 
 use crate::error::RocksDbStorageError;
@@ -24,6 +25,7 @@ mod small_bytes;
 mod state_tree;
 mod substate_id;
 mod substate_lock;
+mod time;
 mod tuple;
 
 /// When the key is smaller than 100 bytes, it will be stack-allocated. Otherwise, it will be heap-allocated.

@@ -22,12 +22,8 @@ use tari_transaction::Transaction;
 
 use crate::support::{committee_number_to_shard_group, helpers::random_substate_in_shard_group, TEST_NUM_PRESHARDS};
 
-pub fn build_transaction_from(tx: Transaction, decision: Decision) -> TransactionRecord {
-    let mut tx = TransactionRecord::new(tx);
-    if decision.is_abort() {
-        tx.abort(RejectReason::ExecutionFailure("Test aborted".to_string()));
-    }
-    tx
+pub fn build_transaction_from(tx: Transaction) -> TransactionRecord {
+    TransactionRecord::new(tx)
 }
 
 pub fn create_execution_result_for_transaction(
@@ -165,15 +161,11 @@ pub fn random_substates_ids_for_committee_generator(
     })
 }
 
-pub fn build_transaction(decision: Decision, inputs: Vec<SubstateRequirement>) -> TransactionRecord {
+pub fn build_transaction(inputs: Vec<SubstateRequirement>) -> TransactionRecord {
     let k = PrivateKey::default();
     let tx = Transaction::builder()
         .call_function(Default::default(), "foo", args![])
         .with_inputs(inputs)
         .build_and_seal(&k);
-    let mut tx = TransactionRecord::new(tx);
-    if decision.is_abort() {
-        tx.abort(RejectReason::ExecutionFailure("Test aborted".to_string()));
-    }
-    tx
+    TransactionRecord::new(tx)
 }

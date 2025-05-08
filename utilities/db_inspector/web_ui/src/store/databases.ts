@@ -11,9 +11,14 @@ declare module "@tanstack/react-query" {
 }
 export const client = RestClient.new();
 
+export interface DatabaseOpts {
+  name: string;
+  path: string;
+  group: string | null;
+}
 
 export const useDatabasesList = () => {
-  return useQuery<{ name: string, path: string }[], Error>({
+  return useQuery<DatabaseOpts[], Error>({
     queryKey: ["dbs"],
     queryFn: () => client.listDatabases().then((res) => res.databases),
     refetchOnMount: false,

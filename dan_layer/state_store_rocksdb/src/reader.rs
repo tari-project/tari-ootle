@@ -68,11 +68,13 @@ use tari_dan_storage::{
         SubstateRecord,
         SubstateUpdate,
         SubstateValueOrHash,
+        TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
         TransactionRecord,
         ValidatorConsensusStats,
     },
+    time::PrimitiveDateTime,
     Ordering,
     StateStoreReadTransaction,
     StorageError,
@@ -114,6 +116,7 @@ use crate::{
         epoch_checkpoint::EpochCheckpointModel,
         evicted_node,
         evicted_node::EvictedNodeModel,
+        finalized_transaction::FinalizedTransactionLinkModel,
         foreign_parked_blocks::ForeignParkedBlockModel,
         foreign_proposal,
         foreign_proposal::ForeignProposalModel,
@@ -211,7 +214,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
 
     /// Returns the blocks until the end_block (inclusive) ordered from the end_block to the commit block (height
     /// descending).
-    fn get_pending_chain_ordered(&self, end_block: &BlockId) -> Result<Vec<BlockId>, RocksDbStorageError> {
+    pub(super) fn get_pending_chain_ordered(&self, end_block: &BlockId) -> Result<Vec<BlockId>, RocksDbStorageError> {
         // TODO: only difference between get_pending_chain_until is that this returns a Vec - worth DRYing up
         const OPERATION: &str = "get_pending_chain_ordered";
         debug!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
@@ -516,85 +519,101 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(txs)
     }
 
-    fn transaction_executions_get(
-        &self,
-        tx_id: &TransactionId,
-        block: &BlockId,
-    ) -> Result<BlockTransactionExecution, StorageError> {
+    fn finalized_transaction_execution_get(&self, tx_id: &TransactionId) -> Result<TransactionExecution, StorageError> {
         const OPERATION: &str = "transaction_executions_get";
+        let cf = self.db().cf(FinalizedTransactionLinkModel)?;
+        if !cf.exists(tx_id, OPERATION)? {
+            return Err(StorageError::NotFound {
+                item: "TransactionExecution",
+                key: tx_id.to_string(),
+            });
+        }
 
-        let value = self
+        let cf = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
+        let mut iter = cf.query_prefix_range_key_iterator(Ordering::default(), tx_id);
+        let Some((tx_id, block_id, height)) = iter.next().transpose()? else {
+            return Err(StorageError::NotFound {
+                item: "TransactionExecution",
+                key: format!("{tx_id}"),
+            });
+        };
+        let execution = self
             .db()
             .cf(BlockTransactionExecutionModel)?
-            .get(&(*block, *tx_id), OPERATION)?;
+            .get(&(tx_id, block_id, height), OPERATION)?;
 
-        Ok(value)
+        Ok(execution.into_transaction_execution())
     }
 
-    fn transaction_executions_get_pending_for_block(
+    fn finalized_transaction_execution_get_finalized_time(
+        &self,
+        tx_id: &TransactionId,
+    ) -> Result<PrimitiveDateTime, StorageError> {
+        const OPERATION: &str = "finalized_transaction_execution_get_finalized_time";
+        let cf = self.db().cf(FinalizedTransactionLinkModel)?;
+        let finalized_at = cf.get(tx_id, OPERATION)?;
+        Ok(finalized_at)
+    }
+
+    fn block_transaction_executions_get_pending_for_block(
         &self,
         transaction_id: &TransactionId,
-        from_block_id: &BlockId,
+        from_block: &LeafBlock,
     ) -> Result<BlockTransactionExecution, StorageError> {
-        const OPERATION: &str = "transaction_executions_get_pending_for_block";
+        const OPERATION: &str = "block_transaction_executions_get_pending_for_block";
 
-        if !self.blocks_exists(from_block_id)? {
+        if !self.blocks_exists(from_block.block_id())? {
             return Err(StorageError::QueryError {
-                reason: format!("{OPERATION}: Block {from_block_id} does not exist",),
+                reason: format!("{OPERATION}: Block {from_block} does not exist",),
             });
         }
 
         let cf = self.db().cf(BlockTransactionExecutionModel)?;
-        let query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
 
         // Is the execution is in the queried block
-        if let Some(exec) = cf.get(&(*from_block_id, *transaction_id), OPERATION).optional()? {
+        if let Some(exec) = cf
+            .get(
+                &(*transaction_id, *from_block.block_id(), from_block.height()),
+                OPERATION,
+            )
+            .optional()?
+        {
             return Ok(exec);
         }
 
-        let block_ids = self.get_pending_chain_ordered(from_block_id)?;
-
-        // Find any in pending chain?
-        for block_id in &block_ids {
-            if let Some(execution) = cf.get(&(*block_id, *transaction_id), OPERATION).optional()? {
-                return Ok(execution);
-            }
-        }
-
+        let block_ids = self.get_pending_chain_until(from_block.block_id())?;
         debug!(
             target: LOG_TARGET,
             "{OPERATION}: No execution found for {transaction_id} in pending chain ({} blocks)",
             block_ids.len(),
         );
 
-        // Otherwise look for executions after the commit block
+        let query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
-
-        // TODO: optimise
-        let chain_cf = self.db().cf(chain::CommittedParentChildChainIndex)?;
-        let commit_block = self.get_commit_block_id()?;
-
+        let mut max_height_key = None;
         for result in iter {
-            let (tx_id, block_id) = result?;
-            // Still need to check if the block is committed and not a fork
-            if block_id != commit_block.block_id && !chain_cf.exists(&block_id, OPERATION)? {
-                debug!(
-                    target: LOG_TARGET,
-                    "{OPERATION}: Block {block_id} is not committed, skipping",
-                );
-                continue;
+            let (tx_id, block_id, height) = result?;
+
+            if max_height_key
+                .as_ref()
+                .is_none_or(|(_, block_id, current_height)| *current_height < height && block_ids.contains(block_id))
+            {
+                max_height_key = Some((tx_id, block_id, height));
             }
+        }
+
+        if let Some((tx_id, block_id, height)) = max_height_key {
             debug!(
                 target: LOG_TARGET,
-                "{OPERATION}: Found execution for {transaction_id} in {block_id}",
+                "{OPERATION}: Found execution for {transaction_id} in {block_id} {height}",
             );
-            let execution = cf.get(&(block_id, tx_id), OPERATION)?;
+            let execution = cf.get(&(tx_id, block_id, height), OPERATION)?;
             return Ok(execution);
         }
 
         Err(StorageError::NotFound {
             item: "TransactionExecution",
-            key: format!("{transaction_id} in {from_block_id}"),
+            key: format!("{transaction_id} in {from_block}"),
         })
     }
 

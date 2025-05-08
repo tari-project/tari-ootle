@@ -3,8 +3,9 @@
 
 use std::{str::FromStr, time::Duration};
 
-use chrono::NaiveDateTime;
+use log::*;
 use tari_dan_common_types::Epoch;
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::{
     models::{TransactionStatus, WalletTransaction},
     storage::WalletStorageError,
@@ -12,6 +13,8 @@ use tari_dan_wallet_sdk::{
 use tari_transaction::{UnsealedTransactionV1, UnsignedTransactionV1};
 
 use crate::{schema::transactions, serialization::deserialize_json};
+
+const LOG_TARGET: &str = "tari::dan::wallet::storage_sqlite::models::transaction";
 
 #[derive(Debug, Clone, Queryable, Identifiable)]
 #[diesel(table_name = transactions)]
@@ -33,11 +36,11 @@ pub struct Transaction {
     pub min_epoch: Option<i64>,
     pub max_epoch: Option<i64>,
     pub executed_time_ms: Option<i64>,
-    pub finalized_time_ms: Option<i64>,
+    pub finalized_time: Option<PrimitiveDateTime>,
     pub required_substates: String,
     pub new_account_info: Option<String>,
-    pub updated_at: NaiveDateTime,
-    pub created_at: NaiveDateTime,
+    pub updated_at: PrimitiveDateTime,
+    pub created_at: PrimitiveDateTime,
 }
 
 impl Transaction {
@@ -82,8 +85,19 @@ impl Transaction {
                 .executed_time_ms
                 .map(|t| u64::try_from(t).map(Duration::from_millis).unwrap_or_default()),
             finalized_time: self
-                .finalized_time_ms
-                .map(|t| u64::try_from(t).map(Duration::from_millis).unwrap_or_default()),
+                .finalized_time
+                .map(|t| t - self.created_at)
+                .map(Duration::try_from)
+                .transpose()
+                .inspect_err(|e| {
+                    warn!(
+                        target: LOG_TARGET,
+                        "Failed to convert finalized time to duration: {}",
+                        e
+                    );
+                })
+                // Negative duration cap to 0
+                .unwrap_or_else(|_| Some(Duration::from_secs(0))),
             last_update_time: self.updated_at,
         })
     }

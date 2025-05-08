@@ -24,6 +24,7 @@ use std::io;
 
 use anyhow::anyhow;
 use serde::{de::DeserializeOwned, Serialize};
+use tari_dan_storage::time::{PrimitiveDateTime, UtcDateTime};
 
 use crate::error::RocksDbStorageError;
 
@@ -71,4 +72,9 @@ pub(crate) fn read_n_bytes<R: io::Read>(reader: &mut R, n: usize) -> Option<Vec<
     let mut vec = vec![0u8; n];
     reader.read_exact(&mut vec[..]).ok()?;
     Some(vec)
+}
+
+pub(crate) fn now() -> PrimitiveDateTime {
+    let now = UtcDateTime::now();
+    PrimitiveDateTime::new(now.date(), now.time())
 }

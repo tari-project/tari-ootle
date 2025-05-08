@@ -71,7 +71,7 @@ export default function ListColumnFamilies() {
             variant="h4"
             style={{ paddingBottom: theme.spacing(2) }}
           >
-            Select Column Family
+            {dbName} - Select Column Family
             <Button
               style={{ margin: theme.spacing(2) }}
               variant="contained"

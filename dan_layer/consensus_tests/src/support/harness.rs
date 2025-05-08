@@ -20,6 +20,7 @@ use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
     committee::Committee,
     displayable::Displayable,
+    optional::Optional,
     shard::Shard,
     Epoch,
     NodeHeight,
@@ -29,7 +30,7 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_dan_storage::{
-    consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionRecord},
+    consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionExecution, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -85,7 +86,7 @@ impl Test {
         num_inputs: usize,
         num_new_outputs: usize,
     ) -> (TransactionRecord, Vec<VersionedSubstateId>, Vec<SubstateId>) {
-        let (transaction, inputs) = self.build_transaction(decision, num_inputs);
+        let (transaction, inputs) = self.build_transaction(num_inputs);
 
         let new_outputs = (0..num_new_outputs)
             .map(|i| build_substate_id_for_committee(i as u32 % self.num_committees, self.num_committees))
@@ -126,13 +127,15 @@ impl Test {
         &self,
         dest: TestVnDestination,
         transaction: &TransactionRecord,
+        decision: Decision,
+        fee: u64,
         input_locks: Vec<(SubstateId, SubstateLockType)>,
         new_outputs: Vec<SubstateId>,
     ) -> &Self {
         self.add_execution_at_destination(dest, ExecuteSpec {
             transaction: transaction.transaction().clone(),
-            decision: transaction.current_decision(),
-            fee: transaction.transaction_fee().unwrap_or(1),
+            decision,
+            fee,
             input_locks,
             new_outputs,
             validator_fee_withdrawals: vec![],
@@ -140,13 +143,9 @@ impl Test {
         self
     }
 
-    pub fn build_transaction(
-        &self,
-        decision: Decision,
-        num_inputs: usize,
-    ) -> (TransactionRecord, Vec<VersionedSubstateId>) {
+    pub fn build_transaction(&self, num_inputs: usize) -> (TransactionRecord, Vec<VersionedSubstateId>) {
         let all_inputs = self.create_substates_on_vns(TestVnDestination::All, num_inputs);
-        let transaction = build_transaction(decision, all_inputs.iter().cloned().map(Into::into).collect());
+        let transaction = build_transaction(all_inputs.iter().cloned().map(Into::into).collect());
         (transaction, all_inputs)
     }
 
@@ -427,13 +426,27 @@ impl Test {
     }
 
     pub async fn wait_for_n_to_be_finalized(&self, n: usize) {
-        self.wait_all_for_predicate("waiting for n to be finalized", |vn| {
-            let transactions = vn
-                .state_store
-                .with_read_tx(|tx| tx.transactions_get_paginated(10000, 0, None))
-                .unwrap();
-            log::info!("{} has {} transactions", vn.address, transactions.len());
-            transactions.iter().filter(|tx| tx.is_finalized()).count() >= n
+        self.wait_all_for_predicate(format!("waiting for {n} to be finalized"), |vn| {
+            vn.state_store
+                .with_read_tx(|tx| {
+                    let transactions = tx.transactions_get_paginated(10000, 0, None)?;
+                    let mut count = 0;
+                    log::info!("{} has {} transactions", vn.address, transactions.len());
+                    for transaction in transactions {
+                        if tx
+                            .finalized_transaction_execution_get(transaction.id())
+                            .optional()?
+                            .is_some()
+                        {
+                            count += 1;
+                            if count >= n {
+                                return Ok(true);
+                            }
+                        }
+                    }
+                    Ok::<_, StorageError>(false)
+                })
+                .unwrap()
         })
         .await
     }
@@ -488,15 +501,26 @@ impl Test {
         transaction_id: &TransactionId,
         expected_decision: Decision,
     ) {
+        self.assert_validators_have_decision(TestVnDestination::All, transaction_id, expected_decision)
+            .await;
+    }
+
+    pub async fn assert_validators_have_decision(
+        &self,
+        dest: TestVnDestination,
+        transaction_id: &TransactionId,
+        expected_decision: Decision,
+    ) {
         let mut attempts = 0usize;
         'outer: loop {
-            let decisions = self.validators.values().map(|v| {
-                let decisions = v
+            let decisions = self.validators.values().filter(|vn| dest.is_for_vn(vn)).map(|v| {
+                let decision = v
                     .state_store
-                    .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
+                    .with_read_tx(|tx| TransactionExecution::get_finalized(tx, transaction_id))
+                    .optional()
                     .unwrap_or_else(|err| panic!("{} Error getting transaction {}: {}", v.address, transaction_id, err))
-                    .final_decision();
-                (v.address.clone(), decisions)
+                    .map(|e| e.decision());
+                (v.address.clone(), decision)
             });
             for (addr, decision) in decisions {
                 if decision.is_none() && attempts < 5 {
@@ -560,10 +584,8 @@ impl Test {
 
 pub struct TestBuilder {
     committees: HashMap<u32, Committee<TestAddress>>,
-    sql_address: String,
     rocks_path: Option<String>,
     timeout: Option<Duration>,
-    debug_sql_file: Option<String>,
     message_filter: Option<MessageFilter>,
     failure_nodes: Vec<TestAddress>,
     config: HotstuffConfig,
@@ -574,9 +596,7 @@ impl TestBuilder {
     pub fn new() -> Self {
         Self {
             committees: HashMap::new(),
-            sql_address: ":memory:".to_string(),
             timeout: Some(Duration::from_secs(10)),
-            debug_sql_file: None,
             rocks_path: None,
             message_filter: None,
             failure_nodes: Vec::new(),
@@ -607,18 +627,6 @@ impl TestBuilder {
     #[allow(dead_code)]
     pub fn disable_timeout(mut self) -> Self {
         self.timeout = None;
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn debug_sql<P: Into<String>>(mut self, path: P) -> Self {
-        self.debug_sql_file = Some(path.into());
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn with_sql_url<T: Into<String>>(mut self, sql_address: T) -> Self {
-        self.sql_address = sql_address.into();
         self
     }
 
@@ -667,7 +675,6 @@ impl TestBuilder {
     async fn build_validators(
         leader_strategy: &RoundRobinLeaderStrategy,
         epoch_manager: &TestEpochManager,
-        sql_address: String,
         rocks_path_override: Option<String>,
         config: HotstuffConfig,
         failure_nodes: &[TestAddress],
@@ -687,7 +694,6 @@ impl TestBuilder {
                 true
             })
             .map(|(vn, shard_group)| {
-                let sql_address = sql_address.replace("{}", vn.address.as_str());
                 let rocks_path_override = rocks_path_override
                     .as_ref()
                     .map(|path| path.replace("{}", vn.address.as_str()));
@@ -702,7 +708,6 @@ impl TestBuilder {
                 let (sk, pk) = helpers::derive_keypair_from_address(&vn.address);
 
                 let (channels, validator) = Validator::builder()
-                    .with_sql_url(sql_address)
                     .with_rocks_override_path(rocks_path_override)
                     .with_config(config.clone())
                     .with_address_and_secret_key(vn.address.clone(), sk)
@@ -718,20 +723,7 @@ impl TestBuilder {
             .unzip()
     }
 
-    pub async fn start(mut self) -> Test {
-        if let Some(ref sql_file) = self.debug_sql_file {
-            // Delete any previous database files
-            for path in self
-                .committees
-                .values()
-                .flat_map(|committee| committee.iter().map(|(addr, _)| sql_file.replace("{}", addr.as_str())))
-            {
-                let _ignore = std::fs::remove_file(&path);
-            }
-
-            self.sql_address = format!("sqlite://{sql_file}");
-        }
-
+    pub async fn start(self) -> Test {
         let committees = build_committees(self.committees);
         let num_committees = u32::try_from(committees.len()).expect("WAAAY too many committees");
 
@@ -746,7 +738,6 @@ impl TestBuilder {
         let (channels, validators) = Self::build_validators(
             &leader_strategy,
             &epoch_manager,
-            self.sql_address,
             self.rocks_path,
             self.config,
             &self.failure_nodes,

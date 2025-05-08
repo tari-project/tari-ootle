@@ -14,15 +14,7 @@ use tari_engine_types::serde_with;
 use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 
-use super::{
-    AbortReason,
-    BlockId,
-    ExecutedTransaction,
-    ForeignProposalAtom,
-    LeaderFee,
-    MintConfidentialOutputAtom,
-    TransactionRecord,
-};
+use super::{BlockId, ForeignProposalAtom, LeaderFee, MintConfidentialOutputAtom, TransactionRecord};
 use crate::{
     consensus_models::{evidence::Evidence, Decision},
     StateStoreReadTransaction,
@@ -53,21 +45,6 @@ impl TransactionAtom {
 
     pub fn get_transaction<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<TransactionRecord, StorageError> {
         TransactionRecord::get(tx, &self.id)
-    }
-
-    pub fn get_executed_transaction<TTx: StateStoreReadTransaction>(
-        &self,
-        tx: &TTx,
-    ) -> Result<ExecutedTransaction, StorageError> {
-        ExecutedTransaction::get(tx, &self.id)
-    }
-
-    pub fn abort(self, reason: AbortReason) -> Self {
-        Self {
-            decision: Decision::Abort(reason),
-            leader_fee: None,
-            ..self
-        }
     }
 }
 

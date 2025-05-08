@@ -36,8 +36,10 @@ pub struct CommonArgs {
     pub indexer_url: Url,
     #[clap(long, short = 'v', alias = "vn", default_value = "http://localhost:18200/json_rpc")]
     pub validator_node_url: Url,
-    #[clap(long, short = 't', alias = "faucet")]
+    #[clap(long, alias = "faucet")]
     pub faucet_template: Option<TemplateAddress>,
+    #[clap(long, alias = "swap")]
+    pub swap_template: Option<TemplateAddress>,
 }
 
 #[derive(Subcommand, Debug)]

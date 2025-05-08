@@ -28,7 +28,6 @@ use tari_consensus::hotstuff::HotstuffEvent;
 use tari_dan_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubstateAddress};
 use tari_dan_p2p::{DanMessage, NewTransactionMessage, TariMessagingSpec};
 use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
-use tari_engine_types::commit_result::RejectReason;
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
 use tari_transaction::{Transaction, TransactionId};
@@ -226,14 +225,7 @@ where
 
         if let Err(e) = self.before_execute_validator.validate(&(), &transaction) {
             let transaction_id = *transaction.id();
-            self.state_store.with_write_tx(|tx| {
-                TransactionRecord::new(transaction)
-                    .abort_and_finalize(RejectReason::InvalidTransaction(format!(
-                        "Mempool validation failed {transaction_id}: {e}"
-                    )))
-                    .insert(tx)
-            })?;
-
+            // Throw the transaction away
             #[cfg(feature = "metrics")]
             self.metrics.on_transaction_validation_error(&transaction_id, &e);
             return Err(e.into());

@@ -20,7 +20,7 @@ use tari_dan_storage::{
     StateStoreWriteTransaction,
 };
 use tari_engine_types::{
-    commit_result::{ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
+    commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
     fees::{FeeBreakdown, FeeReceipt},
     substate::SubstateDiff,
 };
@@ -200,7 +200,7 @@ mod transaction_operations {
         assert!(!res);
 
         // transactions_update
-        let mut updated_tx = TransactionRecord::new(
+        let updated_tx = TransactionRecord::new(
             Transaction::builder()
                 .add_instruction(Instruction::DropAllProofsInWorkspace)
                 .add_input(SubstateRequirement::new(create_random_substate_id(), Some(3)))
@@ -210,14 +210,6 @@ mod transaction_operations {
 
         let res = tx.transactions_get(updated_tx.id()).unwrap();
         assert_eq_debug(&res, &updated_tx);
-        assert_eq!(res.abort_reason, None);
-
-        updated_tx.abort_reason = Some(RejectReason::Unknown);
-
-        // tx.transactions_update(&updated_tx).unwrap();
-        // let res = tx.transactions_get(updated_tx.id()).unwrap();
-        // assert_eq_debug(&res, &updated_tx);
-        // assert_eq!(res.abort_reason, Some(RejectReason::Unknown));
 
         // transactions_get_any
         let res = tx
@@ -235,6 +227,7 @@ mod transaction_operations {
 
 mod transaction_execution_operations {
     use tari_dan_common_types::optional::Optional;
+    use tari_dan_storage::consensus_models::Decision;
     use tari_template_lib::types::Hash;
 
     use super::*;
@@ -272,7 +265,7 @@ mod transaction_execution_operations {
         let not_committed_block = chain[9].clone();
         // insert transaction executions
         let exec1 = BlockTransactionExecution::new(
-            *not_committed_block.id(),
+            not_committed_block.as_leaf_block(),
             *tx1.id(),
             ExecuteResult {
                 finalize: FinalizeResult::new(
@@ -290,14 +283,13 @@ mod transaction_execution_operations {
             },
             vec![],
             vec![],
-            None,
         );
-        tx.transaction_executions_insert_or_ignore(&exec1).unwrap();
+        tx.block_transaction_executions_insert_or_ignore(&exec1).unwrap();
 
         let committed_block = chain[6].clone();
         // insert transaction executions
         let exec2 = BlockTransactionExecution::new(
-            *committed_block.id(),
+            committed_block.as_leaf_block(),
             *tx2.id(),
             ExecuteResult {
                 finalize: FinalizeResult::new(
@@ -315,46 +307,38 @@ mod transaction_execution_operations {
             },
             vec![],
             vec![],
-            None,
         );
-        tx.transaction_executions_insert_or_ignore(&exec2).unwrap();
-
-        // transaction_executions_get
-        let res = tx
-            .transaction_executions_get(tx1.id(), not_committed_block.id())
-            .unwrap();
-        assert_eq_debug(&res, &exec1);
+        tx.block_transaction_executions_insert_or_ignore(&exec2).unwrap();
 
         // transaction_executions_get_pending_for_block
         let res = tx
-            .transaction_executions_get_pending_for_block(tx1.id(), not_committed_block.id())
+            .block_transaction_executions_get_pending_for_block(tx1.id(), &not_committed_block.as_leaf_block())
             .unwrap();
         assert_eq_debug(&res, &exec1);
 
         // transactions_finalize_all
-        tx.transaction_pool_insert_new(*tx1.id(), tx1.current_decision(), &Evidence::empty(), true, false)
+        tx.transaction_pool_insert_new(*tx1.id(), Decision::Commit, &Evidence::empty(), true, false)
             .unwrap();
         let transactions = tx.transaction_pool_get_all().unwrap();
         assert_eq!(transactions.len(), 1);
-        tx.transactions_finalize_all(*not_committed_block.id(), transactions.iter())
-            .unwrap();
+        tx.transactions_finalize_all(transactions.iter()).unwrap();
 
         let rec = tx.transactions_get(tx1.id()).unwrap();
-        assert!(rec.is_finalized(), "Transaction should be finalized");
+        assert!(rec.is_finalized(&*tx).unwrap(), "Transaction should be finalized");
 
         let pending = tx
-            .transaction_executions_get_pending_for_block(tx1.id(), not_committed_block.id())
+            .block_transaction_executions_get_pending_for_block(tx1.id(), &not_committed_block.as_leaf_block())
             .optional()
             .unwrap();
         assert!(pending.is_none());
 
         let pending = tx
-            .transaction_executions_get_pending_for_block(tx2.id(), not_committed_block.id())
+            .block_transaction_executions_get_pending_for_block(tx2.id(), &not_committed_block.as_leaf_block())
             .unwrap();
-        assert_eq!(pending.execution.transaction_id, *tx2.id());
+        assert_eq!(*pending.transaction_id(), *tx2.id());
 
-        // transaction_executions_remove_any_by_block_id
-        tx.transaction_executions_remove_any_by_block_id(not_committed_block.id())
+        // block_transaction_executions_lock_any_for_block
+        tx.block_transaction_executions_lock_any_for_block(&not_committed_block.as_leaf_block())
             .unwrap();
 
         tx.rollback().unwrap();

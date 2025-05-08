@@ -211,6 +211,13 @@ impl SubstatePledge {
         }
         true
     }
+
+    pub fn substate_value(&self) -> Option<&SubstateValue> {
+        match self {
+            Self::Input { substate, .. } => Some(substate),
+            Self::Output { .. } => None,
+        }
+    }
 }
 
 /// These are to detect and prevent duplicates in pledging.

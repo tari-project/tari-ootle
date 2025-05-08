@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use log::*;
 use tari_dan_common_types::{optional::Optional, NodeHeight};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, LeafBlock, QuorumCertificate},
+    consensus_models::{Block, BlockId, HighQc, LeafBlock, QuorumCertificate},
     StateStore,
 };
 
@@ -104,13 +104,16 @@ where TConsensusSpec: ConsensusSpec
         }
 
         let is_qc_valid = self.store.with_read_tx(|tx| {
-            // If we already have this QC (locally calculated hash matches), we do not need to validate this again
-            // if !high_qc.exists(tx)? {
+            let local_high_qc = HighQc::get(tx, epoch_state.epoch())?;
+            // Only accept a higher QC than the local one
+            if local_high_qc.block_height > high_qc.block_height() {
+                return Ok(false);
+            }
+
             if let Err(err) = self.validate_qc(&high_qc, epoch_state, self.vote_collector.signing_service()) {
                 warn!(target: LOG_TARGET, "❌ NEWVIEW: Invalid QC: {}", err);
                 return Ok(false);
             }
-            // }
 
             if !Block::record_exists(tx, high_qc.block_id())? {
                 // Sync if we do not have the block for this valid QC

@@ -17,6 +17,7 @@ use tari_dan_storage::{
         BlockId,
         BlockTransactionExecution,
         BurntUtxo,
+        Evidence,
         ForeignProposalRecord,
         ForeignProposalStatus,
         HighQc,
@@ -41,7 +42,7 @@ use tari_dan_storage::{
 use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
 use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-use tari_transaction::TransactionId;
+use tari_transaction::{Transaction, TransactionId};
 
 use crate::{hotstuff::transaction_manager::TransactionLockConflicts, tracing::TraceTimer};
 
@@ -51,6 +52,7 @@ const MEM_MAX_BLOCK_DIFF_CHANGES: usize = 10000;
 const MEM_MAX_STATE_TREE_DIFF_SIZE: usize = 1000;
 const MEM_MAX_SUBSTATE_LOCK_SIZE: usize = 100000;
 const MEM_MAX_TRANSACTION_CHANGE_SIZE: usize = 1000;
+const MEM_NEW_SEQUENCE_TRANSACTIONS: usize = 1000;
 const MEM_MAX_PROPOSED_FOREIGN_PROPOSALS_SIZE: usize = 1000;
 const MEM_MAX_PROPOSED_UTXO_MINTS_SIZE: usize = 1000;
 
@@ -96,6 +98,7 @@ pub struct ProposedBlockChangeSet {
     state_tree_diffs: IndexMap<Shard, PendingShardStateTreeDiff>,
     substate_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
     transaction_changes: IndexMap<TransactionId, TransactionChangeSet>,
+    new_transactions_to_sequence: Vec<TransactionPoolRecord>,
     proposed_foreign_proposals: Vec<BlockId>,
     proposed_utxo_mints: Vec<UnclaimedConfidentialOutputAddress>,
     no_vote_reason: Option<NoVoteReason>,
@@ -110,6 +113,7 @@ impl ProposedBlockChangeSet {
             substate_changes: Vec::new(),
             substate_locks: IndexMap::new(),
             transaction_changes: IndexMap::new(),
+            new_transactions_to_sequence: Vec::new(),
             state_tree_diffs: IndexMap::new(),
             proposed_foreign_proposals: Vec::new(),
             proposed_utxo_mints: Vec::new(),
@@ -150,6 +154,17 @@ impl ProposedBlockChangeSet {
                 MEM_MAX_TRANSACTION_CHANGE_SIZE
             );
             self.transaction_changes.shrink_to(MEM_MAX_TRANSACTION_CHANGE_SIZE);
+        }
+        self.new_transactions_to_sequence.clear();
+        if self.new_transactions_to_sequence.capacity() > MEM_NEW_SEQUENCE_TRANSACTIONS {
+            debug!(
+                target: LOG_TARGET,
+                "Shrinking new_transactions_to_sequence from {} to {}",
+                self.new_transactions_to_sequence.capacity(),
+                MEM_NEW_SEQUENCE_TRANSACTIONS
+            );
+            self.new_transactions_to_sequence
+                .shrink_to(MEM_NEW_SEQUENCE_TRANSACTIONS);
         }
         self.state_tree_diffs.clear();
         if self.state_tree_diffs.capacity() > MEM_MAX_STATE_TREE_DIFF_SIZE {
@@ -291,9 +306,10 @@ impl ProposedBlockChangeSet {
 
     pub fn add_transaction_execution(
         &mut self,
+        transaction_id: TransactionId,
         execution: TransactionExecution,
     ) -> Result<&mut Self, TransactionPoolError> {
-        let execution = execution.for_block(self.block.block_id);
+        let execution = execution.for_block(self.block, transaction_id);
         let change_mut = self.transaction_changes.entry(*execution.transaction_id()).or_default();
         if change_mut.execution.is_some() {
             return Err(TransactionPoolError::TransactionAlreadyExecuted {
@@ -306,7 +322,7 @@ impl ProposedBlockChangeSet {
         Ok(self)
     }
 
-    pub fn get_transaction<TTx: StateStoreReadTransaction>(
+    pub fn get_transaction_pool_record<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
         leaf_block: &LeafBlock,
@@ -329,6 +345,16 @@ impl ProposedBlockChangeSet {
                 key: transaction_id.to_string(),
             })?;
         Ok(rec)
+    }
+
+    pub fn sequence_new_transaction(
+        &mut self,
+        transaction: &Transaction,
+        initial_evidence: Evidence,
+    ) -> TransactionPoolRecord {
+        let rec = TransactionPoolRecord::new_from_transaction(transaction, initial_evidence);
+        self.new_transactions_to_sequence.push(rec.clone());
+        rec
     }
 
     pub fn set_next_transaction_update(
@@ -388,6 +414,26 @@ impl ProposedBlockChangeSet {
 
         // Save locks
         SubstateRecord::lock_all(tx, &self.block.block_id, &self.substate_locks)?;
+
+        // Sequence new transactions
+        for pool_rec in &self.new_transactions_to_sequence {
+            debug!(
+                target: LOG_TARGET,
+                "📝 Sequencing new transaction {} {} {} is_ready_now={}",
+                pool_rec.transaction_id(),
+                pool_rec.current_stage(),
+                pool_rec.current_local_decision(),
+                pool_rec.is_ready()
+            );
+            // TODO: TransactionPool abstraction is not great, so calling the store method directly
+            tx.transaction_pool_insert_new(
+                *pool_rec.transaction_id(),
+                pool_rec.current_local_decision(),
+                pool_rec.evidence(),
+                pool_rec.is_ready(),
+                pool_rec.is_global(),
+            )?;
+        }
 
         for (transaction_id, change) in &self.transaction_changes {
             // Save any transaction executions for the block
@@ -470,6 +516,10 @@ impl ProposedBlockChangeSet {
             }
         }
 
+        for transaction in &self.new_transactions_to_sequence {
+            debug!(target: LOG_TARGET, "[drop] Sequence new transaction: {}", transaction.transaction_id());
+        }
+
         for (transaction_id, change) in &self.transaction_changes {
             debug!(target: LOG_TARGET, "[drop] TransactionChange: {transaction_id}");
             if let Some(ref execution) = change.execution {
@@ -512,6 +562,13 @@ impl Display for ProposedBlockChangeSet {
         }
         if !self.state_tree_diffs.is_empty() {
             write!(f, " StateTreeDiff: {} change(s), ", self.state_tree_diffs.len())?;
+        }
+        if !self.new_transactions_to_sequence.is_empty() {
+            write!(
+                f,
+                " NewTransactions: {} transaction(s), ",
+                self.new_transactions_to_sequence.len()
+            )?;
         }
         if !self.substate_locks.is_empty() {
             write!(f, " SubstateLocks: {} lock(s), ", self.substate_locks.len())?;
@@ -569,6 +626,8 @@ mod tests {
         let mem_transaction_changes =
             (size_of::<TransactionId>() + size_of::<TransactionChangeSet>()) * MEM_MAX_TRANSACTION_CHANGE_SIZE;
         eprintln!("mem_transaction_changes: {}", mem_transaction_changes);
+        let mem_new_sequence_transactions = size_of::<TransactionPoolRecord>() * MEM_NEW_SEQUENCE_TRANSACTIONS;
+        eprintln!("mem_new_sequence_transactions: {}", mem_new_sequence_transactions);
         let mem_proposed_foreign_proposals = size_of::<BlockId>() * MEM_MAX_PROPOSED_FOREIGN_PROPOSALS_SIZE;
         eprintln!("mem_proposed_foreign_proposals: {}", mem_proposed_foreign_proposals);
         let mem_proposed_utxo_mints = size_of::<SubstateId>() * MEM_MAX_PROPOSED_UTXO_MINTS_SIZE;

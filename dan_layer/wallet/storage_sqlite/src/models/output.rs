@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use chrono::NaiveDateTime;
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::{models::ConfidentialOutputModel, storage::WalletStorageError};
 use tari_template_lib::{
     models::EncryptedData,
@@ -22,11 +22,11 @@ pub struct ConfidentialOutput {
     pub encryption_secret_key_index: i64,
     pub public_asset_tag: Option<String>,
     pub status: String,
-    pub locked_at: Option<NaiveDateTime>,
+    pub locked_at: Option<PrimitiveDateTime>,
     pub locked_by_proof: Option<i32>,
     pub encrypted_data: Vec<u8>,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 impl ConfidentialOutput {

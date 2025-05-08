@@ -1,8 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use chrono::NaiveDateTime;
 use diesel::{Identifiable, Queryable};
+use tari_dan_storage::time::PrimitiveDateTime;
 
 use crate::schema::proofs;
 
@@ -14,5 +14,5 @@ pub struct Proof {
     pub vault_id: i32,
     pub transaction_hash: Option<String>,
     pub locked_revealed_amount: i64,
-    pub created_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
 }

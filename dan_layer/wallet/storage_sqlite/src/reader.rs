@@ -185,8 +185,8 @@ impl WalletStoreReader for ReadTransaction<'_> {
             key: config.key,
             value: config.value,
             is_encrypted: config.is_encrypted,
-            created_at: config.created_at.and_utc().timestamp(),
-            updated_at: config.updated_at.and_utc().timestamp(),
+            created_at: config.created_at,
+            updated_at: config.updated_at,
         })
     }
 
@@ -969,7 +969,7 @@ impl WalletStoreReader for ReadTransaction<'_> {
     ) -> Result<(Vec<AuthoredTemplateModel>, u64), WalletStorageError> {
         use crate::schema::authored_templates;
 
-        let author_public_key_str = author_public_key.to_string();
+        let author_public_key_str = serialize_hex(author_public_key);
 
         let total_templates_for_key_index = authored_templates::table
             .filter(authored_templates::author_public_key.eq(&author_public_key_str))

@@ -20,6 +20,7 @@ use tari_engine_types::{confidential::UnclaimedConfidentialOutput, substate::Sub
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
+use time::PrimitiveDateTime;
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
@@ -56,6 +57,7 @@ use crate::{
         SubstateLock,
         SubstatePledges,
         SubstateRecord,
+        TransactionExecution,
         TransactionPoolRecord,
         TransactionPoolStage,
         TransactionPoolStatusUpdate,
@@ -132,16 +134,16 @@ pub trait StateStoreReadTransaction: Sized {
         tx_ids: I,
     ) -> Result<Vec<TransactionRecord>, StorageError>;
 
-    fn transaction_executions_get(
+    fn finalized_transaction_execution_get(&self, tx_id: &TransactionId) -> Result<TransactionExecution, StorageError>;
+    fn finalized_transaction_execution_get_finalized_time(
         &self,
         tx_id: &TransactionId,
-        block: &BlockId,
-    ) -> Result<BlockTransactionExecution, StorageError>;
+    ) -> Result<PrimitiveDateTime, StorageError>;
 
-    fn transaction_executions_get_pending_for_block(
+    fn block_transaction_executions_get_pending_for_block(
         &self,
         tx_id: &TransactionId,
-        from_block_id: &BlockId,
+        from_block: &LeafBlock,
     ) -> Result<BlockTransactionExecution, StorageError>;
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError>;
     fn blocks_get_all_ids_by_height(&self, epoch: Epoch, height: NodeHeight) -> Result<Vec<BlockId>, StorageError>;
@@ -371,16 +373,18 @@ pub trait StateStoreWriteTransaction {
 
     fn transactions_finalize_all<'a, I: IntoIterator<Item = &'a TransactionPoolRecord>>(
         &mut self,
-        block_id: BlockId,
         transaction: I,
     ) -> Result<(), StorageError>;
+
     // -------------------------------- Transaction Executions -------------------------------- //
-    fn transaction_executions_insert_or_ignore(
+
+    fn block_transaction_executions_insert_or_ignore(
         &mut self,
         transaction_execution: &BlockTransactionExecution,
     ) -> Result<bool, StorageError>;
 
-    fn transaction_executions_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
+    fn block_transaction_executions_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
+    fn block_transaction_executions_lock_any_for_block(&mut self, block: &LeafBlock) -> Result<(), StorageError>;
 
     // -------------------------------- Transaction Pool -------------------------------- //
     fn transaction_pool_insert_new(

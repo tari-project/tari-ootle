@@ -46,10 +46,10 @@ CREATE TABLE transactions
     dry_run                   BOOLEAN  NOT NULL,
     min_epoch                 BIGINT   NULL,
     max_epoch                 BIGINT   NULL,
-    executed_time_ms          bigint   NULL,
-    finalized_time_ms         bigint   NULL,
-    required_substates        text     NOT NULL default '[]',
-    new_account_info          text     NULL,
+    executed_time_ms          BIGINT   NULL,
+    finalized_time            DATETIME NULL,
+    required_substates        TEXT     NOT NULL default '[]',
+    new_account_info          TEXT     NULL,
     created_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

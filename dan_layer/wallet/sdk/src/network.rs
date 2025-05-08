@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{substate_type::SubstateType, SubstateRequirement};
-use tari_dan_storage::consensus_models::Decision;
+use tari_dan_storage::{consensus_models::Decision, time::PrimitiveDateTime};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{SubstateId, SubstateValue},
@@ -90,7 +90,7 @@ pub enum TransactionFinalizedResult {
         final_decision: Decision,
         execution_result: Option<Box<ExecuteResult>>,
         execution_time: Duration,
-        finalized_time: Duration,
+        finalized_time: PrimitiveDateTime,
         abort_details: Option<String>,
     },
 }

@@ -7,7 +7,7 @@ use tari_consensus::{
 };
 use tari_dan_common_types::{optional::Optional, NodeHeight, ShardGroup, SubstateAddress, VersionedSubstateIdRef};
 use tari_dan_storage::{
-    consensus_models::{BlockId, LeafBlock, TransactionRecord},
+    consensus_models::{BlockId, LeafBlock, TransactionExecution},
     StateStore,
     StateStoreReadTransaction,
 };
@@ -94,8 +94,8 @@ impl Validator {
     pub fn has_committed_substates(&self, tx_id: &TransactionId) -> bool {
         let tx = self.state_store().create_read_tx().unwrap();
         let tx_rec = tx.transactions_get(tx_id).unwrap();
-        let exec_result = tx_rec.into_final_result().expect("transaction not finalized");
-        if let Some(diff) = exec_result.finalize.accept() {
+        let exec_result = tx_rec.get_finalized_execution(&tx).unwrap();
+        if let Some(diff) = exec_result.result().finalize.accept() {
             for (substate_id, substate) in diff.up_iter() {
                 let id = VersionedSubstateIdRef::new(substate_id, substate.version());
                 if tx.substates_any_exist(Some(id)).unwrap() {
@@ -106,9 +106,15 @@ impl Validator {
         false
     }
 
-    pub fn get_transaction(&self, transaction_id: &TransactionId) -> TransactionRecord {
+    // pub fn get_transaction(&self, transaction_id: &TransactionId) -> TransactionRecord {
+    //     self.state_store
+    //         .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
+    //         .unwrap()
+    // }
+
+    pub fn get_transaction_execution(&self, transaction_id: &TransactionId) -> TransactionExecution {
         self.state_store
-            .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
+            .with_read_tx(|tx| TransactionExecution::get_finalized(tx, transaction_id))
             .unwrap()
     }
 }

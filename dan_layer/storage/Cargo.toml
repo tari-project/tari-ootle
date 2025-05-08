@@ -24,7 +24,6 @@ tari_state_tree = { workspace = true }
 
 anyhow = { workspace = true }
 borsh = { workspace = true }
-chrono = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 log = { workspace = true }
 rand = { workspace = true }
@@ -33,7 +32,6 @@ serde = { workspace = true, default-features = true }
 time = { workspace = true, features = ["serde", "serde-human-readable"] }
 ts-rs = { workspace = true, optional = true }
 strum = "0.26.3"
-strum_macros = "0.26.4"
 
 [dev-dependencies]
 tari_template_lib = { workspace = true }

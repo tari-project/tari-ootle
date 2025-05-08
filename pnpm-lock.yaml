@@ -21,12 +21,6 @@ overrides:
 
 importers:
 
-  .:
-    dependencies:
-      '@tari-project/typescript-bindings':
-        specifier: link:bindings
-        version: link:bindings
-
   applications/tari_dan_wallet_daemon/web_ui:
     dependencies:
       '@emotion/react':

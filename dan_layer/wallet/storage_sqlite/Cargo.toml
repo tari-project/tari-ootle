@@ -20,8 +20,7 @@ tari_utilities = { workspace = true }
 tari_dan_storage = { workspace = true }
 
 bigdecimal = { workspace = true }
-chrono = { workspace = true }
-diesel = { workspace = true, features = ["default", "sqlite", "chrono", "numeric"] }
+diesel = { workspace = true, features = ["default", "sqlite", "time", "numeric"] }
 diesel_migrations = { workspace = true }
 log = { workspace = true }
 hex = { workspace = true }

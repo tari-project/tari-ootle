@@ -13,7 +13,7 @@ use tari_dan_common_types::{
     SubstateRequirement,
     VersionedSubstateIdRef,
 };
-use tari_dan_storage::consensus_models::QuorumCertificate;
+use tari_dan_storage::{consensus_models::QuorumCertificate, time::PrimitiveDateTime};
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
 use tari_template_lib::{
     models::{Amount, VaultId},
@@ -278,7 +278,7 @@ pub trait WalletStoreWriter {
         qcs: Option<&[QuorumCertificate]>,
         new_status: TransactionStatus,
         execution_time: Option<Duration>,
-        finalized_time: Option<Duration>,
+        finalized_time: Option<PrimitiveDateTime>,
     ) -> Result<(), WalletStorageError>;
 
     // Substates

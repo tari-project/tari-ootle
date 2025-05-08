@@ -113,7 +113,7 @@ where TSubstateCache: SubstateCache + 'static
 
         // execute the payload in the WASM engine and return the result
         let exec_output = task::block_in_place(|| {
-            payload_processor.execute(transaction, state_store.into_read_only(), virtual_substates)
+            payload_processor.execute(&transaction, state_store.into_read_only(), virtual_substates)
         })?;
 
         Ok(exec_output.result)

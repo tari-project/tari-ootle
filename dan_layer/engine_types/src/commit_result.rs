@@ -25,6 +25,7 @@ use std::{
     time::Duration,
 };
 
+use borsh::BorshSerialize;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tari_template_lib::types::Hash;
 
@@ -309,7 +310,6 @@ impl Display for TransactionResult {
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub enum RejectReason {
-    InvalidTransaction(String),
     ExecutionFailure(String),
     OneOrMoreInputsNotFound(String),
     FailedToLockInputs(String),
@@ -318,16 +318,17 @@ pub enum RejectReason {
     ForeignShardGroupDecidedToAbort {
         start_shard: u32,
         end_shard: u32,
-        abort_reason: String,
+        abort_reason: AbortReason,
     },
     InsufficientFeesPaid(String),
-    Unknown,
+    Abort {
+        reason: AbortReason,
+    },
 }
 
 impl Display for RejectReason {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            RejectReason::InvalidTransaction(msg) => write!(f, "Invalid transaction: {}", msg),
             RejectReason::ExecutionFailure(msg) => write!(f, "Execution failure: {}", msg),
             RejectReason::OneOrMoreInputsNotFound(msg) => write!(f, "One or more inputs not found: {}", msg),
             RejectReason::FailedToLockInputs(msg) => write!(f, "Failed to lock inputs: {}", msg),
@@ -346,7 +347,44 @@ impl Display for RejectReason {
                 )
             },
             RejectReason::InsufficientFeesPaid(msg) => write!(f, "Insufficient fees paid: {}", msg),
-            RejectReason::Unknown => write!(f, "<unknown reject reason - this is not valid>"),
+            RejectReason::Abort { reason } => write!(f, "Abnormal abort: {reason}"),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, BorshSerialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub enum AbortReason {
+    ForeignPledgeInputConflict,
+    LockInputsFailed,
+    LockOutputsFailed,
+    LockInputsOutputsFailed,
+    ExecutionFailure,
+    OneOrMoreInputsNotFound,
+    InsufficientFeesPaid,
+}
+
+impl Display for AbortReason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl From<&RejectReason> for AbortReason {
+    fn from(reject_reason: &RejectReason) -> Self {
+        match reject_reason {
+            RejectReason::Abort { reason } => *reason,
+            RejectReason::ExecutionFailure(_) => Self::ExecutionFailure,
+            RejectReason::OneOrMoreInputsNotFound(_) => Self::OneOrMoreInputsNotFound,
+            RejectReason::ForeignPledgeInputConflict => Self::ForeignPledgeInputConflict,
+            RejectReason::FailedToLockInputs(_) => Self::LockInputsFailed,
+            RejectReason::FailedToLockOutputs(_) => Self::LockOutputsFailed,
+            RejectReason::ForeignShardGroupDecidedToAbort { abort_reason, .. } => *abort_reason,
+            RejectReason::InsufficientFeesPaid(_) => Self::InsufficientFeesPaid,
         }
     }
 }

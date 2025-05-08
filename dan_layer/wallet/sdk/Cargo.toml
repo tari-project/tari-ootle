@@ -26,7 +26,6 @@ tari_template_abi = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 blake2 = { workspace = true }
-chrono = { workspace = true }
 digest = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, default-features = true }

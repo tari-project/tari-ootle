@@ -57,4 +57,6 @@ pub enum DryRunTransactionProcessorError {
     IndexerError(#[from] IndexerError),
     #[error("StateStore error: {0}")]
     StateStoreError(#[from] StateStoreError),
+    #[error("Not a dry run transaction")]
+    NonDryRunTransaction,
 }

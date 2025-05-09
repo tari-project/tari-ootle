@@ -983,6 +983,7 @@ pub async fn handle_transfer(
         .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
 
     let transaction = transaction_builder(context)
+        .with_dry_run(req.dry_run)
         .with_fee_instructions(fee_instructions)
         .with_instructions(instructions)
         .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))

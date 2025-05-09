@@ -76,6 +76,7 @@ impl TryFrom<Transaction> for tari_transaction::Transaction {
                     min_epoch,
                     max_epoch,
                     is_seal_signer_authorized,
+                    dry_run: false,
                 },
                 signatures,
             ),

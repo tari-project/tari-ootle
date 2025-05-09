@@ -19,7 +19,7 @@ impl Validator<Transaction> for TransactionDryRunValidator {
         match input {
             Transaction::V1(tx) => {
                 if tx.is_dry_run() {
-                    warn!(target: LOG_TARGET, "TransactionDryRunValidator - FAIL: dry ru transactions are not allowed!");
+                    warn!(target: LOG_TARGET, "TransactionDryRunValidator - FAIL: dry run transactions are not allowed!");
                     return Err(Self::Error::DryRunNotAllowed);
                 }
 

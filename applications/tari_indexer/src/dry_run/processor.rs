@@ -51,7 +51,6 @@ use crate::dry_run::error::DryRunTransactionProcessorError;
 
 const LOG_TARGET: &str = "tari::indexer::dry_run_transaction_processor";
 
-// TODO: filtering out non-dry run transactions
 pub struct DryRunTransactionProcessor<TSubstateCache> {
     config: TransactionProcessorConfig,
     epoch_manager: EpochManagerHandle<PeerAddress>,
@@ -89,6 +88,10 @@ where TSubstateCache: SubstateCache + 'static
         transaction: Transaction,
         substate_requirements: Vec<SubstateRequirement>,
     ) -> Result<ExecuteResult, DryRunTransactionProcessorError> {
+        if !transaction.is_dry_run() {
+            return Err(DryRunTransactionProcessorError::NonDryRunTransaction);
+        }
+
         info!(target: LOG_TARGET, "process_transaction: {}", transaction.hash());
 
         // automatically scan the inputs and add all related involved objects

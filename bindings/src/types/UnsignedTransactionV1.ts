@@ -11,4 +11,5 @@ export interface UnsignedTransactionV1 {
   min_epoch: Epoch | null;
   max_epoch: Epoch | null;
   is_seal_signer_authorized: boolean;
+  dry_run: boolean;
 }

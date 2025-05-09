@@ -63,6 +63,7 @@ pub struct BlockDecision {
     pub commit_blocks: Vec<Block>,
     pub finalized_transactions: Vec<Vec<TransactionPoolRecord>>,
     pub high_qc: HighQc,
+    pub no_vote_reason: Option<NoVoteReason>,
 }
 
 impl BlockDecision {
@@ -127,9 +128,13 @@ impl ProposedBlockChangeSet {
         self
     }
 
-    pub fn no_vote(&mut self, no_vote_reason: NoVoteReason) -> &mut Self {
+    pub fn set_no_vote(&mut self, no_vote_reason: NoVoteReason) -> &mut Self {
         self.no_vote_reason = Some(no_vote_reason);
         self
+    }
+
+    pub fn no_vote_reason(&self) -> Option<&NoVoteReason> {
+        self.no_vote_reason.as_ref()
     }
 
     pub fn clear(&mut self) {

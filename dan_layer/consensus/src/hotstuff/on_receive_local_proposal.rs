@@ -17,6 +17,7 @@ use tari_dan_storage::{
         ForeignProposalStatus,
         HighQc,
         LastSentVote,
+        NoVoteReason,
         QcId,
         SubstateRecord,
         TransactionPool,
@@ -240,11 +241,16 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .await;
 
         match result {
-            Ok(true) => {
+            Ok(None) => {
                 // The leader failure is resumed by call to update_view inside process_block
                 Ok(true)
             },
-            Ok(false) => {
+            Ok(Some(NoVoteReason::AlreadyVotedAtHeight)) => {
+                // We have already voted at this height, so we don't need to do anything
+                // The leader failure is resumed by call to update_view inside process_block
+                Ok(true)
+            },
+            Ok(Some(_)) => {
                 if let Err(err) = self.pacemaker.resume_leader_failure().await {
                     error!(target: LOG_TARGET, "Error resuming leader failure: {}", err);
                 }
@@ -269,7 +275,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         proposer_claim_public_key_bytes: RistrettoPublicKeyBytes,
         valid_block: ValidBlock,
-    ) -> Result<bool, HotStuffError> {
+    ) -> Result<Option<NoVoteReason>, HotStuffError> {
         debug!(target: LOG_TARGET, "RECV-LOCAL-PROPOSAL - [{:?}] Starting processing block: {}", current_epoch, valid_block);
 
         let em_epoch = self.epoch_manager.current_epoch().await?;
@@ -320,11 +326,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         change_set.clear();
         self.change_set = Some(change_set);
 
-        let is_accept = self
+        let no_vote = self
             .process_block_decision(local_committee_info, local_committee, process_result, is_epoch_end)
             .await?;
 
-        Ok(is_accept)
+        Ok(no_vote)
     }
 
     async fn process_block_decision(
@@ -333,7 +339,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         process_block_result: ProcessBlockResult,
         is_epoch_end: bool,
-    ) -> Result<bool, HotStuffError> {
+    ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "process-block-decision").with_excessive_threshold(200);
 
         let ProcessBlockResult {
@@ -408,7 +414,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             self.pacemaker.beat();
         }
 
-        Ok(is_accept_decision)
+        Ok(block_decision.no_vote_reason)
     }
 
     async fn process_end_of_epoch(

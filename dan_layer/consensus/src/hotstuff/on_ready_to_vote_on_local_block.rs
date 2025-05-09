@@ -143,7 +143,7 @@ where TConsensusSpec: ConsensusSpec
                 change_set,
             )?;
         } else {
-            change_set.no_vote(NoVoteReason::AlreadyVotedAtHeight);
+            change_set.set_no_vote(NoVoteReason::AlreadyVotedAtHeight);
         }
 
         let mut commit_blocks = Vec::new();
@@ -204,6 +204,7 @@ where TConsensusSpec: ConsensusSpec
             commit_blocks,
             finalized_transactions,
             high_qc,
+            no_vote_reason: change_set.no_vote_reason().cloned(),
         })
     }
 
@@ -339,7 +340,7 @@ where TConsensusSpec: ConsensusSpec
                         proposed_block_change_set,
                         &mut total_leader_fee,
                     )? {
-                        proposed_block_change_set.no_vote(reason);
+                        proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
                     }
                 },
@@ -352,7 +353,7 @@ where TConsensusSpec: ConsensusSpec
                         &mut substate_store,
                         proposed_block_change_set,
                     )? {
-                        proposed_block_change_set.no_vote(reason);
+                        proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
                     }
                 },
@@ -365,7 +366,7 @@ where TConsensusSpec: ConsensusSpec
                         &mut substate_store,
                         proposed_block_change_set,
                     )? {
-                        proposed_block_change_set.no_vote(reason);
+                        proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
                     }
                 },
@@ -379,7 +380,7 @@ where TConsensusSpec: ConsensusSpec
                         proposed_block_change_set,
                         &mut total_leader_fee,
                     )? {
-                        proposed_block_change_set.no_vote(reason);
+                        proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
                     }
                 },
@@ -387,7 +388,7 @@ where TConsensusSpec: ConsensusSpec
                     if let Some(reason) =
                         self.evaluate_some_accept_command(tx, block, atom, proposed_block_change_set)?
                     {
-                        proposed_block_change_set.no_vote(reason);
+                        proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
                     }
                 },
@@ -401,7 +402,7 @@ where TConsensusSpec: ConsensusSpec
                         &mut substate_store,
                         proposed_block_change_set,
                     )? {
-                        proposed_block_change_set.no_vote(reason);
+                        proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
                     }
 
@@ -415,7 +416,7 @@ where TConsensusSpec: ConsensusSpec
                         &mut substate_store,
                         proposed_block_change_set,
                     )? {
-                        proposed_block_change_set.no_vote(reason);
+                        proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
                     }
                 },
@@ -426,7 +427,7 @@ where TConsensusSpec: ConsensusSpec
                             "❌ NO VOTE: {}", NoVoteReason::NodeAlreadyEvicted
                         );
 
-                        proposed_block_change_set.no_vote(NoVoteReason::NodeAlreadyEvicted);
+                        proposed_block_change_set.set_no_vote(NoVoteReason::NodeAlreadyEvicted);
                         return Ok(());
                     }
 
@@ -440,7 +441,7 @@ where TConsensusSpec: ConsensusSpec
                             "❌ NO VOTE: {}", NoVoteReason::CannotEvictNodeBelowQuorumThreshold
                         );
 
-                        proposed_block_change_set.no_vote(NoVoteReason::CannotEvictNodeBelowQuorumThreshold);
+                        proposed_block_change_set.set_no_vote(NoVoteReason::CannotEvictNodeBelowQuorumThreshold);
                         return Ok(());
                     }
 
@@ -451,7 +452,7 @@ where TConsensusSpec: ConsensusSpec
                             "❌ NO VOTE: {} (actual missed count: {}, threshold: {})", NoVoteReason::ShouldNotEvictNode, stats.missed_proposals, self.config.consensus_constants.missed_proposal_evict_threshold
                         );
 
-                        proposed_block_change_set.no_vote(NoVoteReason::ShouldNotEvictNode);
+                        proposed_block_change_set.set_no_vote(NoVoteReason::ShouldNotEvictNode);
                         return Ok(());
                     }
 
@@ -470,7 +471,7 @@ where TConsensusSpec: ConsensusSpec
                             "❌ EpochEvent::End command received for block {} but it is not the next epoch",
                             block.id(),
                         );
-                        proposed_block_change_set.no_vote(NoVoteReason::NotEndOfEpoch);
+                        proposed_block_change_set.set_no_vote(NoVoteReason::NotEndOfEpoch);
                         return Ok(());
                     }
                     if block.commands().len() > 1 {
@@ -479,7 +480,7 @@ where TConsensusSpec: ConsensusSpec
                             "❌ EpochEvent::End command in block {} but block contains other commands",
                             block.id()
                         );
-                        proposed_block_change_set.no_vote(NoVoteReason::EndOfEpochWithOtherCommands);
+                        proposed_block_change_set.set_no_vote(NoVoteReason::EndOfEpochWithOtherCommands);
                         return Ok(());
                     }
 
@@ -496,7 +497,7 @@ where TConsensusSpec: ConsensusSpec
                 block.total_leader_fee(),
                 total_leader_fee
             );
-            proposed_block_change_set.no_vote(NoVoteReason::TotalLeaderFeeDisagreement);
+            proposed_block_change_set.set_no_vote(NoVoteReason::TotalLeaderFeeDisagreement);
             return Ok(());
         }
 
@@ -535,7 +536,7 @@ where TConsensusSpec: ConsensusSpec
             );
             let (diff, locks) = substate_store.into_parts();
             proposed_block_change_set
-                .no_vote(NoVoteReason::StateMerkleRootMismatch)
+                .set_no_vote(NoVoteReason::StateMerkleRootMismatch)
                 // These are set for debugging purposes but aren't actually committed
                 .set_substate_changes(diff)
                 .set_substate_locks(locks);

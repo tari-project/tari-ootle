@@ -14,20 +14,13 @@ use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 
 use crate::{
-    helpers::{assert_eq_debug, build_substate_record, create_rocksdb, create_sqlite},
+    helpers::{assert_eq_debug, build_substate_record, create_rocksdb},
     TEST_NUM_PRESHARDS,
 };
 
 fn substate_id(seed: u8) -> SubstateId {
     let address = ComponentAddress::from_array([seed; ObjectKey::LENGTH]);
     SubstateId::Component(address)
-}
-
-#[test]
-fn sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    operations(db);
 }
 
 #[test]

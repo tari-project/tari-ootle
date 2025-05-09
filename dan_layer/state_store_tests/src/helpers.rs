@@ -51,7 +51,6 @@ use tari_engine_types::{
 };
 use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
 use tari_state_store_rocksdb::RocksDbStateStore;
-use tari_state_store_sqlite::SqliteStateStore;
 use tari_template_lib::{
     auth::OwnerRule,
     models::ComponentAddress,
@@ -74,14 +73,6 @@ pub fn create_rocksdb() -> (RocksDbStateStore<String>, TempDir) {
     let temp_dir = tempfile::Builder::new().keep(false).tempdir().unwrap();
     let db_file = temp_dir.path().join("rocksdb");
     (RocksDbStateStore::open(db_file).unwrap(), temp_dir)
-}
-
-pub fn create_sqlite() -> SqliteStateStore<String> {
-    let db = SqliteStateStore::connect(":memory:").unwrap();
-
-    // Need FK=off because otherwise we'd have to create transactions for each in the pool
-    db.foreign_keys_off().unwrap();
-    db
 }
 
 pub fn create_tx_atom() -> TransactionAtom {

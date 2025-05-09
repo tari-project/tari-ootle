@@ -19,16 +19,9 @@ use crate::helpers::{
     create_chain,
     create_random_substate_id,
     create_rocksdb,
-    create_sqlite,
     substate_id_seed,
     transaction_id_from_seed,
 };
-
-#[test]
-fn sqlite() {
-    let db = create_sqlite();
-    run_test(db);
-}
 
 #[test]
 fn rocksdb() {

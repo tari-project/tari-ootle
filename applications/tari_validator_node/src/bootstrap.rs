@@ -187,12 +187,6 @@ pub async fn spawn_services(
         .as_ref()
         .map(|pk| pk.to_byte_type());
 
-    // Connect to state db
-    #[cfg(feature = "sqlite_backend")]
-    let state_store =
-        ValidatorNodeStateStore::connect(&format!("sqlite://{}", config.validator_node.state_db_path.display()))?;
-
-    #[cfg(not(feature = "sqlite_backend"))]
     let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path)?;
 
     state_store

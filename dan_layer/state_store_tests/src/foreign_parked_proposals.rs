@@ -9,16 +9,9 @@ use tari_dan_storage::{
 };
 
 use crate::{
-    helpers::{create_foreign_proposal, create_rocksdb, create_sqlite, transaction_id_from_seed},
+    helpers::{create_foreign_proposal, create_rocksdb, transaction_id_from_seed},
     TEST_NUM_PRESHARDS,
 };
-
-#[test]
-fn sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    run_test(db);
-}
 
 #[test]
 fn rocksdb() {

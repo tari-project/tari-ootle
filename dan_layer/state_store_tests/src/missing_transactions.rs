@@ -11,14 +11,7 @@ use tari_dan_storage::{
 use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helpers::{create_block, create_rocksdb, create_sqlite, create_tx_atom};
-
-#[test]
-fn missing_transactions_sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    missing_transactions_operations(db);
-}
+use crate::helpers::{create_block, create_rocksdb, create_tx_atom};
 
 #[test]
 fn missing_transactions_rocksdb() {

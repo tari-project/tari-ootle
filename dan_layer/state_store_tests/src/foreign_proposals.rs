@@ -12,15 +12,7 @@ use tari_dan_storage::{
 use tari_template_lib::prelude::SchnorrSignatureBytes;
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helpers::{assert_eq_debug, create_foreign_proposal, create_random_block_id, create_rocksdb, create_sqlite};
-
-#[ignore = "some issue with the QcId"]
-#[test]
-fn foreign_proposals_sqlite() {
-    let db = create_sqlite();
-    db.foreign_keys_off().unwrap();
-    foreign_proposals_operations(db);
-}
+use crate::helpers::{assert_eq_debug, create_foreign_proposal, create_random_block_id, create_rocksdb};
 
 #[test]
 fn foreign_proposals_rocksdb() {

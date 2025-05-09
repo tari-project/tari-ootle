@@ -24,7 +24,6 @@ tari_epoch_manager = { workspace = true }
 tari_shutdown = { workspace = true }
 tari_sidechain = { workspace = true }
 tari_state_store_rocksdb = { workspace = true }
-tari_state_store_sqlite = { workspace = true }
 tari_state_tree = { workspace = true }
 tari_template_lib = { workspace = true, features = ["borsh"] }
 tari_transaction = { workspace = true }

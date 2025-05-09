@@ -1770,7 +1770,6 @@ dependencies = [
  "tari_shutdown",
  "tari_sidechain",
  "tari_state_store_rocksdb",
- "tari_state_store_sqlite",
  "tari_state_tree",
  "tari_template_lib",
  "tari_transaction",
@@ -9684,19 +9683,15 @@ checksum = "e7386b49cb287f6fafbfd3bd604914bccb99fb8d53483f40e1ecfda5d45f3370"
 name = "state_store_tests"
 version = "0.9.2"
 dependencies = [
- "bincode 2.0.1",
  "indexmap 2.9.0",
  "rand 0.8.5",
- "serde",
  "tari_bor",
  "tari_common_types",
- "tari_crypto",
  "tari_dan_common_types",
  "tari_dan_storage",
  "tari_engine_types",
  "tari_sidechain",
  "tari_state_store_rocksdb",
- "tari_state_store_sqlite",
  "tari_state_tree",
  "tari_template_lib",
  "tari_transaction",
@@ -11232,30 +11227,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tari_state_store_sqlite"
-version = "0.9.2"
-dependencies = [
- "anyhow",
- "diesel",
- "diesel_migrations",
- "hex",
- "indexmap 2.9.0",
- "log",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "tari_dan_common_types",
- "tari_dan_storage",
- "tari_engine_types",
- "tari_state_tree",
- "tari_template_lib_types",
- "tari_transaction",
- "tari_utilities",
- "thiserror 1.0.69",
- "time",
-]
-
-[[package]]
 name = "tari_state_tree"
 version = "0.9.2"
 dependencies = [
@@ -11562,7 +11533,6 @@ dependencies = [
  "tari_shutdown",
  "tari_sidechain",
  "tari_state_store_rocksdb",
- "tari_state_store_sqlite",
  "tari_swarm",
  "tari_template_builtin",
  "tari_template_lib",

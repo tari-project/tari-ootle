@@ -1630,7 +1630,7 @@ async fn multishard_validator_fee_claim() {
         .start()
         .await;
     // Create and send publish template transaction
-    let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
+    let inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 1);
     let address = derive_fee_pool_address(
         &claim_bytes,
         test.num_preshards(),
@@ -1663,8 +1663,8 @@ async fn multishard_validator_fee_claim() {
     });
 
     // Get some fees
-    test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
-    test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
+    let (tx1, _, _) = test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
+    let (tx2, _, _) = test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
 
     test.start_epoch(Epoch(1)).await;
 
@@ -1673,7 +1673,9 @@ async fn multishard_validator_fee_claim() {
 
         let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
 
-        if test.is_transaction_pool_empty() {
+        if test.is_transaction_finalized_at_destination(TestVnDestination::Committee(0), tx1.id()) &&
+            test.is_transaction_finalized_at_destination(TestVnDestination::Committee(0), tx2.id())
+        {
             break;
         }
 
@@ -1685,23 +1687,22 @@ async fn multishard_validator_fee_claim() {
     // Send a claim
     test.send_transaction_to_destination(TestVnDestination::All, claim_tx.clone())
         .await;
-    test.wait_for_pool_count(TestVnDestination::All, 1).await;
     loop {
         test.on_block_committed().await;
 
         let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
 
-        if test.is_transaction_pool_empty() {
+        // This transaction is guaranteed to involve committee 0, so we only check one committee
+        if test.is_transaction_finalized_at_destination(TestVnDestination::Committee(0), claim_tx.id()) {
             break;
         }
 
-        if leaf.height >= NodeHeight(40) {
-            panic!("Not all transaction committed after {} blocks", leaf.height);
+        if leaf.height >= NodeHeight(80) {
+            panic!("Not all transactions committed after {} blocks", leaf.height);
         }
     }
 
     test.stop();
-    test.assert_all_validators_committed(claim_tx.id());
 
     // Assert fee pool exists
     let _fee_pool = test

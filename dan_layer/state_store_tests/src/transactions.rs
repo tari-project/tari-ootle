@@ -308,7 +308,7 @@ mod transaction_execution_operations {
             vec![],
             vec![],
         );
-        tx.block_transaction_executions_insert_or_ignore(&exec2).unwrap();
+        assert!(tx.block_transaction_executions_insert_or_ignore(&exec2).unwrap());
 
         // transaction_executions_get_pending_for_block
         let res = tx

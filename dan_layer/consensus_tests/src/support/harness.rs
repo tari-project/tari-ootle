@@ -425,6 +425,26 @@ impl Test {
         })
     }
 
+    pub fn is_transaction_finalized_at_destination(
+        &self,
+        destination: TestVnDestination,
+        transaction_id: &TransactionId,
+    ) -> bool {
+        self.validators
+            .values()
+            .filter(|vn| destination.is_for_vn(vn))
+            .all(|vn| {
+                vn.state_store
+                    .with_read_tx(|tx| {
+                        let finalized = tx
+                            .finalized_transaction_execution_get_finalized_time(transaction_id)
+                            .optional()?;
+                        Ok::<_, StorageError>(finalized.is_some())
+                    })
+                    .unwrap()
+            })
+    }
+
     pub async fn wait_for_n_to_be_finalized(&self, n: usize) {
         self.wait_all_for_predicate(format!("waiting for {n} to be finalized"), |vn| {
             vn.state_store
@@ -452,7 +472,7 @@ impl Test {
     }
 
     pub async fn wait_for_pool_count(&self, dest: TestVnDestination, count: usize) {
-        self.wait_all_for_predicate("waiting for pool count", |vn| {
+        self.wait_all_for_predicate("pool count > n", |vn| {
             if !dest.is_for_vn(vn) {
                 return true;
             }
@@ -478,7 +498,12 @@ impl Test {
                 if predicate(v) {
                     complete.push(v.address.clone());
                 } else if remaining_loops == 0 {
-                    panic!("Timed out waiting for {}", description);
+                    panic!(
+                        "Timed out waiting for {} ({} of {} validators passed)",
+                        description,
+                        complete.len(),
+                        self.validators.len()
+                    );
                 } else {
                     // 📎
                 }
@@ -544,7 +569,11 @@ impl Test {
     }
 
     pub fn assert_all_validators_committed(&self, tx_id: &TransactionId) {
-        self.validators.values().for_each(|v| {
+        self.assert_destination_has_committed(TestVnDestination::All, tx_id);
+    }
+
+    pub fn assert_destination_has_committed(&self, dest: TestVnDestination, tx_id: &TransactionId) {
+        self.validators.values().filter(|vn| dest.is_for_vn(vn)).for_each(|v| {
             assert!(
                 v.has_committed_substates(tx_id),
                 "Validator {} did not commit transaction {}",

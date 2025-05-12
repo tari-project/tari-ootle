@@ -567,6 +567,16 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 reason: format!("{OPERATION}: Block {from_block} does not exist",),
             });
         }
+        if self
+            .db()
+            .cf(FinalizedTransactionLinkModel)?
+            .exists(transaction_id, OPERATION)?
+        {
+            return Err(StorageError::NotFound {
+                item: "FinalizedTransactionLinkModel",
+                key: transaction_id.to_string(),
+            });
+        };
 
         let cf = self.db().cf(BlockTransactionExecutionModel)?;
 

@@ -122,6 +122,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn handle(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,

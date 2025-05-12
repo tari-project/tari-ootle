@@ -61,7 +61,7 @@ impl Transaction {
                         min_epoch: self.min_epoch.map(|epoch| Epoch(epoch as u64)),
                         max_epoch: self.max_epoch.map(|epoch| Epoch(epoch as u64)),
                         is_seal_signer_authorized: true,
-                        dry_run: false,
+                        dry_run: self.is_dry_run,
                     },
                     signatures,
                 ),

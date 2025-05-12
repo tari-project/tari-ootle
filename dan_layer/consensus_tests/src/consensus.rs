@@ -1022,10 +1022,9 @@ async fn leader_failure_node_goes_down() {
         // Allow enough time for leader failures
         .with_test_timeout(Duration::from_secs(60))
         .modify_consensus_constants(|config_mut| {
-            // Prevent evictions
             config_mut.missed_proposal_suspend_threshold = 10;
             config_mut.missed_proposal_evict_threshold = 10;
-            config_mut.pacemaker_block_time = Duration::from_secs(2);
+            config_mut.pacemaker_block_time = Duration::from_secs(5);
         })
         .add_committee(0, vec!["1", "2", "3", "4", "5"])
         .start()

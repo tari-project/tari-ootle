@@ -18,6 +18,7 @@ use tari_dan_storage::{
         ForeignProposalRecord,
         HighQc,
         LeafBlock,
+        NoVoteReason,
         QcId,
         TransactionPool,
         TransactionRecord,
@@ -890,8 +891,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             "on_receive_local_proposal",
             self.on_receive_local_proposal.handle(epoch_state, msg).await,
         ) {
-            Ok(true) => Ok(()),
-            Ok(false) => {
+            Ok(None) | Ok(Some(NoVoteReason::AlreadyVotedAtHeight)) => Ok(()),
+            Ok(Some(_)) => {
                 // We decided NOVOTE, so we immediately send a NEWVIEW
                 self.on_leader_timeout(epoch_state, current_height).await
             },

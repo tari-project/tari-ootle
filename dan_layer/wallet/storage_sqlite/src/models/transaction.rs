@@ -4,7 +4,7 @@
 use std::{str::FromStr, time::Duration};
 
 use log::*;
-use tari_dan_common_types::Epoch;
+use tari_dan_common_types::{displayable::Displayable, Epoch};
 use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::{
     models::{TransactionStatus, WalletTransaction},
@@ -90,9 +90,14 @@ impl Transaction {
                 .map(Duration::try_from)
                 .transpose()
                 .inspect_err(|e| {
-                    warn!(
+                    // TODO: in local testing, created_at > finalized_time happens a lot.
+                    // Could be accurate and due to slight delays in inserting in SQLite + super fast finality.
+                    // But we should investigate this further.
+                    debug!(
                         target: LOG_TARGET,
-                        "Failed to convert finalized time to duration: {}",
+                        "Failed to convert finalized time to duration {} - {}: {}",
+                        self.finalized_time.display(),
+                        self.created_at,
                         e
                     );
                 })

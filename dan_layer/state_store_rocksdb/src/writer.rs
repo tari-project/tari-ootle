@@ -20,11 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{
-    cmp,
-    collections::{HashSet, VecDeque},
-    ops::Deref,
-};
+use std::{cmp, collections::HashSet, ops::Deref};
 
 use indexmap::IndexMap;
 use log::*;
@@ -133,7 +129,7 @@ use crate::{
         quorum_certificate::QuorumCertificateModel,
         state_transition,
         state_transition::{StateTransitionModel, StateTransitionModelData, StateTransitionType},
-        state_tree::{StateTreeModel, StateTreeStaleNodesModel, StateTreeStaleNodesModelRef},
+        state_tree::{StateTreeModel, StateTreeStaleNodesModelRef},
         state_tree_shard_versions::StateTreeShardVersionModel,
         substate,
         substate::{SubstateHeadData, SubstateModel},
@@ -1379,51 +1375,55 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn state_tree_nodes_clear_stale(&mut self, limit: usize) -> Result<(), StorageError> {
-        const OPERATION: &str = "state_tree_nodes_clear_all_stale";
+    fn state_tree_nodes_clear_stale(&mut self, _limit: usize) -> Result<(), StorageError> {
+        // const OPERATION: &str = "state_tree_nodes_clear_all_stale";
 
-        let cf = self.db().cf(StateTreeModel)?;
-        let stale_cf = self.db().cf(StateTreeStaleNodesModel)?;
-        let iter = stale_cf.iterator(Ordering::default(), OPERATION);
-        let mut num_deleted = 0;
-        for result in iter.take(limit) {
-            let ((shard, key), node) = result?;
-            self.db()
-                .cf(StateTreeStaleNodesModelRef::default())?
-                .delete(&(shard, &key), OPERATION)?;
-            match node {
-                StaleTreeNode::Node(key) => {
-                    trace!( target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
-                    cf.delete(&(shard, key), OPERATION)?;
-                    num_deleted += 1;
-                },
-                StaleTreeNode::Subtree(key) => {
-                    trace!( target: LOG_TARGET, "Deleting stale substree {key} from shard {shard}", );
-                    let mut queue = VecDeque::new();
-                    queue.push_back(key);
-                    while let Some(node_key) = queue.pop_front() {
-                        if let Some(node) = cf.get(&(shard, node_key.clone()), OPERATION).optional()? {
-                            cf.delete(&(shard, node_key.clone()), OPERATION)?;
-                            num_deleted += 1;
-                            match node {
-                                Node::Internal(x) => {
-                                    for (nibble, child) in x.into_children() {
-                                        let child_key = node_key.gen_child_node_key(child.version, nibble);
-                                        queue.push_back(child_key)
-                                    }
-                                },
-                                Node::Leaf(_) => {},
-                                Node::Null => {},
-                            }
-                        }
-                    }
-                },
-            }
-        }
+        // let mut num_deleted = 0;
+        // FIXME: this is broken. Investigate - I suspect that we need to delete these in a correct order to allow
+        // partially clearing. However, testing by ignoring the provided limit (deleting all stale nodes) still
+        // caused missing node errors. For now we'll leave stale nodes in the database.
 
-        if num_deleted > 0 {
-            debug!(target: LOG_TARGET, "Deleted {num_deleted}/{limit} stale nodes");
-        }
+        // let cf = self.db().cf(StateTreeModel)?;
+        // let stale_cf = self.db().cf(StateTreeStaleNodesModel)?;
+        // let iter = stale_cf.iterator(Ordering::default(), OPERATION);
+        // for result in iter.take(limit) {
+        //     let ((shard, key), node) = result?;
+        //     self.db()
+        //         .cf(StateTreeStaleNodesModelRef::default())?
+        //         .delete(&(shard, &key), OPERATION)?;
+        //     match node {
+        //         StaleTreeNode::Node(key) => {
+        //             debug!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
+        //             cf.delete(&(shard, key), OPERATION)?;
+        //             num_deleted += 1;
+        //         },
+        //         StaleTreeNode::Subtree(key) => {
+        //             debug!(target: LOG_TARGET, "Deleting stale substree {key} from shard {shard}", );
+        //             let mut queue = VecDeque::new();
+        //             queue.push_back(key);
+        //             while let Some(node_key) = queue.pop_front() {
+        //                 if let Some(node) = cf.get(&(shard, node_key.clone()), OPERATION).optional()? {
+        //                     cf.delete(&(shard, node_key.clone()), OPERATION)?;
+        //                     num_deleted += 1;
+        //                     match node {
+        //                         Node::Internal(x) => {
+        //                             for (nibble, child) in x.into_children() {
+        //                                 let child_key = node_key.gen_child_node_key(child.version, nibble);
+        //                                 queue.push_back(child_key)
+        //                             }
+        //                         },
+        //                         Node::Leaf(_) => {},
+        //                         Node::Null => {},
+        //                     }
+        //                 }
+        //             }
+        //         },
+        //     }
+        // }
+
+        // if num_deleted > 0 {
+        //     debug!(target: LOG_TARGET, "Deleted {num_deleted}/{limit} stale nodes");
+        // }
 
         Ok(())
     }

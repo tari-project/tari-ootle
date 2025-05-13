@@ -14,7 +14,7 @@ use tari_template_manager::interface::TemplateManagerError;
 use tari_validator_node_rpc::ValidatorNodeRpcClientError;
 
 #[derive(Debug, thiserror::Error)]
-pub enum CommsRpcConsensusSyncError {
+pub enum RpcStateSyncError {
     #[error("Epoch manager error: {0}")]
     EpochManagerError(#[from] EpochManagerError),
     #[error("RPC error: {0}")]
@@ -47,28 +47,28 @@ pub enum CommsRpcConsensusSyncError {
     NoCommittees(Epoch),
 }
 
-impl CommsRpcConsensusSyncError {
-    pub fn error_at_remote(self) -> Result<CommsRpcConsensusSyncError, CommsRpcConsensusSyncError> {
+impl RpcStateSyncError {
+    pub fn error_at_remote(self) -> Result<RpcStateSyncError, RpcStateSyncError> {
         match &self {
-            CommsRpcConsensusSyncError::InvalidResponse(_) | CommsRpcConsensusSyncError::RpcError(_) => Err(self),
+            RpcStateSyncError::InvalidResponse(_) | RpcStateSyncError::RpcError(_) => Err(self),
             _ => Ok(self),
         }
     }
 }
 
-impl From<CommsRpcConsensusSyncError> for HotStuffError {
-    fn from(value: CommsRpcConsensusSyncError) -> Self {
+impl From<RpcStateSyncError> for HotStuffError {
+    fn from(value: RpcStateSyncError) -> Self {
         HotStuffError::SyncError(value.into())
     }
 }
 
-impl From<JmtStorageError> for CommsRpcConsensusSyncError {
+impl From<JmtStorageError> for RpcStateSyncError {
     fn from(value: JmtStorageError) -> Self {
         Self::StateTreeError(value.into())
     }
 }
 
-impl From<RpcStatus> for CommsRpcConsensusSyncError {
+impl From<RpcStatus> for RpcStateSyncError {
     fn from(value: RpcStatus) -> Self {
         Self::RpcError(value.into())
     }

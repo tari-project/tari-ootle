@@ -13,6 +13,7 @@ use tari_dan_common_types::{
 use tari_dan_storage::{
     consensus_models::{
         Block,
+        EpochStateRoot,
         ForeignProposalRecord,
         ForeignProposalStatus,
         HighQc,
@@ -456,6 +457,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     )));
                 }
                 checkpoint.save(tx)?;
+                EpochStateRoot::new(eoe_block.epoch(), eoe_block.shard_group(), calculated_mr).set(tx)?;
 
                 if let Some(next_shard_group) = next_shard_group {
                     // Create the next genesis

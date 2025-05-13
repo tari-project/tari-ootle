@@ -35,6 +35,7 @@ pub async fn list(
         Column::new("num_commands", "#Cmds"),
         Column::new("commands", "Commands"),
         Column::new("proposed_by", "Proposed by"),
+        Column::new("parent", "Parent"),
         Column::new("state_hash", "State Hash"),
         Column::new("epoch_hash", "Epoch Hash"),
     ]);
@@ -84,6 +85,7 @@ pub async fn list(
             "num_commands": block.commands().len(),
             "commands": block.commands(),
             "proposed_by": block.proposed_by(),
+            "parent": block.header().parent(),
             "state_hash": hex::encode(block.header().state_merkle_root()),
             "epoch_hash": hex::encode(block.header().epoch_hash()),
         }));

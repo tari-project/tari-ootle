@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{cmp, collections::HashSet, ops::Deref};
+use std::{cmp, collections::HashSet, iter, ops::Deref};
 
 use indexmap::IndexMap;
 use log::*;
@@ -31,6 +31,7 @@ use tari_dan_common_types::{
     Epoch,
     NodeAddressable,
     NodeHeight,
+    NumPreshards,
     ShardGroup,
     ToSubstateAddress,
     VersionedSubstateId,
@@ -43,6 +44,7 @@ use tari_dan_storage::{
         BurntUtxo,
         Decision,
         EpochCheckpoint,
+        EpochStateRoot,
         Evidence,
         ForeignParkedProposal,
         ForeignProposal,
@@ -79,12 +81,12 @@ use tari_dan_storage::{
     StorageError,
 };
 use tari_engine_types::{substate::SubstateId, template_lib_models::UnclaimedConfidentialOutputAddress};
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
+use tari_state_tree::{Child, Nibble, Node, NodeKey, NodeType, StaleTreeNode, Version};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
 use crate::{
-    cf_api::DbContext,
+    cf_api::{CfContext, DbContext},
     codecs::ByteColumn,
     models::{
         block,
@@ -103,6 +105,7 @@ use crate::{
             LastVotedModel,
             LeafBlockModel,
             LockedBlockModel,
+            PreviousEpochStateRootModel,
         },
         burnt_utxo,
         burnt_utxo::BurntUtxoModel,
@@ -129,7 +132,8 @@ use crate::{
         quorum_certificate::QuorumCertificateModel,
         state_transition,
         state_transition::{StateTransitionModel, StateTransitionModelData, StateTransitionType},
-        state_tree::{StateTreeModel, StateTreeStaleNodesModelRef},
+        state_tree,
+        state_tree::{StateTreeModel, StateTreeStaleNodesModel},
         state_tree_shard_versions::StateTreeShardVersionModel,
         substate,
         substate::{SubstateHeadData, SubstateModel},
@@ -141,6 +145,7 @@ use crate::{
         transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData},
         validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
     },
+    options::DatabaseOptions,
     reader::RocksDbStateStoreReadTransaction,
     utils::now,
 };
@@ -151,13 +156,15 @@ pub struct RocksDbStateStoreWriteTransaction<'a, TAddr> {
     /// None indicates if the transaction has been explicitly committed/rolled back
     transaction: Option<RocksDbStateStoreReadTransaction<'a, TAddr>>,
     db: &'a TransactionDB,
+    options: &'a DatabaseOptions,
 }
 
 impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
-    pub(crate) fn new(db: &'a TransactionDB, tx: Transaction<'a, TransactionDB>) -> Self {
+    pub(crate) fn new(db: &'a TransactionDB, tx: Transaction<'a, TransactionDB>, options: &'a DatabaseOptions) -> Self {
         Self {
             db,
             transaction: Some(RocksDbStateStoreReadTransaction::new(db, tx)),
+            options,
         }
     }
 
@@ -1355,75 +1362,116 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(diffs)
     }
 
-    fn state_tree_nodes_insert(&mut self, shard: Shard, key: NodeKey, node: Node<Version>) -> Result<(), StorageError> {
-        const OPERATION: &str = "state_tree_nodes_insert";
-        self.db().cf(StateTreeModel)?.put(&(shard, key), &node, OPERATION)?;
-        Ok(())
-    }
-
-    fn state_tree_nodes_record_stale_tree_node(
+    fn state_tree_nodes_batch_insert(
         &mut self,
         shard: Shard,
-        node: StaleTreeNode,
+        nodes: Vec<(NodeKey, Node<Version>)>,
     ) -> Result<(), StorageError> {
-        const OPERATION: &str = "state_tree_nodes_record_stale_tree_node";
+        const OPERATION: &str = "state_tree_nodes_insert";
+        let cf = self.db().cf(StateTreeModel)?;
+        for (key, node) in nodes {
+            cf.put(&(shard, key), &node, OPERATION)?;
+        }
+        Ok(())
+    }
+
+    fn state_tree_nodes_record_stale_tree_nodes(
+        &mut self,
+        shard: Shard,
+        version: Version,
+        nodes: Vec<StaleTreeNode>,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "state_tree_nodes_record_stale_tree_nodes";
 
         self.db()
-            .cf(StateTreeStaleNodesModelRef::default())?
-            .put(&(shard, node.as_node_key()), &node, OPERATION)?;
+            .cf(StateTreeStaleNodesModel)?
+            .put(&(shard, version), &nodes, OPERATION)?;
 
         Ok(())
     }
 
-    fn state_tree_nodes_clear_stale(&mut self, _limit: usize) -> Result<(), StorageError> {
-        // const OPERATION: &str = "state_tree_nodes_clear_all_stale";
+    fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<(), StorageError> {
+        const OPERATION: &str = "state_tree_nodes_clear_all_stale";
 
-        // let mut num_deleted = 0;
-        // FIXME: this is broken. Investigate - I suspect that we need to delete these in a correct order to allow
-        // partially clearing. However, testing by ignoring the provided limit (deleting all stale nodes) still
-        // caused missing node errors. For now we'll leave stale nodes in the database.
+        let cf = self.db().cf(StateTreeModel)?;
+        let versions_cf = self.db().cf(StateTreeShardVersionModel)?;
+        let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardQuery)?;
+        for shard in ShardGroup::all_shards(num_preshards).shard_iter() {
+            let mut num_deleted = 0;
+            let stale_iter = stale_cf.query_prefix_range_iterator(Ordering::Ascending, &shard);
+            let max_version = versions_cf.get(&shard, OPERATION).optional()?.unwrap_or(0);
+            let Some(to_version) = max_version.checked_sub(self.options.history_length) else {
+                debug!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.history_length);
+                continue;
+            };
+            for result in stale_iter {
+                let ((shard, version), nodes) = result?;
+                // Only delete up to history length back from the max version
+                if version > to_version {
+                    break;
+                }
 
-        // let cf = self.db().cf(StateTreeModel)?;
-        // let stale_cf = self.db().cf(StateTreeStaleNodesModel)?;
-        // let iter = stale_cf.iterator(Ordering::default(), OPERATION);
-        // for result in iter.take(limit) {
-        //     let ((shard, key), node) = result?;
-        //     self.db()
-        //         .cf(StateTreeStaleNodesModelRef::default())?
-        //         .delete(&(shard, &key), OPERATION)?;
-        //     match node {
-        //         StaleTreeNode::Node(key) => {
-        //             debug!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
-        //             cf.delete(&(shard, key), OPERATION)?;
-        //             num_deleted += 1;
-        //         },
-        //         StaleTreeNode::Subtree(key) => {
-        //             debug!(target: LOG_TARGET, "Deleting stale substree {key} from shard {shard}", );
-        //             let mut queue = VecDeque::new();
-        //             queue.push_back(key);
-        //             while let Some(node_key) = queue.pop_front() {
-        //                 if let Some(node) = cf.get(&(shard, node_key.clone()), OPERATION).optional()? {
-        //                     cf.delete(&(shard, node_key.clone()), OPERATION)?;
-        //                     num_deleted += 1;
-        //                     match node {
-        //                         Node::Internal(x) => {
-        //                             for (nibble, child) in x.into_children() {
-        //                                 let child_key = node_key.gen_child_node_key(child.version, nibble);
-        //                                 queue.push_back(child_key)
-        //                             }
-        //                         },
-        //                         Node::Leaf(_) => {},
-        //                         Node::Null => {},
-        //                     }
-        //                 }
-        //             }
-        //         },
-        //     }
-        // }
+                let mut delete_buffer = vec![];
+                for node in nodes {
+                    // Deletes are buffered to ensure that we delete entire subtrees at once
+                    if delete_buffer.len() >= 1_000_000 {
+                        debug!(target: LOG_TARGET, "Deleting {} stale nodes from shard {}", delete_buffer.len(), shard);
+                        for key in &delete_buffer {
+                            cf.delete(key, OPERATION)?;
+                        }
+                        num_deleted += delete_buffer.len();
+                        delete_buffer.clear();
+                    }
 
-        // if num_deleted > 0 {
-        //     debug!(target: LOG_TARGET, "Deleted {num_deleted}/{limit} stale nodes");
-        // }
+                    match node {
+                        StaleTreeNode::Node(key) => {
+                            debug!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
+                            delete_buffer.push((shard, key));
+                        },
+                        StaleTreeNode::Subtree(parent_key) => {
+                            debug!(target: LOG_TARGET, "Deleting stale substree {parent_key} from shard {shard}", );
+                            let Some(parent_node) = cf.get(&(shard, parent_key.clone()), OPERATION).optional()? else {
+                                continue;
+                            };
+
+                            match parent_node {
+                                Node::Internal(node) => {
+                                    delete_buffer.extend(recurse_subtree_depth_first_post_order(
+                                        &cf,
+                                        shard,
+                                        parent_key,
+                                        node.into_children(),
+                                    ));
+                                },
+                                Node::Leaf(_) => {
+                                    // Subtree is a single leaf node
+                                    debug!(target: LOG_TARGET, "Deleting stale leaf node {parent_key} from shard {shard}", );
+                                    delete_buffer.push((shard, parent_key));
+                                },
+                                Node::Null => {},
+                            }
+                        },
+                    }
+                }
+
+                if !delete_buffer.is_empty() {
+                    debug!(target: LOG_TARGET, "Deleting final {} stale nodes from shard {}", delete_buffer.len(), shard);
+                    for key in &delete_buffer {
+                        cf.delete(key, OPERATION)?;
+                    }
+                    num_deleted += delete_buffer.len();
+                }
+
+                // Finally delete the stale node record
+                self.db()
+                    .cf(StateTreeStaleNodesModel)?
+                    .delete(&(shard, version), OPERATION)?;
+            }
+
+            if num_deleted > 0 {
+                debug!(target: LOG_TARGET, "Deleted {num_deleted} stale nodes in shard {shard} to version {to_version}");
+            }
+        }
 
         Ok(())
     }
@@ -1440,11 +1488,18 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {
         const OPERATION: &str = "epoch_checkpoint_save";
-
         self.db()
             .cf(EpochCheckpointModel)?
             .put(&checkpoint.epoch(), checkpoint, OPERATION)?;
 
+        Ok(())
+    }
+
+    fn previous_epoch_state_root_set(&mut self, epoch_state_root: &EpochStateRoot) -> Result<(), StorageError> {
+        const OPERATION: &str = "epoch_state_root_set";
+        self.db()
+            .cf(PreviousEpochStateRootModel)?
+            .put(&ByteColumn, epoch_state_root, OPERATION)?;
         Ok(())
     }
 
@@ -1713,4 +1768,46 @@ impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
             }
         }
     }
+}
+
+fn recurse_subtree_depth_first_post_order<'a>(
+    cf: &'a CfContext<Transaction<TransactionDB>, StateTreeModel>,
+    shard: Shard,
+    parent_key: NodeKey,
+    children: IndexMap<Nibble, Child>,
+) -> impl Iterator<Item = (Shard, NodeKey)> + 'a {
+    const OPERATION: &str = "recurse_subtree";
+    let parent_after_child = Some((shard, parent_key.clone()));
+
+    children
+        .into_iter()
+        .flat_map(move |(nibble, child)| -> Box<dyn Iterator<Item = (Shard, NodeKey)>> {
+            let child_key = parent_key.gen_child_node_key(child.version, nibble);
+            match child.node_type{
+                NodeType::Leaf => {
+                    Box::new(iter::once((shard, child_key)))
+                }
+                NodeType::Null => {
+                    Box::new(iter::empty())
+                }
+                NodeType::Internal { .. } => {
+                    let Some(child) = cf
+                        .get(&(shard, child_key.clone()), OPERATION)
+                        .optional()
+                        .expect("db error in recurse_subtree")
+                    else {
+                        return Box::new(iter::empty());
+                    };
+                    let Node::Internal(x) = child else {
+                        panic!("expected internal node in recurse_subtree for key ({shard}, {child_key}) but got {child:?}");
+                    };
+
+                    let children = x.into_children();
+                    Box::new(recurse_subtree_depth_first_post_order(cf, shard, child_key, children))
+                }
+
+            }
+        })
+        // Emit the parent key after all children
+        .chain(parent_after_child)
 }

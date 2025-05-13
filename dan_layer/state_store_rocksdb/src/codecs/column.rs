@@ -27,7 +27,7 @@ impl<const COL: u32> Display for Column<COL> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ByteColumn<const COL: u8>;
 impl<const COL: u8> ByteColumn<COL> {
     pub const fn byte(&self) -> u8 {

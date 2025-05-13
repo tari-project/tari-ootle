@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
-use log::debug;
+use log::*;
 use tari_dan_common_types::{shard::Shard, ShardGroup};
 use tari_dan_storage::{
     consensus_models::PendingShardStateTreeDiff,
@@ -20,7 +20,6 @@ use tari_state_tree::{
     StateTreeError,
     SubstateTreeChange,
     TreeHash,
-    TreeStoreWriter,
     Version,
     SPARSE_MERKLE_PLACEHOLDER_HASH,
 };
@@ -172,6 +171,13 @@ impl<TTx: StateStoreWriteTransaction> ShardedStateTree<&mut TTx> {
         &mut self,
         diffs: IndexMap<Shard, Vec<PendingShardStateTreeDiff>>,
     ) -> Result<(), StateTreeError> {
+        debug!(
+            target: LOG_TARGET,
+            "Committing {} pending diff(s) for {} shard(s)",
+            diffs.values().map(|v| v.len()).sum::<usize>(),
+            diffs.len()
+        );
+
         for (shard, pending_diffs) in diffs {
             for pending_diff in pending_diffs {
                 self.commit_diff(shard, pending_diff.version, pending_diff.diff)?;
@@ -187,23 +193,16 @@ impl<TTx: StateStoreWriteTransaction> ShardedStateTree<&mut TTx> {
         version: Version,
         diff: StateHashTreeDiff<Version>,
     ) -> Result<(), StateTreeError> {
-        // TODO: committing the entire diff in one go is more efficient at the db level
-        // e.g. self.tx.state_tree_nodes_commit_diff(shard, version, diff)?;
         let mut store = ShardScopedTreeStoreWriter::new(self.tx, shard);
 
-        for stale_tree_node in diff.stale_tree_nodes {
-            debug!(
-                "(shard={shard}) Recording stale tree node: {}",
-                stale_tree_node.as_node_key()
-            );
-            store.record_stale_tree_node(stale_tree_node)?;
-        }
-
-        for (key, node) in diff.new_nodes {
-            debug!("(shard={shard}) Inserting node: {}", key);
-            store.insert_node(key, node)?;
-        }
-
+        trace!(
+            target: LOG_TARGET,
+            "Committing diff for shard {shard} (version={version}) with {} new node(s) and {} stale node(s)",
+            diff.new_nodes.len(),
+            diff.stale_tree_nodes.len()
+        );
+        store.record_stale_tree_nodes(version, diff.stale_tree_nodes)?;
+        store.insert_nodes(diff.new_nodes)?;
         store.set_version(version)?;
         Ok(())
     }

@@ -109,6 +109,17 @@ impl ShardGroup {
         })
     }
 
+    /// Returns the intersection of two shard groups, if they overlap.
+    pub fn intersection(&self, other: &ShardGroup) -> Option<Self> {
+        if self.overlaps_shard_group(other) {
+            let start = self.start.max(other.start);
+            let end_inclusive = self.end_inclusive.min(other.end_inclusive);
+            Some(Self::new_unchecked(start, end_inclusive))
+        } else {
+            None
+        }
+    }
+
     pub fn start(&self) -> Shard {
         self.start
     }
@@ -256,5 +267,35 @@ mod tests {
         assert_eq!(sg, ShardGroup::new(1, 1));
         let sg = ShardGroup::all_shards(NumPreshards::P64);
         assert_eq!(sg, ShardGroup::new(1, 64));
+    }
+
+    mod intersection {
+        use super::*;
+
+        #[test]
+        fn it_calculates_the_intersection_of_overlapping_shard_groups() {
+            let sg1 = ShardGroup::new(1, 256);
+            let sg2 = ShardGroup::new(10, 20);
+            let intersection = sg1.intersection(&sg2).unwrap();
+            assert_eq!(intersection, ShardGroup::new(10, 20));
+
+            let sg1 = ShardGroup::new(1, 5);
+            let sg2 = ShardGroup::new(3, 7);
+            let intersection = sg1.intersection(&sg2).unwrap();
+            assert_eq!(intersection, ShardGroup::new(3, 5));
+        }
+
+        #[test]
+        fn it_returns_none_if_shard_groups_do_not_overlap() {
+            let sg1 = ShardGroup::new(1, 5);
+            let sg2 = ShardGroup::new(6, 10);
+            let intersection = sg1.intersection(&sg2);
+            assert!(intersection.is_none());
+
+            let sg1 = ShardGroup::new(1, 5);
+            let sg2 = ShardGroup::new(0, 0);
+            let intersection = sg1.intersection(&sg2);
+            assert!(intersection.is_none());
+        }
     }
 }

@@ -27,7 +27,8 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
         .collect::<Vec<_>>();
     db.with_write_tx(|tx| {
         for (key, value) in &nodes {
-            tx.state_tree_nodes_insert(SHARD, key.clone(), value.clone()).unwrap();
+            tx.state_tree_nodes_batch_insert(SHARD, vec![(key.clone(), value.clone())])
+                .unwrap();
         }
         Ok::<_, StorageError>(())
     })
@@ -45,7 +46,8 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
     db.with_write_tx(|tx| {
         for (key, _) in &nodes[..100] {
             let stale_node = StaleTreeNode::Node(key.clone());
-            tx.state_tree_nodes_record_stale_tree_node(SHARD, stale_node).unwrap();
+            tx.state_tree_nodes_record_stale_tree_nodes(SHARD, key.version(), vec![stale_node])
+                .unwrap();
         }
         for shard in ShardGroup::all_shards(TEST_NUM_PRESHARDS).shard_iter() {
             tx.state_tree_shard_versions_set(shard, 100).unwrap();
@@ -54,7 +56,8 @@ fn state_tree_operations(db: impl StateStore, num_nodes: usize) {
     })
     .unwrap();
 
-    db.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(100)).unwrap();
+    db.with_write_tx(|tx| tx.state_tree_nodes_clear_stale(TEST_NUM_PRESHARDS))
+        .unwrap();
     db.with_read_tx(|tx| {
         // TODO: stale nodes are not cleared currently - implement test once this is done
         // for (key, _) in &nodes[..100] {

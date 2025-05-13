@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::NodeHeight;
 use tari_dan_storage::consensus_models::{
     BlockId,
+    EpochStateRoot,
     HighQc,
     LastExecuted,
     LastProposed,
@@ -15,35 +16,63 @@ use tari_dan_storage::consensus_models::{
 };
 
 use crate::{
-    codecs::{ByteColumn, ColumnCodec, DefaultCodec},
+    codecs::{ByteColumn, ColumnCodec, DefaultCodec, NumberCodec},
     traits::Cf,
 };
 
 pub const CF_NAME: &str = "bookkeeping";
 
 enum BookKeepingKey {
+    /// The migration version of the database
+    DatabaseMigrationVersion,
+    /// The last voted block
     LastVoted,
+    /// The last executed block
     LastExecuted,
+    /// The last proposed block
     LastProposed,
+    /// The last sent vote
     LastSentVote,
+    /// The last committed block
     CommitBlock,
+    /// The last leaf block
     LeafBlock,
+    /// The last locked block
     LockedBlock,
+    /// The last high quorum certificate
     HighQc,
+    /// The state root of the previous epoch. This is set based on either calculated root of the current shard group
+    /// after a successful sync, or based on the last checkpoint
+    PreviousEpochStateRoot,
 }
 
 impl BookKeepingKey {
     const fn as_byte(&self) -> u8 {
         match self {
-            Self::LastVoted => 0,
-            Self::LastExecuted => 1,
-            Self::LastProposed => 2,
-            Self::LastSentVote => 3,
-            Self::CommitBlock => 4,
-            Self::LockedBlock => 5,
-            Self::LeafBlock => 6,
-            Self::HighQc => 7,
+            Self::DatabaseMigrationVersion => 0,
+            Self::LastVoted => 1,
+            Self::LastExecuted => 2,
+            Self::LastProposed => 3,
+            Self::LastSentVote => 4,
+            Self::CommitBlock => 5,
+            Self::LockedBlock => 6,
+            Self::LeafBlock => 7,
+            Self::HighQc => 8,
+            Self::PreviousEpochStateRoot => 9,
         }
+    }
+}
+
+pub struct DatabaseMigrationVersion;
+
+impl Cf for DatabaseMigrationVersion {
+    type Key = ByteColumn<{ BookKeepingKey::DatabaseMigrationVersion.as_byte() }>;
+    type KeyCodec = ColumnCodec;
+    type Value = u64;
+    type ValueCodec = NumberCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        CF_NAME
     }
 }
 
@@ -151,6 +180,19 @@ impl Cf for HighQcModel {
     type Key = ByteColumn<{ BookKeepingKey::HighQc.as_byte() }>;
     type KeyCodec = ColumnCodec;
     type Value = HighQc;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        CF_NAME
+    }
+}
+
+pub struct PreviousEpochStateRootModel;
+
+impl Cf for PreviousEpochStateRootModel {
+    type Key = ByteColumn<{ BookKeepingKey::PreviousEpochStateRoot.as_byte() }>;
+    type KeyCodec = ColumnCodec;
+    type Value = EpochStateRoot;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {

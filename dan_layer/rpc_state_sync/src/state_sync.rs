@@ -5,6 +5,7 @@ use std::{cmp, collections::HashMap};
 
 use anyhow::anyhow;
 use futures::StreamExt;
+use indexmap::IndexMap;
 use log::*;
 use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
@@ -25,6 +26,7 @@ use tari_dan_storage::{
     consensus_models::{
         BlockId,
         EpochCheckpoint,
+        EpochStateRoot,
         LeafBlock,
         QcId,
         StateTransition,
@@ -41,7 +43,14 @@ use tari_dan_storage::{
 };
 use tari_epoch_manager::EpochManagerReader;
 use tari_rpc_framework::RpcError;
-use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{
+    compute_merkle_root_for_hashes,
+    SpreadPrefixStateTree,
+    SubstateTreeChange,
+    TreeHash,
+    Version,
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
+};
 use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
@@ -109,7 +118,6 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 Ok(checkpoint) => {
                     info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
                     self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
-                    self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
                     self.valid_checkpoints.insert(for_shard_group, checkpoint.clone());
                     Ok(Some(checkpoint))
                 },
@@ -287,7 +295,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         let mut state_tree = SpreadPrefixStateTree::new(&mut store);
                         let next_version = current_version + 1;
                         info!(target: LOG_TARGET, "🛜 Committing {} state tree changes v{} to v{}", tree_changes.len(), current_version, next_version);
-                        state_tree.put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
+                        state_tree.batch_put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
                         maybe_current_version = Some(next_version);
                         store.set_version(next_version)?;
                     }
@@ -297,7 +305,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     let mut state_tree = SpreadPrefixStateTree::new(&mut store);
                     let next_version = current_version + 1;
                     info!(target: LOG_TARGET, "🛜 Committing final {} state tree changes v{} to v{}", tree_changes.len(), current_version, next_version);
-                    state_tree.put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
+                    state_tree.batch_put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
                     maybe_current_version = Some(next_version);
                     store.set_version(next_version)?;
                 }
@@ -306,9 +314,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             })?;
         }
 
-        let local_state_root = self
-            .state_store
-            .with_read_tx(|tx| self.get_state_root_for_shard(tx, shard, maybe_current_version))?;
+        let local_state_root = self.calculate_state_root_for_shard(shard, maybe_current_version)?;
         if local_state_root != checkpoint_state_root {
             error!(
                 target: LOG_TARGET,
@@ -329,20 +335,20 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         Ok(maybe_current_version)
     }
 
-    fn get_state_root_for_shard(
+    fn calculate_state_root_for_shard(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         shard: Shard,
         version: Option<Version>,
     ) -> Result<TreeHash, RpcStateSyncError> {
         let Some(version) = version else {
             return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
         };
-
-        let mut store = ShardScopedTreeStoreReader::new(tx, shard);
-        let state_tree = SpreadPrefixStateTree::new(&mut store);
-        let root_hash = state_tree.get_root_hash(version)?;
-        Ok(root_hash)
+        self.state_store.with_read_tx(|tx| {
+            let mut store = ShardScopedTreeStoreReader::new(tx, shard);
+            let state_tree = SpreadPrefixStateTree::new(&mut store);
+            let root = state_tree.get_root_hash(version)?;
+            Ok(root)
+        })
     }
 
     pub fn commit_update<TTx: StateStoreWriteTransaction>(
@@ -386,7 +392,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         &self,
         local_shard_group: ShardGroup,
         current_epoch: Epoch,
-    ) -> Result<Vec<(ShardGroup, Committee<PeerAddress>)>, RpcStateSyncError> {
+    ) -> Result<HashMap<ShardGroup, Committee<PeerAddress>>, RpcStateSyncError> {
         // We are behind at least one epoch.
         // We get the current substate range, and we asks committees from previous epoch in this range to give us
         // data.
@@ -404,9 +410,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             return Err(RpcStateSyncError::NoCommittees(prev_epoch));
         }
 
-        // not strictly necessary to sort by shard but easier on the eyes in logs
-        let mut committees = committees.into_iter().collect::<Vec<_>>();
-        committees.sort_by_key(|(k, _)| *k);
+        let committees = committees.into_iter().collect::<HashMap<_, _>>();
         info!(target: LOG_TARGET, "🛜 Querying {} committee(s) from epoch {}", committees.len(), prev_epoch);
         Ok(committees)
     }
@@ -439,7 +443,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         epoch: Epoch,
         prev_committee: &Committee<PeerAddress>,
         our_vn_addr: &PeerAddress,
-    ) -> Result<(), RpcStateSyncError> {
+    ) -> Result<Option<Version>, RpcStateSyncError> {
         let mut remaining_members = prev_committee.len();
 
         info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", epoch.saturating_sub(Epoch(1)));
@@ -477,12 +481,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     // TODO: we should check with f + 1 validators in this case. If a single validator reports
                     // this falsely, this will prevent us from continuing with consensus for a long time (state
                     // root will mismatch).
-                    // TODO: we should instead ask the base layer if this is the first epoch in the network
+                    // TODO: we should instead ask the epoch manager if this is the first epoch in the network
                     warn!(
                         target: LOG_TARGET,
                         "❓No checkpoint for epoch {epoch}. This may mean that this is the first epoch in the network"
                     );
-                    return Ok(());
+                    return Ok(None);
                 },
                 Err(err) => {
                     warn!(
@@ -502,12 +506,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 .start_state_sync(&mut client, shard, &checkpoint, &mut template_changes)
                 .await
             {
-                Ok(_) => {
+                Ok(maybe_version) => {
                     // We only enqueue these if state sync succeeds and the state root matches
                     if !template_changes.is_empty() {
                         self.template_manager.enqueue_template_changes(template_changes).await?;
                     }
-                    break;
+                    return Ok(maybe_version);
                 },
                 Err(err) => {
                     warn!(
@@ -523,20 +527,22 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             }
         }
 
-        Ok(())
+        Err(RpcStateSyncError::SyncFailedAllPeers {
+            committee_size: prev_committee.len(),
+        })
     }
 
     async fn sync_global_shard(
         &mut self,
         current_epoch: Epoch,
         shard_group: ShardGroup,
-        prev_committees: &[(ShardGroup, Committee<PeerAddress>)],
+        prev_committees: &HashMap<ShardGroup, Committee<PeerAddress>>,
         our_vn_address: &PeerAddress,
-    ) -> Result<(), RpcStateSyncError> {
+    ) -> Result<Option<Version>, RpcStateSyncError> {
         let mut last_error = None;
 
         for (sg, prev_committee) in prev_committees {
-            if let Err(err) = self
+            let result = self
                 .sync_shard(
                     Shard::global(),
                     shard_group,
@@ -544,20 +550,33 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     prev_committee,
                     our_vn_address,
                 )
-                .await
-            {
-                warn!(target: LOG_TARGET, "⚠️ Failed to sync global shard from {sg}: {err}. Attempting another committee if available");
-                last_error = Some(err);
-                continue;
+                .await;
+            match result {
+                Ok(maybe_version) => {
+                    let Some(version) = maybe_version else {
+                        info!(target: LOG_TARGET, "🛜 No state changes for global shard");
+                        return Ok(None);
+                    };
+                    info!(target: LOG_TARGET, "🛜 Synced global shard to v{}", version);
+                    return Ok(Some(version));
+                },
+                Err(err) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ Failed to sync global shard from {sg}: {err}. Attempting another committee if available"
+                    );
+                    last_error = Some(err);
+                },
             }
-            break;
         }
 
         if let Some(err) = last_error {
             return Err(err);
         }
 
-        Ok(())
+        Err(RpcStateSyncError::SyncFailedAllPeers {
+            committee_size: prev_committees.len(),
+        })
     }
 
     async fn sync_inner(&mut self) -> Result<(), RpcStateSyncError> {
@@ -572,23 +591,45 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             },
             Err(err) => return Err(err),
         };
+        let local_shard_group = local_info.shard_group();
 
-        self.sync_global_shard(
-            current_epoch,
-            ShardGroup::all_shards(local_info.num_preshards()),
-            &prev_epoch_committees,
-            &our_vn.address,
-        )
-        .await?;
+        let mut shard_state_roots = IndexMap::with_capacity(local_shard_group.len() + 1);
+
+        let maybe_version = self
+            .sync_global_shard(
+                current_epoch,
+                ShardGroup::all_shards(local_info.num_preshards()),
+                &prev_epoch_committees,
+                &our_vn.address,
+            )
+            .await?;
+        let local_state_root = self.calculate_state_root_for_shard(Shard::global(), maybe_version)?;
+        shard_state_roots.insert(Shard::global(), local_state_root);
 
         // Sync data from each committee in range of the committee we're joining.
         // NOTE: we don't have to worry about substates in address range because shard boundaries are fixed.
         for (shard_group, committee) in prev_epoch_committees {
-            for shard in shard_group.shard_iter() {
-                self.sync_shard(shard, shard_group, current_epoch, &committee, &our_vn.address)
+            let Some(intersect_shard_group) = shard_group.intersection(&local_shard_group) else {
+                warn!(
+                    target: LOG_TARGET,
+                    "❗️ Shard group {shard_group} does not intersect with our shard group {local_shard_group}. Skipping."
+                );
+                continue;
+            };
+            for shard in intersect_shard_group.shard_iter() {
+                let maybe_current_version = self
+                    .sync_shard(shard, shard_group, current_epoch, &committee, &our_vn.address)
                     .await?;
+                let local_state_root = self.calculate_state_root_for_shard(shard, maybe_current_version)?;
+                shard_state_roots.insert_sorted(shard, local_state_root);
             }
         }
+
+        // Calculate the shard group merkle root and save it for the next genesis
+        let final_state_root = compute_merkle_root_for_hashes(shard_state_roots.into_values())?;
+        self.state_store
+            .with_write_tx(|tx| EpochStateRoot::new(current_epoch, local_shard_group, final_state_root).set(tx))?;
+
         Ok(())
     }
 }

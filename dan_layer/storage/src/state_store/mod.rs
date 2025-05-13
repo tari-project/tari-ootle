@@ -10,6 +10,7 @@ use tari_dan_common_types::{
     Epoch,
     NodeAddressable,
     NodeHeight,
+    NumPreshards,
     ShardGroup,
     SubstateAddress,
     ToSubstateAddress,
@@ -21,8 +22,6 @@ use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::{
     consensus_models::{
@@ -33,6 +32,7 @@ use crate::{
         BurntUtxo,
         Decision,
         EpochCheckpoint,
+        EpochStateRoot,
         Evidence,
         ForeignParkedProposal,
         ForeignProposal,
@@ -269,6 +269,8 @@ pub trait StateStoreReadTransaction: Sized {
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError>;
 
+    fn previous_epoch_state_root_get(&self) -> Result<EpochStateRoot, StorageError>;
+
     // -------------------------------- Foreign Substate Pledges -------------------------------- //
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(
         &self,
@@ -491,19 +493,27 @@ pub trait StateStoreWriteTransaction {
     ) -> Result<IndexMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError>;
 
     //---------------------------------- State tree --------------------------------------------//
-    fn state_tree_nodes_insert(&mut self, shard: Shard, key: NodeKey, node: Node<Version>) -> Result<(), StorageError>;
-
-    fn state_tree_nodes_record_stale_tree_node(
+    fn state_tree_nodes_batch_insert(
         &mut self,
         shard: Shard,
-        node: StaleTreeNode,
+        nodes: Vec<(NodeKey, Node<Version>)>,
     ) -> Result<(), StorageError>;
 
-    fn state_tree_nodes_clear_stale(&mut self, limit: usize) -> Result<(), StorageError>;
+    fn state_tree_nodes_record_stale_tree_nodes(
+        &mut self,
+        shard: Shard,
+        version: Version,
+        nodes: Vec<StaleTreeNode>,
+    ) -> Result<(), StorageError>;
+
+    fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<(), StorageError>;
     fn state_tree_shard_versions_set(&mut self, shard: Shard, version: Version) -> Result<(), StorageError>;
 
     // -------------------------------- Epoch checkpoint -------------------------------- //
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError>;
+
+    // -------------------------------- Epoch state root -------------------------------- //
+    fn previous_epoch_state_root_set(&mut self, epoch_state_root: &EpochStateRoot) -> Result<(), StorageError>;
 
     // -------------------------------- BurntUtxo -------------------------------- //
     fn burnt_utxos_insert(&mut self, burnt_utxo: &BurntUtxo) -> Result<(), StorageError>;
@@ -558,7 +568,11 @@ pub trait StateStoreWriteTransaction {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum Ordering {
     #[default]
     Ascending,

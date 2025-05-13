@@ -15,7 +15,7 @@ use tari_engine_types::{
     component::{ComponentBody, ComponentHeader},
     substate::{Substate, SubstateId, SubstateValue},
 };
-use tari_state_store_rocksdb::RocksDbStateStore;
+use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_template_lib::{
     models::ComponentAddress,
     types::{EntityId, ObjectKey},
@@ -220,7 +220,7 @@ fn add_substate(store: &TestStore, seed: u8, version: u32) -> VersionedSubstateI
 
 fn create_store() -> (TestStore, TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
-    let store = RocksDbStateStore::open(&temp_dir).unwrap();
+    let store = RocksDbStateStore::open(&temp_dir, DatabaseOptions::default()).unwrap();
     store
         .with_write_tx(|tx| {
             let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);

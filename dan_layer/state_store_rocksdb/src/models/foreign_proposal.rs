@@ -38,7 +38,7 @@ impl Cf for ForeignProposalModel {
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "foreignproposals"
+        "foreign_proposals"
     }
 }
 

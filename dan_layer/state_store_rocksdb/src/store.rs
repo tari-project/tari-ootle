@@ -25,6 +25,8 @@ use tari_dan_common_types::NodeAddressable;
 use tari_dan_storage::{StateStore, StorageError};
 
 use crate::{
+    cf_api::DbContext,
+    codecs::ByteColumn,
     dbs::read_only::ReadOnlyDb,
     error::RocksDbStorageError,
     info::ColumnFamilyInfo,
@@ -36,6 +38,7 @@ use crate::{
         block_transaction_execution,
         block_transaction_execution::BlockTransactionExecutionModel,
         bookkeeping,
+        bookkeeping::DatabaseMigrationVersion,
         burnt_utxo,
         burnt_utxo::BurntUtxoModel,
         chain,
@@ -66,6 +69,7 @@ use crate::{
         transaction_pool_state_update::TransactionPoolStateUpdateModel,
         validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
     },
+    options::DatabaseOptions,
     read_only::ReadOnlyContext,
     reader::RocksDbStateStoreReadTransaction,
     snapshot::SnapshotContext,
@@ -138,23 +142,41 @@ fn build_default_store_opts() -> rocksdb::Options {
 pub type RocksDbReadOnlyStateStore<TAddr> = RocksDbStateStore<TAddr, ReadOnlyDb>;
 pub struct RocksDbStateStore<TAddr, DB = TransactionDB> {
     db: Arc<DB>,
+    options: DatabaseOptions,
     _addr: PhantomData<TAddr>,
 }
 
 impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
-        let options = build_default_store_opts();
+    pub fn open<P: AsRef<Path>>(path: P, options: DatabaseOptions) -> Result<Self, StorageError> {
+        let rocks_opts = build_default_store_opts();
 
         let cf_names = all_column_families_iter();
-        let db = TransactionDB::<SingleThreaded>::open_cf(&options, &TransactionDBOptions::default(), path, cf_names)
-            .map_err(|e| StorageError::ConnectionError {
-            reason: e.into_string(),
-        })?;
-
-        Ok(Self {
+        let db =
+            TransactionDB::<SingleThreaded>::open_cf(&rocks_opts, &TransactionDBOptions::default(), path, cf_names)
+                .map_err(|e| StorageError::ConnectionError {
+                    reason: e.into_string(),
+                })?;
+        let db = Self {
             db: Arc::new(db),
+            options,
             _addr: PhantomData,
-        })
+        };
+
+        db.migrate()?;
+
+        Ok(db)
+    }
+
+    fn migrate(&self) -> Result<(), StorageError> {
+        // Put v0 for now. In future versions of the code, we can detect v0 and migrate accordingly.
+        // A "fresh" db will not have a version, meaning that no migration is required.
+        const OPERATION: &str = "migrate";
+        const CURRENT_VERSION: u64 = 0;
+        let tx = self.db.transaction();
+        let db = DbContext::new(&self.db, &tx);
+        db.cf(DatabaseMigrationVersion)?
+            .put(&ByteColumn, &CURRENT_VERSION, OPERATION)?;
+        Ok(())
     }
 
     /// Force compact all column families in the database.
@@ -196,6 +218,7 @@ impl<TAddr> RocksDbStateStore<TAddr, ReadOnlyDb> {
         Ok(Self {
             db: Arc::new(ReadOnlyDb::new(db)),
             _addr: PhantomData,
+            options: DatabaseOptions::default(),
         })
     }
 
@@ -270,7 +293,7 @@ impl<TAddr: NodeAddressable + Serialize + DeserializeOwned> StateStore for Rocks
     fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
         let timer = Instant::now();
         let tx = self.db.transaction();
-        let tx = RocksDbStateStoreWriteTransaction::new(&self.db, tx);
+        let tx = RocksDbStateStoreWriteTransaction::new(&self.db, tx, &self.options);
         let elapsed = timer.elapsed();
         let level = if elapsed > Duration::from_secs(1) {
             log::Level::Warn
@@ -291,6 +314,7 @@ impl<TAddr, DB> Clone for RocksDbStateStore<TAddr, DB> {
         Self {
             db: self.db.clone(),
             _addr: PhantomData,
+            options: self.options.clone(),
         }
     }
 }

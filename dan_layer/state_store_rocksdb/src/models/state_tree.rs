@@ -24,7 +24,7 @@ use tari_dan_common_types::shard::Shard;
 use tari_state_tree::{Node, NodeKey, StaleTreeNode, Version};
 
 use crate::{
-    codecs::{DefaultCodec, NodeKeyCodec, ShardCodec},
+    codecs::{DefaultCodec, NodeKeyCodec, NumberCodec, ShardCodec},
     traits::{Cf, QueryCf},
 };
 
@@ -52,7 +52,7 @@ impl<'a> Cf for StateTreeModelRef<'a> {
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "statetree"
+        StateTreeModel::name()
     }
 }
 
@@ -75,10 +75,9 @@ impl QueryCf for ByShardQuery {
 pub struct StateTreeStaleNodesModel;
 
 impl Cf for StateTreeStaleNodesModel {
-    // Must be the same key as the StateTreeModel
-    type Key = (Shard, NodeKey);
-    type KeyCodec = (ShardCodec, NodeKeyCodec);
-    type Value = StaleTreeNode;
+    type Key = (Shard, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>);
+    type Value = Vec<StaleTreeNode>;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {
@@ -86,25 +85,10 @@ impl Cf for StateTreeStaleNodesModel {
     }
 }
 
-pub struct StateTreeStaleNodesModelRef<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
+pub struct ByStateTreeStaleShardQuery;
 
-impl<'a> Cf for StateTreeStaleNodesModelRef<'a> {
-    type Key = (Shard, &'a NodeKey);
-    type KeyCodec = (ShardCodec, NodeKeyCodec);
-    type Value = StaleTreeNode;
-    type ValueCodec = DefaultCodec<Self::Value>;
-
-    fn name() -> &'static str {
-        StateTreeStaleNodesModel::name()
-    }
-}
-
-impl Default for StateTreeStaleNodesModelRef<'_> {
-    fn default() -> Self {
-        Self {
-            _phantom: std::marker::PhantomData,
-        }
-    }
+impl QueryCf for ByStateTreeStaleShardQuery {
+    type Cf = StateTreeStaleNodesModel;
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
 }

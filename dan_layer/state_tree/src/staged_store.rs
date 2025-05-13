@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use log::debug;
+use log::*;
 use tari_dan_common_types::displayable::Displayable;
 use tari_jellyfish::{JmtStorageError, Node, NodeKey, StaleTreeNode, TreeStoreReader, TreeStoreWriter};
 
@@ -31,14 +31,14 @@ impl<'s, S: TreeStoreReader<P>, P> StagedTreeStore<'s, S, P> {
     pub fn apply_pending_diff(&mut self, diff: StateHashTreeDiff<P>) {
         self.preceding_pending_state.reserve(diff.new_nodes.len());
         for (key, node) in diff.new_nodes {
-            debug!(target: LOG_TARGET, "PENDING INSERT: node {} leaf: {}", key, node.leaf().map(|l| l.value_hash()).display());
+            trace!(target: LOG_TARGET, "PENDING INSERT: node {} leaf: {}", key, node.leaf().map(|l| l.value_hash()).display());
             self.preceding_pending_state.insert(key, node);
         }
 
         for stale in diff.stale_tree_nodes {
-            debug!(target: LOG_TARGET, "PENDING DELETE: node {}", stale.as_node_key());
+            trace!(target: LOG_TARGET, "PENDING DELETE: node {}", stale.as_node_key());
             if self.preceding_pending_state.remove(stale.as_node_key()).is_some() {
-                debug!(target: LOG_TARGET, "PENDING DELETE: node {} removed", stale.as_node_key());
+                trace!(target: LOG_TARGET, "PENDING DELETE: node {} removed", stale.as_node_key());
             }
         }
     }

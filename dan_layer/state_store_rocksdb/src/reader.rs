@@ -45,6 +45,7 @@ use tari_dan_storage::{
         BlockId,
         BlockTransactionExecution,
         EpochCheckpoint,
+        EpochStateRoot,
         ForeignProposalRecord,
         HighQc,
         LastExecuted,
@@ -90,7 +91,6 @@ use tari_transaction::TransactionId;
 
 use crate::{
     cf_api::DbContext,
-    codecs::ByteColumn,
     error::RocksDbStorageError,
     models::{
         block,
@@ -109,6 +109,7 @@ use crate::{
             LastVotedModel,
             LeafBlockModel,
             LockedBlockModel,
+            PreviousEpochStateRootModel,
         },
         burnt_utxo,
         burnt_utxo::BurntUtxoModel,
@@ -217,7 +218,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     pub(super) fn get_pending_chain_ordered(&self, end_block: &BlockId) -> Result<Vec<BlockId>, RocksDbStorageError> {
         // TODO: only difference between get_pending_chain_until is that this returns a Vec - worth DRYing up
         const OPERATION: &str = "get_pending_chain_ordered";
-        debug!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
+        trace!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
 
         let chain_cf = self.db().cf(chain::PendingChainIndex)?;
         if !chain_cf.exists(end_block, OPERATION)? {
@@ -231,7 +232,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
         let mut block_ids = Vec::new();
         block_ids.push(*end_block);
         let mut block_id = *end_block;
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "{OPERATION}: end block {end_block} is in pending chain",
         );
@@ -253,7 +254,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
             block_id = parent_id;
         }
 
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "{OPERATION}: block_ids.len(): {}",
             block_ids.len()
@@ -283,7 +284,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
 
     fn get_current_locked_block(&self) -> Result<LockedBlock, StorageError> {
         let cf = self.db().cf(LockedBlockModel)?;
-        let value = cf.get(&ByteColumn, "get_current_locked_block")?;
+        let value = cf.get_by_default_key("get_current_locked_block")?;
         Ok(value)
     }
 
@@ -347,7 +348,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
 
     pub fn get_commit_block_id(&self) -> Result<CommitBlock, RocksDbStorageError> {
         let cf = self.db().cf(CommitBlockModel)?;
-        let value = cf.get(&ByteColumn, "get_commit_block")?;
+        let value = cf.get_by_default_key("get_commit_block")?;
         Ok(value)
     }
 }
@@ -361,27 +362,33 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let last_voted = self
             .db()
             .cf(LastSentVoteModel)?
-            .get(&ByteColumn, "last_sent_vote_get")?;
+            .get_by_default_key("last_sent_vote_get")?;
         Ok(last_voted)
     }
 
     fn last_voted_get(&self) -> Result<LastVoted, StorageError> {
-        let last_voted = self.db().cf(LastVotedModel)?.get(&ByteColumn, "last_voted_get")?;
+        let last_voted = self.db().cf(LastVotedModel)?.get_by_default_key("last_voted_get")?;
         Ok(last_voted)
     }
 
     fn last_executed_get(&self) -> Result<LastExecuted, StorageError> {
-        let last_executed = self.db().cf(LastExecutedModel)?.get(&ByteColumn, "last_executed_get")?;
+        let last_executed = self
+            .db()
+            .cf(LastExecutedModel)?
+            .get_by_default_key("last_executed_get")?;
         Ok(last_executed)
     }
 
     fn last_proposed_get(&self) -> Result<LastProposed, StorageError> {
-        let last_proposed = self.db().cf(LastProposedModel)?.get(&ByteColumn, "last_proposed_get")?;
+        let last_proposed = self
+            .db()
+            .cf(LastProposedModel)?
+            .get_by_default_key("last_proposed_get")?;
         Ok(last_proposed)
     }
 
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError> {
-        let locked_block = self.db().cf(LockedBlockModel)?.get(&ByteColumn, "locked_block_get")?;
+        let locked_block = self.db().cf(LockedBlockModel)?.get_by_default_key("locked_block_get")?;
         if locked_block.epoch != epoch {
             return Err(StorageError::NotFound {
                 item: "LockedBlock",
@@ -392,7 +399,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
-        let leaf_block = self.db().cf(LeafBlockModel)?.get(&ByteColumn, "leaf_block_get")?;
+        let leaf_block = self.db().cf(LeafBlockModel)?.get_by_default_key("leaf_block_get")?;
         if leaf_block.epoch != epoch {
             return Err(StorageError::NotFound {
                 item: "LeafBlock",
@@ -403,7 +410,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError> {
-        let high_qc = self.db().cf(HighQcModel)?.get(&ByteColumn, "high_qc_get")?;
+        let high_qc = self.db().cf(HighQcModel)?.get_by_default_key("high_qc_get")?;
         if high_qc.epoch != epoch {
             return Err(StorageError::NotFound {
                 item: "HighQc",
@@ -854,7 +861,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let iter: Box<dyn Iterator<Item = Result<_, _>>> = if ordering.is_ascending() {
             Box::new(query.query_start_range_key_iterator(ordering, &(locked.epoch, NodeHeight(offset))))
         } else {
-            let leaf_block = self.db().cf(LeafBlockModel)?.get(&ByteColumn, OPERATION)?;
+            let leaf_block = self.db().cf(LeafBlockModel)?.get_by_default_key(OPERATION)?;
             Box::new(query.query_end_range_key_iterator(
                 ordering,
                 &(
@@ -1443,7 +1450,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let mut diffs = HashMap::new();
         // Load diffs in from earliest to latest
         for block_id in block_ids.iter().rev() {
-            debug!(
+            trace!(
                 target: LOG_TARGET,
                 "{OPERATION}: diffs for block {}",
                 block_id
@@ -1451,7 +1458,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             let iter = query.query_prefix_range_iterator(Ordering::default(), block_id);
             for result in iter {
                 let ((_, shard), diff) = result?;
-                debug!(
+                trace!(
                     target: LOG_TARGET,
                     "{OPERATION}: got diff for shard {} (v{}, new={}, stale={})",
                     shard, diff.version, diff.diff.new_nodes.len(), diff.diff.stale_tree_nodes.len()
@@ -1563,6 +1570,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let cf = self.db().cf(EpochCheckpointModel)?;
         let checkpoint = cf.get(&epoch, OPERATION)?;
         Ok(checkpoint)
+    }
+
+    fn previous_epoch_state_root_get(&self) -> Result<EpochStateRoot, StorageError> {
+        const OPERATION: &str = "previous_epoch_state_root_get";
+        let cf = self.db().cf(PreviousEpochStateRootModel)?;
+        let data = cf.get_by_default_key(OPERATION)?;
+        Ok(data)
     }
 
     fn foreign_substate_pledges_exists_for_transaction_and_address<T: ToSubstateAddress>(

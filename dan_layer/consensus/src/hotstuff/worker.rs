@@ -14,7 +14,7 @@ use tari_dan_storage::{
         Block,
         BlockDiff,
         BurntUtxo,
-        EpochCheckpoint,
+        EpochStateRoot,
         ForeignProposalRecord,
         HighQc,
         LeafBlock,
@@ -365,7 +365,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     // TODO: put this in a separate periodic task
                 _ = cleanup_task.tick() => {
                     if let Err(err) = self.state_store.with_write_tx(|tx|     {
-                        tx.state_tree_nodes_clear_stale(1000)
+                        tx.state_tree_nodes_clear_stale(epoch_state.local_committee_info.num_preshards())
                     }) {
                         error!(target: LOG_TARGET, "Error clearing stale nodes: {}", err);
                     }
@@ -921,13 +921,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         shard_group: ShardGroup,
     ) -> Result<(), HotStuffError> {
         self.state_store.with_write_tx(|tx| {
-            let previous_epoch = epoch.saturating_sub(Epoch(1));
-            let checkpoint = EpochCheckpoint::get(&**tx, previous_epoch).optional()?;
-            let state_merkle_root = checkpoint
-                .map(|cp| cp.compute_state_merkle_root())
-                .transpose()
-                .map_err(|e| HotStuffError::InvariantError(format!("Invalid checkpoint was stored for {epoch}: {e}")))?
-                .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH);
             // The parent for genesis blocks refer to this zero block
             let mut zero_block = Block::zero_block(self.config.network, self.config.consensus_constants.num_preshards);
             if !zero_block.exists(&**tx)? {
@@ -938,12 +931,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 zero_block.commit_diff(tx, zero_block.justify().id(), BlockDiff::empty(*zero_block.id()))?;
             }
 
+            let checkpoint = EpochStateRoot::get(&**tx).optional()?;
+            let state_merkle_root = checkpoint
+                .map(|cp| cp.state_root)
+                .unwrap_or_else(|| SPARSE_MERKLE_PLACEHOLDER_HASH);
             let mut genesis = Block::genesis(
                 self.config.network,
                 epoch,
                 epoch_hash,
                 shard_group,
-                FixedHash::from(state_merkle_root.into_array()),
+                FixedHash::new(state_merkle_root.into_array()),
                 self.config.sidechain_id,
             );
             if !genesis.exists(&**tx)? {

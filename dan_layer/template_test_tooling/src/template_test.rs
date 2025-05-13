@@ -3,6 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsStr,
     path::Path,
     sync::Arc,
     time::Instant,
@@ -56,7 +57,7 @@ pub fn test_faucet_component() -> ComponentAddress {
 }
 
 pub struct TemplateTest {
-    package: Arc<Package>,
+    package: Package,
     track_calls: TrackCallsModule,
     secret_key: RistrettoSecretKey,
     public_key: RistrettoPublicKey,
@@ -71,20 +72,30 @@ pub struct TemplateTest {
 
 impl TemplateTest {
     pub fn new<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(template_paths: I) -> Self {
-        Self::new_internal(template_paths, None)
+        Self::new_internal(template_paths, None::<(String, String)>)
     }
 
-    pub fn new_with_shared_target_dir<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(
-        template_paths: I,
-        target_dir: P,
-    ) -> Self {
-        Self::new_internal(template_paths, Some(target_dir))
+    pub fn new_with_compile_envs<I, P, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: Clone + AsRef<Path>,
+        TEnvs: IntoIterator<Item = (K, V)>,
+        TEnvs::IntoIter: Clone,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        Self::new_internal(template_paths, envs)
     }
 
-    fn new_internal<I: IntoIterator<Item = P>, P: Clone + AsRef<Path>>(
-        template_paths: I,
-        target_dir: Option<P>,
-    ) -> Self {
+    fn new_internal<I, P, TEnvs, K, V>(template_paths: I, envs: TEnvs) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: Clone + AsRef<Path>,
+        TEnvs: IntoIterator<Item = (K, V)>,
+        TEnvs::IntoIter: Clone,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
         let mut builder = Package::builder();
 
         // Add builtin templates
@@ -92,11 +103,12 @@ impl TemplateTest {
         builder.add_builtin_template(&ACCOUNT_NFT_TEMPLATE_ADDRESS);
 
         // Add the faucet template for fungible tokens
-        builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"), None);
+        builder.add_template(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/faucet"));
 
         // Add all of the templates specified in the argument
+        let envs_iter = envs.into_iter();
         for path in template_paths {
-            builder.add_template(path, target_dir.clone());
+            builder.add_template_with_envs(path, envs_iter.clone());
         }
 
         let package = builder.build();
@@ -127,7 +139,7 @@ impl TemplateTest {
         virtual_substates.insert(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0));
 
         Self {
-            package: Arc::new(package),
+            package,
             track_calls: TrackCallsModule::new(),
             public_key,
             secret_key,
@@ -194,6 +206,32 @@ impl TemplateTest {
                 }),
             )
             .unwrap();
+    }
+
+    pub fn compile_new_template<T, P, TEnvs, K, V>(
+        &mut self,
+        name: T,
+        path: P,
+        features: &[&str],
+        envs: TEnvs,
+    ) -> TemplateAddress
+    where
+        T: Into<String>,
+        P: AsRef<Path>,
+        TEnvs: IntoIterator<Item = (K, V)>,
+        TEnvs::IntoIter: Clone,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        let mut builder = Package::builder();
+        for (addr, template) in self.package.templates() {
+            builder.add_loaded_template(addr, template);
+        }
+        let template_addr = builder.add_template_opts(path, features, envs);
+        self.package = builder.build();
+        self.name_to_template.insert(name.into(), template_addr);
+
+        template_addr
     }
 
     pub fn enable_fees(&mut self) -> &mut Self {
@@ -492,7 +530,7 @@ impl TemplateTest {
             TransactionProcessorConfig::builder()
                 .with_network(Network::LocalNet)
                 .build(),
-            self.package.clone(),
+            Arc::new(self.package.clone()),
             self.state_store.clone().into_read_only(),
             auth_params,
             self.virtual_substates.clone(),

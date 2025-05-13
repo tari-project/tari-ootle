@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{
+    ffi::OsStr,
     fs,
     fs::File,
     io,
@@ -69,24 +70,32 @@ crate-type = ["cdylib", "lib"]
 
     compile_template(temp_dir.path(), features)
 }
-
-pub fn compile_template_with_custom_target_dir<P: AsRef<Path>>(
-    package_dir: P,
-    features: &[&str],
-    target_dir: P,
-) -> io::Result<WasmModule> {
-    compile_template_internal(package_dir, features, Some(target_dir))
+pub fn compile_template<P>(package_dir: P, features: &[&str]) -> io::Result<WasmModule>
+where P: AsRef<Path> {
+    compile_template_internal(package_dir, features, None::<(String, String)>)
 }
 
-pub fn compile_template<P: AsRef<Path>>(package_dir: P, features: &[&str]) -> io::Result<WasmModule> {
-    compile_template_internal(package_dir, features, None)
-}
-
-fn compile_template_internal<P: AsRef<Path>>(
+pub fn compile_template_with_envs<P, TEnvs, K, V>(
     package_dir: P,
     features: &[&str],
-    target_dir: Option<P>,
-) -> io::Result<WasmModule> {
+    envs: TEnvs,
+) -> io::Result<WasmModule>
+where
+    P: AsRef<Path>,
+
+    TEnvs: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    compile_template_internal(package_dir, features, envs)
+}
+fn compile_template_internal<P, TEnvs, K, V>(package_dir: P, features: &[&str], envs: TEnvs) -> io::Result<WasmModule>
+where
+    P: AsRef<Path>,
+    TEnvs: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
     if !package_dir.as_ref().exists() {
         return Err(io::Error::new(
             ErrorKind::NotFound,
@@ -106,6 +115,7 @@ fn compile_template_internal<P: AsRef<Path>>(
 
     let output = Command::new("cargo")
         .current_dir(package_dir.as_ref())
+        .envs(envs)
         .args(args)
         .output()?;
     if !output.status.success() {
@@ -140,20 +150,14 @@ fn compile_template_internal<P: AsRef<Path>>(
     };
 
     // path of the wasm executable
-    let mut path = match target_dir {
-        Some(target_dir) => target_dir.as_ref().to_path_buf(),
-        None => {
-            let mut path = package_dir.as_ref().to_path_buf();
-            path.push("target");
-            path
-        },
-    };
-    path.push("wasm32-unknown-unknown");
-    path.push("release");
-    path.push(wasm_name);
-    path.set_extension("wasm");
+    let path = package_dir
+        .as_ref()
+        .join("target")
+        .join("wasm32-unknown-unknown")
+        .join("release")
+        .join(wasm_name)
+        .with_extension("wasm");
 
-    // return
     let code = fs::read(path)?;
     Ok(WasmModule::from_code(code))
 }

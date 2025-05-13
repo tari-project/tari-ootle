@@ -506,7 +506,6 @@ pub fn create_mempool_transaction_validator(
         .and_then(HasInputs::new())
         .and_then(FeeTransactionValidator)
         .and_then(TransactionSignatureValidator)
-        .and_then(HasInputs::new())
         .and_then(TemplateExistsValidator::new(template_manager))
 }
 

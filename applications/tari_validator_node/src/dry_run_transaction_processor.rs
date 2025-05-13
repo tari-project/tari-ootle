@@ -126,7 +126,7 @@ impl<TStateStore: StateStore<Addr = PeerAddress> + Send + Sync> DryRunTransactio
         // execute the payload in the WASM engine and return the result
         let processor = self.payload_processor.clone();
         let exec_output = task::spawn_blocking(move || {
-            processor.execute(transaction, temp_state_store.into_read_only(), virtual_substates)
+            processor.execute(&transaction, temp_state_store.into_read_only(), virtual_substates)
         })
         .await??;
         let result = exec_output.result;

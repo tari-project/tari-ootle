@@ -1,11 +1,13 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use chrono::NaiveDateTime;
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::{models::AuthoredTemplateModel, storage::WalletStorageError};
-use tari_template_lib::types::TemplateAddress;
 
-use crate::schema::authored_templates;
+use crate::{
+    schema::authored_templates,
+    serialization::{deserialize_hex_try_from, deserialize_json},
+};
 
 #[derive(Debug, Clone, Queryable, Identifiable, Selectable)]
 #[diesel(table_name = authored_templates)]
@@ -16,25 +18,8 @@ pub struct AuthoredTemplate {
     pub name: String,
     pub tari_version: String,
     pub functions: String,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
-}
-
-impl TryFrom<AuthoredTemplateModel> for AuthoredTemplate {
-    type Error = serde_json::Error;
-
-    fn try_from(model: AuthoredTemplateModel) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: 0,
-            author_public_key: model.author_public_key.to_string(),
-            address: format!("{}", model.address),
-            name: model.name,
-            tari_version: model.tari_version,
-            functions: serde_json::to_string(&model.functions)?,
-            created_at: Default::default(),
-            updated_at: Default::default(),
-        })
-    }
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 impl TryFrom<&AuthoredTemplate> for AuthoredTemplateModel {
@@ -42,30 +27,11 @@ impl TryFrom<&AuthoredTemplate> for AuthoredTemplateModel {
 
     fn try_from(template: &AuthoredTemplate) -> Result<Self, Self::Error> {
         Ok(Self {
-            author_public_key: template
-                .author_public_key
-                .parse()
-                .map_err(|e| WalletStorageError::DecodingError {
-                    operation: "TryFrom<AuthoredTemplate>",
-                    item: "AuthoredTemplateModel",
-                    details: format!("Failed to parse author_public_key: {}", e),
-                })?,
-            address: TemplateAddress::from_hex(template.address.as_str()).map_err(|error| {
-                Self::Error::DecodingError {
-                    operation: "convert_authored_template_to_model",
-                    item: "address",
-                    details: error.to_string(),
-                }
-            })?,
+            author_public_key: deserialize_hex_try_from(&template.author_public_key)?,
+            address: deserialize_hex_try_from(template.address.as_str())?,
             name: template.name.clone(),
             tari_version: template.tari_version.clone(),
-            functions: serde_json::from_str(template.functions.as_str()).map_err(|error| {
-                Self::Error::DecodingError {
-                    operation: "convert_authored_template_to_model",
-                    item: "functions",
-                    details: error.to_string(),
-                }
-            })?,
+            functions: deserialize_json(template.functions.as_str())?,
         })
     }
 }

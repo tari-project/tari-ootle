@@ -13,7 +13,10 @@ use tari_dan_p2p::{
     proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
     TariMessagingSpec,
 };
-use tari_dan_storage::consensus_models::Decision;
+use tari_dan_storage::{
+    consensus_models::Decision,
+    time::{PrimitiveDateTime, UtcDateTime},
+};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
@@ -54,7 +57,7 @@ pub struct FinalizedResult {
     pub execute_result: Option<ExecuteResult>,
     pub final_decision: Decision,
     pub execution_time: Duration,
-    pub finalized_time: Duration,
+    pub finalized_time: PrimitiveDateTime,
     pub abort_details: Option<String>,
 }
 
@@ -156,13 +159,17 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
                     })?;
 
                 let execution_time = Duration::from_millis(response.execution_time_ms);
-                let finalized_time = Duration::from_millis(response.finalized_time_ms);
+                let finalized_time = UtcDateTime::from_unix_timestamp(response.finalized_timestamp).map_err(|e| {
+                    ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+                        "Node returned an invalid finalized timestamp: {e}"
+                    ))
+                })?;
 
                 Ok(TransactionResultStatus::Finalized(Box::new(FinalizedResult {
                     execute_result: execution_result,
                     final_decision,
                     execution_time,
-                    finalized_time,
+                    finalized_time: PrimitiveDateTime::new(finalized_time.date(), finalized_time.time()),
                     abort_details: Some(response.abort_details).filter(|s| s.is_empty()),
                 })))
             },

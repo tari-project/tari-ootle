@@ -199,7 +199,7 @@ impl WalletDaemonClient {
         &mut self,
         request: T,
     ) -> Result<TransactionGetAllResponse, WalletDaemonClientError> {
-        self.send_request("transactions.get_all", request.borrow()).await
+        self.send_request("transactions.list", request.borrow()).await
     }
 
     pub async fn get_transaction_result<T: Borrow<TransactionGetResultRequest>>(

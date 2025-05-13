@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
                 path: "data/swarm/processes/validator-node-00/localnet/data/validator_node/rocksdb".into(),
                 secondary_path: "data/db_inspector/secondaries/vn0".into(),
                 name: "VN0".to_string(),
+                group: None,
             }],
         };
         config.save(&cli.config_path)?;

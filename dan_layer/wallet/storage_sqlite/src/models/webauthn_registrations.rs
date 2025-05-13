@@ -1,7 +1,7 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use chrono::NaiveDateTime;
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::models::{WebauthnRegistrationModel, WebauthnRegistrationPasskeyModel};
 use webauthn_rs::prelude::Passkey;
 
@@ -12,8 +12,8 @@ use crate::schema::{webauthn_registration_passkeys, webauthn_registrations};
 pub struct WebauthnRegistration {
     pub id: i32,
     pub username: String,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 impl From<WebauthnRegistration> for WebauthnRegistrationModel {
@@ -31,8 +31,8 @@ pub struct WebauthnRegistrationPasskey {
     pub id: i32,
     pub registration_id: i32,
     pub passkey: Vec<u8>,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 impl TryFrom<&WebauthnRegistrationPasskey> for WebauthnRegistrationPasskeyModel {

@@ -46,7 +46,7 @@ impl Evidence {
         }
     }
 
-    pub fn from_initial_substates<'a, I, O>(
+    pub fn from_inputs_and_outputs<'a, I, O>(
         num_preshards: NumPreshards,
         num_committees: u32,
         inputs: I,
@@ -81,26 +81,15 @@ impl Evidence {
         evidence
     }
 
-    pub fn from_inputs_and_outputs<I, O, L1, L2>(
-        num_preshards: NumPreshards,
-        num_committees: u32,
-        resolved_inputs: I,
-        resulting_outputs: O,
-    ) -> Self
+    pub fn from_lock_intents<I, L1>(num_preshards: NumPreshards, num_committees: u32, locks: I) -> Self
     where
         L1: LockIntent + Clone,
         I: IntoIterator<Item = L1>,
-        L2: LockIntent + Clone,
-        O: IntoIterator<Item = L2>,
     {
         let mut evidence = Self::empty();
 
-        for obj in resolved_inputs {
-            evidence.insert_from_lock_intent(num_preshards, num_committees, obj);
-        }
-
-        for obj in resulting_outputs {
-            evidence.insert_from_lock_intent(num_preshards, num_committees, obj);
+        for lock in locks {
+            evidence.insert_from_lock_intent(num_preshards, num_committees, lock);
         }
 
         evidence
@@ -495,7 +484,7 @@ impl ShardGroupEvidence {
             *input = None;
         }
 
-        self.outputs.clear();
+        self.outputs = IndexMap::new();
         self
     }
 

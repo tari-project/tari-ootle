@@ -3,8 +3,8 @@
 
 use std::str::FromStr;
 
-use chrono::NaiveDateTime;
 use tari_bor::json_encoding::CiboruimValueDeserializeFixWrapper;
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::storage::WalletStorageError;
 use tari_template_lib::models::{NonFungibleId, ResourceAddress, VaultId};
 
@@ -20,8 +20,8 @@ pub struct NonFungibleToken {
     pub data: String,
     pub mutable_data: String,
     pub is_burned: bool,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 impl NonFungibleToken {

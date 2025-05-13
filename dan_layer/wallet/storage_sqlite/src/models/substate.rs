@@ -3,9 +3,9 @@
 
 use std::str::FromStr;
 
-use chrono::NaiveDateTime;
 use diesel::{Identifiable, Queryable};
 use tari_dan_common_types::VersionedSubstateId;
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::{models::SubstateModel, storage::WalletStorageError};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::types::Hash;
@@ -22,7 +22,7 @@ pub struct Substate {
     pub referenced_substates: String,
     pub version: i32,
     pub template_address: Option<String>,
-    pub created_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
 }
 
 impl Substate {

@@ -229,36 +229,33 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
             .ok_or_else(|| RpcStatus::not_found("Transaction not found"))?;
 
-        let Some(final_decision) = transaction.final_decision() else {
+        let Some(execution) = transaction
+            .get_finalized_execution(&tx)
+            .optional()
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
+        else {
             return Ok(Response::new(GetTransactionResultResponse {
                 status: PayloadResultStatus::Pending.into(),
                 ..Default::default()
             }));
         };
 
-        let abort_details = transaction.abort_reason().map(|r| r.to_string()).unwrap_or_default();
+        let finalized_time = transaction
+            .get_finalized_time(&tx)
+            .optional()
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
         Ok(Response::new(GetTransactionResultResponse {
             status: PayloadResultStatus::Finalized.into(),
 
-            final_decision: Some(proto::consensus::Decision::from(final_decision)),
-            execution_time_ms: transaction
-                .execution_time()
-                .map(|t| u64::try_from(t.as_millis()).unwrap_or(u64::MAX))
+            final_decision: Some(proto::consensus::Decision::from(execution.decision())),
+            execution_time_ms: u64::try_from(execution.execution_time().as_millis()).unwrap_or(u64::MAX),
+            finalized_timestamp: finalized_time
+                .map(|t| t.assume_utc().unix_timestamp())
                 .unwrap_or_default(),
-            finalized_time_ms: transaction
-                .finalized_time()
-                .map(|t| u64::try_from(t.as_millis()).unwrap_or(u64::MAX))
-                .unwrap_or_default(),
-            abort_details,
+            abort_details: execution.abort_reason().map(|r| r.to_string()).unwrap_or_default(),
             // For simplicity, we simply encode the whole result as a CBOR blob.
-            execution_result: transaction
-                .into_final_result()
-                .as_ref()
-                .map(encode)
-                .transpose()
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
-                .unwrap_or_default(),
+            execution_result: encode(execution.result()).map_err(RpcStatus::log_internal_error(LOG_TARGET))?,
         }))
     }
 
@@ -359,13 +356,32 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         request: Request<GetCheckpointRequest>,
     ) -> Result<Response<GetCheckpointResponse>, RpcStatus> {
         let msg = request.into_message();
-        let current_epoch = self.consensus.current_epoch();
+        if !self
+            .epoch_manager
+            .is_initial_scanning_complete()
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
+        {
+            return Err(RpcStatus::general("Node is still scanning the base layer"));
+        }
+        let current_epoch = self
+            .epoch_manager
+            .current_epoch()
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let consensus_epoch = self.epoch_manager.get_current_epoch();
+        if consensus_epoch != current_epoch {
+            return Err(RpcStatus::general(format!(
+                "Node is not in sync with the consensus epoch. Current epoch: {}, Consensus epoch: {}",
+                current_epoch, consensus_epoch
+            )));
+        }
 
-        if msg.epoch >= current_epoch.as_u64() {
+        if msg.epoch >= consensus_epoch.as_u64() {
             // This may occur if one of the nodes has not fully scanned the base layer
             return Err(RpcStatus::bad_request(format!(
                 "Peer requested checkpoint with epoch {} but the current epoch is {}",
-                msg.epoch, current_epoch
+                msg.epoch, consensus_epoch
             )));
         }
 

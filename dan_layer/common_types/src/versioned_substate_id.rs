@@ -477,8 +477,8 @@ impl PartialEq<SubstateId> for VersionedSubstateIdRef<'_> {
 
 impl Eq for VersionedSubstateIdRef<'_> {}
 
-// Only consider the substate id in maps. This means that duplicates found if the substate id is the same regardless of
-// the version.
+// Only consider the substate id in maps. This means that duplicates are cheaply found if the substate id is the same
+// regardless of the version.
 impl std::hash::Hash for VersionedSubstateIdRef<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.substate_id.hash(state);
@@ -499,17 +499,43 @@ pub enum VersionedSubstateIdError {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
     use indexmap::IndexSet;
     use tari_template_lib::models::ComponentAddress;
     use tari_template_lib_types::ObjectKey;
 
     use super::*;
 
+    fn hash<T: Hash>(t: &T) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        t.hash(&mut hasher);
+        hasher.finish()
+    }
+
     #[test]
     fn it_hashes_identically_to_a_substate_id() {
-        let substate_id = SubstateId::Component(ComponentAddress::new(ObjectKey::default()));
+        let s1 = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([1; 32])));
+        let ha = hash(&s1);
+        let versioned = VersionedSubstateIdRef::new(&s1, 123);
+        let hb = hash(&versioned);
+        let req = SubstateRequirement::versioned(s1.clone(), 0);
+        let hc = hash(&req);
+        // Ensure the a == b.&& hash(a) == hash(b) property
+        assert_eq!(ha, hb);
+        assert_eq!(ha, hc);
+        assert_eq!(versioned, s1);
+        assert_eq!(req, s1);
+
+        let s2 = SubstateId::Component(ComponentAddress::new(ObjectKey::from_array([2; 32])));
+        let h = hash(&s2);
+        assert_ne!(ha, h);
+
         let mut set = IndexSet::new();
-        set.extend([VersionedSubstateId::new(substate_id.clone(), 0)]);
-        assert!(set.contains(&substate_id));
+        set.extend([VersionedSubstateId::new(s1.clone(), 0)]);
+        assert!(set.contains(&s1));
+        let mut set = IndexSet::new();
+        set.extend([SubstateRequirement::versioned(s1.clone(), 0)]);
+        assert!(set.contains(&s1));
     }
 }

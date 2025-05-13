@@ -133,7 +133,7 @@ diesel::table! {
         min_epoch -> Nullable<BigInt>,
         max_epoch -> Nullable<BigInt>,
         executed_time_ms -> Nullable<BigInt>,
-        finalized_time_ms -> Nullable<BigInt>,
+        finalized_time -> Nullable<Timestamp>,
         required_substates -> Text,
         new_account_info -> Nullable<Text>,
         created_at -> Timestamp,

@@ -40,8 +40,6 @@ pub struct ValidatorBuilder {
     pub shard_address: SubstateAddress,
     pub fee_claim_public_key: RistrettoPublicKeyBytes,
     pub shard_group: ShardGroup,
-    #[allow(dead_code)]
-    pub sql_url: String,
     pub rocks_tmp_path: TempDir,
     pub rocks_override_path: Option<PathBuf>,
     pub leader_strategy: RoundRobinLeaderStrategy,
@@ -61,7 +59,6 @@ impl ValidatorBuilder {
             shard_address: SubstateAddress::zero(),
             num_committees: 0,
             shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
-            sql_url: ":memory".to_string(),
             rocks_override_path: None,
             rocks_tmp_path: tempfile::tempdir().unwrap(),
             leader_strategy: RoundRobinLeaderStrategy::new(),
@@ -100,11 +97,6 @@ impl ValidatorBuilder {
 
     pub fn with_epoch_manager(&mut self, epoch_manager: TestEpochManager) -> &mut Self {
         self.epoch_manager = Some(epoch_manager);
-        self
-    }
-
-    pub fn with_sql_url<T: Into<String>>(&mut self, sql_url: T) -> &mut Self {
-        self.sql_url = sql_url.into();
         self
     }
 

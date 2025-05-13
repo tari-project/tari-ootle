@@ -40,14 +40,7 @@ import StatusChip from "../../Components/StatusChip";
 import { DataTableCell } from "../../Components/StyledComponents";
 import { useGetAllTransactions } from "../../api/hooks/useTransactions";
 import { emptyRows, handleChangePage, handleChangeRowsPerPage } from "../../utils/helpers";
-import { useAccountsGet } from "../../api/hooks/useAccounts";
-import {
-  Account,
-  FinalizeResult,
-  substateIdToString,
-  Transaction,
-  TransactionStatus,
-} from "@tari-project/typescript-bindings";
+import { Account, substateIdToString, WalletTransaction } from "@tari-project/typescript-bindings";
 
 export default function Transactions({ account }: { account: Account }) {
   const [page, setPage] = useState(0);
@@ -77,12 +70,12 @@ export default function Transactions({ account }: { account: Account }) {
             <TableBody>
               {data?.transactions
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                .map(([t, result, status, _s]: [Transaction, FinalizeResult | null, TransactionStatus, string]) => {
-                  const tx = t.V1;
-                  if (!tx?.id) {
-                    return <></>;
-                  }
-
+                .map((transaction: WalletTransaction) => {
+                  const {
+                    transaction: { V1: tx },
+                    finalize: result,
+                    status,
+                  } = transaction;
                   const hash = tx.id;
                   return (
                     <TableRow key={hash}>

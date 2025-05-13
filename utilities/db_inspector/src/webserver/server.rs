@@ -38,10 +38,10 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
     let bind_address = context.config().webserver.bind_address;
 
     let mut api = Router::new()
-        .route("/databases", get(handlers::column_families::list))
+        .route("/databases", get(handlers::databases::list))
         .route(
             "/databases/:db_name/column-families",
-            get(handlers::column_families::list_column_families),
+            get(handlers::column_families::list),
         )
         // Special cases
         .route(
@@ -59,6 +59,10 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         .route(
             "/databases/:db_name/column-families/bookkeeping",
             get(handlers::bookkeeping::list),
+        )
+        .route(
+            "/databases/:db_name/column-families/foreign_substate_pledges",
+            get(handlers::foreign_substate_pledges::list),
         );
 
     add_cf_routes!(
@@ -76,7 +80,8 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         models::quorum_certificate::QuorumCertificateModel,
         models::quorum_certificate::QuorumCertificateBlockIndex,
         models::block_transaction_execution::BlockTransactionExecutionModel,
-        models::block_transaction_execution::TransactionIndex,
+        models::block_transaction_execution::BlockIndex,
+        models::finalized_transaction::FinalizedTransactionLinkModel,
         models::transaction::TransactionModel,
         models::transaction_pool::TransactionPoolModel,
         models::transaction_pool_state_update::TransactionPoolStateUpdateModel,
@@ -93,7 +98,7 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         models::substate::UnprunedDownedValuesIndex,
         // models::state_transition::StateTransitionModel,
         models::state_transition::ShardSeqIndex,
-        models::foreign_substate_pledge::ForeignSubstatePledgeModel,
+        // models::foreign_substate_pledge::ForeignSubstatePledgeModel,
         models::pending_state_tree_diff::PendingStateTreeDiffModel,
         models::state_tree::StateTreeModel,
         models::state_tree::StateTreeStaleNodesModel,

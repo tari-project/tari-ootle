@@ -12,7 +12,7 @@ use tari_dan_wallet_storage_sqlite::SqliteWalletStore;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_transaction::{Transaction, TransactionBuilder, TransactionId};
 use tari_validator_node_client::types::TemplateMetadata;
-use tokio::time;
+use tokio::time::sleep;
 use url::Url;
 
 use crate::{cli::CommonArgs, stats::Stats, templates::get_templates};
@@ -66,12 +66,12 @@ impl Runner {
                 .check_and_store_finalized_transaction(tx_id)
                 .await?
             else {
-                time::sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(1)).await;
                 continue;
             };
 
             let Some(ref finalize) = tx.finalize else {
-                time::sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(1)).await;
                 continue;
             };
 

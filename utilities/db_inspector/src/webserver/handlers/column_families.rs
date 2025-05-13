@@ -7,21 +7,7 @@ use axum::{extract::Path as ExtractPath, Extension, Json};
 use serde::Serialize;
 use tokio::fs;
 
-use crate::{
-    config::DatabaseConfig,
-    webserver::{context::HandlerContext, error::WebError},
-};
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ListDatabasesResponse {
-    pub databases: Vec<DatabaseConfig>,
-}
-
-pub async fn list(Extension(context): Extension<Arc<HandlerContext>>) -> Result<Json<ListDatabasesResponse>, WebError> {
-    Ok(Json(ListDatabasesResponse {
-        databases: context.config().dbs.clone(),
-    }))
-}
+use crate::webserver::{context::HandlerContext, error::WebError};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ListColumnFamiliesResponse {
@@ -56,7 +42,7 @@ async fn dir_size<P: AsRef<Path>>(path: P) -> io::Result<u64> {
     dir_size(dir).await
 }
 
-pub async fn list_column_families(
+pub async fn list(
     Extension(context): Extension<Arc<HandlerContext>>,
     ExtractPath(db_name): ExtractPath<String>,
 ) -> Result<Json<ListColumnFamiliesResponse>, WebError> {

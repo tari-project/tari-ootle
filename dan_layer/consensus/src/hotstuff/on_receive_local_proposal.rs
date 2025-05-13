@@ -17,6 +17,7 @@ use tari_dan_storage::{
         ForeignProposalStatus,
         HighQc,
         LastSentVote,
+        NoVoteReason,
         QcId,
         SubstateRecord,
         TransactionPool,
@@ -121,11 +122,12 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn handle(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         msg: ProposalMessage,
-    ) -> Result<bool, HotStuffError> {
+    ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "OnReceiveLocalProposalHandler");
 
         // Do not trigger leader failures while processing a proposal.
@@ -161,10 +163,9 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
         let Some(valid_block) = maybe_valid_block else {
             // Validation failed, this is already logged so we can exit here
-            return Ok(false);
+            // We do not trigger an immediate leader failure for an invalid block
+            return Ok(None);
         };
-
-        self.pacemaker.suspend_leader_failure().await?;
 
         // First validate and save the attached foreign proposals
         let is_all_foreign_proposals_valid = self.store.with_write_tx(|tx| {
@@ -221,45 +222,49 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         })?;
 
         if !is_all_foreign_proposals_valid {
-            return Ok(false);
+            // Do not trigger an immediate leader failure for an invalid block
+            return Ok(None);
         }
+
+        // If a leader failure occurs while we are processing the block, ignore it
+        self.pacemaker.suspend_leader_timeout().await?;
+
+        let result = self.process_valid_block(epoch_state, valid_block.clone()).await;
+
+        // Ensure leader failure is resumed
+        // If the result was successful, the leader timeout was reset, and no leader failure will occur. Otherwise,
+        // resuming will cause a leader failure
+        if let Err(err) = self.pacemaker.resume_leader_timeout().await {
+            error!(target: LOG_TARGET, "Error resuming leader failure: {}", err);
+        }
+
+        result.inspect_err(|err| {
+            if matches!(err, HotStuffError::ProposalValidationError(_)) {
+                self.hooks.on_block_validation_failed(&err);
+            }
+        })
+    }
+
+    async fn process_valid_block(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        valid_block: ValidBlock,
+    ) -> Result<Option<NoVoteReason>, HotStuffError> {
+        let _timer = TraceTimer::debug(LOG_TARGET, "process_valid_block");
 
         let proposer_vn = self
             .epoch_manager
             .get_validator_node_by_public_key(valid_block.epoch(), *valid_block.proposed_by())
             .await?;
 
-        let result = self
-            .process_block(
-                epoch_state.epoch(),
-                *epoch_state.local_committee_info(),
-                epoch_state.local_committee(),
-                proposer_vn.fee_claim_public_key,
-                valid_block,
-            )
-            .await;
-
-        match result {
-            Ok(true) => {
-                // The leader failure is resumed by call to update_view inside process_block
-                Ok(true)
-            },
-            Ok(false) => {
-                if let Err(err) = self.pacemaker.resume_leader_failure().await {
-                    error!(target: LOG_TARGET, "Error resuming leader failure: {}", err);
-                }
-                Ok(false)
-            },
-            Err(err) => {
-                if let Err(err) = self.pacemaker.resume_leader_failure().await {
-                    error!(target: LOG_TARGET, "Error resuming leader failure: {}", err);
-                }
-                if matches!(err, HotStuffError::ProposalValidationError(_)) {
-                    self.hooks.on_block_validation_failed(&err);
-                }
-                Err(err)
-            },
-        }
+        self.process_block(
+            epoch_state.epoch(),
+            *epoch_state.local_committee_info(),
+            epoch_state.local_committee(),
+            proposer_vn.fee_claim_public_key,
+            valid_block,
+        )
+        .await
     }
 
     async fn process_block(
@@ -269,7 +274,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         proposer_claim_public_key_bytes: RistrettoPublicKeyBytes,
         valid_block: ValidBlock,
-    ) -> Result<bool, HotStuffError> {
+    ) -> Result<Option<NoVoteReason>, HotStuffError> {
         debug!(target: LOG_TARGET, "RECV-LOCAL-PROPOSAL - [{:?}] Starting processing block: {}", current_epoch, valid_block);
 
         let em_epoch = self.epoch_manager.current_epoch().await?;
@@ -320,11 +325,11 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         change_set.clear();
         self.change_set = Some(change_set);
 
-        let is_accept = self
+        let no_vote = self
             .process_block_decision(local_committee_info, local_committee, process_result, is_epoch_end)
             .await?;
 
-        Ok(is_accept)
+        Ok(no_vote)
     }
 
     async fn process_block_decision(
@@ -333,7 +338,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         process_block_result: ProcessBlockResult,
         is_epoch_end: bool,
-    ) -> Result<bool, HotStuffError> {
+    ) -> Result<Option<NoVoteReason>, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "process-block-decision").with_excessive_threshold(200);
 
         let ProcessBlockResult {
@@ -408,7 +413,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             self.pacemaker.beat();
         }
 
-        Ok(is_accept_decision)
+        Ok(block_decision.no_vote_reason)
     }
 
     async fn process_end_of_epoch(

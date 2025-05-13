@@ -38,6 +38,7 @@ pub struct DatabaseConfig {
     pub path: PathBuf,
     pub secondary_path: PathBuf,
     pub name: String,
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

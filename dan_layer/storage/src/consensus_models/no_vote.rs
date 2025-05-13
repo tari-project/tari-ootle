@@ -4,7 +4,7 @@
 use tari_dan_common_types::ShardGroup;
 use tari_transaction::TransactionId;
 
-use crate::consensus_models::{Decision, TransactionPoolStage};
+use crate::consensus_models::{BlockId, Decision, TransactionPoolStage};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum NoVoteReason {
@@ -36,6 +36,16 @@ pub enum NoVoteReason {
     TransactionNotInPool,
     #[error("Decision disagreement. Local: {local:?}, Remote: {remote:?}")]
     DecisionDisagreement { local: Decision, remote: Decision },
+    #[error("Proposed invalid command SomeAccept(Commit, {transaction_id}) in {block_id}")]
+    SomeAcceptAtomMustBeAbort {
+        transaction_id: TransactionId,
+        block_id: BlockId,
+    },
+    #[error("Proposed invalid command AllAccept(Abort, {transaction_id}) in {block_id}")]
+    AllAcceptMustBeCommit {
+        transaction_id: TransactionId,
+        block_id: BlockId,
+    },
     #[error("Fee disagreement")]
     FeeDisagreement,
     #[error("Leader fee disagreement")]
@@ -105,6 +115,8 @@ impl NoVoteReason {
             Self::OutputOnlyDisagreement { .. } => "OutputOnlyDisagreement",
             Self::TransactionNotInPool => "TransactionNotInPool",
             Self::DecisionDisagreement { .. } => "DecisionDisagreement",
+            Self::SomeAcceptAtomMustBeAbort { .. } => "SomeAcceptAtomMustBeAbort",
+            Self::AllAcceptMustBeCommit { .. } => "AllAcceptMustBeCommit",
             Self::FeeDisagreement => "FeeDisagreement",
             Self::LeaderFeeDisagreement => "LeaderFeeDisagreement",
             Self::NoLeaderFee => "NoLeaderFee",

@@ -372,12 +372,7 @@ pub async fn handle_get_all(
         .wallet_sdk()
         .transaction_api()
         .fetch_all(req.status, req.component)?;
-    Ok(TransactionGetAllResponse {
-        transactions: transactions
-            .into_iter()
-            .map(|tx| (tx.transaction, tx.finalize, tx.status, tx.last_update_time))
-            .collect(),
-    })
+    Ok(TransactionGetAllResponse { transactions })
 }
 
 pub async fn handle_get_result(

@@ -48,4 +48,11 @@ impl TransactionLockConflicts {
     ) -> Result<(), StorageError> {
         tx.lock_conflicts_remove_by_transaction_ids(transaction_ids)
     }
+
+    pub(crate) fn remove_for_block<TTx: StateStoreWriteTransaction>(
+        tx: &mut TTx,
+        block_id: &BlockId,
+    ) -> Result<(), StorageError> {
+        tx.lock_conflicts_remove_by_block_id(block_id)
+    }
 }

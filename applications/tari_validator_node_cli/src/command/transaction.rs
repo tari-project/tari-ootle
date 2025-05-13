@@ -155,16 +155,16 @@ async fn handle_get(args: GetArgs, client: &mut ValidatorNodeClient) -> Result<(
     let request = GetTransactionResultRequest {
         transaction_id: args.transaction_hash.into_inner(),
     };
-    let resp = client.get_transaction_result(request).await?;
+    let Some(resp) = client.get_transaction_result(request).await.optional()? else {
+        println!("Transaction not finalized");
+        return Ok(());
+    };
 
-    if let Some(result) = resp.result {
-        println!("Transaction {}", args.transaction_hash);
-        println!();
+    let result = resp.transaction_execution.result();
+    println!("Transaction {}", args.transaction_hash);
+    println!();
 
-        summarize_finalize_result(&result.finalize);
-    } else {
-        println!("Transaction not finalized",);
-    }
+    summarize_finalize_result(&result.finalize);
 
     Ok(())
 }
@@ -258,30 +258,30 @@ pub async fn submit_transaction(
         println!("⏳️ Waiting for transaction result...");
         println!();
         let GetTransactionResultResponse {
-            result, final_decision, ..
+            transaction_execution, ..
         } = wait_for_transaction_result(
             resp.transaction_id,
             client,
             common.wait_for_result_timeout.map(Duration::from_secs),
         )
         .await?;
-        let result = result.unwrap();
-        if final_decision.unwrap().is_commit() {
+        let result = transaction_execution.result();
+        if transaction_execution.decision().is_commit() {
             if let Some(diff) = result.finalize.result.accept() {
                 component_manager.commit_diff(diff)?;
             }
         }
-        summarize(&result, timer.elapsed());
+        summarize(result, timer.elapsed());
         // Hack: submit response never returns a result unless it's a dry run - however cucumbers expect a result so add
         // it to the response here to satisfy that We'll remove these handlers eventually anyway
         resp.dry_run_result = Some(DryRunTransactionFinalizeResult {
-            decision: if final_decision.unwrap().is_commit() {
+            decision: if transaction_execution.decision().is_commit() {
                 QuorumDecision::Accept
             } else {
                 QuorumDecision::Reject
             },
             fee_breakdown: Some(result.finalize.fee_receipt.to_cost_breakdown()),
-            finalize: result.finalize,
+            finalize: result.finalize.clone(),
         });
     }
 
@@ -303,9 +303,7 @@ async fn wait_for_transaction_result(
             .optional()?;
 
         if let Some(resp) = resp {
-            if resp.final_decision.is_some() {
-                return Ok(resp);
-            }
+            return Ok(resp);
         }
         if let Some(t) = timeout {
             timeout = t.checked_sub(Duration::from_secs(1));

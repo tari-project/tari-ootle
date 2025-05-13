@@ -34,6 +34,10 @@ impl TransactionId {
         self.id
     }
 
+    pub fn as_hash(&self) -> Hash {
+        Hash::from(self.id)
+    }
+
     pub fn from_hex(hex: &str) -> Result<Self, FixedHashSizeError> {
         // TODO: This error isnt correct
         let bytes = from_hex(hex).map_err(|_| FixedHashSizeError)?;
@@ -107,5 +111,11 @@ impl From<[u8; 32]> for TransactionId {
 impl From<TransactionId> for Hash {
     fn from(id: TransactionId) -> Self {
         Hash::from(id.id)
+    }
+}
+
+impl From<Hash> for TransactionId {
+    fn from(hash: Hash) -> Self {
+        Self::new(hash.into_array())
     }
 }

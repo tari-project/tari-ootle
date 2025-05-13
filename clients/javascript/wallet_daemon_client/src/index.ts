@@ -87,9 +87,9 @@ import type {
   WebauthnStartRegisterRequest,
   WebauthnStartRegisterResponse,
   WebRtcStartRequest,
-  WebRtcStartResponse
+  WebRtcStartResponse,
 } from "@tari-project/typescript-bindings";
-import {FetchRpcTransport, RpcTransport} from "./transports";
+import { FetchRpcTransport, RpcTransport } from "./transports";
 
 export * as transports from "./transports";
 
@@ -225,7 +225,7 @@ export class WalletDaemonClient {
   }
 
   public transactionsList(params: TransactionGetAllRequest): Promise<TransactionGetAllResponse> {
-    return this.__invokeRpc("transactions.get_all", params);
+    return this.__invokeRpc("transactions.list", params);
   }
 
   public transactionsGet(params: TransactionGetRequest): Promise<TransactionGetResponse> {

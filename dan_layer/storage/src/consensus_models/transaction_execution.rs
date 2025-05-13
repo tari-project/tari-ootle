@@ -4,55 +4,60 @@
 use std::{fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{NumPreshards, ShardGroup, ToSubstateAddress};
+use tari_dan_common_types::{NodeHeight, NumPreshards};
 use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
 use tari_transaction::TransactionId;
+use time::PrimitiveDateTime;
 
 use crate::{
-    consensus_models::{AbortReason, BlockId, Decision, Evidence, VersionedSubstateIdLockIntent},
+    consensus_models::{BlockId, Decision, Evidence, LeafBlock, VersionedSubstateIdLockIntent},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct TransactionExecution {
-    pub transaction_id: TransactionId,
     pub result: ExecuteResult,
-    pub abort_reason: Option<RejectReason>,
     pub resolved_inputs: Vec<VersionedSubstateIdLockIntent>,
     pub resulting_outputs: Vec<VersionedSubstateIdLockIntent>,
 }
 
 impl TransactionExecution {
     pub fn new(
-        transaction_id: TransactionId,
         result: ExecuteResult,
         resolved_inputs: Vec<VersionedSubstateIdLockIntent>,
         resulting_outputs: Vec<VersionedSubstateIdLockIntent>,
-        abort_reason: Option<RejectReason>,
     ) -> Self {
         Self {
-            transaction_id,
             result,
             resolved_inputs,
             resulting_outputs,
-            abort_reason,
         }
     }
 
-    pub fn id(&self) -> &TransactionId {
-        &self.transaction_id
+    pub fn abort(transaction_id: &TransactionId, reject_reason: RejectReason) -> Self {
+        Self {
+            result: ExecuteResult::new_rejected(transaction_id.as_hash(), reject_reason),
+            resolved_inputs: Vec::new(),
+            resulting_outputs: Vec::new(),
+        }
     }
 
     pub fn result(&self) -> &ExecuteResult {
         &self.result
     }
 
+    pub fn into_result(self) -> ExecuteResult {
+        self.result
+    }
+
     pub fn decision(&self) -> Decision {
-        if let Some(reject_reason) = &self.abort_reason {
-            return Decision::Abort(AbortReason::from(reject_reason));
-        }
         Decision::from(&self.result.finalize.result)
     }
 
@@ -78,20 +83,18 @@ impl TransactionExecution {
     }
 
     pub fn abort_reason(&self) -> Option<&RejectReason> {
-        self.abort_reason.as_ref()
+        self.result().finalize.result.any_reject()
     }
 
-    pub fn set_abort_reason(&mut self, abort_reason: RejectReason) -> &mut Self {
-        self.abort_reason = Some(abort_reason);
-        self
+    pub fn execution_time(&self) -> Duration {
+        self.result.execution_time
     }
 
     pub fn to_evidence(&self, num_preshards: NumPreshards, num_committees: u32) -> Evidence {
-        let mut evidence = Evidence::from_inputs_and_outputs(
+        let mut evidence = Evidence::from_lock_intents(
             num_preshards,
             num_committees,
-            self.resolved_inputs(),
-            self.resulting_outputs(),
+            self.resolved_inputs().iter().chain(self.resulting_outputs()),
         );
         if self.decision().is_abort() {
             evidence.abort();
@@ -99,45 +102,62 @@ impl TransactionExecution {
         evidence
     }
 
-    pub fn is_involved(&self, num_preshards: NumPreshards, num_committees: u32, shard_group: ShardGroup) -> bool {
-        self.resolved_inputs()
-            .iter()
-            .chain(self.resulting_outputs())
-            .any(|obj| obj.to_substate_address().to_shard_group(num_preshards, num_committees) == shard_group)
-    }
-
-    pub fn for_block(self, block_id: BlockId) -> BlockTransactionExecution {
+    pub fn for_block(self, block: LeafBlock, transaction_id: TransactionId) -> BlockTransactionExecution {
         BlockTransactionExecution {
-            block_id,
+            block,
+            transaction_id,
             execution: self,
         }
     }
 }
 
+impl TransactionExecution {
+    pub fn get_finalized<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<Self, StorageError> {
+        tx.finalized_transaction_execution_get(transaction_id)
+    }
+
+    pub fn get_finalized_time<TTx: StateStoreReadTransaction>(
+        tx: &TTx,
+        transaction_id: &TransactionId,
+    ) -> Result<PrimitiveDateTime, StorageError> {
+        tx.finalized_transaction_execution_get_finalized_time(transaction_id)
+    }
+}
+
+impl Display for TransactionExecution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TransactionExecution({}, decision: {}, execution_time: {:.2?})",
+            self.result.finalize.result,
+            self.decision(),
+            self.execution_time()
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockTransactionExecution {
-    pub block_id: BlockId,
-    pub execution: TransactionExecution,
+    block: LeafBlock,
+    transaction_id: TransactionId,
+    execution: TransactionExecution,
 }
 
 impl BlockTransactionExecution {
     pub fn new(
-        block_id: BlockId,
+        block: LeafBlock,
         transaction_id: TransactionId,
         result: ExecuteResult,
         resolved_inputs: Vec<VersionedSubstateIdLockIntent>,
         resulting_outputs: Vec<VersionedSubstateIdLockIntent>,
-        abort_reason: Option<RejectReason>,
     ) -> Self {
         Self {
-            block_id,
-            execution: TransactionExecution::new(
-                transaction_id,
-                result,
-                resolved_inputs,
-                resulting_outputs,
-                abort_reason,
-            ),
+            block,
+            transaction_id,
+            execution: TransactionExecution::new(result, resolved_inputs, resulting_outputs),
         }
     }
 
@@ -150,7 +170,11 @@ impl BlockTransactionExecution {
     }
 
     pub fn block_id(&self) -> &BlockId {
-        &self.block_id
+        self.block.block_id()
+    }
+
+    pub fn block_height(&self) -> NodeHeight {
+        self.block.height()
     }
 
     pub fn decision(&self) -> Decision {
@@ -158,7 +182,7 @@ impl BlockTransactionExecution {
     }
 
     pub fn transaction_id(&self) -> &TransactionId {
-        &self.execution.transaction_id
+        &self.transaction_id
     }
 
     pub fn result(&self) -> &ExecuteResult {
@@ -177,10 +201,6 @@ impl BlockTransactionExecution {
         self.execution.result.execution_time
     }
 
-    pub fn abort_reason(&self) -> Option<&RejectReason> {
-        self.execution.abort_reason()
-    }
-
     pub fn transaction_fee(&self) -> u64 {
         self.execution.transaction_fee()
     }
@@ -188,7 +208,7 @@ impl BlockTransactionExecution {
 
 impl BlockTransactionExecution {
     pub fn insert_if_required<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<bool, StorageError> {
-        tx.transaction_executions_insert_or_ignore(self)
+        tx.block_transaction_executions_insert_or_ignore(self)
     }
 
     /// Fetches any pending execution that happened before the given block until the commit block (parent of locked
@@ -196,18 +216,9 @@ impl BlockTransactionExecution {
     pub fn get_pending_for_block<TTx: StateStoreReadTransaction>(
         tx: &TTx,
         transaction_id: &TransactionId,
-        from_block_id: &BlockId,
+        from_block: &LeafBlock,
     ) -> Result<Self, StorageError> {
-        tx.transaction_executions_get_pending_for_block(transaction_id, from_block_id)
-    }
-
-    /// Fetches any pending execution that happened in the given block
-    pub fn get_by_block<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        transaction_id: &TransactionId,
-        block_id: &BlockId,
-    ) -> Result<Self, StorageError> {
-        tx.transaction_executions_get(transaction_id, block_id)
+        tx.block_transaction_executions_get_pending_for_block(transaction_id, from_block)
     }
 }
 
@@ -215,9 +226,9 @@ impl Display for BlockTransactionExecution {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "BlockTransactionExecution(block_id: {}, transaction_id: {}, decision: {}, execution_time: {:.2?})",
-            self.block_id,
-            self.execution.transaction_id,
+            "BlockTransactionExecution({}, transaction_id: {}, decision: {}, execution_time: {:.2?})",
+            self.block,
+            self.transaction_id,
             self.decision(),
             self.execution_time()
         )

@@ -30,6 +30,11 @@ impl Display for Account {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct NewAccountInfo {
     pub name: Option<String>,
     pub key_index: u64,

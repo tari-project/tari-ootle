@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use tari_dan_common_types::{optional::IsNotFoundError, Epoch, SubstateRequirement};
 use tari_dan_storage::{
-    consensus_models::{ExecutedTransaction, TransactionPoolError},
+    consensus_models::{TransactionExecution, TransactionPoolError},
     StateStore,
     StorageError,
 };
@@ -63,8 +63,8 @@ pub trait BlockTransactionExecutor<TStateStore: StateStore> {
 
     fn execute(
         &self,
-        transaction: Transaction,
+        transaction: &Transaction,
         current_epoch: Epoch,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
-    ) -> Result<ExecutedTransaction, BlockTransactionExecutorError>;
+    ) -> Result<TransactionExecution, BlockTransactionExecutorError>;
 }

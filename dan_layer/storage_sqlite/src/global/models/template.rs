@@ -20,10 +20,9 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use chrono::NaiveDateTime;
 use tari_common_types::types::FixedHashSizeError;
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::global::DbTemplate;
+use tari_dan_storage::{global::DbTemplate, time::PrimitiveDateTime};
 use tari_template_lib::{
     prelude::RistrettoPublicKeyBytes,
     types::{HashParseError, TemplateAddress},
@@ -45,7 +44,7 @@ pub struct TemplateModel {
     pub author_public_key: Vec<u8>,
     pub code: Option<Vec<u8>>,
     pub status: String,
-    pub added_at: NaiveDateTime,
+    pub added_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Error)]

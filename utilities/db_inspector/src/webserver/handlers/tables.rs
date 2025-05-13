@@ -109,9 +109,9 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("transaction.V1.id", "Tx Id"),
                 Column::new("transaction.V1.body.transaction.instructions", "Instructions"),
                 Column::new("transaction.V1.body.transaction.fee_instructions", "Fee Instructions"),
-                Column::new("execution_result.finalize.result", "Result"),
-                Column::new("resolved_inputs", "Inputs"),
-                Column::new("resulting_outputs", "Outputs"),
+                Column::new("transaction.V1.body.transaction.inputs", "Inputs"),
+                Column::new("transaction.V1.body.signatures", "Signatures"),
+                Column::new("transaction.V1.seal_signature.public_key", "Seal signer"),
             ]);
         },
         "votes" => {

@@ -3,8 +3,8 @@
 
 use std::str::FromStr;
 
-use chrono::NaiveDateTime;
 use diesel::{Identifiable, Queryable};
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::storage::WalletStorageError;
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
@@ -26,8 +26,8 @@ pub struct Vault {
     pub confidential_balance: i64,
     pub locked_revealed_balance: i64,
     pub token_symbol: Option<String>,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 impl Vault {

@@ -22,7 +22,7 @@
 
 use std::{
     cmp,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
     ops::Deref,
 };
 
@@ -115,6 +115,7 @@ use crate::{
         epoch_checkpoint::EpochCheckpointModel,
         evicted_node,
         evicted_node::{EvictedNodeData, EvictedNodeModel},
+        finalized_transaction::FinalizedTransactionLinkModel,
         foreign_parked_blocks,
         foreign_parked_blocks::ForeignParkedBlockModel,
         foreign_proposal,
@@ -145,6 +146,7 @@ use crate::{
         validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
     },
     reader::RocksDbStateStoreReadTransaction,
+    utils::now,
 };
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::writer";
@@ -326,6 +328,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             self.db().cf(CommitBlockModel)?.put(
                 &ByteColumn,
                 &CommitBlock {
+                    height: block.height(),
                     block_id: *block.id(),
                     parent_id: *block.parent(),
                 },
@@ -630,109 +633,84 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn transactions_finalize_all<'a, I: IntoIterator<Item = &'a TransactionPoolRecord>>(
         &mut self,
-        block_id: BlockId,
         transactions: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "transactions_finalize_all";
 
-        if !self.blocks_exists(&block_id)? {
-            return Err(StorageError::QueryError {
-                reason: format!(
-                    "{}: Cannot finalize transactions for non-existent block {}",
-                    OPERATION, block_id
-                ),
-            });
+        let finalized_cf = self.db().cf(FinalizedTransactionLinkModel)?;
+
+        let iter = transactions.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut finalized_set = HashSet::with_capacity(lower);
+        // Add transactions to finalized CF
+        let now = now();
+        for transaction in iter {
+            finalized_set.insert(transaction.transaction_id());
+            finalized_cf.put(transaction.transaction_id(), &now, OPERATION)?;
         }
 
-        let cf = self.db().cf(TransactionModel)?;
-
-        // Deduplicate the transactions preserving each decision. Finalisation order does not matter since we're just
-        // updating records.
-        let id_decision_map = transactions
-            .into_iter()
-            .map(|t| (*t.transaction_id(), t.current_decision()))
-            .collect::<HashMap<_, _>>();
-
-        let records = cf.multi_get(id_decision_map.keys(), OPERATION)?;
-
-        let exec_cf = self.db().cf(BlockTransactionExecutionModel)?;
+        // Delete from block index since this is used for querying pending executions
         let exec_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
-        let exec_index_cf = self.db().cf(block_transaction_execution::TransactionIndex)?;
-
-        for (mut transaction, decision) in records.into_iter().zip(id_decision_map.into_values()) {
-            // TODO(perf): O(3n*3m) ops, transaction_executions_get_pending_for_block query is slow
-            let exec = self
-                .transaction_executions_get_pending_for_block(transaction.id(), &block_id)
-                .optional()?
-                .ok_or_else(|| StorageError::DataInconsistency {
-                    details: format!(
-                        "transactions_finalize_all: No pending execution for transaction {}",
-                        transaction.id()
-                    ),
-                })?;
-            // Delete all executions for transaction
-            let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), transaction.id());
+        let exec_index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
+        for id in finalized_set {
+            let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), id);
             for result in iter {
                 let key = result?;
-                exec_index_cf.delete(&key, OPERATION)?;
-                let (tx_id, block_id) = key;
-                exec_cf.delete(&(block_id, tx_id), OPERATION)?;
+                let (tx_id, block_id, height) = key;
+                exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
             }
-
-            transaction.resolved_inputs = Some(exec.execution.resolved_inputs);
-            transaction.resulting_outputs = Some(exec.execution.resulting_outputs);
-            transaction.execution_result = Some(exec.execution.result);
-            transaction.final_decision = Some(decision);
-            transaction.abort_reason = exec.execution.abort_reason;
-            // TODO: track insertion time to calculate a local finalize time
-            // transaction.finalized_time = now() - transaction.created_at
-            cf.put(transaction.id(), &transaction, OPERATION)?;
         }
 
         Ok(())
     }
 
-    fn transaction_executions_insert_or_ignore(
+    fn block_transaction_executions_insert_or_ignore(
         &mut self,
         transaction_execution: &BlockTransactionExecution,
     ) -> Result<bool, StorageError> {
         const OPERATION: &str = "transaction_executions_insert_or_ignore";
+
         let cf = self.db().cf(BlockTransactionExecutionModel)?;
         if cf.exists(
             &(
-                *transaction_execution.block_id(),
                 *transaction_execution.transaction_id(),
+                *transaction_execution.block_id(),
+                transaction_execution.block_height(),
             ),
             OPERATION,
         )? {
             debug!(
                 target: LOG_TARGET,
-                "Transaction execution for transaction {} in block {} already exists",
+                "Transaction execution for transaction {} in block {} {} already exists",
                 transaction_execution.transaction_id(),
-                transaction_execution.block_id()
+                transaction_execution.block_id(),
+                transaction_execution.block_height()
             );
             return Ok(false);
         }
 
         info!(
             target: LOG_TARGET,
-            "🔧 Inserting transaction execution for transaction {} in block {}",
+            "🔧 Inserting transaction execution for transaction {} in block {} {}",
             transaction_execution.transaction_id(),
-            transaction_execution.block_id()
+            transaction_execution.block_id(),
+            transaction_execution.block_height()
         );
         cf.put(
             &(
-                *transaction_execution.block_id(),
                 *transaction_execution.transaction_id(),
+                *transaction_execution.block_id(),
+                transaction_execution.block_height(),
             ),
             transaction_execution,
             OPERATION,
         )?;
 
-        self.db().cf(block_transaction_execution::TransactionIndex)?.put(
+        self.db().cf(block_transaction_execution::BlockIndex)?.put(
             &(
-                *transaction_execution.transaction_id(),
                 *transaction_execution.block_id(),
+                *transaction_execution.transaction_id(),
+                transaction_execution.block_height(),
             ),
             &(),
             OPERATION,
@@ -741,20 +719,67 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(true)
     }
 
-    fn transaction_executions_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
-        const OPERATION: &str = "transaction_executions_remove_any_by_block_id";
+    fn block_transaction_executions_remove_any_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
+        const OPERATION: &str = "block_transaction_executions_remove_any_by_block_id";
 
         let query = self.db().cf(block_transaction_execution::ByBlockQuery)?;
-
-        let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
-
         let cf = self.db().cf(BlockTransactionExecutionModel)?;
-        let index_cf = self.db().cf(block_transaction_execution::TransactionIndex)?;
+        let index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
+
+        let iter = query.query_prefix_range_key_iterator(Ordering::default(), block_id);
         for result in iter {
             let key = result?;
-            cf.delete(&key, OPERATION)?;
-            let (block_id, tx_id) = key;
-            index_cf.delete(&(tx_id, block_id), OPERATION)?;
+            index_cf.delete(&key, OPERATION)?;
+            let (block_id, tx_id, height) = key;
+            cf.delete(&(tx_id, block_id, height), OPERATION)?;
+        }
+
+        Ok(())
+    }
+
+    fn block_transaction_executions_lock_any_for_block(&mut self, lock_block: &LeafBlock) -> Result<(), StorageError> {
+        const OPERATION: &str = "block_transaction_executions_lock_any_for_block";
+
+        let block_query = self.db().cf(block_transaction_execution::ByBlockQuery)?;
+        let tx_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
+        let cf = self.db().cf(BlockTransactionExecutionModel)?;
+        let index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
+
+        // Remove any executions prior to this block - we do this only if this block has an execution (if not, iter will
+        // be empty). By the time the block that finalizes a transaction is committed - there will only be one
+        // execution.
+        let iter = block_query.query_prefix_range_key_iterator(Ordering::default(), lock_block.block_id());
+        for result in iter {
+            let (_, tx_id, locked_height) = result?;
+            let tx_iter = tx_query.query_prefix_range_key_iterator(Ordering::default(), &tx_id);
+            for result in tx_iter {
+                let (tx_id, block_id, height) = result?;
+                // Don't remove for this block or any later blocks (higher height)
+                if height > locked_height {
+                    debug!(
+                        target: LOG_TARGET,
+                        "Skip deleting transaction execution for transaction {} in block {} ({} > {})",
+                        tx_id,
+                        block_id,
+                        height,
+                        locked_height
+                    );
+                    continue;
+                }
+                if block_id == *lock_block.block_id() {
+                    continue;
+                }
+                debug!(
+                    target: LOG_TARGET,
+                    "Deleting transaction execution for transaction {} in block {} ({} <= {})",
+                    tx_id,
+                    block_id,
+                    height,
+                    locked_height
+                );
+                cf.delete(&(tx_id, block_id, height), OPERATION)?;
+                index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
+            }
         }
 
         Ok(())
@@ -1519,6 +1544,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         transaction_ids: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "lock_conflicts_remove_by_transaction_ids";
+        let mut transaction_ids = transaction_ids.into_iter().peekable();
+        if transaction_ids.peek().is_none() {
+            return Ok(());
+        }
 
         let db = self.db();
         let cf = db.cf(LockConflictModel)?;
@@ -1554,6 +1583,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             index_cf.delete(&key, OPERATION)?;
             let (block_id, transaction_id, depends_on_tx) = key;
             cf.delete(&(transaction_id, block_id, depends_on_tx), OPERATION)?;
+            cf.delete(&(depends_on_tx, block_id, transaction_id), OPERATION)?;
         }
 
         Ok(())

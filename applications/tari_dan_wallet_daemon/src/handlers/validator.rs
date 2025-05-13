@@ -139,6 +139,7 @@ pub async fn handle_claim_validator_fees(
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
 
     let transaction = transaction_builder(context)
+        .with_dry_run(req.dry_run)
         .with_fee_instructions_builder(|builder| {
             let mut bucket_names = vec![];
             fee_pool_addresses

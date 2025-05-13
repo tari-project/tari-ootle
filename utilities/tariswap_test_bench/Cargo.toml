@@ -21,6 +21,7 @@ tari_validator_node_client = { workspace = true }
 
 clap = { version = "4.3.21", features = ["derive"] }
 url = { workspace = true, features = [] }
+time = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 log = { workspace = true }

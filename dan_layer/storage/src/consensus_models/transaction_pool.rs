@@ -20,10 +20,11 @@ use tari_dan_common_types::{
     SubstateLockType,
 };
 use tari_engine_types::{substate::SubstateId, transaction_receipt::TransactionReceiptAddress};
-use tari_transaction::TransactionId;
+use tari_transaction::{Transaction, TransactionId};
 
 use crate::{
     consensus_models::{
+        calculate_leader_fee,
         BlockId,
         BlockTransactionExecution,
         Decision,
@@ -74,18 +75,17 @@ impl<TStateStore: StateStore> TransactionPool<TStateStore> {
         Ok(())
     }
 
-    pub fn insert_new_batched<'a, I: IntoIterator<Item = (&'a TransactionRecord, bool)>>(
+    pub fn insert_new_batched<'a, I: IntoIterator<Item = (&'a TransactionRecord, Decision, bool)>>(
         &self,
         tx: &mut TStateStore::WriteTransaction<'_>,
         num_preshards: NumPreshards,
         num_committees: u32,
         transactions: I,
     ) -> Result<(), TransactionPoolError> {
-        // TODO(perf)
-        for (transaction, is_ready) in transactions {
+        for (transaction, decision, is_ready) in transactions {
             tx.transaction_pool_insert_new(
                 *transaction.id(),
-                transaction.current_decision(),
+                decision,
                 &transaction.to_initial_evidence(num_preshards, num_committees),
                 is_ready,
                 transaction.transaction().is_global(),
@@ -345,6 +345,22 @@ pub struct TransactionPoolRecord {
 }
 
 impl TransactionPoolRecord {
+    pub fn new_from_transaction(transaction: &Transaction, initial_evidence: Evidence) -> Self {
+        Self {
+            transaction_id: *transaction.id(),
+            evidence: initial_evidence,
+            is_global: transaction.is_global(),
+            transaction_fee: 0,
+            leader_fee: None,
+            stage: TransactionPoolStage::New,
+            pending_stage: None,
+            original_decision: Decision::Commit,
+            local_decision: None,
+            remote_decision: None,
+            is_ready: false,
+        }
+    }
+
     pub fn load(
         id: TransactionId,
         evidence: Evidence,
@@ -503,37 +519,7 @@ impl TransactionPoolRecord {
     }
 
     pub fn calculate_leader_fee(&self, num_involved_shards: NonZeroU64, exhaust_divisor: u64) -> LeaderFee {
-        let target_burn = self.transaction_fee.checked_div(exhaust_divisor).unwrap_or(0);
-        let block_fee_after_burn = self.transaction_fee - target_burn;
-
-        let mut leader_fee = block_fee_after_burn / num_involved_shards;
-        // The extra amount that is burnt from dividing the number of shards involved
-        let excess_remainder_burn = block_fee_after_burn % num_involved_shards;
-
-        // Adjust the leader fee to account for the remainder
-        // If the remainder accounts for an extra burn of greater than half the number of involved shards, we
-        // give each validator an extra 1 in fees if enough fees are available, burning less than the exhaust target.
-        // Otherwise, we burn a little more than/equal to the exhaust target.
-        let actual_burn = if excess_remainder_burn > 0 &&
-            // If the div floor burn accounts for 1 less fee for more than half of number of shards, and ...
-            excess_remainder_burn >= num_involved_shards.get() / 2 &&
-            // ... if there are enough fees to pay out an additional 1 to all shards
-            (leader_fee + 1) * num_involved_shards.get() <= self.transaction_fee
-        {
-            // Pay each leader 1 more
-            leader_fee += 1;
-
-            // We burn a little less due to the remainder
-            target_burn.saturating_sub(num_involved_shards.get() - excess_remainder_burn)
-        } else {
-            // We burn a little more due to the remainder
-            target_burn + excess_remainder_burn
-        };
-
-        LeaderFee {
-            fee: leader_fee,
-            global_exhaust_burn: actual_burn,
-        }
+        calculate_leader_fee(self.transaction_fee, num_involved_shards, exhaust_divisor)
     }
 
     pub fn set_remote_decision(&mut self, decision: Decision) -> &mut Self {
@@ -565,6 +551,11 @@ impl TransactionPoolRecord {
         self
     }
 
+    pub fn no_leader_fee(&mut self) -> &mut Self {
+        self.leader_fee = None;
+        self
+    }
+
     pub fn set_is_ready(&mut self, is_ready: bool) -> &mut Self {
         self.is_ready = is_ready;
         self
@@ -591,12 +582,13 @@ impl TransactionPoolRecord {
             self.set_local_decision(execution.decision());
         }
 
-        let involved_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
-        for lock in involved_locks {
-            self.evidence_mut()
-                .insert_from_lock_intent(num_preshards, num_committees, lock);
-        }
-        if self.current_decision().is_abort() {
+        if self.current_decision().is_commit() {
+            let involved_locks = execution.resolved_inputs().iter().chain(execution.resulting_outputs());
+            for lock in involved_locks {
+                self.evidence_mut()
+                    .insert_from_lock_intent(num_preshards, num_committees, lock);
+            }
+        } else {
             self.evidence.abort();
         }
 
@@ -702,12 +694,12 @@ impl TransactionPoolRecord {
         Ok(transaction)
     }
 
-    pub fn get_execution_for_block<TTx: StateStoreReadTransaction>(
+    pub fn get_pending_execution_for_block<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
-        from_block_id: &BlockId,
+        from_block: &LeafBlock,
     ) -> Result<BlockTransactionExecution, TransactionPoolError> {
-        let exec = BlockTransactionExecution::get_pending_for_block(tx, self.transaction_id(), from_block_id)?;
+        let exec = BlockTransactionExecution::get_pending_for_block(tx, self.transaction_id(), from_block)?;
         Ok(exec)
     }
 

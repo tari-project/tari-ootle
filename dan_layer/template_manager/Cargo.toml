@@ -25,7 +25,6 @@ tari_validator_node_rpc = { workspace = true }
 
 anyhow = { workspace = true }
 bytes = { workspace = true }
-chrono = { workspace = true }
 dashmap = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }

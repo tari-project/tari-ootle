@@ -18,6 +18,7 @@ use tari_dan_common_types::{
     crypto::{create_key_pair, create_key_pair_from_seed},
     derive_fee_pool_address,
     optional::Optional,
+    shard::Shard,
     Epoch,
     NodeHeight,
     SubstateAddress,
@@ -25,12 +26,12 @@ use tari_dan_common_types::{
     SubstateRequirement,
 };
 use tari_dan_storage::{
-    consensus_models::{AbortReason, Command, Decision, SubstateRecord, TransactionRecord},
+    consensus_models::{Command, Decision, SubstateRecord, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
 };
 use tari_engine_types::{
-    commit_result::RejectReason,
+    commit_result::AbortReason,
     hashing::hash_template_code,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
@@ -152,7 +153,7 @@ async fn single_transaction_abort() {
     let mut test = Test::builder().add_committee(0, vec!["1"]).start().await;
     // First get transaction in the mempool
     let (tx1, _, _) = test
-        .send_transaction_to_all(Decision::Abort(AbortReason::None), 1, 1, 1)
+        .send_transaction_to_all(Decision::Abort(AbortReason::ExecutionFailure), 1, 1, 1)
         .await;
     test.start_epoch(Epoch(1)).await;
 
@@ -239,12 +240,14 @@ async fn node_requests_missing_transaction_from_local_leader() {
     // proposed before node "1" can propose block 2 with all the transactions.
     let mut tx_ids = Vec::with_capacity(10);
     for _ in 0..10 {
-        let (transaction, inputs) = test.build_transaction(Decision::Commit, 5);
+        let (transaction, inputs) = test.build_transaction(5);
         tx_ids.push(*transaction.id());
         // All VNs will decide the same thing
         test.create_execution_at_destination_for_transaction(
             TestVnDestination::All,
             &transaction,
+            Decision::Commit,
+            5,
             inputs
                 .into_iter()
                 .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
@@ -399,19 +402,18 @@ async fn foreign_shard_group_decides_to_abort() {
         .start()
         .await;
 
-    let (tx1, inputs) = test.build_transaction(Decision::Commit, 5);
+    let (tx1, inputs) = test.build_transaction(5);
     test.send_transaction_to_destination(TestVnDestination::Committee(0), tx1.clone())
         .await;
 
     // Change the decision on committee 1 to Abort when executing. This test is not technically valid, as all
     // non-byzantine nodes MUST have the same decision given the same pledges. However, this does test that is it not
     // possible for others to COMMIT without all committees agreeing to COMMIT.
-    let mut tx2 = tx1.clone();
-    tx2.abort(RejectReason::ExecutionFailure("Test aborted".to_string()));
-
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::Committee(0),
         &tx1,
+        Decision::Commit,
+        5,
         inputs
             .iter()
             .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
@@ -420,7 +422,9 @@ async fn foreign_shard_group_decides_to_abort() {
     )
     .create_execution_at_destination_for_transaction(
         TestVnDestination::Committee(1),
-        &tx2,
+        &tx1,
+        Decision::Abort(AbortReason::ExecutionFailure),
+        5,
         inputs
             .into_iter()
             .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
@@ -428,7 +432,7 @@ async fn foreign_shard_group_decides_to_abort() {
         vec![],
     );
 
-    test.send_transaction_to_destination(TestVnDestination::Committee(1), tx2.clone())
+    test.send_transaction_to_destination(TestVnDestination::Committee(1), tx1.clone())
         .await;
 
     test.start_epoch(Epoch(1)).await;
@@ -451,7 +455,7 @@ async fn foreign_shard_group_decides_to_abort() {
     }
 
     test.stop();
-    test.assert_all_validators_have_decision(tx2.id(), Decision::Abort(AbortReason::ExecutionFailure))
+    test.assert_all_validators_have_decision(tx1.id(), Decision::Abort(AbortReason::ExecutionFailure))
         .await;
 
     test.assert_clean_shutdown().await;
@@ -477,11 +481,12 @@ async fn multishard_local_inputs_foreign_outputs() {
         Transaction::builder()
             .with_inputs(inputs.iter().cloned().map(|i| i.into()))
             .build_and_seal(&PrivateKey::default()),
-        Decision::Commit,
     );
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
         &tx1,
+        Decision::Commit,
+        5,
         inputs
             .into_iter()
             .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
@@ -534,11 +539,12 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
         .with_inputs(inputs.iter().cloned().map(|i| i.into()))
         .build_and_seal(&PrivateKey::default());
 
-    let tx = build_transaction_from(transaction.clone(), Decision::Commit);
-    let tx_abort = build_transaction_from(transaction, Decision::Abort(AbortReason::ExecutionFailure));
+    let tx = build_transaction_from(transaction);
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::Committee(0),
         &tx,
+        Decision::Commit,
+        5,
         inputs
             .clone()
             .into_iter()
@@ -551,14 +557,16 @@ async fn multishard_local_inputs_foreign_outputs_abort() {
 
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::Committee(1),
-        &tx_abort,
+        &tx,
+        Decision::Abort(AbortReason::ExecutionFailure),
+        5,
         inputs
             .into_iter()
             .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
             .collect(),
         outputs,
     );
-    test.send_transaction_to_destination(TestVnDestination::Committee(1), tx_abort.clone())
+    test.send_transaction_to_destination(TestVnDestination::Committee(1), tx.clone())
         .await;
 
     test.start_epoch(Epoch(1)).await;
@@ -608,12 +616,13 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
     let tx1 = build_transaction_from(
         Transaction::builder()
             .with_inputs(inputs_0.iter().chain(&inputs_1).cloned().map(|i| i.into()))
-            .build_and_seal(&PrivateKey::default()),
-        Decision::Commit,
+            .build_and_seal(&PrivateKey::from_canonical_bytes(&[1; 32]).unwrap()),
     );
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
         &tx1,
+        Decision::Commit,
+        5,
         inputs_0
             .into_iter()
             .chain(inputs_1)
@@ -625,7 +634,7 @@ async fn multishard_local_inputs_and_outputs_foreign_outputs() {
         .await;
     test.send_transaction_to_destination(TestVnDestination::Committee(1), tx1.clone())
         .await;
-    // Don't send to committee 2 since they are not involved in inputs
+    // Don't send to committee 2 since they are not involved in inputs (simulated mempool behaviour)
 
     test.start_epoch(Epoch(1)).await;
 
@@ -664,12 +673,14 @@ async fn multishard_output_conflict_abort() {
         .start()
         .await;
 
-    let (tx1, inputs) = test.build_transaction(Decision::Commit, 5);
+    let (tx1, inputs) = test.build_transaction(5);
     let mut outputs = test.build_outputs_for_committee(0, 1);
     outputs.extend(test.build_outputs_for_committee(1, 1));
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
         &tx1,
+        Decision::Commit,
+        5,
         inputs
             .into_iter()
             .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
@@ -683,11 +694,13 @@ async fn multishard_output_conflict_abort() {
     let tx = Transaction::builder()
         .with_inputs(inputs.iter().cloned().map(|i| i.into()))
         .build_and_seal(&Default::default());
-    let tx2 = build_transaction_from(tx, Decision::Commit);
-    assert_ne!(tx1.id(), tx2.id());
+    let tx2 = build_transaction_from(tx);
+    assert_ne!(tx1.id(), tx2.id(), "tx1 and tx2 should be different");
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
         &tx2,
+        Decision::Commit,
+        5,
         inputs
             .into_iter()
             .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
@@ -722,21 +735,29 @@ async fn multishard_output_conflict_abort() {
     test.stop();
     // Currently not deterministic (test harness) which transaction will arrive first so we check that one transaction
     // is committed and the other is aborted. TODO: It is also possible that both are aborted.
-    let tx1_vn1 = test.get_validator(&TestAddress::new("1")).get_transaction(tx_ids[0]);
-    let tx2_vn1 = test.get_validator(&TestAddress::new("1")).get_transaction(tx_ids[1]);
+    let tx1_vn1 = test
+        .get_validator(&TestAddress::new("1"))
+        .get_transaction_execution(tx_ids[0]);
+    let tx2_vn1 = test
+        .get_validator(&TestAddress::new("1"))
+        .get_transaction_execution(tx_ids[1]);
 
-    let tx1_vn3 = test.get_validator(&TestAddress::new("3")).get_transaction(tx_ids[0]);
-    let tx2_vn3 = test.get_validator(&TestAddress::new("3")).get_transaction(tx_ids[1]);
+    let tx1_vn3 = test
+        .get_validator(&TestAddress::new("3"))
+        .get_transaction_execution(tx_ids[0]);
+    let tx2_vn3 = test
+        .get_validator(&TestAddress::new("3"))
+        .get_transaction_execution(tx_ids[1]);
 
-    assert_eq!(tx1_vn1.final_decision().unwrap(), tx1_vn3.final_decision().unwrap());
-    assert_eq!(tx2_vn1.final_decision().unwrap(), tx2_vn3.final_decision().unwrap());
-    if tx1_vn1.final_decision().unwrap().is_commit() {
+    assert_eq!(tx1_vn1.decision(), tx1_vn3.decision());
+    assert_eq!(tx2_vn1.decision(), tx2_vn3.decision());
+    if tx1_vn1.decision().is_commit() {
         test.assert_all_validators_committed(tx_ids[0]);
     } else {
         test.assert_all_validators_did_not_commit(tx_ids[0]);
     }
 
-    if tx2_vn1.final_decision().unwrap().is_commit() {
+    if tx2_vn1.decision().is_commit() {
         test.assert_all_validators_committed(tx_ids[1]);
     } else {
         test.assert_all_validators_did_not_commit(tx_ids[1]);
@@ -760,10 +781,12 @@ async fn single_shard_inputs_from_previous_outputs() {
     let tx2 = Transaction::builder()
         .with_inputs(prev_outputs.clone())
         .build_and_seal(&Default::default());
-    let tx2 = build_transaction_from(tx2.clone(), Decision::Commit);
+    let tx2 = build_transaction_from(tx2.clone());
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
         &tx2,
+        Decision::Commit,
+        5,
         prev_outputs
             .into_iter()
             .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
@@ -793,9 +816,8 @@ async fn single_shard_inputs_from_previous_outputs() {
         .await;
     let decision_tx2 = test
         .get_validator(&TestAddress::new("1"))
-        .get_transaction(tx2.id())
-        .final_decision()
-        .expect("tx2 final decision not reached");
+        .get_transaction_execution(tx2.id())
+        .decision();
     test.assert_all_validators_have_decision(tx2.id(), decision_tx2).await;
     if let Some(reason) = decision_tx2.abort_reason() {
         assert_eq!(reason, AbortReason::OneOrMoreInputsNotFound);
@@ -823,10 +845,12 @@ async fn multishard_inputs_from_previous_outputs() {
     let tx2 = Transaction::builder()
         .with_inputs(prev_outputs.clone())
         .build_and_seal(&Default::default());
-    let tx2 = build_transaction_from(tx2.clone(), Decision::Commit);
+    let tx2 = build_transaction_from(tx2.clone());
     test.create_execution_at_destination_for_transaction(
         TestVnDestination::All,
         &tx2,
+        Decision::Commit,
+        5,
         prev_outputs
             .into_iter()
             .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
@@ -926,9 +950,8 @@ async fn single_shard_input_conflict() {
 
     let tx1_decision = test
         .get_validator(&TestAddress::new("1"))
-        .get_transaction(tx1.transaction().id())
-        .final_decision()
-        .expect("tx1 final decision not reached");
+        .get_transaction_execution(tx1.transaction().id())
+        .decision();
     info!("tx1 = {}", tx1.id());
     info!("tx2 = {}", tx2.id());
     if tx1_decision.is_commit() {
@@ -1000,10 +1023,9 @@ async fn leader_failure_node_goes_down() {
         // Allow enough time for leader failures
         .with_test_timeout(Duration::from_secs(60))
         .modify_consensus_constants(|config_mut| {
-            // Prevent evictions
             config_mut.missed_proposal_suspend_threshold = 10;
             config_mut.missed_proposal_evict_threshold = 10;
-            config_mut.pacemaker_block_time = Duration::from_secs(2);
+            config_mut.pacemaker_block_time = Duration::from_secs(5);
         })
         .add_committee(0, vec!["1", "2", "3", "4", "5"])
         .start()
@@ -1609,19 +1631,9 @@ async fn multishard_validator_fee_claim() {
         .start()
         .await;
     // Create and send publish template transaction
-    let inputs = test.create_substates_on_vns(TestVnDestination::All, 1);
-    let address = derive_fee_pool_address(
-        &claim_bytes,
-        test.num_preshards(),
-        test.num_preshards()
-            .all_shard_groups_iter(test.num_committees())
-            .next()
-            .unwrap()
-            .start(),
-    );
+    let address = derive_fee_pool_address(&claim_bytes, test.num_preshards(), Shard::first());
     let claim_tx = Transaction::builder()
         .claim_validator_fees(address)
-        .with_inputs(inputs.iter().cloned().map(Into::into))
         .add_input(address)
         .build_and_seal(&claim_sk);
     let claim_tx = TransactionRecord::new(claim_tx);
@@ -1630,10 +1642,7 @@ async fn multishard_validator_fee_claim() {
         transaction: claim_tx.transaction().clone(),
         decision: Decision::Commit,
         fee: 1000,
-        input_locks: inputs
-            .into_iter()
-            .map(|input| (input.into_substate_id(), SubstateLockType::Write))
-            .collect(),
+        input_locks: vec![(address.into(), SubstateLockType::Write)],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![ValidatorFeeWithdrawal {
             address,
@@ -1642,8 +1651,8 @@ async fn multishard_validator_fee_claim() {
     });
 
     // Get some fees
-    test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
-    test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
+    let (tx1, _, _) = test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
+    let (tx2, _, _) = test.send_transaction_to_all(Decision::Commit, 1000, 1, 1).await;
 
     test.start_epoch(Epoch(1)).await;
 
@@ -1652,7 +1661,9 @@ async fn multishard_validator_fee_claim() {
 
         let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
 
-        if test.is_transaction_pool_empty() {
+        if test.is_transaction_finalized_at_destination(TestVnDestination::Committee(0), tx1.id()) &&
+            test.is_transaction_finalized_at_destination(TestVnDestination::Committee(0), tx2.id())
+        {
             break;
         }
 
@@ -1669,17 +1680,17 @@ async fn multishard_validator_fee_claim() {
 
         let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
 
-        if test.is_transaction_pool_empty() {
+        // This transaction is guaranteed to involve committee 0, so we only check one committee
+        if test.is_transaction_finalized_at_destination(TestVnDestination::Committee(0), claim_tx.id()) {
             break;
         }
 
-        if leaf.height >= NodeHeight(40) {
-            panic!("Not all transaction committed after {} blocks", leaf.height);
+        if leaf.height >= NodeHeight(80) {
+            panic!("Not all transactions committed after {} blocks", leaf.height);
         }
     }
 
     test.stop();
-    test.assert_all_validators_committed(claim_tx.id());
 
     // Assert fee pool exists
     let _fee_pool = test

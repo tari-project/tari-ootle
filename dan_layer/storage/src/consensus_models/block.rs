@@ -573,6 +573,11 @@ impl Block {
         Ok(())
     }
 
+    pub fn lock_executions<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
+        tx.block_transaction_executions_lock_any_for_block(&self.as_leaf_block())?;
+        Ok(())
+    }
+
     pub fn remove_diff<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
         tx.block_diffs_remove(self.id())
     }
@@ -746,11 +751,12 @@ impl Block {
         let mut updates = Vec::with_capacity(committed.len());
         for transaction in committed {
             let tx_rec = transaction.get_transaction(tx)?;
-            // TODO: this is not completely correct but this is only used for block sync which is only used (for now) by
-            // the indexer, Returning substates like this is good enough.
-            let Some(outputs) = tx_rec.resulting_outputs() else {
+            let Some(execution) = tx_rec.get_finalized_execution(tx).optional()? else {
                 continue;
             };
+            // TODO: this is not completely correct but this is only used for block sync which is only used (for now) by
+            // the indexer, Returning substates like this is good enough.
+            let outputs = execution.resulting_outputs();
             let outputs = outputs
                 .iter()
                 .map(|lock| lock.versioned_substate_id().as_ref())
@@ -1225,7 +1231,7 @@ where
     tx.pending_state_tree_diffs_remove_by_block(block_id).optional()?;
     tx.substate_locks_remove_any_by_block_id(block_id)?;
     tx.transaction_pool_state_updates_remove_any_by_block_id(block_id)?;
-    tx.transaction_executions_remove_any_by_block_id(block_id)?;
+    tx.block_transaction_executions_remove_any_by_block_id(block_id)?;
     tx.foreign_proposals_clear_proposed_in(block_id).optional()?;
     tx.burnt_utxos_clear_proposed_block(block_id)?;
     tx.lock_conflicts_remove_by_block_id(block_id)?;

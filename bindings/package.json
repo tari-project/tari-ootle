@@ -1,6 +1,6 @@
 {
   "name": "@tari-project/typescript-bindings",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "description": "TypeScript types synchronized to the Tari Ootle Rust codebase",
   "homepage": "https://github.com/tari-project/tari-dan#readme",
   "bugs": {
@@ -17,7 +17,9 @@
   },
   "scripts": {
     "build-dist": "tsc --project tsconfig.prod.json",
-    "build": "sh build.sh && tsc --project tsconfig.prod.json && pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn && tsc"
+    "build-dev": "tsc",
+    "build": "sh build.sh && pnpm run fmt &&  tsc --project tsconfig.prod.json",
+    "fmt": "pnpm npx prettier --write \"./**/*.{ts,tsx,css,json}\" --log-level=warn"
   },
   "files": [
     "/dist"

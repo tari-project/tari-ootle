@@ -5,6 +5,8 @@ pub mod block_diff;
 pub mod blocks;
 pub mod bookkeeping;
 pub mod column_families;
+pub mod databases;
+pub mod foreign_substate_pledges;
 pub mod state_transitions;
 pub mod tables;
 mod types;

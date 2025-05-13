@@ -38,7 +38,6 @@ import { getTransaction, getTransactionResult } from "../../utils/json_rpc";
 import { displayDuration } from "../../utils/helpers";
 import type {
   Event,
-  ExecutedTransaction,
   ExecuteResult,
   LogEntry,
   VersionedSubstateId,
@@ -48,10 +47,17 @@ import type {
 import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/typescript-bindings";
 import StatusChip from "../../Components/StatusChip";
 import { getSubstateDiffFromTransactionResult } from "@tari-project/typescript-bindings/dist/helpers/helpers";
+import { Transaction } from "@tari-project/typescript-bindings/dist/types/Transaction";
+import { Decision } from "@tari-project/typescript-bindings/dist/types/Decision";
 
 export default function TransactionDetails() {
   const { transactionHash } = useParams();
-  const [state, setState] = useState<ExecutedTransaction>();
+  const [state, setState] = useState<{
+    transaction: Transaction,
+    final_decision: Decision,
+    finalized_at: string,
+    result: ExecuteResult
+  }>();
   const [upSubstate, setUpSubstate] = useState<[SubstateId, Substate][]>([]);
   const [downSubstate, setDownSubstate] = useState<VersionedSubstateId[]>([]);
   const [events, setEvents] = useState<Event[]>();
@@ -67,10 +73,16 @@ export default function TransactionDetails() {
       getTransaction({ transaction_id: String(transactionHash) }),
       getTransactionResult({ transaction_id: String(transactionHash) }),
     ])
-      .then(([transaction, result]) => {
-        setState(transaction.transaction);
-        if (result.result && ("Accept" in result.result.finalize.result || "AcceptFeeRejectRest" in result.result.finalize.result)) {
-          let diff = getSubstateDiffFromTransactionResult(result.result!.finalize.result);
+      .then(([transaction, resultResp]) => {
+        const { result } = resultResp.transaction_execution;
+        setState({
+          transaction: transaction.transaction,
+          final_decision: resultResp.final_decision,
+          finalized_at: resultResp.finalize_at,
+          result,
+        });
+        if (result && ("Accept" in result.finalize.result || "AcceptFeeRejectRest" in result.finalize.result)) {
+          let diff = getSubstateDiffFromTransactionResult(result.finalize.result);
           if (diff) {
             setDownSubstate(diff.down_substates.map(([substate_id, version]) => ({
               substate_id, version,
@@ -79,9 +91,9 @@ export default function TransactionDetails() {
           }
         }
         setError(undefined);
-        setEvents(result.result?.finalize.events);
-        setLogs(result.result?.finalize.logs);
-        setFee(result.result?.finalize.fee_receipt.total_fees_paid);
+        setEvents(result?.finalize.events);
+        setLogs(result?.finalize.logs);
+        setFee(result?.finalize.fee_receipt.total_fees_paid);
       })
       .catch((err) => {
         setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
@@ -126,8 +138,8 @@ export default function TransactionDetails() {
   if (state === undefined) {
     return <Loading />;
   }
-  const { result, transaction: container, finalized_time, final_decision } = state;
-  const transaction = container.V1.body.transaction;
+  const { transaction: container, final_decision, finalized_at: finalized_time, result } = state;
+  const transaction = container?.V1.body.transaction;
   const decision = typeof final_decision === "object" ? "Abort" : final_decision;
   const abortReason = final_decision !== null && typeof final_decision === "object" ? final_decision.Abort : null;
   return (
@@ -182,8 +194,8 @@ export default function TransactionDetails() {
                               <br />
                               Executed
                               in {result.execution_time ? displayDuration(result.execution_time) : "--"},
-                              Finalized in{" "}
-                              {finalized_time ? displayDuration(finalized_time) : "--"}
+                              Finalized at{" "}
+                              {finalized_time}
                             </DataTableCell>
                           </TableRow>
                         </TableBody>

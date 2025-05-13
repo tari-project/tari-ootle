@@ -25,10 +25,10 @@ use std::{
     str::FromStr,
 };
 
-use chrono::{NaiveDateTime, Utc};
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::Epoch;
 use tari_template_lib::types::{crypto::RistrettoPublicKeyBytes, TemplateAddress};
+use time::{PrimitiveDateTime, UtcDateTime};
 
 use crate::global::GlobalDbAdapter;
 
@@ -93,7 +93,7 @@ pub struct DbTemplate {
     pub code: Option<Vec<u8>>,
     pub url: Option<String>,
     pub status: TemplateStatus,
-    pub added_at: NaiveDateTime,
+    pub added_at: PrimitiveDateTime,
 }
 
 impl DbTemplate {
@@ -109,12 +109,17 @@ impl DbTemplate {
             expected_hash: FixedHash::zero(),
             status: TemplateStatus::Pending,
             code: None,
-            added_at: Utc::now().naive_utc(),
+            added_at: now(),
             template_type: DbTemplateType::Wasm,
             url: None,
             epoch,
         }
     }
+}
+
+fn now() -> PrimitiveDateTime {
+    let now = UtcDateTime::now();
+    PrimitiveDateTime::new(now.date(), now.time())
 }
 
 #[derive(Debug, Clone, Default)]

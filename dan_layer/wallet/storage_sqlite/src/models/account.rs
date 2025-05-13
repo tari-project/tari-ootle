@@ -1,8 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use chrono::NaiveDateTime;
 use diesel::{Identifiable, Queryable};
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_engine_types::substate::InvalidSubstateIdFormat;
 
 use crate::schema::accounts;
@@ -15,8 +15,8 @@ pub struct Account {
     pub address: String,
     pub owner_key_index: i64,
     pub is_default: bool,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at: PrimitiveDateTime,
+    pub updated_at: PrimitiveDateTime,
 }
 
 impl TryFrom<Account> for tari_dan_wallet_sdk::models::Account {

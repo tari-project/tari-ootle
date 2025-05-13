@@ -135,14 +135,14 @@ impl PaceMaker {
                                 leader_timeout.as_mut().reset(far_future());
                                 block_timer.as_mut().reset(far_future());
                             },
-                           PacemakerRequest::SuspendLeaderFailure => {
+                           PacemakerRequest::SuspendLeaderTimeout => {
                                 if !started {
                                     continue;
                                 }
                                 leader_failure_suspended = true;
                                 debug!(target: LOG_TARGET, "🧿 Pacemaker suspend");
                            },
-                            PacemakerRequest::ResumeLeaderFailure => {
+                            PacemakerRequest::ResumeLeaderTimeout => {
                                 if !started {
                                     continue;
                                 }

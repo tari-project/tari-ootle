@@ -37,7 +37,11 @@ use tari_dan_app_utilities::{keypair::RistrettoKeypair, substate_file_cache::Sub
 use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 use tari_dan_p2p::TariMessagingSpec;
-use tari_dan_storage::{consensus_models::Decision, global::GlobalDb};
+use tari_dan_storage::{
+    consensus_models::Decision,
+    global::GlobalDb,
+    time::{PrimitiveDateTime, UtcDateTime},
+};
 use tari_dan_storage_sqlite::{error::SqliteStorageError, global::SqliteGlobalDbAdapter};
 use tari_engine_types::{FromByteType, ToByteType};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
@@ -450,7 +454,7 @@ impl JsonRpcHandlers {
                     execution_result: Some(Box::new(exec_result)),
                     final_decision: Decision::Commit,
                     abort_details: None,
-                    finalized_time: Default::default(),
+                    finalized_time: now(),
                     execution_time: Default::default(),
                 },
                 transaction_id,
@@ -674,4 +678,9 @@ impl JsonRpcHandlers {
         error!(target: LOG_TARGET, "Internal error: {}", error);
         Self::error_response(answer_id, JsonRpcErrorReason::InternalError, error)
     }
+}
+
+fn now() -> PrimitiveDateTime {
+    let now = UtcDateTime::now();
+    PrimitiveDateTime::new(now.date(), now.time())
 }

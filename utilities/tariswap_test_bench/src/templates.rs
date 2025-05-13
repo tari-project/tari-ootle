@@ -9,7 +9,7 @@ pub async fn get_templates(cli: &CommonArgs) -> anyhow::Result<(TemplateMetadata
     let mut client = tari_validator_node_client::ValidatorNodeClient::connect(cli.validator_node_url.clone())?;
     let GetTemplatesResponse { templates } = client.get_active_templates(GetTemplatesRequest { limit: 100 }).await?;
 
-    let tariswap = if let Some(template_address) = cli.faucet_template {
+    let tariswap = if let Some(template_address) = cli.swap_template {
         templates
             .iter()
             .find(|t| t.address == template_address)
@@ -23,11 +23,19 @@ pub async fn get_templates(cli: &CommonArgs) -> anyhow::Result<(TemplateMetadata
             .clone()
     };
 
-    let faucet = templates
-        .iter()
-        .find(|t| t.name.eq_ignore_ascii_case("TestFaucet"))
-        .ok_or(anyhow::anyhow!("Faucet template not found"))?
-        .clone();
+    let faucet = if let Some(template_address) = cli.faucet_template {
+        templates
+            .iter()
+            .find(|t| t.address == template_address)
+            .ok_or(anyhow::anyhow!("Faucet template not found"))?
+            .clone()
+    } else {
+        templates
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case("TestFaucet"))
+            .ok_or(anyhow::anyhow!("Faucet template not found"))?
+            .clone()
+    };
 
     log::info!("Faucet template: {}", faucet.address);
     log::info!("Tariswap template: {}", tariswap.address);

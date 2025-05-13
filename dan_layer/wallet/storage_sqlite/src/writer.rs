@@ -9,13 +9,12 @@ use std::{
     time::Duration,
 };
 
-use chrono::NaiveDateTime;
 use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
 use tari_dan_common_types::{SubstateRequirement, VersionedSubstateIdRef};
-use tari_dan_storage::consensus_models::QuorumCertificate;
+use tari_dan_storage::{consensus_models::QuorumCertificate, time::PrimitiveDateTime};
 use tari_dan_wallet_sdk::{
     models::{
         AuthoredTemplateModel,
@@ -42,12 +41,9 @@ use webauthn_rs::prelude::Passkey;
 
 use crate::{
     diesel::ExpressionMethods,
-    models::{
-        AuthoredTemplate,
-        {self},
-    },
+    models,
     reader::ReadTransaction,
-    serialization::serialize_json,
+    serialization::{serialize_hex, serialize_json},
 };
 
 const LOG_TARGET: &str = "auth::tari::dan::wallet_sdk::storage_sqlite::writer";
@@ -331,7 +327,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         qcs: Option<&[QuorumCertificate]>,
         new_status: TransactionStatus,
         execution_time: Option<Duration>,
-        finalized_time: Option<Duration>,
+        finalized_time: Option<PrimitiveDateTime>,
     ) -> Result<(), WalletStorageError> {
         use crate::schema::transactions;
 
@@ -343,8 +339,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 transactions::qcs.eq(qcs.map(serialize_json).transpose()?),
                 transactions::executed_time_ms
                     .eq(execution_time.map(|v| i64::try_from(v.as_millis()).unwrap_or(i64::MAX))),
-                transactions::finalized_time_ms
-                    .eq(finalized_time.map(|v| i64::try_from(v.as_millis()).unwrap_or(i64::MAX))),
+                transactions::finalized_time.eq(finalized_time),
                 transactions::updated_at.eq(diesel::dsl::now),
             ))
             .filter(transactions::hash.eq(transaction_id.to_string()))
@@ -803,7 +798,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .set((
                 outputs::status.eq(OutputStatus::Unspent.as_key_str()),
                 outputs::locked_by_proof.eq::<Option<i32>>(None),
-                outputs::locked_at.eq::<Option<NaiveDateTime>>(None),
+                outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("outputs_finalize_by_proof_id", e))?;
@@ -815,7 +810,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .set((
                 outputs::status.eq(OutputStatus::Spent.as_key_str()),
                 outputs::locked_by_proof.eq::<Option<i32>>(None),
-                outputs::locked_at.eq::<Option<NaiveDateTime>>(None),
+                outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("outputs_finalize_by_proof_id", e))?;
@@ -833,7 +828,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .set((
                 outputs::status.eq(OutputStatus::Unspent.as_key_str()),
                 outputs::locked_by_proof.eq::<Option<i32>>(None),
-                outputs::locked_at.eq::<Option<NaiveDateTime>>(None),
+                outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("outputs_unlock_by_proof_id", e))?;
@@ -1012,18 +1007,14 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     /// Inserting a new authored template.
     fn authored_templates_insert(&mut self, model: AuthoredTemplateModel) -> Result<(), WalletStorageError> {
         use crate::schema::authored_templates;
-        let entity = AuthoredTemplate::try_from(model).map_err(|error| WalletStorageError::DecodingError {
-            operation: "authored_templates_insert",
-            item: "authored_template_model",
-            details: error.to_string(),
-        })?;
+
         diesel::insert_into(authored_templates::table)
             .values((
-                authored_templates::author_public_key.eq(entity.author_public_key),
-                authored_templates::address.eq(entity.address),
-                authored_templates::name.eq(entity.name),
-                authored_templates::tari_version.eq(entity.tari_version),
-                authored_templates::functions.eq(entity.functions),
+                authored_templates::author_public_key.eq(serialize_hex(model.author_public_key)),
+                authored_templates::address.eq(serialize_hex(model.address)),
+                authored_templates::name.eq(model.name),
+                authored_templates::tari_version.eq(model.tari_version),
+                authored_templates::functions.eq(serialize_json(&model.functions)?),
             ))
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("authored_templates_insert", e))?;

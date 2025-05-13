@@ -30,9 +30,10 @@ import Fade from "@mui/material/Fade";
 import ThemeSwitcher from "./ThemeSwitcher";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
-import { useDatabasesList } from "../store/databases.ts";
+import { DatabaseOpts, useDatabasesList } from "../store/databases.ts";
 import { GiOilDrum } from "react-icons/gi";
 import { OilBarrel } from "@mui/icons-material";
+import { TiSpanner, TiSpannerOutline } from "react-icons/ti";
 
 function MainListItems() {
   const theme = useTheme();
@@ -63,11 +64,24 @@ function MainListItems() {
     color: theme.palette.primary.main,
   };
 
+  const groupOpts = (db: DatabaseOpts) => {
+    if (db.group == "test") {
+      return {
+        icon: <TiSpannerOutline style={iconStyle} />,
+        activeIcon: <TiSpanner style={activeIconStyle} />,
+      };
+    }
+
+    return {
+      icon: <GiOilDrum style={iconStyle} />,
+      activeIcon: <OilBarrel style={activeIconStyle} />,
+    };
+  };
+
   const databaseItems = databases.map((db) => ({
     title: db.name,
-    icon: <GiOilDrum style={iconStyle} />,
-    activeIcon: <OilBarrel style={activeIconStyle} />,
     link: `/databases/${encodeURIComponent(db.name)}`,
+    ...groupOpts(db),
   }));
 
   const mainItems = [
@@ -78,24 +92,6 @@ function MainListItems() {
       link: "/",
     },
     ...databaseItems,
-    // {
-    //   title: "Templates",
-    //   icon: <LuLayoutTemplate style={iconStyle} />,
-    //   activeIcon: <LuLayoutTemplate style={activeIconStyle} />,
-    //   link: "templates",
-    // },
-    // {
-    //   title: "Manifest",
-    //   icon: <IoTerminalOutline style={iconStyle} />,
-    //   activeIcon: <IoTerminal style={activeIconStyle} />,
-    //   link: "manifest",
-    // },
-    // {
-    //   title: "Settings",
-    //   icon: <IoSettingsOutline style={iconStyle} />,
-    //   activeIcon: <IoSettings style={activeIconStyle} />,
-    //   link: "settings",
-    // },
   ];
 
 

@@ -18,6 +18,7 @@ use tari_dan_common_types::{
     crypto::{create_key_pair, create_key_pair_from_seed},
     derive_fee_pool_address,
     optional::Optional,
+    shard::Shard,
     Epoch,
     NodeHeight,
     SubstateAddress,
@@ -1630,19 +1631,9 @@ async fn multishard_validator_fee_claim() {
         .start()
         .await;
     // Create and send publish template transaction
-    let inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 1);
-    let address = derive_fee_pool_address(
-        &claim_bytes,
-        test.num_preshards(),
-        test.num_preshards()
-            .all_shard_groups_iter(test.num_committees())
-            .next()
-            .unwrap()
-            .start(),
-    );
+    let address = derive_fee_pool_address(&claim_bytes, test.num_preshards(), Shard::first());
     let claim_tx = Transaction::builder()
         .claim_validator_fees(address)
-        .with_inputs(inputs.iter().cloned().map(Into::into))
         .add_input(address)
         .build_and_seal(&claim_sk);
     let claim_tx = TransactionRecord::new(claim_tx);
@@ -1651,10 +1642,7 @@ async fn multishard_validator_fee_claim() {
         transaction: claim_tx.transaction().clone(),
         decision: Decision::Commit,
         fee: 1000,
-        input_locks: inputs
-            .into_iter()
-            .map(|input| (input.into_substate_id(), SubstateLockType::Write))
-            .collect(),
+        input_locks: vec![(address.into(), SubstateLockType::Write)],
         new_outputs: vec![],
         validator_fee_withdrawals: vec![ValidatorFeeWithdrawal {
             address,

@@ -567,6 +567,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 reason: format!("{OPERATION}: Block {from_block} does not exist",),
             });
         }
+
+        // Check if the transaction is finalized i.e not pending. Technically not required since consensus
+        // should not be querying for finalized transactions. However, this is currently the expected behaviour in
+        // tests.
         if self
             .db()
             .cf(FinalizedTransactionLinkModel)?

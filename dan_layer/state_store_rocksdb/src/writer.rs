@@ -1544,6 +1544,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         transaction_ids: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "lock_conflicts_remove_by_transaction_ids";
+        let mut transaction_ids = transaction_ids.into_iter().peekable();
+        if transaction_ids.peek().is_none() {
+            return Ok(());
+        }
 
         let db = self.db();
         let cf = db.cf(LockConflictModel)?;
@@ -1579,6 +1583,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             index_cf.delete(&key, OPERATION)?;
             let (block_id, transaction_id, depends_on_tx) = key;
             cf.delete(&(transaction_id, block_id, depends_on_tx), OPERATION)?;
+            cf.delete(&(depends_on_tx, block_id, transaction_id), OPERATION)?;
         }
 
         Ok(())

@@ -1702,6 +1702,7 @@ where TConsensusSpec: ConsensusSpec
         // Whenever we commit a block that will result in an abort for a transaction, we can remove lock conflicts to
         // allow other "blocked" transactions to be proposed.
         TransactionLockConflicts::remove_for_transactions(tx, block.all_aborting_transaction_ids())?;
+        TransactionLockConflicts::remove_for_block(tx, block.id())?;
 
         if !finalized_transactions.is_empty() {
             let _timer = TraceTimer::debug(LOG_TARGET, "unlock and finalized transactions")

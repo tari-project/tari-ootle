@@ -1165,15 +1165,21 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let cf = self.db().cf(TransactionPoolModel)?;
 
         let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
+        let lock_conflicts_cf = self.db().cf(lock_conflict::ByTransactionIdQuery)?;
 
         let pending_chain = self.get_pending_chain_ordered(block_id)?;
 
         // TODO: optimise
         let mut updates = HashMap::new();
+        let mut lock_conflicted = HashSet::new();
         for block_id in pending_chain.into_iter().rev() {
             let iter = query.query_prefix_range_iterator(Ordering::default(), &block_id);
             for result in iter {
                 let ((_, tx_id), update) = result?;
+                if lock_conflicts_cf.exists_prefix(&tx_id)? {
+                    lock_conflicted.insert(tx_id);
+                    continue;
+                }
                 updates.insert(tx_id, update);
             }
         }
@@ -1183,6 +1189,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         for result in iter {
             let mut tx = result?;
+            if lock_conflicted.contains(tx.transaction_id()) {
+                continue;
+            }
+
+            if lock_conflicts_cf.exists_prefix(tx.transaction_id())? {
+                continue;
+            }
             if let Some(update) = updates.remove(tx.transaction_id()) {
                 update.merge_into(&mut tx);
             }

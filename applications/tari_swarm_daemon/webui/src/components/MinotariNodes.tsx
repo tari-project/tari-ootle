@@ -7,6 +7,7 @@ import NodeControls from "./NodeControls.tsx";
 
 interface Props {
   showLogs: boolean;
+  autoRefresh: boolean;
 }
 
 export default function MinotariNodes(props: Props) {
@@ -27,7 +28,7 @@ export default function MinotariNodes(props: Props) {
   return (
     <div>
       {nodes!.map((node: any, i: number) => (
-        <Node key={i} {...node} onReload={reload} showLogs={props.showLogs} />
+        <Node key={i} {...node} autoRefresh={props.autoRefresh} onReload={reload} showLogs={props.showLogs} />
       ))}
     </div>
   );
@@ -72,7 +73,7 @@ function Node(props: any) {
     load().finally(() => setIsLoading(false));
 
     const timer = setInterval(() => {
-      if (!isLoading) {
+      if (!isLoading && props.autoRefresh) {
         load();
       }
     }, 1000);

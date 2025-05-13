@@ -564,7 +564,7 @@ export default function Main() {
       <button onClick={() => addValidatorNode()}>Add VN</button>
       <div className="label">Base layer</div>
       <div className="infos">
-        <MinotariNodes showLogs={showLogs} />
+        <MinotariNodes showLogs={showLogs} autoRefresh={autoRefresh} />
         <MinotariWallet showLogs={showLogs} />
         <ShowInfo executable={Executable.Miner} name="miner" logs={logs?.miner}
                   stdoutLogs={stdoutLogs?.miner} showLogs={showLogs} horizontal={horizontal}>

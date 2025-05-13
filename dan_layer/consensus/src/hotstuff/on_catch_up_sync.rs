@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use log::{info, warn};
-use tari_dan_common_types::Epoch;
+use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_dan_storage::{consensus_models::HighQc, StateStore};
 
 use crate::{
@@ -34,26 +34,32 @@ impl<TConsensusSpec: ConsensusSpec> OnCatchUpSync<TConsensusSpec> {
 
     pub async fn request_sync(&mut self, epoch: Epoch, from: TConsensusSpec::Addr) -> Result<(), HotStuffError> {
         let high_qc = self.store.with_read_tx(|tx| HighQc::get(tx, epoch))?;
+
+        let block_height = if high_qc.epoch() == epoch {
+            high_qc.block_height()
+        } else {
+            NodeHeight::zero()
+        };
+
+        // Reset leader timeout to previous height since we're behind and need to process catch up blocks. This is the
+        // only case where the view is non-monotonic. TODO: is this correct/necessary?
+        self.pacemaker.reset_view(epoch, block_height, block_height).await?;
+
         info!(
             target: LOG_TARGET,
-            "⏰ Catch up required from block {} from {} (current view: {})",
-            high_qc,
+            "⏰ Catch up required from block {}/{} from {} (current view: {})",
+            epoch,
+            block_height,
             from,
             self.pacemaker.current_view()
         );
-
-        // Reset leader timeout to previous height since we're behind and need to process catch up blocks. This is the
-        // only case where the view is non-monotonic. TODO: is this correct?
-        self.pacemaker
-            .reset_view(epoch, high_qc.block_height(), high_qc.block_height)
-            .await?;
 
         // Request a catch-up
         if self
             .outbound_messaging
             .send(
                 from,
-                HotstuffMessage::CatchUpSyncRequest(SyncRequestMessage { high_qc }),
+                HotstuffMessage::CatchUpSyncRequest(SyncRequestMessage { epoch, block_height }),
             )
             .await
             .is_err()

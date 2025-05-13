@@ -2,13 +2,14 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::Serialize;
-use tari_dan_common_types::Epoch;
-use tari_dan_storage::consensus_models::{Block, HighQc, QuorumCertificate};
+use tari_dan_common_types::{Epoch, NodeHeight};
+use tari_dan_storage::consensus_models::{Block, QuorumCertificate};
 use tari_transaction::Transaction;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SyncRequestMessage {
-    pub high_qc: HighQc,
+    pub epoch: Epoch,
+    pub block_height: NodeHeight,
 }
 
 #[derive(Debug, Clone, Serialize)]

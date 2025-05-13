@@ -33,12 +33,12 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
 
     #[allow(clippy::too_many_lines)]
     pub fn handle(&self, from: TConsensusSpec::Addr, epoch: Epoch, msg: SyncRequestMessage) {
-        if msg.high_qc.epoch() != epoch {
+        if msg.epoch != epoch {
             warn!(
                 target: LOG_TARGET,
                 "Received SyncRequest from {} for epoch {} but our epoch is {}. Ignoring request.",
                 from,
-                msg.high_qc.epoch(),
+                msg.epoch,
                 epoch
             );
             return;
@@ -56,17 +56,28 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     }
                 }
 
+                if leaf_block.epoch != msg.epoch {
+                    info!(
+                        target: LOG_TARGET,
+                        "Received catch up request from {} for epoch {} but our leaf block is {}. Ignoring request.",
+                        from,
+                        msg.epoch,
+                        leaf_block
+                    );
+                    return Ok(vec![]);
+                }
+
                 if leaf_block.height.is_zero() {
                     info!(target: LOG_TARGET, "This node is at height 0 so cannot return any sync blocks. Ignoring request");
                     return Ok(vec![]);
                 }
 
-                if leaf_block.height() < msg.high_qc.block_height() {
+                if leaf_block.height() < msg.block_height {
                     return Err(HotStuffError::InvalidSyncRequest {
                         details: format!(
                             "Received catch up request from {} for block {} but our leaf block is {}. Ignoring \
                              request.",
-                            from, msg.high_qc, leaf_block
+                            from, msg.block_height, leaf_block
                         ),
                     });
                 }
@@ -75,7 +86,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     target: LOG_TARGET,
                     "🌐 Received catch up request from {} from block {} to {}",
                     from,
-                    msg.high_qc,
+                    msg.block_height,
                     leaf_block
                 );
                 // NOTE: We have to send dummy blocks, because the messaging will ignore heights > current_view + 1,
@@ -84,8 +95,8 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                 // sending dummies is problematic as they are unsigned and generally, you cannot prove their validity.
                 let blocks = Block::get_all_blocks_between(
                     tx,
-                    leaf_block.epoch(),
-                    msg.high_qc.block_height(),
+                    msg.epoch,
+                    msg.block_height,
                     leaf_block.height(),
                     true,
                     1000,

@@ -7,7 +7,7 @@ use fern::{DateBased, FormatCallback};
 
 pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerError> {
     fn should_skip(target: &str) -> bool {
-        const SKIP: &[&str] = &["hyper::", "h2::", "tower::", "hyper_util::"];
+        const SKIP: &[&str] = &["hyper", "h2", "tower", "hyper_util", "tokio", "tokio_util"];
         target.is_empty() || SKIP.iter().any(|s| target.starts_with(s))
     }
 

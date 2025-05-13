@@ -64,7 +64,7 @@ mod tests {
     fn tx(network_byte: u8) -> Transaction {
         Transaction::new(
             UnsealedTransactionV1::new(
-                UnsignedTransactionV1::new(network_byte, vec![], vec![], IndexSet::new(), None, None),
+                UnsignedTransactionV1::new(network_byte, vec![], vec![], IndexSet::new(), None, None, false),
                 vec![TransactionSignature::new(
                     RistrettoPublicKeyBytes::zero(),
                     SchnorrSignatureBytes::zero(),

@@ -441,6 +441,7 @@ pub async fn handle_transfer_nft(
         .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
 
     let transaction = transaction_builder(context)
+        .with_dry_run(req.dry_run)
         .with_fee_instructions(vec![Instruction::CallMethod {
             component_address: fee_payer_account_address,
             method: "pay_fee".to_string(),

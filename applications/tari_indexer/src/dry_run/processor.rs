@@ -88,6 +88,10 @@ where TSubstateCache: SubstateCache + 'static
         transaction: Transaction,
         substate_requirements: Vec<SubstateRequirement>,
     ) -> Result<ExecuteResult, DryRunTransactionProcessorError> {
+        if !transaction.is_dry_run() {
+            return Err(DryRunTransactionProcessorError::NonDryRunTransaction);
+        }
+
         info!(target: LOG_TARGET, "process_transaction: {}", transaction.hash());
 
         // automatically scan the inputs and add all related involved objects

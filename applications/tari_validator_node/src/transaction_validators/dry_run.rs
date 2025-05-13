@@ -1,0 +1,90 @@
+// Copyright 2025 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+use log::warn;
+use tari_transaction::Transaction;
+
+use crate::{transaction_validators::TransactionValidationError, validator::Validator};
+
+const LOG_TARGET: &str = "tari::dan::mempool::validators::dry_run";
+
+#[derive(Debug)]
+pub struct TransactionDryRunValidator;
+
+impl Validator<Transaction> for TransactionDryRunValidator {
+    type Context = ();
+    type Error = TransactionValidationError;
+
+    fn validate(&self, _context: &Self::Context, input: &Transaction) -> Result<(), Self::Error> {
+        match input {
+            Transaction::V1(tx) => {
+                if tx.is_dry_run() {
+                    warn!(target: LOG_TARGET, "TransactionDryRunValidator - FAIL: dry run transactions are not allowed!");
+                    return Err(Self::Error::DryRunNotAllowed);
+                }
+
+                Ok(())
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use indexmap::IndexSet;
+    use tari_common::configuration::Network;
+    use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+    use tari_transaction::{
+        Transaction,
+        TransactionSealSignature,
+        TransactionSignature,
+        UnsealedTransactionV1,
+        UnsignedTransactionV1,
+    };
+
+    use crate::{
+        transaction_validators::{TransactionDryRunValidator, TransactionValidationError},
+        validator::Validator,
+    };
+
+    fn tx(dry_run: bool) -> Transaction {
+        Transaction::new(
+            UnsealedTransactionV1::new(
+                UnsignedTransactionV1::new(
+                    Network::LocalNet.as_byte(),
+                    vec![],
+                    vec![],
+                    IndexSet::new(),
+                    None,
+                    None,
+                    dry_run,
+                ),
+                vec![TransactionSignature::new(
+                    RistrettoPublicKeyBytes::zero(),
+                    SchnorrSignatureBytes::zero(),
+                )],
+            ),
+            TransactionSealSignature::new(RistrettoPublicKeyBytes::zero(), SchnorrSignatureBytes::zero()),
+        )
+    }
+
+    #[test]
+    fn dry_run_tx_not_allowed() {
+        let validator = TransactionDryRunValidator {};
+        let tx = tx(true);
+        let result = validator.validate(&(), &tx);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.err().unwrap(),
+            TransactionValidationError::DryRunNotAllowed
+        ));
+    }
+
+    #[test]
+    fn non_dry_run_tx_allowed() {
+        let validator = TransactionDryRunValidator {};
+        let tx = tx(false);
+        let result = validator.validate(&(), &tx);
+        assert!(result.is_ok());
+    }
+}

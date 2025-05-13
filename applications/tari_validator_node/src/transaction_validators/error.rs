@@ -45,4 +45,6 @@ pub enum TransactionValidationError {
     UnknownNetwork(u8, ConfigurationError),
     #[error("Network mismatch! Current network: {actual}, Transaction network: {expected}")]
     NetworkMismatch { actual: Network, expected: Network },
+    #[error("Dry run transactions are not allowed")]
+    DryRunNotAllowed,
 }

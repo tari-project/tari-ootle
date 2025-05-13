@@ -207,6 +207,7 @@ pub async fn handle_submit_dry_run(
     let transaction = transaction_builder(context)
         .with_unsigned_transaction(req.transaction)
         .with_inputs(detected_inputs)
+        .with_dry_run(true)
         .build_and_seal(&key.key);
 
     for proof_id in req.proof_ids {
@@ -292,13 +293,16 @@ pub async fn handle_submit_manifest(
             }
         });
     let signatures = builder.signatures().to_vec();
-    let transaction = builder.build_unsigned_transaction();
+    let mut transaction = builder.build_unsigned_transaction();
 
     // Detect inputs
     let substates = transaction.to_referenced_substates()?;
     let substates = substates.into_iter().collect::<Vec<_>>();
     let dependencies = sdk.substate_api().locate_dependent_substates(&substates).await?;
     let inputs = dependencies.into_iter().map(|input| input.into_unversioned());
+
+    // set currently requested dry run status
+    transaction.set_dry_run(req.dry_run);
 
     let transaction = transaction
         .with_inputs(inputs)

@@ -73,6 +73,12 @@ impl Transaction {
         }
     }
 
+    pub fn is_dry_run(&self) -> bool {
+        match self {
+            Transaction::V1(tx) => tx.is_dry_run(),
+        }
+    }
+
     pub fn unsealed_transaction(&self) -> &UnsealedTransactionV1 {
         match self {
             Self::V1(tx) => tx.unsealed_transaction(),

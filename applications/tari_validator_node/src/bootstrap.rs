@@ -94,6 +94,7 @@ use crate::{
         FeeTransactionValidator,
         HasInputs,
         TemplateExistsValidator,
+        TransactionDryRunValidator,
         TransactionNetworkValidator,
         TransactionSignatureValidator,
         TransactionValidationError,
@@ -501,6 +502,7 @@ pub fn create_mempool_transaction_validator(
     template_manager: TemplateManager<PeerAddress>,
 ) -> impl Validator<Transaction, Context = (), Error = TransactionValidationError> {
     TransactionNetworkValidator::new(network)
+        .and_then(TransactionDryRunValidator)
         .and_then(HasInputs::new())
         .and_then(FeeTransactionValidator)
         .and_then(TransactionSignatureValidator)

@@ -488,6 +488,7 @@ where
         let network = self.config_api.get_network()?;
         let transaction = Transaction::builder()
             .for_network(network.as_byte())
+            .with_dry_run(params.is_dry_run)
             .fee_transaction_pay_from_component_confidential(from_account_address, fee_withdraw_proof)
             .then(|builder| {
                 if dest_account_exists {

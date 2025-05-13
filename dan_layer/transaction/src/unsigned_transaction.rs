@@ -33,6 +33,13 @@ impl UnsignedTransaction {
         self
     }
 
+    pub fn set_dry_run(&mut self, dry_run: bool) -> &mut Self {
+        match self {
+            Self::V1(tx) => tx.set_dry_run(dry_run),
+        };
+        self
+    }
+
     pub fn authorized_sealed_signer(mut self) -> Self {
         match self {
             Self::V1(ref mut tx) => tx.is_seal_signer_authorized = true,

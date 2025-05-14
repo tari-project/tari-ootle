@@ -241,14 +241,8 @@ message SubstateDestroyed {
 }
 
 message SyncRequest {
-  HighQc high_qc = 1;
-}
-
-message HighQc {
-  bytes block_id = 1;
+  uint64 epoch = 1;
   uint64 block_height = 2;
-  uint64 epoch = 3;
-  bytes qc_id = 4;
 }
 
 message SyncResponse {

@@ -298,6 +298,17 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
     }
 }
 
+impl<CF, DB> CfContext<'_, DB, CF>
+where
+    CF: Cf,
+    CF::Key: Default,
+    DB: RocksReader,
+{
+    pub fn get_by_default_key(&self, operation: &'static str) -> Result<CF::Value, RocksDbStorageError> {
+        self.get(&CF::Key::default(), operation)
+    }
+}
+
 impl<CF: Cf, DB: RocksWriter> CfContext<'_, DB, CF> {
     pub fn insert(&self, key: &CF::Key, value: &CF::Value, operation: &'static str) -> Result<(), RocksDbStorageError> {
         if self.exists(key, operation)? {

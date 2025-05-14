@@ -337,7 +337,11 @@ impl Block {
     }
 
     pub fn as_last_proposed(&self) -> LastProposed {
-        self.header().as_last_proposed()
+        LastProposed {
+            height: self.header.height(),
+            block_id: *self.id(),
+            epoch: self.header.epoch(),
+        }
     }
 
     pub fn id(&self) -> &BlockId {
@@ -517,15 +521,6 @@ impl Block {
 
     pub fn parent_exists<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<bool, StorageError> {
         Self::record_exists(tx, self.parent())
-    }
-
-    pub fn has_been_justified<TTx: StateStoreReadTransaction>(
-        tx: &TTx,
-        block_id: &BlockId,
-    ) -> Result<bool, StorageError> {
-        // TODO: consider optimising
-        let b = Self::get(tx, block_id)?;
-        Ok(b.is_justified())
     }
 
     pub fn record_exists<TTx: StateStoreReadTransaction>(tx: &TTx, block_id: &BlockId) -> Result<bool, StorageError> {

@@ -78,7 +78,7 @@ pub async fn spawn(
         network,
         sidechain_id,
         consensus_constants: consensus_constants.clone(),
-        cleanup_interval: Duration::from_secs(60),
+        state_tree_cleanup_interval: Duration::from_secs(60),
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

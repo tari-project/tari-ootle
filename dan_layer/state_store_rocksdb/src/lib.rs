@@ -37,5 +37,7 @@ mod info;
 pub mod read_only;
 pub mod snapshot;
 
+mod options;
+pub use options::*;
 #[cfg(test)]
 mod tests;

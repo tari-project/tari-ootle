@@ -18,7 +18,7 @@ use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 
 use super::{BlockError, BlockId, QcId, QuorumCertificate};
-use crate::consensus_models::{Command, LastExecuted, LastProposed, LastVoted, LeafBlock, LockedBlock};
+use crate::consensus_models::{Command, LastExecuted, LastVoted, LeafBlock, LockedBlock};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -341,14 +341,6 @@ impl BlockHeader {
 
     pub fn as_leaf_block(&self) -> LeafBlock {
         LeafBlock {
-            height: self.height,
-            block_id: self.id,
-            epoch: self.epoch,
-        }
-    }
-
-    pub fn as_last_proposed(&self) -> LastProposed {
-        LastProposed {
             height: self.height,
             block_id: self.id,
             epoch: self.epoch,

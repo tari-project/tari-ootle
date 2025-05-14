@@ -50,7 +50,7 @@ use tari_engine_types::{
     substate::{hash_substate, Substate, SubstateId, SubstateValue},
 };
 use tari_sidechain::{CommitProofElement, QuorumDecision, SidechainBlockCommitProof, SidechainBlockHeader};
-use tari_state_store_rocksdb::RocksDbStateStore;
+use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
 use tari_template_lib::{
     auth::OwnerRule,
     models::ComponentAddress,
@@ -72,7 +72,10 @@ pub const fn num_preshards() -> NumPreshards {
 pub fn create_rocksdb() -> (RocksDbStateStore<String>, TempDir) {
     let temp_dir = tempfile::Builder::new().keep(false).tempdir().unwrap();
     let db_file = temp_dir.path().join("rocksdb");
-    (RocksDbStateStore::open(db_file).unwrap(), temp_dir)
+    (
+        RocksDbStateStore::open(db_file, DatabaseOptions::default()).unwrap(),
+        temp_dir,
+    )
 }
 
 pub fn create_tx_atom() -> TransactionAtom {

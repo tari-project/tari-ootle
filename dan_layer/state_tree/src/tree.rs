@@ -25,8 +25,11 @@ use crate::{
     error::StateTreeError,
     key_mapper::{DbKeyMapper, HashIdentityKeyMapper, SpreadPrefixKeyMapper},
     memory_store::MemoryTreeStore,
+    TreeStoreBatchWriter,
     SPARSE_MERKLE_PLACEHOLDER_HASH,
 };
+
+const LOG_TARGET: &str = "tari::dan::state_tree";
 
 pub type SpreadPrefixStateTree<'a, S> = StateTree<'a, S, SpreadPrefixKeyMapper>;
 pub type RootStateTree<'a, S> = StateTree<'a, S, HashIdentityKeyMapper>;
@@ -62,9 +65,7 @@ impl<S: TreeStoreReader<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree
         let root_hash = jmt.get_root_hash(version)?;
         Ok(root_hash)
     }
-}
 
-impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
     fn calculate_substate_changes<I: IntoIterator<Item = SubstateTreeChange>>(
         &mut self,
         current_version: Option<Version>,
@@ -75,7 +76,9 @@ impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S
             calculate_substate_changes::<_, M, _>(self.store, current_version, next_version, changes)?;
         Ok((root_hash, update_batch.into()))
     }
+}
 
+impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S, M> {
     /// Stores the substate changes in the state tree and returns the new root hash.
     pub fn put_substate_changes<I: IntoIterator<Item = SubstateTreeChange>>(
         &mut self,
@@ -100,6 +103,31 @@ impl<S: TreeStore<Version>, M: DbKeyMapper<VersionedSubstateId>> StateTree<'_, S
         }
 
         Ok(())
+    }
+}
+
+impl<S: TreeStoreReader<Version> + TreeStoreBatchWriter<Version>, M: DbKeyMapper<VersionedSubstateId>>
+    StateTree<'_, S, M>
+{
+    /// Stores the substate changes in the state tree and returns the new root hash.
+    pub fn batch_put_substate_changes<I: IntoIterator<Item = SubstateTreeChange>>(
+        &mut self,
+        current_version: Option<Version>,
+        next_version: Version,
+        changes: I,
+    ) -> Result<TreeHash, StateTreeError> {
+        let (root_hash, update_batch) = self.calculate_substate_changes(current_version, next_version, changes)?;
+        log::debug!(
+            target: LOG_TARGET,
+            "Batch inserting {} new nodes and recording {} stale tree nodes",
+            update_batch.new_nodes.len(),
+            update_batch.stale_tree_nodes.len()
+        );
+        self.store.batch_insert_nodes(update_batch.new_nodes)?;
+        self.store
+            .record_stale_tree_nodes(next_version, update_batch.stale_tree_nodes)?;
+
+        Ok(root_hash)
     }
 }
 

@@ -52,7 +52,6 @@ use tari_dan_storage::{
         Evidence,
         ForeignProposal,
         ForeignProposalAtom,
-        HighQc,
         LeaderFee,
         MintConfidentialOutputAtom,
         QcId,
@@ -946,12 +945,8 @@ impl From<SubstateDestroyed> for proto::consensus::SubstateDestroyed {
 impl From<&SyncRequestMessage> for proto::consensus::SyncRequest {
     fn from(value: &SyncRequestMessage) -> Self {
         Self {
-            high_qc: Some(proto::consensus::HighQc {
-                block_id: value.high_qc.block_id.as_bytes().to_vec(),
-                block_height: value.high_qc.block_height.as_u64(),
-                epoch: value.high_qc.epoch.as_u64(),
-                qc_id: value.high_qc.qc_id.as_bytes().to_vec(),
-            }),
+            epoch: value.epoch.as_u64(),
+            block_height: value.block_height.as_u64(),
         }
     }
 }
@@ -961,18 +956,8 @@ impl TryFrom<proto::consensus::SyncRequest> for SyncRequestMessage {
 
     fn try_from(value: proto::consensus::SyncRequest) -> Result<Self, Self::Error> {
         Ok(Self {
-            high_qc: value
-                .high_qc
-                .map(|value| {
-                    Ok::<_, anyhow::Error>(HighQc {
-                        block_id: BlockId::try_from(value.block_id)?,
-                        block_height: NodeHeight(value.block_height),
-                        epoch: Epoch(value.epoch),
-                        qc_id: QcId::try_from(value.qc_id.as_slice())?,
-                    })
-                })
-                .transpose()?
-                .ok_or_else(|| anyhow!("High QC not provided"))?,
+            epoch: Epoch(value.epoch),
+            block_height: NodeHeight(value.block_height),
         })
     }
 }

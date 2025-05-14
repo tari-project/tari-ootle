@@ -59,7 +59,7 @@ impl HotstuffMessage {
             Self::Vote(msg) => msg.epoch,
             Self::MissingTransactionsRequest(msg) => msg.epoch,
             Self::MissingTransactionsResponse(msg) => msg.epoch,
-            Self::CatchUpSyncRequest(msg) => msg.high_qc.epoch(),
+            Self::CatchUpSyncRequest(msg) => msg.epoch,
             Self::SyncResponse(msg) => msg.epoch,
         }
     }
@@ -117,7 +117,7 @@ impl Display for HotstuffMessage {
                 msg.block_id,
                 msg.epoch
             ),
-            HotstuffMessage::CatchUpSyncRequest(msg) => write!(f, "SyncRequest({})", msg.high_qc),
+            HotstuffMessage::CatchUpSyncRequest(msg) => write!(f, "SyncRequest({}/{})", msg.epoch, msg.block_height),
             HotstuffMessage::SyncResponse(msg) => {
                 write!(f, "SyncResponse({}, {} block(s))", msg.epoch, msg.blocks.len())
             },

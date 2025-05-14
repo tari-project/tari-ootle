@@ -357,7 +357,7 @@ impl ProcessManager {
         // Check for layer one transactions
         let processed = layer_one_transaction_service.process_any().await?;
         if processed.is_empty() {
-            info!("🫙 No layer one transactions to process");
+            debug!("🫙 No layer one transactions to process");
             return Ok(());
         }
         for (transaction, tx_id) in processed {

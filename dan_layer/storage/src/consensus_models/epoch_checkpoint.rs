@@ -35,6 +35,10 @@ impl EpochCheckpoint {
         self.proof.header()
     }
 
+    pub fn checked_shard_group(&self) -> Result<ShardGroup, EpochCheckpointValidationError> {
+        convert_sidechain_shard_group_to_shard_group(self.header().shard_group)
+    }
+
     pub fn epoch(&self) -> Epoch {
         Epoch(self.proof.header().epoch)
     }
@@ -51,7 +55,7 @@ impl EpochCheckpoint {
     }
 
     pub fn compute_state_merkle_root(&self) -> Result<TreeHash, EpochCheckpointValidationError> {
-        let shard_group = convert_sidechain_shard_group_to_shard_group(self.header().shard_group)?;
+        let shard_group = self.checked_shard_group()?;
         let hashes = iter::once(Shard::global())
             .chain(shard_group.shard_iter())
             .map(|shard| self.get_shard_root(shard));

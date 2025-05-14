@@ -6,7 +6,7 @@ use std::ops::Deref;
 use log::*;
 use tari_dan_common_types::{optional::Optional, shard::Shard};
 use tari_dan_storage::{StateStoreReadTransaction, StateStoreWriteTransaction};
-use tari_state_tree::{Node, NodeKey, StaleTreeNode, TreeStoreReader, TreeStoreWriter, Version};
+use tari_state_tree::{JmtStorageError, Node, NodeKey, StaleTreeNode, TreeStoreBatchWriter, TreeStoreReader, Version};
 
 const LOG_TARGET: &str = "tari::dan::consensus::sharded_state_tree";
 
@@ -56,6 +56,25 @@ impl<'a, TTx: StateStoreWriteTransaction> ShardScopedTreeStoreWriter<'a, TTx> {
             .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
     }
 
+    pub fn record_stale_tree_nodes(
+        &mut self,
+        version: Version,
+        nodes: Vec<StaleTreeNode>,
+    ) -> Result<(), tari_state_tree::JmtStorageError> {
+        self.tx
+            .state_tree_nodes_record_stale_tree_nodes(self.shard, version, nodes)
+            .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
+    }
+
+    pub fn insert_nodes(
+        &mut self,
+        nodes: Vec<(NodeKey, Node<Version>)>,
+    ) -> Result<(), tari_state_tree::JmtStorageError> {
+        self.tx
+            .state_tree_nodes_batch_insert(self.shard, nodes)
+            .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
+    }
+
     pub fn transaction(&mut self) -> &mut TTx {
         self.tx
     }
@@ -81,16 +100,16 @@ where
     }
 }
 
-impl<TTx: StateStoreWriteTransaction> TreeStoreWriter<Version> for ShardScopedTreeStoreWriter<'_, TTx> {
-    fn insert_node(&mut self, key: NodeKey, node: Node<Version>) -> Result<(), tari_state_tree::JmtStorageError> {
+impl<TTx: StateStoreWriteTransaction> TreeStoreBatchWriter<Version> for ShardScopedTreeStoreWriter<'_, TTx> {
+    fn batch_insert_nodes(&mut self, nodes: Vec<(NodeKey, Node<Version>)>) -> Result<(), JmtStorageError> {
         self.tx
-            .state_tree_nodes_insert(self.shard, key, node)
+            .state_tree_nodes_batch_insert(self.shard, nodes)
             .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
     }
 
-    fn record_stale_tree_node(&mut self, node: StaleTreeNode) -> Result<(), tari_state_tree::JmtStorageError> {
+    fn record_stale_tree_nodes(&mut self, version: Version, nodes: Vec<StaleTreeNode>) -> Result<(), JmtStorageError> {
         self.tx
-            .state_tree_nodes_record_stale_tree_node(self.shard, node)
+            .state_tree_nodes_record_stale_tree_nodes(self.shard, version, nodes)
             .map_err(|e| tari_state_tree::JmtStorageError::UnexpectedError(e.to_string()))
     }
 }

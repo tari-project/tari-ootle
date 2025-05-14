@@ -1,10 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::cmp;
+use std::{cmp, collections::HashMap, time::Instant};
 
 use anyhow::anyhow;
 use futures::StreamExt;
+use indexmap::IndexMap;
 use log::*;
 use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
@@ -25,6 +26,7 @@ use tari_dan_storage::{
     consensus_models::{
         BlockId,
         EpochCheckpoint,
+        EpochStateRoot,
         LeafBlock,
         QcId,
         StateTransition,
@@ -41,14 +43,21 @@ use tari_dan_storage::{
 };
 use tari_epoch_manager::EpochManagerReader;
 use tari_rpc_framework::RpcError;
-use tari_state_tree::{SpreadPrefixStateTree, SubstateTreeChange, TreeHash, Version, SPARSE_MERKLE_PLACEHOLDER_HASH};
+use tari_state_tree::{
+    compute_merkle_root_for_hashes,
+    SpreadPrefixStateTree,
+    SubstateTreeChange,
+    TreeHash,
+    Version,
+    SPARSE_MERKLE_PLACEHOLDER_HASH,
+};
 use tari_template_manager::interface::{TemplateChange, TemplateManagerHandle};
 use tari_validator_node_rpc::{
     client::{TariValidatorNodeRpcClientFactory, ValidatorNodeClientFactory},
     rpc_service::ValidatorNodeRpcClient,
 };
 
-use crate::error::CommsRpcConsensusSyncError;
+use crate::{error::RpcStateSyncError, stats::StateSyncStats};
 
 const BATCH_SIZE: usize = 100;
 const LOG_TARGET: &str = "tari::dan::comms_rpc_state_sync";
@@ -58,6 +67,8 @@ pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
     state_store: TConsensusSpec::StateStore,
     client_factory: TariValidatorNodeRpcClientFactory,
     template_manager: TemplateManagerHandle,
+    valid_checkpoints: HashMap<ShardGroup, EpochCheckpoint>,
+    stats: StateSyncStats,
 }
 
 impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
@@ -74,32 +85,47 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             state_store,
             client_factory,
             template_manager,
+            valid_checkpoints: HashMap::new(),
+            stats: StateSyncStats::default(),
         }
     }
 
-    async fn establish_rpc_session(
-        &self,
-        addr: &PeerAddress,
-    ) -> Result<ValidatorNodeRpcClient, CommsRpcConsensusSyncError> {
+    async fn establish_rpc_session(&self, addr: &PeerAddress) -> Result<ValidatorNodeRpcClient, RpcStateSyncError> {
         let mut rpc_client = self.client_factory.create_client(addr);
         let client = rpc_client.client_connection().await?;
         Ok(client)
     }
 
-    async fn fetch_epoch_checkpoint(
-        &self,
+    async fn get_or_fetch_valid_epoch_checkpoint(
+        &mut self,
         client: &mut ValidatorNodeRpcClient,
-        epoch: Epoch,
-    ) -> Result<Option<EpochCheckpoint>, CommsRpcConsensusSyncError> {
+        for_shard_group: ShardGroup,
+        prev_committee: &Committee<PeerAddress>,
+        prev_epoch: Epoch,
+    ) -> Result<Option<EpochCheckpoint>, RpcStateSyncError> {
+        if let Some(cp) = self.valid_checkpoints.get(&for_shard_group) {
+            info!(target: LOG_TARGET, "🛜 Checkpoint already fetched and valid: {cp}");
+            return Ok(Some(cp.clone()));
+        }
+
+        self.stats.total_requests += 1;
+
         match client
-            .get_checkpoint(GetCheckpointRequest { epoch: epoch.as_u64() })
+            .get_checkpoint(GetCheckpointRequest {
+                epoch: prev_epoch.as_u64(),
+            })
             .await
         {
             Ok(GetCheckpointResponse {
                 checkpoint: Some(checkpoint),
             }) => match EpochCheckpoint::try_from(checkpoint) {
-                Ok(cp) => Ok(Some(cp)),
-                Err(err) => Err(CommsRpcConsensusSyncError::InvalidResponse(err)),
+                Ok(checkpoint) => {
+                    info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
+                    self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
+                    self.valid_checkpoints.insert(for_shard_group, checkpoint.clone());
+                    Ok(Some(checkpoint))
+                },
+                Err(err) => Err(RpcStateSyncError::InvalidResponse(err)),
             },
             Err(RpcError::RequestFailed(err)) if err.is_not_found() => Ok(None),
             Ok(GetCheckpointResponse { checkpoint: None }) => Ok(None),
@@ -110,12 +136,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
     #[allow(clippy::too_many_lines)]
     async fn start_state_sync(
-        &self,
+        &mut self,
         client: &mut ValidatorNodeRpcClient,
         shard: Shard,
         checkpoint: &EpochCheckpoint,
         template_changes_mut: &mut Vec<TemplateChange>,
-    ) -> Result<Option<Version>, CommsRpcConsensusSyncError> {
+    ) -> Result<Option<Version>, RpcStateSyncError> {
         let checkpoint_state_root = checkpoint.get_shard_root(shard);
         if checkpoint_state_root == SPARSE_MERKLE_PLACEHOLDER_HASH {
             info!(target: LOG_TARGET, "Checkpoint state root indicates no state changes. Nothing to sync for {shard}");
@@ -150,6 +176,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             current_version
         );
 
+        self.stats.total_requests += 1;
         let mut state_stream = client
             .sync_state(SyncStateRequest {
                 start_epoch: last_state_transition_id.epoch().as_u64(),
@@ -174,10 +201,12 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             };
 
             if msg.transitions.is_empty() {
-                return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
+                return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                     "Received empty state transition batch."
                 )));
             }
+
+            self.stats.total_transitions += msg.transitions.len() as u64;
 
             tree_changes.reserve_exact(cmp::min(msg.transitions.len(), BATCH_SIZE));
 
@@ -193,9 +222,9 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
                 for transition in msg.transitions {
                     let transition =
-                        StateTransition::try_from(transition).map_err(CommsRpcConsensusSyncError::InvalidResponse)?;
+                        StateTransition::try_from(transition).map_err(RpcStateSyncError::InvalidResponse)?;
                     if transition.id.shard() != shard {
-                        return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
+                        return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                             "Received state transition for shard {} which is not the expected shard {}.",
                             transition.id.shard(),
                             shard
@@ -203,13 +232,13 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     }
 
                     if transition.id.epoch().is_zero() {
-                        return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
+                        return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                             "Received state transition with epoch 0."
                         )));
                     }
 
                     if transition.id.epoch() >= current_epoch {
-                        return Err(CommsRpcConsensusSyncError::InvalidResponse(anyhow!(
+                        return Err(RpcStateSyncError::InvalidResponse(anyhow!(
                             "Received state transition for epoch {} which is at or ahead of our current epoch {}.",
                             transition.id.epoch(),
                             current_epoch
@@ -226,7 +255,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                                     .value() {
                                     Some(value) => {
                                         let template = value.as_template()
-                                            .ok_or_else(|| CommsRpcConsensusSyncError::InvalidResponse(
+                                            .ok_or_else(|| RpcStateSyncError::InvalidResponse(
                                                 anyhow!("Validator returned a template address {} but substate value was not a template", id.substate_id())
                                             ))?;
 
@@ -273,7 +302,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                         let mut state_tree = SpreadPrefixStateTree::new(&mut store);
                         let next_version = current_version + 1;
                         info!(target: LOG_TARGET, "🛜 Committing {} state tree changes v{} to v{}", tree_changes.len(), current_version, next_version);
-                        state_tree.put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
+                        state_tree.batch_put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
                         maybe_current_version = Some(next_version);
                         store.set_version(next_version)?;
                     }
@@ -283,18 +312,16 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     let mut state_tree = SpreadPrefixStateTree::new(&mut store);
                     let next_version = current_version + 1;
                     info!(target: LOG_TARGET, "🛜 Committing final {} state tree changes v{} to v{}", tree_changes.len(), current_version, next_version);
-                    state_tree.put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
+                    state_tree.batch_put_substate_changes(maybe_current_version, next_version, tree_changes.drain(..))?;
                     maybe_current_version = Some(next_version);
                     store.set_version(next_version)?;
                 }
 
-                Ok::<_, CommsRpcConsensusSyncError>(())
+                Ok::<_, RpcStateSyncError>(())
             })?;
         }
 
-        let local_state_root = self
-            .state_store
-            .with_read_tx(|tx| self.get_state_root_for_shard(tx, shard, maybe_current_version))?;
+        let local_state_root = self.calculate_state_root_for_shard(shard, maybe_current_version)?;
         if local_state_root != checkpoint_state_root {
             error!(
                 target: LOG_TARGET,
@@ -304,7 +331,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             );
 
             // TODO: rollback
-            return Err(CommsRpcConsensusSyncError::StateRootMismatch {
+            return Err(RpcStateSyncError::StateRootMismatch {
                 expected: checkpoint_state_root,
                 actual: local_state_root,
             });
@@ -315,20 +342,20 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         Ok(maybe_current_version)
     }
 
-    fn get_state_root_for_shard(
+    fn calculate_state_root_for_shard(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         shard: Shard,
         version: Option<Version>,
-    ) -> Result<TreeHash, CommsRpcConsensusSyncError> {
+    ) -> Result<TreeHash, RpcStateSyncError> {
         let Some(version) = version else {
             return Ok(SPARSE_MERKLE_PLACEHOLDER_HASH);
         };
-
-        let mut store = ShardScopedTreeStoreReader::new(tx, shard);
-        let state_tree = SpreadPrefixStateTree::new(&mut store);
-        let root_hash = state_tree.get_root_hash(version)?;
-        Ok(root_hash)
+        self.state_store.with_read_tx(|tx| {
+            let mut store = ShardScopedTreeStoreReader::new(tx, shard);
+            let state_tree = SpreadPrefixStateTree::new(&mut store);
+            let root = state_tree.get_root_hash(version)?;
+            Ok(root)
+        })
     }
 
     pub fn commit_update<TTx: StateStoreWriteTransaction>(
@@ -370,29 +397,27 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
     async fn get_sync_committees(
         &self,
+        local_shard_group: ShardGroup,
         current_epoch: Epoch,
-    ) -> Result<Vec<(ShardGroup, Committee<PeerAddress>)>, CommsRpcConsensusSyncError> {
+    ) -> Result<HashMap<ShardGroup, Committee<PeerAddress>>, RpcStateSyncError> {
         // We are behind at least one epoch.
         // We get the current substate range, and we asks committees from previous epoch in this range to give us
         // data.
-        let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let prev_epoch = current_epoch
             .checked_sub(Epoch(1))
-            .ok_or_else(|| CommsRpcConsensusSyncError::NoCommittees(Epoch::zero()))?;
+            .ok_or_else(|| RpcStateSyncError::NoCommittees(Epoch::zero()))?;
         info!(target: LOG_TARGET,"Previous epoch is {}", prev_epoch);
         // We want to get any committees from the previous epoch that overlap with our shard group in this epoch
         let committees = self
             .epoch_manager
-            .get_committees_overlapping_shard_group(prev_epoch, local_info.shard_group())
+            .get_committees_overlapping_shard_group(prev_epoch, local_shard_group)
             .await?;
 
         if committees.is_empty() {
-            return Err(CommsRpcConsensusSyncError::NoCommittees(prev_epoch));
+            return Err(RpcStateSyncError::NoCommittees(prev_epoch));
         }
 
-        // not strictly necessary to sort by shard but easier on the eyes in logs
-        let mut committees = committees.into_iter().collect::<Vec<_>>();
-        committees.sort_by_key(|(k, _)| *k);
+        let committees = committees.into_iter().collect::<HashMap<_, _>>();
         info!(target: LOG_TARGET, "🛜 Querying {} committee(s) from epoch {}", committees.len(), prev_epoch);
         Ok(committees)
     }
@@ -402,11 +427,11 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         checkpoint: &EpochCheckpoint,
         committee: &Committee<PeerAddress>,
         epoch: Epoch,
-    ) -> Result<(), CommsRpcConsensusSyncError> {
+    ) -> Result<(), RpcStateSyncError> {
         let quorum_threshold = committee.quorum_threshold();
         checkpoint
             .validate(epoch, quorum_threshold, |pk| Ok(committee.contains_public_key(pk)))
-            .map_err(|err| CommsRpcConsensusSyncError::InvalidResponse(anyhow!("Checkpoint is not valid: {err}",)))?;
+            .map_err(|err| RpcStateSyncError::InvalidResponse(anyhow!("Checkpoint is not valid: {err}",)))?;
 
         info!(
             target: LOG_TARGET,
@@ -421,14 +446,15 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     pub async fn sync_shard(
         &mut self,
         shard: Shard,
+        shard_group: ShardGroup,
         epoch: Epoch,
         prev_committee: &Committee<PeerAddress>,
         our_vn_addr: &PeerAddress,
-    ) -> Result<(), CommsRpcConsensusSyncError> {
+    ) -> Result<Option<Version>, RpcStateSyncError> {
         let mut remaining_members = prev_committee.len();
 
         info!(target: LOG_TARGET, "🛜 Syncing state for shard {shard} and epoch {}", epoch.saturating_sub(Epoch(1)));
-        for addr in prev_committee.addresses() {
+        for (addr, _) in prev_committee.shuffled() {
             remaining_members = remaining_members.saturating_sub(1);
             if our_vn_addr == addr {
                 continue;
@@ -452,19 +478,22 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             // attempt - once it's validated, there is no need to fetch it again
             let prev_epoch = epoch
                 .checked_sub(Epoch(1))
-                .ok_or_else(|| CommsRpcConsensusSyncError::InvalidResponse(anyhow!("Epoch is zero")))?;
-            let checkpoint = match self.fetch_epoch_checkpoint(&mut client, prev_epoch).await {
+                .ok_or_else(|| RpcStateSyncError::InvalidResponse(anyhow!("Epoch is zero")))?;
+            let checkpoint = match self
+                .get_or_fetch_valid_epoch_checkpoint(&mut client, shard_group, prev_committee, prev_epoch)
+                .await
+            {
                 Ok(Some(cp)) => cp,
                 Ok(None) => {
                     // TODO: we should check with f + 1 validators in this case. If a single validator reports
                     // this falsely, this will prevent us from continuing with consensus for a long time (state
                     // root will mismatch).
-                    // TODO: we should instead ask the base layer if this is the first epoch in the network
+                    // TODO: we should instead ask the epoch manager if this is the first epoch in the network
                     warn!(
                         target: LOG_TARGET,
                         "❓No checkpoint for epoch {epoch}. This may mean that this is the first epoch in the network"
                     );
-                    return Ok(());
+                    return Ok(None);
                 },
                 Err(err) => {
                     warn!(
@@ -478,21 +507,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 },
             };
 
-            info!(target: LOG_TARGET, "🛜 Checkpoint: {checkpoint}");
-            self.validate_checkpoint(&checkpoint, prev_committee, prev_epoch)?;
-            self.state_store.with_write_tx(|tx| checkpoint.save(tx))?;
             let mut template_changes = vec![];
 
             match self
                 .start_state_sync(&mut client, shard, &checkpoint, &mut template_changes)
                 .await
             {
-                Ok(_) => {
+                Ok(maybe_version) => {
                     // We only enqueue these if state sync succeeds and the state root matches
                     if !template_changes.is_empty() {
                         self.template_manager.enqueue_template_changes(template_changes).await?;
                     }
-                    break;
+                    return Ok(maybe_version);
                 },
                 Err(err) => {
                     warn!(
@@ -508,33 +534,122 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             }
         }
 
-        Ok(())
+        Err(RpcStateSyncError::SyncFailedAllPeers {
+            committee_size: prev_committee.len(),
+        })
     }
 
     async fn sync_global_shard(
         &mut self,
         current_epoch: Epoch,
-        prev_committees: &[(ShardGroup, Committee<PeerAddress>)],
+        shard_group: ShardGroup,
+        prev_committees: &HashMap<ShardGroup, Committee<PeerAddress>>,
         our_vn_address: &PeerAddress,
-    ) -> Result<(), CommsRpcConsensusSyncError> {
+    ) -> Result<Option<Version>, RpcStateSyncError> {
         let mut last_error = None;
 
         for (sg, prev_committee) in prev_committees {
-            if let Err(err) = self
-                .sync_shard(Shard::global(), current_epoch, prev_committee, our_vn_address)
-                .await
-            {
-                warn!(target: LOG_TARGET, "⚠️ Failed to sync global shard from {sg}: {err}. Attempting another committee if available");
-                last_error = Some(err);
-                continue;
+            let result = self
+                .sync_shard(
+                    Shard::global(),
+                    shard_group,
+                    current_epoch,
+                    prev_committee,
+                    our_vn_address,
+                )
+                .await;
+            match result {
+                Ok(maybe_version) => {
+                    let Some(version) = maybe_version else {
+                        info!(target: LOG_TARGET, "🛜 No state changes for global shard");
+                        return Ok(None);
+                    };
+                    info!(target: LOG_TARGET, "🛜 Synced global shard to v{}", version);
+                    return Ok(Some(version));
+                },
+                Err(err) => {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ Failed to sync global shard from {sg}: {err}. Attempting another committee if available"
+                    );
+                    last_error = Some(err);
+                },
             }
-            break;
         }
 
         if let Some(err) = last_error {
             return Err(err);
         }
 
+        Err(RpcStateSyncError::SyncFailedAllPeers {
+            committee_size: prev_committees.len(),
+        })
+    }
+
+    async fn sync_inner(&mut self) -> Result<(), RpcStateSyncError> {
+        let timer = Instant::now();
+        let current_epoch = self.epoch_manager.current_epoch().await?;
+        let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
+        let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
+        let prev_epoch_committees = match self.get_sync_committees(local_info.shard_group(), current_epoch).await {
+            Ok(committees) => committees,
+            Err(RpcStateSyncError::NoCommittees(prev_epoch)) => {
+                info!(target: LOG_TARGET, "No committees for the previous epoch {prev_epoch}. This is the first committee.");
+                return Ok(());
+            },
+            Err(err) => return Err(err),
+        };
+
+        // Edge case: we're the only VN in a previous committee
+        if prev_epoch_committees.len() == 1 &&
+            prev_epoch_committees.values().all(|committee| {
+                committee.len() == 1 && committee.address_iter().all(|addr| *addr == our_vn.address)
+            })
+        {
+            info!(target: LOG_TARGET, "This node is the only Validator in the previous committee - no need to sync.");
+            return Ok(());
+        }
+
+        let local_shard_group = local_info.shard_group();
+
+        let mut shard_state_roots = IndexMap::with_capacity(local_shard_group.len() + 1);
+
+        let maybe_version = self
+            .sync_global_shard(
+                current_epoch,
+                ShardGroup::all_shards(local_info.num_preshards()),
+                &prev_epoch_committees,
+                &our_vn.address,
+            )
+            .await?;
+        let local_state_root = self.calculate_state_root_for_shard(Shard::global(), maybe_version)?;
+        shard_state_roots.insert(Shard::global(), local_state_root);
+
+        // Sync data from each committee in range of the committee we're joining.
+        // NOTE: we don't have to worry about substates in address range because shard boundaries are fixed.
+        for (shard_group, committee) in prev_epoch_committees {
+            let Some(intersect_shard_group) = shard_group.intersection(&local_shard_group) else {
+                warn!(
+                    target: LOG_TARGET,
+                    "❗️ Shard group {shard_group} does not intersect with our shard group {local_shard_group}. Skipping."
+                );
+                continue;
+            };
+            for shard in intersect_shard_group.shard_iter() {
+                let maybe_current_version = self
+                    .sync_shard(shard, shard_group, current_epoch, &committee, &our_vn.address)
+                    .await?;
+                let local_state_root = self.calculate_state_root_for_shard(shard, maybe_current_version)?;
+                shard_state_roots.insert_sorted(shard, local_state_root);
+            }
+        }
+
+        // Calculate the shard group merkle root and save it for the next genesis
+        let final_state_root = compute_merkle_root_for_hashes(shard_state_roots.into_values())?;
+        self.state_store
+            .with_write_tx(|tx| EpochStateRoot::new(current_epoch, local_shard_group, final_state_root).set(tx))?;
+
+        self.stats.total_time = timer.elapsed();
         Ok(())
     }
 }
@@ -542,7 +657,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 impl<TConsensusSpec> SyncManager for RpcStateSyncClientProtocol<TConsensusSpec>
 where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
 {
-    type Error = CommsRpcConsensusSyncError;
+    type Error = RpcStateSyncError;
 
     async fn check_sync(&self) -> Result<SyncStatus, Self::Error> {
         let current_epoch = self.epoch_manager.current_epoch().await?;
@@ -561,31 +676,18 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
     }
 
     async fn sync(&mut self) -> Result<(), Self::Error> {
-        let current_epoch = self.epoch_manager.current_epoch().await?;
-        let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
-        let prev_epoch_committees = match self.get_sync_committees(current_epoch).await {
-            Ok(committees) => committees,
-            Err(CommsRpcConsensusSyncError::NoCommittees(prev_epoch)) => {
-                info!(target: LOG_TARGET, "No committees for the previous epoch {prev_epoch}. This is the first committee.");
-                return Ok(());
-            },
-            Err(err) => return Err(err),
-        };
-
-        self.sync_global_shard(current_epoch, &prev_epoch_committees, &our_vn.address)
-            .await?;
-
-        // Sync data from each committee in range of the committee we're joining.
-        // NOTE: we don't have to worry about substates in address range because shard boundaries are fixed.
-        for (shard_group, mut committee) in prev_epoch_committees {
-            committee.shuffle();
-            for shard in shard_group.shard_iter() {
-                self.sync_shard(shard, current_epoch, &committee, &our_vn.address)
-                    .await?;
-            }
+        if let Err(err) = self.sync_inner().await {
+            warn!(target: LOG_TARGET, "🛜State sync failed: {err}");
+            // Clear the valid checkpoints cache
+            self.valid_checkpoints = HashMap::new();
+            return Err(err);
         }
 
-        info!(target: LOG_TARGET, "🛜State sync complete");
+        // Clear the valid checkpoints cache
+        self.valid_checkpoints = HashMap::new();
+
+        info!(target: LOG_TARGET, "🛜State sync complete: {}", self.stats);
+        self.stats = StateSyncStats::default();
         Ok(())
     }
 }

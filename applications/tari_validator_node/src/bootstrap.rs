@@ -64,6 +64,7 @@ use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
 use tari_shutdown::ShutdownSignal;
+use tari_state_store_rocksdb::DatabaseOptions;
 use tari_template_manager::{implementation::TemplateManager, interface::TemplateManagerHandle};
 use tari_transaction::Transaction;
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
@@ -187,7 +188,7 @@ pub async fn spawn_services(
         .as_ref()
         .map(|pk| pk.to_byte_type());
 
-    let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path)?;
+    let state_store = ValidatorNodeStateStore::open(&config.validator_node.state_db_path, DatabaseOptions::default())?;
 
     state_store
         .with_write_tx(|tx| bootstrap_state(tx, config.network, consensus_constants.num_preshards, sidechain_id))?;

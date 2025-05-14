@@ -192,8 +192,6 @@ pub enum ProposalValidationError {
         locked_block: LockedBlock,
         candidate_block: LeafBlock,
     },
-    #[error("Proposed block {block_id} {height} already has been processed")]
-    BlockAlreadyProcessed { block_id: BlockId, height: NodeHeight },
     #[error("Proposed block {block_id} {height} doesn't have a signature")]
     MissingSignature { block_id: BlockId, height: NodeHeight },
     #[error("Proposed block {block_id} {height} has invalid signature")]

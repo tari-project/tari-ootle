@@ -68,6 +68,12 @@ pub async fn list(
         &mut table,
     )?;
     add_item(&tx, "commit_block", models::bookkeeping::CommitBlockModel, &mut table)?;
+    add_item(
+        &tx,
+        "previous_epoch_root",
+        models::bookkeeping::PreviousEpochStateRootModel,
+        &mut table,
+    )?;
 
     // Count the total number of entries in the bookkeeping column family (HighQcModel chosen arbitrarily)
     let cf = tx.cf(models::bookkeeping::HighQcModel)?;

@@ -13,6 +13,7 @@ use tari_dan_common_types::{ShardGroup, SubstateAddress};
 use tari_dan_storage::consensus_models::TransactionPool;
 use tari_engine_types::ToByteType;
 use tari_shutdown::ShutdownSignal;
+use tari_state_store_rocksdb::DatabaseOptions;
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc, watch};
@@ -144,7 +145,7 @@ impl ValidatorBuilder {
                 .as_deref()
                 .unwrap_or_else(|| self.rocks_tmp_path.path());
             log::info!("Rocksdb path {}", rocks_path.display());
-            TestStore::open(rocks_path).unwrap()
+            TestStore::open(rocks_path, DatabaseOptions::default()).unwrap()
         };
         let signing_service = TestVoteSignatureService::new(self.address.clone());
         let transaction_pool = TransactionPool::new();

@@ -1,7 +1,7 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use log::{log, warn};
 
@@ -11,7 +11,7 @@ pub struct TraceTimer {
     context: &'static str,
     level: log::Level,
     iterations: Option<usize>,
-    excessive_threshold: u128,
+    excessive_threshold: Duration,
 }
 
 impl TraceTimer {
@@ -22,11 +22,11 @@ impl TraceTimer {
             context,
             level,
             iterations: None,
-            excessive_threshold: 1000,
+            excessive_threshold: Duration::from_secs(1),
         }
     }
 
-    pub fn with_excessive_threshold(mut self, excessive_threshold: u128) -> Self {
+    pub fn with_excessive_threshold(mut self, excessive_threshold: Duration) -> Self {
         self.excessive_threshold = excessive_threshold;
         self
     }
@@ -52,7 +52,7 @@ impl TraceTimer {
 impl Drop for TraceTimer {
     fn drop(&mut self) {
         let elapsed = self.start.elapsed();
-        if elapsed.as_millis() >= self.excessive_threshold {
+        if elapsed >= self.excessive_threshold {
             if let Some(iterations) = self.iterations {
                 let avg = elapsed.as_millis() as f64 / iterations as f64;
                 warn!(target: self.log_target, "⏲️ EXCESSIVE: {} took {:.2?} for {} iterations (avg: {:.0?}ms)", self.context, elapsed, iterations, avg);

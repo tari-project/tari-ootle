@@ -12,5 +12,9 @@ pub mod memory_store;
 mod staged_store;
 pub use staged_store::*;
 
+mod traits;
+pub use traits::*;
+
 mod tree;
+
 pub use tree::*;

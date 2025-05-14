@@ -14,7 +14,7 @@ use tari_dan_storage::{
         Block,
         BlockDiff,
         BurntUtxo,
-        EpochCheckpoint,
+        EpochStateRoot,
         ForeignProposalRecord,
         HighQc,
         LeafBlock,
@@ -24,7 +24,6 @@ use tari_dan_storage::{
         TransactionRecord,
     },
     StateStore,
-    StateStoreWriteTransaction,
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
@@ -57,6 +56,7 @@ use crate::{
         on_receive_vote::OnReceiveVoteHandler,
         pacemaker::PaceMaker,
         pacemaker_handle::PaceMakerHandle,
+        state_tree_gc::StateTreeGc,
         transaction_manager::ConsensusTransactionManager,
         vote_collector::VoteCollector,
     },
@@ -256,6 +256,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             local_committee_info,
             local_committee,
         };
+
+        let _cancel_gc_task_on_drop = StateTreeGc::new(
+            self.state_store.clone(),
+            epoch_state.local_committee_info.num_preshards(),
+        )
+        .do_work_periodically(self.config.state_tree_cleanup_interval);
+
         self.run(epoch_state).await?;
         Ok(())
     }
@@ -280,8 +287,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .get_our_validator_node(current_epoch)
             .await?
             .fee_claim_public_key;
-
-        let mut cleanup_task = tokio::time::interval(self.config.cleanup_interval);
 
         loop {
             let current_height = self.pacemaker.current_view().get_height();
@@ -359,15 +364,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     if let Err(e) = self.on_leader_timeout(&epoch_state, current_height).await {
                         self.on_failure("on_leader_timeout", &e).await;
                         return Err(e);
-                    }
-                },
-
-                    // TODO: put this in a separate periodic task
-                _ = cleanup_task.tick() => {
-                    if let Err(err) = self.state_store.with_write_tx(|tx|     {
-                        tx.state_tree_nodes_clear_stale(1000)
-                    }) {
-                        error!(target: LOG_TARGET, "Error clearing stale nodes: {}", err);
                     }
                 },
 
@@ -921,13 +917,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         shard_group: ShardGroup,
     ) -> Result<(), HotStuffError> {
         self.state_store.with_write_tx(|tx| {
-            let previous_epoch = epoch.saturating_sub(Epoch(1));
-            let checkpoint = EpochCheckpoint::get(&**tx, previous_epoch).optional()?;
-            let state_merkle_root = checkpoint
-                .map(|cp| cp.compute_state_merkle_root())
-                .transpose()
-                .map_err(|e| HotStuffError::InvariantError(format!("Invalid checkpoint was stored for {epoch}: {e}")))?
-                .unwrap_or(SPARSE_MERKLE_PLACEHOLDER_HASH);
             // The parent for genesis blocks refer to this zero block
             let mut zero_block = Block::zero_block(self.config.network, self.config.consensus_constants.num_preshards);
             if !zero_block.exists(&**tx)? {
@@ -938,12 +927,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 zero_block.commit_diff(tx, zero_block.justify().id(), BlockDiff::empty(*zero_block.id()))?;
             }
 
+            let checkpoint = EpochStateRoot::get(&**tx).optional()?;
+            let state_merkle_root = checkpoint
+                .map(|cp| cp.state_root)
+                .unwrap_or_else(|| SPARSE_MERKLE_PLACEHOLDER_HASH);
             let mut genesis = Block::genesis(
                 self.config.network,
                 epoch,
                 epoch_hash,
                 shard_group,
-                FixedHash::from(state_merkle_root.into_array()),
+                FixedHash::new(state_merkle_root.into_array()),
                 self.config.sidechain_id,
             );
             if !genesis.exists(&**tx)? {

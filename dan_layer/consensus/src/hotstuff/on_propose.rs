@@ -181,7 +181,6 @@ where TConsensusSpec: ConsensusSpec
                     high_qc_cert,
                     &local_committee_info,
                     &local_claim_public_key,
-                    false,
                     epoch_hash,
                     propose_epoch_end,
                 )?;
@@ -408,7 +407,6 @@ where TConsensusSpec: ConsensusSpec
         high_qc_certificate: QuorumCertificate,
         local_committee_info: &CommitteeInfo,
         local_claim_public_key_bytes: &RistrettoPublicKeyBytes,
-        dont_propose_transactions: bool,
         epoch_hash: FixedHash,
         can_propose_epoch_end: bool,
     ) -> Result<NextBlock, HotStuffError> {
@@ -420,20 +418,24 @@ where TConsensusSpec: ConsensusSpec
         } else {
             // Parent does not exist which means we have dummy blocks between the parent and the justified block so we
             // can exclude them from the query. There are a few queries that will fail if we used a non-existent block.
-            high_qc_certificate.as_leaf_block()
+            high_qc_certificate.get_block(tx)?.as_leaf_block()
+        };
+
+        let should_not_propose_commands = can_propose_epoch_end || {
+            // TODO: prevent proposers from proposing transactions after an epoch end command is in the justified
+            // pending chain, regardless of whether we see the end of epoch or not (race condition).
+            // If the last justified/parent block is an epoch end block, we dont propose commands since the block will
+            // be rejected
+            let block = Block::get(tx, start_of_chain_block.block_id())?;
+            block.is_epoch_end()
         };
 
         let mut total_leader_fee = 0;
 
-        let batch = if can_propose_epoch_end {
+        let batch = if should_not_propose_commands {
             ProposalBatch::default()
         } else {
-            self.fetch_next_proposal_batch(
-                tx,
-                local_committee_info,
-                dont_propose_transactions,
-                start_of_chain_block,
-            )?
+            self.fetch_next_proposal_batch(tx, local_committee_info, start_of_chain_block)?
         };
 
         let mut substate_store = PendingSubstateStore::new(
@@ -466,7 +468,8 @@ where TConsensusSpec: ConsensusSpec
             )
         };
 
-        let mut change_set = ProposedBlockChangeSet::new(high_qc_certificate.as_leaf_block());
+        // NOTE: the block for the change set is not used.
+        let mut change_set = ProposedBlockChangeSet::new(start_of_chain_block);
 
         // No need to include evidence from justified block if no transactions are included in the next block
         if !batch.transactions.is_empty() {
@@ -628,7 +631,6 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &<<TConsensusSpec as ConsensusSpec>::StateStore as StateStore>::ReadTransaction<'_>,
         local_committee_info: &CommitteeInfo,
-        dont_propose_transactions: bool,
         start_of_chain_block: LeafBlock,
     ) -> Result<ProposalBatch, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "fetch_next_proposal_batch");
@@ -693,17 +695,13 @@ where TConsensusSpec: ConsensusSpec
 
         remaining_block_size = subtract_block_size_checked(remaining_block_size, evict_nodes.len());
 
-        let transactions = if dont_propose_transactions {
-            vec![]
-        } else {
-            remaining_block_size
-                .map(|size| {
-                    self.transaction_pool
-                        .get_batch_for_next_block(tx, size, start_of_chain_block.block_id())
-                })
-                .transpose()?
-                .unwrap_or_default()
-        };
+        let transactions = remaining_block_size
+            .map(|size| {
+                self.transaction_pool
+                    .get_batch_for_next_block(tx, size, start_of_chain_block.block_id())
+            })
+            .transpose()?
+            .unwrap_or_default();
 
         Ok(ProposalBatch {
             foreign_proposals: foreign_proposals.into_iter().map(|fp| fp.into_proposal()).collect(),

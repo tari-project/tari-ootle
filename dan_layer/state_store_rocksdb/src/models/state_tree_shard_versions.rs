@@ -37,6 +37,6 @@ impl Cf for StateTreeShardVersionModel {
     type ValueCodec = NumberCodec<Self::Value>;
 
     fn name() -> &'static str {
-        "statetreeshardversions"
+        "state_tree_shard_versions"
     }
 }

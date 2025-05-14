@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use log::*;
 use tari_dan_common_types::{
@@ -13,6 +13,7 @@ use tari_dan_common_types::{
 use tari_dan_storage::{
     consensus_models::{
         Block,
+        EpochStateRoot,
         ForeignProposalRecord,
         ForeignProposalStatus,
         HighQc,
@@ -147,7 +148,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         } = msg;
 
         let maybe_valid_block = self.store.with_read_tx(|tx| {
-            if Block::has_been_justified(tx, block.id()).optional()?.unwrap_or(false) {
+            if Block::record_exists(tx, block.id())? {
                 info!(target: LOG_TARGET, "🧊 Block {} has already been processed", block);
                 return Ok(None);
             }
@@ -339,7 +340,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         process_block_result: ProcessBlockResult,
         is_epoch_end: bool,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
-        let _timer = TraceTimer::debug(LOG_TARGET, "process-block-decision").with_excessive_threshold(200);
+        let _timer = TraceTimer::debug(LOG_TARGET, "process-block-decision")
+            .with_excessive_threshold(Duration::from_millis(200));
 
         let ProcessBlockResult {
             mut block_decision,
@@ -456,6 +458,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     )));
                 }
                 checkpoint.save(tx)?;
+                EpochStateRoot::new(eoe_block.epoch(), eoe_block.shard_group(), calculated_mr).set(tx)?;
 
                 if let Some(next_shard_group) = next_shard_group {
                     // Create the next genesis
@@ -515,7 +518,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         block: &Block,
         decision: QuorumDecision,
     ) -> Result<(), HotStuffError> {
-        let _timer = TraceTimer::debug(LOG_TARGET, "SendVoteToLeader").with_excessive_threshold(200);
+        let _timer =
+            TraceTimer::debug(LOG_TARGET, "SendVoteToLeader").with_excessive_threshold(Duration::from_millis(200));
 
         let vote = self.generate_vote_message(block, decision)?;
         info!(
@@ -552,7 +556,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         high_qc: HighQc,
         decision: QuorumDecision,
     ) -> Result<(), HotStuffError> {
-        let _timer = TraceTimer::debug(LOG_TARGET, "send-newview-and-vote").with_excessive_threshold(200);
+        let _timer =
+            TraceTimer::debug(LOG_TARGET, "send-newview-and-vote").with_excessive_threshold(Duration::from_millis(200));
 
         let vote = self.generate_vote_message(block, decision)?;
         info!(
@@ -696,17 +701,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         local_committee: &Committee<TConsensusSpec::Addr>,
         _local_committee_info: &CommitteeInfo,
     ) -> Result<ValidBlock, HotStuffError> {
-        if Block::has_been_justified(tx, candidate_block.id())
-            .optional()?
-            .unwrap_or(false)
-        {
-            return Err(ProposalValidationError::BlockAlreadyProcessed {
-                block_id: *candidate_block.id(),
-                height: candidate_block.height(),
-            }
-            .into());
-        }
-
         if candidate_block.height().is_zero() {
             return Err(ProposalValidationError::MalformedBlock {
                 block_id: *candidate_block.id(),

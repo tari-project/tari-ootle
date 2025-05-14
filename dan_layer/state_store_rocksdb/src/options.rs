@@ -12,6 +12,6 @@ pub struct DatabaseOptions {
 
 impl Default for DatabaseOptions {
     fn default() -> Self {
-        Self { history_length: 10 }
+        Self { history_length: 100 }
     }
 }

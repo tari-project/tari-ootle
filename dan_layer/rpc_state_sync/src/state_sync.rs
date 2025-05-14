@@ -599,6 +599,17 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             },
             Err(err) => return Err(err),
         };
+
+        // Edge case: we're the only VN in a previous committee
+        if prev_epoch_committees.len() == 1 &&
+            prev_epoch_committees.values().all(|committee| {
+                committee.len() == 1 && committee.address_iter().all(|addr| *addr == our_vn.address)
+            })
+        {
+            info!(target: LOG_TARGET, "This node is the only Validator in the previous committee - no need to sync.");
+            return Ok(());
+        }
+
         let local_shard_group = local_info.shard_group();
 
         let mut shard_state_roots = IndexMap::with_capacity(local_shard_group.len() + 1);

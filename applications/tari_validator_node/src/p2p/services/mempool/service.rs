@@ -224,10 +224,9 @@ where
         self.metrics.on_transaction_received(&transaction);
 
         if let Err(e) = self.before_execute_validator.validate(&(), &transaction) {
-            let transaction_id = *transaction.id();
             // Throw the transaction away
             #[cfg(feature = "metrics")]
-            self.metrics.on_transaction_validation_error(&transaction_id, &e);
+            self.metrics.on_transaction_validation_error(transaction.id(), &e);
             return Err(e.into());
         }
 

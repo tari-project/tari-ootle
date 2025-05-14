@@ -57,6 +57,7 @@ pub struct QuorumCertificate {
     signatures: Vec<ValidatorSignature>,
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     decision: QuorumDecision,
+    // TODO: extra fields should be in a DB-only struct (e.g QuorumCertificateRecord)
     is_shares_processed: bool,
 }
 

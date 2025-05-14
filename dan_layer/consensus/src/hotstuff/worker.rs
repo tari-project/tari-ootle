@@ -24,7 +24,6 @@ use tari_dan_storage::{
         TransactionRecord,
     },
     StateStore,
-    StateStoreWriteTransaction,
 };
 use tari_epoch_manager::{EpochManagerEvent, EpochManagerReader};
 use tari_shutdown::ShutdownSignal;
@@ -57,6 +56,7 @@ use crate::{
         on_receive_vote::OnReceiveVoteHandler,
         pacemaker::PaceMaker,
         pacemaker_handle::PaceMakerHandle,
+        state_tree_gc::StateTreeGc,
         transaction_manager::ConsensusTransactionManager,
         vote_collector::VoteCollector,
     },
@@ -256,6 +256,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             local_committee_info,
             local_committee,
         };
+
+        let _cancel_gc_task_on_drop = StateTreeGc::new(
+            self.state_store.clone(),
+            epoch_state.local_committee_info.num_preshards(),
+        )
+        .do_work_periodically(self.config.state_tree_cleanup_interval);
+
         self.run(epoch_state).await?;
         Ok(())
     }
@@ -280,8 +287,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             .get_our_validator_node(current_epoch)
             .await?
             .fee_claim_public_key;
-
-        let mut cleanup_task = tokio::time::interval(self.config.cleanup_interval);
 
         loop {
             let current_height = self.pacemaker.current_view().get_height();
@@ -359,15 +364,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     if let Err(e) = self.on_leader_timeout(&epoch_state, current_height).await {
                         self.on_failure("on_leader_timeout", &e).await;
                         return Err(e);
-                    }
-                },
-
-                    // TODO: put this in a separate periodic task
-                _ = cleanup_task.tick() => {
-                    if let Err(err) = self.state_store.with_write_tx(|tx|     {
-                        tx.state_tree_nodes_clear_stale(epoch_state.local_committee_info.num_preshards())
-                    }) {
-                        error!(target: LOG_TARGET, "Error clearing stale nodes: {}", err);
                     }
                 },
 

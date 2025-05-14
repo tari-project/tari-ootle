@@ -106,12 +106,6 @@ impl Validator {
         false
     }
 
-    // pub fn get_transaction(&self, transaction_id: &TransactionId) -> TransactionRecord {
-    //     self.state_store
-    //         .with_read_tx(|tx| TransactionRecord::get(tx, transaction_id))
-    //         .unwrap()
-    // }
-
     pub fn get_transaction_execution(&self, transaction_id: &TransactionId) -> TransactionExecution {
         self.state_store
             .with_read_tx(|tx| TransactionExecution::get_finalized(tx, transaction_id))

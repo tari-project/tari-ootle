@@ -79,10 +79,10 @@ export default function BlockDetails() {
           setIdentity(identity);
           setBlock(resp.block);
           if (resp?.block?.justify?.block_id) {
-            getBlock({ block_id: resp.block.justify.block_id }).then((justify) => {
-              if (resp.block.stored_at && justify.block.stored_at) {
+            getBlock({ block_id: resp.block.justify.block_id }).then((justify_block) => {
+              if (resp.block.stored_at && justify_block.block.stored_at) {
                 let blockTime = resp.block.stored_at;
-                let justifyTime = justify.block.stored_at;
+                let justifyTime = justify_block.block.stored_at;
                 setBlockTime(Math.floor(new Date(blockTime).getTime() / 1000) - Math.floor(new Date(justifyTime).getTime() / 1000));
               }
             });

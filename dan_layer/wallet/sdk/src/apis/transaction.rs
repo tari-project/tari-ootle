@@ -428,9 +428,14 @@ where
                             warn!(target: LOG_TARGET, "Vault {} does not have a parent", vault_id);
                             tx.substates_upsert_root(
                                 VersionedSubstateIdRef::new(id, substate.version()),
-                                [(*substate.substate_value().vault().unwrap().resource_address()).into()]
-                                    .into_iter()
-                                    .collect(),
+                                [(*substate
+                                    .substate_value()
+                                    .vault()
+                                    .expect("should be vault")
+                                    .resource_address())
+                                .into()]
+                                .into_iter()
+                                .collect(),
                                 None,
                                 None,
                             )?;

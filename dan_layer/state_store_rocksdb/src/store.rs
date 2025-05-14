@@ -176,6 +176,10 @@ impl<TAddr> RocksDbStateStore<TAddr, TransactionDB> {
         let db = DbContext::new(&self.db, &tx);
         db.cf(DatabaseMigrationVersion)?
             .put(&ByteColumn, &CURRENT_VERSION, OPERATION)?;
+        tx.commit().map_err(|e| RocksDbStorageError::RocksDbError {
+            source: e,
+            operation: OPERATION,
+        })?;
         Ok(())
     }
 

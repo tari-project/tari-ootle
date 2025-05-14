@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use tari_dan_common_types::{Epoch, NodeHeight};
 
 use crate::{
-    consensus_models::{Block, BlockId, LeafBlock, QcId, QuorumCertificate},
+    consensus_models::{Block, BlockId, QcId, QuorumCertificate},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
@@ -55,14 +55,6 @@ impl HighQc {
 
     pub fn epoch(&self) -> Epoch {
         self.epoch
-    }
-
-    pub fn as_leaf_block(&self) -> LeafBlock {
-        LeafBlock {
-            block_id: self.block_id,
-            height: self.block_height,
-            epoch: self.epoch,
-        }
     }
 }
 

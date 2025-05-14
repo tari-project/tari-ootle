@@ -1392,6 +1392,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn state_tree_nodes_clear_stale(&mut self, num_preshards: NumPreshards) -> Result<(), StorageError> {
         const OPERATION: &str = "state_tree_nodes_clear_all_stale";
+        /// We buffer deletes to ensure that we delete entire subtrees at once. The number of buffered deletes may
+        /// exceed this threshold when flushed, due to whole subtrees being added.
+        const DELETE_BUFFER_FLUSH_THRESHOLD: usize = 1_000_000;
 
         let cf = self.db().cf(StateTreeModel)?;
         let versions_cf = self.db().cf(StateTreeShardVersionModel)?;
@@ -1414,8 +1417,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
                 let mut delete_buffer = vec![];
                 for node in nodes {
-                    // Deletes are buffered to ensure that we delete entire subtrees at once
-                    if delete_buffer.len() >= 1_000_000 {
+                    // Deletes are buffered to ensure that we delete entire subtrees at once.
+                    if delete_buffer.len() >= DELETE_BUFFER_FLUSH_THRESHOLD {
                         debug!(target: LOG_TARGET, "Deleting {} stale nodes from shard {}", delete_buffer.len(), shard);
                         for key in &delete_buffer {
                             cf.delete(key, OPERATION)?;

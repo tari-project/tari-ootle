@@ -218,11 +218,10 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     pub(super) fn get_pending_chain_ordered(&self, end_block: &BlockId) -> Result<Vec<BlockId>, RocksDbStorageError> {
         // TODO: only difference between get_pending_chain_until is that this returns a Vec - worth DRYing up
         const OPERATION: &str = "get_pending_chain_ordered";
-        trace!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
 
         let chain_cf = self.db().cf(chain::PendingChainIndex)?;
         if !chain_cf.exists(end_block, OPERATION)? {
-            debug!(
+            trace!(
                 target: LOG_TARGET,
                 "{OPERATION}: end block {end_block} not in pending chain",
             );
@@ -400,7 +399,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
         let leaf_block = self.db().cf(LeafBlockModel)?.get_by_default_key("leaf_block_get")?;
-        if leaf_block.epoch != epoch {
+        if leaf_block.epoch() != epoch {
             return Err(StorageError::NotFound {
                 item: "LeafBlock",
                 key: format!("epoch {epoch}"),

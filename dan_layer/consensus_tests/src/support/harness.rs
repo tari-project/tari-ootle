@@ -648,7 +648,7 @@ impl TestBuilder {
                     epochs_per_era: Epoch(10),
                     template_binary_max_size_bytes: 1000 * 1000 * 5,
                 },
-                cleanup_interval: Duration::from_secs(60),
+                state_tree_cleanup_interval: Duration::from_secs(60),
             },
         }
     }

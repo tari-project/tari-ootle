@@ -50,13 +50,14 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
         task::spawn(async move {
             let result = store.with_read_tx(|tx| {
                 let mut leaf_block = LeafBlock::get(tx, epoch)?;
+                // Include the block we last proposed if applicable.
                 if let Some(last_proposed) = LastProposed::get(tx).optional()? {
-                    if last_proposed.height > leaf_block.height() {
+                    if last_proposed.epoch == leaf_block.epoch() && last_proposed.height > leaf_block.height() {
                         leaf_block = last_proposed.as_leaf_block();
                     }
                 }
 
-                if leaf_block.epoch != msg.epoch {
+                if leaf_block.epoch() != msg.epoch {
                     info!(
                         target: LOG_TARGET,
                         "Received catch up request from {} for epoch {} but our leaf block is {}. Ignoring request.",

@@ -29,6 +29,7 @@ mod on_message_validate;
 mod pacemaker;
 mod pacemaker_handle;
 mod state_machine;
+mod state_tree_gc;
 pub mod substate_store;
 mod transaction_manager;
 mod vote_collector;

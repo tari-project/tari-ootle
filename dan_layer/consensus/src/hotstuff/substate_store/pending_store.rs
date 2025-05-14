@@ -106,9 +106,11 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
         if let Some(head_change_mut) = self.get_head_change_mut(substate_id) {
             match head_change_mut {
                 SubstateChange::Up { substate, .. } => {
+                    debug!(target: LOG_TARGET, "Updating substate in place: {} v{}", substate_id, substate.version());
                     return updater(substate.substate_value_mut());
                 },
                 SubstateChange::Down { id, .. } => {
+                    debug!(target: LOG_TARGET, "Creating substate in place: {}", id);
                     let value = creator(Some(id.as_ref()))?;
                     let next_id = id.to_next_version();
                     let up = SubstateChange::Up {
@@ -123,6 +125,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
         }
 
         let Some(change) = self.get_latest_change_from_store(substate_id).optional()? else {
+            debug!(target: LOG_TARGET, "Creating substate in place: {} v0", substate_id);
             let value = creator(None)?;
             let id = SubstateAddress::from_substate_id(substate_id, 0);
             let up = SubstateChange::Up {
@@ -141,13 +144,22 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                     id: VersionedSubstateId::new(id.clone(), substate.version()),
                     shard,
                 });
-                let next_version = substate.version() + 1;
+                let version = substate.version();
+                let next_version = version + 1;
                 let mut substate_value = substate.into_substate_value();
+                debug!(
+                    target: LOG_TARGET,
+                    "Updating substate in place: {} v{} -> v{}",
+                    id,
+                    version,
+                    next_version
+                );
                 updater(&mut substate_value)?;
                 let substate = Substate::new(next_version, substate_value);
                 self.insert(SubstateChange::Up { id, shard, substate });
             },
             SubstateChange::Down { id, .. } => {
+                debug!(target: LOG_TARGET, "Re-creating DOWNed substate in place: {}", id);
                 let value = creator(Some(id.as_ref()))?;
                 let next_id = id.into_next_version();
                 let up = SubstateChange::Up {

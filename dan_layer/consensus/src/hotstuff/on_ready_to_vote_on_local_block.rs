@@ -109,7 +109,7 @@ where TConsensusSpec: ConsensusSpec
         valid_block: &ValidBlock,
         local_committee_info: &CommitteeInfo,
         proposer_claim_public_key_bytes: &RistrettoPublicKeyBytes,
-        can_propose_epoch_end: bool,
+        mut can_propose_epoch_end: bool,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
         let _timer =
@@ -132,6 +132,10 @@ where TConsensusSpec: ConsensusSpec
                     change_set,
                 )?;
                 justified_block.set_as_justified(tx, valid_block.justify().id())?;
+
+                // Even if we do not yet see the next epoch (e.g. race condition), if a majority have, we allow the
+                // epoch end to be proposed.
+                can_propose_epoch_end |= justified_block.is_epoch_end();
             }
 
             self.decide_what_to_vote(
@@ -225,6 +229,15 @@ where TConsensusSpec: ConsensusSpec
 
         let mut num_applicable_commands = 0;
         let leaf = new_leaf_block.as_leaf_block();
+        if new_leaf_block.is_epoch_end() {
+            debug!(
+                target: LOG_TARGET,
+                "✅ New leaf block {} is an epoch end. No commands to process in process_newly_justified_block",
+                new_leaf_block,
+            );
+            return Ok(());
+        }
+
         for cmd in new_leaf_block.commands() {
             if !cmd.is_local_prepare() && !cmd.is_local_accept() {
                 continue;

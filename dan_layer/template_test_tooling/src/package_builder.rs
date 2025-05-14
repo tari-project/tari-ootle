@@ -3,6 +3,7 @@
 
 use std::{
     collections::HashMap,
+    ffi::OsStr,
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -11,10 +12,7 @@ use tari_dan_common_types::services::template_provider::TemplateProvider;
 use tari_dan_engine::{
     abi::TemplateDef,
     template::{LoadedTemplate, TemplateLoaderError, TemplateModuleLoader},
-    wasm::{
-        compile::{compile_template, compile_template_with_custom_target_dir},
-        WasmModule,
-    },
+    wasm::{compile::compile_template_with_envs, WasmModule},
 };
 use tari_engine_types::hashing::hash_template_code;
 use tari_template_builtin::get_template_builtin;
@@ -65,24 +63,35 @@ impl PackageBuilder {
         }
     }
 
-    pub fn add_template<P: AsRef<Path>>(&mut self, path: P, target_dir: Option<P>) -> &mut Self {
-        self.add_template_with_features(path, &[], target_dir)
+    pub fn add_template<P>(&mut self, path: P) -> &mut Self
+    where P: AsRef<Path> {
+        self.add_template_opts(path, &[], None::<(String, String)>);
+        self
     }
 
-    pub fn add_template_with_features<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-        features: &[&str],
-        target_dir: Option<P>,
-    ) -> &mut Self {
-        let wasm = match target_dir {
-            None => compile_template(path, features).unwrap(),
-            Some(target_dir) => compile_template_with_custom_target_dir(path, features, target_dir).unwrap(),
-        };
+    pub fn add_template_with_envs<P, TEnvs, K, V>(&mut self, path: P, envs: TEnvs) -> &mut Self
+    where
+        P: AsRef<Path>,
+        TEnvs: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        self.add_template_opts(path, &[], envs);
+        self
+    }
+
+    pub fn add_template_opts<P, TEnvs, K, V>(&mut self, path: P, features: &[&str], envs: TEnvs) -> TemplateAddress
+    where
+        P: AsRef<Path>,
+        TEnvs: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        let wasm = compile_template_with_envs(path, features, envs).unwrap();
         let template_addr = hash_template_code(wasm.code());
         let wasm = wasm.load_template().unwrap();
         self.add_loaded_template(template_addr, wasm);
-        self
+        template_addr
     }
 
     pub fn add_loaded_template(&mut self, address: TemplateAddress, template: LoadedTemplate) -> &mut Self {

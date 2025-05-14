@@ -140,6 +140,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn execute(self, transaction: Transaction) -> Result<ExecuteResult, TransactionError> {
         let timer = Instant::now();
         let entity_id_provider = EntityIdProvider::new(transaction.hash(), 1000);
@@ -156,6 +157,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let mut initial_call_scope = CallScope::new();
         initial_call_scope.set_auth_scope(initial_auth_scope);
         for input in transaction.all_inputs_iter() {
+            log::error!(
+                target: LOG_TARGET,
+                "Adding substate to initial call scope: {}",
+                input.substate_id
+            );
             initial_call_scope.add_substate_to_owned(input.substate_id.clone());
         }
 

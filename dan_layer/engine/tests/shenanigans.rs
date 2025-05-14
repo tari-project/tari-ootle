@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_engine::runtime::RuntimeError;
+use tari_dan_engine::runtime::{ActionIdent, NativeAction, RuntimeError};
 use tari_engine_types::{indexed_value::IndexedWellKnownTypes, resource_container::ResourceError};
 use tari_template_lib::{
     args,
@@ -312,5 +312,118 @@ fn it_disallows_minting_different_resource_type() {
         operate: "mint",
         expected: ResourceType::NonFungible,
         given: ResourceType::Fungible,
+    });
+}
+
+#[test]
+fn it_does_not_bring_non_owned_vault_id_into_scope() {
+    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
+    let template_addr = test.get_template_address("Shenanigans");
+    let (account, _, _) = test.create_funded_account();
+    let vault_id = {
+        let store = test.read_only_state_store();
+        let component = store.get_component(account).unwrap();
+        let values = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+        values.vault_ids()[0]
+    };
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_function(template_addr, "with_stolen_vault", args![vault_id])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .add_input(vault_id)
+            .build_and_seal(test.get_test_secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, RuntimeError::SubstateOutOfScope { id: vault_id.into() });
+}
+
+#[test]
+fn it_disallows_withdraws_from_vaults_outside_of_component_context() {
+    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
+    let (account, _, _) = test.create_funded_account();
+    let vault_id = {
+        let store = test.read_only_state_store();
+        let component = store.get_component(account).unwrap();
+        let values = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+        values.vault_ids()[0]
+    };
+
+    let template_addr = test.compile_new_template("Shenanigans", "tests/templates/shenanigans", &[], [(
+        "VAULT_ID",
+        vault_id.to_string(),
+    )]);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_function(template_addr, "take_from_hardcoded_vault", args![])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .add_input(vault_id)
+            .build_and_seal(test.get_test_secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, RuntimeError::NotInComponentContext {
+        action: ActionIdent::Native(NativeAction::Vault(VaultAction::Withdraw)),
+    });
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_function(template_addr, "take_from_vault_and_return_bucket", args![vault_id,])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .add_input(vault_id)
+            .build_and_seal(test.get_test_secret_key()),
+        vec![],
+    );
+
+    assert_reject_reason(reason, RuntimeError::NotInComponentContext {
+        action: ActionIdent::Native(NativeAction::Vault(VaultAction::Withdraw)),
+    });
+}
+
+#[test]
+fn it_disallows_withdraws_from_vaults_outside_of_owning_component() {
+    let mut test = TemplateTest::new(["tests/templates/shenanigans"]);
+    let (account, _, _) = test.create_funded_account();
+    let vault_id = {
+        let store = test.read_only_state_store();
+        let component = store.get_component(account).unwrap();
+        let values = IndexedWellKnownTypes::from_value(component.state()).unwrap();
+        values.vault_ids()[0]
+    };
+
+    let template_addr = test.compile_new_template("Shenanigans", "tests/templates/shenanigans", &[], [(
+        "VAULT_ID",
+        vault_id.to_string(),
+    )]);
+
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .call_function(template_addr, "new", args![])
+            .build_and_seal(test.get_test_secret_key()),
+        vec![],
+    );
+
+    let component = result.finalize.execution_results[0]
+        .decode::<ComponentAddress>()
+        .unwrap();
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(component, "take_from_hardcoded_vault_in_component_context", args![])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .add_input(vault_id)
+            .build_and_seal(test.get_test_secret_key()),
+        vec![test.get_test_proof()],
+    );
+
+    assert_reject_reason(reason, RuntimeError::SubstateNotOwned {
+        id: vault_id.into(),
+        requested_owner: Box::new(component.into()),
     });
 }

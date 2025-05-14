@@ -13,7 +13,7 @@ mod template {
         component_address: Option<ComponentAddress>,
         vault: Option<Vault>,
         vault_copy: Option<Vault>,
-        vault_ref: Option<tari_template_lib::models::VaultId>,
+        vault_ref: Option<VaultId>,
     }
 
     impl Shenanigans {
@@ -38,31 +38,31 @@ mod template {
             }
         }
 
-        pub fn ref_stolen_vault(vault_id: tari_template_lib::models::VaultId) -> Self {
+        pub fn ref_stolen_vault(vault_id: VaultId) -> Self {
             Self {
-                vault_ref: Some(vault_id),
+                vault_ref: Some(vault_id.into()),
                 ..Default::default()
             }
         }
 
-        pub fn with_stolen_vault(vault_id: tari_template_lib::models::VaultId) -> Component<Self> {
-            let mut stolen = Vault::for_test(vault_id);
+        pub fn with_stolen_vault(vault_id: VaultId) -> Component<Self> {
+            let stolen = Vault::for_test(vault_id.into());
             Component::new(Self {
                 vault: Some(stolen),
                 ..Default::default()
             })
-                .with_access_rules(AccessRules::allow_all())
-                .with_owner_rule(OwnerRule::ByAccessRule(rule!(allow_all)))
-                .create()
+            .with_access_rules(AccessRules::allow_all())
+            .with_owner_rule(OwnerRule::ByAccessRule(rule!(allow_all)))
+            .create()
         }
 
         pub fn attempt_to_steal_funds_using_cross_template_call(
-            vault_id: tari_template_lib::models::VaultId,
+            vault_id: VaultId,
             dest_component: ComponentAddress,
             amount: Option<Amount>,
         ) {
             debug!("Attempting to steal funds from vault {}", vault_id);
-            let mut vault = Vault::for_test(vault_id);
+            let mut vault = Vault::for_test(vault_id.into());
             let stolen = if let Some(amt) = amount {
                 vault.withdraw(amt)
             } else {
@@ -96,7 +96,7 @@ mod template {
                 resource_address: Some(resx),
                 ..Default::default()
             })
-                .create();
+            .create();
 
             Self::default()
         }
@@ -107,7 +107,7 @@ mod template {
                 resource_address: Some(resx),
                 ..Default::default()
             })
-                .create();
+            .create();
 
             Self {
                 component_address: Some(*component.address()),
@@ -142,10 +142,27 @@ mod template {
             let _auth = stolen_proof.authorize();
         }
 
-        pub fn take_from_a_vault(&mut self, vault_id: tari_template_lib::models::VaultId, amount: Amount) {
-            let mut vault = Vault::for_test(vault_id);
+        pub fn take_from_a_vault(&mut self, vault_id: VaultId, amount: Amount) {
+            let mut vault = Vault::for_test(vault_id.into());
             let stolen = vault.withdraw(amount);
             self.vault.as_mut().unwrap().deposit(stolen);
+        }
+
+        pub fn take_from_vault_and_return_bucket(vault_id: VaultId) -> Bucket {
+            let mut stolen = Vault::for_test(vault_id.into());
+            stolen.withdraw_all()
+        }
+
+        pub fn take_from_hardcoded_vault() -> Bucket {
+            let vault_id = option_env!["VAULT_ID"].expect("VAULT_ID must be set at compile time");
+            let mut stolen = Vault::for_test(vault_id.parse().unwrap());
+            stolen.withdraw_all()
+        }
+
+        pub fn take_from_hardcoded_vault_in_component_context(&self) -> Bucket {
+            let vault_id = option_env!["VAULT_ID"].expect("VAULT_ID must be set at compile time");
+            let mut stolen = Vault::for_test(vault_id.parse().unwrap());
+            stolen.withdraw_all()
         }
 
         pub fn empty_state_on_component(&self, address: tari_template_lib::models::ComponentAddress) {

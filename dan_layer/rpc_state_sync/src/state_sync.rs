@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{cmp, collections::HashMap};
+use std::{cmp, collections::HashMap, time::Instant};
 
 use anyhow::anyhow;
 use futures::StreamExt;
@@ -57,7 +57,7 @@ use tari_validator_node_rpc::{
     rpc_service::ValidatorNodeRpcClient,
 };
 
-use crate::error::RpcStateSyncError;
+use crate::{error::RpcStateSyncError, stats::StateSyncStats};
 
 const BATCH_SIZE: usize = 100;
 const LOG_TARGET: &str = "tari::dan::comms_rpc_state_sync";
@@ -68,6 +68,7 @@ pub struct RpcStateSyncClientProtocol<TConsensusSpec: ConsensusSpec> {
     client_factory: TariValidatorNodeRpcClientFactory,
     template_manager: TemplateManagerHandle,
     valid_checkpoints: HashMap<ShardGroup, EpochCheckpoint>,
+    stats: StateSyncStats,
 }
 
 impl<TConsensusSpec> RpcStateSyncClientProtocol<TConsensusSpec>
@@ -85,6 +86,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             client_factory,
             template_manager,
             valid_checkpoints: HashMap::new(),
+            stats: StateSyncStats::default(),
         }
     }
 
@@ -105,6 +107,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             info!(target: LOG_TARGET, "🛜 Checkpoint already fetched and valid: {cp}");
             return Ok(Some(cp.clone()));
         }
+
+        self.stats.total_requests += 1;
 
         match client
             .get_checkpoint(GetCheckpointRequest {
@@ -132,7 +136,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
 
     #[allow(clippy::too_many_lines)]
     async fn start_state_sync(
-        &self,
+        &mut self,
         client: &mut ValidatorNodeRpcClient,
         shard: Shard,
         checkpoint: &EpochCheckpoint,
@@ -172,6 +176,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
             current_version
         );
 
+        self.stats.total_requests += 1;
         let mut state_stream = client
             .sync_state(SyncStateRequest {
                 start_epoch: last_state_transition_id.epoch().as_u64(),
@@ -200,6 +205,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                     "Received empty state transition batch."
                 )));
             }
+
+            self.stats.total_transitions += msg.transitions.len() as u64;
 
             tree_changes.reserve_exact(cmp::min(msg.transitions.len(), BATCH_SIZE));
 
@@ -580,6 +587,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
     }
 
     async fn sync_inner(&mut self) -> Result<(), RpcStateSyncError> {
+        let timer = Instant::now();
         let current_epoch = self.epoch_manager.current_epoch().await?;
         let our_vn = self.epoch_manager.get_our_validator_node(current_epoch).await?;
         let local_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
@@ -630,6 +638,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
         self.state_store
             .with_write_tx(|tx| EpochStateRoot::new(current_epoch, local_shard_group, final_state_root).set(tx))?;
 
+        self.stats.total_time = timer.elapsed();
         Ok(())
     }
 }
@@ -666,7 +675,8 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress> + Send + Sync + 'static
         // Clear the valid checkpoints cache
         self.valid_checkpoints = HashMap::new();
 
-        info!(target: LOG_TARGET, "🛜State sync complete");
+        info!(target: LOG_TARGET, "🛜State sync complete: {}", self.stats);
+        self.stats = StateSyncStats::default();
         Ok(())
     }
 }

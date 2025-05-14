@@ -191,7 +191,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     /// in the pending chain, if not an empty list is returned.
     fn get_pending_chain_until(&self, end_block: &BlockId) -> Result<HashSet<BlockId>, RocksDbStorageError> {
         const OPERATION: &str = "get_pending_chain_until";
-        debug!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
+        trace!(target: LOG_TARGET, "{OPERATION}: end: {end_block}");
 
         let chain_cf = self.db().cf(chain::PendingChainIndex)?;
         if !chain_cf.exists(end_block, OPERATION)? {

@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{cmp, collections::HashSet, iter, ops::Deref};
+use std::{cmp, collections::HashSet, iter, ops::Deref, time::Instant};
 
 use indexmap::IndexMap;
 use log::*;
@@ -1317,7 +1317,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         diff: &PendingShardStateTreeDiff,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "pending_state_tree_diffs_insert";
-        debug!(
+        trace!(
             target: LOG_TARGET,
             "{OPERATION}: shard {} block {} (v{}, new={}, stale={})", shard, block_id,
             diff.version,diff.diff.new_nodes.len(),diff.diff.stale_tree_nodes.len()
@@ -1397,6 +1397,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let versions_cf = self.db().cf(StateTreeShardVersionModel)?;
         let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardQuery)?;
         for shard in ShardGroup::all_shards(num_preshards).shard_iter() {
+            let timer = Instant::now();
             let mut num_deleted = 0;
             let stale_iter = stale_cf.query_prefix_range_iterator(Ordering::Ascending, &shard);
             let max_version = versions_cf.get(&shard, OPERATION).optional()?.unwrap_or(0);
@@ -1425,11 +1426,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
                     match node {
                         StaleTreeNode::Node(key) => {
-                            debug!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
+                            trace!(target: LOG_TARGET, "Deleting stale node {key} from shard {shard}", );
                             delete_buffer.push((shard, key));
                         },
                         StaleTreeNode::Subtree(parent_key) => {
-                            debug!(target: LOG_TARGET, "Deleting stale substree {parent_key} from shard {shard}", );
+                            trace!(target: LOG_TARGET, "Deleting stale substree {parent_key} from shard {shard}", );
                             let Some(parent_node) = cf.get(&(shard, parent_key.clone()), OPERATION).optional()? else {
                                 continue;
                             };
@@ -1445,7 +1446,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                                 },
                                 Node::Leaf(_) => {
                                     // Subtree is a single leaf node
-                                    debug!(target: LOG_TARGET, "Deleting stale leaf node {parent_key} from shard {shard}", );
+                                    trace!(target: LOG_TARGET, "Deleting stale leaf node {parent_key} from shard {shard}", );
                                     delete_buffer.push((shard, parent_key));
                                 },
                                 Node::Null => {},
@@ -1469,7 +1470,11 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             }
 
             if num_deleted > 0 {
-                debug!(target: LOG_TARGET, "Deleted {num_deleted} stale nodes in shard {shard} to version {to_version}");
+                debug!(
+                    target: LOG_TARGET,
+                    "Deleted {} stale nodes in shard {} in {:.2?} to version {}",
+                    num_deleted, shard, timer.elapsed(), to_version
+                );
             }
         }
 

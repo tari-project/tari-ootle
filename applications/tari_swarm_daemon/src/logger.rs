@@ -20,8 +20,9 @@ pub fn init_logger(log_to_file: Option<PathBuf>) -> Result<(), log::SetLoggerErr
 
             let fallback = |out: FormatCallback<'_>| {
                 out.finish(format_args!(
-                    "{} {} {}",
+                    "{} [{}] {} {}",
                     humantime::format_rfc3339(std::time::SystemTime::now()),
+                    record.target(),
                     colors.color(record.level()),
                     message
                 ))

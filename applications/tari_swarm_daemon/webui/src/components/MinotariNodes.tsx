@@ -78,7 +78,7 @@ function Node(props: any) {
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [props.id]);
+  }, [props.id, props.autoRefresh]);
 
   return (
     <div className="info">

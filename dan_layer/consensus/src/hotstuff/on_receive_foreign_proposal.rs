@@ -5,17 +5,16 @@ use std::collections::HashSet;
 
 use anyhow::anyhow;
 use log::*;
+use tari_consensus_types::{BlockId, ProposalCertificate};
 use tari_dan_common_types::{committee::CommitteeInfo, optional::Optional, Epoch, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,
-        BlockId,
         CommandOrHash,
         CommandsCommitProof,
         ForeignProposal,
         ForeignProposalRecord,
         ForeignProposalStatus,
-        QuorumCertificate,
     },
     StateStore,
     StateStoreReadTransaction,
@@ -467,7 +466,7 @@ fn validate_evidence_and_pledges_match(
 fn generate_transaction_commands_commit_proof_for_shard_group<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     block: &Block,
-    commit_qc: &QuorumCertificate,
+    commit_qc: &ProposalCertificate,
     for_shard_group: ShardGroup,
 ) -> Result<CommandsCommitProof, HotStuffError> {
     let applicable_commands = block.commands().iter().map(|cmd| {

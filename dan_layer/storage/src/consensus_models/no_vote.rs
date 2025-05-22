@@ -1,10 +1,11 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_consensus_types::{BlockId, Decision};
 use tari_dan_common_types::ShardGroup;
 use tari_transaction::TransactionId;
 
-use crate::consensus_models::{BlockId, Decision, TransactionPoolStage};
+use crate::consensus_models::TransactionPoolStage;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum NoVoteReason {

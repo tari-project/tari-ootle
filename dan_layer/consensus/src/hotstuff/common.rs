@@ -7,9 +7,11 @@ use indexmap::IndexMap;
 use log::*;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     derive_fee_pool_address,
+    optional::Optional,
     shard::Shard,
     substate_type::SubstateType,
     Epoch,
@@ -22,11 +24,9 @@ use tari_dan_storage::{
     consensus_models::{
         Block,
         BlockHeader,
-        BlockId,
+        BookkeepingModel,
         EpochCheckpoint,
-        LeafBlock,
         PendingShardStateTreeDiff,
-        QuorumCertificate,
         SubstateChange,
         ValidatorConsensusStats,
     },
@@ -57,7 +57,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
     epoch: Epoch,
     shard_group: ShardGroup,
     parent_block_id: BlockId,
-    qc: &QuorumCertificate,
+    qc: &ProposalCertificate,
     parent_merkle_root: FixedHash,
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
@@ -79,7 +79,7 @@ pub fn calculate_last_dummy_block<TAddr: NodeAddressable, TLeaderStrategy: Leade
         parent_timestamp,
         parent_epoch_hash,
         |dummy_block| {
-            dummy = Some(dummy_block.as_leaf_block());
+            dummy = Some(dummy_block.as_leaf());
             ControlFlow::Continue(())
         },
     );
@@ -94,7 +94,7 @@ pub fn calculate_dummy_blocks<TAddr: NodeAddressable, TLeaderStrategy: LeaderStr
     epoch: Epoch,
     shard_group: ShardGroup,
     parent_block_id: BlockId,
-    qc: &QuorumCertificate,
+    qc: &ProposalCertificate,
     expected_parent_block_id: &BlockId,
     parent_merkle_root: FixedHash,
     leader_strategy: &TLeaderStrategy,
@@ -155,13 +155,13 @@ pub fn calculate_dummy_blocks_from_justify<TAddr: NodeAddressable, TLeaderStrate
 }
 
 fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
-    mut current_height: NodeHeight,
+    mut current_block_height: NodeHeight,
     new_height: NodeHeight,
     network: Network,
     epoch: Epoch,
     shard_group: ShardGroup,
     mut parent_block_id: BlockId,
-    qc: &QuorumCertificate,
+    qc: &ProposalCertificate,
     parent_merkle_root: FixedHash,
     leader_strategy: &TLeaderStrategy,
     local_committee: &Committee<TAddr>,
@@ -173,11 +173,11 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
     TLeaderStrategy: LeaderStrategy<TAddr>,
     F: FnMut(Block) -> ControlFlow<()>,
 {
-    if current_height >= new_height {
+    if current_block_height >= new_height {
         error!(
             target: LOG_TARGET,
             "BUG: 🍼 no dummy blocks to calculate. current height {} is greater than new height {}",
-            current_height,
+            current_block_height,
             new_height,
         );
         return;
@@ -187,28 +187,31 @@ fn with_dummy_blocks<TAddr, TLeaderStrategy, F>(
         target: LOG_TARGET,
         "🍼 calculating dummy blocks in epoch {} from {} to {}",
         epoch,
-        current_height,
+        current_block_height,
         new_height,
     );
+
+    let justify_id = qc.calculate_id();
     loop {
-        current_height += NodeHeight(1);
-        if current_height == new_height {
+        current_block_height += NodeHeight(1);
+        if current_block_height == new_height {
             break;
         }
-        let (_, leader) = leader_strategy.get_leader(local_committee, current_height);
+        let view_height = current_block_height - NodeHeight(1);
+        let (_, leader) = leader_strategy.get_leader(local_committee, view_height);
         let dummy_header = BlockHeader::dummy_block(
             network,
             parent_block_id,
             *leader,
-            current_height,
-            *qc.id(),
+            current_block_height,
+            justify_id,
             epoch,
             shard_group,
             parent_merkle_root,
             parent_timestamp,
             parent_epoch_hash,
         );
-        let dummy_block = Block::new(dummy_header, qc.clone(), Default::default());
+        let dummy_block = Block::new(dummy_header, qc.clone(), Default::default(), None);
         debug!(
             target: LOG_TARGET,
             "🍼 new dummy block: {}",
@@ -246,7 +249,7 @@ pub fn calculate_state_merkle_root<'a, TTx: StateStoreReadTransaction, I: IntoIt
 pub(crate) fn generate_epoch_checkpoint<TTx>(
     tx: &TTx,
     eoe_block: &Block,
-    tip_qc: &QuorumCertificate,
+    tip_qc: &ProposalCertificate,
 ) -> Result<EpochCheckpoint, HotStuffError>
 where
     TTx: StateStoreReadTransaction,
@@ -313,7 +316,14 @@ pub(crate) fn filter_diff_for_committee(committee_info: &CommitteeInfo, diff: &S
     filtered_diff
 }
 
-pub(crate) fn get_next_block_height_and_leader<
+#[derive(Debug, Clone, Copy)]
+pub struct NextLeader<'a, TAddr> {
+    pub address: &'a TAddr,
+    pub height: NodeHeight,
+    pub vote_to_skip_next: bool,
+}
+
+pub(crate) fn get_leader_for_view<
     'a,
     TTx: StateStoreReadTransaction,
     TLeaderStrategy: LeaderStrategy<TAddr>,
@@ -324,22 +334,27 @@ pub(crate) fn get_next_block_height_and_leader<
     leader_strategy: &TLeaderStrategy,
     block_id: &BlockId,
     height: NodeHeight,
-) -> Result<(NodeHeight, &'a TAddr, usize), HotStuffError> {
+) -> Result<NextLeader<'a, TAddr>, HotStuffError> {
     let mut num_skipped = 0;
-    let mut next_height = height;
-    let (mut leader_addr, mut leader_pk) = leader_strategy.get_leader_for_next_height(committee, next_height);
 
+    let (mut leader_addr, mut leader_pk) = leader_strategy.get_leader(committee, height);
+
+    let mut next_height = height;
     while ValidatorConsensusStats::is_node_evicted(tx, block_id, leader_pk)? {
-        debug!(target: LOG_TARGET, "Validator {} evicted for next height {}. Checking next validator", leader_addr, next_height + NodeHeight(1));
+        debug!(target: LOG_TARGET, "Validator {} evicted for {}. Checking next validator", leader_addr, next_height);
         next_height += NodeHeight(1);
         num_skipped += 1;
-        let (addr, pk) = leader_strategy.get_leader_for_next_height(committee, next_height);
+        let (addr, pk) = leader_strategy.get_leader(committee, next_height);
         leader_addr = addr;
         leader_pk = pk;
     }
-    debug!(target: LOG_TARGET, "Validator {} selected as next leader at height {}", leader_addr, next_height);
+    debug!(target: LOG_TARGET, "Validator {} selected as leader at {}", leader_addr, next_height);
 
-    Ok((next_height, leader_addr, num_skipped))
+    Ok(NextLeader {
+        height: next_height,
+        address: leader_addr,
+        vote_to_skip_next: num_skipped > 0,
+    })
 }
 
 pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
@@ -383,4 +398,19 @@ pub fn apply_leader_fee_to_substate_store<TStore: StateStore>(
     )?;
 
     Ok(())
+}
+
+pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    epoch: Epoch,
+) -> Result<NodeHeight, HotStuffError> {
+    let high_pc = HighPc::get(tx, epoch)
+        .optional()?
+        .map(|high_pc| high_pc.block_height())
+        .unwrap_or_default();
+    let high_tc = HighTc::get(tx, epoch)
+        .optional()?
+        .map(|high_tc| high_tc.height())
+        .unwrap_or_default();
+    Ok(high_pc.max(high_tc))
 }

@@ -13,7 +13,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::json;
 use tari_dan_storage::Ordering;
-use tari_state_store_rocksdb::{codecs::DbCodec, error::RocksDbStorageError, models, traits::Cf};
+use tari_state_store_rocksdb::{codecs::DbCodec, column_families, error::RocksDbStorageError, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
@@ -139,7 +139,7 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("proposed_in_block", "Proposed in"),
             ]);
         },
-        s if s == models::quorum_certificate::QuorumCertificateModel::name() => {
+        s if s == column_families::certificates::ProposalCertificateCf::name() => {
             table.with_columns([
                 Column::new("qc_id", "QC ID"),
                 Column::new("block_id", "Block ID"),

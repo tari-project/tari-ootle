@@ -13,6 +13,7 @@ use std::time::Duration;
 use log::info;
 use tari_common_types::types::PrivateKey;
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage};
+use tari_consensus_types::Decision;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
     crypto::{create_key_pair, create_key_pair_from_seed},
@@ -26,7 +27,7 @@ use tari_dan_common_types::{
     SubstateRequirement,
 };
 use tari_dan_storage::{
-    consensus_models::{Command, Decision, SubstateRecord, TransactionRecord},
+    consensus_models::{Block, Command, SubstateRecord, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
 };
@@ -81,7 +82,8 @@ async fn single_transaction() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let mut block = tx.leaf_block_get(Epoch(1))?.get_block(tx)?;
+            let leaf = tx.leaf_block_get(Epoch(1))?;
+            let mut block = Block::get(tx, &leaf.block_id)?;
             loop {
                 block = block.get_parent(tx)?;
                 if block.id().is_zero() {
@@ -127,7 +129,8 @@ async fn single_transaction_multi_vn() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let mut block = tx.leaf_block_get(Epoch(1))?.get_block(tx)?;
+            let leaf = tx.leaf_block_get(Epoch(1))?;
+            let mut block = Block::get(tx, &leaf.block_id)?;
             loop {
                 block = block.get_parent(tx)?;
                 if block.id().is_zero() {
@@ -1196,7 +1199,8 @@ async fn single_shard_unversioned_inputs() {
     test.get_validator(&TestAddress::new("1"))
         .state_store
         .with_read_tx(|tx| {
-            let mut block = Some(tx.leaf_block_get(Epoch(1))?.get_block(tx)?);
+            let leaf = tx.leaf_block_get(Epoch(1))?;
+            let mut block = Some(Block::get(tx, &leaf.block_id)?);
             loop {
                 block = block.as_ref().unwrap().get_parent(tx).optional()?;
                 let Some(b) = block.as_ref() else {

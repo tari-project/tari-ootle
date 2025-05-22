@@ -7,6 +7,7 @@ use borsh::BorshSerialize;
 use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::QcId;
 use tari_dan_common_types::{
     borsh::indexmap as indexmap_borsh,
     displayable::Displayable,
@@ -21,7 +22,7 @@ use tari_dan_common_types::{
 };
 use tari_engine_types::{serde_with, substate::SubstateId};
 
-use crate::consensus_models::{QcId, RequireLockIntentRef, SubstatePledge};
+use crate::consensus_models::{RequireLockIntentRef, SubstatePledge};
 
 const LOG_TARGET: &str = "tari::dan::consensus_models::evidence";
 

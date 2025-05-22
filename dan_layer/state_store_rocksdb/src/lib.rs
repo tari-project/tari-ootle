@@ -22,8 +22,8 @@
 
 mod cf_api;
 pub mod codecs;
+pub mod column_families;
 pub mod error;
-pub mod models;
 mod reader;
 mod store;
 pub mod traits;

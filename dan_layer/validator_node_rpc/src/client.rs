@@ -7,16 +7,14 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tari_bor::decode;
+use tari_consensus_types::Decision;
 use tari_dan_common_types::{NodeAddressable, SubstateRequirementRef, ToPeerId};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{GetTransactionResultRequest, PayloadResultStatus, SubmitTransactionRequest, SubstateStatus},
     TariMessagingSpec,
 };
-use tari_dan_storage::{
-    consensus_models::Decision,
-    time::{PrimitiveDateTime, UtcDateTime},
-};
+use tari_dan_storage::time::{PrimitiveDateTime, UtcDateTime};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{Substate, SubstateId, SubstateValue},
@@ -64,7 +62,7 @@ pub struct FinalizedResult {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum SubstateResult {
     DoesNotExist,
-    Up { id: SubstateId, substate: Substate },
+    Up { id: SubstateId, substate: Box<Substate> },
     Down { id: SubstateId, version: u32 },
 }
 
@@ -205,7 +203,7 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
                 let substate = SubstateValue::from_bytes(&resp.substate)
                     .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?;
                 Ok(SubstateResult::Up {
-                    substate: Substate::new(resp.version, substate),
+                    substate: Box::new(Substate::new(resp.version, substate)),
                     id: SubstateId::from_bytes(&resp.address)
                         .map_err(|e| ValidatorNodeRpcClientError::InvalidResponse(anyhow!(e)))?,
                 })

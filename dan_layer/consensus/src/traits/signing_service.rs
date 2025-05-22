@@ -1,33 +1,38 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_common_types::types::FixedHash;
+use log::*;
+use tari_consensus_types::{SignedMessage, ToSignatureMessage, ValidatorSchnorrSignature};
 use tari_crypto::ristretto::RistrettoPublicKey;
-use tari_dan_common_types::hashing::vote_signature_hasher;
-use tari_dan_storage::consensus_models::{BlockId, ValidatorSchnorrSignature, ValidatorSignature};
-use tari_engine_types::ToByteType;
-use tari_sidechain::QuorumDecision;
+use tari_engine_types::FromByteType;
 
-pub trait ValidatorSignatureService {
-    fn sign<M: AsRef<[u8]>>(&self, message: M) -> ValidatorSchnorrSignature;
+const LOG_TARGET: &str = "tari::consensus::signer_service";
+
+pub trait ValidatorSignerService {
+    fn sign<M: ToSignatureMessage>(&self, message: &M) -> ValidatorSchnorrSignature;
 
     fn public_key(&self) -> &RistrettoPublicKey;
 }
 
-pub trait VoteSignatureService: ValidatorSignatureService {
-    fn create_message(&self, block_id: &BlockId, decision: &QuorumDecision) -> FixedHash {
-        vote_signature_hasher()
-            .chain(block_id)
-            .chain(decision)
-            .finalize()
-            .into()
+pub trait ValidatorSignatureVerifierService {
+    fn verify<M: SignedMessage>(&self, message: &M) -> bool {
+        let Ok(public_key) = RistrettoPublicKey::try_from_byte_type(message.public_key()) else {
+            warn!(
+                target: LOG_TARGET,
+                "Malformed signature public key. Raw: {}",
+                message.public_key()
+            );
+            return false;
+        };
+        let Ok(signature) = ValidatorSchnorrSignature::try_from_byte_type(message.signature()) else {
+            warn!(
+                target: LOG_TARGET,
+                "Malformed signature. Raw: {}",
+                message.signature()
+            );
+            return false;
+        };
+        let message = message.to_signature_message();
+        signature.verify(&public_key, message)
     }
-
-    fn sign_vote(&self, block_id: &BlockId, decision: &QuorumDecision) -> ValidatorSignature {
-        let message = self.create_message(block_id, decision);
-        let signature = self.sign(message);
-        ValidatorSignature::new(self.public_key().to_byte_type(), signature.to_byte_type())
-    }
-
-    fn verify(&self, signature: &ValidatorSignature, block_id: &BlockId, decision: &QuorumDecision) -> bool;
 }

@@ -30,32 +30,35 @@ use tari_consensus::messages::{
     ForeignProposalMessage,
     ForeignProposalNotificationMessage,
     ForeignProposalRequestMessage,
-    FullBlock,
     HotstuffMessage,
     MissingTransactionsRequest,
     MissingTransactionsResponse,
     NewViewMessage,
     ProposalMessage,
     SyncRequestMessage,
-    SyncResponseMessage,
     VoteMessage,
+};
+use tari_consensus_types::{
+    BlockId,
+    Decision,
+    ProposalCertificate,
+    ProposalVote,
+    QcId,
+    TimeoutCertificate,
+    TimeoutVote,
 };
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, ShardGroup, ValidatorMetadata};
 use tari_dan_storage::{
     consensus_models,
     consensus_models::{
-        BlockId,
         Command,
-        Decision,
         EvictNodeAtom,
         Evidence,
         ForeignProposal,
         ForeignProposalAtom,
         LeaderFee,
         MintConfidentialOutputAtom,
-        QcId,
-        QuorumCertificate,
         SubstateDestroyed,
         SubstateRecord,
         TransactionAtom,
@@ -77,8 +80,8 @@ use crate::{
 impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
     fn from(source: &HotstuffMessage) -> Self {
         let message = match source {
-            HotstuffMessage::NewView(msg) => proto::consensus::hot_stuff_message::Message::NewView(msg.into()),
-            HotstuffMessage::Proposal(msg) => proto::consensus::hot_stuff_message::Message::Proposal(msg.into()),
+            HotstuffMessage::NewView(msg) => proto::consensus::hot_stuff_message::Message::NewView((&**msg).into()),
+            HotstuffMessage::Proposal(msg) => proto::consensus::hot_stuff_message::Message::Proposal((&**msg).into()),
             HotstuffMessage::ForeignProposal(msg) => {
                 proto::consensus::hot_stuff_message::Message::ForeignProposal(msg.into())
             },
@@ -98,9 +101,6 @@ impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
             HotstuffMessage::CatchUpSyncRequest(msg) => {
                 proto::consensus::hot_stuff_message::Message::SyncRequest(msg.into())
             },
-            HotstuffMessage::SyncResponse(msg) => {
-                proto::consensus::hot_stuff_message::Message::SyncResponse(msg.into())
-            },
         };
         Self { message: Some(message) }
     }
@@ -112,8 +112,10 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
     fn try_from(value: proto::consensus::HotStuffMessage) -> Result<Self, Self::Error> {
         let message = value.message.ok_or_else(|| anyhow!("Message is missing"))?;
         Ok(match message {
-            proto::consensus::hot_stuff_message::Message::NewView(msg) => HotstuffMessage::NewView(msg.try_into()?),
-            proto::consensus::hot_stuff_message::Message::Proposal(msg) => HotstuffMessage::Proposal(msg.try_into()?),
+            proto::consensus::hot_stuff_message::Message::NewView(msg) => HotstuffMessage::new_newview(msg.try_into()?),
+            proto::consensus::hot_stuff_message::Message::Proposal(msg) => {
+                HotstuffMessage::new_proposal(msg.try_into()?)
+            },
             proto::consensus::hot_stuff_message::Message::ForeignProposal(msg) => {
                 HotstuffMessage::ForeignProposal(msg.try_into()?)
             },
@@ -133,9 +135,6 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
             proto::consensus::hot_stuff_message::Message::SyncRequest(msg) => {
                 HotstuffMessage::CatchUpSyncRequest(msg.try_into()?)
             },
-            proto::consensus::hot_stuff_message::Message::SyncResponse(msg) => {
-                HotstuffMessage::SyncResponse(msg.try_into()?)
-            },
         })
     }
 }
@@ -145,9 +144,9 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
 impl From<&NewViewMessage> for proto::consensus::NewViewMessage {
     fn from(value: &NewViewMessage) -> Self {
         Self {
-            high_qc: Some((&value.high_qc).into()),
-            new_height: value.new_height.as_u64(),
+            high_qc: Some((&value.high_pc).into()),
             last_vote: value.last_vote.as_ref().map(|a| a.into()),
+            timeout: Some((&value.timeout).into()),
         }
     }
 }
@@ -157,12 +156,39 @@ impl TryFrom<proto::consensus::NewViewMessage> for NewViewMessage {
 
     fn try_from(value: proto::consensus::NewViewMessage) -> Result<Self, Self::Error> {
         Ok(NewViewMessage {
-            high_qc: value.high_qc.ok_or_else(|| anyhow!("High QC is missing"))?.try_into()?,
-            new_height: value.new_height.into(),
+            high_pc: value.high_qc.ok_or_else(|| anyhow!("High QC is missing"))?.try_into()?,
             last_vote: value
                 .last_vote
                 .map(|a: proto::consensus::VoteMessage| a.try_into())
                 .transpose()?,
+            timeout: value.timeout.ok_or_else(|| anyhow!("Timeout is missing"))?.try_into()?,
+        })
+    }
+}
+
+// -------------------------------- TimeoutVote -------------------------------- //
+
+impl From<&TimeoutVote> for proto::consensus::TimeoutVote {
+    fn from(value: &TimeoutVote) -> Self {
+        Self {
+            epoch: value.epoch.as_u64(),
+            height: value.height.as_u64(),
+            signature: Some((&value.signature).into()),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::TimeoutVote> for TimeoutVote {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::TimeoutVote) -> Result<Self, Self::Error> {
+        Ok(TimeoutVote {
+            epoch: Epoch(value.epoch),
+            height: NodeHeight(value.height),
+            signature: value
+                .signature
+                .ok_or_else(|| anyhow!("Signature is missing"))?
+                .try_into()?,
         })
     }
 }
@@ -320,12 +346,13 @@ impl TryFrom<proto::consensus::ForeignProposalRequest> for ForeignProposalReques
 
 impl From<&VoteMessage> for proto::consensus::VoteMessage {
     fn from(msg: &VoteMessage) -> Self {
+        let vote = &msg.vote;
         Self {
-            epoch: msg.epoch.as_u64(),
-            block_id: msg.block_id.as_bytes().to_vec(),
-            block_height: msg.unverified_block_height.as_u64(),
-            decision: i32::from(msg.decision.as_u8()),
-            signature: Some((&msg.signature).into()),
+            epoch: vote.epoch.as_u64(),
+            block_id: vote.block_id.as_bytes().to_vec(),
+            block_height: vote.block_height.as_u64(),
+            decision: i32::from(vote.decision.as_u8()),
+            signature: Some((&vote.signature).into()),
         }
     }
 }
@@ -335,9 +362,33 @@ impl TryFrom<proto::consensus::VoteMessage> for VoteMessage {
 
     fn try_from(value: proto::consensus::VoteMessage) -> Result<Self, Self::Error> {
         Ok(VoteMessage {
+            vote: value.try_into()?,
+        })
+    }
+}
+
+// -------------------------------- ProposalVote -------------------------------- //
+
+impl From<&ProposalVote> for proto::consensus::VoteMessage {
+    fn from(vote: &ProposalVote) -> Self {
+        Self {
+            epoch: vote.epoch.as_u64(),
+            block_id: vote.block_id.as_bytes().to_vec(),
+            block_height: vote.block_height.as_u64(),
+            decision: i32::from(vote.decision.as_u8()),
+            signature: Some((&vote.signature).into()),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::VoteMessage> for ProposalVote {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::VoteMessage) -> Result<Self, Self::Error> {
+        Ok(ProposalVote {
             epoch: Epoch(value.epoch),
             block_id: BlockId::try_from(value.block_id)?,
-            unverified_block_height: NodeHeight(value.block_height),
+            block_height: NodeHeight(value.block_height),
             decision: u8::try_from(value.decision)?.try_into()?,
             signature: value
                 .signature
@@ -497,6 +548,7 @@ impl From<&consensus_models::Block> for proto::consensus::Block {
             header: Some(value.header().into()),
             justify: Some(value.justify().into()),
             commands: value.commands().iter().map(Into::into).collect(),
+            timeout_certificate: value.timeout_certificate().map(|a| a.into()),
         }
     }
 }
@@ -514,12 +566,43 @@ impl TryFrom<proto::consensus::Block> for consensus_models::Block {
         let justify = value
             .justify
             .ok_or_else(|| anyhow!("Block conversion: QC not provided"))?;
-        let justify = consensus_models::QuorumCertificate::try_from(justify)?;
+        let justify = ProposalCertificate::try_from(justify)?;
+
+        let high_tc = value.timeout_certificate.map(TryInto::try_into).transpose()?;
 
         let header = value.header.ok_or_else(|| anyhow!("BlockHeader not provided"))?;
-        let header = try_convert_proto_block_header(header, *justify.id(), &commands)?;
+        let header = try_convert_proto_block_header(header, justify.calculate_id(), &commands)?;
 
-        Ok(Self::new(header, justify, commands))
+        Ok(Self::new(header, justify, commands, high_tc))
+    }
+}
+
+// -------------------------------- TimeoutCertificate -------------------------------- //
+
+impl From<&TimeoutCertificate> for proto::consensus::TimeoutCertificate {
+    fn from(value: &TimeoutCertificate) -> Self {
+        Self {
+            epoch: value.epoch().as_u64(),
+            block_height: value.height().as_u64(),
+            signatures: value.signatures().iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::TimeoutCertificate> for TimeoutCertificate {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::TimeoutCertificate) -> Result<Self, Self::Error> {
+        Ok(Self::new(
+            Epoch(value.epoch),
+            NodeHeight(value.block_height),
+            value
+                .signatures
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()
+                .context("invalid encoding of signatures")?,
+        ))
     }
 }
 
@@ -799,14 +882,14 @@ impl TryFrom<proto::consensus::Evidence> for Evidence {
     }
 }
 
-// -------------------------------- QuorumCertificate -------------------------------- //
+// -------------------------------- ProposalCertificate -------------------------------- //
 
-impl From<&QuorumCertificate> for proto::consensus::QuorumCertificate {
-    fn from(source: &QuorumCertificate) -> Self {
+impl From<&ProposalCertificate> for proto::consensus::QuorumCertificate {
+    fn from(source: &ProposalCertificate) -> Self {
         Self {
             header_hash: source.header_hash().as_bytes().to_vec(),
             parent_id: source.parent_id().as_bytes().to_vec(),
-            block_height: source.block_height().as_u64(),
+            block_height: source.height().as_u64(),
             epoch: source.epoch().as_u64(),
             shard_group: source.shard_group().encode_as_u32(),
             signatures: source.signatures().iter().map(Into::into).collect(),
@@ -815,7 +898,7 @@ impl From<&QuorumCertificate> for proto::consensus::QuorumCertificate {
     }
 }
 
-impl TryFrom<proto::consensus::QuorumCertificate> for QuorumCertificate {
+impl TryFrom<proto::consensus::QuorumCertificate> for ProposalCertificate {
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::QuorumCertificate) -> Result<Self, Self::Error> {
@@ -958,60 +1041,6 @@ impl TryFrom<proto::consensus::SyncRequest> for SyncRequestMessage {
         Ok(Self {
             epoch: Epoch(value.epoch),
             block_height: NodeHeight(value.block_height),
-        })
-    }
-}
-
-// -------------------------------- SyncResponse -------------------------------- //
-
-impl From<&SyncResponseMessage> for proto::consensus::SyncResponse {
-    fn from(value: &SyncResponseMessage) -> Self {
-        Self {
-            epoch: value.epoch.as_u64(),
-            blocks: value.blocks.iter().map(|block| block.into()).collect::<Vec<_>>(),
-        }
-    }
-}
-
-impl TryFrom<proto::consensus::SyncResponse> for SyncResponseMessage {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::consensus::SyncResponse) -> Result<Self, Self::Error> {
-        Ok(Self {
-            epoch: Epoch(value.epoch),
-            blocks: value
-                .blocks
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
-        })
-    }
-}
-
-// -------------------------------- FullBlock -------------------------------- //
-
-impl From<&FullBlock> for proto::consensus::FullBlock {
-    fn from(value: &FullBlock) -> Self {
-        Self {
-            block: Some((&value.block).into()),
-            qcs: value.qcs.iter().map(Into::into).collect(),
-            transactions: value.transactions.iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl TryFrom<proto::consensus::FullBlock> for FullBlock {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::consensus::FullBlock) -> Result<Self, Self::Error> {
-        Ok(Self {
-            block: value.block.ok_or_else(|| anyhow!("Block is missing"))?.try_into()?,
-            qcs: value.qcs.into_iter().map(TryInto::try_into).collect::<Result<_, _>>()?,
-            transactions: value
-                .transactions
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
         })
     }
 }

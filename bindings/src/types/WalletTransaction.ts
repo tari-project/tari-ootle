@@ -2,7 +2,7 @@
 import type { Amount } from "./Amount";
 import type { FinalizeResult } from "./FinalizeResult";
 import type { NewAccountInfo } from "./NewAccountInfo";
-import type { QuorumCertificate } from "./QuorumCertificate";
+import type { ProposalCertificate } from "./ProposalCertificate";
 import type { SubstateRequirement } from "./SubstateRequirement";
 import type { Transaction } from "./Transaction";
 import type { TransactionStatus } from "./TransactionStatus";
@@ -12,7 +12,7 @@ export interface WalletTransaction {
   status: TransactionStatus;
   finalize: FinalizeResult | null;
   final_fee: Amount | null;
-  qcs: Array<QuorumCertificate>;
+  qcs: Array<ProposalCertificate>;
   execution_time: { secs: number; nanos: number } | null;
   finalized_time: { secs: number; nanos: number } | null;
   required_substates: Array<SubstateRequirement>;

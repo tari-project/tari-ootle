@@ -2,16 +2,23 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
-use tari_dan_common_types::{committee::Committee, displayable::Displayable, optional::Optional, Epoch, NodeHeight};
-use tari_dan_storage::{
-    consensus_models::{HighQc, LastSentVote, LeafBlock},
-    StateStore,
+use tari_consensus_types::{
+    HighPc,
+    LastSentVote,
+    LeafBlock,
+    ProposalCertificate,
+    TimeoutVote,
+    TimeoutVoteMessage,
+    ValidatorSignatureBytes,
 };
+use tari_dan_common_types::{committee::Committee, displayable::Displayable, optional::Optional, Epoch, NodeHeight};
+use tari_dan_storage::{consensus_models::BookkeepingModel, StateStore};
+use tari_engine_types::ToByteType;
 
 use crate::{
-    hotstuff::{get_next_block_height_and_leader, pacemaker_handle::PaceMakerHandle, HotStuffError},
-    messages::{HotstuffMessage, NewViewMessage, VoteMessage},
-    traits::{ConsensusSpec, OutboundMessaging},
+    hotstuff::{get_leader_for_view, HotStuffError},
+    messages::{HotstuffMessage, NewViewMessage},
+    traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService},
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_next_sync_view";
@@ -20,7 +27,7 @@ pub struct OnNextSyncViewHandler<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     leader_strategy: TConsensusSpec::LeaderStrategy,
-    pacemaker: PaceMakerHandle,
+    signer_service: TConsensusSpec::SignerService,
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
@@ -28,13 +35,13 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         store: TConsensusSpec::StateStore,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
         leader_strategy: TConsensusSpec::LeaderStrategy,
-        pacemaker: PaceMakerHandle,
+        signer_service: TConsensusSpec::SignerService,
     ) -> Self {
         Self {
             store,
             outbound_messaging,
             leader_strategy,
-            pacemaker,
+            signer_service,
         }
     }
 
@@ -44,47 +51,59 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         current_height: NodeHeight,
         local_committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
-        let (new_height, next_leader, leaf_block, high_qc, last_sent_vote) = self.store.with_read_tx(|tx| {
+        // The leader that is supposed to propose the next block timed out
+        let timeout_height = current_height + NodeHeight(2);
+
+        let (next_leader, high_pc, last_sent_vote) = self.store.with_read_tx(|tx| {
             let leaf_block = LeafBlock::get(tx, epoch)?;
-            let (next_height, next_leader, _) = get_next_block_height_and_leader(
+            let next_leader = get_leader_for_view(
                 tx,
                 local_committee,
                 &self.leader_strategy,
                 leaf_block.block_id(),
-                // Leader failure at current height, so we use the next height
-                current_height + NodeHeight(1),
+                // Skipping the next height since the leader failed to propose
+                timeout_height,
             )?;
-            let high_qc = HighQc::get(tx, epoch)?.get_quorum_certificate(tx)?;
-            let last_sent_vote = LastSentVote::get(tx)
+            let high_pc = HighPc::get(tx, epoch)?;
+            let high_pc = ProposalCertificate::get(tx, high_pc.id())?;
+            let last_sent_vote = LastSentVote::get(tx, epoch)
                 .optional()?
-                .filter(|vote| high_qc.epoch() == vote.epoch)
-                .filter(|vote| high_qc.block_height() < vote.block_height);
-            Ok::<_, HotStuffError>((next_height, next_leader, leaf_block, high_qc, last_sent_vote))
+                .filter(|vote| high_pc.height() < vote.block_height());
+            Ok::<_, HotStuffError>((next_leader, high_pc, last_sent_vote))
         })?;
 
-        if leaf_block.height() == new_height {
-            info!(target: LOG_TARGET, "❓️ Leader failure occurred just before we completed processing of the leaf block {leaf_block}. Ignoring.");
-            return Ok(());
-        }
-
-        self.pacemaker
-            .update_view(epoch, new_height, high_qc.block_height())
-            .await?;
-
-        let last_vote = last_sent_vote.map(VoteMessage::from);
         info!(
             target: LOG_TARGET,
-            "🌟 Send NEWVIEW {new_height} Vote[{}] HighQC: {high_qc} to {next_leader}",
-            last_vote.display()
+            "🌟 Send NEWVIEW to {} {} HighPC: {} Vote[{}]",
+            next_leader.address,
+            timeout_height,
+            high_pc,
+            last_sent_vote.display(),
         );
+
+        let msg = TimeoutVoteMessage {
+            epoch: high_pc.epoch(),
+            height: timeout_height,
+        };
+
+        let signature = self.signer_service.sign(&msg);
+        let signature = ValidatorSignatureBytes::new(
+            self.signer_service.public_key().to_byte_type(),
+            signature.to_byte_type(),
+        );
+
         let message = NewViewMessage {
-            high_qc,
-            new_height,
-            last_vote,
+            high_pc,
+            last_vote: None, // last_sent_vote.map(|vote| vote.vote),
+            timeout: TimeoutVote {
+                epoch,
+                height: timeout_height,
+                signature,
+            },
         };
 
         self.outbound_messaging
-            .send(next_leader.clone(), HotstuffMessage::NewView(message))
+            .send(next_leader.address.clone(), HotstuffMessage::new_newview(message))
             .await?;
 
         Ok(())

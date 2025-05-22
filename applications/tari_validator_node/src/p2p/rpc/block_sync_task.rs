@@ -4,13 +4,15 @@
 use std::collections::HashSet;
 
 use log::*;
+use tari_consensus::traits::CertificateStore;
+use tari_consensus_types::{BlockId, ProposalCertificate};
 use tari_dan_common_types::{optional::Optional, Epoch, NumPreshards};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{sync_blocks_response::SyncData, QuorumCertificates, SyncBlocksResponse},
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, QuorumCertificate, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
+    consensus_models::{Block, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -24,7 +26,7 @@ const BLOCK_BUFFER_SIZE: usize = 15;
 
 struct BlockData {
     block: Block,
-    qcs: Vec<QuorumCertificate>,
+    qcs: Vec<ProposalCertificate>,
     substates: Vec<SubstateUpdate>,
     transactions: Vec<TransactionRecord>,
     transaction_receipts: Vec<SubstateCreatedProof>,
@@ -164,7 +166,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                             .flat_map(|transaction| transaction.evidence.qc_ids_iter())
                             .collect::<HashSet<_>>()
                     })
-                    .map(|all_qcs| QuorumCertificate::get_all(tx, all_qcs))
+                    .map(|all_qcs| ProposalCertificate::get_many(tx, all_qcs))
                     .transpose()?
                     .unwrap_or_default();
                 let substates_selection =

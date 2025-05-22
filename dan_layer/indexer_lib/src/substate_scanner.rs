@@ -103,7 +103,7 @@ where
             nft_substates.push(NonFungibleSubstate {
                 index,
                 address: nft_id,
-                substate,
+                substate: *substate,
             });
 
             if let Some(end_index) = end_index {
@@ -186,7 +186,7 @@ where
         let f = (committee.len() - 1) / 3;
         let mut num_nexist_substate_results = 0;
         let mut last_error = None;
-        for vn_addr in committee.addresses() {
+        for vn_addr in committee.address_iter() {
             debug!(target: LOG_TARGET, "Getting substate {} from vn {}", substate_req, vn_addr);
 
             match self.get_substate_from_vn(vn_addr, substate_req).await {

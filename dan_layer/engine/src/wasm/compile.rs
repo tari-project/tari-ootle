@@ -123,10 +123,10 @@ where
         eprintln!("{}", String::from_utf8_lossy(&output.stdout));
         eprintln!("stderr:");
         eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-        return Err(io::Error::new(
-            ErrorKind::Other,
-            format!("Failed to compile package: {:?}", package_dir.as_ref(),),
-        ));
+        return Err(io::Error::other(format!(
+            "Failed to compile package: {}",
+            package_dir.as_ref().display()
+        )));
     }
 
     // resolve wasm name

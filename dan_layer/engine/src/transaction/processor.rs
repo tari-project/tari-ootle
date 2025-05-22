@@ -157,7 +157,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let mut initial_call_scope = CallScope::new();
         initial_call_scope.set_auth_scope(initial_auth_scope);
         for input in transaction.all_inputs_iter() {
-            log::error!(
+            debug!(
                 target: LOG_TARGET,
                 "Adding substate to initial call scope: {}",
                 input.substate_id

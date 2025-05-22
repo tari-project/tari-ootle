@@ -19,19 +19,24 @@ message HotStuffMessage {
     MissingTransactionsRequest request_missing_transactions = 7;
     MissingTransactionsResponse requested_transaction = 8;
     SyncRequest sync_request = 9;
-    SyncResponse sync_response = 10;
   }
 }
 
 message NewViewMessage {
   QuorumCertificate high_qc = 1;
-  uint64 new_height = 2;
-  VoteMessage last_vote = 3;
+  VoteMessage last_vote = 2; // optional
+  TimeoutVote timeout = 3;
 }
 
 message ProposalMessage {
   Block block = 1;
   repeated ForeignProposal foreign_proposals = 2;
+}
+
+message TimeoutVote {
+  uint64 epoch = 1;
+  uint64 height = 2;
+  tari.dan.common.SignatureAndPublicKey signature = 3;
 }
 
 message ForeignProposalMessage {
@@ -94,6 +99,7 @@ message Block {
   BlockHeader header = 1;
   QuorumCertificate justify = 2;
   repeated Command commands = 3;
+  TimeoutCertificate timeout_certificate = 4; // optional
 }
 
 message ExtraData {
@@ -170,6 +176,12 @@ message QuorumCertificate {
   uint32 shard_group = 8;
 }
 
+message TimeoutCertificate {
+  uint64 epoch = 1;
+  uint64 block_height = 2;
+  repeated tari.dan.common.SignatureAndPublicKey signatures = 3;
+}
+
 message ValidatorMetadata {
   bytes public_key = 1;
   bytes vn_shard_key = 2;
@@ -243,17 +255,6 @@ message SubstateDestroyed {
 message SyncRequest {
   uint64 epoch = 1;
   uint64 block_height = 2;
-}
-
-message SyncResponse {
-  repeated FullBlock blocks = 1;
-  uint64 epoch = 2;
-}
-
-message FullBlock {
-  Block block = 1;
-  repeated QuorumCertificate qcs = 2;
-  repeated tari.dan.transaction.Transaction transactions = 3;
 }
 
 message EvictNodeAtom {

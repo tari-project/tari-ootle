@@ -5,6 +5,7 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use indexmap::{IndexMap, IndexSet};
 use log::*;
+use tari_consensus_types::{Decision, LeafBlock};
 use tari_dan_common_types::{
     committee::CommitteeInfo,
     optional::{IsNotFoundError, Optional},
@@ -16,9 +17,7 @@ use tari_dan_common_types::{
 use tari_dan_storage::{
     consensus_models::{
         BlockTransactionExecution,
-        Decision,
         Evidence,
-        LeafBlock,
         SubstateRequirementLockIntent,
         TransactionExecution,
         TransactionPoolRecord,
@@ -79,7 +78,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 Some(version) => {
                     let id = input.with_version(version);
                     store.lock_assert_is_up(id)?;
-                    info!(target: LOG_TARGET, "Resolved LOCAL substate: {id}");
+                    debug!(target: LOG_TARGET, "Resolved LOCAL substate: {id}");
                     resolved_substates.insert(input, version);
                 },
                 None => {
@@ -90,7 +89,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                         }
                         .into());
                     }
-                    info!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input} to version {}",latest.version());
+                    debug!(target: LOG_TARGET, "Resolved LOCAL unversioned substate: {input} to version {}",latest.version());
                     resolved_substates.insert(input, latest.version());
                 },
             }

@@ -9,6 +9,15 @@ use std::{
 
 use log::*;
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{
+    Decision,
+    HighPc,
+    HighestSeenBlock,
+    LeafBlock,
+    ProposalCertificate,
+    QcId,
+    TimeoutCertificate,
+};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
@@ -25,19 +34,14 @@ use tari_dan_storage::{
         Block,
         BlockHeader,
         BlockTransactionExecution,
+        BookkeepingModel,
         BurntUtxo,
         Command,
-        Decision,
         EvictNodeAtom,
         ForeignProposal,
         ForeignProposalRecord,
-        HighQc,
-        LastProposed,
-        LeafBlock,
         MintConfidentialOutputAtom,
         PendingShardStateTreeDiff,
-        QcId,
-        QuorumCertificate,
         SubstateChange,
         TransactionAtom,
         TransactionExecution,
@@ -82,7 +86,7 @@ use crate::{
     },
     messages::{HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,
-    traits::{ConsensusSpec, OutboundMessaging, ValidatorSignatureService, WriteableSubstateStore},
+    traits::{CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService, WriteableSubstateStore},
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_propose";
@@ -101,7 +105,7 @@ pub struct OnPropose<TConsensusSpec: ConsensusSpec> {
     epoch_manager: TConsensusSpec::EpochManager,
     transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
     transaction_manager: ConsensusTransactionManager<TConsensusSpec::TransactionExecutor, TConsensusSpec::StateStore>,
-    signing_service: TConsensusSpec::SignatureService,
+    signing_service: TConsensusSpec::SignerService,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
 }
 
@@ -117,7 +121,7 @@ where TConsensusSpec: ConsensusSpec
             TConsensusSpec::TransactionExecutor,
             TConsensusSpec::StateStore,
         >,
-        signing_service: TConsensusSpec::SignatureService,
+        signing_service: TConsensusSpec::SignerService,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
     ) -> Self {
         Self {
@@ -137,7 +141,9 @@ where TConsensusSpec: ConsensusSpec
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         next_height: NodeHeight,
         local_claim_public_key: RistrettoPublicKeyBytes,
-        leaf_block: LeafBlock,
+        highest_seen_block: HighestSeenBlock,
+        dummy_block: Option<LeafBlock>,
+        propose_high_tc: Option<TimeoutCertificate>,
         propose_epoch_end: bool,
     ) -> Result<(), HotStuffError> {
         let epoch = epoch_state.epoch();
@@ -145,43 +151,24 @@ where TConsensusSpec: ConsensusSpec
         let local_committee = epoch_state.local_committee();
         let epoch_hash = *epoch_state.epoch_hash();
         let _timer = TraceTimer::info(LOG_TARGET, "OnPropose");
-        if let Some(last_proposed) = self.store.with_read_tx(|tx| LastProposed::get(tx)).optional()? {
-            if last_proposed.epoch == epoch && last_proposed.height >= next_height {
-                info!(
-                    target: LOG_TARGET,
-                    "⤵️ SKIPPING propose for {} ({}) because we already proposed block {}",
-                    next_height,
-                    leaf_block,
-                    last_proposed,
-                );
-
-                return Ok(());
-            }
-        }
 
         let on_propose = self.clone();
 
         let (next_block, foreign_proposals) = task::spawn_blocking(move || {
             on_propose.store.with_write_tx(|tx| {
-                let high_qc = HighQc::get(&**tx, epoch)?;
-                let high_qc_cert = high_qc.get_quorum_certificate(&**tx)?;
-
-                info!(
-                    target: LOG_TARGET,
-                    "🌿 PROPOSE local block with parent {}. HighQC: {}",
-                    leaf_block,
-                    high_qc_cert,
-                );
-
+                let high_qc = HighPc::get(&**tx, epoch)?;
+                let high_qc_cert = ProposalCertificate::get(&**tx, high_qc.id())?;
                 let next_block = on_propose.build_next_block(
                     tx,
                     epoch,
                     next_height,
-                    leaf_block,
+                    highest_seen_block,
+                    dummy_block,
                     high_qc_cert,
                     &local_committee_info,
                     &local_claim_public_key,
                     epoch_hash,
+                    propose_high_tc,
                     propose_epoch_end,
                 )?;
 
@@ -205,7 +192,7 @@ where TConsensusSpec: ConsensusSpec
                 }
                 for (transaction_id, executed) in executed_transactions {
                     executed
-                        .for_block(next_block.as_leaf_block(), transaction_id)
+                        .for_block(next_block.as_leaf(), transaction_id)
                         .insert_if_required(tx)?;
                 }
 
@@ -218,12 +205,11 @@ where TConsensusSpec: ConsensusSpec
 
         info!(
             target: LOG_TARGET,
-            "🌿 [{}] PROPOSING new local block {} to {} validators. justify: {} ({}), parent: {}",
+            "🌿 [{}] PROPOSING new block {} to {} validators. justifies: {}, parent: {}",
             self.signing_service.public_key(),
             next_block,
             local_committee.len(),
-            next_block.justify().block_id(),
-            next_block.justify().block_height(),
+            next_block.justify().height(),
             next_block.parent()
         );
 
@@ -240,8 +226,8 @@ where TConsensusSpec: ConsensusSpec
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
         let epoch = next_block.epoch();
-        let leaf_block = next_block.as_leaf_block();
-        let msg = HotstuffMessage::Proposal(ProposalMessage {
+        let leaf_block = next_block.as_leaf();
+        let msg = HotstuffMessage::new_proposal(ProposalMessage {
             block: next_block,
             foreign_proposals,
         });
@@ -344,7 +330,7 @@ where TConsensusSpec: ConsensusSpec
             new_leaf_block,
         );
 
-        let leaf = new_leaf_block.as_leaf_block();
+        let leaf = new_leaf_block.as_leaf();
         for cmd in new_leaf_block.commands() {
             if !cmd.is_local_prepare() && !cmd.is_local_accept() {
                 continue;
@@ -403,30 +389,36 @@ where TConsensusSpec: ConsensusSpec
         tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         epoch: Epoch,
         next_height: NodeHeight,
-        parent_block: LeafBlock,
-        high_qc_certificate: QuorumCertificate,
+        highest_seen_block: HighestSeenBlock,
+        dummy_block: Option<LeafBlock>,
+        high_qc_certificate: ProposalCertificate,
         local_committee_info: &CommitteeInfo,
         local_claim_public_key_bytes: &RistrettoPublicKeyBytes,
         epoch_hash: FixedHash,
+        propose_high_tc: Option<TimeoutCertificate>,
         can_propose_epoch_end: bool,
     ) -> Result<NextBlock, HotStuffError> {
-        // The parent block will only ever not exist if it is a dummy block
-        let parent_exists = Block::record_exists(tx, parent_block.block_id())?;
-        let start_of_chain_block = if parent_exists {
-            // Parent exists - we can include its state in the MR calc, foreign propose etc
-            parent_block
-        } else {
-            // Parent does not exist which means we have dummy blocks between the parent and the justified block so we
-            // can exclude them from the query. There are a few queries that will fail if we used a non-existent block.
-            high_qc_certificate.get_block(tx)?.as_leaf_block()
-        };
+        let high_qc_id = high_qc_certificate.calculate_id();
+        let justify_block = Block::get(tx, &high_qc_certificate.calculate_block_id())?;
+        let start_of_chain_block = highest_seen_block;
+        let parent_block = dummy_block.unwrap_or_else(|| highest_seen_block.as_leaf_block());
+        // // The parent block will only ever not exist if it is a dummy block
+        // let parent_exists = Block::record_exists(tx, parent_block.block_id())?;
+        // let start_of_chain_block = if parent_exists {
+        //     // Parent exists - we can include its state in the MR calc, foreign propose etc.
+        //     parent_block
+        // } else {
+        //     // Parent does not exist which means we have dummy blocks between the parent and the justified block so
+        // we     // can exclude them from the query. There are a few queries that will fail if we used a
+        // non-existent block.     justify_block.as_leaf_block()
+        // };
 
         let should_not_propose_commands = can_propose_epoch_end || {
             // TODO: prevent proposers from proposing transactions after an epoch end command is in the justified
             // pending chain, regardless of whether we see the end of epoch or not (race condition).
             // If the last justified/parent block is an epoch end block, we dont propose commands since the block will
             // be rejected
-            let block = Block::get(tx, start_of_chain_block.block_id())?;
+            let block = Block::get(tx, highest_seen_block.block_id())?;
             block.is_epoch_end()
         };
 
@@ -469,7 +461,7 @@ where TConsensusSpec: ConsensusSpec
         };
 
         // NOTE: the block for the change set is not used.
-        let mut change_set = ProposedBlockChangeSet::new(start_of_chain_block);
+        let mut change_set = ProposedBlockChangeSet::new(start_of_chain_block.as_leaf_block());
 
         // No need to include evidence from justified block if no transactions are included in the next block
         if !batch.transactions.is_empty() {
@@ -502,13 +494,12 @@ where TConsensusSpec: ConsensusSpec
             //     batch.foreign_proposals.push(fp);
             // }
 
-            let justified_block = high_qc_certificate.get_block(tx)?;
-            if !justified_block.is_justified() {
+            if !justify_block.has_justify_qc() {
                 // TODO: we dont need to process transactions here that are not in the batch
                 self.process_newly_justified_block(
                     tx,
-                    &justified_block,
-                    *high_qc_certificate.id(),
+                    &justify_block,
+                    high_qc_id,
                     local_committee_info,
                     &mut change_set,
                 )?;
@@ -524,7 +515,7 @@ where TConsensusSpec: ConsensusSpec
             change_set.apply_transaction_update(&mut transaction);
             if let Some(command) = self.transaction_pool_record_to_command(
                 tx,
-                &start_of_chain_block,
+                &start_of_chain_block.as_leaf_block(),
                 transaction,
                 local_committee_info,
                 &mut substate_store,
@@ -553,7 +544,7 @@ where TConsensusSpec: ConsensusSpec
             let change = SubstateChange::Up {
                 id: substate_id,
                 shard,
-                substate: Substate::new(0, output),
+                substate: Box::new(Substate::new(0, output)),
             };
 
             substate_store.put(change)?;
@@ -600,7 +591,7 @@ where TConsensusSpec: ConsensusSpec
         let mut header = BlockHeader::create_unsigned(
             self.config.network,
             *parent_block.block_id(),
-            *high_qc_certificate.id(),
+            high_qc_id,
             next_height,
             epoch,
             local_committee_info.shard_group(),
@@ -613,10 +604,10 @@ where TConsensusSpec: ConsensusSpec
             ExtraData::new(),
         )?;
 
-        let signature = self.signing_service.sign(header.id());
+        let signature = self.signing_service.sign(&header);
         header.set_signature(signature.to_byte_type());
 
-        let next_block = Block::new(header, high_qc_certificate, commands);
+        let next_block = Block::new(header, high_qc_certificate, commands, propose_high_tc);
 
         Ok(NextBlock {
             block: next_block,
@@ -631,7 +622,7 @@ where TConsensusSpec: ConsensusSpec
         &self,
         tx: &<<TConsensusSpec as ConsensusSpec>::StateStore as StateStore>::ReadTransaction<'_>,
         local_committee_info: &CommitteeInfo,
-        start_of_chain_block: LeafBlock,
+        start_of_chain_block: HighestSeenBlock,
     ) -> Result<ProposalBatch, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "fetch_next_proposal_batch");
         let foreign_proposals = ForeignProposalRecord::get_all_new(

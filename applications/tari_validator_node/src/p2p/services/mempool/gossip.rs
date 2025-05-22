@@ -40,7 +40,7 @@ impl MempoolGossipCodec {
 
     pub async fn decode(&self, message: gossipsub::Message) -> std::io::Result<(usize, DanMessage)> {
         let (length, message) = self.codec.decode_from(&mut message.data.as_slice()).await?;
-        let message = DanMessage::try_from(message).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let message = DanMessage::try_from(message).map_err(std::io::Error::other)?;
 
         Ok((length, message))
     }

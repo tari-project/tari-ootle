@@ -24,10 +24,11 @@ use std::str::FromStr;
 
 use futures::StreamExt;
 use log::*;
+use tari_consensus_types::BlockId;
 use tari_crypto::tari_utilities::message_format::MessageFormat;
 use tari_dan_common_types::{committee::Committee, Epoch, PeerAddress, ShardGroup};
 use tari_dan_p2p::{proto, proto::rpc::SyncBlocksRequest};
-use tari_dan_storage::consensus_models::{Block, BlockId, SubstateUpdate};
+use tari_dan_storage::consensus_models::{Block, SubstateUpdate};
 use tari_engine_types::{
     events::Event,
     substate::{SubstateId, SubstateValue},

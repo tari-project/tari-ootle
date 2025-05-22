@@ -26,6 +26,7 @@ use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{BlockId, Decision};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     shard::Shard,
@@ -35,7 +36,7 @@ use tari_dan_common_types::{
     SubstateAddress,
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, Decision, TransactionExecution, TransactionPoolRecord},
+    consensus_models::{Block, TransactionExecution, TransactionPoolRecord},
     global::models,
     time::PrimitiveDateTime,
     Ordering,

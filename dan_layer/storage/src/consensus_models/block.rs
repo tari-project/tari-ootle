@@ -8,16 +8,27 @@ use std::{
     ops::Deref,
 };
 
-use borsh::BorshSerialize;
 use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
-use tari_common_types::types::{FixedHash, FixedHashSizeError};
+use tari_common_types::types::FixedHash;
+use tari_consensus_types::{
+    BlockId,
+    HighestSeenBlock,
+    LastExecuted,
+    LastProposed,
+    LastVoted,
+    LeafBlock,
+    LockedBlock,
+    ProposalCertificate,
+    QcId,
+    TimeoutCertificate,
+};
 use tari_dan_common_types::{
     committee::CommitteeInfo,
+    displayable::Displayable,
     optional::Optional,
-    serde_with,
     shard::Shard,
     Epoch,
     ExtraData,
@@ -34,20 +45,16 @@ use tari_state_tree::{compute_proof_for_hashes, SparseMerkleProofExt, StateTreeE
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use super::{
     BlockDiff,
     BlockPledge,
+    BookkeepingModel,
     EvictNodeAtom,
     ForeignProposalAtom,
     ForeignProposalRecord,
-    HighQc,
     MintConfidentialOutputAtom,
     PendingShardStateTreeDiff,
-    QcId,
-    QuorumCertificate,
     SubstateChange,
     SubstateDestroyedProof,
     SubstateRecord,
@@ -55,18 +62,7 @@ use super::{
     ValidatorStatsUpdate,
 };
 use crate::{
-    consensus_models::{
-        block_header::BlockHeader,
-        Command,
-        LastExecuted,
-        LastProposed,
-        LastVoted,
-        LeafBlock,
-        LockedBlock,
-        SubstateCreatedProof,
-        SubstateUpdate,
-        TransactionRecord,
-    },
+    consensus_models::{block_header::BlockHeader, Command, SubstateCreatedProof, SubstateUpdate, TransactionRecord},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,
@@ -83,12 +79,20 @@ pub enum BlockError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct Block {
     header: BlockHeader,
-    justify: QuorumCertificate,
+    /// Collection of signatures that justify a previous block and potentially a change to the next higher view.
+    justify: ProposalCertificate,
     /// Commands in the block. These are in canonical order to ensure a deterministic block hash.
     commands: BTreeSet<Command>,
+    /// The block's justification for a view timeout. This is only relevant if it is for a higher view height than the
+    /// ProposalCertificate.
+    timeout_certificate: Option<TimeoutCertificate>,
     // Metadata - not included in the block hash
     /// The QC that justified this block
     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
@@ -110,7 +114,8 @@ impl Block {
     pub fn create(
         network: Network,
         parent: BlockId,
-        justify: QuorumCertificate,
+        justify: ProposalCertificate,
+        high_tc: Option<TimeoutCertificate>,
         height: NodeHeight,
         epoch: Epoch,
         shard_group: ShardGroup,
@@ -126,7 +131,7 @@ impl Block {
         let header = BlockHeader::create(
             network,
             parent,
-            *justify.id(),
+            justify.calculate_id(),
             height,
             epoch,
             shard_group,
@@ -139,69 +144,24 @@ impl Block {
             epoch_hash,
             extra_data,
         )?;
-        Ok(Self::new(header, justify, commands))
+        Ok(Self::new(header, justify, commands, high_tc))
     }
 
-    pub fn new(header: BlockHeader, justify: QuorumCertificate, commands: BTreeSet<Command>) -> Self {
+    pub fn new(
+        header: BlockHeader,
+        justify: ProposalCertificate,
+        commands: BTreeSet<Command>,
+        timeout_certificate: Option<TimeoutCertificate>,
+    ) -> Self {
         Self {
             header,
             justify,
             commands,
+            timeout_certificate,
             justify_qc_id: None,
             commit_qc_id: None,
             block_time: None,
             stored_at: None,
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn load(
-        id: BlockId,
-        network: Network,
-        parent: BlockId,
-        justify: QuorumCertificate,
-        height: NodeHeight,
-        epoch: Epoch,
-        shard_group: ShardGroup,
-        proposed_by: RistrettoPublicKeyBytes,
-        state_merkle_root: FixedHash,
-        commands: BTreeSet<Command>,
-        command_merkle_root: FixedHash,
-        total_leader_fee: u64,
-        justify_qc_id: Option<QcId>,
-        commit_qc_id: Option<QcId>,
-        signature: Option<SchnorrSignatureBytes>,
-        created_at: PrimitiveDateTime,
-        block_time: Option<u64>,
-        timestamp: u64,
-        epoch_hash: FixedHash,
-        extra_data: ExtraData,
-    ) -> Self {
-        let header = BlockHeader::load(
-            id,
-            network,
-            parent,
-            *justify.id(),
-            height,
-            epoch,
-            shard_group,
-            proposed_by,
-            state_merkle_root,
-            total_leader_fee,
-            signature,
-            timestamp,
-            epoch_hash,
-            extra_data,
-            command_merkle_root,
-        );
-        Self {
-            header,
-            justify,
-            commands,
-            justify_qc_id,
-            commit_qc_id,
-            block_time,
-            stored_at: Some(created_at),
         }
     }
 
@@ -223,33 +183,27 @@ impl Block {
                     .expect("RistrettoPublicKey is 32 bytes"),
             );
         }
-
-        Self::create(
+        let justify = ProposalCertificate::genesis(epoch, shard_group);
+        let header = BlockHeader::genesis(
             network,
-            BlockId::zero(),
-            QuorumCertificate::genesis(epoch, shard_group),
-            NodeHeight::zero(),
+            justify.calculate_id(),
             epoch,
             shard_group,
-            RistrettoPublicKeyBytes::default(),
-            Default::default(),
             state_merkle_root,
-            0,
-            SchnorrSignatureBytes::zero(),
-            0,
             epoch_hash,
             extra_data,
-        )
-        .expect("Infallible with empty commands")
+        );
+        Self::new(header, justify, BTreeSet::new(), None)
     }
 
     /// This is the parent block for all genesis blocks. Its block ID is always zero.
     pub fn zero_block(network: Network, num_preshards: NumPreshards) -> Self {
-        let qc = QuorumCertificate::genesis(Epoch::zero(), ShardGroup::all_shards(num_preshards));
+        let qc = ProposalCertificate::genesis(Epoch::zero(), ShardGroup::all_shards(num_preshards));
         Self {
             header: BlockHeader::zero_block(network, num_preshards),
-            commit_qc_id: Some(*qc.id()),
+            commit_qc_id: Some(qc.calculate_id()),
             justify: qc,
+            timeout_certificate: None,
             commands: Default::default(),
             justify_qc_id: None,
             stored_at: None,
@@ -320,8 +274,8 @@ impl Block {
         self.commands.len()
     }
 
-    pub fn as_locked_block(&self) -> LockedBlock {
-        self.header().as_locked_block()
+    pub fn as_locked(&self) -> LockedBlock {
+        self.header().as_locked()
     }
 
     pub fn as_last_executed(&self) -> LastExecuted {
@@ -332,8 +286,16 @@ impl Block {
         self.header().as_last_voted()
     }
 
-    pub fn as_leaf_block(&self) -> LeafBlock {
-        self.header().as_leaf_block()
+    pub fn as_leaf(&self) -> LeafBlock {
+        self.header().as_leaf()
+    }
+
+    pub fn as_highest_seen(&self) -> HighestSeenBlock {
+        HighestSeenBlock {
+            height: self.header.height(),
+            block_id: *self.id(),
+            epoch: self.header.epoch(),
+        }
     }
 
     pub fn as_last_proposed(&self) -> LastProposed {
@@ -356,16 +318,25 @@ impl Block {
         self.header.parent()
     }
 
-    pub fn justify(&self) -> &QuorumCertificate {
+    pub fn justify(&self) -> &ProposalCertificate {
         &self.justify
     }
 
-    pub fn into_justify(self) -> QuorumCertificate {
+    pub fn max_certificate_height(&self) -> NodeHeight {
+        self.justify.height().max(
+            self.timeout_certificate
+                .as_ref()
+                .map(|tc| tc.height())
+                .unwrap_or_else(NodeHeight::zero),
+        )
+    }
+
+    pub fn into_justify(self) -> ProposalCertificate {
         self.justify
     }
 
     pub fn justifies_parent(&self) -> bool {
-        self.justify.block_id() == self.parent()
+        self.justify.calculate_block_id() == *self.parent()
     }
 
     pub fn height(&self) -> NodeHeight {
@@ -416,7 +387,11 @@ impl Block {
         self.header.is_dummy()
     }
 
-    pub fn is_justified(&self) -> bool {
+    pub fn timeout_certificate(&self) -> Option<&TimeoutCertificate> {
+        self.timeout_certificate.as_ref()
+    }
+
+    pub fn has_justify_qc(&self) -> bool {
         self.justify_qc_id.is_some()
     }
 
@@ -569,7 +544,7 @@ impl Block {
     }
 
     pub fn lock_executions<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
-        tx.block_transaction_executions_lock_any_for_block(&self.as_leaf_block())?;
+        tx.block_transaction_executions_lock_any_for_block(&self.as_leaf())?;
         Ok(())
     }
 
@@ -625,6 +600,8 @@ impl Block {
 
         let BlockDiff { changes, .. } = block_diff;
 
+        let justify_qc_id = self.justify().calculate_id();
+
         for change in changes {
             match change {
                 SubstateChange::Up { id, shard, substate } => {
@@ -636,17 +613,17 @@ impl Block {
                         shard,
                         self.epoch(),
                         *self.id(),
-                        *self.justify().id(),
+                        justify_qc_id,
                     )
                     .create(tx)?;
                 },
                 SubstateChange::Down { id, shard } => {
-                    SubstateRecord::destroy(tx, id, shard, self.epoch(), self.height(), self.justify().id())?;
+                    SubstateRecord::destroy(tx, id, shard, self.epoch(), self.height(), &justify_qc_id)?;
                 },
             }
         }
 
-        // Set the QC that committed this block, marking it as committed
+        // Set the QC that caused this block to be committed, marking it as committed
         tx.blocks_set_qcs(self.id(), Some(commit_qc_id), None)?;
         Ok(())
     }
@@ -779,7 +756,7 @@ impl Block {
                     updates.push(SubstateUpdate::Destroy(SubstateDestroyedProof {
                         substate_id: substate.substate_id.clone(),
                         version: substate.version,
-                        // justify: QuorumCertificate::get(tx, &destroyed.justify)?,
+                        // justify: ProposalCertificate::get(tx, &destroyed.justify)?,
                     }));
                 } else {
                     updates.push(SubstateUpdate::Create(SubstateCreatedProof {
@@ -822,93 +799,21 @@ impl Block {
     }
 
     /// Returns the QC that justifies this block
-    pub fn get_justify_qc<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<QuorumCertificate, StorageError> {
+    pub fn get_justify_qc<TTx: StateStoreReadTransaction>(
+        &self,
+        tx: &TTx,
+    ) -> Result<ProposalCertificate, StorageError> {
         let justify_qc_id = self.justify_qc_id.as_ref().ok_or_else(|| StorageError::QueryError {
             reason: format!("get_justify_qc: Block {} has not been justified", self.id()),
         })?;
-        QuorumCertificate::get(tx, justify_qc_id)
+        tx.proposal_certificates_get(justify_qc_id)
     }
 
-    pub fn get_commit_qc<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<QuorumCertificate, StorageError> {
+    pub fn get_commit_qc<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<ProposalCertificate, StorageError> {
         let commit_qc_id = self.commit_qc_id.as_ref().ok_or_else(|| StorageError::QueryError {
-            reason: format!("get_commit_qc: Block {} has not been committed", self.as_leaf_block()),
+            reason: format!("get_commit_qc: Block {} has not been committed", self.as_leaf()),
         })?;
-        QuorumCertificate::get(tx, commit_qc_id)
-    }
-
-    pub fn update_nodes<TTx, TFnOnLock, TFnOnCommit, E>(
-        &self,
-        tx: &mut TTx,
-        mut on_lock_block: TFnOnLock,
-        mut on_commit: TFnOnCommit,
-    ) -> Result<HighQc, E>
-    where
-        TTx: StateStoreWriteTransaction + Deref,
-        TTx::Target: StateStoreReadTransaction,
-        TFnOnLock: FnMut(&mut TTx, &LockedBlock, &Block, &QuorumCertificate) -> Result<(), E>,
-        TFnOnCommit: FnMut(&mut TTx, &LastExecuted, Block) -> Result<(), E>,
-        E: From<StorageError>,
-    {
-        let high_qc = self.justify().update_high_qc(tx)?;
-
-        // b'' <- b*.justify.node i.e. the (possibly new) justified block
-        let justified_node = self.justify().get_block(&**tx)?;
-
-        // b' <- b''.justify.node
-        let new_locked = justified_node.justify().get_block(&**tx)?;
-
-        if new_locked.is_genesis() {
-            return Ok(high_qc);
-        }
-
-        let current_locked = LockedBlock::get(&**tx, self.epoch())?;
-        if new_locked.height() > current_locked.height {
-            on_locked_block_recurse(
-                tx,
-                &current_locked,
-                &new_locked,
-                justified_node.justify(),
-                &mut on_lock_block,
-            )?;
-            new_locked.as_locked_block().set(tx)?;
-        }
-
-        // b <- b'.justify.node
-        let commit_node = new_locked.justify().block_id();
-        if justified_node.parent() == new_locked.id() && new_locked.parent() == commit_node {
-            debug!(
-                target: LOG_TARGET,
-                "✅ Block {} {} forms a 3-chain b'' = {}, b' = {}, b = {}",
-                self.height(),
-                self.id(),
-                justified_node.id(),
-                new_locked.id(),
-                commit_node,
-            );
-
-            // Commit prepare_node (b)
-            if commit_node.is_zero() {
-                return Ok(high_qc);
-            }
-            let prepare_node = Block::get(&**tx, commit_node)?;
-            let last_executed = LastExecuted::get(&**tx)?;
-            let last_exec = prepare_node.as_last_executed();
-            on_commit_block_recurse(tx, &last_executed, prepare_node, &mut on_commit)?;
-            last_exec.set(tx)?;
-        } else {
-            debug!(
-                target: LOG_TARGET,
-                "Block {} {} DOES NOT form a 3-chain b'' = {}, b' = {}, b = {}, b* = {}",
-                self.height(),
-                self.id(),
-                justified_node.id(),
-                new_locked.id(),
-                commit_node,
-                self.id()
-            );
-        }
-
-        Ok(high_qc)
+        tx.proposal_certificates_get(commit_qc_id)
     }
 
     /// safeNode predicate (https://arxiv.org/pdf/1803.05069v6.pdf)
@@ -922,7 +827,7 @@ impl Block {
         let locked = LockedBlock::get(tx, self.epoch())?;
 
         // Liveness rules
-        if self.justify().block_height() > locked.height() {
+        if self.justify().height() > locked.height() {
             return Ok(true);
         }
 
@@ -953,7 +858,7 @@ impl Block {
             // historically.
             warn!(
                 target: LOG_TARGET,
-                "get_block_pledge: Block {} is already committed. Some substates may be DOWN and therefore these pledges will not be provided", self.as_leaf_block()
+                "get_block_pledge: Block {} is already committed. Some substates may be DOWN and therefore these pledges will not be provided", self.as_leaf()
             );
         }
 
@@ -1008,7 +913,7 @@ impl Block {
                 substates.len(), atom.id, self
             );
 
-            let self_as_leaf = self.as_leaf_block();
+            let self_as_leaf = self.as_leaf();
             for substate in substates {
                 let version = substate.version();
                 let id = substate.substate_id;
@@ -1076,11 +981,11 @@ impl Display for Block {
         }
         write!(
             f,
-            "[{}, justify: {}/{} ({}), {}, {}, {} cmd(s), {}->{}]",
+            "[{}, justify: {} ({}), TC: {}, {}, {}, {} cmd(s), {}->{}]",
             self.height(),
-            self.justify().block_height(),
-            self.justify().epoch(),
+            self.justify().height(),
             if self.justifies_parent() { "🟢" } else { "🟡" },
+            self.timeout_certificate.as_ref().map(|tc| tc.height()).display(),
             self.epoch(),
             self.shard_group(),
             self.commands().len(),
@@ -1088,128 +993,6 @@ impl Display for Block {
             self.parent()
         )
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, BorshSerialize)]
-#[serde(transparent)]
-pub struct BlockId(#[serde(with = "serde_with::hex")] FixedHash);
-
-impl BlockId {
-    pub const fn zero() -> Self {
-        Self(FixedHash::zero())
-    }
-
-    pub fn new<T: Into<FixedHash>>(hash: T) -> Self {
-        Self(hash.into())
-    }
-
-    pub const fn as_hash(&self) -> &FixedHash {
-        &self.0
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-
-    pub fn into_array(self) -> [u8; 32] {
-        self.0.into_array()
-    }
-
-    pub fn is_zero(&self) -> bool {
-        self.0.iter().all(|b| *b == 0)
-    }
-
-    pub const fn byte_size() -> usize {
-        FixedHash::byte_size()
-    }
-}
-
-impl AsRef<[u8]> for BlockId {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-}
-
-impl From<FixedHash> for BlockId {
-    fn from(value: FixedHash) -> Self {
-        Self(value)
-    }
-}
-
-impl From<[u8; 32]> for BlockId {
-    fn from(value: [u8; 32]) -> Self {
-        Self(value.into())
-    }
-}
-
-impl TryFrom<Vec<u8>> for BlockId {
-    type Error = FixedHashSizeError;
-
-    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        Self::try_from(value.as_slice())
-    }
-}
-
-impl TryFrom<&[u8]> for BlockId {
-    type Error = FixedHashSizeError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        FixedHash::try_from(value).map(Self)
-    }
-}
-
-impl Display for BlockId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl AsRef<BlockId> for BlockId {
-    fn as_ref(&self) -> &BlockId {
-        self
-    }
-}
-
-fn on_locked_block_recurse<TTx, F, E>(
-    tx: &mut TTx,
-    locked: &LockedBlock,
-    block: &Block,
-    justify_qc: &QuorumCertificate,
-    callback: &mut F,
-) -> Result<(), E>
-where
-    TTx: StateStoreWriteTransaction + Deref,
-    TTx::Target: StateStoreReadTransaction,
-    E: From<StorageError>,
-    F: FnMut(&mut TTx, &LockedBlock, &Block, &QuorumCertificate) -> Result<(), E>,
-{
-    if locked.height < block.height() {
-        let parent = block.get_parent(&**tx)?;
-        on_locked_block_recurse(tx, locked, &parent, block.justify(), callback)?;
-        callback(tx, locked, block, justify_qc)?;
-    }
-    Ok(())
-}
-
-fn on_commit_block_recurse<TTx, F, E>(
-    tx: &mut TTx,
-    last_executed: &LastExecuted,
-    block: Block,
-    callback: &mut F,
-) -> Result<(), E>
-where
-    TTx: StateStoreWriteTransaction + Deref,
-    TTx::Target: StateStoreReadTransaction,
-    E: From<StorageError>,
-    F: FnMut(&mut TTx, &LastExecuted, Block) -> Result<(), E>,
-{
-    if last_executed.height < block.height() {
-        let parent = block.get_parent(&**tx)?;
-        // Recurse to "catch up" any parent blocks we may not have executed
-        on_commit_block_recurse(tx, last_executed, parent, callback)?;
-        callback(tx, last_executed, block)?;
-    }
-    Ok(())
 }
 
 /// Deletes everything related to a block as well as any child blocks

@@ -113,7 +113,7 @@ where TConsensusSpec: ConsensusSpec<Addr = PeerAddress>
                 zero_block.as_leaf_block().set(tx)?;
                 zero_block.as_last_executed().set(tx)?;
                 zero_block.as_last_voted().set(tx)?;
-                zero_block.justify().as_high_qc().set(tx)?;
+                zero_block.justify().as_high_pc().set(tx)?;
                 zero_block.commit_diff(tx, BlockDiff::empty(*zero_block.id()))?;
             }
             Ok::<_, CommsRpcConsensusSyncError>(())

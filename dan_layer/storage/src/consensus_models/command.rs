@@ -9,14 +9,15 @@ use std::{
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{BlockId, Decision};
 use tari_dan_common_types::{hashing::command_hasher, Epoch, ShardGroup};
 use tari_engine_types::serde_with;
 use tari_template_lib::{models::UnclaimedConfidentialOutputAddress, types::crypto::RistrettoPublicKeyBytes};
 use tari_transaction::TransactionId;
 
-use super::{BlockId, ForeignProposalAtom, LeaderFee, MintConfidentialOutputAtom, TransactionRecord};
+use super::{ForeignProposalAtom, LeaderFee, MintConfidentialOutputAtom, TransactionRecord};
 use crate::{
-    consensus_models::{evidence::Evidence, Decision},
+    consensus_models::evidence::Evidence,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,

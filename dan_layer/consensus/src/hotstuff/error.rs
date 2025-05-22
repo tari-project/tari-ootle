@@ -2,17 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{BlockId, LeafBlock, LockedBlock, QcId};
 use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError};
 use tari_dan_storage::{
-    consensus_models::{
-        BlockError,
-        BlockId,
-        ForeignProposalCommitProofError,
-        LeafBlock,
-        LockedBlock,
-        QcId,
-        TransactionPoolError,
-    },
+    consensus_models::{BlockError, ForeignProposalCommitProofError, TransactionPoolError},
     StorageError,
 };
 use tari_epoch_manager::EpochManagerError;
@@ -61,9 +54,12 @@ pub enum HotStuffError {
     #[error("State manager error: {0}")]
     StateManagerError(anyhow::Error),
     #[error("Invalid vote signature from {signer_public_key} (unauthenticated)")]
-    InvalidVoteSignature { signer_public_key: String },
+    InvalidVoteSignature { signer_public_key: RistrettoPublicKeyBytes },
     #[error("Invalid vote {signer_public_key} (unauthenticated): {details}")]
-    InvalidVote { signer_public_key: String, details: String },
+    InvalidVote {
+        signer_public_key: RistrettoPublicKeyBytes,
+        details: String,
+    },
     #[error("Transaction pool error: {0}")]
     TransactionPoolError(#[from] TransactionPoolError),
     #[error("Transaction {transaction_id} does not exist")]
@@ -136,10 +132,12 @@ impl From<EpochManagerError> for HotStuffError {
 pub enum ProposalValidationError {
     #[error("Storage error: {0}")]
     StorageError(#[from] StorageError),
-    #[error("Node proposed by {proposed_by} with hash {hash} did not satisfy the safeNode predicate")]
-    NotSafeBlock { proposed_by: String, hash: BlockId },
-    #[error("Node proposed by {proposed_by} with hash {hash} is the genesis block")]
-    ProposingGenesisBlock { proposed_by: String, hash: BlockId },
+    #[error("Block proposed by {proposed_by} with {block_id} did not satisfy the safeNode predicate")]
+    NotSafeBlock { proposed_by: String, block_id: BlockId },
+    #[error("Block proposed by {proposed_by} with {block_id} is the genesis block")]
+    ProposingGenesisBlock { proposed_by: String, block_id: BlockId },
+    #[error("Block {block} proposed by {proposed_by} is a dummy block. These are immediately rejected.")]
+    ProposingDummyBlock { proposed_by: String, block: LeafBlock },
     #[error("Parent {parent_id} not found in block {block_id} proposed by {proposed_by}")]
     ParentNotFound {
         proposed_by: String,
@@ -163,6 +161,12 @@ pub enum ProposalValidationError {
         justify_block_height: NodeHeight,
         candidate_block_height: NodeHeight,
     },
+    #[error("Invalid block height {block_height} for block {block_id}. {details}")]
+    InvalidBlockHeight {
+        block_id: BlockId,
+        block_height: NodeHeight,
+        details: String,
+    },
     #[error(
         "Candidate block {candidate_block_height} is higher than max failures {max_failures}. Proposed by \
          {proposed_by}, justify block height {justify_block_height}"
@@ -178,11 +182,15 @@ pub enum ProposalValidationError {
         justify_block_height: NodeHeight,
         candidate_block_height: NodeHeight,
     },
-    #[error("Block {block_id} proposed by {proposed_by} is not the leader. Expect {expected_leader}")]
+    #[error(
+        "Block {block} proposed by {proposed_by} is not the leader for {max_certificate_height}. Expect \
+         {expected_leader}"
+    )]
     NotLeader {
         proposed_by: String,
         expected_leader: String,
-        block_id: BlockId,
+        block: LeafBlock,
+        max_certificate_height: NodeHeight,
     },
     #[error(
         "Block {candidate_block} justify proposed by {proposed_by} is less than the current locked {locked_block}"
@@ -285,10 +293,6 @@ pub enum ProposalValidationError {
         qc_epoch: Epoch,
         current_epoch: Epoch,
     },
-    #[error("Dummy block {block_id} includes a signature")]
-    DummyBlockWithSignature { block_id: BlockId },
-    #[error("Dummy block {block_id} includes commands")]
-    DummyBlockWithCommands { block_id: BlockId },
     #[error("Malformed block {block_id}: {details}")]
     MalformedBlock { block_id: BlockId, details: String },
     #[error("Block {block_id} is for a future epoch. Current epoch: {current_epoch}, block epoch: {block_epoch}")]

@@ -5,11 +5,12 @@ use std::{collections::HashMap, hash::Hash, io::Write};
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::Epoch;
 use tari_engine_types::confidential::UnclaimedConfidentialOutput;
 use tari_template_lib::models::UnclaimedConfidentialOutputAddress;
 
-use crate::{consensus_models::BlockId, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
+use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BurntUtxo {

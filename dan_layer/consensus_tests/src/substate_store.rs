@@ -4,11 +4,12 @@
 use tari_common::configuration::Network;
 use tari_consensus::{
     hotstuff::substate_store::{LockFailedError, PendingSubstateStore, SubstateStoreError},
-    traits::{ReadableSubstateStore, WriteableSubstateStore},
+    traits::{CertificateStore, ReadableSubstateStore, WriteableSubstateStore},
 };
+use tari_consensus_types::{BlockId, QcId};
 use tari_dan_common_types::{shard::Shard, NumPreshards, PeerAddress, SubstateLockType, VersionedSubstateId};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, QcId, RequireLockIntentRef, SubstateChange, SubstateRecord},
+    consensus_models::{Block, RequireLockIntentRef, SubstateChange, SubstateRecord},
     StateStore,
 };
 use tari_engine_types::{
@@ -40,7 +41,7 @@ fn it_allows_substate_up_for_v0() {
         .put(SubstateChange::Up {
             id: id.clone(),
             shard: Shard::first(),
-            substate: Substate::new(1, value.clone()),
+            substate: Box::new(Substate::new(1, value.clone())),
         })
         .unwrap_err();
 
@@ -48,7 +49,7 @@ fn it_allows_substate_up_for_v0() {
         .put(SubstateChange::Up {
             id: id.clone(),
             shard: Shard::first(),
-            substate: Substate::new(0, value),
+            substate: Box::new(Substate::new(0, value)),
         })
         .unwrap();
 
@@ -81,7 +82,7 @@ fn it_allows_down_then_up() {
         .put(SubstateChange::Up {
             id: next_version.substate_id().clone(),
             shard: Shard::first(),
-            substate: new_substate(1, next_version.version()),
+            substate: Box::new(new_substate(1, next_version.version())),
         })
         .unwrap();
 
@@ -103,7 +104,7 @@ fn it_fails_if_previous_version_is_not_down() {
         .put(SubstateChange::Up {
             id: id.substate_id().clone(),
             shard: Shard::first(),
-            substate: new_substate(1, id.version() + 1),
+            substate: Box::new(new_substate(1, id.version() + 1)),
         })
         .unwrap_err();
 
@@ -224,7 +225,7 @@ fn create_store() -> (TestStore, TempDir) {
     store
         .with_write_tx(|tx| {
             let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
-            zero.justify().insert(tx)?;
+            zero.justify().save(tx)?;
             zero.insert(tx)
         })
         .unwrap();

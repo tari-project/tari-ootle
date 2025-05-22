@@ -7,13 +7,13 @@ use std::{
     time::Duration,
 };
 
+use tari_consensus_types::ProposalCertificate;
 use tari_dan_common_types::{
     optional::IsNotFoundError,
     substate_type::SubstateType,
     SubstateRequirement,
     VersionedSubstateIdRef,
 };
-use tari_dan_storage::{consensus_models::QuorumCertificate, time::PrimitiveDateTime};
 use tari_engine_types::{commit_result::FinalizeResult, substate::SubstateId};
 use tari_template_lib::{
     models::{Amount, VaultId},
@@ -28,6 +28,7 @@ use tari_template_lib::{
     types::TemplateAddress,
 };
 use tari_transaction::{Transaction, TransactionId};
+use time::PrimitiveDateTime;
 use webauthn_rs::prelude::Passkey;
 
 use crate::models::{
@@ -275,7 +276,7 @@ pub trait WalletStoreWriter {
         transaction_id: TransactionId,
         result: Option<&FinalizeResult>,
         final_fee: Option<Amount>,
-        qcs: Option<&[QuorumCertificate]>,
+        qcs: Option<&[ProposalCertificate]>,
         new_status: TransactionStatus,
         execution_time: Option<Duration>,
         finalized_time: Option<PrimitiveDateTime>,

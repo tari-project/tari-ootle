@@ -6,8 +6,9 @@ use std::time::Duration;
 use multiaddr::Multiaddr;
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::Decision;
 use tari_dan_common_types::{substate_type::SubstateType, Epoch, SubstateRequirement};
-use tari_dan_storage::{consensus_models::Decision, time::PrimitiveDateTime};
+use tari_dan_storage::time::PrimitiveDateTime;
 use tari_engine_types::{
     commit_result::ExecuteResult,
     serde_with as serde_tools,

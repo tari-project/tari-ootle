@@ -42,7 +42,7 @@ fn block_diffs_operations(db: impl StateStore) {
     let change = SubstateChange::Up {
         id: substate_id.clone(),
         shard: block9.shard_group().start(),
-        substate: Substate::new(version, substate_record.substate_value.clone().unwrap()),
+        substate: Box::new(Substate::new(version, substate_record.substate_value.clone().unwrap())),
     };
     tx.block_diffs_insert(&block_id8, &[change]).unwrap();
     let value2 = build_substate_value(Some(
@@ -57,7 +57,7 @@ fn block_diffs_operations(db: impl StateStore) {
         SubstateChange::Up {
             id: substate_id.clone(),
             shard: block9.shard_group().end(),
-            substate: Substate::new(version + 1, value2.clone()),
+            substate: Box::new(Substate::new(version + 1, value2.clone())),
         },
     ];
     tx.block_diffs_insert(&block_id9, changes).unwrap();

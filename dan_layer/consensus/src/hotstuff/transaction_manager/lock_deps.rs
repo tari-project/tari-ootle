@@ -2,11 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use indexmap::IndexMap;
-use tari_dan_storage::{
-    consensus_models::{BlockId, LockConflict},
-    StateStoreWriteTransaction,
-    StorageError,
-};
+use tari_consensus_types::BlockId;
+use tari_dan_storage::{consensus_models::LockConflict, StateStoreWriteTransaction, StorageError};
 use tari_transaction::TransactionId;
 
 pub struct TransactionLockConflicts {

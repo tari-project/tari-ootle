@@ -2,9 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use tari_consensus_types::{LastProposed, LastSentVote, LeafBlock};
 use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_storage::{
-    consensus_models::{Block, LastProposed, LastSentVote, LeafBlock},
+    consensus_models::{Block, BookkeepingModel},
     StateStore,
 };
 use tokio::task;
@@ -51,7 +52,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
             let result = store.with_read_tx(|tx| {
                 let mut leaf_block = LeafBlock::get(tx, epoch)?;
                 // Include the block we last proposed if applicable.
-                if let Some(last_proposed) = LastProposed::get(tx).optional()? {
+                if let Some(last_proposed) = LastProposed::get(tx, epoch).optional()? {
                     if last_proposed.epoch == leaf_block.epoch() && last_proposed.height > leaf_block.height() {
                         leaf_block = last_proposed.as_leaf_block();
                     }
@@ -99,7 +100,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                     msg.epoch,
                     msg.block_height,
                     leaf_block.height(),
-                    true,
+                    false,
                     1000,
                 )?;
 
@@ -147,7 +148,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
                 if let Err(err) = outbound_messaging
                     .send(
                         from.clone(),
-                        HotstuffMessage::Proposal(ProposalMessage {
+                        HotstuffMessage::new_proposal(ProposalMessage {
                             block,
                             foreign_proposals: foreign_proposals.into_iter().map(|p| p.into_proposal()).collect(),
                         }),
@@ -160,7 +161,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
             }
 
             // Send last vote.
-            let maybe_last_vote = match store.with_read_tx(|tx| LastSentVote::get(tx)).optional() {
+            let maybe_last_vote = match store.with_read_tx(|tx| LastSentVote::get(tx, epoch)).optional() {
                 Ok(last_vote) => last_vote,
                 Err(err) => {
                     warn!(target: LOG_TARGET, "Failed to fetch last vote for catch-up request: {}", err);
@@ -169,7 +170,7 @@ impl<TConsensusSpec: ConsensusSpec> OnSyncRequest<TConsensusSpec> {
             };
             if let Some(last_vote) = maybe_last_vote {
                 if let Err(err) = outbound_messaging
-                    .send(from.clone(), HotstuffMessage::Vote(last_vote.into()))
+                    .send(from.clone(), HotstuffMessage::Vote(last_vote.vote.into()))
                     .await
                 {
                     warn!(target: LOG_TARGET, "Failed to send LastVote {err}");

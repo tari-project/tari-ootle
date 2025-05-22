@@ -12,8 +12,8 @@ pub enum BaseNodeClientError {
     ConnectionError,
     #[error("Connection error: {0}")]
     GrpcConnection(#[from] tonic::transport::Error),
-    #[error("GRPC error: {0}")]
-    GrpcStatus(#[from] tonic::Status),
+    #[error("GRPC error: {code} {message}")]
+    GrpcStatus { code: tonic::Code, message: String },
     #[error("Peer sent an invalid message: {0}")]
     InvalidPeerMessage(String),
     #[error("Hash size error: {0}")]
@@ -22,10 +22,20 @@ pub enum BaseNodeClientError {
 
 impl IsNotFoundError for BaseNodeClientError {
     fn is_not_found_error(&self) -> bool {
-        if let Self::GrpcStatus(status) = self {
-            status.code() == tonic::Code::NotFound
+        if let Self::GrpcStatus { code, .. } = self {
+            *code == tonic::Code::NotFound
         } else {
             false
+        }
+    }
+}
+
+impl From<tonic::Status> for BaseNodeClientError {
+    fn from(status: tonic::Status) -> Self {
+        // To limit the size of BaseNodeClientError (to keep clippy happy), we dont include the entire Status instance
+        Self::GrpcStatus {
+            code: status.code(),
+            message: status.message().to_string(),
         }
     }
 }

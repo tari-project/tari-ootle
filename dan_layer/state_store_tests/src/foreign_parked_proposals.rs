@@ -3,7 +3,7 @@
 
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::{
-    consensus_models::{Block, ForeignParkedProposal},
+    consensus_models::{Block, BookkeepingModel, ForeignParkedProposal},
     StateStore,
     StateStoreWriteTransaction,
 };
@@ -24,7 +24,7 @@ fn run_test(db: impl StateStore) {
 
     let zero_block = Block::zero_block(Default::default(), TEST_NUM_PRESHARDS);
     tx.blocks_insert(&zero_block).unwrap();
-    zero_block.as_locked_block().set(&mut tx).unwrap();
+    zero_block.as_locked().set(&mut tx).unwrap();
 
     let fp = create_foreign_proposal(*zero_block.id(), Epoch(1));
 

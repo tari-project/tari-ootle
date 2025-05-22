@@ -17,6 +17,7 @@ tari_epoch_manager = { workspace = true }
 tari_state_tree = { workspace = true }
 tari_sidechain = { workspace = true }
 tari_template_lib_types = { workspace = true }
+tari_consensus_types = { workspace = true }
 
 # Used for PublicKey and Signature and Network enum
 tari_common = { workspace = true }

@@ -32,19 +32,15 @@ where TMsg: prost::Message + Default
         reader.read_exact(&mut len_buf).await?;
         let len = u32::from_be_bytes(len_buf) as usize;
         if len > MAX_MESSAGE_SIZE {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "message too large"));
+            return Err(std::io::Error::other("message too large"));
         }
         let mut buf = vec![0u8; len];
         reader.read_exact(&mut buf).await?;
         let mut slice = &buf[..];
-        let message =
-            prost::Message::decode(&mut slice).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let message = prost::Message::decode(&mut slice).map_err(std::io::Error::other)?;
 
         if !slice.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "bytes remaining on buffer",
-            ));
+            return Err(std::io::Error::other("bytes remaining on buffer"));
         }
         Ok((len, message))
     }
@@ -52,12 +48,10 @@ where TMsg: prost::Message + Default
     async fn encode_to<W>(&self, writer: &mut W, message: Self::Message) -> std::io::Result<()>
     where W: AsyncWrite + Unpin + Send {
         let mut buf = Vec::new();
-        message
-            .encode(&mut buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        message.encode(&mut buf).map_err(std::io::Error::other)?;
         let len = buf.len();
         if len > MAX_MESSAGE_SIZE {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "message too large"));
+            return Err(std::io::Error::other("message too large"));
         }
         writer.write_all(&(len as u32).to_be_bytes()).await?;
         writer.write_all(&buf).await?;

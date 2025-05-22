@@ -1,9 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_consensus_types::{BlockId, LeafBlock};
 use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, LeafBlock, StateTransitionId, SubstateRecord},
+    consensus_models::{Block, StateTransitionId, SubstateRecord},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -43,7 +44,7 @@ fn operations(db: impl StateStore) {
             SHARD,
             Epoch(0),
             *zero_block.id(),
-            *block.justify().id(),
+            block.justify().calculate_id(),
         ))
         .unwrap();
     }
@@ -59,7 +60,7 @@ fn operations(db: impl StateStore) {
             Shard::from(2),
             Epoch(0),
             *zero_block.id(),
-            *block.justify().id(),
+            block.justify().calculate_id(),
         ))
         .unwrap();
     }
@@ -79,7 +80,7 @@ fn operations(db: impl StateStore) {
             SHARD,
             Epoch(1000),
             *zero_block.id(),
-            *block.justify().id(),
+            block.justify().calculate_id(),
         ))
         .unwrap();
     }

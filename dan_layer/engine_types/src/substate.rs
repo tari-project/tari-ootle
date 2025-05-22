@@ -591,7 +591,7 @@ impl_partial_eq!(ValidatorFeePoolAddress, ValidatorFeePool);
 )]
 pub enum SubstateValue {
     Component(ComponentHeader),
-    Resource(Resource),
+    Resource(Box<Resource>),
     Vault(Vault),
     NonFungible(NonFungibleContainer),
     NonFungibleIndex(NonFungibleIndex),
@@ -646,7 +646,7 @@ impl SubstateValue {
 
     pub fn into_resource(self) -> Option<Resource> {
         match self {
-            SubstateValue::Resource(resource) => Some(resource),
+            SubstateValue::Resource(resource) => Some(*resource),
             _ => None,
         }
     }
@@ -808,7 +808,7 @@ impl From<ComponentHeader> for SubstateValue {
 
 impl From<Resource> for SubstateValue {
     fn from(resource: Resource) -> Self {
-        Self::Resource(resource)
+        Self::Resource(Box::new(resource))
     }
 }
 

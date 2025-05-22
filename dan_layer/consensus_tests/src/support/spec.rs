@@ -25,7 +25,7 @@ impl ConsensusSpec for TestConsensusSpec {
     type InboundMessaging = TestInboundMessaging;
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = TestOutboundMessaging;
-    type SignatureService = TestVoteSignatureService;
+    type SignerService = TestVoteSignatureService;
     type StateStore = TestStore;
     type SyncManager = AlwaysSyncedSyncManager;
     type TransactionExecutor = TestBlockTransactionProcessor;

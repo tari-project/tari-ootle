@@ -2,6 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use tari_consensus_types::{BlockId, Decision, LeafBlock, ProposalCertificate, QcId, ValidatorSignatureBytes};
+use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
@@ -13,15 +15,11 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::{
     consensus_models::{
-        BlockId,
         BlockPledge,
         Command,
-        Decision,
         Evidence,
         ForeignProposalRecord,
-        LeafBlock,
         LockedSubstateValue,
-        QcId,
         TransactionAtom,
         TransactionExecution,
         TransactionPoolRecord,
@@ -32,6 +30,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
 };
 use tari_engine_types::commit_result::RejectReason;
+use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -156,7 +155,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 let justify_qc_id = proposal
                     .get_justify_qc()
-                    .map(|qc| QcId::new(qc.calculate_id(proposal.epoch().as_u64())))
+                    .map(calculate_qc_id_from_sidechain_qc)
                     .ok_or_else(|| {
                         HotStuffError::InvariantError(format!(
                             "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
@@ -420,7 +419,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 };
                 let justify_qc_id = proposal
                     .get_justify_qc()
-                    .map(|qc| QcId::new(qc.calculate_id(proposal.epoch().as_u64())))
+                    .map(calculate_qc_id_from_sidechain_qc)
                     .ok_or_else(|| {
                         HotStuffError::InvariantError(format!(
                             "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
@@ -742,7 +741,7 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
                 }
                 info!(
                     target: LOG_TARGET,
-                    "❓️Foreign proposal {} received for transaction {} but it has yet to be sequenced.",
+                    "🧩 Foreign proposal {} received for transaction {} but it has yet to be sequenced.",
                     foreign_block_id,
                     transaction_id
                 );
@@ -771,4 +770,26 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
             },
         },
     }
+}
+
+fn calculate_qc_id_from_sidechain_qc(qc: &tari_sidechain::QuorumCertificate) -> QcId {
+    let signatures = qc
+        .signatures
+        .iter()
+        .map(|s| ValidatorSignatureBytes {
+            public_key: RistrettoPublicKeyBytes::from_bytes(s.public_key.as_bytes())
+                .expect("invariant: public key bytes"),
+            signature: SchnorrSignatureBytes::new(
+                RistrettoPublicKeyBytes::from_bytes(s.signature.get_compressed_public_nonce().as_bytes())
+                    .expect("invariant: nonce bytes"),
+                Scalar32Bytes::from_bytes(s.signature.get_signature().as_bytes()).expect("invariant: signature bytes"),
+            ),
+        })
+        .collect::<Vec<_>>();
+    ProposalCertificate::calculate_id_from_parts(
+        &qc.header_hash,
+        &qc.parent_id.into_array().into(),
+        &signatures,
+        &qc.decision,
+    )
 }

@@ -3,13 +3,9 @@
 
 use std::collections::HashSet;
 
+use tari_consensus_types::QcId;
 use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, VersionedSubstateId, VersionedSubstateIdRef};
-use tari_dan_storage::{
-    consensus_models::{Block, QcId},
-    StateStore,
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-};
+use tari_dan_storage::{consensus_models::Block, StateStore, StateStoreReadTransaction, StateStoreWriteTransaction};
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{models::ComponentAddress, types::ObjectKey};
 

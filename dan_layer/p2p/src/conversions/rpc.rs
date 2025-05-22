@@ -142,9 +142,9 @@ impl TryFrom<proto::rpc::substate_data::SubstateValueOrHash> for SubstateValueOr
 
     fn try_from(value: proto::rpc::substate_data::SubstateValueOrHash) -> Result<Self, Self::Error> {
         match value {
-            proto::rpc::substate_data::SubstateValueOrHash::Value(v) => Ok(SubstateValueOrHash::Value(
+            proto::rpc::substate_data::SubstateValueOrHash::Value(v) => Ok(SubstateValueOrHash::Value(Box::new(
                 SubstateValue::from_bytes(&v).context("SubstateValueOrHash::Value")?,
-            )),
+            ))),
             proto::rpc::substate_data::SubstateValueOrHash::Hash(h) => Ok(SubstateValueOrHash::Hash(
                 FixedHash::try_from(h).context("SubstateValueOrHash::Hash")?,
             )),

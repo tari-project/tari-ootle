@@ -11,7 +11,7 @@ use axum::{
 use serde_json::json;
 use tari_dan_common_types::optional::Optional;
 use tari_dan_storage::Ordering;
-use tari_state_store_rocksdb::models;
+use tari_state_store_rocksdb::column_families;
 
 use crate::webserver::{
     context::HandlerContext,
@@ -37,9 +37,9 @@ pub async fn list(
     ]);
     let tx = db.read_only_context();
 
-    let cf = tx.cf(models::state_transition::StateTransitionModel)?;
+    let cf = tx.cf(column_families::state_transition::StateTransitionCf)?;
 
-    let substate_cf = tx.cf(models::substate::SubstateModel)?;
+    let substate_cf = tx.cf(column_families::substate::SubstateCf)?;
     let ordering = if req.asc {
         Ordering::Ascending
     } else {

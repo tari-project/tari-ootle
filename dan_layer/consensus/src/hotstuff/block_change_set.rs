@@ -9,19 +9,17 @@ use std::{
 
 use indexmap::IndexMap;
 use log::*;
-use tari_dan_common_types::{displayable::Displayable, optional::Optional, shard::Shard, ShardGroup};
+use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock};
+use tari_dan_common_types::{displayable::Displayable, optional::Optional, shard::Shard, NodeHeight, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,
         BlockDiff,
-        BlockId,
         BlockTransactionExecution,
         BurntUtxo,
         Evidence,
         ForeignProposalRecord,
         ForeignProposalStatus,
-        HighQc,
-        LeafBlock,
         NoVoteReason,
         PendingShardStateTreeDiff,
         SubstateChange,
@@ -62,7 +60,8 @@ pub struct BlockDecision {
     /// Contains newly-committed non-dummy blocks
     pub commit_blocks: Vec<Block>,
     pub finalized_transactions: Vec<Vec<TransactionPoolRecord>>,
-    pub high_qc: HighQc,
+    pub high_pc: HighPc,
+    pub new_high_tc: Option<HighTc>,
     pub no_vote_reason: Option<NoVoteReason>,
 }
 
@@ -71,7 +70,7 @@ impl BlockDecision {
         matches!(self.quorum_decision, Some(QuorumDecision::Accept))
     }
 
-    pub fn is_epoch_end(&self) -> bool {
+    pub fn is_committed_epoch_end(&self) -> bool {
         self.commit_blocks.iter().any(|block| block.is_epoch_end())
     }
 
@@ -88,6 +87,12 @@ impl BlockDecision {
         self.commit_blocks
             .iter()
             .filter(|block| block.all_node_evictions().next().is_some())
+    }
+
+    pub fn highest_qc_view(&self) -> NodeHeight {
+        self.high_pc
+            .block_height()
+            .max(self.new_high_tc.as_ref().map_or(NodeHeight(0), |tc| tc.height()))
     }
 }
 
@@ -319,7 +324,7 @@ impl ProposedBlockChangeSet {
         if change_mut.execution.is_some() {
             return Err(TransactionPoolError::TransactionAlreadyExecuted {
                 transaction_id: *execution.transaction_id(),
-                block_id: self.block.block_id,
+                block_id: *self.block.block_id(),
             });
         }
 
@@ -401,7 +406,7 @@ impl ProposedBlockChangeSet {
     {
         if let Some(ref reason) = self.no_vote_reason {
             warn!(target: LOG_TARGET, "❌ No vote: {}", reason);
-            if let Err(err) = tx.diagnostics_add_no_vote(self.block.block_id, reason.clone()) {
+            if let Err(err) = tx.diagnostics_add_no_vote(*self.block.block_id(), reason.clone()) {
                 error!(target: LOG_TARGET, "Failed to save no vote reason: {}", err);
             }
             // No vote

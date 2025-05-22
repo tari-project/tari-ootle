@@ -11,6 +11,7 @@ use std::{
 
 use log::*;
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::{BlockId, Decision, LeafBlock};
 use tari_dan_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
@@ -25,12 +26,9 @@ use tari_transaction::{Transaction, TransactionId};
 use crate::{
     consensus_models::{
         calculate_leader_fee,
-        BlockId,
         BlockTransactionExecution,
-        Decision,
         Evidence,
         LeaderFee,
-        LeafBlock,
         TransactionAtom,
         TransactionExecution,
         TransactionRecord,

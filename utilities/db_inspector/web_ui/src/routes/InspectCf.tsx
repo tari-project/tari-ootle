@@ -225,7 +225,7 @@ function valueGetter(field: string) {
         return "null";
       }
       if (value === undefined) {
-        return field + " undefined";
+        return `<< ${field} undefined >>`;
       }
     }
 

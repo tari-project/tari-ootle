@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::Decision;
 use tari_dan_common_types::{substate_type::SubstateType, SubstateRequirement};
-use tari_dan_storage::{consensus_models::Decision, time::PrimitiveDateTime};
 use tari_engine_types::{
     commit_result::ExecuteResult,
     substate::{SubstateId, SubstateValue},
@@ -14,6 +14,7 @@ use tari_engine_types::{
 use tari_template_abi::TemplateDef;
 use tari_template_lib::prelude::TemplateAddress;
 use tari_transaction::{Transaction, TransactionId};
+use time::PrimitiveDateTime;
 
 #[async_trait]
 pub trait WalletNetworkInterface {

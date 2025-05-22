@@ -124,7 +124,7 @@ where
                         substate.version()
                     );
                     autofilled_inputs.push(VersionedSubstateId::new(id, substate.version()));
-                    found_substates.insert(address, substate);
+                    found_substates.insert(address, *substate);
                 //       found_this_round += 1;
                 } else {
                     warn!(
@@ -180,7 +180,7 @@ where
                     substate.version()
                 );
 
-                return Ok(Some((id, substate)));
+                return Ok(Some((id, *substate)));
             },
             SubstateResult::Down { id, .. } => {
                 warn!(target: LOG_TARGET, "🖋️ The substate for input requirement {id}v{version} is DOWN, continuing to search");

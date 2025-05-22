@@ -5,6 +5,23 @@ use std::{collections::HashMap, ops::Deref};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::{
+    BlockId,
+    Decision,
+    HighPc,
+    HighTc,
+    HighestSeenBlock,
+    LastExecuted,
+    LastProposed,
+    LastSentVote,
+    LastVoted,
+    LeafBlock,
+    LockedBlock,
+    ProposalCertificate,
+    QcId,
+    TcId,
+    TimeoutCertificate,
+};
 use tari_dan_common_types::{
     shard::Shard,
     Epoch,
@@ -27,10 +44,8 @@ use crate::{
     consensus_models::{
         Block,
         BlockDiff,
-        BlockId,
         BlockTransactionExecution,
         BurntUtxo,
-        Decision,
         EpochCheckpoint,
         EpochStateRoot,
         Evidence,
@@ -38,19 +53,10 @@ use crate::{
         ForeignProposal,
         ForeignProposalRecord,
         ForeignProposalStatus,
-        HighQc,
-        LastExecuted,
-        LastProposed,
-        LastSentVote,
-        LastVoted,
-        LeafBlock,
         LockConflict,
-        LockedBlock,
         LockedSubstateValue,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        QcId,
-        QuorumCertificate,
         StateTransition,
         StateTransitionId,
         SubstateChange,
@@ -107,13 +113,15 @@ pub trait StateStore {
 
 pub trait StateStoreReadTransaction: Sized {
     type Addr: NodeAddressable;
-    fn last_sent_vote_get(&self) -> Result<LastSentVote, StorageError>;
-    fn last_voted_get(&self) -> Result<LastVoted, StorageError>;
-    fn last_executed_get(&self) -> Result<LastExecuted, StorageError>;
-    fn last_proposed_get(&self) -> Result<LastProposed, StorageError>;
+    fn last_sent_vote_get(&self, epoch: Epoch) -> Result<LastSentVote, StorageError>;
+    fn last_voted_get(&self, epoch: Epoch) -> Result<LastVoted, StorageError>;
+    fn last_executed_get(&self, epoch: Epoch) -> Result<LastExecuted, StorageError>;
+    fn last_proposed_get(&self, epoch: Epoch) -> Result<LastProposed, StorageError>;
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError>;
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError>;
-    fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError>;
+    fn highest_seen_block_get(&self, epoch: Epoch) -> Result<HighestSeenBlock, StorageError>;
+    fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError>;
+    fn high_tc_get(&self, epoch: Epoch) -> Result<HighTc, StorageError>;
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
         &self,
         block_ids: I,
@@ -190,13 +198,19 @@ pub trait StateStoreReadTransaction: Sized {
         substate_id: T,
     ) -> Result<SubstateChange, StorageError>;
 
-    // -------------------------------- QuorumCertificate -------------------------------- //
-    fn quorum_certificates_get(&self, qc_id: &QcId) -> Result<QuorumCertificate, StorageError>;
-    fn quorum_certificates_get_all<'a, I>(&self, qc_ids: I) -> Result<Vec<QuorumCertificate>, StorageError>
+    // -------------------------------- ProposalCertificate -------------------------------- //
+    fn proposal_certificates_get(&self, qc_id: &QcId) -> Result<ProposalCertificate, StorageError>;
+    fn proposal_certificates_get_many<'a, I>(&self, qc_ids: I) -> Result<Vec<ProposalCertificate>, StorageError>
     where
         I: IntoIterator<Item = &'a QcId>,
         I::IntoIter: ExactSizeIterator;
-    fn quorum_certificates_get_by_block_id(&self, block_id: &BlockId) -> Result<QuorumCertificate, StorageError>;
+
+    // -------------------------------- TimeoutCertificate -------------------------------- //
+    fn timeout_certificates_get(&self, id: &TcId) -> Result<TimeoutCertificate, StorageError>;
+    fn timeout_certificates_get_many<'a, I>(&self, ids: I) -> Result<Vec<TimeoutCertificate>, StorageError>
+    where
+        I: IntoIterator<Item = &'a TcId>,
+        I::IntoIter: ExactSizeIterator;
 
     // -------------------------------- Transaction Pools -------------------------------- //
     fn transaction_pool_get_for_blocks(
@@ -345,9 +359,10 @@ pub trait StateStoreWriteTransaction {
     fn block_diffs_insert(&mut self, block_id: &BlockId, changes: &[SubstateChange]) -> Result<(), StorageError>;
     fn block_diffs_remove(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
 
-    // -------------------------------- QuorumCertificate -------------------------------- //
-    fn quorum_certificates_insert(&mut self, qc: &QuorumCertificate) -> Result<(), StorageError>;
-    fn quorum_certificates_set_shares_processed(&mut self, qc_id: &QcId) -> Result<(), StorageError>;
+    // -------------------------------- ProposalCertificate -------------------------------- //
+    fn proposal_certificates_save(&mut self, qc: &ProposalCertificate) -> Result<(), StorageError>;
+    // -------------------------------- TimeoutCertificate -------------------------------- //
+    fn timeout_certificates_save(&mut self, tc: &TimeoutCertificate) -> Result<(), StorageError>;
 
     // -------------------------------- Bookkeeping -------------------------------- //
     fn last_sent_vote_set(&mut self, last_sent_vote: &LastSentVote) -> Result<(), StorageError>;
@@ -355,8 +370,10 @@ pub trait StateStoreWriteTransaction {
     fn last_executed_set(&mut self, last_exec: &LastExecuted) -> Result<(), StorageError>;
     fn last_proposed_set(&mut self, last_proposed: &LastProposed) -> Result<(), StorageError>;
     fn leaf_block_set(&mut self, leaf_node: &LeafBlock) -> Result<(), StorageError>;
+    fn highest_seen_block_set(&mut self, last_seen_block: &HighestSeenBlock) -> Result<(), StorageError>;
     fn locked_block_set(&mut self, locked_block: &LockedBlock) -> Result<(), StorageError>;
-    fn high_qc_set(&mut self, high_qc: &HighQc) -> Result<(), StorageError>;
+    fn high_pc_set(&mut self, high_pc: &HighPc) -> Result<(), StorageError>;
+    fn high_tc_set(&mut self, high_tc: &HighTc) -> Result<(), StorageError>;
     fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposalRecord) -> Result<(), StorageError>;
     fn foreign_proposals_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
 

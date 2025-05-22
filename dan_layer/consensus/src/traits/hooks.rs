@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_dan_common_types::NodeHeight;
-use tari_dan_storage::consensus_models::{TransactionAtom, ValidBlock};
+use tari_dan_storage::consensus_models::ValidBlock;
 use tari_sidechain::QuorumDecision;
 use tari_transaction::TransactionId;
 
@@ -20,7 +20,7 @@ pub trait ConsensusHooks {
     fn on_needs_sync(&mut self, local_height: NodeHeight, remote_qc_height: NodeHeight);
 
     fn on_transaction_ready(&mut self, tx_id: &TransactionId);
-    fn on_transaction_finalized(&mut self, transaction: &TransactionAtom);
+    fn on_transaction_batch_finalized(&mut self, num_committed: usize, num_aborted: usize);
 }
 
 #[derive(Debug, Clone)]
@@ -87,9 +87,9 @@ impl<T: ConsensusHooks> ConsensusHooks for OptionalHooks<T> {
         }
     }
 
-    fn on_transaction_finalized(&mut self, transaction: &TransactionAtom) {
+    fn on_transaction_batch_finalized(&mut self, num_committed: usize, num_aborted: usize) {
         if let Some(inner) = self.inner.as_mut() {
-            inner.on_transaction_finalized(transaction);
+            inner.on_transaction_batch_finalized(num_committed, num_aborted);
         }
     }
 }
@@ -120,5 +120,5 @@ impl ConsensusHooks for NoopHooks {
 
     fn on_transaction_ready(&mut self, _tx_id: &TransactionId) {}
 
-    fn on_transaction_finalized(&mut self, _transaction: &TransactionAtom) {}
+    fn on_transaction_batch_finalized(&mut self, _num_committed: usize, _num_aborted: usize) {}
 }

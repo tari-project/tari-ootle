@@ -52,7 +52,7 @@ impl BlockPledge {
             pledges.push(SubstatePledge::Input {
                 substate_id: VersionedSubstateId::new(substate_id.clone(), substate.version()),
                 is_write: ev.is_write,
-                substate: substate.substate_value().clone(),
+                substate: Box::new(substate.substate_value().clone()),
             });
         }
         Some(pledges)
@@ -110,7 +110,7 @@ pub enum SubstatePledge {
     Input {
         substate_id: VersionedSubstateId,
         is_write: bool,
-        substate: SubstateValue,
+        substate: Box<SubstateValue>,
     },
     Output {
         substate_id: VersionedSubstateId,
@@ -125,7 +125,7 @@ impl SubstatePledge {
             SubstateLockType::Write | SubstateLockType::Read => Some(Self::Input {
                 is_write: lock_intent.lock_type().is_write(),
                 substate_id: lock_intent.to_versioned_substate_id_ref().to_owned(),
-                substate: substate?,
+                substate: Box::new(substate?),
             }),
             SubstateLockType::Output => Some(Self::Output {
                 substate_id: lock_intent.to_versioned_substate_id_ref().to_owned(),
@@ -137,7 +137,7 @@ impl SubstatePledge {
         match self {
             Self::Input {
                 substate_id, substate, ..
-            } => Some((substate_id, substate)),
+            } => Some((substate_id, *substate)),
             _ => None,
         }
     }

@@ -24,6 +24,8 @@ use std::convert::{TryFrom, TryInto};
 
 use log::*;
 use tari_bor::encode;
+use tari_consensus::traits::CertificateStore;
+use tari_consensus_types::{BlockId, HighPc, ProposalCertificate};
 use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
 use tari_dan_p2p::{
     proto,
@@ -47,7 +49,14 @@ use tari_dan_p2p::{
     },
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, EpochCheckpoint, HighQc, StateTransitionId, SubstateRecord, TransactionRecord},
+    consensus_models::{
+        Block,
+        BookkeepingModel,
+        EpochCheckpoint,
+        StateTransitionId,
+        SubstateRecord,
+        TransactionRecord,
+    },
     StateStore,
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
@@ -179,12 +188,12 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         };
 
         let created_qc = substate
-            .get_created_quorum_certificate(&tx)
+            .get_created_proposal_certificate(&tx)
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
         let resp = if substate.is_destroyed() {
             let destroyed_qc = substate
-                .get_destroyed_quorum_certificate(&tx)
+                .get_destroyed_proposal_certificate(&tx)
                 .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
             GetSubstateResponse {
                 status: SubstateStatus::Down as i32,
@@ -339,9 +348,9 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         let high_qc = self
             .state_store
             .with_read_tx(|tx| {
-                HighQc::get(tx, current_epoch)
+                HighPc::get(tx, current_epoch)
                     .optional()?
-                    .map(|hqc| hqc.get_quorum_certificate(tx))
+                    .map(|hqc| ProposalCertificate::get(tx, hqc.id()))
                     .transpose()
             })
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;

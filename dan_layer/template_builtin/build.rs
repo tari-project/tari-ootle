@@ -6,7 +6,6 @@ use std::{
     error::Error,
     fs,
     io,
-    io::ErrorKind,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -61,10 +60,10 @@ fn compile_template<P: AsRef<Path>>(package_dir: P) -> Result<(), Box<dyn Error>
         eprintln!("{}", String::from_utf8_lossy(&output.stdout));
         eprintln!("stderr:");
         eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-        return Err(Box::new(io::Error::new(
-            ErrorKind::Other,
-            format!("Failed to compile package: {:?}", package_dir.as_ref(),),
-        )));
+        return Err(Box::new(io::Error::other(format!(
+            "Failed to compile package: {:?}",
+            package_dir.as_ref(),
+        ))));
     }
 
     Ok(())

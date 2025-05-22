@@ -1,8 +1,9 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_consensus_types::QcId;
 use tari_dan_storage::{
-    consensus_models::{PendingShardStateTreeDiff, QcId},
+    consensus_models::{BookkeepingModel, PendingShardStateTreeDiff},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -26,9 +27,9 @@ fn pending_state_tree_diff_operations(db: impl StateStore) {
     genesis.insert(&mut tx).unwrap();
     tx.blocks_set_qcs(genesis.id(), Some(&QcId::zero()), Some(&QcId::zero()))
         .unwrap();
-    genesis.justify().save(&mut tx).unwrap();
-    genesis.as_locked_block().set(&mut tx).unwrap();
-    genesis.as_leaf_block().set(&mut tx).unwrap();
+    tx.proposal_certificates_save(genesis.justify()).unwrap();
+    genesis.as_locked().set(&mut tx).unwrap();
+    genesis.as_leaf().set(&mut tx).unwrap();
 
     let mut block_1 = create_block(Some(&genesis));
     block_1.set_commit_qc(QcId::zero());

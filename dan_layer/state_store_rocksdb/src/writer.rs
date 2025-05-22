@@ -25,6 +25,22 @@ use std::{cmp, collections::HashSet, iter, ops::Deref, time::Instant};
 use indexmap::IndexMap;
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
+use tari_consensus_types::{
+    BlockId,
+    Decision,
+    HighPc,
+    HighTc,
+    HighestSeenBlock,
+    LastExecuted,
+    LastProposed,
+    LastSentVote,
+    LastVoted,
+    LeafBlock,
+    LockedBlock,
+    ProposalCertificate,
+    QcId,
+    TimeoutCertificate,
+};
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -39,10 +55,8 @@ use tari_dan_common_types::{
 use tari_dan_storage::{
     consensus_models::{
         Block,
-        BlockId,
         BlockTransactionExecution,
         BurntUtxo,
-        Decision,
         EpochCheckpoint,
         EpochStateRoot,
         Evidence,
@@ -50,18 +64,9 @@ use tari_dan_storage::{
         ForeignProposal,
         ForeignProposalRecord,
         ForeignProposalStatus,
-        HighQc,
-        LastExecuted,
-        LastProposed,
-        LastSentVote,
-        LastVoted,
-        LeafBlock,
         LockConflict,
-        LockedBlock,
         NoVoteReason,
         PendingShardStateTreeDiff,
-        QcId,
-        QuorumCertificate,
         StateTransitionId,
         SubstateChange,
         SubstateDestroyed,
@@ -88,62 +93,63 @@ use tari_transaction::TransactionId;
 use crate::{
     cf_api::{CfContext, DbContext},
     codecs::ByteColumn,
-    models::{
+    column_families::{
         block,
-        block::BlockModel,
+        block::BlockCf,
         block_diff,
-        block_diff::{BlockDiffKey, BlockDiffModel, BlockDiffModelRef, BlockDiffRef},
+        block_diff::{BlockDiffCf, BlockDiffKey, BlockDiffModelRef, BlockDiffRef},
         block_transaction_execution,
-        block_transaction_execution::BlockTransactionExecutionModel,
+        block_transaction_execution::BlockTransactionExecutionCf,
         bookkeeping::{
             CommitBlock,
-            CommitBlockModel,
-            HighQcModel,
-            LastExecutedModel,
-            LastProposedModel,
-            LastSentVoteModel,
-            LastVotedModel,
-            LeafBlockModel,
-            LockedBlockModel,
-            PreviousEpochStateRootModel,
+            CommitBlockCf,
+            HighPcCf,
+            HighTcCf,
+            HighestSeenBlockCf,
+            LastExecutedCf,
+            LastProposedCf,
+            LastSentVoteCf,
+            LastVotedCf,
+            LeafBlockCf,
+            LockedBlockCf,
+            PreviousEpochStateRootCf,
         },
         burnt_utxo,
-        burnt_utxo::BurntUtxoModel,
+        burnt_utxo::BurntUtxoCf,
+        certificates::{ProposalCertificateCf, TimeoutCertificateCf},
         chain,
         chain::PendingChainIndex,
-        epoch_checkpoint::EpochCheckpointModel,
+        epoch_checkpoint::EpochCheckpointCf,
         evicted_node,
-        evicted_node::{EvictedNodeData, EvictedNodeModel},
-        finalized_transaction::FinalizedTransactionLinkModel,
+        evicted_node::{EvictedNodeCf, EvictedNodeData},
+        finalized_transaction::FinalizedTransactionLinkCf,
         foreign_parked_blocks,
-        foreign_parked_blocks::ForeignParkedBlockModel,
+        foreign_parked_blocks::ForeignParkedBlockCf,
         foreign_proposal,
-        foreign_proposal::{ForeignProposalEpochIndexData, ForeignProposalModel},
+        foreign_proposal::{ForeignProposalCf, ForeignProposalEpochIndexData},
         foreign_substate_pledge,
-        foreign_substate_pledge::ForeignSubstatePledgeModel,
+        foreign_substate_pledge::ForeignSubstatePledgeCf,
         lock_conflict,
-        lock_conflict::LockConflictModel,
+        lock_conflict::LockConflictCf,
         missing_transactions,
-        missing_transactions::MissingTransactionModel,
-        parked_block::{ParkedBlockDataRef, ParkedBlockModel, ParkedBlockModelRef},
+        missing_transactions::MissingTransactionCf,
+        parked_block::{ParkedBlockCf, ParkedBlockDataRef, ParkedBlockModelRef},
         pending_state_tree_diff,
-        pending_state_tree_diff::PendingStateTreeDiffModel,
-        quorum_certificate,
-        quorum_certificate::QuorumCertificateModel,
+        pending_state_tree_diff::PendingStateTreeDiffCf,
         state_transition,
-        state_transition::{StateTransitionModel, StateTransitionModelData, StateTransitionType},
+        state_transition::{StateTransitionCf, StateTransitionModelData, StateTransitionType},
         state_tree,
-        state_tree::{StateTreeModel, StateTreeStaleNodesModel},
-        state_tree_shard_versions::StateTreeShardVersionModel,
+        state_tree::{StateTreeCf, StateTreeStaleNodesModel},
+        state_tree_shard_versions::StateTreeShardVersionCf,
         substate,
-        substate::{SubstateHeadData, SubstateModel},
+        substate::{SubstateCf, SubstateHeadData},
         substate_locks,
         substate_locks::{SubstateLockKey, SubstateLockModel},
-        transaction::TransactionModel,
-        transaction_pool::TransactionPoolModel,
+        transaction::TransactionCf,
+        transaction_pool::TransactionPoolCf,
         transaction_pool_state_update,
-        transaction_pool_state_update::{TransactionPoolStateUpdateModel, TransactionPoolStateUpdateModelData},
-        validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
+        transaction_pool_state_update::{TransactionPoolStateUpdateCf, TransactionPoolStateUpdateData},
+        validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
     },
     options::DatabaseOptions,
     reader::RocksDbStateStoreReadTransaction,
@@ -212,7 +218,7 @@ impl<'a, TAddr: NodeAddressable> RocksDbStateStoreWriteTransaction<'a, TAddr> {
 
     fn parked_blocks_remove(&mut self, block_id: &BlockId) -> Result<(Block, Vec<ForeignProposal>), StorageError> {
         const OPERATION: &str = "parked_blocks_remove";
-        let cf = self.db().cf(ParkedBlockModel)?;
+        let cf = self.db().cf(ParkedBlockCf)?;
         let data = cf.get(block_id, OPERATION)?;
         cf.delete_or_not_found(block_id, OPERATION)?;
 
@@ -240,7 +246,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn blocks_insert(&mut self, block: &Block) -> Result<(), StorageError> {
         const OPERATION: &str = "blocks_insert";
-        let cf = self.db().cf(BlockModel)?;
+        let cf = self.db().cf(BlockCf)?;
         if cf.exists(block.id(), OPERATION)? {
             return Err(StorageError::QueryError {
                 reason: format!("Block {} already exists", block.id()),
@@ -281,7 +287,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn blocks_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         const OPERATION: &str = "blocks_delete";
-        let cf = self.db().cf(BlockModel)?;
+        let cf = self.db().cf(BlockCf)?;
         // Let's be a little paranoid and check this call is valid since it is destructive
         let block = cf.get(block_id, OPERATION)?;
         if block.is_committed() {
@@ -314,7 +320,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             return Ok(());
         }
 
-        let cf = self.db().cf(BlockModel)?;
+        let cf = self.db().cf(BlockCf)?;
         let mut block = cf.get(block_id, OPERATION)?;
 
         // set the flags
@@ -328,7 +334,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             self.db()
                 .cf(chain::CommittedParentChildChainIndex)?
                 .put(block.parent(), block_id, OPERATION)?;
-            self.db().cf(CommitBlockModel)?.put(
+            self.db().cf(CommitBlockCf)?.put(
                 &ByteColumn,
                 &CommitBlock {
                     height: block.height(),
@@ -375,7 +381,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn block_diffs_remove(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         const OPERATION: &str = "block_diffs_remove";
-        let cf = self.db().cf(BlockDiffModel)?;
+        let cf = self.db().cf(BlockDiffCf)?;
         let index_cf = self.db().cf(block_diff::SubstateIdIndex)?;
         let query = self.db().cf(block_diff::ByBlockIdQuery)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
@@ -388,47 +394,40 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn quorum_certificates_insert(&mut self, qc: &QuorumCertificate) -> Result<(), StorageError> {
-        const OPERATION: &str = "quorum_certificates_insert";
-        self.db().cf(QuorumCertificateModel)?.put(qc.id(), qc, OPERATION)?;
-        self.db().cf(quorum_certificate::QuorumCertificateBlockIndex)?.put(
-            &(*qc.block_id(), *qc.id()),
-            &(),
-            OPERATION,
-        )?;
+    fn proposal_certificates_save(&mut self, qc: &ProposalCertificate) -> Result<(), StorageError> {
+        const OPERATION: &str = "proposal_certificates_save";
+        self.db()
+            .cf(ProposalCertificateCf)?
+            .put(&qc.calculate_id(), qc, OPERATION)?;
         Ok(())
     }
 
-    fn quorum_certificates_set_shares_processed(&mut self, qc_id: &QcId) -> Result<(), StorageError> {
-        const OPERATION: &str = "quorum_certificates_set_shares_processed";
+    fn timeout_certificates_save(&mut self, tc: &TimeoutCertificate) -> Result<(), StorageError> {
+        const OPERATION: &str = "timeout_certificates_save";
 
-        let cf = self.db().cf(QuorumCertificateModel)?;
-
-        // TODO: consider merge or a separate index
-        let mut qc = cf.get(qc_id, OPERATION)?;
-        qc.set_is_shares_processed(true);
-        cf.put(qc_id, &qc, OPERATION)?;
-
+        self.db()
+            .cf(TimeoutCertificateCf)?
+            .put(&tc.calculate_id(), tc, OPERATION)?;
         Ok(())
     }
 
     fn last_sent_vote_set(&mut self, last_sent_vote: &LastSentVote) -> Result<(), StorageError> {
         self.db()
-            .cf(LastSentVoteModel)?
+            .cf(LastSentVoteCf)?
             .put(&ByteColumn, last_sent_vote, "last_sent_vote_set")?;
         Ok(())
     }
 
     fn last_voted_set(&mut self, last_voted: &LastVoted) -> Result<(), StorageError> {
         self.db()
-            .cf(LastVotedModel)?
+            .cf(LastVotedCf)?
             .put(&ByteColumn, last_voted, "last_voted_set")?;
         Ok(())
     }
 
     fn last_executed_set(&mut self, last_exec: &LastExecuted) -> Result<(), StorageError> {
         self.db()
-            .cf(LastExecutedModel)?
+            .cf(LastExecutedCf)?
             .put(&ByteColumn, last_exec, "last_executed_set")?;
 
         Ok(())
@@ -436,7 +435,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn last_proposed_set(&mut self, last_proposed: &LastProposed) -> Result<(), StorageError> {
         self.db()
-            .cf(LastProposedModel)?
+            .cf(LastProposedCf)?
             .put(&ByteColumn, last_proposed, "last_proposed_set")?;
 
         Ok(())
@@ -444,30 +443,41 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn leaf_block_set(&mut self, leaf_node: &LeafBlock) -> Result<(), StorageError> {
         self.db()
-            .cf(LeafBlockModel)?
+            .cf(LeafBlockCf)?
             .put(&ByteColumn, leaf_node, "leaf_block_set")?;
 
         Ok(())
     }
 
+    fn highest_seen_block_set(&mut self, last_seen_block: &HighestSeenBlock) -> Result<(), StorageError> {
+        self.db()
+            .cf(HighestSeenBlockCf)?
+            .put(&ByteColumn, last_seen_block, "highest_seen_block_set")?;
+        Ok(())
+    }
+
     fn locked_block_set(&mut self, locked_block: &LockedBlock) -> Result<(), StorageError> {
         self.db()
-            .cf(LockedBlockModel)?
+            .cf(LockedBlockCf)?
             .put(&ByteColumn, locked_block, "locked_block_set")?;
 
         Ok(())
     }
 
-    fn high_qc_set(&mut self, high_qc: &HighQc) -> Result<(), StorageError> {
-        self.db().cf(HighQcModel)?.put(&ByteColumn, high_qc, "high_qc_set")?;
+    fn high_pc_set(&mut self, high_qc: &HighPc) -> Result<(), StorageError> {
+        self.db().cf(HighPcCf)?.put(&ByteColumn, high_qc, "high_qc_set")?;
+        Ok(())
+    }
 
+    fn high_tc_set(&mut self, high_tc: &HighTc) -> Result<(), StorageError> {
+        self.db().cf(HighTcCf)?.put(&ByteColumn, high_tc, "high_tc_set")?;
         Ok(())
     }
 
     fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposalRecord) -> Result<(), StorageError> {
         const OPERATION: &str = "foreign_proposals_save";
         let db = self.db();
-        let cf = db.cf(ForeignProposalModel)?;
+        let cf = db.cf(ForeignProposalCf)?;
 
         if cf.exists(foreign_proposal.block_id(), OPERATION)? {
             self.foreign_proposals_set_status(
@@ -517,8 +527,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let db = self.db();
         // TODO: to avoid loading the decoded proposal, an block_id -> epoch index could be made
         // We should also consider keeping foreign proposals out of persistence and in memory
-        let fp = db.cf(ForeignProposalModel)?.get(block_id, OPERATION)?;
-        db.cf(ForeignProposalModel)?.delete(block_id, OPERATION)?;
+        let fp = db.cf(ForeignProposalCf)?.get(block_id, OPERATION)?;
+        db.cf(ForeignProposalCf)?.delete(block_id, OPERATION)?;
         db.cf(foreign_proposal::EpochIndex)?
             .delete_or_not_found(&(fp.epoch(), *block_id), OPERATION)?;
         db.cf(foreign_proposal::UnconfirmedIndex)?
@@ -538,7 +548,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         for result in iter {
             let (epoch, data) = result?;
-            db.cf(ForeignProposalModel)?.delete(&data.block_id, OPERATION)?;
+            db.cf(ForeignProposalCf)?.delete(&data.block_id, OPERATION)?;
             db.cf(foreign_proposal::EpochIndex)?
                 .delete(&(epoch, data.block_id), OPERATION)?;
             db.cf(foreign_proposal::UnconfirmedIndex)?
@@ -559,7 +569,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         set_proposed_in_block: Option<&BlockId>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "foreign_proposals_set_status";
-        let mut fp = self.db().cf(ForeignProposalModel)?.get(block_id, OPERATION)?;
+        let mut fp = self.db().cf(ForeignProposalCf)?.get(block_id, OPERATION)?;
         let db = self.db();
 
         if fp.status().is_unconfirmed() && !status.is_unconfirmed() {
@@ -594,7 +604,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         }
 
         // Update the record
-        self.db().cf(ForeignProposalModel)?.put(block_id, &fp, OPERATION)?;
+        self.db().cf(ForeignProposalCf)?.put(block_id, &fp, OPERATION)?;
 
         Ok(())
     }
@@ -608,7 +618,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         for result in proposed_iter {
             let (proposed_in_block, fp_id) = result?;
-            let mut fp = db.cf(ForeignProposalModel)?.get(&fp_id, OPERATION)?;
+            let mut fp = db.cf(ForeignProposalCf)?.get(&fp_id, OPERATION)?;
             if fp.proposed_in_block() == Some(&proposed_in_block) {
                 // Setting the status to New in this case
                 if !fp.status().is_unconfirmed() {
@@ -617,7 +627,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 }
 
                 fp.reset_proposed();
-                db.cf(ForeignProposalModel)?.put(&fp_id, &fp, OPERATION)?;
+                db.cf(ForeignProposalCf)?.put(&fp_id, &fp, OPERATION)?;
             }
 
             db.cf(foreign_proposal::ProposedInBlockIndex)?
@@ -629,7 +639,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
     fn transactions_insert(&mut self, tx_rec: &TransactionRecord) -> Result<(), StorageError> {
         self.db()
-            .cf(TransactionModel)?
+            .cf(TransactionCf)?
             .put(tx_rec.id(), tx_rec, "transactions_insert")?;
         Ok(())
     }
@@ -640,7 +650,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "transactions_finalize_all";
 
-        let finalized_cf = self.db().cf(FinalizedTransactionLinkModel)?;
+        let finalized_cf = self.db().cf(FinalizedTransactionLinkCf)?;
 
         let iter = transactions.into_iter();
         let (lower, _) = iter.size_hint();
@@ -673,7 +683,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<bool, StorageError> {
         const OPERATION: &str = "transaction_executions_insert_or_ignore";
 
-        let cf = self.db().cf(BlockTransactionExecutionModel)?;
+        let cf = self.db().cf(BlockTransactionExecutionCf)?;
         if cf.exists(
             &(
                 *transaction_execution.transaction_id(),
@@ -692,7 +702,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             return Ok(false);
         }
 
-        info!(
+        debug!(
             target: LOG_TARGET,
             "🔧 Inserting transaction execution for transaction {} in block {} {}",
             transaction_execution.transaction_id(),
@@ -726,7 +736,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "block_transaction_executions_remove_any_by_block_id";
 
         let query = self.db().cf(block_transaction_execution::ByBlockQuery)?;
-        let cf = self.db().cf(BlockTransactionExecutionModel)?;
+        let cf = self.db().cf(BlockTransactionExecutionCf)?;
         let index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
 
         let iter = query.query_prefix_range_key_iterator(Ordering::default(), block_id);
@@ -745,7 +755,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let block_query = self.db().cf(block_transaction_execution::ByBlockQuery)?;
         let tx_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
-        let cf = self.db().cf(BlockTransactionExecutionModel)?;
+        let cf = self.db().cf(BlockTransactionExecutionCf)?;
         let index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
 
         // Remove any executions prior to this block - we do this only if this block has an execution (if not, iter will
@@ -811,7 +821,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         );
 
         self.db()
-            .cf(TransactionPoolModel)?
+            .cf(TransactionPoolCf)?
             .insert(&tx_id, &value, "transaction_pool_insert_new")?;
 
         Ok(())
@@ -823,9 +833,9 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         update: &TransactionPoolStatusUpdate,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "transaction_pool_add_pending_update";
-        let cf = self.db().cf(TransactionPoolStateUpdateModel)?;
+        let cf = self.db().cf(TransactionPoolStateUpdateCf)?;
         // insert the update
-        let value = TransactionPoolStateUpdateModelData {
+        let value = TransactionPoolStateUpdateData {
             block_id: *block.block_id(),
             block_height: block.height(),
             transaction_id: *update.transaction_id(),
@@ -842,7 +852,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         // Set is_ready and pending_stage to the updated values. This allows has_uncommitted_transactions to return an
         // accurate value without querying records in the updates table.
-        let cf = self.db().cf(TransactionPoolModel)?;
+        let cf = self.db().cf(TransactionPoolCf)?;
         let mut tx_pool_value = cf.get(update.transaction_id(), OPERATION)?;
 
         tx_pool_value.set_is_ready(update.is_ready_now());
@@ -858,7 +868,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<Vec<TransactionPoolRecord>, StorageError> {
         const OPERATION: &str = "transaction_pool_remove_all";
 
-        let cf = self.db().cf(TransactionPoolModel)?;
+        let cf = self.db().cf(TransactionPoolCf)?;
         let pool_recs = cf.multi_get(transaction_ids, OPERATION)?;
         for tx in &pool_recs {
             cf.delete(tx.transaction_id(), OPERATION)?;
@@ -874,8 +884,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let iter = by_block_query.query_prefix_range_iterator(Ordering::Ascending, block.block_id());
 
-        let updates_cf = self.db().cf(TransactionPoolStateUpdateModel)?;
-        let pool_cf = self.db().cf(TransactionPoolModel)?;
+        let updates_cf = self.db().cf(TransactionPoolStateUpdateCf)?;
+        let pool_cf = self.db().cf(TransactionPoolCf)?;
         for result in iter {
             let (key, update) = result?;
             updates_cf.delete(&key, OPERATION)?;
@@ -911,7 +921,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let iter = by_block_query.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
 
-        let updates_cf = self.db().cf(TransactionPoolStateUpdateModel)?;
+        let updates_cf = self.db().cf(TransactionPoolStateUpdateCf)?;
         for result in iter {
             let key = result?;
             updates_cf.delete(&key, OPERATION)?;
@@ -937,7 +947,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         self.parked_blocks_insert(block, foreign_proposals)?;
 
-        let cf = self.db().cf(MissingTransactionModel)?;
+        let cf = self.db().cf(MissingTransactionCf)?;
         let index_cf = self.db().cf(missing_transactions::MissingTransactionBlockIdIndex)?;
         let values = missing_transaction_ids.map(|tx_id| ((*tx_id, *block.id()), ()));
         for (k, v) in values {
@@ -965,7 +975,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         };
         drop(iter);
 
-        let cf = self.db().cf(MissingTransactionModel)?;
+        let cf = self.db().cf(MissingTransactionCf)?;
         cf.delete(&key, OPERATION)?;
 
         let (_, block_id) = key;
@@ -995,7 +1005,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn foreign_parked_blocks_insert(&mut self, park_block: &ForeignParkedProposal) -> Result<(), StorageError> {
         const OPERATION: &str = "foreign_parked_blocks_insert";
         self.db()
-            .cf(ForeignParkedBlockModel)?
+            .cf(ForeignParkedBlockCf)?
             .put(park_block.block_id(), park_block, OPERATION)?;
         Ok(())
     }
@@ -1006,7 +1016,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         missing_transaction_ids: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "foreign_parked_blocks_insert_missing_transactions";
-        let parked_cf = self.db().cf(ForeignParkedBlockModel)?;
+        let parked_cf = self.db().cf(ForeignParkedBlockCf)?;
         if !parked_cf.exists(park_block_id, OPERATION)? {
             return Err(StorageError::QueryError {
                 reason: format!(
@@ -1028,7 +1038,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         transaction_id: &TransactionId,
     ) -> Result<Vec<ForeignParkedProposal>, StorageError> {
         const OPERATION: &str = "foreign_parked_blocks_remove_all_by_transaction";
-        let cf = self.db().cf(ForeignParkedBlockModel)?;
+        let cf = self.db().cf(ForeignParkedBlockCf)?;
         let query = self.db().cf(foreign_parked_blocks::ByTransactionIdQuery)?;
         let missing_cf = self.db().cf(foreign_parked_blocks::MissingTransactionsModel)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::default(), transaction_id);
@@ -1176,7 +1186,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let db = self.db();
 
         let address = substate.to_substate_address();
-        db.cf(SubstateModel)?.put(&address, substate, OPERATION)?;
+        db.cf(SubstateCf)?.put(&address, substate, OPERATION)?;
         db.cf(substate::HeadIndex)?.put(
             &substate.substate_id,
             &SubstateHeadData {
@@ -1196,7 +1206,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             transition: StateTransitionType::Up,
         };
 
-        db.cf(StateTransitionModel)?.put(&id, &transition, OPERATION)?;
+        db.cf(StateTransitionCf)?.put(&id, &transition, OPERATION)?;
 
         seq_index.put(&substate.created_by_shard, &next_seq, OPERATION)?;
 
@@ -1214,7 +1224,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "substates_down";
 
         let db = self.db();
-        let cf = db.cf(SubstateModel)?;
+        let cf = db.cf(SubstateCf)?;
 
         let address = versioned_substate_id.to_substate_address();
         let mut substate = cf.get(&address, OPERATION)?;
@@ -1238,7 +1248,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let seq = seq_index.get(&substate.created_by_shard, OPERATION).optional()?;
         let next_seq = seq.map(|s| s + 1).unwrap_or(1);
 
-        let transitions_cf = db.cf(StateTransitionModel)?;
+        let transitions_cf = db.cf(StateTransitionCf)?;
         let data = StateTransitionModelData {
             substate_address: address,
             transition: StateTransitionType::Down,
@@ -1258,7 +1268,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let unpruned_query = db.cf(substate::UnprunedDownedValuesEpochQuery)?;
         let unpruned_index = db.cf(substate::UnprunedDownedValuesIndex)?;
         let iter = unpruned_query.query_prefix_range_iterator(Ordering::Ascending, &epoch);
-        let substates_cf = db.cf(SubstateModel)?;
+        let substates_cf = db.cf(SubstateCf)?;
         for result in iter {
             let (key, substate_addr) = result?;
 
@@ -1281,7 +1291,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "foreign_substate_pledges_save";
 
-        let cf = self.db().cf(ForeignSubstatePledgeModel)?;
+        let cf = self.db().cf(ForeignSubstatePledgeCf)?;
         for pledge in pledges {
             let key = (*transaction_id, pledge.to_substate_address());
             cf.put(&key, pledge, OPERATION)?;
@@ -1296,7 +1306,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "foreign_substate_pledges_remove_many";
 
-        let cf = self.db().cf(ForeignSubstatePledgeModel)?;
+        let cf = self.db().cf(ForeignSubstatePledgeCf)?;
         let query = self.db().cf(foreign_substate_pledge::ByTransactionIdQuery)?;
 
         for transaction_id in transaction_ids {
@@ -1323,14 +1333,14 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             diff.version,diff.diff.new_nodes.len(),diff.diff.stale_tree_nodes.len()
         );
         self.db()
-            .cf(PendingStateTreeDiffModel)?
+            .cf(PendingStateTreeDiffCf)?
             .put(&(block_id, shard), diff, OPERATION)?;
         Ok(())
     }
 
     fn pending_state_tree_diffs_remove_by_block(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         const OPERATION: &str = "pending_state_tree_diffs_remove_by_block";
-        let cf = self.db().cf(PendingStateTreeDiffModel)?;
+        let cf = self.db().cf(PendingStateTreeDiffCf)?;
         let query = self.db().cf(pending_state_tree_diff::ByBlockIdQuery)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::Ascending, block_id);
 
@@ -1347,7 +1357,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         block_id: &BlockId,
     ) -> Result<IndexMap<Shard, Vec<PendingShardStateTreeDiff>>, StorageError> {
         const OPERATION: &str = "pending_state_tree_diffs_remove_and_return_by_block";
-        let cf = self.db().cf(PendingStateTreeDiffModel)?;
+        let cf = self.db().cf(PendingStateTreeDiffCf)?;
         let query = self.db().cf(pending_state_tree_diff::ByBlockIdQuery)?;
         let iter = query.query_prefix_range_iterator(Ordering::Ascending, block_id);
 
@@ -1368,7 +1378,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         nodes: Vec<(NodeKey, Node<Version>)>,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "state_tree_nodes_insert";
-        let cf = self.db().cf(StateTreeModel)?;
+        let cf = self.db().cf(StateTreeCf)?;
         for (key, node) in nodes {
             cf.put(&(shard, key), &node, OPERATION)?;
         }
@@ -1396,8 +1406,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         /// exceed this threshold when flushed, due to whole subtrees being added.
         const DELETE_BUFFER_FLUSH_THRESHOLD: usize = 1_000_000;
 
-        let cf = self.db().cf(StateTreeModel)?;
-        let versions_cf = self.db().cf(StateTreeShardVersionModel)?;
+        let cf = self.db().cf(StateTreeCf)?;
+        let versions_cf = self.db().cf(StateTreeShardVersionCf)?;
         let stale_cf = self.db().cf(state_tree::ByStateTreeStaleShardQuery)?;
         for shard in ShardGroup::all_shards(num_preshards).shard_iter() {
             let timer = Instant::now();
@@ -1405,7 +1415,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             let stale_iter = stale_cf.query_prefix_range_iterator(Ordering::Ascending, &shard);
             let max_version = versions_cf.get(&shard, OPERATION).optional()?.unwrap_or(0);
             let Some(to_version) = max_version.checked_sub(self.options.history_length) else {
-                debug!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.history_length);
+                trace!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.history_length);
                 continue;
             };
             for result in stale_iter {
@@ -1488,7 +1498,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "state_tree_shard_versions_set";
 
         self.db()
-            .cf(StateTreeShardVersionModel)?
+            .cf(StateTreeShardVersionCf)?
             .put(&shard, &version, OPERATION)?;
 
         Ok(())
@@ -1497,7 +1507,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn epoch_checkpoint_save(&mut self, checkpoint: &EpochCheckpoint) -> Result<(), StorageError> {
         const OPERATION: &str = "epoch_checkpoint_save";
         self.db()
-            .cf(EpochCheckpointModel)?
+            .cf(EpochCheckpointCf)?
             .put(&checkpoint.epoch(), checkpoint, OPERATION)?;
 
         Ok(())
@@ -1506,7 +1516,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn previous_epoch_state_root_set(&mut self, epoch_state_root: &EpochStateRoot) -> Result<(), StorageError> {
         const OPERATION: &str = "epoch_state_root_set";
         self.db()
-            .cf(PreviousEpochStateRootModel)?
+            .cf(PreviousEpochStateRootCf)?
             .put(&ByteColumn, epoch_state_root, OPERATION)?;
         Ok(())
     }
@@ -1515,7 +1525,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "burnt_utxos_insert";
 
         self.db()
-            .cf(BurntUtxoModel)?
+            .cf(BurntUtxoCf)?
             .put(&burnt_utxo.commitment, &burnt_utxo.output, OPERATION)?;
 
         if let Some(proposed_in_block) = burnt_utxo.proposed_in_block {
@@ -1536,7 +1546,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "burnt_utxos_set_proposed_block";
 
-        if !self.db().cf(BurntUtxoModel)?.exists(commitment, OPERATION)? {
+        if !self.db().cf(BurntUtxoCf)?.exists(commitment, OPERATION)? {
             return Err(StorageError::NotFound {
                 item: "burnt_utxos",
                 key: commitment.to_string(),
@@ -1572,9 +1582,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "burnt_utxos_delete";
 
-        self.db()
-            .cf(BurntUtxoModel)?
-            .delete_or_not_found(commitment, OPERATION)?;
+        self.db().cf(BurntUtxoCf)?.delete_or_not_found(commitment, OPERATION)?;
 
         self.db()
             .cf(burnt_utxo::ProposedInBlockIndex)?
@@ -1590,7 +1598,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "lock_conflicts_insert_all";
 
-        let cf = self.db().cf(LockConflictModel)?;
+        let cf = self.db().cf(LockConflictCf)?;
         let index_cf = self.db().cf(lock_conflict::LockConflictBlockIdIndex)?;
         for (tx_id, conflicts) in conflicts {
             for conflict in conflicts {
@@ -1613,7 +1621,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         }
 
         let db = self.db();
-        let cf = db.cf(LockConflictModel)?;
+        let cf = db.cf(LockConflictCf)?;
         let index_cf = db.cf(lock_conflict::LockConflictBlockIdIndex)?;
         let query = db.cf(lock_conflict::ByTransactionIdQuery)?;
 
@@ -1636,7 +1644,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     fn lock_conflicts_remove_by_block_id(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
         const OPERATION: &str = "lock_conflicts_remove_by_block_id";
 
-        let cf = self.db().cf(LockConflictModel)?;
+        let cf = self.db().cf(LockConflictCf)?;
         let query_cf = self.db().cf(lock_conflict::ByBlockIdQuery)?;
         let index_cf = self.db().cf(lock_conflict::LockConflictBlockIdIndex)?;
 
@@ -1659,7 +1667,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "validator_epoch_stats_updates";
 
-        let cf = self.db().cf(ValidatorNodeEpochStatsModel)?;
+        let cf = self.db().cf(ValidatorNodeEpochStatsCf)?;
         for update in updates {
             let existing = cf.get(&(epoch, *update.public_key()), OPERATION).optional()?;
 
@@ -1706,7 +1714,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 details: format!("{OPERATION}: block {evicted_in_block} does not exist"),
             })?;
 
-        self.db().cf(EvictedNodeModel)?.put(
+        self.db().cf(EvictedNodeCf)?.put(
             &(*public_key, evicted_in_block),
             &EvictedNodeData {
                 is_committed: false,
@@ -1726,7 +1734,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "evicted_nodes_mark_eviction_as_committed";
 
-        let cf = self.db().cf(EvictedNodeModel)?;
+        let cf = self.db().cf(EvictedNodeCf)?;
         let query = self.db().cf(evicted_node::ByPublicKeyQuery)?;
 
         let iter = query.query_prefix_range_iterator(Ordering::Ascending, public_key);
@@ -1779,7 +1787,7 @@ impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
 }
 
 fn recurse_subtree_depth_first_post_order<'a>(
-    cf: &'a CfContext<Transaction<TransactionDB>, StateTreeModel>,
+    cf: &'a CfContext<Transaction<TransactionDB>, StateTreeCf>,
     shard: Shard,
     parent_key: NodeKey,
     children: IndexMap<Nibble, Child>,

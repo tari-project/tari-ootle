@@ -5,7 +5,7 @@ use std::any::type_name;
 
 use anyhow::anyhow;
 use tari_common_types::types::FixedHash;
-use tari_dan_storage::consensus_models::BlockId;
+use tari_consensus_types::BlockId;
 
 use crate::{
     codecs::{DbCodec, EncodeVec},

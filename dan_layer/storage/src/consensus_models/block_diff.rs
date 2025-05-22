@@ -3,11 +3,12 @@
 
 use std::fmt::Debug;
 
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::{committee::CommitteeInfo, VersionedSubstateIdRef};
 use tari_engine_types::substate::SubstateId;
 
 use crate::{
-    consensus_models::{substate_change::SubstateChange, BlockId},
+    consensus_models::substate_change::SubstateChange,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,

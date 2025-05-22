@@ -23,9 +23,9 @@
 use std::convert::{TryFrom, TryInto};
 
 use anyhow::Context;
+use tari_consensus_types::ValidatorSignatureBytes;
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{Epoch, SubstateAddress};
-use tari_dan_storage::consensus_models::ValidatorSignature;
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_transaction::TransactionSignature;
 
@@ -52,7 +52,7 @@ impl From<&SchnorrSignatureBytes> for proto::common::Signature {
     }
 }
 
-impl TryFrom<proto::common::SignatureAndPublicKey> for ValidatorSignature {
+impl TryFrom<proto::common::SignatureAndPublicKey> for ValidatorSignatureBytes {
     type Error = anyhow::Error;
 
     fn try_from(sig: proto::common::SignatureAndPublicKey) -> Result<Self, Self::Error> {
@@ -69,8 +69,8 @@ impl TryFrom<proto::common::SignatureAndPublicKey> for ValidatorSignature {
     }
 }
 
-impl From<&ValidatorSignature> for proto::common::SignatureAndPublicKey {
-    fn from(value: &ValidatorSignature) -> Self {
+impl From<&ValidatorSignatureBytes> for proto::common::SignatureAndPublicKey {
+    fn from(value: &ValidatorSignatureBytes) -> Self {
         Self {
             public_nonce: value.signature.public_nonce().to_vec(),
             signature: value.signature.signature().to_vec(),

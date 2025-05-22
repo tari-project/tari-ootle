@@ -33,13 +33,6 @@ import "common.proto";
 import "transaction.proto";
 import "consensus.proto";
 
-message Message {
-  oneof message {
-    DanMessage dan_message = 1;
-    tari.dan.consensus.HotStuffMessage consensus = 2;
-  }
-}
-
 message DanMessage {
   oneof message {
     tari.dan.transaction.NewTransactionMessage new_transaction = 1;

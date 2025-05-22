@@ -19,7 +19,7 @@ pub enum SubstateChange {
     Up {
         id: SubstateId,
         shard: Shard,
-        substate: Substate,
+        substate: Box<Substate>,
     },
     Down {
         id: VersionedSubstateId,
@@ -84,7 +84,7 @@ impl SubstateChange {
 
     pub fn into_up(self) -> Option<Substate> {
         match self {
-            SubstateChange::Up { substate: value, .. } => Some(value),
+            SubstateChange::Up { substate: value, .. } => Some(*value),
             _ => None,
         }
     }

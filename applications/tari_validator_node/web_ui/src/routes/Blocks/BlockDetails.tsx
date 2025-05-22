@@ -78,15 +78,13 @@ export default function BlockDetails() {
         .then(([resp, identity]) => {
           setIdentity(identity);
           setBlock(resp.block);
-          if (resp?.block?.justify?.block_id) {
-            getBlock({ block_id: resp.block.justify.block_id }).then((justify_block) => {
-              if (resp.block.stored_at && justify_block.block.stored_at) {
-                let blockTime = resp.block.stored_at;
-                let justifyTime = justify_block.block.stored_at;
-                setBlockTime(Math.floor(new Date(blockTime).getTime() / 1000) - Math.floor(new Date(justifyTime).getTime() / 1000));
-              }
-            });
-          }
+          getBlock({ block_id: resp.block.header.parent }).then((justify_block) => {
+            if (resp.block.stored_at && justify_block.block.stored_at) {
+              let blockTime = resp.block.block_time || 0;
+              let justifyTime = justify_block.block.block_time || 0;
+              setBlockTime(Math.floor(new Date(blockTime * 1000).getTime() / 1000) - Math.floor(new Date(justifyTime * 1000).getTime() / 1000));
+            }
+          });
           setEpochEvents([]);
           const otherCommands: OtherCommands = {};
           const foreignProposals = [];
@@ -189,6 +187,10 @@ export default function BlockDetails() {
                             <DataTableCell>{block!.header.height}</DataTableCell>
                           </TableRow>
                           <TableRow>
+                            <TableCell>Proposal Certificate</TableCell>
+                            <DataTableCell>{block!.justify.height} ({block!.justify.signatures.length} signatures)</DataTableCell>
+                          </TableRow>
+                          <TableRow>
                             <TableCell>Parent block</TableCell>
                             <DataTableCell>
                               <Link to={`/blocks/${block!.header.parent}`}>{block!.header.parent}</Link>
@@ -213,6 +215,14 @@ export default function BlockDetails() {
                           <TableRow>
                             <TableCell>Proposed by</TableCell>
                             <DataTableCell>{block!.header.proposed_by}</DataTableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell>Timeout Height</TableCell>
+                            <DataTableCell>
+                              {block!.timeout_certificate
+                                ? `${block!.timeout_certificate.height} (${block!.timeout_certificate.signatures.length} signatures)`
+                                : "--"}
+                            </DataTableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell>Block time</TableCell>

@@ -6,8 +6,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use tari_consensus_types::Decision;
 use tari_dan_common_types::SubstateLockType;
-use tari_dan_storage::consensus_models::Decision;
 use tari_engine_types::{substate::SubstateId, ValidatorFeeWithdrawal};
 use tari_transaction::{Transaction, TransactionId};
 

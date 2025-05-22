@@ -4,11 +4,12 @@
 use std::{fmt::Display, ops::Deref};
 
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::Epoch;
 use tari_transaction::TransactionId;
 
 use crate::{
-    consensus_models::{BlockId, BlockPledge, CommandsCommitProof, ForeignProposal},
+    consensus_models::{BlockPledge, CommandsCommitProof, ForeignProposal},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,

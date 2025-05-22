@@ -99,27 +99,29 @@ impl CommandsCommitProofV1 {
 
     pub fn validate_header(
         &self,
-        expected_proposer: &RistrettoPublicKeyBytes,
+        _expected_proposer: &RistrettoPublicKeyBytes,
     ) -> Result<(), ForeignProposalCommitProofError> {
         self.validate_well_formed()?;
         let header = &self.commit_proof.header;
         if header.height == 0 {
             return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
-                "Header height is 0. Cannot propose genesis"
+                "Header height is 0"
             )));
         }
+
         let signature = header
             .signature
             .to_schnorr_signature()
             .map_err(|e| ForeignProposalCommitProofError::Invalid(anyhow!("Malformed signature: {e}")))?;
         let block_id = header.calculate_block_id();
-        if header.proposed_by.as_bytes() != expected_proposer.as_bytes() {
-            return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
-                "Proposed by public key {} does not match expected proposer {}",
-                header.proposed_by,
-                expected_proposer
-            )));
-        }
+        // TODO: we currently cannot determine the correct leader from the proof data
+        // if header.proposed_by.as_bytes() != expected_proposer.as_bytes() {
+        //     return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
+        //         "Proposed by public key {} does not match expected proposer {}",
+        //         header.proposed_by,
+        //         expected_proposer
+        //     )));
+        // }
 
         let proposed_by = header
             .proposed_by

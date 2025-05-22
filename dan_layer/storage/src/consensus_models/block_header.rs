@@ -10,6 +10,17 @@ use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{
+    BlockId,
+    LastExecuted,
+    LastVoted,
+    LeafBlock,
+    LockedBlock,
+    ProposalCertificate,
+    QcId,
+    SignedMessage,
+    ToSignatureMessage,
+};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{hashing, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_engine_types::serde_with;
@@ -17,8 +28,8 @@ use tari_sidechain::{BlockHeaderHashFields, BlockHeaderHashFieldsV1};
 use tari_state_tree::{compute_merkle_root_for_hashes, TreeHash};
 use tari_template_lib::{prelude::SchnorrSignatureBytes, types::crypto::RistrettoPublicKeyBytes};
 
-use super::{BlockError, BlockId, QcId, QuorumCertificate};
-use crate::consensus_models::{Command, LastExecuted, LastVoted, LeafBlock, LockedBlock};
+use super::BlockError;
+use crate::consensus_models::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -154,6 +165,34 @@ impl BlockHeader {
         Ok(header)
     }
 
+    pub fn genesis(
+        network: Network,
+        justify_id: QcId,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+        state_merkle_root: FixedHash,
+        epoch_hash: FixedHash,
+        extra_data: ExtraData,
+    ) -> Self {
+        Self::create(
+            network,
+            BlockId::zero(),
+            justify_id,
+            NodeHeight::zero(),
+            epoch,
+            shard_group,
+            RistrettoPublicKeyBytes::default(),
+            state_merkle_root,
+            &BTreeSet::new(),
+            0,
+            SchnorrSignatureBytes::zero(),
+            0,
+            epoch_hash,
+            extra_data,
+        )
+        .expect("Infallible with empty commands")
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn load(
         id: BlockId,
@@ -197,7 +236,8 @@ impl BlockHeader {
             network,
             id: BlockId::zero(),
             parent: BlockId::zero(),
-            justify_id: *QuorumCertificate::genesis(Epoch::zero(), ShardGroup::all_shards(num_preshards)).id(),
+            justify_id: ProposalCertificate::genesis(Epoch::zero(), ShardGroup::all_shards(num_preshards))
+                .calculate_id(),
             height: NodeHeight::zero(),
             epoch: Epoch::zero(),
             shard_group: ShardGroup::all_shards(num_preshards),
@@ -312,10 +352,19 @@ impl BlockHeader {
     }
 
     pub fn is_genesis(&self) -> bool {
-        self.height.is_zero()
+        // TODO: simplify genesis - This check is used to skip some validations (e.g. signature). Are there some
+        // malicious tricks with the other fields here? Ideally we'd simple do
+        // `self == Self::genesis(self.epoch, self.shard_group)` however the previous epoch state hash makes that
+        // difficult.
+        self.height.is_zero() &&
+            self.parent.is_zero() &&
+            self.timestamp == 0 &&
+            self.command_merkle_root.iter().all(|b| *b == 0) &&
+            self.proposed_by.iter().all(|b| *b == 0) &&
+            self.signature.is_none()
     }
 
-    pub fn as_locked_block(&self) -> LockedBlock {
+    pub fn as_locked(&self) -> LockedBlock {
         LockedBlock {
             height: self.height,
             block_id: self.id,
@@ -339,7 +388,7 @@ impl BlockHeader {
         }
     }
 
-    pub fn as_leaf_block(&self) -> LeafBlock {
+    pub fn as_leaf(&self) -> LeafBlock {
         LeafBlock {
             height: self.height,
             block_id: self.id,
@@ -440,6 +489,24 @@ impl Display for BlockHeader {
             self.id(),
             self.parent()
         )
+    }
+}
+
+// Used to sign the block
+impl ToSignatureMessage for BlockHeader {
+    fn to_signature_message(&self) -> FixedHash {
+        *self.id.hash()
+    }
+}
+
+impl SignedMessage for BlockHeader {
+    fn signature(&self) -> &SchnorrSignatureBytes {
+        // TODO: remove the Option for signature
+        self.signature.as_ref().expect("BlockHeader not signed")
+    }
+
+    fn public_key(&self) -> &RistrettoPublicKeyBytes {
+        &self.proposed_by
     }
 }
 

@@ -4,13 +4,13 @@
 use std::str::FromStr;
 
 use diesel::{Identifiable, Queryable};
-use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::storage::WalletStorageError;
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
     models::{Amount, ResourceAddress},
     resource::ResourceType,
 };
+use time::PrimitiveDateTime;
 
 use crate::schema::vaults;
 

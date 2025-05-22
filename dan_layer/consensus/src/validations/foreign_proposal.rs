@@ -12,22 +12,22 @@ use crate::{
 
 pub fn check_foreign_proposal<TConsensusSpec: ConsensusSpec>(
     proposal: &ForeignProposal,
-    committee: &Committee<TConsensusSpec::Addr>,
+    foreign_committee: &Committee<TConsensusSpec::Addr>,
     leader_strategy: &TConsensusSpec::LeaderStrategy,
     config: &HotstuffConfig,
 ) -> Result<(), HotStuffError> {
     check_network(proposal, config.network)?;
-    check_header::<TConsensusSpec>(proposal, committee, leader_strategy)?;
-    check_commit_proof::<TConsensusSpec>(proposal.commit_proof(), committee)?;
+    check_header::<TConsensusSpec>(proposal, foreign_committee, leader_strategy)?;
+    check_commit_proof::<TConsensusSpec>(proposal.commit_proof(), foreign_committee)?;
     Ok(())
 }
 
 fn check_header<TConsensusSpec: ConsensusSpec>(
     proposal: &ForeignProposal,
-    committee: &Committee<TConsensusSpec::Addr>,
+    foreign_committee: &Committee<TConsensusSpec::Addr>,
     leader_strategy: &TConsensusSpec::LeaderStrategy,
 ) -> Result<(), ProposalValidationError> {
-    let (_, leader) = leader_strategy.get_leader(committee, proposal.height());
+    let (_, leader) = leader_strategy.get_leader(foreign_committee, proposal.height());
     proposal.commit_proof().validate_header(leader)?;
     Ok(())
 }
@@ -47,9 +47,9 @@ pub(super) fn check_network(proposal: &ForeignProposal, network: Network) -> Res
 
 pub fn check_commit_proof<TConsensusSpec: ConsensusSpec>(
     proof: &CommandsCommitProof,
-    committee: &Committee<TConsensusSpec::Addr>,
+    foreign_committee: &Committee<TConsensusSpec::Addr>,
 ) -> Result<(), ProposalValidationError> {
-    let quorum_threshold = committee.quorum_threshold();
-    proof.validate_committed(quorum_threshold, &|pk| Ok(committee.contains_public_key(pk)))?;
+    let quorum_threshold = foreign_committee.quorum_threshold();
+    proof.validate_committed(quorum_threshold, &|pk| Ok(foreign_committee.contains_public_key(pk)))?;
     Ok(())
 }

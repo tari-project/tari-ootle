@@ -31,7 +31,7 @@ impl CurrentView {
     }
 
     /// Updates the height and epoch if they are greater than the current values.
-    pub(crate) fn update(&self, epoch: Epoch, height: NodeHeight) -> bool {
+    pub(crate) fn enter(&self, epoch: Epoch, height: NodeHeight) -> bool {
         let current_epoch = self.get_epoch();
         let mut is_updated = false;
         if epoch > current_epoch {

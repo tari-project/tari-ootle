@@ -985,7 +985,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 debug!(target: LOG_TARGET, "Creating zero block");
                 zero_block.justify().save(tx)?;
                 zero_block.insert(tx)?;
-                zero_block.set_as_justified(tx, &QcId::zero())?;
+                zero_block.add_justify_qc(tx, &QcId::zero())?;
                 zero_block.commit_diff(
                     tx,
                     &zero_block.justify().calculate_id(),
@@ -1009,7 +1009,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 info!(target: LOG_TARGET, "✨Creating genesis block {genesis}");
                 genesis.justify().save(tx)?;
                 genesis.insert(tx)?;
-                genesis.set_as_justified(tx, &QcId::zero())?;
+                genesis.add_justify_qc(tx, &QcId::zero())?;
                 genesis.as_locked().set(tx)?;
                 genesis.as_leaf().set(tx)?;
                 genesis.as_highest_seen().set(tx)?;

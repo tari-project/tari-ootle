@@ -35,6 +35,7 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastExecuted,
     LastProposed,
+    LastSentNewView,
     LastSentVote,
     LastVoted,
     LeafBlock,
@@ -112,6 +113,7 @@ use crate::{
             HighestSeenBlockCf,
             LastExecutedCf,
             LastProposedCf,
+            LastSentNewViewCf,
             LastSentVoteCf,
             LastVotedCf,
             LeafBlockCf,
@@ -443,6 +445,22 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
         Ok(last_seen_block)
+    }
+
+    fn last_sent_new_view_get(&self, epoch: Epoch) -> Result<LastSentNewView, StorageError> {
+        let last_sent_new_view = self
+            .db()
+            .cf(LastSentNewViewCf)?
+            .get_by_default_key("last_send_new_view")?;
+
+        if last_sent_new_view.epoch() != epoch {
+            return Err(StorageError::NotFound {
+                item: "LastSentNewView",
+                key: format!("epoch {epoch}"),
+            });
+        }
+
+        Ok(last_sent_new_view)
     }
 
     fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError> {

@@ -182,7 +182,7 @@ impl Evidence {
             })
             // CASE: we use prepare OR accept because inputs can only be accept justified if they were prepared. Prepared
             // may be implicit (null) if the local node is only involved in outputs (and therefore sequences using the LocalAccept
-            // foreign proposal). If there are no
+            // foreign proposal).
             .all(|e| e.is_prepare_justified() || e.is_accept_justified())
     }
 

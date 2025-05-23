@@ -350,11 +350,17 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             .await?;
 
         if let Err(err) = self.check_foreign_proposal(&msg.proposal, &committee) {
-            return Ok(MessageValidationResult::Invalid {
-                from,
-                message: HotstuffMessage::ForeignProposal(msg),
-                err,
-            });
+            if cfg!(debug_assertions) {
+                // This helps to quickly identify the issue in tests. Otherwise, the chain would just continue until the
+                // tests timeout due to block height limits and we'd have to wade through logs.
+                panic!("❌ Foreign proposal {} failed validation: {}", msg.proposal, err);
+            } else {
+                return Ok(MessageValidationResult::Invalid {
+                    from,
+                    message: HotstuffMessage::ForeignProposal(msg),
+                    err,
+                });
+            }
         }
 
         self.store.with_write_tx(|tx| {

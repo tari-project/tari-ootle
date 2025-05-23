@@ -13,6 +13,7 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastExecuted,
     LastProposed,
+    LastSentNewView,
     LastSentVote,
     LastVoted,
     LeafBlock,
@@ -120,6 +121,7 @@ pub trait StateStoreReadTransaction: Sized {
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError>;
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError>;
     fn highest_seen_block_get(&self, epoch: Epoch) -> Result<HighestSeenBlock, StorageError>;
+    fn last_sent_new_view_get(&self, epoch: Epoch) -> Result<LastSentNewView, StorageError>;
     fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError>;
     fn high_tc_get(&self, epoch: Epoch) -> Result<HighTc, StorageError>;
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
@@ -371,6 +373,7 @@ pub trait StateStoreWriteTransaction {
     fn last_proposed_set(&mut self, last_proposed: &LastProposed) -> Result<(), StorageError>;
     fn leaf_block_set(&mut self, leaf_node: &LeafBlock) -> Result<(), StorageError>;
     fn highest_seen_block_set(&mut self, last_seen_block: &HighestSeenBlock) -> Result<(), StorageError>;
+    fn last_sent_new_view_set(&mut self, last_sent_new_view: &LastSentNewView) -> Result<(), StorageError>;
     fn locked_block_set(&mut self, locked_block: &LockedBlock) -> Result<(), StorageError>;
     fn high_pc_set(&mut self, high_pc: &HighPc) -> Result<(), StorageError>;
     fn high_tc_set(&mut self, high_tc: &HighTc) -> Result<(), StorageError>;

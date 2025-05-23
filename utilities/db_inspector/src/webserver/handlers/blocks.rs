@@ -86,7 +86,7 @@ pub async fn list(
             "shard_group": format!("{}-{}", block.shard_group().start().as_u32(), block.shard_group().end().as_u32()),
             "num_commands": block.commands().len(),
             "commands": block.commands(),
-            "justify": block.justify().as_leaf_block(),
+            "justify": block.justify().as_high_pc(),
             "timeout": block.timeout_certificate(),
             "proposed_by": block.proposed_by(),
             "parent": block.header().parent(),

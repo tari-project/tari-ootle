@@ -212,12 +212,12 @@ impl CommandsCommitProofV1 {
             )));
         }
 
-        for elem in &self.commit_proof.proof_elements {
+        for (i, elem) in self.commit_proof.proof_elements.iter().enumerate() {
             match elem {
                 CommitProofElement::QuorumCertificate(qc) => {
                     if qc.signatures.is_empty() {
                         return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
-                            "QuorumCertificate has no signatures"
+                            "QuorumCertificate at index {i} has no signatures"
                         )));
                     }
                     if qc
@@ -226,11 +226,17 @@ impl CommandsCommitProofV1 {
                         .any(|s| s.public_key.as_bytes().len() != RistrettoPublicKeyBytes::length())
                     {
                         return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
-                            "QuorumCertificate has invalid public key"
+                            "QuorumCertificate at index {i} has invalid public key"
                         )));
                     }
                 },
-                CommitProofElement::DummyChain(_) => {},
+                CommitProofElement::ChainLinks(links) => {
+                    if links.is_empty() {
+                        return Err(ForeignProposalCommitProofError::Invalid(anyhow::anyhow!(
+                            "ChainLinks at index {i} is empty"
+                        )));
+                    }
+                },
             }
         }
         Ok(())

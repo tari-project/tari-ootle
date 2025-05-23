@@ -632,7 +632,7 @@ impl Block {
         tx.block_diffs_get(self.id())
     }
 
-    pub fn set_as_justified<TTx: StateStoreWriteTransaction>(
+    pub fn add_justify_qc<TTx: StateStoreWriteTransaction>(
         &mut self,
         tx: &mut TTx,
         qc_id: &QcId,

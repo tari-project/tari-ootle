@@ -76,10 +76,10 @@ pub enum HotStuffError {
     #[error("Pacemaker channel dropped: {details}")]
     PacemakerChannelDropped { details: String },
     #[error(
-        "Bad new view message: HighQC height {high_qc_height}, received new height {received_new_height}: {details}"
+        "Bad new view message: HighQC height {high_pc_height}, received new height {received_new_height}: {details}"
     )]
     BadNewViewMessage {
-        high_qc_height: NodeHeight,
+        high_pc_height: NodeHeight,
         received_new_height: NodeHeight,
         details: String,
     },

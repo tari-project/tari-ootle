@@ -1,13 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::{collections::HashMap, ops::ControlFlow};
+use std::{collections::HashMap, iter, ops::ControlFlow};
 
 use indexmap::IndexMap;
 use log::*;
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate};
+use tari_consensus_types::{BlockId, HighPc, HighTc, LeafBlock, ProposalCertificate, QcId};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     derive_fee_pool_address,
@@ -39,10 +39,12 @@ use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     hotstuff::{
+        block_change_set::ProposedBlockChangeSet,
         commit_proofs::generate_end_of_epoch_commit_proof,
         substate_store::{PendingSubstateStore, ShardScopedTreeStoreReader, ShardedStateTree},
         HotStuffError,
     },
+    tracing::TraceTimer,
     traits::LeaderStrategy,
 };
 
@@ -413,4 +415,134 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
         .map(|high_tc| high_tc.height())
         .unwrap_or_default();
     Ok(high_pc.max(high_tc))
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn process_newly_justified_block<TStore: StateStore>(
+    tx: &<TStore as StateStore>::ReadTransaction<'_>,
+    new_leaf_block: &Block,
+    justify_id: QcId,
+    local_committee_info: &CommitteeInfo,
+    change_set: &mut ProposedBlockChangeSet,
+) -> Result<Vec<Block>, HotStuffError> {
+    let timer = TraceTimer::info(LOG_TARGET, "Process newly justified chain");
+    fn process_newly_justified_block_inner<TStore: StateStore>(
+        tx: &<TStore as StateStore>::ReadTransaction<'_>,
+        new_leaf_block: &Block,
+        justify_id: QcId,
+        local_committee_info: &CommitteeInfo,
+        change_set: &mut ProposedBlockChangeSet,
+    ) -> Result<(), HotStuffError> {
+        let timer = TraceTimer::info(LOG_TARGET, "Process newly justified block");
+        info!(
+            target: LOG_TARGET,
+            "✅ New leaf block {} is justified. Updating evidence for transactions",
+            new_leaf_block,
+        );
+
+        let mut num_applicable_commands = 0;
+        let leaf = new_leaf_block.as_leaf();
+        if new_leaf_block.is_epoch_end() {
+            debug!(
+                target: LOG_TARGET,
+                "✅ New leaf block {} is an epoch end. No commands to process in process_newly_justified_block",
+                new_leaf_block,
+            );
+            return Ok(());
+        }
+
+        for cmd in new_leaf_block.commands() {
+            if !cmd.is_local_prepare() && !cmd.is_local_accept() {
+                continue;
+            }
+
+            num_applicable_commands += 1;
+
+            let atom = cmd.transaction().expect("Command must be a transaction");
+
+            let Some(mut pool_tx) = change_set
+                .get_transaction_pool_record(tx, &leaf, atom.id())
+                .optional()?
+            else {
+                return Err(HotStuffError::InvariantError(format!(
+                    "Transaction {} in newly justified block {} not found in the pool",
+                    atom.id(),
+                    leaf,
+                )));
+            };
+
+            if cmd.is_local_prepare() {
+                debug!(
+                    target: LOG_TARGET,
+                    "🔍 Updating evidence for LocalPrepare command in block {} for transaction {}",
+                    leaf,
+                    atom.id(),
+                );
+                pool_tx
+                    .evidence_mut()
+                    .add_shard_group(local_committee_info.shard_group())
+                    .set_prepare_qc(justify_id);
+            } else if cmd.is_local_accept() {
+                pool_tx
+                    .evidence_mut()
+                    .add_shard_group(local_committee_info.shard_group())
+                    .set_accept_qc(justify_id);
+                debug!(
+                    target: LOG_TARGET,
+                    "🔍 Updating evidence for LocalAccept command in block {} for transaction {}. {:#}",
+                    leaf,
+                    atom.id(),
+                    pool_tx.evidence()
+                );
+            } else {
+                // Nothing
+            }
+
+            // Set readiness
+            if !pool_tx.is_ready() && pool_tx.is_ready_for_pending_stage() {
+                debug!(
+                    target: LOG_TARGET,
+                    "✅ Setting READY for transaction {} in block {}",
+                    atom.id(),
+                    leaf,
+                );
+                pool_tx.set_ready(true);
+            }
+
+            change_set.set_next_transaction_update(pool_tx)?;
+        }
+
+        timer.with_iterations(num_applicable_commands);
+        Ok(())
+    }
+
+    // Nothing to do if the block has been marked as justified
+    if new_leaf_block.justify_qc_id() == Some(justify_id) {
+        return Ok(vec![]);
+    }
+
+    // Update the pending transaction pool state for the chain of newly justified blocks.
+    let mut blocks_to_process = vec![];
+    let mut parent_block = new_leaf_block;
+    loop {
+        let parent = parent_block.get_parent(tx)?;
+        if parent.has_justify_qc() {
+            break;
+        }
+        blocks_to_process.push(parent);
+        parent_block = blocks_to_process.last().expect("Added above");
+    }
+
+    timer.with_iterations(blocks_to_process.len());
+    info!(
+        target: LOG_TARGET,
+        "⚙️ Processing {} blocks in the justified chain",
+        blocks_to_process.len(),
+    );
+
+    for block in blocks_to_process.iter().rev().chain(iter::once(new_leaf_block)) {
+        process_newly_justified_block_inner::<TStore>(tx, block, justify_id, local_committee_info, change_set)?;
+    }
+
+    Ok(blocks_to_process)
 }

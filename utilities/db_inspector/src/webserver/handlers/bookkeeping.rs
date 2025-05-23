@@ -47,8 +47,8 @@ pub async fn list(
     add_item(&tx, "high_qc", column_families::bookkeeping::HighPcCf, &mut table)?;
     add_item(
         &tx,
-        "highest_seen_block",
-        column_families::bookkeeping::HighestSeenBlockCf,
+        "last_sent_new_view",
+        column_families::bookkeeping::LastSentNewViewCf,
         &mut table,
     )?;
     add_item(&tx, "high_tc", column_families::bookkeeping::HighTcCf, &mut table)?;
@@ -93,6 +93,12 @@ pub async fn list(
         &tx,
         "previous_epoch_root",
         column_families::bookkeeping::PreviousEpochStateRootCf,
+        &mut table,
+    )?;
+    add_item(
+        &tx,
+        "last_sent_new_view",
+        column_families::bookkeeping::LastSentNewViewCf,
         &mut table,
     )?;
 

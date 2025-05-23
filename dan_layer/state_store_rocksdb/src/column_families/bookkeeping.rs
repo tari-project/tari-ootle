@@ -9,6 +9,7 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastExecuted,
     LastProposed,
+    LastSentNewView,
     LastSentVote,
     LastVoted,
     LeafBlock,
@@ -50,6 +51,8 @@ enum BookKeepingKey {
     PreviousEpochStateRoot,
     /// The highest block seen by the node
     HighestSeenBlock,
+    /// The last sent new view message
+    LastSentNewView,
 }
 
 impl BookKeepingKey {
@@ -67,6 +70,7 @@ impl BookKeepingKey {
             Self::HighTc => 9,
             Self::PreviousEpochStateRoot => 10,
             Self::HighestSeenBlock => 11,
+            Self::LastSentNewView => 12,
         }
     }
 }
@@ -227,6 +231,19 @@ impl Cf for HighestSeenBlockCf {
     type Key = ByteColumn<{ BookKeepingKey::HighestSeenBlock.as_byte() }>;
     type KeyCodec = ColumnCodec;
     type Value = HighestSeenBlock;
+    type ValueCodec = DefaultCodec<Self::Value>;
+
+    fn name() -> &'static str {
+        CF_NAME
+    }
+}
+
+pub struct LastSentNewViewCf;
+
+impl Cf for LastSentNewViewCf {
+    type Key = ByteColumn<{ BookKeepingKey::LastSentNewView.as_byte() }>;
+    type KeyCodec = ColumnCodec;
+    type Value = LastSentNewView;
     type ValueCodec = DefaultCodec<Self::Value>;
 
     fn name() -> &'static str {

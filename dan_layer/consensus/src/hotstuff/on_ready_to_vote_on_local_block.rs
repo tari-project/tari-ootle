@@ -52,6 +52,7 @@ use crate::{
         event::HotstuffEvent,
         filter_diff_for_committee,
         foreign_proposal_processor::process_foreign_block,
+        process_newly_justified_block,
         substate_store::{LockStatus, PendingSubstateStore, ShardedStateTree},
         transaction_manager::{
             ConsensusTransactionManager,
@@ -123,15 +124,18 @@ where TConsensusSpec: ConsensusSpec
             let mut justified_block = Block::get(&**tx, &valid_block.justify().calculate_block_id())?;
             // This comes before decide so that all evidence can be in place before LocalPrepare and LocalAccept
             if !justified_block.has_justify_qc() {
-                self.process_newly_justified_block(
+                // We need to process this before to ensure that we have the latest state when checking the new block
+                let processed_blocks = process_newly_justified_block::<TConsensusSpec::StateStore>(
                     tx,
                     &justified_block,
                     block_qc_id,
                     local_committee_info,
                     change_set,
                 )?;
-                justified_block.set_as_justified(tx, &block_qc_id)?;
-
+                for mut block in processed_blocks {
+                    block.add_justify_qc(tx, &block_qc_id)?;
+                }
+                justified_block.add_justify_qc(tx, &block_qc_id)?;
                 // Even if we do not yet see the next epoch (e.g. race condition), if a majority have, we allow the
                 // epoch end to be proposed.
                 can_propose_epoch_end |= justified_block.is_epoch_end();
@@ -217,92 +221,6 @@ where TConsensusSpec: ConsensusSpec
             new_high_tc: maybe_high_tc,
             no_vote_reason: change_set.no_vote_reason().cloned(),
         })
-    }
-
-    fn process_newly_justified_block(
-        &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-        new_leaf_block: &Block,
-        justify_id: QcId,
-        local_committee_info: &CommitteeInfo,
-        change_set: &mut ProposedBlockChangeSet,
-    ) -> Result<(), HotStuffError> {
-        let timer = TraceTimer::info(LOG_TARGET, "Process newly justified block");
-        info!(
-            target: LOG_TARGET,
-            "✅ New leaf block {} is justified. Updating evidence for transactions",
-            new_leaf_block,
-        );
-
-        let mut num_applicable_commands = 0;
-        let leaf = new_leaf_block.as_leaf();
-        if new_leaf_block.is_epoch_end() {
-            debug!(
-                target: LOG_TARGET,
-                "✅ New leaf block {} is an epoch end. No commands to process in process_newly_justified_block",
-                new_leaf_block,
-            );
-            return Ok(());
-        }
-
-        for cmd in new_leaf_block.commands() {
-            if !cmd.is_local_prepare() && !cmd.is_local_accept() {
-                continue;
-            }
-
-            num_applicable_commands += 1;
-
-            let atom = cmd.transaction().expect("Command must be a transaction");
-
-            let Some(mut pool_tx) = change_set
-                .get_transaction_pool_record(tx, &leaf, atom.id())
-                .optional()?
-            else {
-                return Err(HotStuffError::InvariantError(format!(
-                    "Transaction {} in newly justified block {} not found in the pool",
-                    atom.id(),
-                    leaf,
-                )));
-            };
-
-            if cmd.is_local_prepare() {
-                debug!(
-                    target: LOG_TARGET,
-                    "🔍 Updating evidence for LocalPrepare command in block {} for transaction {}",
-                    leaf,
-                    atom.id(),
-                );
-                pool_tx
-                    .evidence_mut()
-                    .add_shard_group(local_committee_info.shard_group())
-                    .set_prepare_qc(justify_id);
-            } else if cmd.is_local_accept() {
-                pool_tx
-                    .evidence_mut()
-                    .add_shard_group(local_committee_info.shard_group())
-                    .set_accept_qc(justify_id);
-                debug!(
-                    target: LOG_TARGET,
-                    "🔍 Updating evidence for LocalAccept command in block {} for transaction {}. {:#}",
-                    leaf,
-                    atom.id(),
-                    pool_tx.evidence()
-                );
-            } else {
-                // Nothing
-            }
-
-            // Set readiness
-            if !pool_tx.is_ready() && pool_tx.is_ready_for_pending_stage() {
-                pool_tx.set_ready(true);
-            }
-
-            change_set.set_next_transaction_update(pool_tx)?;
-        }
-
-        timer.with_iterations(num_applicable_commands);
-
-        Ok(())
     }
 
     /// if b_new .height > vheight && (b_new extends b_lock || b_new .justify.node.height > b_lock .height)

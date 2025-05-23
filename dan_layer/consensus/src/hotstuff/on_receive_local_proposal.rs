@@ -378,7 +378,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     .enter_view(
                         valid_block.epoch(),
                         block_decision.highest_qc_view(),
-                        block_decision.highest_qc_view(),
+                        block_decision.high_pc.block_height(),
                     )
                     .await?;
 
@@ -496,7 +496,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
                     genesis.justify().save(tx)?;
                     genesis.insert(tx)?;
-                    genesis.set_as_justified(tx, &QcId::zero())?;
+                    genesis.add_justify_qc(tx, &QcId::zero())?;
                     // We'll propose using the new genesis as parent
                     genesis.as_locked().set(tx)?;
                     genesis.as_highest_seen().set(tx)?;
@@ -862,31 +862,25 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 local_committee,
             );
 
-            let Some(last_dummy) = dummy_blocks.last() else {
-                warn!(target: LOG_TARGET, "❌ Bad proposal, does not justify parent for candidate block {}", candidate_block);
-                return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
-                    justify_block_height: highest_seen_block.height(),
-                    candidate_block_height: candidate_block.height(),
+            if let Some(last_dummy) = dummy_blocks.last() {
+                // TODO: timeout certificate with no dummy blocks?
+                if candidate_block.parent() != last_dummy.id() {
+                    warn!(target: LOG_TARGET, "❌ Bad proposal, unable to find dummy blocks (last dummy: {}) for candidate block {}", last_dummy, candidate_block);
+                    return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
+                        justify_block_height: highest_seen_block.height(),
+                        candidate_block_height: candidate_block.height(),
+                    }
+                    .into());
                 }
-                .into());
-            };
 
-            if candidate_block.parent() != last_dummy.id() {
-                warn!(target: LOG_TARGET, "❌ Bad proposal, unable to find dummy blocks (last dummy: {}) for candidate block {}", last_dummy, candidate_block);
-                return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
-                    justify_block_height: highest_seen_block.height(),
-                    candidate_block_height: candidate_block.height(),
-                }
-                .into());
+                // The logic for not checking is_safe is as follows:
+                // We can't without adding the dummy blocks to the DB
+                // We know that justify_block is safe because we have added it to our chain
+                // We know that each dummy block is built in a chain from the justify block to the candidate block
+                // We know that last dummy block is the parent of candidate block
+                // Therefore we know that candidate block satisfies the safeNode predicate
+                return Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks));
             }
-
-            // The logic for not checking is_safe is as follows:
-            // We can't without adding the dummy blocks to the DB
-            // We know that justify_block is safe because we have added it to our chain
-            // We know that each dummy block is built in a chain from the justify block to the candidate block
-            // We know that last dummy block is the parent of candidate block
-            // Therefore we know that candidate block satisfies the safeNode predicate
-            return Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks));
         }
 
         if !high_pc.block_id().is_zero() && !candidate_block.is_safe(tx)? {

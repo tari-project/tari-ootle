@@ -4,6 +4,7 @@
 use log::*;
 use tari_consensus_types::{
     HighPc,
+    LastSentNewView,
     LastSentVote,
     LeafBlock,
     ProposalCertificate,
@@ -51,11 +52,19 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         current_height: NodeHeight,
         local_committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<(), HotStuffError> {
-        // The leader that is supposed to propose the next block timed out
-        let timeout_height = current_height + NodeHeight(2);
+        let (next_leader, high_pc, last_sent_vote, timeout_height) = self.store.with_read_tx(|tx| {
+            // The leader, that is supposed to propose the next block, timed out. Current height is the highest seen
+            // view, +1 is the next leader that failed, +2 is the next leader that should propose
+            let mut timeout_height = current_height + NodeHeight(2);
 
-        let (next_leader, high_pc, last_sent_vote) = self.store.with_read_tx(|tx| {
             let leaf_block = LeafBlock::get(tx, epoch)?;
+            // If we leader failure more than once in a row, propose the next higher view
+            let last_sent_new_view = LastSentNewView::get(tx, epoch).optional()?;
+            if let Some(last_sent_new_view) = last_sent_new_view {
+                if last_sent_new_view.height() >= timeout_height {
+                    timeout_height = last_sent_new_view.height() + NodeHeight(1);
+                }
+            }
             let next_leader = get_leader_for_view(
                 tx,
                 local_committee,
@@ -69,7 +78,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             let last_sent_vote = LastSentVote::get(tx, epoch)
                 .optional()?
                 .filter(|vote| high_pc.height() < vote.block_height());
-            Ok::<_, HotStuffError>((next_leader, high_pc, last_sent_vote))
+            Ok::<_, HotStuffError>((next_leader, high_pc, last_sent_vote, timeout_height))
         })?;
 
         info!(
@@ -105,6 +114,14 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         self.outbound_messaging
             .send(next_leader.address.clone(), HotstuffMessage::new_newview(message))
             .await?;
+
+        self.store.with_write_tx(|tx| {
+            LastSentNewView {
+                epoch,
+                height: timeout_height,
+            }
+            .set(tx)
+        })?;
 
         Ok(())
     }

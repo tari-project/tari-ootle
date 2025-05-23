@@ -9,6 +9,7 @@ import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Refresh } from "@mui/icons-material";
 import { Params } from "../client.ts";
+import prettyBytes from "pretty-bytes";
 
 
 type Row = Record<string, string | object>;
@@ -22,6 +23,7 @@ interface ColumnFamilyData {
   columns: Column[];
   rows: Row[];
   total_entries: number;
+  total_bytes: number;
 }
 
 interface PaginationModel extends GridPaginationModel {
@@ -188,6 +190,17 @@ export default function InspectCf() {
           </Box>
         )}
       </Grid>
+
+      {data?.total_bytes ? (
+        <Grid container spacing={12}>
+          <Grid size={12}>
+            <Typography variant="h6">
+              Total value
+              bytes: {prettyBytes(data.total_bytes)} (avg: {prettyBytes(data.total_bytes / data.rows.length)})
+            </Typography>
+          </Grid>
+        </Grid>
+      ) : null}
 
       <Grid container spacing={3}>
         <DataGrid

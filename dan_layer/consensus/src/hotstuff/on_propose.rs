@@ -9,15 +9,7 @@ use std::{
 
 use log::*;
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{
-    Decision,
-    HighPc,
-    HighestSeenBlock,
-    LeafBlock,
-    ProposalCertificate,
-    QcId,
-    TimeoutCertificate,
-};
+use tari_consensus_types::{Decision, HighPc, HighestSeenBlock, LeafBlock, ProposalCertificate, TimeoutCertificate};
 use tari_crypto::tari_utilities::epoch_time::EpochTime;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
@@ -73,6 +65,7 @@ use crate::{
         epoch_state::EpochState,
         error::HotStuffError,
         filter_diff_for_committee,
+        process_newly_justified_block,
         substate_store::PendingSubstateStore,
         transaction_manager::{
             ConsensusTransactionManager,
@@ -316,73 +309,6 @@ where TConsensusSpec: ConsensusSpec
         }
     }
 
-    fn process_newly_justified_block(
-        &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
-        new_leaf_block: &Block,
-        high_qc_id: QcId,
-        local_committee_info: &CommitteeInfo,
-        change_set: &mut ProposedBlockChangeSet,
-    ) -> Result<(), HotStuffError> {
-        info!(
-            target: LOG_TARGET,
-            "✅ New leaf block {} is justified. Updating evidence for transactions",
-            new_leaf_block,
-        );
-
-        let leaf = new_leaf_block.as_leaf();
-        for cmd in new_leaf_block.commands() {
-            if !cmd.is_local_prepare() && !cmd.is_local_accept() {
-                continue;
-            }
-
-            let atom = cmd.transaction().expect("Command must be a transaction");
-
-            let Some(mut pool_tx) = change_set
-                .get_transaction_pool_record(tx, &leaf, atom.id())
-                .optional()?
-            else {
-                return Err(HotStuffError::InvariantError(format!(
-                    "Transaction {} in newly justified block {} not found in the pool",
-                    atom.id(),
-                    leaf,
-                )));
-            };
-
-            if cmd.is_local_prepare() {
-                pool_tx
-                    .evidence_mut()
-                    .add_shard_group(local_committee_info.shard_group())
-                    .set_prepare_qc(high_qc_id);
-            } else if cmd.is_local_accept() {
-                pool_tx
-                    .evidence_mut()
-                    .add_shard_group(local_committee_info.shard_group())
-                    .set_accept_qc(high_qc_id);
-            } else {
-                // Nothing
-            }
-
-            // Set readiness
-            if !pool_tx.is_ready() && pool_tx.is_ready_for_pending_stage() {
-                pool_tx.set_ready(true);
-            }
-
-            debug!(
-                target: LOG_TARGET,
-                "ON PROPOSE: process_newly_justified_block {} {} {}, QC[{}]",
-                pool_tx.transaction_id(),
-                pool_tx.current_stage(),
-                local_committee_info.shard_group(),
-                high_qc_id
-            );
-
-            change_set.set_next_transaction_update(pool_tx)?;
-        }
-
-        Ok(())
-    }
-
     #[allow(clippy::too_many_lines)]
     fn build_next_block(
         &self,
@@ -496,7 +422,7 @@ where TConsensusSpec: ConsensusSpec
 
             if !justify_block.has_justify_qc() {
                 // TODO: we dont need to process transactions here that are not in the batch
-                self.process_newly_justified_block(
+                process_newly_justified_block::<TConsensusSpec::StateStore>(
                     tx,
                     &justify_block,
                     high_qc_id,

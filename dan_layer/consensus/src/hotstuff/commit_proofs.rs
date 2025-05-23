@@ -24,7 +24,7 @@ use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
 use crate::hotstuff::HotStuffError;
 
-const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::eviction_proof";
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::commit_proofs";
 
 pub fn generate_eviction_proofs<'a, TTx, I>(
     tx: &TTx,
@@ -97,7 +97,7 @@ pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
     commit_qc: &ProposalCertificate,
     commit_block: &Block,
 ) -> Result<SidechainBlockCommitProof, HotStuffError> {
-    let mut proof_elements = Vec::with_capacity(3);
+    let mut proof_elements = Vec::with_capacity(4);
 
     if commit_block.is_dummy() || commit_block.signature().is_none() {
         return Err(HotStuffError::InvariantError(format!(
@@ -105,28 +105,45 @@ pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
         )));
     }
 
-    debug!(target: LOG_TARGET, "Add commit_qc: {commit_qc}");
+    debug!(target: LOG_TARGET, "⚙️ START: Adding the commit_qc to the proof: {commit_qc}");
     proof_elements.push(convert_qc_to_proof_element(commit_qc)?);
 
     let mut block = Block::get(tx, &commit_qc.calculate_block_id())?;
     while block.id() != commit_block.id() {
+        // Prevent possibility of endless loop if the IDs never match - which should be impossible.
+        if block.height() < commit_block.height() {
+            return Err(HotStuffError::InvariantError(format!(
+                "Block height is less than the commit block height in generate_block_commit_proof ({block}, \
+                 commit_block={commit_block})",
+            )));
+        }
+
         if block.justifies_parent() {
-            debug!(target: LOG_TARGET, "Add justify: {}", block.justify());
+            // This block justifies the parent, so we add it to the proof
+            debug!(target: LOG_TARGET, "⚙️ Add justify: {}", block.justify());
             proof_elements.push(convert_qc_to_proof_element(block.justify())?);
             block = block.get_parent(tx)?;
         } else {
-            block = block.get_parent(tx)?;
-            let mut dummy_chain = vec![ChainLink {
-                header_hash: block.header().calculate_hash(),
-                parent_id: *block.parent().hash(),
-            }];
-            debug!(target: LOG_TARGET, "add dummy chain: {block}");
+            // This block does not justify the parent. We'll add link(s) back until we find the block that is justified
+            // by the PC. NOTE: That these blocks are not necessarily dummy blocks, they simply do not propose a new
+            // proposal certificate.
+            debug!(target: LOG_TARGET, "⚙️ Start chain links: {block}");
             let parent_id = *block.parent();
             let qc = block.into_justify();
             block = Block::get(tx, &parent_id)?;
+
+            let mut chain_links = vec![ChainLink {
+                header_hash: block.header().calculate_hash(),
+                parent_id: *block.parent().hash(),
+            }];
+            debug!(target: LOG_TARGET, "⚙️ Add chain link: {block}");
+            let parent_id = *block.parent();
+            block = Block::get(tx, &parent_id)?;
+
+            // Continue going back in the chain until we find a block that is justified by the QC
             while *block.id() != qc.calculate_block_id() {
-                debug!(target: LOG_TARGET, "add dummy chain: {block} QC: {qc}");
-                dummy_chain.push(ChainLink {
+                debug!(target: LOG_TARGET, "⚙️ Add chain link: {block} QC: {qc}");
+                chain_links.push(ChainLink {
                     header_hash: block.header().calculate_hash(),
                     parent_id: *block.parent().hash(),
                 });
@@ -140,19 +157,14 @@ pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
                 }
             }
 
-            proof_elements.push(CommitProofElement::DummyChain(dummy_chain));
-            debug!(target: LOG_TARGET, "Add justify: {}", qc);
+            // Add the links and
+            proof_elements.push(CommitProofElement::ChainLinks(chain_links));
+            debug!(target: LOG_TARGET, "⚙️ Add justify (end of chain links): {}", qc);
             proof_elements.push(convert_qc_to_proof_element(&qc)?);
-        }
-        // Prevent possibility of endless loop
-        if block.height() < commit_block.height() {
-            return Err(HotStuffError::InvariantError(format!(
-                "Block height is less than the commit block height in generate_block_commit_proof ({block}, \
-                 commit_block={commit_block})",
-            )));
         }
     }
 
+    debug!(target: LOG_TARGET, "⚙️ END of commit proof generation");
     let command_commit_proof = SidechainBlockCommitProof {
         header: convert_block_to_sidechain_block_header(commit_block.header())?,
         proof_elements,

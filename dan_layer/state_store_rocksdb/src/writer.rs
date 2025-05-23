@@ -33,6 +33,7 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastExecuted,
     LastProposed,
+    LastSentNewView,
     LastSentVote,
     LastVoted,
     LeafBlock,
@@ -108,6 +109,7 @@ use crate::{
             HighestSeenBlockCf,
             LastExecutedCf,
             LastProposedCf,
+            LastSentNewViewCf,
             LastSentVoteCf,
             LastVotedCf,
             LeafBlockCf,
@@ -345,7 +347,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             )?;
         }
         if let Some(value) = justify_qc_id {
-            block.set_justify_qc(*value)
+            block.set_justify_qc(*value);
         }
 
         cf.put(block_id, &block, OPERATION)?;
@@ -453,6 +455,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         self.db()
             .cf(HighestSeenBlockCf)?
             .put(&ByteColumn, last_seen_block, "highest_seen_block_set")?;
+        Ok(())
+    }
+
+    fn last_sent_new_view_set(&mut self, last_sent_new_view: &LastSentNewView) -> Result<(), StorageError> {
+        self.db()
+            .cf(LastSentNewViewCf)?
+            .put(&ByteColumn, last_sent_new_view, "last_sent_new_view_set")?;
         Ok(())
     }
 

@@ -7,6 +7,7 @@ use tari_consensus_types::{
     HighestSeenBlock,
     LastExecuted,
     LastProposed,
+    LastSentNewView,
     LastSentVote,
     LastVoted,
     LeafBlock,
@@ -108,5 +109,15 @@ impl BookkeepingModel for LastSentVote {
 
     fn set<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
         tx.last_sent_vote_set(self)
+    }
+}
+
+impl BookkeepingModel for LastSentNewView {
+    fn get<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch) -> Result<Self, StorageError> {
+        tx.last_sent_new_view_get(epoch)
+    }
+
+    fn set<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError> {
+        tx.last_sent_new_view_set(self)
     }
 }

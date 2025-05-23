@@ -77,7 +77,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 {
                     warn!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Command: LocalPrepare({}, {}), block: {} not relevant to local committee",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalPrepare({}, {}), block: {} not relevant to local committee",
                         atom.id, atom.decision, foreign_proposal.block_id(),
                     );
                     continue;
@@ -85,7 +85,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 debug!(
                     target: LOG_TARGET,
-                    "🧩 FOREIGN PROPOSAL: Command: LocalPrepare({}, {}), block: {}",
+                    "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalPrepare({}, {}), block: {}",
                     atom.id,atom.decision, foreign_proposal.block_id(),
                 );
 
@@ -280,7 +280,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 if tx_rec.current_stage().is_new() {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
@@ -298,7 +298,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     if is_ready {
                         info!(
                             target: LOG_TARGET,
-                            "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
+                            "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
                             tx_rec.transaction_id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
@@ -309,7 +309,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     } else {
                         info!(
                             target: LOG_TARGET,
-                            "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalPrepare) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
+                            "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
                             tx_rec.transaction_id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
@@ -322,7 +322,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     // LocalPrepare proposal.
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is ready for propose AllPrepared({}, {}) Local Stage: {}",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose AllPrepared({}, {}) Local Stage: {}",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
@@ -333,7 +333,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, \
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, \
                         All Justified: {}. Waiting for local proposal and/or additional foreign proposals for all other shard groups.",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
@@ -351,7 +351,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 debug!(
                     target: LOG_TARGET,
-                    "🧩 FOREIGN PROPOSAL: Command: LocalAccept({}, {}), block: {}",
+                    "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalAccept({}, {}), block: {}",
                     atom.id, atom.decision, foreign_proposal.block_id(),
                 );
 
@@ -390,7 +390,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     if local_decision.is_commit() {
                         info!(
                             target: LOG_TARGET,
-                            "⚠️ Foreign ABORT {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
+                            "⚠️ Foreign {foreign_shard_group} ABORT {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
                             tx_rec.transaction_id(), tx_rec.current_stage(), local_leaf
                         );
                         // Add an abort execution since we previously decided to commit
@@ -458,7 +458,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     if is_ready {
                         info!(
                             target: LOG_TARGET,
-                            "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalAccept) Transaction is ready for Prepare({}, {}) Local Stage: {}",
+                            "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalAccept) Transaction is ready for Prepare({}, {}) Local Stage: {}",
                             tx_rec.transaction_id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
@@ -470,7 +470,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     } else {
                         info!(
                             target: LOG_TARGET,
-                            "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalAccept) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
+                            "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalAccept) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
                             tx_rec.transaction_id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
@@ -485,7 +485,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 } else if tx_rec.current_stage().is_local_prepared() && tx_rec.is_ready_for_pending_stage() {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is ready for propose ALL_PREPARED({}, {}) Local Stage: {}",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose ALL_PREPARED({}, {}) Local Stage: {}",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
@@ -498,7 +498,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 } else if tx_rec.current_stage().is_local_accepted() && tx_rec.is_ready_for_pending_stage() {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is ready for propose ALL_ACCEPT({}, {}) Local Stage: {}",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose ALL_ACCEPT({}, {}) Local Stage: {}",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
@@ -509,7 +509,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllAccept({}, {}) Local Stage: {}, All Justified: {}. Waiting for local or foreign proposal.",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is NOT ready for AllAccept({}, {}) Local Stage: {}, All Justified: {}. Waiting for local or foreign proposal.",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
@@ -523,8 +523,8 @@ pub fn process_foreign_block<TStore: StateStore>(
             Command::EndEpoch => {
                 warn!(
                     target: LOG_TARGET,
-                    "❓️ NEVER HAPPEN: Foreign proposal received for block {} contains an EndEpoch command. This is invalid behaviour.",
-                    foreign_proposal.block_id()
+                    "❓️ NEVER HAPPEN: Foreign proposal received {} contains an EndEpoch command. This is invalid behaviour but continuing anyway.",
+                    foreign_proposal
                 );
                 continue;
             },
@@ -546,13 +546,13 @@ pub fn process_foreign_block<TStore: StateStore>(
         target: LOG_TARGET,
         "🧩 FOREIGN PROPOSAL: Processed {} commands from foreign block {}",
         command_count,
-        foreign_proposal.block_id()
+        foreign_proposal
     );
     if command_count == 0 {
         warn!(
             target: LOG_TARGET,
             "⚠️ FOREIGN PROPOSAL: No commands were applicable for foreign block {}. Ignoring.",
-            foreign_proposal.block_id()
+            foreign_proposal
         );
     }
 

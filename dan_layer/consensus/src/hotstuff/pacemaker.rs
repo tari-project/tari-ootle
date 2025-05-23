@@ -28,7 +28,7 @@ pub struct PaceMaker {
     pace_maker_handle: PaceMakerHandle,
     handle_receiver: mpsc::Receiver<PacemakerRequest>,
     current_view: CurrentView,
-    current_high_qc_height: NodeHeight,
+    current_high_pc_height: NodeHeight,
     block_time: Duration,
 }
 
@@ -51,7 +51,7 @@ impl PaceMaker {
                 current_view.clone(),
             ),
             current_view,
-            current_high_qc_height: NodeHeight(0),
+            current_high_pc_height: NodeHeight(0),
             block_time: max_base_time,
         }
     }
@@ -94,15 +94,15 @@ impl PaceMaker {
                 maybe_req = self.handle_receiver.recv() => {
                     if let Some(req) = maybe_req {
                         match req {
-                           PacemakerRequest::Reset { high_qc_height, reset_block_time } => {
+                           PacemakerRequest::Reset { high_pc_height, reset_block_time } => {
                                 if !started {
                                     continue;
                                 }
                                 leader_failure_suspended = false;
                                 leader_failure_triggered_during_suspension = false;
 
-                                if let Some(height) = high_qc_height {
-                                    self.current_high_qc_height = height;
+                                if let Some(height) = high_pc_height {
+                                    self.current_high_pc_height = height;
                                 }
                                 leader_timeout.as_mut().reset(self.leader_timeout());
                                 if reset_block_time {
@@ -112,14 +112,14 @@ impl PaceMaker {
                                     info!(target: LOG_TARGET, "🧿 Pacemaker Leader timeout Reset! Current height: {}, Delta: {:.2?}", self.current_view, self.delta_time());
                                 }
                            },
-                            PacemakerRequest::Start { high_qc_height } => {
-                                info!(target: LOG_TARGET, "🚀 Starting pacemaker at leaf height {} and high QC: {}", self.current_view, high_qc_height);
+                            PacemakerRequest::Start { high_pc_height } => {
+                                info!(target: LOG_TARGET, "🚀 Starting pacemaker at leaf height {} and high QC: {}", self.current_view, high_pc_height);
                                 leader_failure_suspended = false;
                                 leader_failure_triggered_during_suspension = false;
                                 if started {
                                     continue;
                                 }
-                                self.current_high_qc_height = high_qc_height;
+                                self.current_high_pc_height = high_pc_height;
                                 info!(target: LOG_TARGET, "Reset! Current height: {}, Delta: {:.2?}", self.current_view, self.delta_time());
                                 leader_timeout.as_mut().reset(self.leader_timeout());
                                 block_timer.as_mut().reset(self.block_time());
@@ -190,7 +190,7 @@ impl PaceMaker {
 
     /// Current leader timeout defined as block_time + delta
     /// This is always greater than the block time.
-    /// Ensure that current_height and current_high_qc_height are set before calling this function.
+    /// Ensure that current_height and current_high_pc_height are set before calling this function.
     fn leader_timeout(&self) -> tokio::time::Instant {
         let delta = self.delta_time();
         // TODO: get real avg latency
@@ -203,13 +203,13 @@ impl PaceMaker {
     /// QC height.
     fn delta_time(&self) -> Duration {
         let current_height = self.current_view.get_height();
-        if current_height.is_zero() || self.current_high_qc_height.is_zero() {
+        if current_height.is_zero() || self.current_high_pc_height.is_zero() {
             // Allow extra time for the first block
             return self.block_time * 2;
         }
         let exp = u32::try_from(cmp::min(
             u64::from(u32::MAX),
-            cmp::max(1, current_height.saturating_sub(self.current_high_qc_height).as_u64()),
+            cmp::max(1, current_height.saturating_sub(self.current_high_pc_height).as_u64()),
         ))
         .unwrap_or(u32::MAX);
         cmp::min(

@@ -261,19 +261,17 @@ where TConsensusSpec: ConsensusSpec
     /// Returns Ok(None) if the command cannot be sequenced yet due to lock conflicts.
     fn transaction_pool_record_to_command(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         start_of_chain_id: &LeafBlock,
-        tx_rec: TransactionPoolRecord,
+        pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
         substate_store: &mut PendingSubstateStore<TConsensusSpec::StateStore>,
         executed_transactions: &mut HashMap<TransactionId, TransactionExecution>,
         lock_conflicts: &mut TransactionLockConflicts,
     ) -> Result<Option<Command>, HotStuffError> {
-        match tx_rec.current_stage() {
+        match pool_tx.current_stage() {
             TransactionPoolStage::New => self.prepare_transaction(
-                tx,
                 start_of_chain_id,
-                tx_rec,
+                pool_tx,
                 local_committee_info,
                 substate_store,
                 executed_transactions,
@@ -282,10 +280,9 @@ where TConsensusSpec: ConsensusSpec
             // Leader thinks all foreign PREPARE pledges have been received (condition for LocalPrepared stage to be
             // ready)
             TransactionPoolStage::LocalPrepared => self.local_accept_transaction(
-                tx,
                 start_of_chain_id,
                 local_committee_info,
-                tx_rec,
+                pool_tx,
                 substate_store,
                 executed_transactions,
             ),
@@ -293,7 +290,7 @@ where TConsensusSpec: ConsensusSpec
             // Leader thinks that all foreign ACCEPT pledges have been received and, we are ready to accept the result
             // (COMMIT/ABORT)
             TransactionPoolStage::LocalAccepted => {
-                self.accept_transaction(tx, start_of_chain_id, &tx_rec, local_committee_info, substate_store)
+                self.accept_transaction(start_of_chain_id, &pool_tx, local_committee_info, substate_store)
             },
             // Not reachable as there is nothing to propose for these stages. To confirm that all local nodes
             // agreed with the Accept, more (possibly empty) blocks with QCs will be
@@ -303,7 +300,7 @@ where TConsensusSpec: ConsensusSpec
             TransactionPoolStage::LocalOnly => {
                 unreachable!(
                     "It is invalid for TransactionPoolStage::{} to be ready to propose",
-                    tx_rec.current_stage()
+                    pool_tx.current_stage()
                 )
             },
         }
@@ -327,7 +324,7 @@ where TConsensusSpec: ConsensusSpec
         let high_qc_id = high_qc_certificate.calculate_id();
         let justify_block = Block::get(tx, &high_qc_certificate.calculate_block_id())?;
         let start_of_chain_block = highest_seen_block;
-        let parent_block = dummy_block.unwrap_or_else(|| highest_seen_block.as_leaf_block());
+        let parent_block = dummy_block.unwrap_or_else(|| highest_seen_block.as_leaf());
         // // The parent block will only ever not exist if it is a dummy block
         // let parent_exists = Block::record_exists(tx, parent_block.block_id())?;
         // let start_of_chain_block = if parent_exists {
@@ -387,7 +384,7 @@ where TConsensusSpec: ConsensusSpec
         };
 
         // NOTE: the block for the change set is not used.
-        let mut change_set = ProposedBlockChangeSet::new(start_of_chain_block.as_leaf_block());
+        let mut change_set = ProposedBlockChangeSet::new(start_of_chain_block.as_leaf());
 
         // No need to include evidence from justified block if no transactions are included in the next block
         if !batch.transactions.is_empty() {
@@ -440,8 +437,7 @@ where TConsensusSpec: ConsensusSpec
             // This allows us to propose evidence in the next block that relates to transactions in the justified block.
             change_set.apply_transaction_update(&mut transaction);
             if let Some(command) = self.transaction_pool_record_to_command(
-                tx,
-                &start_of_chain_block.as_leaf_block(),
+                &start_of_chain_block.as_leaf(),
                 transaction,
                 local_committee_info,
                 &mut substate_store,
@@ -632,7 +628,6 @@ where TConsensusSpec: ConsensusSpec
     #[allow(clippy::too_many_lines)]
     fn prepare_transaction(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         parent_block: &LeafBlock,
         mut pool_tx: TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
@@ -726,7 +721,7 @@ where TConsensusSpec: ConsensusSpec
                         .set_local_decision(execution.decision())
                         .set_transaction_fee(execution.transaction_fee())
                         .no_leader_fee()
-                        .set_evidence(execution.to_evidence(
+                        .merge_evidence(execution.to_evidence(
                             local_committee_info.num_preshards(),
                             local_committee_info.num_committees(),
                         ));
@@ -779,7 +774,8 @@ where TConsensusSpec: ConsensusSpec
                         // foreign inputs/outputs.
                         pool_tx.set_local_decision(Decision::Commit)
                             // Set partial evidence using local inputs and known outputs.
-                            .set_evidence(evidence);
+                            // NOTE: we could have evidence for initial sequence from foreign proposals, so we must not overwrite it
+                            .merge_evidence(evidence);
                     },
                 }
 
@@ -800,16 +796,6 @@ where TConsensusSpec: ConsensusSpec
                 {
                     // No prepare phase needed for output-only transactions. All foreign shards have prepared inputs
                     // and the output shard groups need to execute and accept outputs.
-                    if !pool_tx.has_all_required_foreign_input_pledges(tx, local_committee_info)? {
-                        error!(
-                            target: LOG_TARGET,
-                            "BUG: attempted to propose transaction {} as LocalPrepared but not all foreign input pledges were found. \
-                             This transaction should not have been marked as ready. {}",
-                            pool_tx.transaction_id(),
-                            pool_tx.evidence()
-                        );
-                        return Ok(None);
-                    }
                     debug!(
                         target: LOG_TARGET,
                         "ℹ️ Transaction {} is output-only for {}, proposing LocalAccept",
@@ -828,7 +814,6 @@ where TConsensusSpec: ConsensusSpec
 
     fn local_accept_transaction(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         parent_block: &LeafBlock,
         local_committee_info: &CommitteeInfo,
         mut tx_rec: TransactionPoolRecord,
@@ -840,20 +825,8 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(Command::LocalAccept(tx_rec.get_current_transaction_atom())));
         }
 
+        let tx = substate_store.read_transaction();
         let transaction = TransactionRecord::get(tx, tx_rec.transaction_id())?;
-        if !transaction.has_all_required_input_pledges(tx, local_committee_info)? {
-            // TODO: investigate - this case does occur when all_input_shard_groups_prepared is used vs
-            //       all_shard_groups_prepared in can_continue_to, not sure why.
-            // One case where this can happen if we received a LocalAccept pledge, which will skip sending the substate
-            // values, but not LocalPrepare (which contains substate values). This could be solved by
-            // (re-)requesting the LocalPrepare pledge.
-            error!(
-                target: LOG_TARGET,
-                "BUG: attempted to propose transaction {} as AllPrepared but not all input pledges were found. This transaction should not have been marked as ready.",
-                tx_rec.transaction_id(),
-            );
-            return Ok(None);
-        }
         let execution = self.execute_transaction(tx, parent_block, transaction)?;
 
         // Try to lock all local outputs
@@ -898,7 +871,6 @@ where TConsensusSpec: ConsensusSpec
 
     fn accept_transaction(
         &self,
-        tx: &<TConsensusSpec::StateStore as StateStore>::ReadTransaction<'_>,
         parent_block: &LeafBlock,
         tx_rec: &TransactionPoolRecord,
         local_committee_info: &CommitteeInfo,
@@ -908,6 +880,7 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(Command::SomeAccept(tx_rec.get_current_transaction_atom())));
         }
 
+        let tx = substate_store.read_transaction();
         let execution = tx_rec
             .get_pending_execution_for_block(tx, parent_block)
             .optional()?

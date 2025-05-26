@@ -23,7 +23,7 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{Epoch, NodeHeight};
+use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup};
 
 use crate::{ids::BlockId, LeafBlock};
 
@@ -32,6 +32,7 @@ pub struct HighestSeenBlock {
     pub block_id: BlockId,
     pub height: NodeHeight,
     pub epoch: Epoch,
+    pub shard_group: ShardGroup,
 }
 
 impl HighestSeenBlock {
@@ -47,11 +48,16 @@ impl HighestSeenBlock {
         self.epoch
     }
 
-    pub fn as_leaf_block(self) -> LeafBlock {
+    pub fn shard_group(&self) -> ShardGroup {
+        self.shard_group
+    }
+
+    pub fn as_leaf(self) -> LeafBlock {
         LeafBlock {
             block_id: self.block_id,
             height: self.height,
             epoch: self.epoch,
+            shard_group: self.shard_group,
         }
     }
 }

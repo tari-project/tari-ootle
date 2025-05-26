@@ -381,7 +381,7 @@ impl ProposedBlockChangeSet {
             "set_next_transaction_update: evidence: {}",
             transaction.evidence(),
         );
-        let ready_now = transaction.is_ready_for_pending_stage();
+        let ready_now = transaction.is_ready_for_pending_stage(self.block.shard_group());
         let next_update = TransactionPoolStatusUpdate::new(transaction, ready_now);
         debug!(
             target: LOG_TARGET,

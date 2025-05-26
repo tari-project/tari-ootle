@@ -664,7 +664,7 @@ where TConsensusSpec: ConsensusSpec
             },
         }
 
-        pool_tx.set_next_stage(TransactionPoolStage::LocalOnly)?;
+        pool_tx.set_next_stage_and_readiness(TransactionPoolStage::LocalOnly, block.shard_group())?;
         proposed_block_change_set.set_next_transaction_update(pool_tx)?;
         Ok(None)
     }
@@ -799,7 +799,7 @@ where TConsensusSpec: ConsensusSpec
                         // foreign inputs/outputs.
                         tx_rec.set_local_decision(Decision::Commit);
                         // Set partial evidence for local inputs using what we know.
-                        tx_rec.set_evidence(evidence);
+                        tx_rec.merge_evidence(evidence);
                     },
                 }
             },
@@ -884,7 +884,7 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
-        tx_rec.set_next_stage(TransactionPoolStage::LocalPrepared)?;
+        tx_rec.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, block.shard_group())?;
         proposed_block_change_set.set_next_transaction_update(tx_rec)?;
 
         Ok(None)
@@ -1024,7 +1024,7 @@ where TConsensusSpec: ConsensusSpec
                         .set_local_decision(execution.decision())
                         .set_transaction_fee(0)
                         .no_leader_fee()
-                        .set_next_stage(TransactionPoolStage::LocalAccepted)?;
+                        .set_next_stage_and_readiness(TransactionPoolStage::LocalAccepted, block.shard_group())?;
 
                     proposed_block_change_set
                         .add_transaction_execution(*tx_rec.transaction_id(), execution)?
@@ -1117,7 +1117,7 @@ where TConsensusSpec: ConsensusSpec
             }));
         }
 
-        tx_rec.set_next_stage(TransactionPoolStage::LocalAccepted)?;
+        tx_rec.set_next_stage_and_readiness(TransactionPoolStage::LocalAccepted, block.shard_group())?;
         proposed_block_change_set.set_next_transaction_update(tx_rec)?;
 
         Ok(None)
@@ -1294,7 +1294,7 @@ where TConsensusSpec: ConsensusSpec
 
         substate_store.put_diff(&filter_diff_for_committee(local_committee_info, diff))?;
 
-        tx_rec.set_next_stage(TransactionPoolStage::AllAccepted)?;
+        tx_rec.set_next_stage_and_readiness(TransactionPoolStage::AllAccepted, block.shard_group())?;
         proposed_block_change_set.set_next_transaction_update(tx_rec)?;
 
         Ok(None)
@@ -1374,7 +1374,7 @@ where TConsensusSpec: ConsensusSpec
             return Ok(Some(NoVoteReason::FeeDisagreement));
         }
 
-        tx_rec.set_next_stage(TransactionPoolStage::SomeAccepted)?;
+        tx_rec.set_next_stage_and_readiness(TransactionPoolStage::SomeAccepted, block.shard_group())?;
         proposed_block_change_set.set_next_transaction_update(tx_rec)?;
 
         Ok(None)

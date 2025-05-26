@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
-use tari_dan_common_types::{Epoch, NodeHeight};
+use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup};
 
 use crate::{BlockId, LeafBlock};
 
@@ -11,6 +11,7 @@ pub struct LastProposed {
     pub height: NodeHeight,
     pub block_id: BlockId,
     pub epoch: Epoch,
+    pub shard_group: ShardGroup,
 }
 impl LastProposed {
     pub fn as_leaf_block(&self) -> LeafBlock {
@@ -18,6 +19,7 @@ impl LastProposed {
             block_id: self.block_id,
             height: self.height,
             epoch: self.epoch,
+            shard_group: self.shard_group,
         }
     }
 }

@@ -338,9 +338,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::ForeignProposal(msg),
-                err: HotStuffError::ProposalValidationError(ProposalValidationError::NoTransactionsInCommittee {
-                    block_id,
-                }),
+                err: ProposalValidationError::NoTransactionsInCommittee { block_id }.into(),
             });
         }
 
@@ -380,9 +378,9 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 return Ok(MessageValidationResult::Invalid {
                     from,
                     message: HotstuffMessage::ForeignProposal(msg),
-                    err: HotStuffError::ProposalValidationError(ProposalValidationError::NoTransactionsInCommittee {
+                    err: ProposalValidationError::NoTransactionsInCommittee {
                         block_id,
-                    }),
+                    }.into(),
                 });
             }
 

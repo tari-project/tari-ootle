@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus_types::{BlockId, LeafBlock};
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
+use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{Block, StateTransitionId, SubstateRecord},
     StateStore,
@@ -34,6 +34,7 @@ fn operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         height: NodeHeight(0),
         epoch: Epoch(0),
+        shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
     };
     for (key, value) in substates {
         let block = create_block_with_qc(&dummy_parent);
@@ -70,6 +71,7 @@ fn operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         height: NodeHeight(10000),
         epoch: Epoch(1000),
+        shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
     };
     for (key, value) in substates {
         let block = create_block_with_qc(&dummy_parent);

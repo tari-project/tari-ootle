@@ -450,6 +450,7 @@ pub fn process_newly_justified_block<TStore: StateStore>(
             );
             return Ok(());
         }
+        let local_shard_group = local_committee_info.shard_group();
 
         for cmd in new_leaf_block.commands() {
             if !cmd.is_local_prepare() && !cmd.is_local_accept() {
@@ -480,12 +481,12 @@ pub fn process_newly_justified_block<TStore: StateStore>(
                 );
                 pool_tx
                     .evidence_mut()
-                    .add_shard_group(local_committee_info.shard_group())
+                    .add_shard_group(local_shard_group)
                     .set_prepare_qc(justify_id);
             } else if cmd.is_local_accept() {
                 pool_tx
                     .evidence_mut()
-                    .add_shard_group(local_committee_info.shard_group())
+                    .add_shard_group(local_shard_group)
                     .set_accept_qc(justify_id);
                 debug!(
                     target: LOG_TARGET,
@@ -499,7 +500,7 @@ pub fn process_newly_justified_block<TStore: StateStore>(
             }
 
             // Set readiness
-            if !pool_tx.is_ready() && pool_tx.is_ready_for_pending_stage() {
+            if !pool_tx.is_ready() && pool_tx.is_ready_for_pending_stage(local_shard_group) {
                 debug!(
                     target: LOG_TARGET,
                     "✅ Setting READY for transaction {} in block {}",

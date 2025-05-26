@@ -393,6 +393,7 @@ impl BlockHeader {
             height: self.height,
             block_id: self.id,
             epoch: self.epoch,
+            shard_group: self.shard_group,
         }
     }
 

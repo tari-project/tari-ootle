@@ -89,6 +89,7 @@ impl Validator {
                 block_id: BlockId::zero(),
                 height: NodeHeight::zero(),
                 epoch,
+                shard_group: self.shard_group,
             })
     }
 

@@ -295,6 +295,7 @@ impl Block {
             height: self.header.height(),
             block_id: *self.id(),
             epoch: self.header.epoch(),
+            shard_group: self.header.shard_group(),
         }
     }
 
@@ -303,6 +304,7 @@ impl Block {
             height: self.header.height(),
             block_id: *self.id(),
             epoch: self.header.epoch(),
+            shard_group: self.header.shard_group(),
         }
     }
 

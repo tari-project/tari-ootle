@@ -14,7 +14,7 @@ use tari_consensus_types::{
     QcId,
     ValidatorSignatureBytes,
 };
-use tari_dan_common_types::{optional::Optional, Epoch, NodeHeight, NumPreshards, ShardGroup};
+use tari_dan_common_types::{optional::Optional, Epoch, NodeHeight, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint},
     StateStore,
@@ -25,7 +25,10 @@ use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitPro
 use tari_state_tree::{compute_proof_for_hashes, TreeHash};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::helpers::{assert_eq_debug, create_rocksdb};
+use crate::{
+    helpers::{assert_eq_debug, create_rocksdb},
+    TEST_NUM_PRESHARDS,
+};
 
 #[test]
 fn miscellaneous_rocksdb() {
@@ -130,6 +133,7 @@ fn miscellaneous_operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         height: NodeHeight(123),
         epoch,
+        shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
     };
     tx.leaf_block_set(&leaf_block).unwrap();
     let res = tx.leaf_block_get(epoch).unwrap();
@@ -160,8 +164,8 @@ fn miscellaneous_operations(db: impl StateStore) {
     assert_eq_debug(&res, &high_qc);
 
     // epoch checkpoints
-    let shard_group = ShardGroup::all_shards(NumPreshards::P4);
-    let block = Block::zero_block(Default::default(), NumPreshards::P4);
+    let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
+    let block = Block::zero_block(Default::default(), TEST_NUM_PRESHARDS);
     let mut shard_roots = IndexMap::new();
     shard_roots.insert(shard_group.start(), TreeHash::zero());
     let key = TreeHash::new([1; 32]);

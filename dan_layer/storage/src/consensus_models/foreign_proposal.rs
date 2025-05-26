@@ -65,11 +65,12 @@ impl ForeignProposalRecord {
         &self.block_id
     }
 
-    pub fn as_leaf_block(&self) -> LeafBlock {
+    pub fn as_leaf(&self) -> LeafBlock {
         LeafBlock {
             block_id: self.block_id,
             height: self.height(),
             epoch: self.epoch(),
+            shard_group: self.shard_group_unchecked(),
         }
     }
 

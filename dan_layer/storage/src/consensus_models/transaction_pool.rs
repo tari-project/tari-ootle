@@ -17,6 +17,7 @@ use tari_dan_common_types::{
     displayable::Displayable,
     optional::IsNotFoundError,
     NumPreshards,
+    ShardGroup,
     SubstateAddress,
     SubstateLockType,
 };
@@ -394,11 +395,11 @@ impl TransactionPoolRecord {
             .unwrap_or_else(|| self.current_local_decision())
     }
 
-    fn can_continue_to(&self, stage: TransactionPoolStage) -> bool {
+    fn can_continue_to(&self, stage: TransactionPoolStage, local_shard_group: ShardGroup) -> bool {
         match stage {
             TransactionPoolStage::New => self.is_ready,
             TransactionPoolStage::LocalPrepared => match self.current_decision() {
-                Decision::Commit => self.evidence.all_input_shard_groups_prepared(),
+                Decision::Commit => self.evidence.all_input_shard_groups_prepared(local_shard_group),
                 Decision::Abort(_) => self.evidence.some_shard_groups_prepared(),
             },
             TransactionPoolStage::LocalAccepted => match self.current_decision() {
@@ -412,8 +413,8 @@ impl TransactionPoolRecord {
         }
     }
 
-    pub fn is_ready_for_pending_stage(&self) -> bool {
-        self.can_continue_to(self.current_stage())
+    pub fn is_ready_for_pending_stage(&self, local_shard_group: ShardGroup) -> bool {
+        self.can_continue_to(self.current_stage(), local_shard_group)
     }
 
     pub fn current_local_decision(&self) -> Decision {
@@ -594,8 +595,12 @@ impl TransactionPoolRecord {
         self
     }
 
-    pub fn set_next_stage(&mut self, next_stage: TransactionPoolStage) -> Result<(), TransactionPoolError> {
-        let is_ready = self.can_continue_to(next_stage);
+    pub fn set_next_stage_and_readiness(
+        &mut self,
+        next_stage: TransactionPoolStage,
+        local_shard_group: ShardGroup,
+    ) -> Result<(), TransactionPoolError> {
+        let is_ready = self.can_continue_to(next_stage, local_shard_group);
         self.check_pending_status_update(next_stage, is_ready)?;
         info!(
             target: LOG_TARGET,
@@ -618,8 +623,19 @@ impl TransactionPoolRecord {
         self
     }
 
+    /// Sets the evidence for the transaction pool record. This replaces any existing evidence.
     pub fn set_evidence(&mut self, evidence: Evidence) -> &mut Self {
         self.evidence = evidence;
+        self
+    }
+
+    /// Merges the given evidence into the existing evidence of the transaction pool record.
+    /// This ensures that QC evidence is preserved (neither added not removed), adding only new lock evidence.
+    /// TODO: we also add inputs/outputs - this _shouldn't be_ necessary because the node should have already added
+    /// this. Determine if there are any cases which need this e.g outputs need to be added initially to
+    /// preserve version info before local execution.
+    pub fn merge_evidence(&mut self, evidence: Evidence) -> &mut Self {
+        self.evidence.merge(&evidence);
         self
     }
 

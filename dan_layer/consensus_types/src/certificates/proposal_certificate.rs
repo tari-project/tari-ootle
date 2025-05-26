@@ -146,6 +146,7 @@ impl ProposalCertificate {
             block_id: self.calculate_block_id(),
             height: self.height,
             epoch: self.epoch,
+            shard_group: self.shard_group,
         }
     }
 }

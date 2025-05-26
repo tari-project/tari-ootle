@@ -622,12 +622,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn check_max_mem_usage() {
+    fn check_max_stack_mem_usage() {
         let sz = size_of::<ProposedBlockChangeSet>();
         eprintln!("ProposedBlockChangeSet: {}", sz);
-        const TARGET_MAX_MEM_USAGE: usize = 20_024_000;
+        const TARGET_MAX_MEM_USAGE: usize = 13_232_000;
         let mem_block_diff = size_of::<SubstateChange>() * MEM_MAX_BLOCK_DIFF_CHANGES;
-        eprintln!("mem_block_diff: {}MiB", mem_block_diff / 1024 / 1024);
+        eprintln!("mem_block_diff: {}KiB", mem_block_diff / 1024);
         let mem_state_tree_diffs =
             size_of::<Shard>() * size_of::<PendingShardStateTreeDiff>() * MEM_MAX_STATE_TREE_DIFF_SIZE;
         eprintln!("mem_state_tree_diffs: {}", mem_state_tree_diffs);

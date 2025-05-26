@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_common_types::types::FixedHash;
-use tari_consensus_types::{BlockId, LeafBlock, LockedBlock, QcId};
+use tari_consensus_types::{BlockId, LeafBlock, QcId};
 use tari_dan_common_types::{Epoch, NodeHeight, ShardGroup, VersionedSubstateIdError};
 use tari_dan_storage::{
     consensus_models::{BlockError, ForeignProposalCommitProofError, TransactionPoolError},
@@ -167,16 +167,6 @@ pub enum ProposalValidationError {
         block_height: NodeHeight,
         details: String,
     },
-    #[error(
-        "Candidate block {candidate_block_height} is higher than max failures {max_failures}. Proposed by \
-         {proposed_by}, justify block height {justify_block_height}"
-    )]
-    CandidateBlockHigherThanMaxFailures {
-        proposed_by: String,
-        justify_block_height: NodeHeight,
-        candidate_block_height: NodeHeight,
-        max_failures: usize,
-    },
     #[error("Candidate block {candidate_block_height} does not extend justify block {justify_block_height}")]
     CandidateBlockDoesNotExtendJustify {
         justify_block_height: NodeHeight,
@@ -191,14 +181,6 @@ pub enum ProposalValidationError {
         expected_leader: String,
         block: LeafBlock,
         max_certificate_height: NodeHeight,
-    },
-    #[error(
-        "Block {candidate_block} justify proposed by {proposed_by} is less than the current locked {locked_block}"
-    )]
-    CandidateBlockNotHigherThanLockedBlock {
-        proposed_by: String,
-        locked_block: LockedBlock,
-        candidate_block: LeafBlock,
     },
     #[error("Proposed block {block_id} {height} doesn't have a signature")]
     MissingSignature { block_id: BlockId, height: NodeHeight },

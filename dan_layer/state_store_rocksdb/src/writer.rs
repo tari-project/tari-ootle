@@ -118,13 +118,13 @@ use crate::{
         },
         burnt_utxo,
         burnt_utxo::BurntUtxoCf,
-        certificates::{ProposalCertificateCf, TimeoutCertificateCf},
+        certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         chain::PendingChainIndex,
         epoch_checkpoint::EpochCheckpointCf,
         evicted_node,
         evicted_node::{EvictedNodeCf, EvictedNodeData},
-        finalized_transaction::FinalizedTransactionLinkCf,
+        finalized_transaction::{FinalizedTransactionLinkCf, FinalizedTransactionLinkData},
         foreign_parked_blocks,
         foreign_parked_blocks::ForeignParkedBlockCf,
         foreign_proposal,
@@ -400,7 +400,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "proposal_certificates_save";
         self.db()
             .cf(ProposalCertificateCf)?
-            .put(&qc.calculate_id(), qc, OPERATION)?;
+            .put(&(qc.epoch(), qc.calculate_id()), qc, OPERATION)?;
         Ok(())
     }
 
@@ -409,7 +409,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         self.db()
             .cf(TimeoutCertificateCf)?
-            .put(&tc.calculate_id(), tc, OPERATION)?;
+            .put(&(tc.epoch(), tc.calculate_id()), tc, OPERATION)?;
         Ok(())
     }
 
@@ -549,28 +549,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn foreign_proposals_delete_in_epoch(&mut self, epoch: Epoch) -> Result<(), StorageError> {
-        const OPERATION: &str = "foreign_proposals_delete_in_epoch";
-        let db = self.db();
-        let cf = db.cf(foreign_proposal::ByEpochQuery)?;
-        let iter = cf.prefix_range_iterator(Ordering::Ascending, &epoch);
-
-        for result in iter {
-            let (epoch, data) = result?;
-            db.cf(ForeignProposalCf)?.delete(&data.block_id, OPERATION)?;
-            db.cf(foreign_proposal::EpochIndex)?
-                .delete(&(epoch, data.block_id), OPERATION)?;
-            db.cf(foreign_proposal::UnconfirmedIndex)?
-                .delete(&(epoch, data.block_id), OPERATION)?;
-            if let Some(proposed_block_id) = data.proposed_in_block {
-                db.cf(foreign_proposal::ProposedInBlockIndex)?
-                    .delete(&(proposed_block_id, data.block_id), OPERATION)?;
-            }
-        }
-
-        Ok(())
-    }
-
     fn foreign_proposals_set_status(
         &mut self,
         block_id: &BlockId,
@@ -660,25 +638,19 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         const OPERATION: &str = "transactions_finalize_all";
 
         let finalized_cf = self.db().cf(FinalizedTransactionLinkCf)?;
-
-        let iter = transactions.into_iter();
-        let (lower, _) = iter.size_hint();
-        let mut finalized_set = HashSet::with_capacity(lower);
-        // Add transactions to finalized CF
-        let now = now();
-        for transaction in iter {
-            finalized_set.insert(transaction.transaction_id());
-            finalized_cf.put(transaction.transaction_id(), &now, OPERATION)?;
-        }
-
-        // Delete from block index since this is used for querying pending executions
         let exec_query = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
         let exec_index_cf = self.db().cf(block_transaction_execution::BlockIndex)?;
-        for id in finalized_set {
-            let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), id);
+
+        let iter = transactions.into_iter();
+        // Add transactions to finalized CF
+        let data = FinalizedTransactionLinkData { finalized_at: now() };
+        for transaction in iter {
+            finalized_cf.put(transaction.transaction_id(), &data, OPERATION)?;
+
+            // Delete from block index which is used for querying pending executions
+            let iter = exec_query.query_prefix_range_key_iterator(Ordering::default(), transaction.transaction_id());
             for result in iter {
-                let key = result?;
-                let (tx_id, block_id, height) = key;
+                let (tx_id, block_id, height) = result?;
                 exec_index_cf.delete(&(block_id, tx_id, height), OPERATION)?;
             }
         }
@@ -1278,6 +1250,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let unpruned_index = db.cf(substate::UnprunedDownedValuesIndex)?;
         let iter = unpruned_query.query_prefix_range_iterator(Ordering::Ascending, &epoch);
         let substates_cf = db.cf(SubstateCf)?;
+        let mut count = 0usize;
         for result in iter {
             let (key, substate_addr) = result?;
 
@@ -1286,7 +1259,12 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             substate.clear_substate_value();
             substates_cf.put(&substate_addr, &substate, OPERATION)?;
             unpruned_index.delete(&key, OPERATION)?;
+            count += 1;
         }
+        info!(
+            target: LOG_TARGET,
+            "🗑️ Pruned {count} downed substates for epoch {epoch} from unpruned values index"
+        );
 
         Ok(())
     }
@@ -1423,8 +1401,8 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             let mut num_deleted = 0;
             let stale_iter = stale_cf.query_prefix_range_iterator(Ordering::Ascending, &shard);
             let max_version = versions_cf.get(&shard, OPERATION).optional()?.unwrap_or(0);
-            let Some(to_version) = max_version.checked_sub(self.options.history_length) else {
-                trace!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.history_length);
+            let Some(to_version) = max_version.checked_sub(self.options.state_history_length) else {
+                trace!(target: LOG_TARGET, "Shard {shard} is at version {max_version}, skipping stale node deletion due to history length {}", self.options.state_history_length);
                 continue;
             };
             for result in stale_iter {
@@ -1763,6 +1741,22 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
+    fn epoch_cleanup(&mut self, epoch: Epoch) -> Result<(), StorageError> {
+        let Some(prune_epoch) = epoch.checked_sub(self.options.epoch_history_length) else {
+            return Ok(());
+        };
+
+        // TODO: this assumes that cleanup is run every epoch - if not, some substates will not be pruned
+        self.substates_prune_downed_values(prune_epoch)?;
+
+        let db = self.db();
+        cleanup::cleanup_blocks_for_epoch(&db, prune_epoch)?;
+        cleanup::cleanup_qcs_for_epoch(&db, prune_epoch)?;
+        cleanup::foreign_proposals_for_epoch(&db, prune_epoch)?;
+
+        Ok(())
+    }
+
     fn diagnostics_add_no_vote(&mut self, _block_id: BlockId, _reason: NoVoteReason) -> Result<(), StorageError> {
         // used for debugging. TODO: consider implementing as a user option or keeping in the global Sqlite db
         Ok(())
@@ -1835,4 +1829,113 @@ fn recurse_subtree_depth_first_post_order<'a>(
         })
         // Emit the parent key after all children
         .chain(parent_after_child)
+}
+
+mod cleanup {
+    use super::*;
+    use crate::column_families::{
+        certificates,
+        certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
+    };
+
+    pub fn foreign_proposals_for_epoch(db: &DbContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
+        const OPERATION: &str = "cleanup::foreign_proposals_for_epoch";
+        let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
+        let cf = db.cf(foreign_proposal::ByEpochQuery)?;
+        let iter = cf.query_end_range_iterator(Ordering::Ascending, &up_to_epoch);
+
+        let mut count = 0;
+        for result in iter {
+            let ((epoch, _), data) = result?;
+            db.cf(ForeignProposalCf)?.delete(&data.block_id, OPERATION)?;
+            db.cf(foreign_proposal::EpochIndex)?
+                .delete(&(epoch, data.block_id), OPERATION)?;
+            db.cf(foreign_proposal::UnconfirmedIndex)?
+                .delete(&(epoch, data.block_id), OPERATION)?;
+            if let Some(proposed_block_id) = data.proposed_in_block {
+                db.cf(foreign_proposal::ProposedInBlockIndex)?
+                    .delete(&(proposed_block_id, data.block_id), OPERATION)?;
+            }
+            count += 1;
+        }
+        info!(
+            target: LOG_TARGET,
+            "Cleaned up {} foreign proposals for epoch ..{}",
+            count,
+            up_to_epoch
+        );
+        Ok(())
+    }
+
+    pub fn cleanup_blocks_for_epoch(db: &DbContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
+        const OPERATION: &str = "cleanup::cleanup_blocks_for_epoch";
+        let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
+        let cf = db.cf(BlockCf)?;
+        let committed_cf = db.cf(chain::CommittedParentChildChainIndex)?;
+        let query = db.cf(block::ByEpochQuery)?;
+        let index_cf = db.cf(block::EpochHeightIndex)?;
+
+        // Don't delete epoch 0 blocks (i.e the zero block)
+        let iter = query.query_range_key_iterator(Ordering::Ascending, Epoch(1)..up_to_epoch);
+
+        let mut count = 0usize;
+        for result in iter {
+            let (epoch, height, block_id) = result?;
+            cf.delete(&block_id, OPERATION)?;
+            committed_cf.delete(&block_id, OPERATION)?;
+            index_cf.delete(&(epoch, height, block_id), OPERATION)?;
+            count += 1;
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "Cleaned up {} blocks for ..{}",
+            count,
+            up_to_epoch
+        );
+
+        Ok(())
+    }
+
+    pub fn cleanup_qcs_for_epoch(db: &DbContext<'_>, up_to_epoch: Epoch) -> Result<(), StorageError> {
+        const OPERATION: &str = "cleanup::cleanup_qcs_for_epoch";
+        let up_to_epoch = up_to_epoch + Epoch(1); // Make it inclusive
+        let cf = db.cf(ProposalCertificateCf)?;
+        let query = db.cf(certificates::proposal::ByEpochQuery)?;
+        let iter = query.query_range_key_iterator(Ordering::Ascending, Epoch(1)..up_to_epoch);
+
+        let mut count = 0usize;
+        for result in iter {
+            let key = result?;
+            cf.delete(&key, OPERATION)?;
+            count += 1;
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "Cleaned up {} proposal certificates for ..{}",
+            count,
+            up_to_epoch
+        );
+
+        let cf = db.cf(TimeoutCertificateCf)?;
+        let query = db.cf(certificates::timeout::ByEpochQuery)?;
+        let iter = query.query_range_key_iterator(Ordering::Ascending, Epoch(1)..up_to_epoch);
+
+        let mut count = 0usize;
+        for result in iter {
+            let key = result?;
+            cf.delete(&key, OPERATION)?;
+            count += 1;
+        }
+
+        info!(
+            target: LOG_TARGET,
+            "Cleaned up {} timeout certificates for ..={}",
+            count,
+            up_to_epoch
+        );
+
+        Ok(())
+    }
 }

@@ -9,6 +9,7 @@ mod messaging;
 mod signing_service;
 mod substate_store;
 mod sync;
+mod tasks;
 mod transaction_executor;
 
 pub use block_store::*;
@@ -21,6 +22,7 @@ pub use sync::*;
 use tari_dan_common_types::DerivableFromPublicKey;
 use tari_dan_storage::StateStore;
 use tari_epoch_manager::EpochManagerReader;
+pub use tasks::*;
 pub use transaction_executor::*;
 
 use crate::traits::hooks::ConsensusHooks;

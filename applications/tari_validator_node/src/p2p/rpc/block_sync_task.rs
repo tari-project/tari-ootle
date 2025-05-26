@@ -155,6 +155,7 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                     continue;
                 }
 
+                let epoch = child.epoch();
                 last_block_id = current_block_id;
                 let certificates = req
                     .stream_qcs
@@ -164,9 +165,10 @@ impl<TStateStore: StateStore> BlockSyncTask<TStateStore> {
                             .iter()
                             .filter_map(|cmd| cmd.transaction())
                             .flat_map(|transaction| transaction.evidence.qc_ids_iter())
+                            .map(|qc_id| (epoch, *qc_id))
                             .collect::<HashSet<_>>()
                     })
-                    .map(|all_qcs| ProposalCertificate::get_many(tx, all_qcs))
+                    .map(|all_qcs| ProposalCertificate::get_many(tx, &all_qcs))
                     .transpose()?
                     .unwrap_or_default();
                 let substates_selection =

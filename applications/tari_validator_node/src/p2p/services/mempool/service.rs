@@ -27,7 +27,7 @@ use log::*;
 use tari_consensus::hotstuff::HotstuffEvent;
 use tari_dan_common_types::{optional::Optional, PeerAddress, ShardGroup, ToSubstateAddress};
 use tari_dan_p2p::{DanMessage, NewTransactionMessage, TariMessagingSpec};
-use tari_dan_storage::{consensus_models::TransactionRecord, StateStore};
+use tari_dan_storage::{consensus_models::TransactionRecord, StateStore, StateStoreReadTransaction};
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
 use tari_networking::NetworkingHandle;
 use tari_transaction::{Transaction, TransactionId};
@@ -47,6 +47,8 @@ use crate::{
 };
 
 const LOG_TARGET: &str = "tari::validator_node::mempool::service";
+
+const MEM_MAX_TRANSACTIONS_DEDUP_ALLOC: usize = 1_000_000; // 32Mb
 
 #[derive(Debug)]
 pub struct MempoolService<TValidator, TStateStore> {
@@ -144,6 +146,9 @@ where
                 num_found += 1;
             }
         }
+        if self.transactions.capacity() > MEM_MAX_TRANSACTIONS_DEDUP_ALLOC {
+            self.transactions.shrink_to(MEM_MAX_TRANSACTIONS_DEDUP_ALLOC);
+        }
         num_found
     }
 
@@ -231,7 +236,12 @@ where
         }
 
         if transaction.num_unique_inputs() == 0 {
-            warn!(target: LOG_TARGET, "⚠ No involved shards for payload");
+            warn!(target: LOG_TARGET, "⚠ No involved shards for transaction {}", transaction.id());
+            return Err(MempoolError::TransactionValidationError(
+                TransactionValidationError::NoInvolvedShards {
+                    transaction_id: *transaction.id(),
+                },
+            ));
         }
 
         let current_epoch = self.consensus_handle.current_view().get_epoch();
@@ -315,7 +325,21 @@ where
             return Ok(true);
         }
 
-        let transaction_exists = self.state_store.with_read_tx(|tx| TransactionRecord::exists(tx, id))?;
+        let transaction_exists = self.state_store.with_read_tx(|tx| {
+            if tx
+                .finalized_transaction_execution_get_finalized_time(id)
+                .optional()?
+                .is_some()
+            {
+                debug!(
+                    target: LOG_TARGET,
+                    "🎱 Transaction {} already finalized. Ignoring",
+                    id
+                );
+                return Ok(true);
+            }
+            TransactionRecord::exists(tx, id)
+        })?;
 
         if transaction_exists {
             debug!(

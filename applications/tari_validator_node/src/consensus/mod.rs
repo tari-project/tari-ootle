@@ -78,7 +78,9 @@ pub async fn spawn(
         network,
         sidechain_id,
         consensus_constants: consensus_constants.clone(),
-        state_tree_cleanup_interval: Duration::from_secs(60),
+        // TODO: make these configurable (defaults should probably be longer than 1 hour)
+        state_tree_cleanup_interval: Duration::from_secs(60 * 60),
+        epoch_gc_interval: Duration::from_secs(60 * 60),
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(

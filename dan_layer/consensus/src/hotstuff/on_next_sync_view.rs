@@ -74,7 +74,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
                 timeout_height,
             )?;
             let high_pc = HighPc::get(tx, epoch)?;
-            let high_pc = ProposalCertificate::get(tx, high_pc.id())?;
+            let high_pc = ProposalCertificate::get(tx, epoch, high_pc.id())?;
             let last_sent_vote = LastSentVote::get(tx, epoch)
                 .optional()?
                 .filter(|vote| high_pc.height() < vote.block_height());

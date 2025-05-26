@@ -33,7 +33,6 @@ impl Cf for EpochHeightIndex {
 
     fn name() -> &'static str {
         "block_height_idx"
-        // "blocks_epoch_height_idx"
     }
 }
 

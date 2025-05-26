@@ -48,6 +48,7 @@ use super::{
 };
 use crate::{
     hotstuff::{
+        epoch_gc::EpochGc,
         epoch_state::EpochState,
         error::HotStuffError,
         event::HotstuffEvent,
@@ -70,7 +71,7 @@ use crate::{
     },
     messages::{HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,
-    traits::{hooks::ConsensusHooks, CertificateStore, ConsensusSpec, LeaderStrategy},
+    traits::{hooks::ConsensusHooks, CertificateStore, ConsensusSpec, LeaderStrategy, PeriodicTask},
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::worker";
@@ -275,11 +276,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             local_committee,
         };
 
-        let _cancel_gc_task_on_drop = StateTreeGc::new(
+        let _cancel_state_tree_gc_task_on_drop = StateTreeGc::new(
             self.state_store.clone(),
             epoch_state.local_committee_info.num_preshards(),
         )
         .do_work_periodically(self.config.state_tree_cleanup_interval);
+
+        let _cancel_epoch_gc_task_on_drop =
+            EpochGc::new(self.state_store.clone()).do_work_periodically(self.config.epoch_gc_interval);
 
         self.run(epoch_state).await?;
         Ok(())
@@ -820,9 +824,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         if next_height > highest_block.height + NodeHeight(1) {
             let (high_qc, high_tc, parent) = self.state_store.with_read_tx(|tx| {
                 let high_qc = HighPc::get(tx, epoch_state.epoch())?;
-                let high_qc = ProposalCertificate::get(tx, high_qc.id())?;
+                let high_qc = ProposalCertificate::get(tx, high_qc.epoch(), high_qc.id())?;
                 let high_tc = HighTc::get(tx, epoch_state.epoch())?;
-                let high_tc = TimeoutCertificate::get(tx, high_tc.id())?;
+                let high_tc = TimeoutCertificate::get(tx, high_tc.epoch(), high_tc.id())?;
                 let block = Block::get(tx, highest_block.block_id())?;
                 Ok::<_, HotStuffError>((high_qc, high_tc, block))
             })?;

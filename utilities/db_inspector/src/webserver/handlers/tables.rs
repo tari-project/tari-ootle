@@ -151,7 +151,7 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("proposed_in_block", "Proposed in"),
             ]);
         },
-        s if s == column_families::certificates::ProposalCertificateCf::name() => {
+        s if s == column_families::certificates::proposal::ProposalCertificateCf::name() => {
             table.with_columns([
                 Column::new("qc_id", "QC ID"),
                 Column::new("block_id", "Block ID"),

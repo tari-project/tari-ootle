@@ -22,6 +22,7 @@ mod on_receive_vote;
 // mod on_sync_response;
 mod block_change_set;
 pub mod commit_proofs;
+mod epoch_gc;
 mod epoch_state;
 mod foreign_proposal_processor;
 mod on_catch_up_sync;

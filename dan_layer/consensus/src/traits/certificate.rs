@@ -5,7 +5,7 @@ use std::ops::Deref;
 
 use log::info;
 use tari_consensus_types::{HighPc, HighTc, ProposalCertificate, QcId, TcId, TimeoutCertificate};
-use tari_dan_common_types::{displayable::Displayable, optional::Optional};
+use tari_dan_common_types::{displayable::Displayable, optional::Optional, Epoch};
 use tari_dan_storage::{
     consensus_models::BookkeepingModel,
     StateStoreReadTransaction,
@@ -18,12 +18,12 @@ const LOG_TARGET: &str = "tari::dan::consensus::quorum_certificate";
 pub trait CertificateStore: Sized {
     type Id: 'static;
     type HighCertificate;
-    fn get<TTx: StateStoreReadTransaction>(tx: &TTx, id: &Self::Id) -> Result<Self, StorageError>;
+    fn get<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch, id: &Self::Id) -> Result<Self, StorageError>;
 
     fn get_many<'a, TTx, I>(tx: &TTx, ids: I) -> Result<Vec<Self>, StorageError>
     where
         TTx: StateStoreReadTransaction,
-        I: IntoIterator<Item = &'a Self::Id>,
+        I: IntoIterator<Item = &'a (Epoch, Self::Id)>,
         I::IntoIter: ExactSizeIterator;
 
     fn save<TTx: StateStoreWriteTransaction>(&self, tx: &mut TTx) -> Result<(), StorageError>;
@@ -38,14 +38,14 @@ impl CertificateStore for ProposalCertificate {
     type HighCertificate = HighPc;
     type Id = QcId;
 
-    fn get<TTx: StateStoreReadTransaction>(tx: &TTx, id: &Self::Id) -> Result<Self, StorageError> {
-        tx.proposal_certificates_get(id)
+    fn get<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch, id: &Self::Id) -> Result<Self, StorageError> {
+        tx.proposal_certificates_get(epoch, id)
     }
 
     fn get_many<'a, TTx, I>(tx: &TTx, ids: I) -> Result<Vec<Self>, StorageError>
     where
         TTx: StateStoreReadTransaction,
-        I: IntoIterator<Item = &'a Self::Id>,
+        I: IntoIterator<Item = &'a (Epoch, Self::Id)>,
         I::IntoIter: ExactSizeIterator,
     {
         tx.proposal_certificates_get_many(ids)
@@ -95,14 +95,14 @@ impl CertificateStore for TimeoutCertificate {
     type HighCertificate = HighTc;
     type Id = TcId;
 
-    fn get<TTx: StateStoreReadTransaction>(tx: &TTx, id: &Self::Id) -> Result<Self, StorageError> {
-        tx.timeout_certificates_get(id)
+    fn get<TTx: StateStoreReadTransaction>(tx: &TTx, epoch: Epoch, id: &Self::Id) -> Result<Self, StorageError> {
+        tx.timeout_certificates_get(epoch, id)
     }
 
     fn get_many<'a, TTx, I>(tx: &TTx, ids: I) -> Result<Vec<Self>, StorageError>
     where
         TTx: StateStoreReadTransaction,
-        I: IntoIterator<Item = &'a Self::Id>,
+        I: IntoIterator<Item = &'a (Epoch, Self::Id)>,
         I::IntoIter: ExactSizeIterator,
     {
         tx.timeout_certificates_get_many(ids)

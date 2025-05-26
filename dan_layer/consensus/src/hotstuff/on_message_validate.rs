@@ -4,13 +4,14 @@
 use std::collections::HashSet;
 
 use log::*;
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     Epoch,
     NodeHeight,
 };
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, ForeignParkedProposal, ForeignProposal, TransactionRecord},
+    consensus_models::{Block, ForeignParkedProposal, ForeignProposal, TransactionRecord},
     StateStore,
     StateStoreWriteTransaction,
 };
@@ -35,7 +36,7 @@ pub struct OnMessageValidate<TConsensusSpec: ConsensusSpec> {
     epoch_manager: TConsensusSpec::EpochManager,
     current_view: CurrentView,
     leader_strategy: TConsensusSpec::LeaderStrategy,
-    vote_signing_service: TConsensusSpec::SignatureService,
+    vote_signing_service: TConsensusSpec::SignerService,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     tx_events: broadcast::Sender<HotstuffEvent>,
     /// Keep track of max 32 in-flight requests
@@ -50,7 +51,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         epoch_manager: TConsensusSpec::EpochManager,
         current_view: CurrentView,
         leader_strategy: TConsensusSpec::LeaderStrategy,
-        vote_signing_service: TConsensusSpec::SignatureService,
+        vote_signing_service: TConsensusSpec::SignerService,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
         tx_events: broadcast::Sender<HotstuffEvent>,
     ) -> Self {
@@ -86,7 +87,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     );
                     return Ok(MessageValidationResult::Discard);
                 }
-                self.process_local_proposal(current_height, from, epoch_state, msg)
+                self.process_local_proposal(current_height, from, epoch_state, *msg)
             },
             HotstuffMessage::ForeignProposal(proposal) => {
                 self.process_foreign_proposal(epoch_state, from, proposal).await
@@ -109,18 +110,6 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             msg @ HotstuffMessage::NewView(_) |
             msg @ HotstuffMessage::Vote(_) |
             msg @ HotstuffMessage::CatchUpSyncRequest(_) |
-            msg @ HotstuffMessage::SyncResponse(_) => {
-                if !epoch_state.local_committee().contains(&from) {
-                    warn!(
-                        target: LOG_TARGET,
-                        "⚠️ Received {} message from non-committee member {}. Discarding message.",
-                        msg.as_type_str(),
-                        from
-                    );
-                    return Ok(MessageValidationResult::Discard);
-                }
-                Ok(MessageValidationResult::Ready { from, message: msg })
-            },
             msg => Ok(MessageValidationResult::Ready { from, message: msg }),
         }
     }
@@ -183,7 +172,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         if let Err(err) = self.check_local_proposal(&proposal.block, epoch_state) {
             return Ok(MessageValidationResult::Invalid {
                 from,
-                message: HotstuffMessage::Proposal(proposal),
+                message: HotstuffMessage::new_proposal(proposal),
                 err,
             });
         }
@@ -209,7 +198,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                     info!(target: LOG_TARGET, "♻️ all transactions for local block {unparked_block} are ready for consensus");
 
                     let _ignore = self.tx_events.send(HotstuffEvent::ParkedBlockReady {
-                        block: unparked_block.as_leaf_block(),
+                        block: unparked_block.as_leaf(),
                     });
 
                     unparked_blocks.push(ProposalMessage {
@@ -270,12 +259,12 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
         if missing_tx_ids.is_empty() {
             return Ok(MessageValidationResult::Ready {
                 from,
-                message: HotstuffMessage::Proposal(proposal),
+                message: HotstuffMessage::new_proposal(proposal),
             });
         }
 
         let _ignore = self.tx_events.send(HotstuffEvent::ProposedBlockParked {
-            block: proposal.block.as_leaf_block(),
+            block: proposal.block.as_leaf(),
             num_missing_txs: missing_tx_ids.len(),
             // TODO: remove
             num_awaiting_txs: 0,
@@ -349,9 +338,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             return Ok(MessageValidationResult::Invalid {
                 from,
                 message: HotstuffMessage::ForeignProposal(msg),
-                err: HotStuffError::ProposalValidationError(ProposalValidationError::NoTransactionsInCommittee {
-                    block_id,
-                }),
+                err: ProposalValidationError::NoTransactionsInCommittee { block_id }.into(),
             });
         }
 
@@ -361,11 +348,17 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
             .await?;
 
         if let Err(err) = self.check_foreign_proposal(&msg.proposal, &committee) {
-            return Ok(MessageValidationResult::Invalid {
-                from,
-                message: HotstuffMessage::ForeignProposal(msg),
-                err,
-            });
+            if cfg!(debug_assertions) {
+                // This helps to quickly identify the issue in tests. Otherwise, the chain would just continue until the
+                // tests timeout due to block height limits and we'd have to wade through logs.
+                panic!("❌ Foreign proposal {} failed validation: {}", msg.proposal, err);
+            } else {
+                return Ok(MessageValidationResult::Invalid {
+                    from,
+                    message: HotstuffMessage::ForeignProposal(msg),
+                    err,
+                });
+            }
         }
 
         self.store.with_write_tx(|tx| {
@@ -385,9 +378,9 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 return Ok(MessageValidationResult::Invalid {
                     from,
                     message: HotstuffMessage::ForeignProposal(msg),
-                    err: HotStuffError::ProposalValidationError(ProposalValidationError::NoTransactionsInCommittee {
+                    err: ProposalValidationError::NoTransactionsInCommittee {
                         block_id,
-                    }),
+                    }.into(),
                 });
             }
 

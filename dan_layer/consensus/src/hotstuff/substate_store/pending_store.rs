@@ -5,6 +5,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
 use indexmap::IndexMap;
 use log::*;
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::{
     displayable::Displayable,
     optional::Optional,
@@ -19,7 +20,7 @@ use tari_dan_common_types::{
     VersionedSubstateIdRef,
 };
 use tari_dan_storage::{
-    consensus_models::{BlockDiff, BlockId, LockConflict, SubstateChange, SubstateLock, SubstateRecord},
+    consensus_models::{BlockDiff, LockConflict, SubstateChange, SubstateLock, SubstateRecord},
     StateStore,
     StateStoreReadTransaction,
 };
@@ -85,9 +86,11 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
         Ok(SubstateChange::Up {
             id: id.clone(),
             shard: substate.created_by_shard,
-            substate: substate
-                .into_substate()
-                .expect("PendingSubstateStore::get_latest_change: UP substate has no value"),
+            substate: Box::new(
+                substate
+                    .into_substate()
+                    .expect("PendingSubstateStore::get_latest_change: UP substate has no value"),
+            ),
         })
     }
 
@@ -115,7 +118,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                     let next_id = id.to_next_version();
                     let up = SubstateChange::Up {
                         shard: id.to_shard(num_preshards),
-                        substate: Substate::new(next_id.version(), value),
+                        substate: Box::new(Substate::new(next_id.version(), value)),
                         id: next_id.into_substate_id(),
                     };
                     self.insert(up);
@@ -130,7 +133,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
             let id = SubstateAddress::from_substate_id(substate_id, 0);
             let up = SubstateChange::Up {
                 shard: id.to_shard(num_preshards),
-                substate: Substate::new(0, value),
+                substate: Box::new(Substate::new(0, value)),
                 id: substate_id.clone(),
             };
             self.insert(up);
@@ -156,7 +159,11 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                 );
                 updater(&mut substate_value)?;
                 let substate = Substate::new(next_version, substate_value);
-                self.insert(SubstateChange::Up { id, shard, substate });
+                self.insert(SubstateChange::Up {
+                    id,
+                    shard,
+                    substate: Box::new(substate),
+                });
             },
             SubstateChange::Down { id, .. } => {
                 debug!(target: LOG_TARGET, "Re-creating DOWNed substate in place: {}", id);
@@ -164,7 +171,7 @@ impl<'a, 'tx, TStore: StateStore + 'a> PendingSubstateStore<'a, 'tx, TStore> {
                 let next_id = id.into_next_version();
                 let up = SubstateChange::Up {
                     shard: next_id.to_shard(self.num_preshards),
-                    substate: Substate::new(next_id.version(), value),
+                    substate: Box::new(Substate::new(next_id.version(), value)),
                     id: next_id.into_substate_id(),
                 };
                 self.insert(up);
@@ -251,7 +258,7 @@ impl<'a, 'tx, TStore: StateStore + 'a + 'tx> WriteableSubstateStore for PendingS
             self.put(SubstateChange::Up {
                 id: id.clone(),
                 shard,
-                substate: substate.clone(),
+                substate: Box::new(substate.clone()),
             })?;
         }
 

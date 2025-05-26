@@ -71,7 +71,7 @@ async fn ensure_registered(handle: &ManagerHandle, vn_registration_file: &PathBu
     }
 
     // if the node is already registered
-    if active_keys.iter().any(|vn| *vn == public_key) {
+    if active_keys.contains(&public_key) {
         info!("VN has an active registration");
         return Ok(());
     }

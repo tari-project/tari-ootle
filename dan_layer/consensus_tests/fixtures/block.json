@@ -27,7 +27,7 @@
     "block_id": "60e452539750d7d9c628f0b729f5a4ffb6a3f4343be734b230cf513bb21dbb53",
     "header_hash": "a908861a4a4d2d2be4fd181352fb499249580c066cae761b9f074b8068e9137a",
     "parent_id": "75cd035fcf70444dfcd547f76838a8168c2e48bc7fd1217be05fcb28c4bf25dd",
-    "block_height": 65,
+    "height": 65,
     "epoch": 5,
     "shard_group": {
       "start": 0,

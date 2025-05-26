@@ -3,14 +3,14 @@
 
 use anyhow::anyhow;
 use tari_common_types::types::FixedHash;
-use tari_dan_storage::consensus_models::BlockId;
+use tari_consensus_types::BlockId;
 use tari_engine_types::substate::SubstateId;
 use tari_transaction::TransactionId;
 
 use crate::{
     codecs::{DbCodec, EncodeVec, SubstateIdCodec},
+    column_families::substate_locks::SubstateLockKey,
     error::RocksDbStorageError,
-    models::substate_locks::SubstateLockKey,
     utils::read_to_fixed,
 };
 

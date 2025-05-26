@@ -25,20 +25,17 @@ use std::{io::Write, ops::Deref};
 use rand::{rngs::OsRng, Rng, RngCore};
 use tari_bor::cbor;
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{BlockId, Decision, LeafBlock, ProposalCertificate, QcId};
 use tari_dan_common_types::{shard::Shard, Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_dan_storage::{
     consensus_models::{
         Block,
-        BlockId,
         BlockPledge,
+        BookkeepingModel,
         Command,
         CommandsCommitProof,
-        Decision,
         ForeignProposal,
         ForeignProposalRecord,
-        LeafBlock,
-        QcId,
-        QuorumCertificate,
         SubstateRecord,
         TransactionAtom,
     },
@@ -68,7 +65,7 @@ pub const fn num_preshards() -> NumPreshards {
 }
 
 /// Create a RocksDbStateStore and a temporary directory
-/// NOTE: this takes around 1.5s on my machine (AMD Ryzen 9 5950X, SSD)
+/// NOTE: this takes around 1.5 s on my machine (AMD Ryzen 9 5950X, SSD)
 pub fn create_rocksdb() -> (RocksDbStateStore<String>, TempDir) {
     let temp_dir = tempfile::Builder::new().keep(false).tempdir().unwrap();
     let db_file = temp_dir.path().join("rocksdb");
@@ -221,6 +218,7 @@ pub fn create_block(parent: Option<&Block>) -> Block {
         network,
         *parent.id(),
         parent.justify().clone(),
+        None,
         NodeHeight(1),
         Epoch(0),
         ShardGroup::all_shards(num_preshards()),
@@ -252,6 +250,7 @@ pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
         network,
         *parent.block_id(),
         qc,
+        None,
         parent.height() + NodeHeight(1),
         parent.epoch(),
         ShardGroup::all_shards(num_preshards()),
@@ -268,9 +267,9 @@ pub fn create_block_with_qc(parent: &LeafBlock) -> Block {
     )
     .unwrap()
 }
-pub fn create_qc(block: &LeafBlock) -> QuorumCertificate {
-    QuorumCertificate::new(
-        *block.block_id().as_hash(),
+pub fn create_qc(block: &LeafBlock) -> ProposalCertificate {
+    ProposalCertificate::new(
+        *block.block_id().hash(),
         *block.block_id(),
         block.height(),
         block.epoch(),
@@ -283,11 +282,11 @@ pub fn create_qc(block: &LeafBlock) -> QuorumCertificate {
 pub fn create_chain(num_blocks: usize) -> Vec<Block> {
     let mut blocks = Vec::with_capacity(num_blocks);
     let block = create_block(None);
-    let mut parent = block.as_leaf_block();
+    let mut parent = block.as_leaf();
     blocks.push(block);
     for _ in 0..num_blocks {
         let block = create_block_with_qc(&parent);
-        parent = block.as_leaf_block();
+        parent = block.as_leaf();
         blocks.push(block);
     }
     blocks
@@ -300,27 +299,27 @@ where
 {
     for block in chain {
         block.insert(tx).unwrap();
-        block.justify().save(tx).unwrap();
+        tx.proposal_certificates_save(block.justify()).unwrap();
     }
     let len = chain.len();
     if len < 3 {
         return;
     }
 
-    chain[len - 3].as_locked_block().set(tx).unwrap();
+    chain[len - 3].as_locked().set(tx).unwrap();
 
     for block in &chain[..len - 3] {
         tx.blocks_set_qcs(block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
             .unwrap();
     }
 
-    chain.last().unwrap().as_leaf_block().set(tx).unwrap();
+    chain.last().unwrap().as_leaf().set(tx).unwrap();
 }
 
 pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignProposalRecord {
     let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
-    let qc1 = QuorumCertificate::new(
-        *parent_id.as_hash(),
+    let qc1 = ProposalCertificate::new(
+        *parent_id.hash(),
         parent_id,
         NodeHeight(1),
         epoch,
@@ -333,6 +332,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
         Default::default(),
         parent_id,
         qc1.clone(),
+        None,
         NodeHeight(2),
         epoch,
         shard_group,
@@ -349,8 +349,8 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
     let commit_proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
         header: SidechainBlockHeader {
             network: foreign_block.network().as_byte(),
-            parent_id: *parent_id.as_hash(),
-            justify_id: *qc1.id().hash(),
+            parent_id: *parent_id.hash(),
+            justify_id: *qc1.calculate_id().hash(),
             height: foreign_block.height().as_u64(),
             epoch: epoch.as_u64(),
             shard_group: tari_sidechain::ShardGroup {
@@ -366,7 +366,7 @@ pub fn create_foreign_proposal(parent_id: BlockId, epoch: Epoch) -> ForeignPropo
         proof_elements: vec![CommitProofElement::QuorumCertificate(
             tari_sidechain::QuorumCertificate {
                 header_hash: foreign_block.header().calculate_hash(),
-                parent_id: *parent_id.as_hash(),
+                parent_id: *parent_id.hash(),
                 signatures: vec![],
                 decision: QuorumDecision::Accept,
             },

@@ -37,10 +37,10 @@ use crate::store::{EpochOracleStore, StoreKey};
 
 const LOG_TARGET: &str = "tari::dan::base_layer_scanner";
 
-type TaskOutput<TStore> = (Result<(), BaseLayerOracleError>, BaseLayerOracleInner<TStore>);
+type TaskOutput<TStore> = (Result<(), BaseLayerOracleError>, Box<BaseLayerOracleInner<TStore>>);
 
 pub struct BaseLayerOracle<TStore> {
-    inner: Option<BaseLayerOracleInner<TStore>>,
+    inner: Option<Box<BaseLayerOracleInner<TStore>>>,
     scanning_interval: Duration,
     is_initialized: bool,
     is_done: bool,
@@ -77,7 +77,7 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
         template_sidechain_id: Option<RistrettoPublicKeyBytes>,
     ) -> Self {
         Self {
-            inner: Some(BaseLayerOracleInner {
+            inner: Some(Box::new(BaseLayerOracleInner {
                 store,
                 last_scanned_tip: None,
                 last_scanned_height: 0,
@@ -92,7 +92,7 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
                 burnt_utxo_sidechain_id,
                 template_sidechain_id,
                 pending_events: VecDeque::new(),
-            }),
+            })),
             scanning_interval,
             is_initialized: false,
             is_done: false,

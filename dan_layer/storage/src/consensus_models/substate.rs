@@ -5,6 +5,7 @@ use std::{collections::HashSet, fmt, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::{BlockId, ProposalCertificate, QcId};
 use tari_dan_common_types::{
     displayable::Displayable,
     shard::Shard,
@@ -21,12 +22,7 @@ use tari_engine_types::{
 };
 use tari_transaction::TransactionId;
 
-use crate::{
-    consensus_models::{BlockId, QcId, QuorumCertificate, SubstateLock},
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
-};
+use crate::{consensus_models::SubstateLock, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -262,19 +258,19 @@ impl SubstateRecord {
         Ok(rec)
     }
 
-    pub fn get_created_quorum_certificate<TTx: StateStoreReadTransaction>(
+    pub fn get_created_proposal_certificate<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
-    ) -> Result<QuorumCertificate, StorageError> {
-        tx.quorum_certificates_get(self.created_justify())
+    ) -> Result<ProposalCertificate, StorageError> {
+        tx.proposal_certificates_get(self.created_justify())
     }
 
-    pub fn get_destroyed_quorum_certificate<TTx: StateStoreReadTransaction>(
+    pub fn get_destroyed_proposal_certificate<TTx: StateStoreReadTransaction>(
         &self,
         tx: &TTx,
-    ) -> Result<Option<QuorumCertificate>, StorageError> {
+    ) -> Result<Option<ProposalCertificate>, StorageError> {
         self.destroyed()
-            .map(|destroyed| tx.quorum_certificates_get(&destroyed.justify))
+            .map(|destroyed| tx.proposal_certificates_get(&destroyed.justify))
             .transpose()
     }
 
@@ -324,7 +320,7 @@ impl SubstateDestroyedProof {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SubstateValueOrHash {
-    Value(SubstateValue),
+    Value(Box<SubstateValue>),
     Hash(FixedHash),
 }
 
@@ -338,7 +334,7 @@ impl SubstateValueOrHash {
 
     pub fn into_value(self) -> Option<SubstateValue> {
         match self {
-            SubstateValueOrHash::Value(value) => Some(value),
+            SubstateValueOrHash::Value(value) => Some(*value),
             SubstateValueOrHash::Hash(_) => None,
         }
     }
@@ -360,7 +356,7 @@ impl SubstateValueOrHash {
 
 impl From<SubstateValue> for SubstateValueOrHash {
     fn from(value: SubstateValue) -> Self {
-        Self::Value(value)
+        Self::Value(Box::new(value))
     }
 }
 

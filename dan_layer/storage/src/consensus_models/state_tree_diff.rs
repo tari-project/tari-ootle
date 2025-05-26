@@ -8,10 +8,11 @@ use std::{collections::HashMap, fmt::Display, ops::Deref};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::shard::Shard;
 use tari_state_tree::{StateHashTreeDiff, Version};
 
-use crate::{consensus_models::BlockId, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
+use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PendingShardStateTreeDiff {

@@ -841,7 +841,7 @@ where
 
         self.update_connected_peers(&peer_id, &info);
 
-        let is_relay = info.protocols.iter().any(|p| *p == relay::HOP_PROTOCOL_NAME);
+        let is_relay = info.protocols.contains(&relay::HOP_PROTOCOL_NAME);
 
         let is_connected_through_relay = self
             .active_connections

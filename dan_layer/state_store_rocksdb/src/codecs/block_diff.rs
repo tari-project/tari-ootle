@@ -3,12 +3,12 @@
 
 use anyhow::anyhow;
 use tari_common_types::types::FixedHash;
-use tari_dan_storage::consensus_models::BlockId;
+use tari_consensus_types::BlockId;
 
 use crate::{
     codecs::{DbCodec, EncodeVec, SubstateIdCodec},
+    column_families::block_diff::BlockDiffKey,
     error::RocksDbStorageError,
-    models::block_diff::BlockDiffKey,
     utils::read_to_fixed,
 };
 

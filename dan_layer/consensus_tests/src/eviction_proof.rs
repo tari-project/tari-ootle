@@ -51,13 +51,13 @@ fn it_produces_a_summarized_header_that_hashes_to_the_original() {
     assert_eq!(sidechain_block.epoch, block.header().epoch().as_u64());
     assert_eq!(sidechain_block.height, block.header().height().as_u64());
     assert_eq!(sidechain_block.justify_id, *block.header().justify_id().hash());
-    assert_eq!(sidechain_block.parent_id, *block.header().parent().as_hash());
+    assert_eq!(sidechain_block.parent_id, *block.header().parent().hash());
     assert_eq!(sidechain_block.network, block.header().network().as_byte());
 
     // Finally check the hash matches
     assert_eq!(sidechain_block.calculate_hash(), block.header().calculate_hash());
     assert_eq!(
         sidechain_block.calculate_block_id(),
-        *block.header().calculate_id().as_hash()
+        *block.header().calculate_id().hash()
     );
 }

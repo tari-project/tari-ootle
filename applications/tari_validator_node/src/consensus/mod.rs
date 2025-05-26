@@ -35,12 +35,12 @@ mod handle;
 mod leader_selection;
 #[cfg(feature = "metrics")]
 pub mod metrics;
-mod signature_service;
+mod signer_service;
 pub mod spec;
 
 pub use block_transaction_executor::*;
 pub use handle::*;
-pub use signature_service::*;
+pub use signer_service::*;
 use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_template_manager::interface::TemplateManagerHandle;

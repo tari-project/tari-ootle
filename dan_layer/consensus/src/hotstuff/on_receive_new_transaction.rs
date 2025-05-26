@@ -2,9 +2,10 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use tari_consensus_types::Decision;
 use tari_dan_common_types::{committee::CommitteeInfo, Epoch};
 use tari_dan_storage::{
-    consensus_models::{Decision, TransactionPool, TransactionRecord},
+    consensus_models::{TransactionPool, TransactionRecord},
     StateStore,
 };
 use tari_transaction::TransactionId;

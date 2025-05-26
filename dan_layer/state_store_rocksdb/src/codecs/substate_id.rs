@@ -73,14 +73,14 @@ impl<'a> DbCodec<VersionedSubstateIdRef<'a>> for SubstateIdCodec {
 #[cfg(test)]
 mod tests {
     use tari_common_types::types::FixedHash;
-    use tari_dan_storage::consensus_models::BlockId;
+    use tari_consensus_types::BlockId;
     use tari_engine_types::template_lib_models::ComponentAddress;
     use tari_template_lib_types::ObjectKey;
 
     use super::*;
     use crate::{
         codecs::{BlockDiffKeyCodec, SubstateIdBlockIdVersionSeq},
-        models::block_diff::BlockDiffKey,
+        column_families::block_diff::BlockDiffKey,
     };
 
     fn new_substate_id(seed: u8) -> SubstateId {

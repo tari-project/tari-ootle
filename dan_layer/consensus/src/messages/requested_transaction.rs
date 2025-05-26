@@ -2,8 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::Serialize;
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::consensus_models::BlockId;
 use tari_transaction::Transaction;
 
 #[derive(Debug, Clone, Serialize)]

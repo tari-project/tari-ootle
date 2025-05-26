@@ -180,13 +180,13 @@ where TSubstateCache: SubstateCache + 'static
         let mut nexist_count = 0;
         let mut err_count = 0;
 
-        for vn_addr in committee.addresses() {
+        for vn_addr in committee.address_iter() {
             // build a client with the VN
             let mut client = self.client_provider.create_client(vn_addr);
 
             match client.get_substate(substate_requirement.as_ref()).await {
                 Ok(SubstateResult::Up { substate, id, .. }) => {
-                    return Ok((id, substate));
+                    return Ok((id, *substate));
                 },
                 Ok(SubstateResult::Down { id, version, .. }) => {
                     // TODO: we should seek proof of this.

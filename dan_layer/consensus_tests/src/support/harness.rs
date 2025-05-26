@@ -16,6 +16,7 @@ use tari_consensus::{
     consensus_constants::ConsensusConstants,
     hotstuff::{HotstuffConfig, HotstuffEvent},
 };
+use tari_consensus_types::{BlockId, Decision, QcId};
 use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_dan_common_types::{
     committee::Committee,
@@ -30,7 +31,7 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_dan_storage::{
-    consensus_models::{BlockId, Decision, QcId, SubstateRecord, TransactionExecution, TransactionRecord},
+    consensus_models::{SubstateRecord, TransactionExecution, TransactionRecord},
     StateStore,
     StateStoreReadTransaction,
     StorageError,
@@ -261,7 +262,7 @@ impl Test {
                 self.on_hotstuff_event().await
             };
             if self.network.is_offline(&address, self.num_committees).await {
-                log::info!("[{}] Ignoring event for offline node: {:?}", address, event);
+                info!("[{}] Ignoring event for offline node: {:?}", address, event);
                 continue;
             }
 
@@ -273,7 +274,7 @@ impl Test {
                 } => return (address, block_id, epoch, height),
                 HotstuffEvent::Failure { message } => panic!("[{}] Consensus failure: {}", address, message),
                 other => {
-                    log::info!("[{}] Ignoring event: {:?}", address, other);
+                    info!("[{}] Ignoring event: {:?}", address, other);
                     continue;
                 },
             }
@@ -348,7 +349,7 @@ impl Test {
                 format!(
                     "C: {}, J: {}, D: {}",
                     block.is_committed(),
-                    block.is_justified(),
+                    block.has_justify_qc(),
                     block.is_dummy()
                 ),
                 block.commands().display()
@@ -623,9 +624,11 @@ pub struct TestBuilder {
 
 impl TestBuilder {
     pub fn new() -> Self {
+        const DEFAULT_PACEMAKER_BLOCK_TIME: Duration = Duration::from_secs(10);
         Self {
             committees: HashMap::new(),
-            timeout: Some(Duration::from_secs(10)),
+            // By default, timeout aims to occur after we allow enough time for a "slow" block
+            timeout: Some(DEFAULT_PACEMAKER_BLOCK_TIME + Duration::from_secs(2)),
             rocks_path: None,
             message_filter: None,
             failure_nodes: Vec::new(),
@@ -639,7 +642,7 @@ impl TestBuilder {
                     max_base_layer_blocks_ahead: 5,
                     max_base_layer_blocks_behind: 5,
                     num_preshards: TEST_NUM_PRESHARDS,
-                    pacemaker_block_time: Duration::from_secs(10),
+                    pacemaker_block_time: DEFAULT_PACEMAKER_BLOCK_TIME,
                     missed_proposal_suspend_threshold: 5,
                     missed_proposal_evict_threshold: 10,
                     missed_proposal_recovery_threshold: 5,

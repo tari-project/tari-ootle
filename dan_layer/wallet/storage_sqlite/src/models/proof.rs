@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::{Identifiable, Queryable};
-use tari_dan_storage::time::PrimitiveDateTime;
+use time::PrimitiveDateTime;
 
 use crate::schema::proofs;
 

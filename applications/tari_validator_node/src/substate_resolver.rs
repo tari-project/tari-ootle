@@ -160,7 +160,7 @@ where
                         id,
                         timer.elapsed().as_millis()
                     );
-                    substates.insert(id, substate);
+                    substates.insert(id, *substate);
                 },
                 SubstateResult::Down { id, version, .. } => {
                     return Err(SubstateResolverError::InputSubstateDowned { id, version });

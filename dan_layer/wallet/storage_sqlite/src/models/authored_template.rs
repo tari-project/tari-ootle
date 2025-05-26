@@ -1,8 +1,8 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::{models::AuthoredTemplateModel, storage::WalletStorageError};
+use time::PrimitiveDateTime;
 
 use crate::{
     schema::authored_templates,

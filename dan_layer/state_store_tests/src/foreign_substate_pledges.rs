@@ -57,6 +57,6 @@ fn build_substate_pledge() -> SubstatePledge {
     SubstatePledge::Input {
         substate_id: VersionedSubstateId::new(create_random_substate_id(), 0),
         is_write: false,
-        substate: build_substate_value(None),
+        substate: Box::new(build_substate_value(None)),
     }
 }

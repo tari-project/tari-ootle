@@ -4,13 +4,14 @@
 use std::{fmt::Display, time::Duration};
 
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::{BlockId, Decision, LeafBlock};
 use tari_dan_common_types::{NodeHeight, NumPreshards};
 use tari_engine_types::commit_result::{ExecuteResult, RejectReason};
 use tari_transaction::TransactionId;
 use time::PrimitiveDateTime;
 
 use crate::{
-    consensus_models::{BlockId, Decision, Evidence, LeafBlock, VersionedSubstateIdLockIntent},
+    consensus_models::{Evidence, VersionedSubstateIdLockIntent},
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StorageError,

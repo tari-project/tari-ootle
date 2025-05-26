@@ -1,9 +1,10 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
+use tari_consensus_types::{BlockId, LeafBlock};
+use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight, ShardGroup};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockId, LeafBlock, StateTransitionId, SubstateRecord},
+    consensus_models::{Block, StateTransitionId, SubstateRecord},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -33,6 +34,7 @@ fn operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         height: NodeHeight(0),
         epoch: Epoch(0),
+        shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
     };
     for (key, value) in substates {
         let block = create_block_with_qc(&dummy_parent);
@@ -43,7 +45,7 @@ fn operations(db: impl StateStore) {
             SHARD,
             Epoch(0),
             *zero_block.id(),
-            *block.justify().id(),
+            block.justify().calculate_id(),
         ))
         .unwrap();
     }
@@ -59,7 +61,7 @@ fn operations(db: impl StateStore) {
             Shard::from(2),
             Epoch(0),
             *zero_block.id(),
-            *block.justify().id(),
+            block.justify().calculate_id(),
         ))
         .unwrap();
     }
@@ -69,6 +71,7 @@ fn operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         height: NodeHeight(10000),
         epoch: Epoch(1000),
+        shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
     };
     for (key, value) in substates {
         let block = create_block_with_qc(&dummy_parent);
@@ -79,7 +82,7 @@ fn operations(db: impl StateStore) {
             SHARD,
             Epoch(1000),
             *zero_block.id(),
-            *block.justify().id(),
+            block.justify().calculate_id(),
         ))
         .unwrap();
     }

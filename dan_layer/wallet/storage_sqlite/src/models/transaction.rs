@@ -5,12 +5,12 @@ use std::{str::FromStr, time::Duration};
 
 use log::*;
 use tari_dan_common_types::{displayable::Displayable, Epoch};
-use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::{
     models::{TransactionStatus, WalletTransaction},
     storage::WalletStorageError,
 };
 use tari_transaction::{UnsealedTransactionV1, UnsignedTransactionV1};
+use time::PrimitiveDateTime;
 
 use crate::{schema::transactions, serialization::deserialize_json};
 

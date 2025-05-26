@@ -87,6 +87,19 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
         Ok(value)
     }
 
+    pub fn get_raw_pinned(
+        &self,
+        key: &CF::Key,
+        operation: &'static str,
+    ) -> Result<Option<rocksdb::DBPinnableSlice<'_>>, RocksDbStorageError> {
+        let key = self.encode_key(key);
+        let value = self
+            .db
+            .get_pinned_cf(self.handle, &key)
+            .map_err(|e| RocksDbStorageError::RocksDbError { operation, source: e })?;
+        Ok(value)
+    }
+
     pub fn count(&self, operation: &'static str) -> Result<usize, RocksDbStorageError> {
         let iter = self.db.iterator_cf(self.handle, IteratorMode::Start);
         let mut count = 0;

@@ -2,6 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use log::*;
+use tari_consensus_types::{BlockId, Decision, LeafBlock, ProposalCertificate, QcId, ValidatorSignatureBytes};
+use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{
     committee::CommitteeInfo,
     displayable::Displayable,
@@ -13,15 +15,11 @@ use tari_dan_common_types::{
 };
 use tari_dan_storage::{
     consensus_models::{
-        BlockId,
         BlockPledge,
         Command,
-        Decision,
         Evidence,
         ForeignProposalRecord,
-        LeafBlock,
         LockedSubstateValue,
-        QcId,
         TransactionAtom,
         TransactionExecution,
         TransactionPoolRecord,
@@ -32,6 +30,7 @@ use tari_dan_storage::{
     StateStoreReadTransaction,
 };
 use tari_engine_types::commit_result::RejectReason;
+use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 use tari_transaction::TransactionId;
 
 use crate::{
@@ -78,7 +77,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 {
                     warn!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Command: LocalPrepare({}, {}), block: {} not relevant to local committee",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalPrepare({}, {}), block: {} not relevant to local committee",
                         atom.id, atom.decision, foreign_proposal.block_id(),
                     );
                     continue;
@@ -86,7 +85,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 debug!(
                     target: LOG_TARGET,
-                    "🧩 FOREIGN PROPOSAL: Command: LocalPrepare({}, {}), block: {}",
+                    "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalPrepare({}, {}), block: {}",
                     atom.id,atom.decision, foreign_proposal.block_id(),
                 );
 
@@ -146,7 +145,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 // Update the transaction record with any new information provided by this foreign block
                 let Some(foreign_evidence) = atom.evidence.get(&foreign_shard_group) else {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block: foreign_proposal.as_leaf_block(),
+                        block: foreign_proposal.as_leaf(),
                         transaction_id: atom.id,
                         shard_group: foreign_shard_group,
                         details: "Foreign proposal did not contain evidence for its own shard group".to_string(),
@@ -156,7 +155,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 let justify_qc_id = proposal
                     .get_justify_qc()
-                    .map(|qc| QcId::new(qc.calculate_id(proposal.epoch().as_u64())))
+                    .map(calculate_qc_id_from_sidechain_qc)
                     .ok_or_else(|| {
                         HotStuffError::InvariantError(format!(
                             "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
@@ -261,7 +260,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 add_pledges(
                     &tx_rec,
-                    foreign_proposal.as_leaf_block(),
+                    foreign_proposal.as_leaf(),
                     atom,
                     block_pledge,
                     foreign_shard_group,
@@ -277,11 +276,12 @@ pub fn process_foreign_block<TStore: StateStore>(
                 //         "🐞 LOCALPREPARE EVIDENCE (l={}, f={}) {}: {}", includes_local, !includes_local, addr, ev
                 //     );
                 // });
+                let local_shard_group = local_committee_info.shard_group();
 
                 if tx_rec.current_stage().is_new() {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
@@ -299,60 +299,70 @@ pub fn process_foreign_block<TStore: StateStore>(
                     if is_ready {
                         info!(
                             target: LOG_TARGET,
-                            "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
+                            "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is ready for Prepare({}, {}) Local Stage: {}",
                             tx_rec.transaction_id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
                         tx_rec.set_ready(true);
-                        tx_rec.set_next_stage(TransactionPoolStage::New)?;
-                        proposed_block_change_set.set_next_transaction_update(tx_rec)?;
+                        tx_rec.set_next_stage_and_readiness(TransactionPoolStage::New, local_shard_group)?;
                     } else {
                         info!(
                             target: LOG_TARGET,
-                            "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalPrepare) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
+                            "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalPrepare) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
                             tx_rec.transaction_id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
+                        // If foreign abort, we are ready to propose ABORT
+                        if tx_rec.current_decision().is_abort() {
+                            tx_rec.set_ready(true);
+                        }
                     }
-                } else if tx_rec.current_stage().is_local_prepared() && tx_rec.is_ready_for_pending_stage() {
+                } else if tx_rec.current_stage().is_local_prepared() &&
+                    tx_rec.is_ready_for_pending_stage(local_shard_group)
+                {
                     // If all shards are complete, and we've already received our LocalPrepared, we can set the
                     // LocalPrepared transaction as ready to propose AllPrepared. If we have not received
                     // the local LocalPrepared, the transition to AllPrepared will occur after we receive the local
                     // LocalPrepare proposal.
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is ready for propose AllPrepared({}, {}) Local Stage: {}",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose AllPrepared({}, {}) Local Stage: {}",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
                     );
 
-                    tx_rec.set_next_stage(TransactionPoolStage::LocalPrepared)?;
-                    proposed_block_change_set.set_next_transaction_update(tx_rec)?;
+                    tx_rec.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, local_shard_group)?;
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, \
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is NOT ready for AllPrepared({}, {}) Local Stage: {}, \
                         All Justified: {}. Waiting for local proposal and/or additional foreign proposals for all other shard groups.",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
-                         tx_rec.evidence().all_input_shard_groups_prepared()
+                        tx_rec.evidence().all_input_shard_groups_prepared(local_shard_group)
                     );
-                    // Update the evidence
-                    proposed_block_change_set.set_next_transaction_update(tx_rec)?;
                 }
+
+                proposed_block_change_set.set_next_transaction_update(tx_rec)?;
             },
             Command::LocalAccept(atom) => {
                 if !atom.evidence.has(&local_committee_info.shard_group()) {
+                    // Should not happen, since foreign shard groups should only send applicable commands
+                    warn!(
+                        target: LOG_TARGET,
+                        "🧩❓️ FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalAccept({}, {}), block: {} not relevant to local committee",
+                        atom.id, atom.decision, foreign_proposal.block_id(),
+                    );
                     continue;
                 }
 
                 debug!(
                     target: LOG_TARGET,
-                    "🧩 FOREIGN PROPOSAL: Command: LocalAccept({}, {}), block: {}",
+                    "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Command: LocalAccept({}, {}), block: {}",
                     atom.id, atom.decision, foreign_proposal.block_id(),
                 );
 
@@ -391,7 +401,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                     if local_decision.is_commit() {
                         info!(
                             target: LOG_TARGET,
-                            "⚠️ Foreign ABORT {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
+                            "⚠️ Foreign {foreign_shard_group} ABORT {}. Update overall decision to ABORT. Local stage: {}, Leaf: {}",
                             tx_rec.transaction_id(), tx_rec.current_stage(), local_leaf
                         );
                         // Add an abort execution since we previously decided to commit
@@ -411,7 +421,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 // Update the transaction record with any new information provided by this foreign block
                 let Some(foreign_evidence) = atom.evidence.get(&foreign_shard_group) else {
                     return Err(ProposalValidationError::ForeignInvalidPledge {
-                        block: foreign_proposal.as_leaf_block(),
+                        block: foreign_proposal.as_leaf(),
                         transaction_id: atom.id,
                         shard_group: foreign_shard_group,
                         details: "Foreign proposal did not contain evidence for its own shard group".to_string(),
@@ -420,7 +430,7 @@ pub fn process_foreign_block<TStore: StateStore>(
                 };
                 let justify_qc_id = proposal
                     .get_justify_qc()
-                    .map(|qc| QcId::new(qc.calculate_id(proposal.epoch().as_u64())))
+                    .map(calculate_qc_id_from_sidechain_qc)
                     .ok_or_else(|| {
                         HotStuffError::InvariantError(format!(
                             "Foreign proposal {} does not contain a justify QC for shard group {} - this should have \
@@ -439,7 +449,7 @@ pub fn process_foreign_block<TStore: StateStore>(
 
                 add_pledges(
                     &tx_rec,
-                    foreign_proposal.as_leaf_block(),
+                    foreign_proposal.as_leaf(),
                     atom,
                     block_pledge,
                     foreign_shard_group,
@@ -447,6 +457,8 @@ pub fn process_foreign_block<TStore: StateStore>(
                     proposed_block_change_set,
                     false,
                 )?;
+
+                let local_shard_group = local_committee_info.shard_group();
 
                 if tx_rec.current_stage().is_new() {
                     // If the transaction is New, we're waiting for all foreign pledges. Propose transaction once we
@@ -459,19 +471,18 @@ pub fn process_foreign_block<TStore: StateStore>(
                     if is_ready {
                         info!(
                             target: LOG_TARGET,
-                            "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalAccept) Transaction is ready for Prepare({}, {}) Local Stage: {}",
+                            "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalAccept) Transaction is ready for Prepare({}, {}) Local Stage: {}",
                             tx_rec.transaction_id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
                         );
 
                         tx_rec.set_ready(true);
-                        tx_rec.set_next_stage(TransactionPoolStage::New)?;
-                        proposed_block_change_set.set_next_transaction_update(tx_rec)?;
+                        tx_rec.set_next_stage_and_readiness(TransactionPoolStage::New, local_shard_group)?;
                     } else {
                         info!(
                             target: LOG_TARGET,
-                            "🧩 FOREIGN PROPOSAL: (Initial sequence from LocalAccept) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
+                            "🧩 FOREIGN PROPOSAL {foreign_shard_group}: (Initial sequence from LocalAccept) Transaction is NOT ready for Prepare({}, {}) Local Stage: {}",
                             tx_rec.transaction_id(),
                             tx_rec.current_decision(),
                             tx_rec.current_stage()
@@ -481,51 +492,52 @@ pub fn process_foreign_block<TStore: StateStore>(
                         if tx_rec.current_decision().is_abort() {
                             tx_rec.set_ready(true);
                         }
-                        proposed_block_change_set.set_next_transaction_update(tx_rec)?;
                     }
-                } else if tx_rec.current_stage().is_local_prepared() && tx_rec.is_ready_for_pending_stage() {
+                } else if tx_rec.current_stage().is_local_prepared() &&
+                    tx_rec.is_ready_for_pending_stage(local_shard_group)
+                {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is ready for propose ALL_PREPARED({}, {}) Local Stage: {}",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose ALL_PREPARED({}, {}) Local Stage: {}",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
                     );
 
                     // Set readiness according to the new evidence even if in LocalPrepared phase. We may get
-                    // LocalPrepared foreign proposal after this which is basically a no-op
-                    tx_rec.set_next_stage(TransactionPoolStage::LocalPrepared)?;
-                    proposed_block_change_set.set_next_transaction_update(tx_rec)?;
-                } else if tx_rec.current_stage().is_local_accepted() && tx_rec.is_ready_for_pending_stage() {
+                    // LocalPrepared foreign proposal after this.
+                    tx_rec.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, local_shard_group)?;
+                } else if tx_rec.current_stage().is_local_accepted() &&
+                    tx_rec.is_ready_for_pending_stage(local_shard_group)
+                {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is ready for propose ALL_ACCEPT({}, {}) Local Stage: {}",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is ready for propose ALL_ACCEPT({}, {}) Local Stage: {}",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage()
                     );
 
-                    tx_rec.set_next_stage(TransactionPoolStage::LocalAccepted)?;
-                    proposed_block_change_set.set_next_transaction_update(tx_rec)?;
+                    tx_rec.set_next_stage_and_readiness(TransactionPoolStage::LocalAccepted, local_shard_group)?;
                 } else {
                     info!(
                         target: LOG_TARGET,
-                        "🧩 FOREIGN PROPOSAL: Transaction is NOT ready for AllAccept({}, {}) Local Stage: {}, All Justified: {}. Waiting for local or foreign proposal.",
+                        "🧩 FOREIGN PROPOSAL {foreign_shard_group}: Transaction is NOT ready for AllAccept({}, {}) Local Stage: {}, All Justified: {}. Waiting for local or foreign proposal.",
                         tx_rec.transaction_id(),
                         tx_rec.current_decision(),
                         tx_rec.current_stage(),
                         tx_rec.evidence().all_shard_groups_accepted()
                     );
-                    // Still need to update the evidence
-                    proposed_block_change_set.set_next_transaction_update(tx_rec)?;
                 }
+                // Add the next transaction update to the proposed block change set
+                proposed_block_change_set.set_next_transaction_update(tx_rec)?;
             },
             // Should never receive this
             Command::EndEpoch => {
                 warn!(
                     target: LOG_TARGET,
-                    "❓️ NEVER HAPPEN: Foreign proposal received for block {} contains an EndEpoch command. This is invalid behaviour.",
-                    foreign_proposal.block_id()
+                    "❓️ NEVER HAPPEN: Foreign proposal received {} contains an EndEpoch command. This is invalid behaviour but continuing anyway.",
+                    foreign_proposal
                 );
                 continue;
             },
@@ -547,13 +559,13 @@ pub fn process_foreign_block<TStore: StateStore>(
         target: LOG_TARGET,
         "🧩 FOREIGN PROPOSAL: Processed {} commands from foreign block {}",
         command_count,
-        foreign_proposal.block_id()
+        foreign_proposal
     );
     if command_count == 0 {
         warn!(
             target: LOG_TARGET,
             "⚠️ FOREIGN PROPOSAL: No commands were applicable for foreign block {}. Ignoring.",
-            foreign_proposal.block_id()
+            foreign_proposal
         );
     }
 
@@ -742,7 +754,7 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
                 }
                 info!(
                     target: LOG_TARGET,
-                    "❓️Foreign proposal {} received for transaction {} but it has yet to be sequenced.",
+                    "🧩 Foreign proposal {} received for transaction {} but it has yet to be sequenced.",
                     foreign_block_id,
                     transaction_id
                 );
@@ -771,4 +783,26 @@ fn get_or_sequence_transaction<TTx: StateStoreReadTransaction>(
             },
         },
     }
+}
+
+fn calculate_qc_id_from_sidechain_qc(qc: &tari_sidechain::QuorumCertificate) -> QcId {
+    let signatures = qc
+        .signatures
+        .iter()
+        .map(|s| ValidatorSignatureBytes {
+            public_key: RistrettoPublicKeyBytes::from_bytes(s.public_key.as_bytes())
+                .expect("invariant: public key bytes"),
+            signature: SchnorrSignatureBytes::new(
+                RistrettoPublicKeyBytes::from_bytes(s.signature.get_compressed_public_nonce().as_bytes())
+                    .expect("invariant: nonce bytes"),
+                Scalar32Bytes::from_bytes(s.signature.get_signature().as_bytes()).expect("invariant: signature bytes"),
+            ),
+        })
+        .collect::<Vec<_>>();
+    ProposalCertificate::calculate_id_from_parts(
+        &qc.header_hash,
+        &qc.parent_id.into_array().into(),
+        &signatures,
+        &qc.decision,
+    )
 }

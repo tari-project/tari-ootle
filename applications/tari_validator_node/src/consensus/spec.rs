@@ -15,7 +15,7 @@ use crate::consensus::metrics::PrometheusConsensusMetrics;
 use crate::{
     consensus::{
         leader_selection::RoundRobinLeaderStrategy,
-        signature_service::TariSignatureService,
+        signer_service::TariSignatureService,
         ConsensusTransactionValidator,
         TariDanBlockTransactionExecutor,
     },
@@ -39,7 +39,7 @@ impl ConsensusSpec for TariConsensusSpec {
     type InboundMessaging = ConsensusInboundMessaging<NopLogger>;
     type LeaderStrategy = RoundRobinLeaderStrategy;
     type OutboundMessaging = ConsensusOutboundMessaging<NopLogger>;
-    type SignatureService = TariSignatureService;
+    type SignerService = TariSignatureService;
     type StateStore = ValidatorNodeStateStore;
     type SyncManager = RpcStateSyncClientProtocol<Self>;
     type TransactionExecutor = TariDanBlockTransactionExecutor<

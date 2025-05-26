@@ -366,7 +366,7 @@ impl TestNetworkWorker {
             self.is_offline_destination(&from, &to, ShardGroup::all_shards(TEST_NUM_PRESHARDS))
                 .await
         {
-            log::info!("🗑️ Discarding message {msg} from {from}. Leader {to} is offline");
+            log::info!("🗑️ [TEST] Discarding message {msg} from {from}. Leader {to} is offline");
             return;
         }
         log::debug!("✉️ Message {} sent from {} to {}", msg, from, to);

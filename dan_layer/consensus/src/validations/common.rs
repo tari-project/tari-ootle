@@ -5,22 +5,24 @@ use std::collections::HashSet;
 use log::{debug, warn};
 use tari_common::configuration::Network;
 use tari_common_types::types::FixedHash;
-use tari_crypto::ristretto::RistrettoPublicKey;
+use tari_consensus_types::ProposalCertificate;
 use tari_dan_common_types::{
     committee::Committee,
     DerivableFromPublicKey,
     Epoch,
     ExtraFieldKey,
+    NodeHeight,
     NumPreshards,
     ShardGroup,
 };
-use tari_dan_storage::consensus_models::{Block, BlockHeader, QuorumCertificate, ValidatorSchnorrSignature};
-use tari_engine_types::FromByteType;
+use tari_dan_storage::consensus_models::{Block, BlockHeader};
+use tari_sidechain::ProposalCertificateSignatureFields;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     hotstuff::{HotstuffConfig, ProposalValidationError},
-    traits::{ConsensusSpec, LeaderStrategy, VoteSignatureService},
+    traits::{ConsensusSpec, LeaderStrategy, ValidatorSignatureVerifierService},
+    validations::signed_vote::SignedProposalVote,
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::validations";
@@ -41,26 +43,12 @@ pub(super) fn check_current_epoch(
     Ok(())
 }
 
-pub(super) fn check_dummy(candidate_block: &Block) -> Result<(), ProposalValidationError> {
-    if candidate_block.signature().is_some() {
-        return Err(ProposalValidationError::DummyBlockWithSignature {
-            block_id: *candidate_block.id(),
-        });
-    }
-    if !candidate_block.commands().is_empty() {
-        return Err(ProposalValidationError::DummyBlockWithCommands {
-            block_id: *candidate_block.id(),
-        });
-    }
-    Ok(())
-}
-
-pub(super) fn check_network(candidate_block: &Block, network: Network) -> Result<(), ProposalValidationError> {
-    if candidate_block.network() != network {
+pub(super) fn check_network(header: &BlockHeader, network: Network) -> Result<(), ProposalValidationError> {
+    if header.network() != network {
         return Err(ProposalValidationError::InvalidNetwork {
-            block_network: candidate_block.network().to_string(),
+            block_network: header.network().to_string(),
             expected_network: network.to_string(),
-            block_id: *candidate_block.id(),
+            block_id: *header.id(),
         });
     }
     Ok(())
@@ -143,73 +131,66 @@ pub(super) fn check_shard_group_bounds(
     Ok(())
 }
 
-pub(super) fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
-    leader_strategy: &TLeaderStrategy,
-    local_committee: &Committee<TAddr>,
-    header: &BlockHeader,
-) -> Result<(), ProposalValidationError> {
-    let (leader, _) = leader_strategy.get_leader(local_committee, header.height());
-    let Ok(proposed_by) = RistrettoPublicKey::try_from_byte_type(header.proposed_by()) else {
-        return Err(ProposalValidationError::MalformedBlock {
-            block_id: *header.id(),
-            details: format!(
-                "proposed_by {} is not a valid compressed RistrettoPublicKey",
-                header.proposed_by()
-            ),
+pub(super) fn check_height(block: &Block) -> Result<(), ProposalValidationError> {
+    if block.height().is_zero() {
+        return Err(ProposalValidationError::InvalidBlockHeight {
+            block_id: *block.id(),
+            block_height: block.height(),
+            details: "Block height is zero".to_string(),
         });
-    };
-    if !leader.eq_to_public_key(&proposed_by) {
-        return Err(ProposalValidationError::NotLeader {
-            proposed_by: header.proposed_by().to_string(),
-            expected_leader: leader.to_string(),
-            block_id: *header.id(),
+    }
+    let max_certificate_height = block.max_certificate_height();
+    // invariant: the block may only advance the view by 1 higher than the justified height
+    if block.height() != max_certificate_height + NodeHeight(1) {
+        return Err(ProposalValidationError::InvalidBlockHeight {
+            block_id: *block.id(),
+            block_height: block.height(),
+            details: format!("Expected it to be one higher than the max certificate height {max_certificate_height}"),
         });
     }
     Ok(())
 }
 
-pub(super) fn check_block_signature(header: &BlockHeader) -> Result<(), ProposalValidationError> {
-    if header.is_dummy() {
-        // Dummy blocks don't have signatures
-        return Ok(());
+pub(super) fn check_proposed_by_leader<TAddr: DerivableFromPublicKey, TLeaderStrategy: LeaderStrategy<TAddr>>(
+    leader_strategy: &TLeaderStrategy,
+    local_committee: &Committee<TAddr>,
+    block: &Block,
+) -> Result<(), ProposalValidationError> {
+    let (addr, leader) = leader_strategy.get_leader(local_committee, block.height() - NodeHeight(1));
+    if leader != block.proposed_by() {
+        return Err(ProposalValidationError::NotLeader {
+            proposed_by: block.proposed_by().to_string(),
+            expected_leader: format!("{} / {}", leader, addr),
+            block: block.as_leaf(),
+            max_certificate_height: block.max_certificate_height(),
+        });
     }
+    Ok(())
+}
+
+pub(super) fn check_block_signature<TSignerService: ValidatorSignatureVerifierService>(
+    header: &BlockHeader,
+    signer_service: &TSignerService,
+) -> Result<(), ProposalValidationError> {
     if header.is_genesis() {
         // Genesis block doesn't have signatures
         return Ok(());
     }
+
     let validator_signature = header.signature().ok_or(ProposalValidationError::MissingSignature {
         block_id: *header.id(),
         height: header.height(),
     })?;
-    let Ok(validator_signature) = ValidatorSchnorrSignature::try_from_byte_type(validator_signature) else {
-        return Err(ProposalValidationError::MalformedBlock {
-            block_id: *header.id(),
-            details: format!(
-                "signature {} is not a valid compressed Schnorr signature",
-                validator_signature
-            ),
-        });
-    };
 
     debug!(
         target: LOG_TARGET,
         "Validating signature block_id={}, P={}, R={}",
         header.id(),
         header.proposed_by(),
-        validator_signature.get_public_nonce(),
+        validator_signature.public_nonce(),
     );
 
-    let Ok(proposed_by) = RistrettoPublicKey::try_from_byte_type(header.proposed_by()) else {
-        return Err(ProposalValidationError::MalformedBlock {
-            block_id: *header.id(),
-            details: format!(
-                "proposed_by {} is not a valid compressed RistrettoPublicKey",
-                header.proposed_by()
-            ),
-        });
-    };
-
-    if !validator_signature.verify(&proposed_by, header.id()) {
+    if !signer_service.verify(header) {
         return Err(ProposalValidationError::InvalidSignature {
             block_id: *header.id(),
             height: header.height(),
@@ -221,12 +202,12 @@ pub(super) fn check_block_signature(header: &BlockHeader) -> Result<(), Proposal
 pub(super) fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
     candidate_block: &Block,
     committee: &Committee<TConsensusSpec::Addr>,
-    signing_service: &TConsensusSpec::SignatureService,
+    signing_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
     let qc = candidate_block.justify();
-    if candidate_block.height() <= qc.block_height() {
+    if candidate_block.height() <= qc.height() {
         return Err(ProposalValidationError::CandidateBlockNotHigherThanJustify {
-            justify_block_height: qc.block_height(),
+            justify_block_height: qc.height(),
             candidate_block_height: candidate_block.height(),
         });
     }
@@ -239,9 +220,9 @@ pub(super) fn check_quorum_certificate<TConsensusSpec: ConsensusSpec>(
 /// Validates the signatures of the quorum certificate.
 // pub because used in on receive NEWVIEW
 pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
-    qc: &QuorumCertificate,
+    qc: &ProposalCertificate,
     committee: &Committee<TConsensusSpec::Addr>,
-    vote_signing_service: &TConsensusSpec::SignatureService,
+    signing_service: &TConsensusSpec::SignerService,
 ) -> Result<(), ProposalValidationError> {
     if qc.justifies_zero_block() {
         // TODO: This is potentially dangerous. There should be a check
@@ -252,7 +233,7 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
 
     if qc.signatures().len() < committee.quorum_threshold() {
         return Err(ProposalValidationError::QuorumWasNotReached {
-            qc: *qc.id(),
+            qc: qc.calculate_id(),
             got: qc.signatures().len(),
             required: committee.quorum_threshold(),
         });
@@ -272,13 +253,21 @@ pub fn check_quorum_certificate_signatures<TConsensusSpec: ConsensusSpec>(
         }
         if !check_dups.insert(signature.public_key()) {
             return Err(ProposalValidationError::QcDuplicateSignature {
-                qc: *qc.id(),
+                qc: qc.calculate_id(),
                 validator: *signature.public_key(),
             });
         }
-        let message = vote_signing_service.create_message(qc.block_id(), &qc.decision());
-        if !signature.verify(message) {
-            return Err(ProposalValidationError::QcInvalidSignature { qc: *qc.id() });
+
+        let block_id = qc.calculate_block_id();
+        let message = ProposalCertificateSignatureFields {
+            block_id: block_id.hash(),
+            decision: qc.decision(),
+        };
+        let vote = SignedProposalVote { message, signature };
+
+        let is_valid = signing_service.verify(&vote);
+        if !is_valid {
+            return Err(ProposalValidationError::QcInvalidSignature { qc: qc.calculate_id() });
         }
     }
 

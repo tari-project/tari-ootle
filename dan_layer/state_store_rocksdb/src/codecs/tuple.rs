@@ -2,8 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::anyhow;
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::{shard::Shard, Epoch, NodeHeight};
-use tari_dan_storage::consensus_models::{BlockId, ForeignProposalStatus, StateTransitionId};
+use tari_dan_storage::consensus_models::{ForeignProposalStatus, StateTransitionId};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 

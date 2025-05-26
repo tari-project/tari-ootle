@@ -6,10 +6,7 @@ use std::{collections::HashMap, str::FromStr};
 use prometheus::{core::Collector, IntCounter, IntGauge, IntGaugeVec, Opts, Registry};
 use tari_consensus::{hotstuff::HotStuffError, messages::HotstuffMessage, traits::hooks::ConsensusHooks};
 use tari_dan_common_types::NodeHeight;
-use tari_dan_storage::{
-    consensus_models::{Decision, TransactionAtom, ValidBlock},
-    StateStore,
-};
+use tari_dan_storage::{consensus_models::ValidBlock, StateStore};
 use tari_sidechain::QuorumDecision;
 use tari_transaction::TransactionId;
 
@@ -182,14 +179,8 @@ impl<S: StateStore> ConsensusHooks for PrometheusConsensusMetrics<S> {
         self.transactions_ready_for_consensus.inc();
     }
 
-    fn on_transaction_finalized(&mut self, transaction: &TransactionAtom) {
-        match transaction.decision {
-            Decision::Commit => {
-                self.transactions_finalized_committed.inc();
-            },
-            Decision::Abort(_) => {
-                self.transactions_finalized_aborted.inc();
-            },
-        }
+    fn on_transaction_batch_finalized(&mut self, num_committed: usize, num_aborted: usize) {
+        self.transactions_finalized_committed.inc_by(num_committed as u64);
+        self.transactions_finalized_aborted.inc_by(num_aborted as u64);
     }
 }

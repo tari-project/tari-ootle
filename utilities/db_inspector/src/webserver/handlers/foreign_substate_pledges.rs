@@ -10,7 +10,7 @@ use axum::{
 };
 use serde_json::json;
 use tari_dan_storage::Ordering;
-use tari_state_store_rocksdb::models;
+use tari_state_store_rocksdb::column_families;
 
 use crate::webserver::{
     context::HandlerContext,
@@ -33,7 +33,7 @@ pub async fn list(
     ]);
     let tx = db.read_only_context();
 
-    let cf = tx.cf(models::foreign_substate_pledge::ForeignSubstatePledgeModel)?;
+    let cf = tx.cf(column_families::foreign_substate_pledge::ForeignSubstatePledgeCf)?;
 
     let ordering = if req.asc {
         Ordering::Ascending

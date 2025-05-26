@@ -13,7 +13,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::json;
 use tari_dan_storage::Ordering;
-use tari_state_store_rocksdb::{codecs::DbCodec, error::RocksDbStorageError, models, traits::Cf};
+use tari_state_store_rocksdb::{codecs::DbCodec, column_families, error::RocksDbStorageError, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
@@ -58,8 +58,14 @@ where
                 let page_size = req.limit.unwrap_or(1_000);
                 let skip = req.page.unwrap_or(0) * page_size;
 
+                let mut total_bytes = 0usize;
                 for result in iter.skip(skip).take(page_size) {
                     let (key, value) = result?;
+                    let bytes = cf
+                        .get_raw_pinned(&key, OPERATION)
+                        .map_err(|e| anyhow!("Failed to get_raw_pinned: {}", e))?;
+                    total_bytes += bytes.map(|b| b.len()).unwrap_or(0);
+
                     let mut value =
                         serde_json::to_value(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;
                     let key = key_codec
@@ -76,6 +82,7 @@ where
                 }
                 let total = cf.count(OPERATION)?;
                 table.set_total_entries(total);
+                table.set_total_bytes(total_bytes);
 
                 Ok::<_, WebError>(Json(table))
             }
@@ -125,10 +132,15 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
         },
         "foreign_proposals" => {
             table.with_columns([
-                Column::new("block.header.id", "Block ID"),
-                Column::new("block.header.epoch", "Epoch"),
-                Column::new("block.height", "Height"),
-                Column::new("block.commands", "Cmds"),
+                Column::new("proposal.commit_proof.V1.commit_proof.header.epoch", "Epoch"),
+                Column::new("proposal.commit_proof.V1.commit_proof.header.height", "Height"),
+                Column::new(
+                    "proposal.commit_proof.V1.commit_proof.header.shard_group",
+                    "Shard group",
+                ),
+                Column::new("proposal.commit_proof.V1.commands", "Commands"),
+                Column::new("proposal.commit_proof.V1.commit_proof", "Commit Proof"),
+                Column::new("proposal.block_pledge.pledges", "Pledges"),
                 Column::new("proposed_in_block", "Proposed In"),
                 Column::new("status", "Status"),
             ]);
@@ -139,7 +151,7 @@ fn create_table_for_cf(cf_name: &str) -> TableResponse {
                 Column::new("proposed_in_block", "Proposed in"),
             ]);
         },
-        s if s == models::quorum_certificate::QuorumCertificateModel::name() => {
+        s if s == column_families::certificates::ProposalCertificateCf::name() => {
             table.with_columns([
                 Column::new("qc_id", "QC ID"),
                 Column::new("block_id", "Block ID"),

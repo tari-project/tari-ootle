@@ -34,10 +34,6 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         Self { members }
     }
 
-    pub fn address_iter(&self) -> impl Iterator<Item = &TAddr> + '_ {
-        self.members.iter().map(|(addr, _)| addr)
-    }
-
     pub fn members_mut(&mut self) -> &mut Vec<(TAddr, RistrettoPublicKeyBytes)> {
         &mut self.members
     }
@@ -124,7 +120,7 @@ impl<TAddr: PartialEq> Committee<TAddr> {
         self.members.iter()
     }
 
-    pub fn addresses(&self) -> impl Iterator<Item = &TAddr> {
+    pub fn address_iter(&self) -> impl Iterator<Item = &TAddr> + '_ {
         self.members.iter().map(|(addr, _)| addr)
     }
 

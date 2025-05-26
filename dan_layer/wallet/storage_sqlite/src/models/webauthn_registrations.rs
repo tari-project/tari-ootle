@@ -1,8 +1,8 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_storage::time::PrimitiveDateTime;
 use tari_dan_wallet_sdk::models::{WebauthnRegistrationModel, WebauthnRegistrationPasskeyModel};
+use time::PrimitiveDateTime;
 use webauthn_rs::prelude::Passkey;
 
 use crate::schema::{webauthn_registration_passkeys, webauthn_registrations};

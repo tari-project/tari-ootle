@@ -35,6 +35,7 @@ pub struct TableResponse {
     columns: Vec<Column>,
     rows: Vec<json::Value>,
     total_entries: Option<usize>,
+    total_bytes: usize,
 }
 
 impl TableResponse {
@@ -43,6 +44,7 @@ impl TableResponse {
             columns: vec![],
             rows: vec![],
             total_entries: None,
+            total_bytes: 0,
         }
     }
 
@@ -51,6 +53,7 @@ impl TableResponse {
             columns: columns.into_iter().collect(),
             rows: vec![],
             total_entries: None,
+            total_bytes: 0,
         }
     }
 
@@ -66,6 +69,11 @@ impl TableResponse {
 
     pub fn set_total_entries(&mut self, count: usize) -> &mut Self {
         self.total_entries = Some(count);
+        self
+    }
+
+    pub fn set_total_bytes(&mut self, count: usize) -> &mut Self {
+        self.total_bytes = count;
         self
     }
 }

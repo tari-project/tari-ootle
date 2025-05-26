@@ -10,13 +10,14 @@ use std::{
 
 use borsh::BorshSerialize;
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::{BlockId, LeafBlock};
 use tari_crypto::tari_utilities::ByteArray;
 use tari_dan_common_types::{committee::CommitteeInfo, Epoch, NodeHeight, ShardGroup};
 use tari_sidechain::{CommitProofElement, QuorumCertificate};
 use tari_template_lib::prelude::RistrettoPublicKeyBytes;
 use tari_transaction::TransactionId;
 
-use super::{BlockId, BlockPledge, Command, CommandOrHash, CommandsCommitProof, LeafBlock};
+use super::{BlockPledge, Command, CommandOrHash, CommandsCommitProof};
 use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -64,11 +65,12 @@ impl ForeignProposalRecord {
         &self.block_id
     }
 
-    pub fn as_leaf_block(&self) -> LeafBlock {
+    pub fn as_leaf(&self) -> LeafBlock {
         LeafBlock {
             block_id: self.block_id,
             height: self.height(),
             epoch: self.epoch(),
+            shard_group: self.shard_group_unchecked(),
         }
     }
 

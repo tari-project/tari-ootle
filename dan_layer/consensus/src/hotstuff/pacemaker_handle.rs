@@ -14,11 +14,11 @@ use crate::hotstuff::{
 
 pub enum PacemakerRequest {
     Reset {
-        high_qc_height: Option<NodeHeight>,
+        high_pc_height: Option<NodeHeight>,
         reset_block_time: bool,
     },
     Start {
-        high_qc_height: NodeHeight,
+        high_pc_height: NodeHeight,
     },
     Stop,
     SuspendLeaderTimeout,
@@ -56,11 +56,11 @@ impl PaceMakerHandle {
         &self,
         current_epoch: Epoch,
         current_view: NodeHeight,
-        high_qc_height: NodeHeight,
+        high_pc_height: NodeHeight,
     ) -> Result<(), HotStuffError> {
-        self.current_view.update(current_epoch, current_view);
+        self.current_view.enter(current_epoch, current_view);
         self.sender
-            .send(PacemakerRequest::Start { high_qc_height })
+            .send(PacemakerRequest::Start { high_pc_height })
             .await
             .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })
     }
@@ -99,20 +99,20 @@ impl PaceMakerHandle {
         self.on_leader_timeout.clone()
     }
 
-    pub async fn reset_leader_timeout(&self, high_qc_height: NodeHeight) -> Result<(), HotStuffError> {
+    pub async fn reset_leader_timeout(&self, high_pc_height: NodeHeight) -> Result<(), HotStuffError> {
         self.sender
             .send(PacemakerRequest::Reset {
-                high_qc_height: Some(high_qc_height),
+                high_pc_height: Some(high_pc_height),
                 reset_block_time: false,
             })
             .await
             .map_err(|e| HotStuffError::PacemakerChannelDropped { details: e.to_string() })
     }
 
-    pub async fn reset(&self, high_qc_height: NodeHeight) -> Result<(), HotStuffError> {
+    async fn reset(&self, high_pc_height: NodeHeight) -> Result<(), HotStuffError> {
         self.sender
             .send(PacemakerRequest::Reset {
-                high_qc_height: Some(high_qc_height),
+                high_pc_height: Some(high_pc_height),
                 reset_block_time: true,
             })
             .await
@@ -120,15 +120,17 @@ impl PaceMakerHandle {
     }
 
     /// Reset the leader timeout. This should be called when a valid leader proposal is received.
-    pub async fn update_view(
+    pub async fn enter_view(
         &self,
         epoch: Epoch,
-        last_seen_height: NodeHeight,
-        high_qc_height: NodeHeight,
+        height: NodeHeight,
+        high_pc_height: NodeHeight,
     ) -> Result<(), HotStuffError> {
-        // Update current height here to prevent possibility of race conditions
-        self.current_view.update(epoch, last_seen_height);
-        self.reset(high_qc_height).await
+        // Update the current height here to prevent the possibility of race conditions
+        if self.current_view.enter(epoch, height) {
+            self.reset(high_pc_height).await?;
+        }
+        Ok(())
     }
 
     /// Suspend leader failure trigger. This should be called when a proposal is being processed. No leader failure will
@@ -154,11 +156,11 @@ impl PaceMakerHandle {
         &self,
         epoch: Epoch,
         last_seen_height: NodeHeight,
-        high_qc_height: NodeHeight,
+        high_pc_height: NodeHeight,
     ) -> Result<(), HotStuffError> {
         // Update current height here to prevent possibility of race conditions
         self.current_view.reset(epoch, last_seen_height);
-        self.reset(high_qc_height).await
+        self.reset(high_pc_height).await
     }
 
     /// Reset the leader timeout. This should be called when an end of epoch proposal has been committed.

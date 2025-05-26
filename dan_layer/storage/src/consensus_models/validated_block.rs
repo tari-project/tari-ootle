@@ -3,15 +3,11 @@
 
 use std::{fmt, fmt::Display, ops::Deref};
 
+use tari_consensus_types::{BlockId, ProposalCertificate};
 use tari_dan_common_types::{Epoch, NodeHeight};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
-use crate::{
-    consensus_models::{Block, BlockId, QuorumCertificate},
-    StateStoreReadTransaction,
-    StateStoreWriteTransaction,
-    StorageError,
-};
+use crate::{consensus_models::Block, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone)]
 pub struct ValidBlock {
@@ -51,7 +47,7 @@ impl ValidBlock {
         self.block.proposed_by()
     }
 
-    pub fn justify(&self) -> &QuorumCertificate {
+    pub fn justify(&self) -> &ProposalCertificate {
         self.block.justify()
     }
 

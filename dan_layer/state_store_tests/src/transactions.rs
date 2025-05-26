@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use tari_common_types::types::{FixedHash, PrivateKey};
-use tari_dan_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup, SubstateRequirement};
+use tari_dan_common_types::{Epoch, ExtraData, NodeHeight, ShardGroup, SubstateRequirement};
 use tari_dan_storage::{
     consensus_models::{
         Block,
@@ -31,10 +31,12 @@ use tari_utilities::epoch_time::EpochTime;
 use crate::helpers::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_tx_atom};
 
 mod confirm_all_transitions {
-    use tari_dan_storage::consensus_models::QcId;
+    use tari_consensus_types::QcId;
+    use tari_dan_storage::consensus_models::BookkeepingModel;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
+    use crate::TEST_NUM_PRESHARDS;
 
     #[test]
     fn it_sets_pending_stage_to_stage_rocksdb() {
@@ -50,19 +52,22 @@ mod confirm_all_transitions {
         let atom3 = create_tx_atom();
 
         let network = Default::default();
-        let zero_block = Block::zero_block(network, NumPreshards::P64);
+        let zero_block = Block::zero_block(network, TEST_NUM_PRESHARDS);
         zero_block.insert(&mut tx).unwrap();
-        zero_block.justify().save(&mut tx).unwrap();
+        tx.proposal_certificates_save(zero_block.justify()).unwrap();
         tx.blocks_set_qcs(zero_block.id(), Some(&QcId::zero()), Some(&QcId::zero()))
             .unwrap();
+
+        let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
 
         let block1 = Block::create(
             network,
             *zero_block.id(),
             zero_block.justify().clone(),
+            None,
             NodeHeight(1),
             Epoch(0),
-            ShardGroup::all_shards(NumPreshards::P64),
+            shard_group,
             Default::default(),
             // Need to have a command in, otherwise this block will not be included internally in the query because it
             // cannot cause a state change without any commands
@@ -76,8 +81,8 @@ mod confirm_all_transitions {
         )
         .unwrap();
         block1.insert(&mut tx).unwrap();
-        block1.as_locked_block().set(&mut tx).unwrap();
-        block1.as_leaf_block().set(&mut tx).unwrap();
+        block1.as_locked().set(&mut tx).unwrap();
+        block1.as_leaf().set(&mut tx).unwrap();
 
         tx.transaction_pool_insert_new(atom1.id, atom1.decision, &Evidence::empty(), true, false)
             .unwrap();
@@ -107,16 +112,20 @@ mod confirm_all_transitions {
         assert!(tx.transaction_pool_exists(&atom2.id).unwrap());
         assert!(tx.transaction_pool_exists(&atom3.id).unwrap());
 
-        tx_1.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
-        tx_1.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
-        tx_2.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
-        tx_3.set_next_stage(TransactionPoolStage::LocalPrepared).unwrap();
+        tx_1.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, shard_group)
+            .unwrap();
+        tx_1.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, shard_group)
+            .unwrap();
+        tx_2.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, shard_group)
+            .unwrap();
+        tx_3.set_next_stage_and_readiness(TransactionPoolStage::LocalPrepared, shard_group)
+            .unwrap();
 
-        tx.transaction_pool_add_pending_update(&block1.as_leaf_block(), &TransactionPoolStatusUpdate::new(tx_1, true))
+        tx.transaction_pool_add_pending_update(&block1.as_leaf(), &TransactionPoolStatusUpdate::new(tx_1, true))
             .unwrap();
-        tx.transaction_pool_add_pending_update(&block1.as_leaf_block(), &TransactionPoolStatusUpdate::new(tx_2, true))
+        tx.transaction_pool_add_pending_update(&block1.as_leaf(), &TransactionPoolStatusUpdate::new(tx_2, true))
             .unwrap();
-        tx.transaction_pool_add_pending_update(&block1.as_leaf_block(), &TransactionPoolStatusUpdate::new(tx_3, true))
+        tx.transaction_pool_add_pending_update(&block1.as_leaf(), &TransactionPoolStatusUpdate::new(tx_3, true))
             .unwrap();
 
         let rec = tx.transaction_pool_get_many_ready(10, &block_id).unwrap();
@@ -130,8 +139,7 @@ mod confirm_all_transitions {
         assert!(rec.committed_stage().is_new());
         assert!(rec.pending_stage().unwrap().is_local_prepared());
 
-        tx.transaction_pool_confirm_all_transitions(&block1.as_leaf_block())
-            .unwrap();
+        tx.transaction_pool_confirm_all_transitions(&block1.as_leaf()).unwrap();
 
         let rec = tx.transaction_pool_get_for_blocks(&block_id, &atom1.id).unwrap();
         assert!(rec.committed_stage().is_local_prepared());
@@ -226,8 +234,8 @@ mod transaction_operations {
 }
 
 mod transaction_execution_operations {
+    use tari_consensus_types::Decision;
     use tari_dan_common_types::optional::Optional;
-    use tari_dan_storage::consensus_models::Decision;
     use tari_template_lib::types::Hash;
 
     use super::*;
@@ -265,7 +273,7 @@ mod transaction_execution_operations {
         let not_committed_block = chain[9].clone();
         // insert transaction executions
         let exec1 = BlockTransactionExecution::new(
-            not_committed_block.as_leaf_block(),
+            not_committed_block.as_leaf(),
             *tx1.id(),
             ExecuteResult {
                 finalize: FinalizeResult::new(
@@ -289,7 +297,7 @@ mod transaction_execution_operations {
         let committed_block = chain[6].clone();
         // insert transaction executions
         let exec2 = BlockTransactionExecution::new(
-            committed_block.as_leaf_block(),
+            committed_block.as_leaf(),
             *tx2.id(),
             ExecuteResult {
                 finalize: FinalizeResult::new(
@@ -312,7 +320,7 @@ mod transaction_execution_operations {
 
         // transaction_executions_get_pending_for_block
         let res = tx
-            .block_transaction_executions_get_pending_for_block(tx1.id(), &not_committed_block.as_leaf_block())
+            .block_transaction_executions_get_pending_for_block(tx1.id(), &not_committed_block.as_leaf())
             .unwrap();
         assert_eq_debug(&res, &exec1);
 
@@ -327,18 +335,18 @@ mod transaction_execution_operations {
         assert!(rec.is_finalized(&*tx).unwrap(), "Transaction should be finalized");
 
         let pending = tx
-            .block_transaction_executions_get_pending_for_block(tx1.id(), &not_committed_block.as_leaf_block())
+            .block_transaction_executions_get_pending_for_block(tx1.id(), &not_committed_block.as_leaf())
             .optional()
             .unwrap();
         assert!(pending.is_none());
 
         let pending = tx
-            .block_transaction_executions_get_pending_for_block(tx2.id(), &not_committed_block.as_leaf_block())
+            .block_transaction_executions_get_pending_for_block(tx2.id(), &not_committed_block.as_leaf())
             .unwrap();
         assert_eq!(*pending.transaction_id(), *tx2.id());
 
         // block_transaction_executions_lock_any_for_block
-        tx.block_transaction_executions_lock_any_for_block(&not_committed_block.as_leaf_block())
+        tx.block_transaction_executions_lock_any_for_block(&not_committed_block.as_leaf())
             .unwrap();
 
         tx.rollback().unwrap();

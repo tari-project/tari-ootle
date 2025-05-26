@@ -2,10 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::{Decision, LeafBlock};
 use tari_transaction::TransactionId;
 
 use crate::{
-    consensus_models::{Decision, Evidence, LeaderFee, LeafBlock, TransactionPoolRecord, TransactionPoolStage},
+    consensus_models::{Evidence, LeaderFee, TransactionPoolRecord, TransactionPoolStage},
     StateStoreWriteTransaction,
 };
 

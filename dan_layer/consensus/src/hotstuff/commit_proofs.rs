@@ -3,9 +3,10 @@
 
 use log::*;
 use tari_common_types::types::CompressedPublicKey;
+use tari_consensus_types::ProposalCertificate;
 use tari_crypto::{ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
 use tari_dan_storage::{
-    consensus_models::{Block, BlockHeader, EndOfEpochCommand, QuorumCertificate},
+    consensus_models::{Block, BlockHeader, EndOfEpochCommand},
     StateStoreReadTransaction,
 };
 use tari_sidechain::{
@@ -23,11 +24,11 @@ use tari_template_lib_types::crypto::SchnorrSignatureBytes;
 
 use crate::hotstuff::HotStuffError;
 
-const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::eviction_proof";
+const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::commit_proofs";
 
 pub fn generate_eviction_proofs<'a, TTx, I>(
     tx: &TTx,
-    tip_qc: &QuorumCertificate,
+    tip_qc: &ProposalCertificate,
     committed_blocks_with_evictions: I,
 ) -> Result<Vec<EvictionProof>, HotStuffError>
 where
@@ -69,7 +70,7 @@ where
 
 pub fn generate_end_of_epoch_commit_proof<TTx: StateStoreReadTransaction>(
     tx: &TTx,
-    tip_qc: &QuorumCertificate,
+    tip_qc: &ProposalCertificate,
     commit_block: &Block,
 ) -> Result<CommandCommitProof<EndOfEpochCommand>, HotStuffError> {
     if commit_block.commands().len() != 1 {
@@ -93,10 +94,10 @@ pub fn generate_end_of_epoch_commit_proof<TTx: StateStoreReadTransaction>(
 
 pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
     tx: &TTx,
-    commit_qc: &QuorumCertificate,
+    commit_qc: &ProposalCertificate,
     commit_block: &Block,
 ) -> Result<SidechainBlockCommitProof, HotStuffError> {
-    let mut proof_elements = Vec::with_capacity(3);
+    let mut proof_elements = Vec::with_capacity(4);
 
     if commit_block.is_dummy() || commit_block.signature().is_none() {
         return Err(HotStuffError::InvariantError(format!(
@@ -104,34 +105,51 @@ pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
         )));
     }
 
-    debug!(target: LOG_TARGET, "Add commit_qc: {commit_qc}");
+    debug!(target: LOG_TARGET, "⚙️ START: Adding the commit_qc to the proof: {commit_qc}");
     proof_elements.push(convert_qc_to_proof_element(commit_qc)?);
 
-    let mut block = commit_qc.get_block(tx)?;
+    let mut block = Block::get(tx, &commit_qc.calculate_block_id())?;
     while block.id() != commit_block.id() {
+        // Prevent possibility of endless loop if the IDs never match - which should be impossible.
+        if block.height() < commit_block.height() {
+            return Err(HotStuffError::InvariantError(format!(
+                "Block height is less than the commit block height in generate_block_commit_proof ({block}, \
+                 commit_block={commit_block})",
+            )));
+        }
+
         if block.justifies_parent() {
-            debug!(target: LOG_TARGET, "Add justify: {}", block.justify());
+            // This block justifies the parent, so we add it to the proof
+            debug!(target: LOG_TARGET, "⚙️ Add justify: {}", block.justify());
             proof_elements.push(convert_qc_to_proof_element(block.justify())?);
             block = block.get_parent(tx)?;
         } else {
-            block = block.get_parent(tx)?;
-            let mut dummy_chain = vec![ChainLink {
-                header_hash: block.header().calculate_hash(),
-                parent_id: *block.parent().as_hash(),
-            }];
-            debug!(target: LOG_TARGET, "add dummy chain: {block}");
+            // This block does not justify the parent. We'll add link(s) back until we find the block that is justified
+            // by the PC. NOTE: That these blocks are not necessarily dummy blocks, they simply do not propose a new
+            // proposal certificate.
+            debug!(target: LOG_TARGET, "⚙️ Start chain links: {block}");
             let parent_id = *block.parent();
             let qc = block.into_justify();
             block = Block::get(tx, &parent_id)?;
-            while block.id() != qc.block_id() {
-                debug!(target: LOG_TARGET, "add dummy chain: {block} QC: {qc}");
-                dummy_chain.push(ChainLink {
+
+            let mut chain_links = vec![ChainLink {
+                header_hash: block.header().calculate_hash(),
+                parent_id: *block.parent().hash(),
+            }];
+            debug!(target: LOG_TARGET, "⚙️ Add chain link: {block}");
+            let parent_id = *block.parent();
+            block = Block::get(tx, &parent_id)?;
+
+            // Continue going back in the chain until we find a block that is justified by the QC
+            while *block.id() != qc.calculate_block_id() {
+                debug!(target: LOG_TARGET, "⚙️ Add chain link: {block} QC: {qc}");
+                chain_links.push(ChainLink {
                     header_hash: block.header().calculate_hash(),
-                    parent_id: *block.parent().as_hash(),
+                    parent_id: *block.parent().hash(),
                 });
 
                 block = block.get_parent(tx)?;
-                if block.height() < qc.block_height() {
+                if block.height() < qc.height() {
                     return Err(HotStuffError::InvariantError(format!(
                         "Block height is less than the height of the QC in generate_block_commit_proof \
                          (block={block}, qc={qc})",
@@ -139,19 +157,14 @@ pub(crate) fn generate_block_commit_proof<TTx: StateStoreReadTransaction>(
                 }
             }
 
-            proof_elements.push(CommitProofElement::DummyChain(dummy_chain));
-            debug!(target: LOG_TARGET, "Add justify: {}", qc);
+            // Add the links and
+            proof_elements.push(CommitProofElement::ChainLinks(chain_links));
+            debug!(target: LOG_TARGET, "⚙️ Add justify (end of chain links): {}", qc);
             proof_elements.push(convert_qc_to_proof_element(&qc)?);
-        }
-        // Prevent possibility of endless loop
-        if block.height() < commit_block.height() {
-            return Err(HotStuffError::InvariantError(format!(
-                "Block height is less than the commit block height in generate_block_commit_proof ({block}, \
-                 commit_block={commit_block})",
-            )));
         }
     }
 
+    debug!(target: LOG_TARGET, "⚙️ END of commit proof generation");
     let command_commit_proof = SidechainBlockCommitProof {
         header: convert_block_to_sidechain_block_header(commit_block.header())?,
         proof_elements,
@@ -167,7 +180,7 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<S
 
     Ok(SidechainBlockHeader {
         network: header.network().as_byte(),
-        parent_id: *header.parent().as_hash(),
+        parent_id: *header.parent().hash(),
         justify_id: *header.justify_id().hash(),
         height: header.height().as_u64(),
         epoch: header.epoch().as_u64(),
@@ -189,11 +202,11 @@ pub fn convert_block_to_sidechain_block_header(header: &BlockHeader) -> Result<S
     })
 }
 
-fn convert_qc_to_proof_element(qc: &QuorumCertificate) -> Result<CommitProofElement, HotStuffError> {
+fn convert_qc_to_proof_element(qc: &ProposalCertificate) -> Result<CommitProofElement, HotStuffError> {
     Ok(CommitProofElement::QuorumCertificate(
         tari_sidechain::QuorumCertificate {
             header_hash: *qc.header_hash(),
-            parent_id: *qc.parent_id().as_hash(),
+            parent_id: *qc.parent_id().hash(),
             signatures: qc
                 .signatures()
                 .iter()
@@ -241,6 +254,7 @@ fn convert_validator_block_signature(
 mod tests {
     use tari_common::configuration::Network;
     use tari_common_types::types::FixedHash;
+    use tari_consensus_types::ProposalCertificate;
     use tari_crypto::tari_utilities::epoch_time::EpochTime;
     use tari_dan_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
     use tari_sidechain::QuorumDecision;
@@ -255,7 +269,7 @@ mod tests {
     #[test]
     fn it_hashes_the_header_identically_to_sidechain_header() {
         let parent_id = seed_hash(1).into_array().into();
-        let qc1 = QuorumCertificate::new(
+        let qc1 = ProposalCertificate::new(
             seed_hash(2),
             parent_id,
             NodeHeight(1),
@@ -265,11 +279,12 @@ mod tests {
             QuorumDecision::Accept,
         );
 
+        let qc1_id = qc1.calculate_id();
         let network = Network::LocalNet;
         let block = BlockHeader::create(
             network,
             parent_id,
-            *qc1.id(),
+            qc1_id,
             NodeHeight(2),
             Epoch(1),
             ShardGroup::all_shards(NumPreshards::P256),
@@ -286,8 +301,8 @@ mod tests {
 
         let sidechain_header = SidechainBlockHeader {
             network: network.as_byte(),
-            parent_id: *parent_id.as_hash(),
-            justify_id: *qc1.id().hash(),
+            parent_id: *parent_id.hash(),
+            justify_id: *qc1_id.hash(),
             height: 2,
             epoch: 1,
             shard_group: tari_sidechain::ShardGroup {
@@ -306,6 +321,6 @@ mod tests {
         };
 
         assert_eq!(sidechain_header.calculate_hash(), block.calculate_hash());
-        assert_eq!(sidechain_header.calculate_block_id(), *block.calculate_id().as_hash());
+        assert_eq!(sidechain_header.calculate_block_id(), *block.calculate_id().hash());
     }
 }

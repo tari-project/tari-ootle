@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use log::*;
+use tari_consensus_types::Vote;
 use tari_dan_common_types::{Epoch, NodeAddressable, NodeHeight};
 
 use crate::{
@@ -81,11 +82,11 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
         current_height: NodeHeight,
     ) -> IncomingMessageResult<TConsensusSpec::Addr> {
         // We listen for messages for the next view
-        let next_height = current_height + NodeHeight(1);
-        // Clear buffer with lower (epoch, heights)
+        let next_height = current_height; // + NodeHeight(1);
+                                          // Clear buffer with lower (epoch, heights)
         self.buffer = self.buffer.split_off(&(current_epoch, next_height));
 
-        // Check if message is in the buffer
+        // Drain all buffered messages for the current view
         if let Some(buffer) = self.buffer.get_mut(&(current_epoch, next_height)) {
             if let Some(msg_tuple) = buffer.pop_front() {
                 return Ok(Some(msg_tuple));
@@ -103,35 +104,25 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
                 }
             }
 
-            match msg_epoch_and_height(&msg) {
-                // Discard old message
-                Some((e, h)) if e < current_epoch || (e == current_epoch && h < next_height) => {
-                    info!(target: LOG_TARGET, "🗑️ Discard message {} is for previous view {}/{}. Current view {}/{}", msg, e, h, current_epoch, next_height);
-                    continue;
-                },
-                // Buffer message for future epoch/height
-                Some((epoch, height)) if epoch == current_epoch && height > next_height => {
-                    if msg.proposal().is_some() {
-                        info!(target: LOG_TARGET, "🦴Proposal {msg} is for future view (Current view: {current_epoch}, {current_height})");
-                    } else {
-                        info!(target: LOG_TARGET, "🦴Message {msg} is for future view (Current view: {current_epoch}, {current_height})");
-                    }
-                    self.push_to_buffer(epoch, height, from, msg);
-                    continue;
-                },
-                Some((epoch, height)) if epoch > current_epoch => {
-                    warn!(target: LOG_TARGET, "⚠️ Message {msg} is for future epoch {epoch}. Current epoch {current_epoch}");
-                    if matches!(&msg, HotstuffMessage::Vote(_)) {
-                        // Buffer VOTE messages. As it does not contain a QC we can use to prove that a BFT-majority has
-                        // reached the epoch
-                        self.push_to_buffer(epoch, height, from, msg);
-                        continue;
-                    }
-                    // Return the message, it will be validated and if valid, will kick consensus into sync
+            match msg_relative_view(&msg, current_epoch, next_height) {
+                MessageRelativeView::Current => {
                     return Ok(Some((from, msg)));
                 },
-                // Height is irrelevant or current, return message
-                _ => return Ok(Some((from, msg))),
+                MessageRelativeView::Past { epoch, height } => {
+                    info!(target: LOG_TARGET, "🗑️ Discard message {} is for previous view {}/{}. Current view {}/{}", msg, epoch, height, current_epoch, current_height);
+                },
+                MessageRelativeView::Future { epoch, height } => {
+                    // Buffer message for future epoch/height
+                    if msg.proposal().is_some() {
+                        info!(target: LOG_TARGET, "🔮 Proposal {msg} is for future view (Current view: {current_epoch}, {current_height})");
+                    } else {
+                        info!(target: LOG_TARGET, "🔮 Message {msg} is for future view (Current view: {current_epoch}, {current_height})");
+                    }
+                    self.push_to_buffer(epoch, height, from, msg);
+                },
+                MessageRelativeView::Discard => {
+                    info!(target: LOG_TARGET, "🗑️ Discard non-applicable message {}. Current view {}/{}", msg, current_epoch, current_height);
+                },
             }
         }
 
@@ -167,11 +158,169 @@ pub struct NeedsSync<TAddr: NodeAddressable> {
     pub local_epoch: Epoch,
 }
 
-fn msg_epoch_and_height(msg: &HotstuffMessage) -> Option<EpochAndHeight> {
+enum MessageRelativeView {
+    /// The message is for the current view, or is applicable to the current view
+    Current,
+    /// The message is for a past view
+    Past { epoch: Epoch, height: NodeHeight },
+    /// The message is for a future view
+    Future { epoch: Epoch, height: NodeHeight },
+    /// The message is not and will never be applicable
+    Discard,
+}
+
+#[allow(clippy::too_many_lines)]
+fn msg_relative_view(msg: &HotstuffMessage, current_epoch: Epoch, current_height: NodeHeight) -> MessageRelativeView {
     match msg {
-        HotstuffMessage::Proposal(msg) => Some((msg.block.epoch(), msg.block.height())),
-        // Votes for block v occur in view v + 1
-        HotstuffMessage::Vote(msg) => Some((msg.epoch, msg.unverified_block_height.saturating_add(NodeHeight(1)))),
-        _ => None,
+        HotstuffMessage::Proposal(msg) => {
+            let next_height = current_height + NodeHeight(1);
+            let epoch = msg.block.epoch();
+            let justify_height = msg.block.justify().height();
+            if epoch == current_epoch &&
+                // Special case, the justify height and the current height are zero
+                ((current_height.is_zero() && justify_height.is_zero()) ||
+                    // The proposal (supposedly) justifies the next view change
+                    justify_height == next_height ||
+                    // or, the timeout certificate height is higher than the current height
+                    msg.block
+                        .timeout_certificate()
+                        .is_some_and(|t| t.height() >= current_height))
+            {
+                return MessageRelativeView::Current;
+            }
+
+            if epoch < current_epoch || (epoch == current_epoch && justify_height < next_height) {
+                return MessageRelativeView::Past {
+                    epoch: msg.block.epoch(),
+                    height: justify_height,
+                };
+            }
+
+            MessageRelativeView::Future {
+                epoch: msg.block.epoch(),
+                height: justify_height,
+            }
+        },
+        HotstuffMessage::Vote(msg) => {
+            let vote = &msg.vote;
+            let vote_view_height = vote.height();
+            if vote.epoch() == current_epoch && vote_view_height >= current_height {
+                return MessageRelativeView::Current;
+            }
+
+            if vote.epoch() < current_epoch || (vote.epoch() == current_epoch && vote_view_height < current_height) {
+                return MessageRelativeView::Past {
+                    epoch: vote.epoch(),
+                    height: vote_view_height,
+                };
+            }
+
+            // Epoch >= current_epoch
+            MessageRelativeView::Future {
+                epoch: vote.epoch(),
+                height: vote_view_height,
+            }
+        },
+        HotstuffMessage::NewView(msg) => {
+            // let Some(height) = msg.max_height().checked_add(NodeHeight(1)) else {
+            //     warn!(
+            //         target: LOG_TARGET,
+            //         "❗️ NewView message {} has invalid max height {}. Discarding.", msg, msg.max_height()
+            //     );
+            //     return MessageRelativeView::Discard;
+            // };
+
+            let height = msg.max_height();
+            if msg.epoch() < current_epoch || (msg.epoch() == current_epoch && height < current_height) {
+                MessageRelativeView::Past {
+                    epoch: msg.epoch(),
+                    height,
+                }
+            } else {
+                // All new view messages for future view heights are considered applicable and should be processed
+                MessageRelativeView::Current
+            }
+        },
+        HotstuffMessage::ForeignProposal(msg) => {
+            if msg.proposal.epoch() < current_epoch {
+                return MessageRelativeView::Past {
+                    epoch: msg.proposal.epoch(),
+                    height: msg.proposal.height(),
+                };
+            }
+            if msg.proposal.epoch() > current_epoch {
+                return MessageRelativeView::Future {
+                    epoch: msg.proposal.epoch(),
+                    height: msg.proposal.height(),
+                };
+            }
+            MessageRelativeView::Current
+        },
+        HotstuffMessage::ForeignProposalNotification(msg) => {
+            if msg.epoch < current_epoch {
+                return MessageRelativeView::Past {
+                    epoch: msg.epoch,
+                    height: NodeHeight::zero(),
+                };
+            }
+            if msg.epoch > current_epoch {
+                return MessageRelativeView::Future {
+                    epoch: msg.epoch,
+                    height: NodeHeight::zero(),
+                };
+            }
+            MessageRelativeView::Current
+        },
+        HotstuffMessage::ForeignProposalRequest(msg) => {
+            if msg.epoch() < current_epoch {
+                return MessageRelativeView::Past {
+                    epoch: msg.epoch(),
+                    height: NodeHeight::zero(),
+                };
+            }
+            if msg.epoch() > current_epoch {
+                return MessageRelativeView::Future {
+                    epoch: msg.epoch(),
+                    height: NodeHeight::zero(),
+                };
+            }
+            MessageRelativeView::Current
+        },
+        HotstuffMessage::MissingTransactionsRequest(msg) => {
+            if msg.epoch < current_epoch {
+                return MessageRelativeView::Past {
+                    epoch: msg.epoch,
+                    height: NodeHeight::zero(),
+                };
+            }
+            if msg.epoch > current_epoch {
+                return MessageRelativeView::Future {
+                    epoch: msg.epoch,
+                    height: NodeHeight::zero(),
+                };
+            }
+            MessageRelativeView::Current
+        },
+        HotstuffMessage::MissingTransactionsResponse(msg) => {
+            if msg.epoch < current_epoch {
+                return MessageRelativeView::Past {
+                    epoch: msg.epoch,
+                    height: NodeHeight::zero(),
+                };
+            }
+            if msg.epoch > current_epoch {
+                return MessageRelativeView::Future {
+                    epoch: msg.epoch,
+                    height: NodeHeight::zero(),
+                };
+            }
+            MessageRelativeView::Current
+        },
+        HotstuffMessage::CatchUpSyncRequest(msg) => {
+            if msg.epoch != current_epoch {
+                return MessageRelativeView::Discard;
+            }
+            MessageRelativeView::Current
+        },
     }
 }

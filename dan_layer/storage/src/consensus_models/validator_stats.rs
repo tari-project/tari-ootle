@@ -2,10 +2,11 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::Epoch;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
-use crate::{consensus_models::BlockId, StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
+use crate::{StateStoreReadTransaction, StateStoreWriteTransaction, StorageError};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ValidatorStatsUpdate<'a> {

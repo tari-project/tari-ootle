@@ -11,6 +11,7 @@ use tari_consensus::{
     hotstuff::substate_store::{ShardScopedTreeStoreReader, ShardScopedTreeStoreWriter},
     traits::{ConsensusSpec, SyncManager, SyncStatus},
 };
+use tari_consensus_types::{BlockId, LeafBlock, QcId};
 use tari_dan_common_types::{
     committee::Committee,
     displayable::Displayable,
@@ -24,11 +25,9 @@ use tari_dan_common_types::{
 use tari_dan_p2p::proto::rpc::{GetCheckpointRequest, GetCheckpointResponse, SyncStateRequest};
 use tari_dan_storage::{
     consensus_models::{
-        BlockId,
+        BookkeepingModel,
         EpochCheckpoint,
         EpochStateRoot,
-        LeafBlock,
-        QcId,
         StateTransition,
         StateTransitionId,
         SubstateCreatedProof,

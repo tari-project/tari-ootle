@@ -4,7 +4,7 @@
 use tari_common_types::types::FixedHash;
 use tari_dan_common_types::{Epoch, ExtraData, NodeHeight, NumPreshards, ShardGroup};
 use tari_dan_storage::{
-    consensus_models::{Block, Command, ForeignProposalStatus},
+    consensus_models::{Block, BookkeepingModel, Command, ForeignProposalStatus},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -29,7 +29,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
 
     let zero_block = Block::zero_block(network, NumPreshards::P64);
     tx.blocks_insert(&zero_block).unwrap();
-    zero_block.as_locked_block().set(&mut tx).unwrap();
+    zero_block.as_locked().set(&mut tx).unwrap();
     let proposal1 = create_foreign_proposal(*zero_block.id(), EPOCH);
     tx.foreign_proposals_save(&proposal1).unwrap();
 
@@ -37,6 +37,7 @@ fn foreign_proposals_operations(db: impl StateStore) {
         network,
         *zero_block.id(),
         zero_block.justify().clone(),
+        None,
         NodeHeight(2),
         EPOCH,
         ShardGroup::all_shards(NumPreshards::P64),
@@ -53,14 +54,15 @@ fn foreign_proposals_operations(db: impl StateStore) {
         ExtraData::new(),
     )
     .unwrap();
-    block1.as_locked_block().set(&mut tx).unwrap();
+    block1.as_locked().set(&mut tx).unwrap();
 
     tx.blocks_insert(&block1).unwrap();
-    tx.quorum_certificates_insert(block1.justify()).unwrap();
+    tx.proposal_certificates_save(block1.justify()).unwrap();
     let fork_block = Block::create(
         network,
         *zero_block.id(),
         zero_block.justify().clone(),
+        None,
         NodeHeight(2),
         EPOCH,
         ShardGroup::all_shards(NumPreshards::P64),

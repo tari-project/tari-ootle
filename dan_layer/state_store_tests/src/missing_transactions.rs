@@ -33,6 +33,7 @@ fn missing_transactions_operations(db: impl StateStore) {
         network,
         *genesis.id(),
         genesis.justify().clone(),
+        None,
         NodeHeight(1),
         Epoch(0),
         ShardGroup::all_shards(NumPreshards::P64),

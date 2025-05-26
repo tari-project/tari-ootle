@@ -31,6 +31,7 @@ use log::*;
 use serde_json::{self as json, json};
 use tari_base_node_client::types::BaseLayerValidatorNode;
 use tari_common_types::types::{CompressedPublicKey, FixedHash};
+use tari_consensus_types::{Decision, LeafBlock};
 use tari_core::transactions::transaction_components::ValidatorNodeSignature;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
 use tari_dan_app_utilities::keypair::RistrettoKeypair;
@@ -49,7 +50,7 @@ use tari_dan_common_types::{
 };
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
-    consensus_models::{Block, Decision, LeafBlock, SubstateRecord, TransactionExecution, TransactionRecord},
+    consensus_models::{Block, BookkeepingModel, SubstateRecord, TransactionExecution, TransactionRecord},
     global::GlobalDb,
     Ordering,
     StateStore,
@@ -327,12 +328,13 @@ impl JsonRpcHandlers {
                 .optional()
                 .map_err(internal_error(answer_id))?
                 .ok_or_else(|| not_found(answer_id, format!("Block {} not found", id)))?,
-            None => LeafBlock::get(&tx, current_epoch)
-                .optional()
-                .map_err(internal_error(answer_id))?
-                .ok_or_else(|| not_found(answer_id, format!("No leaf block for epoch {current_epoch}")))?
-                .get_block(&tx)
-                .map_err(internal_error(answer_id))?,
+            None => {
+                let leaf = LeafBlock::get(&tx, current_epoch)
+                    .optional()
+                    .map_err(internal_error(answer_id))?
+                    .ok_or_else(|| not_found(answer_id, format!("No leaf block for epoch {current_epoch}")))?;
+                Block::get(&tx, leaf.block_id()).map_err(internal_error(answer_id))?
+            },
         };
         let blocks = tx
             .blocks_get_parent_chain(start_block.id(), req.limit)

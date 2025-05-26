@@ -32,13 +32,13 @@ use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use log::{error, info, warn};
 use serde_json::{self as json, json, Value};
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::Decision;
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::hex::to_hex};
 use tari_dan_app_utilities::{keypair::RistrettoKeypair, substate_file_cache::SubstateFileCache};
 use tari_dan_common_types::{optional::Optional, public_key_to_peer_id, Epoch, PeerAddress, SubstateRequirement};
 use tari_dan_engine::{template::TemplateModuleLoader, wasm::WasmModule};
 use tari_dan_p2p::TariMessagingSpec;
 use tari_dan_storage::{
-    consensus_models::Decision,
     global::GlobalDb,
     time::{PrimitiveDateTime, UtcDateTime},
 };

@@ -2,11 +2,9 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use tari_consensus::hotstuff::{HotStuffError, ProposalValidationError};
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::Epoch;
-use tari_dan_storage::{
-    consensus_models::{BlockId, TransactionPoolError},
-    StorageError,
-};
+use tari_dan_storage::{consensus_models::TransactionPoolError, StorageError};
 use tari_epoch_manager::EpochManagerError;
 use tari_rpc_framework::{RpcError, RpcStatus};
 use tari_state_tree::{JmtStorageError, TreeHash};

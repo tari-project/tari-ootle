@@ -11,7 +11,7 @@ where
     for<'a> V::Error: From<&'a str>,
     T: FromTagAndValue<Error = V::Error>,
 {
-    walk_all_depth(value, visitor, max_depth, 0)?;
+    let _ignore = walk_all_depth(value, visitor, max_depth, 0)?;
     Ok(())
 }
 

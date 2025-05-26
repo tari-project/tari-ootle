@@ -2,22 +2,21 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use indexmap::IndexMap;
-use tari_dan_common_types::{Epoch, NodeHeight, NumPreshards, ShardGroup};
+use tari_consensus_types::{
+    BlockId,
+    HighPc,
+    LastExecuted,
+    LastSentVote,
+    LastVoted,
+    LeafBlock,
+    LockedBlock,
+    ProposalVote,
+    QcId,
+    ValidatorSignatureBytes,
+};
+use tari_dan_common_types::{optional::Optional, Epoch, NodeHeight, ShardGroup};
 use tari_dan_storage::{
-    consensus_models::{
-        Block,
-        BlockId,
-        EndOfEpochCommand,
-        EpochCheckpoint,
-        HighQc,
-        LastExecuted,
-        LastSentVote,
-        LastVoted,
-        LeafBlock,
-        LockedBlock,
-        QcId,
-        ValidatorSignature,
-    },
+    consensus_models::{Block, EndOfEpochCommand, EpochCheckpoint},
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -26,7 +25,10 @@ use tari_sidechain::{CommandCommitProof, QuorumDecision, SidechainBlockCommitPro
 use tari_state_tree::{compute_proof_for_hashes, TreeHash};
 use tari_template_lib::prelude::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
 
-use crate::helpers::{assert_eq_debug, create_rocksdb};
+use crate::{
+    helpers::{assert_eq_debug, create_rocksdb},
+    TEST_NUM_PRESHARDS,
+};
 
 #[test]
 fn miscellaneous_rocksdb() {
@@ -45,31 +47,33 @@ fn miscellaneous_operations(db: impl StateStore) {
         epoch: Epoch::zero(),
     };
     tx.last_voted_set(&last_voted).unwrap();
-    let res = tx.last_voted_get().unwrap();
+    let res = tx.last_voted_get(Epoch::zero()).unwrap();
     assert_eq_debug(&res, &last_voted);
 
     last_voted.epoch += Epoch(1);
 
     tx.last_voted_set(&last_voted).unwrap();
-    let res = tx.last_voted_get().unwrap();
+    let res = tx.last_voted_get(Epoch(1)).unwrap();
     assert_eq_debug(&res, &last_voted);
 
     // last sent vote
     let mut last_sent_vote = LastSentVote {
-        block_id: BlockId::zero(),
-        epoch: Epoch::zero(),
-        block_height: NodeHeight(123),
-        decision: QuorumDecision::Accept,
-        signature: ValidatorSignature::new(RistrettoPublicKeyBytes::default(), SchnorrSignatureBytes::zero()),
+        vote: ProposalVote {
+            block_id: BlockId::zero(),
+            epoch: Epoch::zero(),
+            block_height: NodeHeight(123),
+            decision: QuorumDecision::Accept,
+            signature: ValidatorSignatureBytes::new(RistrettoPublicKeyBytes::default(), SchnorrSignatureBytes::zero()),
+        },
     };
     tx.last_sent_vote_set(&last_sent_vote).unwrap();
-    let res = tx.last_sent_vote_get().unwrap();
+    let res = tx.last_sent_vote_get(Epoch::zero()).unwrap();
     assert_eq_debug(&res, &last_sent_vote);
 
-    last_sent_vote.epoch += Epoch(1);
+    last_sent_vote.vote.epoch += Epoch(1);
 
     tx.last_sent_vote_set(&last_sent_vote).unwrap();
-    let res = tx.last_sent_vote_get().unwrap();
+    let res = tx.last_sent_vote_get(Epoch(1)).unwrap();
     assert_eq_debug(&res, &last_sent_vote);
 
     // last executed
@@ -79,13 +83,13 @@ fn miscellaneous_operations(db: impl StateStore) {
         epoch: Epoch::zero(),
     };
     tx.last_executed_set(&last_exec).unwrap();
-    let res = tx.last_executed_get().unwrap();
+    let res = tx.last_executed_get(Epoch::zero()).unwrap();
     assert_eq_debug(&res, &last_exec);
 
-    last_exec.epoch += Epoch(1);
+    last_exec.epoch = Epoch(1);
 
     tx.last_executed_set(&last_exec).unwrap();
-    let res = tx.last_executed_get().unwrap();
+    let res = tx.last_executed_get(Epoch(1)).unwrap();
     assert_eq_debug(&res, &last_exec);
 
     // last executed
@@ -95,13 +99,15 @@ fn miscellaneous_operations(db: impl StateStore) {
         epoch: Epoch::zero(),
     };
     tx.last_executed_set(&last_exec).unwrap();
-    let res = tx.last_executed_get().unwrap();
+    let res = tx.last_executed_get(Epoch::zero()).unwrap();
     assert_eq_debug(&res, &last_exec);
 
-    last_exec.epoch += Epoch(1);
+    last_exec.epoch = Epoch(2);
 
     tx.last_executed_set(&last_exec).unwrap();
-    let res = tx.last_executed_get().unwrap();
+    let res = tx.last_executed_get(Epoch(1)).optional().unwrap();
+    assert!(res.is_none());
+    let res = tx.last_executed_get(Epoch(2)).unwrap();
     assert_eq_debug(&res, &last_exec);
 
     // locked block
@@ -127,6 +133,7 @@ fn miscellaneous_operations(db: impl StateStore) {
         block_id: BlockId::zero(),
         height: NodeHeight(123),
         epoch,
+        shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
     };
     tx.leaf_block_set(&leaf_block).unwrap();
     let res = tx.leaf_block_get(epoch).unwrap();
@@ -140,25 +147,25 @@ fn miscellaneous_operations(db: impl StateStore) {
 
     // high qc
     let epoch = Epoch::zero();
-    let mut high_qc = HighQc {
+    let mut high_qc = HighPc {
         block_id: BlockId::zero(),
         epoch,
         block_height: NodeHeight(123),
         qc_id: QcId::zero(),
     };
-    tx.high_qc_set(&high_qc).unwrap();
-    let res = tx.high_qc_get(epoch).unwrap();
+    tx.high_pc_set(&high_qc).unwrap();
+    let res = tx.high_pc_get(epoch).unwrap();
     assert_eq_debug(&res, &high_qc);
 
     high_qc.block_height += NodeHeight(1);
 
-    tx.high_qc_set(&high_qc).unwrap();
-    let res = tx.high_qc_get(epoch).unwrap();
+    tx.high_pc_set(&high_qc).unwrap();
+    let res = tx.high_pc_get(epoch).unwrap();
     assert_eq_debug(&res, &high_qc);
 
     // epoch checkpoints
-    let shard_group = ShardGroup::all_shards(NumPreshards::P4);
-    let block = Block::zero_block(Default::default(), NumPreshards::P4);
+    let shard_group = ShardGroup::all_shards(TEST_NUM_PRESHARDS);
+    let block = Block::zero_block(Default::default(), TEST_NUM_PRESHARDS);
     let mut shard_roots = IndexMap::new();
     shard_roots.insert(shard_group.start(), TreeHash::zero());
     let key = TreeHash::new([1; 32]);

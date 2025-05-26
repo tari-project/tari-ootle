@@ -5,9 +5,10 @@ use tari_consensus::{
     hotstuff::{ConsensusCurrentState, CurrentView, HotstuffEvent},
     messages::HotstuffMessage,
 };
+use tari_consensus_types::{BlockId, LeafBlock};
 use tari_dan_common_types::{optional::Optional, NodeHeight, ShardGroup, SubstateAddress, VersionedSubstateIdRef};
 use tari_dan_storage::{
-    consensus_models::{BlockId, LeafBlock, TransactionExecution},
+    consensus_models::{BookkeepingModel, TransactionExecution},
     StateStore,
     StateStoreReadTransaction,
 };
@@ -88,6 +89,7 @@ impl Validator {
                 block_id: BlockId::zero(),
                 height: NodeHeight::zero(),
                 epoch,
+                shard_group: self.shard_group,
             })
     }
 

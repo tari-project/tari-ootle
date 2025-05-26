@@ -7,6 +7,7 @@ use borsh::BorshSerialize;
 use indexmap::IndexMap;
 use log::*;
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::QcId;
 use tari_dan_common_types::{
     borsh::indexmap as indexmap_borsh,
     displayable::Displayable,
@@ -21,7 +22,7 @@ use tari_dan_common_types::{
 };
 use tari_engine_types::{serde_with, substate::SubstateId};
 
-use crate::consensus_models::{QcId, RequireLockIntentRef, SubstatePledge};
+use crate::consensus_models::{RequireLockIntentRef, SubstatePledge};
 
 const LOG_TARGET: &str = "tari::dan::consensus_models::evidence";
 
@@ -172,17 +173,26 @@ impl Evidence {
             .any(|e| e.is_prepare_justified() || e.is_accept_justified())
     }
 
-    pub fn all_input_shard_groups_prepared(&self) -> bool {
+    pub fn all_input_shard_groups_prepared(&self, local_shard_group: ShardGroup) -> bool {
+        let local_has_inputs = self.has_inputs(local_shard_group);
+
         self.evidence
             .values()
             .filter(|e| {
                 // CASE: we only require input shard groups to prepare
-                 !e.inputs().is_empty()
+                !e.inputs().is_empty()
             })
-            // CASE: we use prepare OR accept because inputs can only be accept justified if they were prepared. Prepared
-            // may be implicit (null) if the local node is only involved in outputs (and therefore sequences using the LocalAccept
-            // foreign proposal). If there are no
-            .all(|e| e.is_prepare_justified() || e.is_accept_justified())
+            .all(|e| {
+                if local_has_inputs {
+                    // Local has inputs: we require prepare justification to continue regardless of accept justification
+                    e.is_prepare_justified()
+                } else {
+                    // Local is Output-only: we consider the input shard groups prepared if we've received prepare OR
+                    // accept justification TODO: Technically, we should only have received accept
+                    // justification, so is being more lenient a problem?
+                    e.is_prepare_justified() || e.is_accept_justified()
+                }
+            })
     }
 
     /// Returns true if all substates in the given shard group are output locks.
@@ -270,14 +280,14 @@ impl Evidence {
     }
 
     /// Add or update shard groups, substates and locks into Evidence. Existing prepare/accept QC IDs are not changed.
-    pub fn update(&mut self, other: &Evidence) -> &mut Self {
+    pub fn merge(&mut self, other: &Evidence) -> &mut Self {
         for (sg, evidence) in other.iter() {
             let evidence_mut = self.evidence.entry(*sg).or_default();
             let inputs_mut = &mut evidence_mut.inputs;
 
-            for (substate_id, evidence) in evidence.inputs.iter().map(|(id, lock)| (id.clone(), *lock)) {
+            for (substate_id, other_evidence) in evidence.inputs.iter().map(|(id, lock)| (id.clone(), *lock)) {
                 if let Some(e_mut) = inputs_mut.get_mut(&substate_id) {
-                    match evidence {
+                    match other_evidence {
                         Some(e) => match e_mut {
                             Some(e_mut) => {
                                 e_mut.is_write = e.is_write;
@@ -290,7 +300,7 @@ impl Evidence {
                         None => continue,
                     }
                 } else {
-                    inputs_mut.insert(substate_id, evidence);
+                    inputs_mut.insert(substate_id, other_evidence);
                 }
             }
             evidence_mut
@@ -651,7 +661,7 @@ mod tests {
             .add_shard_group(sg3)
             .insert_from_lock_intent(seed_lock_intent(4, SubstateLockType::Output));
 
-        evidence1.update(&evidence2);
+        evidence1.merge(&evidence2);
 
         assert_eq!(evidence1.len(), 3);
         assert!(

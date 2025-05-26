@@ -2,8 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use diesel::{Identifiable, Queryable};
-use tari_dan_storage::time::PrimitiveDateTime;
 use tari_engine_types::substate::InvalidSubstateIdFormat;
+use time::PrimitiveDateTime;
 
 use crate::schema::accounts;
 

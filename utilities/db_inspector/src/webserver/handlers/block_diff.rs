@@ -10,7 +10,7 @@ use axum::{
 };
 use serde_json::json;
 use tari_dan_storage::Ordering;
-use tari_state_store_rocksdb::{error::RocksDbStorageError, models, traits::Cf};
+use tari_state_store_rocksdb::{column_families as cfs, error::RocksDbStorageError, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
@@ -34,14 +34,14 @@ pub async fn list(
     ]);
     let tx = db.read_only_context();
 
-    let cf = tx.cf(models::block_diff::BlockDiffModel)?;
+    let cf = tx.cf(cfs::block_diff::BlockDiffCf)?;
     let ordering = if req.asc {
         Ordering::Ascending
     } else {
         Ordering::Descending
     };
-    type Key = <models::block_diff::BlockDiffModel as Cf>::Key;
-    type Value = <models::block_diff::BlockDiffModel as Cf>::Value;
+    type Key = <cfs::block_diff::BlockDiffCf as Cf>::Key;
+    type Value = <cfs::block_diff::BlockDiffCf as Cf>::Value;
     let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
         if let Some(prefix_hex) = req.query_prefix_hex.as_ref() {
             let key_prefix = decode_hex_prefix(prefix_hex)?;

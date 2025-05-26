@@ -4,8 +4,9 @@
 use std::fmt::{Display, Formatter};
 
 use serde::Serialize;
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::{Epoch, ShardGroup};
-use tari_dan_storage::consensus_models::{BlockId, ForeignParkedProposal, ForeignProposal, ForeignProposalRecord};
+use tari_dan_storage::consensus_models::{ForeignParkedProposal, ForeignProposal, ForeignProposalRecord};
 use tari_transaction::TransactionId;
 
 #[derive(Debug, Clone, Serialize)]

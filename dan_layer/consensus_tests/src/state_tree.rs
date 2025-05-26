@@ -4,12 +4,9 @@
 use std::time::Duration;
 
 use tari_consensus::hotstuff::HotStuffError;
+use tari_consensus_types::Decision;
 use tari_dan_common_types::{Epoch, NodeHeight};
-use tari_dan_storage::{
-    consensus_models::{Decision, StateTransitionId},
-    StateStore,
-    StateStoreReadTransaction,
-};
+use tari_dan_storage::{consensus_models::StateTransitionId, StateStore, StateStoreReadTransaction};
 use tari_state_tree::{key_mapper::SpreadPrefixKeyMapper, memory_store::MemoryTreeStore};
 
 use crate::support::{logging::setup_logger, Test, TestAddress, TEST_NUM_PRESHARDS};

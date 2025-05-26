@@ -3,8 +3,9 @@
 
 use rocksdb::{SingleThreaded, Transaction, TransactionDB};
 use tari_common_types::types::FixedHash;
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::{Epoch, NodeHeight};
-use tari_dan_storage::{consensus_models::BlockId, Ordering, StorageError};
+use tari_dan_storage::{Ordering, StorageError};
 use tari_transaction::TransactionId;
 use tempfile::TempDir;
 

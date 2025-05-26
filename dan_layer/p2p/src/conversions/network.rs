@@ -24,33 +24,7 @@ use std::convert::{TryFrom, TryInto};
 
 use anyhow::anyhow;
 
-use crate::{proto, DanMessage, Message};
-
-// -------------------------------- Message -------------------------------- //
-impl From<&Message> for proto::network::Message {
-    fn from(msg: &Message) -> Self {
-        match msg {
-            Message::Dan(msg) => Self {
-                message: Some(proto::network::message::Message::DanMessage(msg.into())),
-            },
-            Message::Consensus(msg) => Self {
-                message: Some(proto::network::message::Message::Consensus(msg.into())),
-            },
-        }
-    }
-}
-
-impl TryFrom<proto::network::Message> for Message {
-    type Error = anyhow::Error;
-
-    fn try_from(value: proto::network::Message) -> Result<Self, Self::Error> {
-        let msg_type = value.message.ok_or_else(|| anyhow!("Message type not provided"))?;
-        match msg_type {
-            proto::network::message::Message::DanMessage(msg) => Ok(Message::Dan(msg.try_into()?)),
-            proto::network::message::Message::Consensus(msg) => Ok(Message::Consensus(msg.try_into()?)),
-        }
-    }
-}
+use crate::{proto, DanMessage};
 
 // -------------------------------- DanMessage -------------------------------- //
 

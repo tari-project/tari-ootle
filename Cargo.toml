@@ -27,6 +27,7 @@ members = [
     "dan_layer/epoch_oracles",
     "dan_layer/consensus",
     "dan_layer/consensus_tests",
+    "dan_layer/consensus_types",
     "dan_layer/epoch_manager",
     "dan_layer/indexer_lib",
     "dan_layer/p2p",
@@ -85,6 +86,7 @@ sqlite_message_logger = { path = "networking/sqlite_message_logger" }
 tari_base_node_client = { path = "clients/base_node_client" }
 tari_rpc_state_sync = { path = "dan_layer/rpc_state_sync" }
 tari_consensus = { path = "dan_layer/consensus" }
+tari_consensus_types = { path = "dan_layer/consensus_types" }
 tari_epoch_oracles = { path = "dan_layer/epoch_oracles" }
 tari_bor = { path = "dan_layer/tari_bor", default-features = false }           # avoid including default features so each crate can choose which ones to import
 tari_dan_app_utilities = { path = "applications/tari_dan_app_utilities" }

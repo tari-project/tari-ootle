@@ -13,8 +13,8 @@ use diesel::{OptionalExtension, QueryDsl, RunQueryDsl, SqliteConnection};
 use log::*;
 use serde::Serialize;
 use tari_bor::json_encoding::CborValueJsonSerializeWrapper;
+use tari_consensus_types::ProposalCertificate;
 use tari_dan_common_types::{SubstateRequirement, VersionedSubstateIdRef};
-use tari_dan_storage::{consensus_models::QuorumCertificate, time::PrimitiveDateTime};
 use tari_dan_wallet_sdk::{
     models::{
         AuthoredTemplateModel,
@@ -37,6 +37,7 @@ use tari_template_lib::{
 };
 use tari_transaction::{Transaction, TransactionId};
 use tari_utilities::hex::Hex;
+use time::PrimitiveDateTime;
 use webauthn_rs::prelude::Passkey;
 
 use crate::{
@@ -324,7 +325,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         transaction_id: TransactionId,
         result: Option<&FinalizeResult>,
         final_fee: Option<Amount>,
-        qcs: Option<&[QuorumCertificate]>,
+        qcs: Option<&[ProposalCertificate]>,
         new_status: TransactionStatus,
         execution_time: Option<Duration>,
         finalized_time: Option<PrimitiveDateTime>,

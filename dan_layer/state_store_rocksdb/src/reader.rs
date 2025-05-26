@@ -28,6 +28,23 @@ use std::{
 use log::*;
 use rocksdb::{Transaction, TransactionDB};
 use serde::{de::DeserializeOwned, Serialize};
+use tari_consensus_types::{
+    BlockId,
+    HighPc,
+    HighTc,
+    HighestSeenBlock,
+    LastExecuted,
+    LastProposed,
+    LastSentNewView,
+    LastSentVote,
+    LastVoted,
+    LeafBlock,
+    LockedBlock,
+    ProposalCertificate,
+    QcId,
+    TcId,
+    TimeoutCertificate,
+};
 use tari_dan_common_types::{
     optional::Optional,
     shard::Shard,
@@ -42,22 +59,12 @@ use tari_dan_storage::{
     consensus_models::{
         Block,
         BlockDiff,
-        BlockId,
         BlockTransactionExecution,
         EpochCheckpoint,
         EpochStateRoot,
         ForeignProposalRecord,
-        HighQc,
-        LastExecuted,
-        LastProposed,
-        LastSentVote,
-        LastVoted,
-        LeafBlock,
-        LockedBlock,
         LockedSubstateValue,
         PendingShardStateTreeDiff,
-        QcId,
-        QuorumCertificate,
         StateTransition,
         StateTransitionId,
         SubstateChange,
@@ -91,56 +98,58 @@ use tari_transaction::TransactionId;
 
 use crate::{
     cf_api::DbContext,
-    error::RocksDbStorageError,
-    models::{
+    column_families::{
         block,
-        block::BlockModel,
+        block::BlockCf,
         block_diff,
-        block_diff::{BlockDiffKey, BlockDiffModel},
+        block_diff::{BlockDiffCf, BlockDiffKey},
         block_transaction_execution,
-        block_transaction_execution::BlockTransactionExecutionModel,
+        block_transaction_execution::BlockTransactionExecutionCf,
         bookkeeping::{
             CommitBlock,
-            CommitBlockModel,
-            HighQcModel,
-            LastExecutedModel,
-            LastProposedModel,
-            LastSentVoteModel,
-            LastVotedModel,
-            LeafBlockModel,
-            LockedBlockModel,
-            PreviousEpochStateRootModel,
+            CommitBlockCf,
+            HighPcCf,
+            HighTcCf,
+            HighestSeenBlockCf,
+            LastExecutedCf,
+            LastProposedCf,
+            LastSentNewViewCf,
+            LastSentVoteCf,
+            LastVotedCf,
+            LeafBlockCf,
+            LockedBlockCf,
+            PreviousEpochStateRootCf,
         },
         burnt_utxo,
-        burnt_utxo::BurntUtxoModel,
+        burnt_utxo::BurntUtxoCf,
+        certificates::{ProposalCertificateCf, TimeoutCertificateCf},
         chain,
-        epoch_checkpoint::EpochCheckpointModel,
+        epoch_checkpoint::EpochCheckpointCf,
         evicted_node,
-        evicted_node::EvictedNodeModel,
-        finalized_transaction::FinalizedTransactionLinkModel,
-        foreign_parked_blocks::ForeignParkedBlockModel,
+        evicted_node::EvictedNodeCf,
+        finalized_transaction::FinalizedTransactionLinkCf,
+        foreign_parked_blocks::ForeignParkedBlockCf,
         foreign_proposal,
-        foreign_proposal::ForeignProposalModel,
+        foreign_proposal::ForeignProposalCf,
         foreign_substate_pledge,
-        foreign_substate_pledge::ForeignSubstatePledgeModel,
+        foreign_substate_pledge::ForeignSubstatePledgeCf,
         lock_conflict,
         pending_state_tree_diff,
-        quorum_certificate,
-        quorum_certificate::QuorumCertificateModel,
         state_transition,
-        state_transition::{StateTransitionModel, StateTransitionType},
-        state_tree::StateTreeModelRef,
-        state_tree_shard_versions::StateTreeShardVersionModel,
+        state_transition::{StateTransitionCf, StateTransitionType},
+        state_tree::StateTreeCfRef,
+        state_tree_shard_versions::StateTreeShardVersionCf,
         substate,
-        substate::SubstateModel,
+        substate::SubstateCf,
         substate_locks,
         substate_locks::SubstateLockModel,
-        transaction::TransactionModel,
-        transaction_pool::TransactionPoolModel,
+        transaction::TransactionCf,
+        transaction_pool::TransactionPoolCf,
         transaction_pool_state_update,
         validator_node_epoch_stats,
-        validator_node_epoch_stats::ValidatorNodeEpochStatsModel,
+        validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
     },
+    error::RocksDbStorageError,
 };
 
 const LOG_TARGET: &str = "tari::dan::storage::state_store_rocksdb::reader";
@@ -273,16 +282,16 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     /// Used in tests, therefore not used in consensus and not part of the trait
     pub fn transactions_count(&self) -> Result<u64, RocksDbStorageError> {
         const OPERATION: &str = "transactions_count";
-        self.db().cf(TransactionModel)?.count(OPERATION).map(|c| c as u64)
+        self.db().cf(TransactionCf)?.count(OPERATION).map(|c| c as u64)
     }
 
     pub fn substates_count(&self) -> Result<u64, RocksDbStorageError> {
         const OPERATION: &str = "substates_count";
-        self.db().cf(SubstateModel)?.count(OPERATION).map(|c| c as u64)
+        self.db().cf(SubstateCf)?.count(OPERATION).map(|c| c as u64)
     }
 
     fn get_current_locked_block(&self) -> Result<LockedBlock, StorageError> {
-        let cf = self.db().cf(LockedBlockModel)?;
+        let cf = self.db().cf(LockedBlockCf)?;
         let value = cf.get_by_default_key("get_current_locked_block")?;
         Ok(value)
     }
@@ -296,7 +305,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     ) -> Result<Vec<TransactionRecord>, StorageError> {
         const OPERATION: &str = "transactions_get_paginated";
 
-        let cf = self.db().cf(TransactionModel)?;
+        let cf = self.db().cf(TransactionCf)?;
         let iter = cf.value_iterator(Ordering::Ascending, OPERATION);
 
         // pagination - not super efficient but since this is just used in tests, optimising is not important
@@ -318,7 +327,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
             });
         };
 
-        let cf = self.db().cf(BlockModel)?;
+        let cf = self.db().cf(BlockCf)?;
 
         let query = self.db().cf(block::ByEpochQuery)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::Descending, &locked_block.epoch());
@@ -346,7 +355,7 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a> RocksDbStat
     }
 
     pub fn get_commit_block_id(&self) -> Result<CommitBlock, RocksDbStorageError> {
-        let cf = self.db().cf(CommitBlockModel)?;
+        let cf = self.db().cf(CommitBlockCf)?;
         let value = cf.get_by_default_key("get_commit_block")?;
         Ok(value)
     }
@@ -357,37 +366,53 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 {
     type Addr = TAddr;
 
-    fn last_sent_vote_get(&self) -> Result<LastSentVote, StorageError> {
-        let last_voted = self
-            .db()
-            .cf(LastSentVoteModel)?
-            .get_by_default_key("last_sent_vote_get")?;
+    fn last_sent_vote_get(&self, epoch: Epoch) -> Result<LastSentVote, StorageError> {
+        let last_voted = self.db().cf(LastSentVoteCf)?.get_by_default_key("last_sent_vote_get")?;
+        if last_voted.epoch() != epoch {
+            return Err(StorageError::NotFound {
+                item: "LastSentVote",
+                key: format!("epoch {epoch}"),
+            });
+        }
         Ok(last_voted)
     }
 
-    fn last_voted_get(&self) -> Result<LastVoted, StorageError> {
-        let last_voted = self.db().cf(LastVotedModel)?.get_by_default_key("last_voted_get")?;
+    fn last_voted_get(&self, epoch: Epoch) -> Result<LastVoted, StorageError> {
+        let last_voted = self.db().cf(LastVotedCf)?.get_by_default_key("last_voted_get")?;
+        if last_voted.epoch() != epoch {
+            return Err(StorageError::NotFound {
+                item: "LastVoted",
+                key: format!("epoch {epoch}"),
+            });
+        }
+
         Ok(last_voted)
     }
 
-    fn last_executed_get(&self) -> Result<LastExecuted, StorageError> {
-        let last_executed = self
-            .db()
-            .cf(LastExecutedModel)?
-            .get_by_default_key("last_executed_get")?;
+    fn last_executed_get(&self, epoch: Epoch) -> Result<LastExecuted, StorageError> {
+        let last_executed = self.db().cf(LastExecutedCf)?.get_by_default_key("last_executed_get")?;
+        if last_executed.epoch != epoch {
+            return Err(StorageError::NotFound {
+                item: "LastExecuted",
+                key: format!("epoch {epoch}"),
+            });
+        }
         Ok(last_executed)
     }
 
-    fn last_proposed_get(&self) -> Result<LastProposed, StorageError> {
-        let last_proposed = self
-            .db()
-            .cf(LastProposedModel)?
-            .get_by_default_key("last_proposed_get")?;
+    fn last_proposed_get(&self, epoch: Epoch) -> Result<LastProposed, StorageError> {
+        let last_proposed = self.db().cf(LastProposedCf)?.get_by_default_key("last_proposed_get")?;
+        if last_proposed.epoch != epoch {
+            return Err(StorageError::NotFound {
+                item: "LastProposed",
+                key: format!("epoch {epoch}"),
+            });
+        }
         Ok(last_proposed)
     }
 
     fn locked_block_get(&self, epoch: Epoch) -> Result<LockedBlock, StorageError> {
-        let locked_block = self.db().cf(LockedBlockModel)?.get_by_default_key("locked_block_get")?;
+        let locked_block = self.db().cf(LockedBlockCf)?.get_by_default_key("locked_block_get")?;
         if locked_block.epoch != epoch {
             return Err(StorageError::NotFound {
                 item: "LockedBlock",
@@ -398,7 +423,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn leaf_block_get(&self, epoch: Epoch) -> Result<LeafBlock, StorageError> {
-        let leaf_block = self.db().cf(LeafBlockModel)?.get_by_default_key("leaf_block_get")?;
+        let leaf_block = self.db().cf(LeafBlockCf)?.get_by_default_key("leaf_block_get")?;
         if leaf_block.epoch() != epoch {
             return Err(StorageError::NotFound {
                 item: "LeafBlock",
@@ -408,8 +433,38 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(leaf_block)
     }
 
-    fn high_qc_get(&self, epoch: Epoch) -> Result<HighQc, StorageError> {
-        let high_qc = self.db().cf(HighQcModel)?.get_by_default_key("high_qc_get")?;
+    fn highest_seen_block_get(&self, epoch: Epoch) -> Result<HighestSeenBlock, StorageError> {
+        let last_seen_block = self
+            .db()
+            .cf(HighestSeenBlockCf)?
+            .get_by_default_key("highest_seen_block_get")?;
+        if last_seen_block.epoch() != epoch {
+            return Err(StorageError::NotFound {
+                item: "HighestSeenBlock",
+                key: format!("epoch {epoch}"),
+            });
+        }
+        Ok(last_seen_block)
+    }
+
+    fn last_sent_new_view_get(&self, epoch: Epoch) -> Result<LastSentNewView, StorageError> {
+        let last_sent_new_view = self
+            .db()
+            .cf(LastSentNewViewCf)?
+            .get_by_default_key("last_send_new_view")?;
+
+        if last_sent_new_view.epoch() != epoch {
+            return Err(StorageError::NotFound {
+                item: "LastSentNewView",
+                key: format!("epoch {epoch}"),
+            });
+        }
+
+        Ok(last_sent_new_view)
+    }
+
+    fn high_pc_get(&self, epoch: Epoch) -> Result<HighPc, StorageError> {
+        let high_qc = self.db().cf(HighPcCf)?.get_by_default_key("high_qc_get")?;
         if high_qc.epoch != epoch {
             return Err(StorageError::NotFound {
                 item: "HighQc",
@@ -417,6 +472,17 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
         Ok(high_qc)
+    }
+
+    fn high_tc_get(&self, epoch: Epoch) -> Result<HighTc, StorageError> {
+        let high_tc = self.db().cf(HighTcCf)?.get_by_default_key("high_tc_get")?;
+        if high_tc.epoch != epoch {
+            return Err(StorageError::NotFound {
+                item: "HighTc",
+                key: format!("epoch {epoch}"),
+            });
+        }
+        Ok(high_tc)
     }
 
     fn foreign_proposals_get_any<'a, I: IntoIterator<Item = &'a BlockId>>(
@@ -429,7 +495,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             return Ok(vec![]);
         }
 
-        let proposals = self.db().cf(ForeignProposalModel)?.multi_get(block_ids, OPERATION)?;
+        let proposals = self.db().cf(ForeignProposalCf)?.multi_get(block_ids, OPERATION)?;
 
         Ok(proposals)
     }
@@ -437,7 +503,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn foreign_proposals_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
         let exists = self
             .db()
-            .cf(ForeignProposalModel)?
+            .cf(ForeignProposalCf)?
             .exists(block_id, "foreign_proposals_exists")?;
         Ok(exists)
     }
@@ -467,7 +533,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let locked = self.get_current_locked_block()?;
         let pending_block_ids = self.get_pending_chain_with_commands_between(block_id)?;
 
-        let cf = self.db().cf(ForeignProposalModel)?;
+        let cf = self.db().cf(ForeignProposalCf)?;
         let unconfirmed_cf = self.db().cf(foreign_proposal::UnconfirmedIndex)?;
         let proposed_in_block_cf = self.db().cf(foreign_proposal::ProposedInBlockIndex)?;
         let iter = unconfirmed_cf.key_iterator(Ordering::Ascending, OPERATION);
@@ -506,13 +572,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn transactions_get(&self, tx_id: &TransactionId) -> Result<TransactionRecord, StorageError> {
         const OPERATION: &str = "transactions_get";
-        let tx = self.db().cf(TransactionModel)?.get(tx_id, OPERATION)?;
+        let tx = self.db().cf(TransactionCf)?.get(tx_id, OPERATION)?;
         Ok(tx)
     }
 
     fn transactions_exists(&self, tx_id: &TransactionId) -> Result<bool, StorageError> {
         const OPERATION: &str = "transactions_exists";
-        let exists = self.db().cf(TransactionModel)?.exists(tx_id, OPERATION)?;
+        let exists = self.db().cf(TransactionCf)?.exists(tx_id, OPERATION)?;
         Ok(exists)
     }
 
@@ -521,13 +587,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         tx_ids: I,
     ) -> Result<Vec<TransactionRecord>, StorageError> {
         const OPERATION: &str = "transactions_get_any";
-        let txs = self.db().cf(TransactionModel)?.multi_get(tx_ids, OPERATION)?;
+        let txs = self.db().cf(TransactionCf)?.multi_get(tx_ids, OPERATION)?;
         Ok(txs)
     }
 
     fn finalized_transaction_execution_get(&self, tx_id: &TransactionId) -> Result<TransactionExecution, StorageError> {
         const OPERATION: &str = "transaction_executions_get";
-        let cf = self.db().cf(FinalizedTransactionLinkModel)?;
+        let cf = self.db().cf(FinalizedTransactionLinkCf)?;
         if !cf.exists(tx_id, OPERATION)? {
             return Err(StorageError::NotFound {
                 item: "TransactionExecution",
@@ -545,7 +611,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         };
         let execution = self
             .db()
-            .cf(BlockTransactionExecutionModel)?
+            .cf(BlockTransactionExecutionCf)?
             .get(&(tx_id, block_id, height), OPERATION)?;
 
         Ok(execution.into_transaction_execution())
@@ -556,7 +622,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         tx_id: &TransactionId,
     ) -> Result<PrimitiveDateTime, StorageError> {
         const OPERATION: &str = "finalized_transaction_execution_get_finalized_time";
-        let cf = self.db().cf(FinalizedTransactionLinkModel)?;
+        let cf = self.db().cf(FinalizedTransactionLinkCf)?;
         let finalized_at = cf.get(tx_id, OPERATION)?;
         Ok(finalized_at)
     }
@@ -579,7 +645,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         // tests.
         if self
             .db()
-            .cf(FinalizedTransactionLinkModel)?
+            .cf(FinalizedTransactionLinkCf)?
             .exists(transaction_id, OPERATION)?
         {
             return Err(StorageError::NotFound {
@@ -588,7 +654,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         };
 
-        let cf = self.db().cf(BlockTransactionExecutionModel)?;
+        let cf = self.db().cf(BlockTransactionExecutionCf)?;
 
         // Is the execution is in the queried block
         if let Some(exec) = cf
@@ -640,7 +706,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn blocks_get(&self, block_id: &BlockId) -> Result<Block, StorageError> {
         const OPERATION: &str = "blocks_get";
 
-        let block = self.db().cf(BlockModel)?.get(block_id, OPERATION)?;
+        let block = self.db().cf(BlockCf)?.get(block_id, OPERATION)?;
         Ok(block)
     }
 
@@ -683,7 +749,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<Block>, StorageError> {
         const OPERATION: &str = "blocks_get_all_between";
 
-        // Prevent possibility of memory exhaustion (defensive, not in response to an observed bug)
+        // Prevent the possibility of memory exhaustion (defensive, not in response to an observed bug)
         if limit > 1_000_000 {
             return Err(StorageError::QueryError {
                 reason: format!("{OPERATION}: limit {limit} is too large"),
@@ -703,7 +769,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let iter = query.query_start_range_key_iterator(Ordering::Ascending, &(query_epoch, start_block_height));
 
-        // Almost always, the limit will be reached so allocate the full size vector once.
+        // For reasonable limits, the limit will almost always be reached, so allocate the full vector once.
         let mut blocks = Vec::with_capacity(limit);
         for result in iter {
             let (epoch, height, block_id) = result?;
@@ -727,7 +793,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     }
 
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
-        let exists = self.db().cf(BlockModel)?.exists(block_id, "blocks_exists")?;
+        let exists = self.db().cf(BlockCf)?.exists(block_id, "blocks_exists")?;
         Ok(exists)
     }
 
@@ -852,7 +918,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             return Ok(vec![]);
         };
 
-        let cf = self.db().cf(BlockModel)?;
+        let cf = self.db().cf(BlockCf)?;
         let query = self.db().cf(block::ByEpochHeightQuery)?;
 
         // NOTE: this only fetches for current epoch
@@ -860,7 +926,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         let iter: Box<dyn Iterator<Item = Result<_, _>>> = if ordering.is_ascending() {
             Box::new(query.query_start_range_key_iterator(ordering, &(locked.epoch, NodeHeight(offset))))
         } else {
-            let leaf_block = self.db().cf(LeafBlockModel)?.get_by_default_key(OPERATION)?;
+            let leaf_block = self.db().cf(LeafBlockCf)?.get_by_default_key(OPERATION)?;
             Box::new(query.query_end_range_key_iterator(
                 ordering,
                 &(
@@ -949,7 +1015,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             res
         };
 
-        let cf = self.db().cf(BlockModel)?;
+        let cf = self.db().cf(BlockCf)?;
 
         let no_filters = filter_index.is_none() || filter.as_ref().is_none_or(|x| x.is_empty());
         if no_filters {
@@ -999,7 +1065,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let applicable_blocks = self.get_pending_chain_until(block_id)?;
 
-        let cf = self.db().cf(BlockDiffModel)?;
+        let cf = self.db().cf(BlockDiffCf)?;
         let query = self.db().cf(block_diff::BySubstateIdQuery)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::default(), substate_id);
 
@@ -1036,7 +1102,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let applicable_blocks = self.get_pending_chain_until(block_id)?;
 
-        let cf = self.db().cf(BlockDiffModel)?;
+        let cf = self.db().cf(BlockDiffCf)?;
         let query = self.db().cf(block_diff::BySubstateIdQuery)?;
         let iter = query.query_prefix_range_key_iterator(Ordering::default(), versioned.substate_id());
 
@@ -1054,35 +1120,52 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         })
     }
 
-    fn quorum_certificates_get(&self, qc_id: &QcId) -> Result<QuorumCertificate, StorageError> {
-        const OPERATION: &str = "quorum_certificates_get";
-        let qc = self.db().cf(QuorumCertificateModel)?.get(qc_id, OPERATION)?;
+    fn proposal_certificates_get(&self, qc_id: &QcId) -> Result<ProposalCertificate, StorageError> {
+        const OPERATION: &str = "proposal_certificates_get";
+        let qc = self.db().cf(ProposalCertificateCf)?.get(qc_id, OPERATION)?;
         Ok(qc)
     }
 
-    fn quorum_certificates_get_all<'a, I: IntoIterator<Item = &'a QcId>>(
-        &self,
-        qc_ids: I,
-    ) -> Result<Vec<QuorumCertificate>, StorageError> {
-        const OPERATION: &str = "quorum_certificates_get_all";
-        let qcs = self.db().cf(QuorumCertificateModel)?.multi_get(qc_ids, OPERATION)?;
+    fn proposal_certificates_get_many<'a, I>(&self, qc_ids: I) -> Result<Vec<ProposalCertificate>, StorageError>
+    where
+        I: IntoIterator<Item = &'a QcId>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        const OPERATION: &str = "proposal_certificates_get_all";
+        let iter = qc_ids.into_iter();
+        let expected = iter.len();
+        let qcs = self.db().cf(ProposalCertificateCf)?.multi_get(iter, OPERATION)?;
+        if qcs.len() != expected {
+            return Err(StorageError::NotFound {
+                item: "QuorumCertificate",
+                key: "one or more qc_ids".to_string(),
+            });
+        }
         Ok(qcs)
     }
 
-    fn quorum_certificates_get_by_block_id(&self, block_id: &BlockId) -> Result<QuorumCertificate, StorageError> {
-        const OPERATION: &str = "quorum_certificates_get_by_block_id";
-        let cf = self.db().cf(QuorumCertificateModel)?;
-        let query = self.db().cf(quorum_certificate::ByBlockIdQuery)?;
+    fn timeout_certificates_get(&self, id: &TcId) -> Result<TimeoutCertificate, StorageError> {
+        const OPERATION: &str = "timeout_certificates_get";
+        let tc = self.db().cf(TimeoutCertificateCf)?.get(id, OPERATION)?;
+        Ok(tc)
+    }
 
-        let mut iter = query.query_prefix_range_iterator(Ordering::default(), block_id);
-
-        let ((_, qc_id), _) = iter.next().transpose()?.ok_or_else(|| StorageError::NotFound {
-            item: "QuorumCertificate",
-            key: format!("{block_id}"),
-        })?;
-
-        let qc = cf.get(&qc_id, OPERATION)?;
-        Ok(qc)
+    fn timeout_certificates_get_many<'a, I>(&self, ids: I) -> Result<Vec<TimeoutCertificate>, StorageError>
+    where
+        I: IntoIterator<Item = &'a TcId>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        const OPERATION: &str = "timeout_certificates_get_many";
+        let iter = ids.into_iter();
+        let expected = iter.len();
+        let tcs = self.db().cf(TimeoutCertificateCf)?.multi_get(iter, OPERATION)?;
+        if tcs.len() != expected {
+            return Err(StorageError::NotFound {
+                item: "TimeoutCertificate",
+                key: "one or more tc_ids".to_string(),
+            });
+        }
+        Ok(tcs)
     }
 
     fn transaction_pool_get_for_blocks(
@@ -1097,7 +1180,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        let cf = self.db().cf(TransactionPoolModel)?;
+        let cf = self.db().cf(TransactionPoolCf)?;
         let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
 
         let mut transaction = cf.get(transaction_id, OPERATION)?;
@@ -1121,7 +1204,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn transaction_pool_exists(&self, transaction_id: &TransactionId) -> Result<bool, StorageError> {
         let exists = self
             .db()
-            .cf(TransactionPoolModel)?
+            .cf(TransactionPoolCf)?
             .exists(transaction_id, "transaction_pool_exists")?;
         Ok(exists)
     }
@@ -1129,7 +1212,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     fn transaction_pool_get_all(&self) -> Result<Vec<TransactionPoolRecord>, StorageError> {
         // TODO: Only used in tests
         const OPERATION: &str = "transaction_pool_get_all";
-        let cf = self.db().cf(TransactionPoolModel)?;
+        let cf = self.db().cf(TransactionPoolCf)?;
 
         let commit_block = self.get_commit_block_id()?;
         let pending_chain = self.get_pending_chain_ordered(&commit_block.block_id)?;
@@ -1168,7 +1251,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
             });
         }
 
-        let cf = self.db().cf(TransactionPoolModel)?;
+        let cf = self.db().cf(TransactionPoolCf)?;
 
         let query = self.db().cf(transaction_pool_state_update::ByBlockIdQuery)?;
         let lock_conflicts_cf = self.db().cf(lock_conflict::ByTransactionIdQuery)?;
@@ -1237,7 +1320,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<usize, StorageError> {
         const OPERATION: &str = "transaction_pool_count";
 
-        let cf = self.db().cf(TransactionPoolModel)?;
+        let cf = self.db().cf(TransactionPoolCf)?;
 
         let lock_conflict_query = self.db().cf(lock_conflict::ByTransactionIdQuery)?;
         let iter = cf.key_iterator(Ordering::default(), OPERATION);
@@ -1285,7 +1368,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn substates_get(&self, address: &SubstateAddress) -> Result<SubstateRecord, StorageError> {
         const OPERATION: &str = "substates_get";
-        let substate = self.db().cf(SubstateModel)?.get(address, OPERATION)?;
+        let substate = self.db().cf(SubstateCf)?.get(address, OPERATION)?;
         Ok(substate)
     }
 
@@ -1297,7 +1380,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let substates = self
             .db()
-            .cf(SubstateModel)?
+            .cf(SubstateCf)?
             .multi_get(substate_ids.into_iter().map(|id| id.to_substate_address()), OPERATION)?;
 
         Ok(substates)
@@ -1310,7 +1393,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "substates_get_any_max_version";
 
         let index_cf = self.db().cf(substate::HeadIndex)?;
-        let cf = self.db().cf(SubstateModel)?;
+        let cf = self.db().cf(SubstateCf)?;
 
         let iter = substate_ids.into_iter();
         let (lower, _) = iter.size_hint();
@@ -1336,7 +1419,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     where I: IntoIterator<Item = VersionedSubstateIdRef<'a>> {
         const OPERATION: &str = "substates_any_exist";
 
-        let cf = self.db().cf(SubstateModel)?;
+        let cf = self.db().cf(SubstateCf)?;
 
         for id in substates {
             if cf.exists(&id.to_substate_address(), OPERATION)? {
@@ -1357,7 +1440,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<Vec<LockedSubstateValue>, StorageError> {
         const OPERATION: &str = "substate_locks_get_locked_substates_for_transaction";
 
-        let substates_cf = self.db().cf(SubstateModel)?;
+        let substates_cf = self.db().cf(SubstateCf)?;
         let query = self.db().cf(substate_locks::ByTransactionIdQuery)?;
 
         let num_items = query.count_prefix(transaction_id)?;
@@ -1479,10 +1562,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "state_transitions_get_n_after";
         // The StateTransitionId may not exist and is used to find subsequent state transitions
 
-        let cf = self.db().cf(StateTransitionModel)?;
+        let cf = self.db().cf(StateTransitionCf)?;
         let query = self.db().cf(state_transition::ByShardAndIdQuery)?;
         let iter = query.query_start_range_key_iterator(Ordering::Ascending, &(id.shard(), id.seq() + 1));
-        let substate_cf = self.db().cf(SubstateModel)?;
+        let substate_cf = self.db().cf(SubstateCf)?;
 
         let mut transitions = Vec::with_capacity(n);
         // TODO: this loads and searches a lot of keys which are not applicable to the end epoch. We'll need to use an
@@ -1512,7 +1595,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 StateTransitionType::Up => {
                     let value = substate.substate_value.map_or_else(
                         || SubstateValueOrHash::Hash(substate.state_hash),
-                        SubstateValueOrHash::Value,
+                        |v| SubstateValueOrHash::Value(Box::new(v)),
                     );
                     SubstateUpdate::Create(SubstateCreatedProof {
                         substate: SubstateData {
@@ -1552,28 +1635,28 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn state_tree_nodes_get(&self, shard: Shard, key: &NodeKey) -> Result<Node<Version>, StorageError> {
         const OPERATION: &str = "state_tree_nodes_get";
-        let cf = self.db().cf(StateTreeModelRef::default())?;
+        let cf = self.db().cf(StateTreeCfRef::default())?;
         let node = cf.get(&(shard, key), OPERATION)?;
         Ok(node)
     }
 
     fn state_tree_versions_get_latest(&self, shard: Shard) -> Result<Option<Version>, StorageError> {
         const OPERATION: &str = "state_tree_versions_get_latest";
-        let query = self.db().cf(StateTreeShardVersionModel)?;
+        let query = self.db().cf(StateTreeShardVersionCf)?;
         let version = query.get(&shard, OPERATION).optional()?;
         Ok(version)
     }
 
     fn epoch_checkpoint_get(&self, epoch: Epoch) -> Result<EpochCheckpoint, StorageError> {
         const OPERATION: &str = "epoch_checkpoint_get";
-        let cf = self.db().cf(EpochCheckpointModel)?;
+        let cf = self.db().cf(EpochCheckpointCf)?;
         let checkpoint = cf.get(&epoch, OPERATION)?;
         Ok(checkpoint)
     }
 
     fn previous_epoch_state_root_get(&self) -> Result<EpochStateRoot, StorageError> {
         const OPERATION: &str = "previous_epoch_state_root_get";
-        let cf = self.db().cf(PreviousEpochStateRootModel)?;
+        let cf = self.db().cf(PreviousEpochStateRootCf)?;
         let data = cf.get_by_default_key(OPERATION)?;
         Ok(data)
     }
@@ -1584,7 +1667,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         address: T,
     ) -> Result<bool, StorageError> {
         const OPERATION: &str = "foreign_substate_pledges_exists_for_transaction_and_address";
-        let cf = self.db().cf(ForeignSubstatePledgeModel)?;
+        let cf = self.db().cf(ForeignSubstatePledgeCf)?;
         let exists = cf.exists(&(*transaction_id, address.to_substate_address()), OPERATION)?;
         Ok(exists)
     }
@@ -1638,7 +1721,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         commitment: &UnclaimedConfidentialOutputAddress,
     ) -> Result<UnclaimedConfidentialOutput, StorageError> {
         const OPERATION: &str = "burnt_utxos_get";
-        let cf = self.db().cf(BurntUtxoModel)?;
+        let cf = self.db().cf(BurntUtxoCf)?;
         let output = cf.get(commitment, OPERATION)?;
         Ok(output)
     }
@@ -1662,7 +1745,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
         let exclude_block_ids = self.get_pending_chain_with_commands_between(leaf_block)?;
 
-        let cf = self.db().cf(BurntUtxoModel)?;
+        let cf = self.db().cf(BurntUtxoCf)?;
         let index_cf = self.db().cf(burnt_utxo::ProposedInBlockIndex)?;
 
         let iter = cf.iterator(Ordering::default(), OPERATION);
@@ -1693,13 +1776,13 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn burnt_utxos_count(&self) -> Result<u64, StorageError> {
         const OPERATION: &str = "burnt_utxos_count";
-        let count = self.db().cf(BurntUtxoModel)?.count(OPERATION)?;
+        let count = self.db().cf(BurntUtxoCf)?.count(OPERATION)?;
         Ok(count as u64)
     }
 
     fn foreign_parked_blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError> {
         const OPERATION: &str = "foreign_parked_blocks_exists";
-        let cf = self.db().cf(ForeignParkedBlockModel)?;
+        let cf = self.db().cf(ForeignParkedBlockCf)?;
         let exists = cf.exists(block_id, OPERATION)?;
         Ok(exists)
     }
@@ -1710,7 +1793,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         public_key: &RistrettoPublicKeyBytes,
     ) -> Result<ValidatorConsensusStats, StorageError> {
         const OPERATION: &str = "validator_epoch_stats_get";
-        let cf = self.db().cf(ValidatorNodeEpochStatsModel)?;
+        let cf = self.db().cf(ValidatorNodeEpochStatsCf)?;
         let stats = cf.get(&(epoch, *public_key), OPERATION)?;
         Ok(stats)
     }
@@ -1798,7 +1881,7 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         const OPERATION: &str = "evicted_nodes_count";
 
         // TODO: we'll need an index just to optimise this query.
-        let cf = self.db().cf(EvictedNodeModel)?;
+        let cf = self.db().cf(EvictedNodeCf)?;
         let iter = cf.value_iterator(Ordering::default(), OPERATION);
         let mut count = 0;
         for result in iter {

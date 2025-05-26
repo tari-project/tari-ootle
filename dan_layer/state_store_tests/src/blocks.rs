@@ -23,7 +23,7 @@ use tari_utilities::epoch_time::EpochTime;
 use crate::helpers::{create_rocksdb, create_tx_atom};
 
 mod basic_block_operations {
-    use tari_dan_storage::consensus_models::QcId;
+    use tari_consensus_types::QcId;
 
     use super::*;
     use crate::helpers::{commit_chain, create_chain};
@@ -60,11 +60,11 @@ mod basic_block_operations {
 
         // set qcs
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
-        assert!(!block1_from_db.is_justified());
+        assert!(!block1_from_db.has_justify_qc());
         tx.blocks_set_qcs(block1_from_db.id(), None, Some(&QcId::zero()))
             .unwrap();
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
-        assert!(block1_from_db.is_justified());
+        assert!(block1_from_db.has_justify_qc());
 
         // set is_commited flag
         let block1_from_db = tx.blocks_get(block1.id()).unwrap();
@@ -84,7 +84,7 @@ mod basic_block_operations {
 }
 
 mod block_parent_operations {
-    use tari_dan_storage::consensus_models::QcId;
+    use tari_consensus_types::QcId;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
@@ -110,6 +110,7 @@ mod block_parent_operations {
             network,
             *zero_block.id(),
             zero_block.justify().clone(),
+            None,
             NodeHeight(1),
             Epoch(0),
             ShardGroup::all_shards(NumPreshards::P64),
@@ -131,6 +132,7 @@ mod block_parent_operations {
             network,
             *block1.id(),
             block1.justify().clone(),
+            None,
             NodeHeight(1),
             Epoch(0),
             ShardGroup::all_shards(NumPreshards::P64),
@@ -207,7 +209,8 @@ mod block_parent_operations {
 }
 
 mod block_query_operations {
-    use tari_dan_storage::consensus_models::QcId;
+    use tari_consensus_types::QcId;
+    use tari_dan_storage::consensus_models::BookkeepingModel;
     use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
@@ -236,6 +239,7 @@ mod block_query_operations {
             network,
             *zero_block.id(),
             zero_block.justify().clone(),
+            None,
             NodeHeight(1),
             Epoch(0),
             ShardGroup::all_shards(NumPreshards::P64),
@@ -254,12 +258,13 @@ mod block_query_operations {
         block1.insert(&mut tx).unwrap();
         tx.blocks_set_qcs(block1.id(), Some(&QcId::zero()), Some(&QcId::zero()))
             .unwrap();
-        block1.as_locked_block().set(&mut tx).unwrap();
+        block1.as_locked().set(&mut tx).unwrap();
 
         let block2 = Block::create(
             network,
             *block1.id(),
             block1.justify().clone(),
+            None,
             NodeHeight(2),
             Epoch(0),
             ShardGroup::all_shards(NumPreshards::P64),
@@ -279,7 +284,7 @@ mod block_query_operations {
         block2.insert(&mut tx).unwrap();
         tx.blocks_set_qcs(block2.id(), Some(&QcId::zero()), Some(&QcId::zero()))
             .unwrap();
-        block2.justify().save(&mut tx).unwrap();
+        tx.proposal_certificates_save(block2.justify()).unwrap();
 
         let mut block3_data = ExtraData::new();
         block3_data.insert(
@@ -290,6 +295,7 @@ mod block_query_operations {
             network,
             *block1.id(),
             block1.justify().clone(),
+            None,
             // Height 2 to test forks
             NodeHeight(2),
             Epoch(0),
@@ -308,7 +314,7 @@ mod block_query_operations {
         )
         .unwrap();
         block3.insert(&mut tx).unwrap();
-        block3.as_leaf_block().set(&mut tx).unwrap();
+        block3.as_leaf().set(&mut tx).unwrap();
 
         // blocks_get_all_ids_by_height
         let res = tx.blocks_get_all_ids_by_height(Epoch(0), NodeHeight(1)).unwrap();

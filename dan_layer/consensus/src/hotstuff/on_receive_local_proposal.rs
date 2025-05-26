@@ -4,6 +4,18 @@
 use std::{collections::HashSet, time::Duration};
 
 use log::*;
+use tari_consensus_types::{
+    Decision,
+    HighPc,
+    HighestSeenBlock,
+    LastSentVote,
+    ProposalCertificate,
+    ProposalVote,
+    QcId,
+    TimeoutVote,
+    TimeoutVoteMessage,
+    ValidatorSignatureBytes,
+};
 use tari_dan_common_types::{
     committee::{Committee, CommitteeInfo},
     optional::Optional,
@@ -13,13 +25,11 @@ use tari_dan_common_types::{
 use tari_dan_storage::{
     consensus_models::{
         Block,
+        BookkeepingModel,
         EpochStateRoot,
         ForeignProposalRecord,
         ForeignProposalStatus,
-        HighQc,
-        LastSentVote,
         NoVoteReason,
-        QcId,
         SubstateRecord,
         TransactionPool,
         ValidBlock,
@@ -27,8 +37,9 @@ use tari_dan_storage::{
     StateStore,
     StateStoreWriteTransaction,
 };
+use tari_engine_types::ToByteType;
 use tari_epoch_manager::EpochManagerReader;
-use tari_sidechain::QuorumDecision;
+use tari_sidechain::{ProposalCertificateSignatureFields, QuorumDecision};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::{sync::broadcast, task};
 
@@ -40,7 +51,7 @@ use crate::{
         epoch_state::EpochState,
         error::HotStuffError,
         generate_epoch_checkpoint,
-        get_next_block_height_and_leader,
+        get_leader_for_view,
         on_ready_to_vote_on_local_block::OnReadyToVoteOnLocalBlock,
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
         pacemaker_handle::PaceMakerHandle,
@@ -51,13 +62,7 @@ use crate::{
     },
     messages::{ForeignProposalNotificationMessage, HotstuffMessage, NewViewMessage, ProposalMessage, VoteMessage},
     tracing::TraceTimer,
-    traits::{
-        hooks::ConsensusHooks,
-        ConsensusSpec,
-        OutboundMessaging,
-        ValidatorSignatureService,
-        VoteSignatureService,
-    },
+    traits::{hooks::ConsensusHooks, CertificateStore, ConsensusSpec, OutboundMessaging, ValidatorSignerService},
 };
 
 const LOG_TARGET: &str = "tari::dan::consensus::hotstuff::on_receive_local_proposal";
@@ -71,7 +76,7 @@ pub struct OnReceiveLocalProposalHandler<TConsensusSpec: ConsensusSpec> {
     on_ready_to_vote_on_local_block: OnReadyToVoteOnLocalBlock<TConsensusSpec>,
     change_set: Option<ProposedBlockChangeSet>,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
-    vote_signing_service: TConsensusSpec::SignatureService,
+    signing_service: TConsensusSpec::SignerService,
     on_receive_foreign_proposal: OnReceiveForeignProposalHandler<TConsensusSpec>,
     tx_events: broadcast::Sender<HotstuffEvent>,
     hooks: TConsensusSpec::Hooks,
@@ -85,7 +90,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         leader_strategy: TConsensusSpec::LeaderStrategy,
         pacemaker: PaceMakerHandle,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
-        vote_signing_service: TConsensusSpec::SignatureService,
+        signing_service: TConsensusSpec::SignerService,
         transaction_pool: TransactionPool<TConsensusSpec::StateStore>,
         tx_events: broadcast::Sender<HotstuffEvent>,
         transaction_manager: ConsensusTransactionManager<
@@ -95,14 +100,14 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         config: HotstuffConfig,
         hooks: TConsensusSpec::Hooks,
     ) -> Self {
-        let local_validator_pk = vote_signing_service.public_key().clone();
+        let local_validator_pk = signing_service.public_key().clone();
         Self {
             config: config.clone(),
             store: store.clone(),
             epoch_manager: epoch_manager.clone(),
             leader_strategy,
             pacemaker: pacemaker.clone(),
-            vote_signing_service,
+            signing_service,
             outbound_messaging: outbound_messaging.clone(),
             hooks,
             tx_events: tx_events.clone(),
@@ -230,7 +235,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         // If a leader failure occurs while we are processing the block, ignore it
         self.pacemaker.suspend_leader_timeout().await?;
 
-        let result = self.process_valid_block(epoch_state, valid_block.clone()).await;
+        let result = self.process_valid_block(epoch_state, valid_block).await;
 
         // Ensure leader failure is resumed
         // If the result was successful, the leader timeout was reset, and no leader failure will occur. Otherwise,
@@ -276,7 +281,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         proposer_claim_public_key_bytes: RistrettoPublicKeyBytes,
         valid_block: ValidBlock,
     ) -> Result<Option<NoVoteReason>, HotStuffError> {
-        debug!(target: LOG_TARGET, "RECV-LOCAL-PROPOSAL - [{:?}] Starting processing block: {}", current_epoch, valid_block);
+        debug!(target: LOG_TARGET, "process_block: [{}] processing block: {}", current_epoch, valid_block);
 
         let em_epoch = self.epoch_manager.current_epoch().await?;
         let can_propose_epoch_end = em_epoch > current_epoch;
@@ -289,10 +294,10 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .change_set
             .take()
             .map(|mut c| {
-                c.set_block(valid_block.block().as_leaf_block());
+                c.set_block(valid_block.block().as_leaf());
                 c
             })
-            .unwrap_or_else(|| ProposedBlockChangeSet::new(valid_block.block().as_leaf_block()));
+            .unwrap_or_else(|| ProposedBlockChangeSet::new(valid_block.block().as_leaf()));
 
         let store = self.store.clone();
 
@@ -365,10 +370,21 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             }
         }
 
-        if !block_decision.is_epoch_end() {
+        // End of epoch committed? No need to enter the view or send votes
+        if !block_decision.is_committed_epoch_end() {
             if let Some(decision) = block_decision.quorum_decision {
-                let (next_height, next_leader_addr, num_skipped) = self.store.with_read_tx(|tx| {
-                    get_next_block_height_and_leader(
+                // Enter the highest view justified by this block
+                self.pacemaker
+                    .enter_view(
+                        valid_block.epoch(),
+                        block_decision.highest_qc_view(),
+                        block_decision.high_pc.block_height(),
+                    )
+                    .await?;
+
+                // Get the leader that will collect votes for this block to justify moving onto the next view
+                let next_leader = self.store.with_read_tx(|tx| {
+                    get_leader_for_view(
                         tx,
                         local_committee,
                         &self.leader_strategy,
@@ -377,31 +393,38 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     )
                 })?;
 
-                self.pacemaker
-                    .update_view(valid_block.epoch(), next_height, block_decision.high_qc.block_height())
-                    .await?;
-
-                if num_skipped == 0 {
-                    self.send_vote_to_leader(next_leader_addr, valid_block.block(), decision)
-                        .await?;
-                } else {
+                // And vote to move onto the next view
+                if next_leader.vote_to_skip_next {
                     self.send_new_view_and_vote_to_leader(
-                        next_height,
-                        next_leader_addr,
+                        next_leader.height,
+                        next_leader.address,
                         valid_block.block(),
-                        block_decision.high_qc.clone(),
+                        block_decision.high_pc.clone(),
                         decision,
                     )
                     .await?;
+                } else {
+                    self.send_vote_to_leader(next_leader.address, valid_block.block(), decision)
+                        .await?;
                 }
             }
         }
 
         self.hooks
             .on_local_block_decide(&valid_block, block_decision.quorum_decision);
-        for t in block_decision.finalized_transactions.drain(..).flatten() {
-            self.hooks.on_transaction_finalized(&t.into_current_transaction_atom());
-        }
+        let (num_committed, num_aborted) =
+            block_decision
+                .finalized_transactions
+                .iter()
+                .flatten()
+                .fold((0usize, 0), |acc, t| {
+                    let (committed, aborted) = acc;
+                    match t.current_decision() {
+                        Decision::Commit => (committed + 1, aborted),
+                        Decision::Abort(_) => (committed, aborted + 1),
+                    }
+                });
+        self.hooks.on_transaction_batch_finalized(num_committed, num_aborted);
 
         // THere should only be one committed block with end of epoch
         if let Some(eoe_block) = block_decision.take_end_of_epoch_block() {
@@ -471,15 +494,16 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                         sidechain_id,
                     );
                     info!(target: LOG_TARGET, "⭐️ Creating new genesis block {genesis}");
-                    genesis.justify().insert(tx)?;
+                    genesis.justify().save(tx)?;
                     genesis.insert(tx)?;
-                    genesis.set_as_justified(tx, &QcId::zero())?;
+                    genesis.add_justify_qc(tx, &QcId::zero())?;
                     // We'll propose using the new genesis as parent
-                    genesis.as_locked_block().set(tx)?;
-                    genesis.as_leaf_block().set(tx)?;
+                    genesis.as_locked().set(tx)?;
+                    genesis.as_highest_seen().set(tx)?;
+                    genesis.as_leaf().set(tx)?;
                     genesis.as_last_executed().set(tx)?;
                     genesis.as_last_voted().set(tx)?;
-                    genesis.justify().as_high_qc().set(tx)?;
+                    genesis.justify().as_high_pc().set(tx)?;
                 }
 
                 cleanup_epoch(tx, prev_epoch)?;
@@ -521,26 +545,20 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         let _timer =
             TraceTimer::debug(LOG_TARGET, "SendVoteToLeader").with_excessive_threshold(Duration::from_millis(200));
 
-        let vote = self.generate_vote_message(block, decision)?;
+        let message = self.generate_vote_message(block, decision)?;
         info!(
             target: LOG_TARGET,
-            "🔥 VOTE {:?} for block {} proposed by {} to next leader {:.4}",
-            vote.decision,
+            "🔥 VOTE {:?} to leader {:.4} for block {} proposed by {}",
+            message.vote.decision,
+            leader,
             block,
             block.proposed_by(),
-            leader,
         );
 
-        let last_sent_vote = LastSentVote {
-            epoch: vote.epoch,
-            block_id: vote.block_id,
-            block_height: block.height(),
-            decision: vote.decision,
-            signature: vote.signature.clone(),
-        };
+        let last_sent_vote = LastSentVote::from(message.vote.clone());
 
         self.outbound_messaging
-            .send(leader.clone(), HotstuffMessage::Vote(vote))
+            .send(leader.clone(), HotstuffMessage::Vote(message))
             .await?;
 
         self.store.with_write_tx(|tx| last_sent_vote.set(tx))?;
@@ -550,47 +568,57 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
 
     async fn send_new_view_and_vote_to_leader(
         &mut self,
-        new_height: NodeHeight,
+        timeout_height: NodeHeight,
         leader: &TConsensusSpec::Addr,
         block: &Block,
-        high_qc: HighQc,
+        high_pc: HighPc,
         decision: QuorumDecision,
     ) -> Result<(), HotStuffError> {
         let _timer =
             TraceTimer::debug(LOG_TARGET, "send-newview-and-vote").with_excessive_threshold(Duration::from_millis(200));
 
-        let vote = self.generate_vote_message(block, decision)?;
+        let message = self.generate_vote_message(block, decision)?;
         info!(
             target: LOG_TARGET,
             "🔥 NEWVIEW VOTE {:?} for block {} proposed by {} to next leader {:.4}",
-            vote.decision,
+            message.vote.decision,
             block,
             block.proposed_by(),
             leader,
         );
 
-        let last_sent_vote = LastSentVote {
-            epoch: vote.epoch,
-            block_id: vote.block_id,
-            block_height: block.height(),
-            decision: vote.decision,
-            signature: vote.signature.clone(),
-        };
+        let last_sent_vote = LastSentVote::from(message.vote.clone());
 
-        let high_qc = if high_qc.qc_id == *block.justify().id() {
+        let high_pc = if high_pc.qc_id == block.justify().calculate_id() {
             block.justify().clone()
         } else {
-            self.store.with_read_tx(|tx| high_qc.get_quorum_certificate(tx))?
+            self.store
+                .with_read_tx(|tx| ProposalCertificate::get(tx, high_pc.id()))?
         };
 
+        let msg = TimeoutVoteMessage {
+            epoch: high_pc.epoch(),
+            height: timeout_height,
+        };
+
+        let signature = self.signing_service.sign(&msg);
+        let signature = ValidatorSignatureBytes::new(
+            self.signing_service.public_key().to_byte_type(),
+            signature.to_byte_type(),
+        );
+
         let message = NewViewMessage {
-            high_qc,
-            new_height,
-            last_vote: Some(vote),
+            last_vote: Some(message.vote),
+            timeout: TimeoutVote {
+                epoch: high_pc.epoch(),
+                height: timeout_height,
+                signature,
+            },
+            high_pc,
         };
 
         self.outbound_messaging
-            .send(leader.clone(), HotstuffMessage::NewView(message))
+            .send(leader.clone(), HotstuffMessage::new_newview(message))
             .await?;
 
         self.store.with_write_tx(|tx| last_sent_vote.set(tx))?;
@@ -622,14 +650,24 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
     }
 
     fn generate_vote_message(&self, block: &Block, decision: QuorumDecision) -> Result<VoteMessage, HotStuffError> {
-        let signature = self.vote_signing_service.sign_vote(block.id(), &decision);
+        let msg = ProposalCertificateSignatureFields {
+            block_id: block.id().hash(),
+            decision,
+        };
+        let signature = self.signing_service.sign(&msg);
+        let signature = ValidatorSignatureBytes {
+            public_key: self.signing_service.public_key().to_byte_type(),
+            signature: signature.to_byte_type(),
+        };
 
         Ok(VoteMessage {
-            epoch: block.epoch(),
-            block_id: *block.id(),
-            unverified_block_height: block.height(),
-            decision,
-            signature,
+            vote: ProposalVote {
+                epoch: block.epoch(),
+                block_id: *block.id(),
+                block_height: block.height(),
+                decision,
+                signature,
+            },
         })
     }
 
@@ -709,7 +747,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         }
 
-        if candidate_block.header().justify_id() != candidate_block.justify().id() {
+        if *candidate_block.header().justify_id() != candidate_block.justify().calculate_id() {
             // Note the ID is calculated locally when the message is read from the network, therefore if this happens
             // there is a bug. This is here as a sanity check.
             return Err(ProposalValidationError::MalformedBlock {
@@ -717,7 +755,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 details: format!(
                     "BUG: justify_id ({}) in header does not match the calculated justify id ({})",
                     candidate_block.header().justify_id(),
-                    candidate_block.justify().id()
+                    candidate_block.justify().calculate_id()
                 ),
             }
             .into());
@@ -747,7 +785,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         if candidate_block.justify().epoch() != current_epoch {
             return Err(ProposalValidationError::InvalidEpochInQc {
                 block_id: *candidate_block.id(),
-                qc_id: *candidate_block.justify().id(),
+                qc_id: candidate_block.justify().calculate_id(),
                 qc_epoch: candidate_block.justify().epoch(),
                 current_epoch,
             }
@@ -761,14 +799,16 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
         } else {
             // Load our local version of the justified block. Check that details included in the justify match
             // previously added blocks
-            candidate_block.justify().get_block(tx).optional()?.ok_or_else(|| {
-                // This will trigger a sync
-                ProposalValidationError::JustifyBlockNotFound {
-                    proposed_by: candidate_block.proposed_by().to_string(),
-                    block_description: candidate_block.to_string(),
-                    justify_block: candidate_block.justify().as_leaf_block(),
-                }
-            })?
+            Block::get(tx, &candidate_block.justify().calculate_block_id())
+                .optional()?
+                .ok_or_else(|| {
+                    // This will trigger a catch-up sync
+                    ProposalValidationError::JustifyBlockNotFound {
+                        proposed_by: candidate_block.proposed_by().to_string(),
+                        block_description: candidate_block.to_string(),
+                        justify_block: candidate_block.justify().as_leaf_block(),
+                    }
+                })?
         };
 
         if candidate_block.justifies_parent() && !candidate_block.parent_exists(tx)? {
@@ -780,14 +820,14 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         }
 
-        if justify_block.height() != candidate_block.justify().block_height() {
+        if justify_block.height() != candidate_block.justify().height() {
             return Err(ProposalValidationError::JustifyBlockInvalid {
                 proposed_by: candidate_block.proposed_by().to_string(),
                 block_id: *candidate_block.id(),
                 details: format!(
                     "Justify block height ({}) does not match justify block height ({})",
                     justify_block.height(),
-                    candidate_block.justify().block_height()
+                    candidate_block.justify().height()
                 ),
             }
             .into());
@@ -801,51 +841,52 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             .into());
         }
 
-        let high_qc = HighQc::get(tx, candidate_block.epoch())?;
+        let high_pc = HighPc::get(tx, candidate_block.epoch())?;
         // if the block parent is not the justify parent, then we have experienced a leader failure
         // and should make dummy blocks to fill in the gaps.
-        if !candidate_block.justifies_parent() && candidate_block.height() > NodeHeight(1) {
+        if candidate_block.timeout_certificate().is_some() {
             let num_dummies = candidate_block.height().as_u64() - justify_block.height().as_u64() - 1;
             info!(target: LOG_TARGET, "🔨 Creating {} dummy block(s) for block {}", num_dummies, candidate_block);
+            // On a leader failure we want to include the highest valid block we've seen. We have already asserted above
+            // that we know the block in the proposal certificate (or else we kick into catch-up sync). Assuming that PC
+            // was included in the highest-seen block (that, for whatever reason, did not get justified) we
+            // can assume that this highest-seen block used to create dummy blocks is the same as the
+            // proposer.
+            let highest_seen_block = HighestSeenBlock::get(tx, candidate_block.epoch())?;
+            let highest_seen_block = Block::get(tx, highest_seen_block.block_id())?;
 
             let dummy_blocks = calculate_dummy_blocks_from_justify(
                 &candidate_block,
-                &justify_block,
+                &highest_seen_block,
                 &self.leader_strategy,
                 local_committee,
             );
 
-            let Some(last_dummy) = dummy_blocks.last() else {
-                warn!(target: LOG_TARGET, "❌ Bad proposal, does not justify parent for candidate block {}", candidate_block);
-                return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
-                    justify_block_height: justify_block.height(),
-                    candidate_block_height: candidate_block.height(),
+            if let Some(last_dummy) = dummy_blocks.last() {
+                // TODO: timeout certificate with no dummy blocks?
+                if candidate_block.parent() != last_dummy.id() {
+                    warn!(target: LOG_TARGET, "❌ Bad proposal, unable to find dummy blocks (last dummy: {}) for candidate block {}", last_dummy, candidate_block);
+                    return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
+                        justify_block_height: highest_seen_block.height(),
+                        candidate_block_height: candidate_block.height(),
+                    }
+                    .into());
                 }
-                .into());
-            };
 
-            if candidate_block.parent() != last_dummy.id() {
-                warn!(target: LOG_TARGET, "❌ Bad proposal, unable to find dummy blocks (last dummy: {}) for candidate block {}", last_dummy, candidate_block);
-                return Err(ProposalValidationError::CandidateBlockDoesNotExtendJustify {
-                    justify_block_height: justify_block.height(),
-                    candidate_block_height: candidate_block.height(),
-                }
-                .into());
+                // The logic for not checking is_safe is as follows:
+                // We can't without adding the dummy blocks to the DB
+                // We know that justify_block is safe because we have added it to our chain
+                // We know that each dummy block is built in a chain from the justify block to the candidate block
+                // We know that last dummy block is the parent of candidate block
+                // Therefore we know that candidate block satisfies the safeNode predicate
+                return Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks));
             }
-
-            // The logic for not checking is_safe is as follows:
-            // We can't without adding the dummy blocks to the DB
-            // We know that justify_block is safe because we have added it to our chain
-            // We know that each dummy block is built in a chain from the justify block to the candidate block
-            // We know that last dummy block is the parent of candidate block
-            // Therefore we know that candidate block satisfies the safeNode predicate
-            return Ok(ValidBlock::with_dummy_blocks(candidate_block, dummy_blocks));
         }
 
-        if !high_qc.block_id().is_zero() && !candidate_block.is_safe(tx)? {
+        if !high_pc.block_id().is_zero() && !candidate_block.is_safe(tx)? {
             return Err(ProposalValidationError::NotSafeBlock {
                 proposed_by: candidate_block.proposed_by().to_string(),
-                hash: *candidate_block.id(),
+                block_id: *candidate_block.id(),
             }
             .into());
         }

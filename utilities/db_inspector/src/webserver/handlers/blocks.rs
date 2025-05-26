@@ -11,7 +11,7 @@ use axum::{
 use serde_json::json;
 use tari_dan_common_types::Epoch;
 use tari_dan_storage::Ordering;
-use tari_state_store_rocksdb::models;
+use tari_state_store_rocksdb::column_families as cfs;
 
 use crate::webserver::{
     context::HandlerContext,
@@ -34,15 +34,17 @@ pub async fn list(
         Column::new("shard_group", "ShardGroup"),
         Column::new("num_commands", "#Cmds"),
         Column::new("commands", "Commands"),
-        Column::new("proposed_by", "Proposed by"),
+        Column::new("justify", "Proposal Cert"),
+        Column::new("timeout", "Timeout Cert"),
         Column::new("parent", "Parent"),
         Column::new("state_hash", "State Hash"),
         Column::new("epoch_hash", "Epoch Hash"),
+        Column::new("proposed_by", "Proposed by"),
     ]);
     let tx = db.read_only_context();
 
-    let cf = tx.cf(models::block::BlockModel)?;
-    let query_cf = tx.cf(models::block::ByEpochQuery)?;
+    let cf = tx.cf(cfs::block::BlockCf)?;
+    let query_cf = tx.cf(cfs::block::ByEpochQuery)?;
     let ordering = if req.asc {
         Ordering::Ascending
     } else {
@@ -68,7 +70,7 @@ pub async fn list(
         if block.is_committed() {
             flags.push("C");
         }
-        if block.is_justified() {
+        if block.has_justify_qc() {
             flags.push("J");
         }
         if block.is_dummy() {
@@ -84,6 +86,8 @@ pub async fn list(
             "shard_group": format!("{}-{}", block.shard_group().start().as_u32(), block.shard_group().end().as_u32()),
             "num_commands": block.commands().len(),
             "commands": block.commands(),
+            "justify": block.justify().as_high_pc(),
+            "timeout": block.timeout_certificate(),
             "proposed_by": block.proposed_by(),
             "parent": block.header().parent(),
             "state_hash": hex::encode(block.header().state_merkle_root()),

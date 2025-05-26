@@ -1,7 +1,8 @@
 //   Copyright 2024 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_dan_storage::consensus_models::{Decision, Evidence, TransactionExecution};
+use tari_consensus_types::Decision;
+use tari_dan_storage::consensus_models::{Evidence, TransactionExecution};
 
 use crate::hotstuff::substate_store::LockStatus;
 

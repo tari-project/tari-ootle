@@ -4,6 +4,7 @@
 mod block;
 mod common;
 mod foreign_proposal;
+mod signed_vote;
 
 pub use block::*;
 pub use common::*;

@@ -986,7 +986,11 @@ impl Display for Block {
             "[{}, justify: {} ({}), TC: {}, {}, {}, {} cmd(s), {}->{}]",
             self.height(),
             self.justify().height(),
-            if self.justifies_parent() { "🟢" } else { "🟡" },
+            if self.timeout_certificate().is_none() && !self.is_dummy() {
+                "🟢"
+            } else {
+                "🟡"
+            },
             self.timeout_certificate.as_ref().map(|tc| tc.height()).display(),
             self.epoch(),
             self.shard_group(),

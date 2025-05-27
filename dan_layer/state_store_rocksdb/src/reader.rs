@@ -367,8 +367,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     type Addr = TAddr;
 
     fn current_epoch(&self) -> Result<Epoch, StorageError> {
-        let leaf_block = self.db().cf(LeafBlockCf)?.get_by_default_key("leaf_block_get")?;
-        Ok(leaf_block.epoch())
+        let high_pc = self.db().cf(HighPcCf)?.get_by_default_key("current_epoch").optional()?;
+        Ok(high_pc.map(|hpc| hpc.epoch()).unwrap_or(Epoch(0)))
     }
 
     fn last_sent_vote_get(&self, epoch: Epoch) -> Result<LastSentVote, StorageError> {

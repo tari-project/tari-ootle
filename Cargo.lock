@@ -9520,6 +9520,9 @@ name = "smallvec"
 version = "2.0.0-alpha.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87b96efa4bd6bdd2ff0c6615cc36fc4970cbae63cfd46ddff5cee35a1b4df570"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "smart-default"
@@ -11216,6 +11219,7 @@ dependencies = [
  "rand 0.8.5",
  "rocksdb",
  "serde",
+ "smallvec 2.0.0-alpha.11",
  "tari_common_types",
  "tari_consensus_types",
  "tari_dan_common_types",

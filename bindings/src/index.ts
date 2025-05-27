@@ -4,6 +4,7 @@
 export * from "./types/AbortReason";
 export * from "./types/AccessRule";
 export * from "./types/Account";
+export * from "./types/AllocatableAddressType";
 export * from "./types/Amount";
 export * from "./types/ArgDef";
 export * from "./types/Arg";
@@ -18,6 +19,7 @@ export * from "./types/Committee";
 export * from "./types/ComponentAccessRules";
 export * from "./types/ComponentAddress";
 export * from "./types/ComponentBody";
+export * from "./types/ComponentCall";
 export * from "./types/ComponentHeader";
 export * from "./types/ComponentKey";
 export * from "./types/CompressedElgamalVerifiableBalance";

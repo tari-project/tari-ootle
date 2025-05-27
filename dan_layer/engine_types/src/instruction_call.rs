@@ -4,7 +4,7 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib::{args::WorkspaceKey, models::ComponentAddress};
+use tari_template_lib::{args::WorkspaceKey, models::ComponentAddress, types::serde_helpers};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(
@@ -14,7 +14,11 @@ use tari_template_lib::{args::WorkspaceKey, models::ComponentAddress};
 )]
 pub enum ComponentCall {
     Address(ComponentAddress),
-    FromWorkspace(WorkspaceKey),
+    FromWorkspace(
+        #[serde(with = "serde_helpers::dynamic_hex")]
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        WorkspaceKey,
+    ),
 }
 
 impl From<ComponentAddress> for ComponentCall {

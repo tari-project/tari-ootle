@@ -4,11 +4,13 @@
 use std::time::Duration;
 
 use tari_common_types::types::{FixedHash, PrivateKey};
+use tari_consensus_types::{Decision, QcId};
 use tari_dan_common_types::{Epoch, ExtraData, NodeHeight, ShardGroup, SubstateRequirement};
 use tari_dan_storage::{
     consensus_models::{
         Block,
         BlockTransactionExecution,
+        BookkeepingModel,
         Command,
         Evidence,
         TransactionPoolStage,
@@ -24,19 +26,18 @@ use tari_engine_types::{
     fees::{FeeBreakdown, FeeReceipt},
     substate::SubstateDiff,
 };
-use tari_template_lib::models::Amount;
+use tari_template_lib::{models::Amount, prelude::SchnorrSignatureBytes, types::Hash};
 use tari_transaction::{Instruction, Transaction};
 use tari_utilities::epoch_time::EpochTime;
 
-use crate::helpers::{assert_eq_debug, create_random_substate_id, create_rocksdb, create_tx_atom};
+use crate::{
+    helpers::{assert_eq_debug, commit_chain, create_chain, create_random_substate_id, create_rocksdb, create_tx_atom},
+    TEST_NUM_PRESHARDS,
+};
 
 mod confirm_all_transitions {
-    use tari_consensus_types::QcId;
-    use tari_dan_storage::consensus_models::BookkeepingModel;
-    use tari_template_lib::prelude::SchnorrSignatureBytes;
 
     use super::*;
-    use crate::TEST_NUM_PRESHARDS;
 
     #[test]
     fn it_sets_pending_stage_to_stage_rocksdb() {
@@ -234,12 +235,8 @@ mod transaction_operations {
 }
 
 mod transaction_execution_operations {
-    use tari_consensus_types::Decision;
-    use tari_dan_common_types::optional::Optional;
-    use tari_template_lib::types::Hash;
 
     use super::*;
-    use crate::helpers::{commit_chain, create_chain};
 
     #[test]
     fn transaction_execution_operations_rocksdb() {
@@ -333,12 +330,6 @@ mod transaction_execution_operations {
 
         let rec = tx.transactions_get(tx1.id()).unwrap();
         assert!(rec.is_finalized(&*tx).unwrap(), "Transaction should be finalized");
-
-        let pending = tx
-            .block_transaction_executions_get_pending_for_block(tx1.id(), &not_committed_block.as_leaf())
-            .optional()
-            .unwrap();
-        assert!(pending.is_none());
 
         let pending = tx
             .block_transaction_executions_get_pending_for_block(tx2.id(), &not_committed_block.as_leaf())

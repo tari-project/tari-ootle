@@ -262,7 +262,7 @@ impl SubstateRecord {
         &self,
         tx: &TTx,
     ) -> Result<ProposalCertificate, StorageError> {
-        tx.proposal_certificates_get(self.created_justify())
+        tx.proposal_certificates_get(self.created_at_epoch, self.created_justify())
     }
 
     pub fn get_destroyed_proposal_certificate<TTx: StateStoreReadTransaction>(
@@ -270,7 +270,7 @@ impl SubstateRecord {
         tx: &TTx,
     ) -> Result<Option<ProposalCertificate>, StorageError> {
         self.destroyed()
-            .map(|destroyed| tx.proposal_certificates_get(&destroyed.justify))
+            .map(|destroyed| tx.proposal_certificates_get(destroyed.at_epoch, &destroyed.justify))
             .transpose()
     }
 

@@ -14,4 +14,5 @@ pub struct HotstuffConfig {
     pub sidechain_id: Option<RistrettoPublicKeyBytes>,
     pub consensus_constants: ConsensusConstants,
     pub state_tree_cleanup_interval: Duration,
+    pub epoch_gc_interval: Duration,
 }

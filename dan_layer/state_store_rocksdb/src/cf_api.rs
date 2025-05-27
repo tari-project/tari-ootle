@@ -3,7 +3,9 @@
 
 use std::{
     any::type_name,
+    borrow::Borrow,
     fmt::{Debug, Display},
+    ops::Range,
 };
 
 use rocksdb::{ColumnFamily, IterateBounds, IteratorMode, Transaction, TransactionDB};
@@ -155,7 +157,7 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
     pub fn multi_get<I, T>(&self, keys: I, operation: &'static str) -> Result<Vec<CF::Value>, RocksDbStorageError>
     where
         I: IntoIterator<Item = T>,
-        T: AsRef<CF::Key>,
+        T: Borrow<CF::Key>,
     {
         let mut keys = keys.into_iter().peekable();
         if keys.peek().is_none() {
@@ -166,7 +168,7 @@ impl<CF: Cf, DB: RocksReader> CfContext<'_, DB, CF> {
             // We don't support key encoding failing here for mem allocation reasons. Generally key encoding is
             // infallible so we should evaluate whether to change the codec to be infallible. If key encoding on the
             // database level ever fails a crash is reasonable.
-            let key = self.key_codec.encode(k.as_ref()).expect("Failed to encode key");
+            let key = self.key_codec.encode(k.borrow()).expect("Failed to encode key");
             (self.handle, key)
         });
         let results = self.db.multi_get_cf(keys);
@@ -437,6 +439,26 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
         })
     }
 
+    /// Returns an iterator over the range of keys (exclusive).
+    pub fn query_range_key_iterator<B: Borrow<TQuery::Key>>(
+        &self,
+        ordering: Ordering,
+        range: Range<B>,
+    ) -> impl Iterator<Item = Result<<TQuery::Cf as Cf>::Key, RocksDbStorageError>> + '_ {
+        let start = self.encode_key(range.start.borrow());
+        let end = self.encode_key(range.end.borrow());
+        let iter = self
+            .range_iterator_with_codecs::<<TQuery::Cf as Cf>::KeyCodec, UnitCodec, <TQuery::Cf as Cf>::Key, ()>(
+                ordering,
+                start..end,
+            );
+        iter.map(|res| {
+            let (k, _) = res?;
+            Ok::<_, RocksDbStorageError>(k)
+        })
+    }
+
+    /// Returns an iterator over the keys in the column family that are less than (exclusive) to the end key.
     pub fn query_end_range_key_iterator(
         &self,
         ordering: Ordering,
@@ -452,6 +474,20 @@ impl<TQuery: QueryCf, DB: RocksReader> CfContext<'_, DB, TQuery> {
             let (k, _) = res?;
             Ok::<_, RocksDbStorageError>(k)
         })
+    }
+
+    /// Returns an iterator over the key/values in the column family that are less than (exclusive) to the end key.
+    pub fn query_end_range_iterator(
+        &self,
+        ordering: Ordering,
+        end_key: &TQuery::Key,
+    ) -> impl Iterator<Item = Result<QueryCfKv<TQuery>, RocksDbStorageError>> + '_ {
+        let key = self.encode_key(end_key);
+        self
+            .range_iterator_with_codecs::<<TQuery::Cf as Cf>::KeyCodec, <TQuery::Cf as Cf>::ValueCodec, <TQuery::Cf as Cf>::Key, <TQuery::Cf as Cf>::Value>(
+                ordering,
+                ..key,
+            )
     }
 
     pub fn query_last(&self, operation: &'static str) -> Result<QueryCfKv<TQuery>, RocksDbStorageError> {

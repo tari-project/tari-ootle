@@ -14,6 +14,8 @@ use crate::{
 pub struct BlockTransactionExecutionCf;
 
 impl Cf for BlockTransactionExecutionCf {
+    // The node height is included so that executions can be filtered by height in
+    // block_transaction_executions_get_pending_for_block.
     type Key = (TransactionId, BlockId, NodeHeight);
     type KeyCodec = (TransactionIdCodec, BlockIdCodec, NumberCodec<NodeHeight>);
     type Value = BlockTransactionExecution;

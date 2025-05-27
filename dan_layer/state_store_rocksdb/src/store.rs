@@ -38,7 +38,7 @@ use crate::{
         bookkeeping::DatabaseMigrationVersion,
         burnt_utxo,
         burnt_utxo::BurntUtxoCf,
-        certificates::{ProposalCertificateCf, TimeoutCertificateCf},
+        certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         epoch_checkpoint::EpochCheckpointCf,
         evicted_node::EvictedNodeCf,

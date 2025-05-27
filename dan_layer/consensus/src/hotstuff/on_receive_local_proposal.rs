@@ -30,12 +30,10 @@ use tari_dan_storage::{
         ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
-        SubstateRecord,
         TransactionPool,
         ValidBlock,
     },
     StateStore,
-    StateStoreWriteTransaction,
 };
 use tari_engine_types::ToByteType;
 use tari_epoch_manager::EpochManagerReader;
@@ -506,8 +504,6 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                     genesis.justify().as_high_pc().set(tx)?;
                 }
 
-                cleanup_epoch(tx, prev_epoch)?;
-
                 Ok::<_, HotStuffError>(())
             })
         })
@@ -593,7 +589,7 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
             block.justify().clone()
         } else {
             self.store
-                .with_read_tx(|tx| ProposalCertificate::get(tx, high_pc.id()))?
+                .with_read_tx(|tx| ProposalCertificate::get(tx, high_pc.epoch(), high_pc.id()))?
         };
 
         let msg = TimeoutVoteMessage {
@@ -979,13 +975,6 @@ async fn broadcast_foreign_proposal_if_required<TConsensusSpec: ConsensusSpec>(
         }
     }
 
-    Ok(())
-}
-
-fn cleanup_epoch<TTx: StateStoreWriteTransaction>(tx: &mut TTx, epoch: Epoch) -> Result<(), HotStuffError> {
-    // Prune all DOWNed values
-    SubstateRecord::prune_downed_values(tx, epoch)?;
-    ForeignProposalRecord::delete_in_epoch(tx, epoch)?;
     Ok(())
 }
 

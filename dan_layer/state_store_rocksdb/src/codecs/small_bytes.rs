@@ -4,104 +4,71 @@
 use std::{
     fmt,
     fmt::Display,
-    io::Write,
     ops::{Deref, Index},
 };
+
+use smallvec::SmallVec;
 
 /// A **immutable** byte buffer that can be stack-allocated if the buffer is smaller than L or heap-allocated if it is
 /// larger.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SmallBytes<const L: usize> {
-    Stack { buf: [u8; L], length: usize },
-    Heap(Vec<u8>),
+pub struct SmallBytes<const L: usize> {
+    inner: SmallVec<u8, L>,
 }
 
 impl<const L: usize> SmallBytes<L> {
     pub const FIXED_SIZE: usize = L;
 
     pub const fn empty() -> Self {
-        Self::Heap(Vec::new())
+        Self { inner: SmallVec::new() }
     }
 
     pub fn from_slice(slice: &[u8]) -> Self {
-        let length = slice.len();
-        if length <= L {
-            let mut buf = Self::make_stack_buf();
-            buf[..slice.len()].copy_from_slice(slice);
-            return Self::Stack { buf, length };
-        }
-        Self::Heap(slice.to_vec())
+        let inner = SmallVec::from_slice(slice);
+        Self { inner }
     }
 
     pub fn from_slices(slices: &[&[u8]]) -> Self {
-        let mut length = 0;
-        let mut is_stack = true;
+        let len = slices.iter().map(|s| s.len()).sum::<usize>();
+        let mut inner = SmallVec::with_capacity(len);
         for slice in slices {
-            length += slice.len();
-            if length > L {
-                is_stack = false;
-                break;
-            }
+            inner.extend_from_slice(slice);
         }
-        if is_stack {
-            let mut buf = Self::make_stack_buf();
-            let mut writer = buf.as_mut_slice();
-            for slice in slices {
-                writer.write_all(slice).expect("infallible");
-            }
-            return Self::Stack { buf, length };
-        }
-        Self::Heap(slices.iter().flat_map(|s| s.iter().copied()).collect())
+        Self { inner }
     }
 
     pub fn new_from_array<const SZ: usize>(buf: [u8; SZ]) -> Self {
         assert!(SZ <= L);
         let mut full_buf = [0; L];
         full_buf[..SZ].copy_from_slice(&buf);
-        SmallBytes::Stack {
-            buf: full_buf,
-            length: SZ,
-        }
+        let inner = SmallVec::from_buf_and_len(full_buf, SZ);
+        Self { inner }
     }
 
     pub const fn make_stack_buf() -> [u8; L] {
         [0; L]
     }
 
-    pub const fn new_stack(buf: [u8; L], length: usize) -> Self {
-        Self::Stack { buf, length }
+    pub fn new_stack(buf: [u8; L], length: usize) -> Self {
+        let inner = SmallVec::from_buf_and_len(buf, length);
+        Self { inner }
     }
 
-    pub const fn new_heap(v: Vec<u8>) -> Self {
-        Self::Heap(v)
-    }
-
-    pub const fn zero_array() -> Self {
-        Self::Stack {
-            buf: Self::make_stack_buf(),
-            length: L,
-        }
+    pub fn new_heap(v: Vec<u8>) -> Self {
+        let inner = SmallVec::from_vec(v);
+        Self { inner }
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        match self {
-            Self::Stack { buf, length } => &buf[..*length],
-            Self::Heap(b) => b.as_ref(),
-        }
+        self.inner.as_ref()
     }
 
     pub fn into_vec(self) -> Vec<u8> {
-        match self {
-            Self::Stack { buf, length } => buf[..length].to_vec(),
-            Self::Heap(b) => b,
-        }
+        self.inner.into_vec()
     }
 
     pub fn len(&self) -> usize {
-        match self {
-            Self::Stack { length, .. } => *length,
-            Self::Heap(b) => b.len(),
-        }
+        self.inner.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -109,11 +76,11 @@ impl<const L: usize> SmallBytes<L> {
     }
 
     pub fn is_stack(&self) -> bool {
-        matches!(self, Self::Stack { .. })
+        !self.is_heap()
     }
 
     pub fn is_heap(&self) -> bool {
-        matches!(self, Self::Heap(_))
+        self.inner.spilled()
     }
 }
 
@@ -133,13 +100,13 @@ impl<const L: usize> AsRef<[u8]> for SmallBytes<L> {
 
 impl<const L: usize> From<[u8; L]> for SmallBytes<L> {
     fn from(b: [u8; L]) -> Self {
-        SmallBytes::Stack { buf: b, length: L }
+        SmallBytes::new_from_array(b)
     }
 }
 
 impl<const L: usize> From<Vec<u8>> for SmallBytes<L> {
     fn from(b: Vec<u8>) -> Self {
-        SmallBytes::Heap(b)
+        SmallBytes::new_heap(b)
     }
 }
 impl<const L: usize> From<SmallBytes<L>> for Vec<u8> {

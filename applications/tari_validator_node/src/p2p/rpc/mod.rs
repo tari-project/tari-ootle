@@ -32,20 +32,18 @@ use tari_epoch_manager::service::EpochManagerHandle;
 use tari_template_manager::interface::TemplateManagerHandle;
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcServer;
 
-use crate::{consensus::ConsensusHandle, p2p::services::mempool::MempoolHandle};
+use crate::p2p::services::mempool::MempoolHandle;
 
 pub fn create_tari_validator_node_rpc_service<TStateStore: StateStore + Send + Sync + Clone + 'static>(
     epoch_manager: EpochManagerHandle<PeerAddress>,
     template_manager: TemplateManagerHandle,
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
-    consensus: ConsensusHandle,
 ) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl<TStateStore>> {
     ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(
         epoch_manager,
         template_manager,
         shard_store_store,
         mempool,
-        consensus,
     ))
 }

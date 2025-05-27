@@ -114,6 +114,7 @@ pub trait StateStore {
 
 pub trait StateStoreReadTransaction: Sized {
     type Addr: NodeAddressable;
+    fn current_epoch(&self) -> Result<Epoch, StorageError>;
     fn last_sent_vote_get(&self, epoch: Epoch) -> Result<LastSentVote, StorageError>;
     fn last_voted_get(&self, epoch: Epoch) -> Result<LastVoted, StorageError>;
     fn last_executed_get(&self, epoch: Epoch) -> Result<LastExecuted, StorageError>;
@@ -201,17 +202,17 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstateChange, StorageError>;
 
     // -------------------------------- ProposalCertificate -------------------------------- //
-    fn proposal_certificates_get(&self, qc_id: &QcId) -> Result<ProposalCertificate, StorageError>;
+    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &QcId) -> Result<ProposalCertificate, StorageError>;
     fn proposal_certificates_get_many<'a, I>(&self, qc_ids: I) -> Result<Vec<ProposalCertificate>, StorageError>
     where
-        I: IntoIterator<Item = &'a QcId>,
+        I: IntoIterator<Item = &'a (Epoch, QcId)>,
         I::IntoIter: ExactSizeIterator;
 
     // -------------------------------- TimeoutCertificate -------------------------------- //
-    fn timeout_certificates_get(&self, id: &TcId) -> Result<TimeoutCertificate, StorageError>;
+    fn timeout_certificates_get(&self, epoch: Epoch, id: &TcId) -> Result<TimeoutCertificate, StorageError>;
     fn timeout_certificates_get_many<'a, I>(&self, ids: I) -> Result<Vec<TimeoutCertificate>, StorageError>
     where
-        I: IntoIterator<Item = &'a TcId>,
+        I: IntoIterator<Item = &'a (Epoch, TcId)>,
         I::IntoIter: ExactSizeIterator;
 
     // -------------------------------- Transaction Pools -------------------------------- //
@@ -380,7 +381,6 @@ pub trait StateStoreWriteTransaction {
     fn foreign_proposals_save(&mut self, foreign_proposal: &ForeignProposalRecord) -> Result<(), StorageError>;
     fn foreign_proposals_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
 
-    fn foreign_proposals_delete_in_epoch(&mut self, epoch: Epoch) -> Result<(), StorageError>;
     fn foreign_proposals_set_status(
         &mut self,
         block_id: &BlockId,
@@ -582,6 +582,9 @@ pub trait StateStoreWriteTransaction {
         public_key: &RistrettoPublicKeyBytes,
         epoch: Epoch,
     ) -> Result<(), StorageError>;
+
+    // -------------------------------- Epoch cleanup -------------------------------- //
+    fn epoch_cleanup(&mut self, epoch: Epoch) -> Result<(), StorageError>;
 
     // -------------------------------- Diagnotics -------------------------------- //
     fn diagnostics_add_no_vote(&mut self, block_id: BlockId, reason: NoVoteReason) -> Result<(), StorageError>;

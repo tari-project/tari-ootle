@@ -808,14 +808,14 @@ impl Block {
         let justify_qc_id = self.justify_qc_id.as_ref().ok_or_else(|| StorageError::QueryError {
             reason: format!("get_justify_qc: Block {} has not been justified", self.id()),
         })?;
-        tx.proposal_certificates_get(justify_qc_id)
+        tx.proposal_certificates_get(self.epoch(), justify_qc_id)
     }
 
     pub fn get_commit_qc<TTx: StateStoreReadTransaction>(&self, tx: &TTx) -> Result<ProposalCertificate, StorageError> {
         let commit_qc_id = self.commit_qc_id.as_ref().ok_or_else(|| StorageError::QueryError {
             reason: format!("get_commit_qc: Block {} has not been committed", self.as_leaf()),
         })?;
-        tx.proposal_certificates_get(commit_qc_id)
+        tx.proposal_certificates_get(self.epoch(), commit_qc_id)
     }
 
     /// safeNode predicate (https://arxiv.org/pdf/1803.05069v6.pdf)
@@ -986,7 +986,11 @@ impl Display for Block {
             "[{}, justify: {} ({}), TC: {}, {}, {}, {} cmd(s), {}->{}]",
             self.height(),
             self.justify().height(),
-            if self.justifies_parent() { "🟢" } else { "🟡" },
+            if self.timeout_certificate().is_none() && !self.is_dummy() {
+                "🟢"
+            } else {
+                "🟡"
+            },
             self.timeout_certificate.as_ref().map(|tc| tc.height()).display(),
             self.epoch(),
             self.shard_group(),

@@ -173,10 +173,6 @@ impl ForeignProposalRecord {
         tx.foreign_proposals_delete(block_id)
     }
 
-    pub fn delete_in_epoch<TTx: StateStoreWriteTransaction>(tx: &mut TTx, epoch: Epoch) -> Result<(), StorageError> {
-        tx.foreign_proposals_delete_in_epoch(epoch)
-    }
-
     pub fn get_any<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = &'a BlockId>>(
         tx: &TTx,
         block_ids: I,

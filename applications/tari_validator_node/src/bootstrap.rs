@@ -381,7 +381,6 @@ pub async fn spawn_services(
         epoch_manager.clone(),
         state_store.clone(),
         mempool.clone(),
-        consensus_handle.clone(),
         template_manager_service.clone(),
     )
     .await?;
@@ -475,7 +474,6 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
     epoch_manager: EpochManagerHandle<PeerAddress>,
     shard_store_store: TStateStore,
     mempool: MempoolHandle,
-    consensus: ConsensusHandle,
     template_manager: TemplateManagerHandle,
 ) -> anyhow::Result<()> {
     let rpc_server = RpcServer::builder()
@@ -487,7 +485,6 @@ async fn spawn_p2p_rpc<TStateStore: StateStore + Clone + Send + Sync + 'static>(
             template_manager,
             shard_store_store,
             mempool,
-            consensus,
         ));
 
     let (notify_tx, notify_rx) = mpsc::unbounded_channel();

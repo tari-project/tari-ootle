@@ -150,7 +150,7 @@ where TConsensusSpec: ConsensusSpec
         let (next_block, foreign_proposals) = task::spawn_blocking(move || {
             on_propose.store.with_write_tx(|tx| {
                 let high_qc = HighPc::get(&**tx, epoch)?;
-                let high_qc_cert = ProposalCertificate::get(&**tx, high_qc.id())?;
+                let high_qc_cert = ProposalCertificate::get(&**tx, epoch, high_qc.id())?;
                 let next_block = on_propose.build_next_block(
                     tx,
                     epoch,

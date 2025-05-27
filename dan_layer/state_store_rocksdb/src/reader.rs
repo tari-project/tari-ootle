@@ -122,7 +122,7 @@ use crate::{
         },
         burnt_utxo,
         burnt_utxo::BurntUtxoCf,
-        certificates::{ProposalCertificateCf, TimeoutCertificateCf},
+        certificates::{proposal::ProposalCertificateCf, timeout::TimeoutCertificateCf},
         chain,
         epoch_checkpoint::EpochCheckpointCf,
         evicted_node,
@@ -366,6 +366,11 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 {
     type Addr = TAddr;
 
+    fn current_epoch(&self) -> Result<Epoch, StorageError> {
+        let high_pc = self.db().cf(HighPcCf)?.get_by_default_key("current_epoch").optional()?;
+        Ok(high_pc.map(|hpc| hpc.epoch()).unwrap_or(Epoch(0)))
+    }
+
     fn last_sent_vote_get(&self, epoch: Epoch) -> Result<LastSentVote, StorageError> {
         let last_voted = self.db().cf(LastSentVoteCf)?.get_by_default_key("last_sent_vote_get")?;
         if last_voted.epoch() != epoch {
@@ -593,13 +598,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
 
     fn finalized_transaction_execution_get(&self, tx_id: &TransactionId) -> Result<TransactionExecution, StorageError> {
         const OPERATION: &str = "transaction_executions_get";
-        let cf = self.db().cf(FinalizedTransactionLinkCf)?;
-        if !cf.exists(tx_id, OPERATION)? {
-            return Err(StorageError::NotFound {
-                item: "TransactionExecution",
-                key: tx_id.to_string(),
-            });
-        }
 
         let cf = self.db().cf(block_transaction_execution::ByTransactionIdQuery)?;
         let mut iter = cf.query_prefix_range_key_iterator(Ordering::default(), tx_id);
@@ -623,8 +621,8 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
     ) -> Result<PrimitiveDateTime, StorageError> {
         const OPERATION: &str = "finalized_transaction_execution_get_finalized_time";
         let cf = self.db().cf(FinalizedTransactionLinkCf)?;
-        let finalized_at = cf.get(tx_id, OPERATION)?;
-        Ok(finalized_at)
+        let data = cf.get(tx_id, OPERATION)?;
+        Ok(data.finalized_at)
     }
 
     fn block_transaction_executions_get_pending_for_block(
@@ -639,20 +637,6 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
                 reason: format!("{OPERATION}: Block {from_block} does not exist",),
             });
         }
-
-        // Check if the transaction is finalized i.e not pending. Technically not required since consensus
-        // should not be querying for finalized transactions. However, this is currently the expected behaviour in
-        // tests.
-        if self
-            .db()
-            .cf(FinalizedTransactionLinkCf)?
-            .exists(transaction_id, OPERATION)?
-        {
-            return Err(StorageError::NotFound {
-                item: "FinalizedTransactionLinkModel",
-                key: transaction_id.to_string(),
-            });
-        };
 
         let cf = self.db().cf(BlockTransactionExecutionCf)?;
 
@@ -1120,15 +1104,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         })
     }
 
-    fn proposal_certificates_get(&self, qc_id: &QcId) -> Result<ProposalCertificate, StorageError> {
+    fn proposal_certificates_get(&self, epoch: Epoch, qc_id: &QcId) -> Result<ProposalCertificate, StorageError> {
         const OPERATION: &str = "proposal_certificates_get";
-        let qc = self.db().cf(ProposalCertificateCf)?.get(qc_id, OPERATION)?;
+        let qc = self.db().cf(ProposalCertificateCf)?.get(&(epoch, *qc_id), OPERATION)?;
         Ok(qc)
     }
 
     fn proposal_certificates_get_many<'a, I>(&self, qc_ids: I) -> Result<Vec<ProposalCertificate>, StorageError>
     where
-        I: IntoIterator<Item = &'a QcId>,
+        I: IntoIterator<Item = &'a (Epoch, QcId)>,
         I::IntoIter: ExactSizeIterator,
     {
         const OPERATION: &str = "proposal_certificates_get_all";
@@ -1144,15 +1128,15 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx> StateStor
         Ok(qcs)
     }
 
-    fn timeout_certificates_get(&self, id: &TcId) -> Result<TimeoutCertificate, StorageError> {
+    fn timeout_certificates_get(&self, epoch: Epoch, id: &TcId) -> Result<TimeoutCertificate, StorageError> {
         const OPERATION: &str = "timeout_certificates_get";
-        let tc = self.db().cf(TimeoutCertificateCf)?.get(id, OPERATION)?;
+        let tc = self.db().cf(TimeoutCertificateCf)?.get(&(epoch, *id), OPERATION)?;
         Ok(tc)
     }
 
     fn timeout_certificates_get_many<'a, I>(&self, ids: I) -> Result<Vec<TimeoutCertificate>, StorageError>
     where
-        I: IntoIterator<Item = &'a TcId>,
+        I: IntoIterator<Item = &'a (Epoch, TcId)>,
         I::IntoIter: ExactSizeIterator,
     {
         const OPERATION: &str = "timeout_certificates_get_many";

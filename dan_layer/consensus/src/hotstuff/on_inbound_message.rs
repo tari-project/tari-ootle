@@ -175,12 +175,15 @@ fn msg_relative_view(msg: &HotstuffMessage, current_epoch: Epoch, current_height
         HotstuffMessage::Proposal(msg) => {
             let next_height = current_height + NodeHeight(1);
             let epoch = msg.block.epoch();
-            let justify_height = msg.block.justify().height();
+            let block_height = msg.block.height();
+            let justify_height = msg.block.max_certificate_height();
             if epoch == current_epoch &&
                 // Special case, the justify height and the current height are zero
                 ((current_height.is_zero() && justify_height.is_zero()) ||
                     // The proposal (supposedly) justifies the next view change
                     justify_height == next_height ||
+                    // The proposal is for the current view (catch up)
+                    block_height == next_height ||
                     // or, the timeout certificate height is higher than the current height
                     msg.block
                         .timeout_certificate()

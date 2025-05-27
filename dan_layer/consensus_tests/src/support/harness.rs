@@ -652,6 +652,7 @@ impl TestBuilder {
                     template_binary_max_size_bytes: 1000 * 1000 * 5,
                 },
                 state_tree_cleanup_interval: Duration::from_secs(60),
+                epoch_gc_interval: Duration::from_secs(60),
             },
         }
     }

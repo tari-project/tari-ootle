@@ -24,16 +24,13 @@ use std::convert::{TryFrom, TryInto};
 
 use log::*;
 use tari_bor::encode;
-use tari_consensus::traits::CertificateStore;
-use tari_consensus_types::{BlockId, HighPc, ProposalCertificate};
+use tari_consensus_types::BlockId;
 use tari_dan_common_types::{optional::Optional, shard::Shard, Epoch, NodeHeight, PeerAddress, SubstateRequirement};
 use tari_dan_p2p::{
     proto,
     proto::rpc::{
         GetCheckpointRequest,
         GetCheckpointResponse,
-        GetHighQcRequest,
-        GetHighQcResponse,
         GetSubstateRequest,
         GetSubstateResponse,
         GetTransactionResultRequest,
@@ -49,14 +46,7 @@ use tari_dan_p2p::{
     },
 };
 use tari_dan_storage::{
-    consensus_models::{
-        Block,
-        BookkeepingModel,
-        EpochCheckpoint,
-        StateTransitionId,
-        SubstateRecord,
-        TransactionRecord,
-    },
+    consensus_models::{Block, EpochCheckpoint, StateTransitionId, SubstateRecord, TransactionRecord},
     StateStore,
 };
 use tari_epoch_manager::{service::EpochManagerHandle, EpochManagerReader};
@@ -67,12 +57,9 @@ use tari_transaction::{Transaction, TransactionId};
 use tari_validator_node_rpc::rpc_service::ValidatorNodeRpcService;
 use tokio::{sync::mpsc, task};
 
-use crate::{
-    consensus::ConsensusHandle,
-    p2p::{
-        rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
-        services::mempool::MempoolHandle,
-    },
+use crate::p2p::{
+    rpc::{block_sync_task::BlockSyncTask, state_sync_task::StateSyncTask, template_sync_task::TemplateSyncTask},
+    services::mempool::MempoolHandle,
 };
 
 const LOG_TARGET: &str = "tari::dan::p2p::rpc";
@@ -82,7 +69,6 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     template_manager: TemplateManagerHandle,
     state_store: TStateStore,
     mempool: MempoolHandle,
-    consensus: ConsensusHandle,
 }
 
 impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
@@ -91,14 +77,12 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
         template_manager: TemplateManagerHandle,
         state_store: TStateStore,
         mempool: MempoolHandle,
-        consensus: ConsensusHandle,
     ) -> Self {
         Self {
             epoch_manager,
             template_manager,
             state_store,
             mempool,
-            consensus,
         }
     }
 }
@@ -341,23 +325,6 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         task::spawn(BlockSyncTask::new(store, start_block_id, None, sender, committee_info.num_preshards()).run(req));
 
         Ok(Streaming::new(receiver))
-    }
-
-    async fn get_high_qc(&self, _request: Request<GetHighQcRequest>) -> Result<Response<GetHighQcResponse>, RpcStatus> {
-        let current_epoch = self.consensus.current_epoch();
-        let high_qc = self
-            .state_store
-            .with_read_tx(|tx| {
-                HighPc::get(tx, current_epoch)
-                    .optional()?
-                    .map(|hqc| ProposalCertificate::get(tx, hqc.id()))
-                    .transpose()
-            })
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-
-        Ok(Response::new(GetHighQcResponse {
-            high_qc: high_qc.as_ref().map(Into::into),
-        }))
     }
 
     async fn get_checkpoint(

@@ -215,12 +215,6 @@ message QuorumCertificates {
   repeated tari.dan.consensus.QuorumCertificate quorum_certificates = 1;
 }
 
-message GetHighQcRequest {}
-
-message GetHighQcResponse {
-  tari.dan.consensus.QuorumCertificate high_qc = 1;
-}
-
 message GetCheckpointRequest {
   uint64 epoch = 1;
 }

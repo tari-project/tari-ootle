@@ -21,34 +21,59 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_consensus_types::{ProposalCertificate, QcId, TcId, TimeoutCertificate};
+use tari_dan_common_types::Epoch;
 
 use crate::{
-    codecs::{DefaultCodec, FixedBytesCodec32},
-    traits::Cf,
+    codecs::{DefaultCodec, EpochCodec, FixedBytesCodec32},
+    traits::{Cf, QueryCf},
 };
 
-pub struct ProposalCertificateCf;
+pub mod proposal {
+    use super::*;
 
-impl Cf for ProposalCertificateCf {
-    type Key = QcId;
-    type KeyCodec = FixedBytesCodec32;
-    type Value = ProposalCertificate;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    pub struct ProposalCertificateCf;
 
-    fn name() -> &'static str {
-        "proposal_certificates"
+    impl Cf for ProposalCertificateCf {
+        type Key = (Epoch, QcId);
+        type KeyCodec = (EpochCodec, FixedBytesCodec32);
+        type Value = ProposalCertificate;
+        type ValueCodec = DefaultCodec<Self::Value>;
+
+        fn name() -> &'static str {
+            "proposal_certificates"
+        }
+    }
+
+    pub struct ByEpochQuery;
+
+    impl QueryCf for ByEpochQuery {
+        type Cf = ProposalCertificateCf;
+        type Key = Epoch;
+        type KeyCodec = EpochCodec;
     }
 }
 
-pub struct TimeoutCertificateCf;
+pub mod timeout {
+    use super::*;
 
-impl Cf for TimeoutCertificateCf {
-    type Key = TcId;
-    type KeyCodec = FixedBytesCodec32;
-    type Value = TimeoutCertificate;
-    type ValueCodec = DefaultCodec<Self::Value>;
+    pub struct TimeoutCertificateCf;
 
-    fn name() -> &'static str {
-        "timeout_certificates"
+    impl Cf for TimeoutCertificateCf {
+        type Key = (Epoch, TcId);
+        type KeyCodec = (EpochCodec, FixedBytesCodec32);
+        type Value = TimeoutCertificate;
+        type ValueCodec = DefaultCodec<Self::Value>;
+
+        fn name() -> &'static str {
+            "timeout_certificates"
+        }
+    }
+
+    pub struct ByEpochQuery;
+
+    impl QueryCf for ByEpochQuery {
+        type Cf = TimeoutCertificateCf;
+        type Key = Epoch;
+        type KeyCodec = EpochCodec;
     }
 }

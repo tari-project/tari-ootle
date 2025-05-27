@@ -37,13 +37,13 @@ fn quorum_certificates_operations(db: impl StateStore) {
     tx.proposal_certificates_save(&qc1).unwrap();
 
     // quorum_certificates_get
-    let res = tx.proposal_certificates_get(&genesis_qc.calculate_id()).unwrap();
+    let res = tx.proposal_certificates_get(epoch, &genesis_qc.calculate_id()).unwrap();
     assert_eq_debug(&res, &genesis_qc);
-    let res = tx.proposal_certificates_get(&qc1.calculate_id()).unwrap();
+    let res = tx.proposal_certificates_get(epoch, &qc1.calculate_id()).unwrap();
     assert_eq_debug(&res, &qc1);
 
     // quorum_certificates_get_all
-    let qc_ids = vec![genesis_qc.calculate_id(), qc1.calculate_id()];
+    let qc_ids = vec![(epoch, genesis_qc.calculate_id()), (epoch, qc1.calculate_id())];
     let res = tx.proposal_certificates_get_many(&qc_ids).unwrap();
     assert_eq!(res.len(), 2);
 

@@ -17,7 +17,7 @@ fn it_allocates_addresses_in_template_code() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(test.get_template_address("AddressAllocationTest"), "create", args![])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 
@@ -71,7 +71,7 @@ fn it_fails_if_address_allocation_is_not_used() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "drop_component_allocation", args![])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 
@@ -79,7 +79,7 @@ fn it_fails_if_address_allocation_is_not_used() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(template_addr, "drop_resource_allocation", args![])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 
@@ -92,9 +92,9 @@ fn it_fails_if_instruction_allocated_addresses_are_not_used() {
 
     let reason = test.execute_expect_failure(
         Transaction::builder()
-            .allocate_address(args::SubstateType::Component, "my_addr")
-            .allocate_address(args::SubstateType::Resource, "my_res")
-            .build_and_seal(test.get_test_secret_key()),
+            .allocate_component_address("my_addr")
+            .allocate_resource_address("my_res")
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 
@@ -109,8 +109,8 @@ fn it_allocates_an_address_using_instructions() {
 
     let result = test.execute_expect_success(
         Transaction::builder()
-            .allocate_address(args::SubstateType::Component, "my_addr")
-            .allocate_address(args::SubstateType::Resource, "my_res")
+            .allocate_component_address("my_addr")
+            .allocate_resource_address("my_res")
             .call_function(template_addr, "get_component_allocation_address", args![Workspace(
                 "my_addr"
             )])
@@ -121,7 +121,7 @@ fn it_allocates_an_address_using_instructions() {
                 Workspace("my_addr"),
                 Workspace("my_res")
             ])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 
@@ -148,4 +148,33 @@ fn it_allocates_an_address_using_instructions() {
 
     let addr = result.expect_return::<String>(3);
     assert_eq!(addr, actual_resx.to_string());
+}
+
+#[test]
+fn it_allows_calls_to_component_using_the_allocated_address() {
+    let mut test = TemplateTest::new(["tests/templates/address_allocation"]);
+
+    let template_addr = test.get_template_address("AddressAllocationTest");
+
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .allocate_component_address("my_addr")
+            .allocate_resource_address("my_res")
+            .call_function(template_addr, "create_from_allocations", args![
+                Workspace("my_addr"),
+                Workspace("my_res")
+            ])
+            .call_method(b"my_addr".to_vec(), "get_resource_address", args![])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    let actual_resx = result
+        .expect_success()
+        .up_iter()
+        .find_map(|(k, _)| k.as_resource_address())
+        .unwrap();
+
+    let addr = result.expect_return::<ResourceAddress>(3);
+    assert_eq!(addr, actual_resx);
 }

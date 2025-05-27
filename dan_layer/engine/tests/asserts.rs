@@ -33,7 +33,7 @@ fn setup() -> AssertTest {
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: faucet_template,
+                address: faucet_template,
                 function: "mint".to_string(),
                 args: args![initial_supply],
             }],

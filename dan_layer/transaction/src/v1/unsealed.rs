@@ -7,11 +7,7 @@ use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_dan_common_types::{Epoch, SubstateRequirement};
-use tari_engine_types::{
-    indexed_value::{IndexedValue, IndexedValueError},
-    instruction::Instruction,
-    substate::SubstateId,
-};
+use tari_engine_types::{indexed_value::IndexedValueError, instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{models::ComponentAddress, types::crypto::RistrettoPublicKeyBytes};
 
 use crate::{
@@ -109,49 +105,12 @@ impl UnsealedTransactionV1 {
     }
 
     pub fn as_referenced_components(&self) -> impl Iterator<Item = &ComponentAddress> + '_ {
-        self.instructions()
-            .iter()
-            .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::CallMethod { component_address, .. } = instruction {
-                    Some(component_address)
-                } else {
-                    None
-                }
-            })
+        self.transaction.as_referenced_components()
     }
 
     /// Returns all substates addresses referenced by this transaction
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
-        let all_instructions = self.instructions().iter().chain(self.fee_instructions());
-
-        let mut substates = HashSet::new();
-        for instruction in all_instructions {
-            match instruction {
-                Instruction::CallFunction { args, .. } => {
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
-                        let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
-                    }
-                },
-                Instruction::CallMethod {
-                    component_address,
-                    args,
-                    ..
-                } => {
-                    substates.insert(SubstateId::Component(*component_address));
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
-                        let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
-                    }
-                },
-                Instruction::ClaimBurn { claim } => {
-                    substates.insert(SubstateId::UnclaimedConfidentialOutput(claim.output_address));
-                },
-                _ => {},
-            }
-        }
-        Ok(substates)
+        self.transaction.to_referenced_substates()
     }
 
     pub fn has_inputs_without_version(&self) -> bool {

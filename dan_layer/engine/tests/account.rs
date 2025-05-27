@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
+use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_dan_engine::runtime::{ActionIdent, RuntimeError};
 use tari_engine_types::{instruction::Instruction, ToByteType};
 use tari_template_lib::{
@@ -29,7 +29,7 @@ fn basic_faucet_transfer() {
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: faucet_template,
+                address: faucet_template,
                 function: "mint".to_string(),
                 args: args![initial_supply],
             }],
@@ -50,57 +50,27 @@ fn basic_faucet_transfer() {
     let (receiver_address, _, _) = template_test.create_funded_account();
 
     let _result = template_test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: faucet_component,
-                    method: "take_free_coins".to_string(),
-                    args: args![],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"free_coins".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: sender_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("free_coins")],
-                },
-            ],
+        .build_and_execute(
+            Transaction::builder()
+                .call_method(faucet_component, "take_free_coins", args![])
+                .put_last_instruction_output_on_workspace("free_coins")
+                .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
             vec![template_test.get_test_proof()],
         )
-        .unwrap();
+        .unwrap_success();
 
     let result = template_test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: sender_address,
-                    method: "withdraw".to_string(),
-                    args: args![faucet_resource, Amount(100)],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"foo_bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: receiver_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("foo_bucket")],
-                },
-                Instruction::CallMethod {
-                    component_address: sender_address,
-                    method: "balance".to_string(),
-                    args: args![faucet_resource],
-                },
-                Instruction::CallMethod {
-                    component_address: receiver_address,
-                    method: "balance".to_string(),
-                    args: args![faucet_resource],
-                },
-            ],
+        .build_and_execute(
+            Transaction::builder()
+                .call_method(sender_address, "withdraw", args![faucet_resource, Amount(100)])
+                .put_last_instruction_output_on_workspace("foo_bucket")
+                .call_method(receiver_address, "deposit", args![Workspace("foo_bucket")])
+                .call_method(sender_address, "balance", args![faucet_resource])
+                .call_method(receiver_address, "balance", args![faucet_resource]),
             // Sender proof needed to withdraw
             vec![sender_proof],
         )
-        .unwrap();
+        .unwrap_success();
 
     assert_eq!(result.finalize.execution_results[3].decode::<Amount>().unwrap(), 900u64);
     assert_eq!(result.finalize.execution_results[4].decode::<Amount>().unwrap(), 100u64);
@@ -116,7 +86,7 @@ fn withdraw_from_account_prevented() {
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: faucet_template,
+                address: faucet_template,
                 function: "mint".to_string(),
                 args: args![initial_supply],
             }],
@@ -286,7 +256,9 @@ fn custom_access_rules() {
             .build_and_seal(&secret_key),
         vec![owner_proof],
     );
-    let user_account = result.finalize.execution_results[2].decode().unwrap();
+    let user_account = result.finalize.execution_results[2]
+        .decode::<ComponentAddress>()
+        .unwrap();
 
     // We create another account and we we will withdraw from the custom one
     let (user2_account, user2_account_proof, user2_secret_key) = template_test.create_funded_account();

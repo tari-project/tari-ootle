@@ -73,6 +73,7 @@ pub(super) struct WorkingState {
     logs: Vec<LogEntry>,
     buckets: HashMap<BucketId, Bucket>,
     address_allocations: HashMap<AddressAllocationId, AllocatedAddress>,
+    used_address_allocations: HashMap<AddressAllocationId, SubstateId>,
     address_allocation_id: u32,
     proofs: HashMap<ProofId, Proof>,
     object_ids: ObjectIds,
@@ -106,6 +107,7 @@ impl WorkingState {
             proofs: HashMap::new(),
             address_allocation_id: 0,
             address_allocations: HashMap::new(),
+            used_address_allocations: HashMap::new(),
 
             store: WorkingStateStore::new(state_store),
 
@@ -733,22 +735,33 @@ impl WorkingState {
                 .template_address()
                 .ok_or(RuntimeError::AddressAllocationNoTemplate)?),
             None => {
-                let component = self.store.load_component(component_address)?;
+                let component = self.store.load_and_cache_component(component_address)?;
                 Ok(component.template_address)
             },
         }
     }
 
-    pub fn take_allocated_address(&mut self, id: AddressAllocationId) -> Result<AllocatedAddress, RuntimeError> {
-        self.address_allocations
+    pub fn use_allocated_address(&mut self, id: AddressAllocationId) -> Result<AllocatedAddress, RuntimeError> {
+        let alloc_addr = self
+            .address_allocations
             .remove(&id)
-            .ok_or(RuntimeError::AddressAllocationNotFound { id })
+            .ok_or(RuntimeError::AddressAllocationNotFound { id })?;
+        self.used_address_allocations
+            .insert(id, alloc_addr.substate_id().clone());
+        Ok(alloc_addr)
     }
 
     pub fn get_allocated_address(&self, id: AddressAllocationId) -> Result<&AllocatedAddress, RuntimeError> {
         self.address_allocations
             .get(&id)
             .ok_or(RuntimeError::AddressAllocationNotFound { id })
+    }
+
+    pub fn get_used_address(&self, id: AddressAllocationId) -> Result<SubstateId, RuntimeError> {
+        self.used_address_allocations
+            .get(&id)
+            .cloned()
+            .ok_or(RuntimeError::AddressAllocationNotUsed { id })
     }
 
     pub fn pay_fee(&mut self, resource: ResourceContainer, return_vault: VaultId) -> Result<(), RuntimeError> {
@@ -1056,8 +1069,11 @@ impl WorkingState {
         self.last_instruction_output.take()
     }
 
-    pub fn load_component(&mut self, component_address: &ComponentAddress) -> Result<&ComponentHeader, RuntimeError> {
-        self.store.load_component(component_address)
+    pub fn load_and_cache_component(
+        &mut self,
+        component_address: &ComponentAddress,
+    ) -> Result<&ComponentHeader, RuntimeError> {
+        self.store.load_and_cache_component(component_address)
     }
 
     pub fn check_all_substates_known(&self, value: &IndexedWellKnownTypes) -> Result<(), RuntimeError> {

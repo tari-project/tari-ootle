@@ -30,8 +30,6 @@ use tari_template_abi::rust::{
     fmt::{Display, Formatter},
     str::FromStr,
 };
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::{
     args::Arg,
@@ -68,7 +66,11 @@ pub struct EmitLogArg {
 
 /// All the possible log levels
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum LogLevel {
     Error,
     Warn,
@@ -544,18 +546,16 @@ pub struct CallerContextInvokeArg {
     pub args: Vec<Vec<u8>>,
 }
 
-/// Possible substate types
+/// Possible allocatable address types
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
-pub enum SubstateType {
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub enum AllocatableAddressType {
     Component,
     Resource,
-    Vault,
-    UnclaimedConfidentialOutput,
-    NonFungible,
-    TransactionReceipt,
-    NonFungibleIndex,
-    ValidatorFeePool,
-    Template,
 }
 
 // -------------------------------- AddressAllocation -------------------------------- //

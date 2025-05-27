@@ -4,7 +4,7 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use tari_engine_types::substate::{Substate, SubstateValue};
+use tari_engine_types::substate::{Substate, SubstateId, SubstateValue};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[cfg_attr(
@@ -38,6 +38,22 @@ impl SubstateType {
             SubstateType::Template => "template",
         }
     }
+
+    pub fn matches(&self, addr: &SubstateId) -> bool {
+        #[allow(clippy::match_like_matches_macro)]
+        match (self, addr) {
+            (SubstateType::Component, SubstateId::Component(_)) => true,
+            (SubstateType::Resource, SubstateId::Resource(_)) => true,
+            (SubstateType::Vault, SubstateId::Vault(_)) => true,
+            (SubstateType::NonFungible, SubstateId::NonFungible(_)) => true,
+            (SubstateType::NonFungibleIndex, SubstateId::NonFungibleIndex(_)) => true,
+            (SubstateType::UnclaimedConfidentialOutput, SubstateId::UnclaimedConfidentialOutput(_)) => true,
+            (SubstateType::TransactionReceipt, SubstateId::TransactionReceipt(_)) => true,
+            (SubstateType::ValidatorFeePool, SubstateId::ValidatorFeePool(_)) => true,
+            (SubstateType::Template, SubstateId::Template(_)) => true,
+            _ => false,
+        }
+    }
 }
 
 impl From<&SubstateValue> for SubstateType {
@@ -52,6 +68,22 @@ impl From<&SubstateValue> for SubstateType {
             SubstateValue::NonFungibleIndex(_) => SubstateType::NonFungibleIndex,
             SubstateValue::Template(_) => SubstateType::Template,
             SubstateValue::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
+        }
+    }
+}
+
+impl From<&SubstateId> for SubstateType {
+    fn from(value: &SubstateId) -> Self {
+        match value {
+            SubstateId::Component(_) => SubstateType::Component,
+            SubstateId::Resource(_) => SubstateType::Resource,
+            SubstateId::Vault(_) => SubstateType::Vault,
+            SubstateId::UnclaimedConfidentialOutput(_) => SubstateType::UnclaimedConfidentialOutput,
+            SubstateId::NonFungible(_) => SubstateType::NonFungible,
+            SubstateId::TransactionReceipt(_) => SubstateType::TransactionReceipt,
+            SubstateId::NonFungibleIndex(_) => SubstateType::NonFungibleIndex,
+            SubstateId::ValidatorFeePool(_) => SubstateType::ValidatorFeePool,
+            SubstateId::Template(_) => SubstateType::Template,
         }
     }
 }

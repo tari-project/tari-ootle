@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
 use tari_bor::encode;
 use tari_template_lib_types::serde_helpers;
 
+pub type WorkspaceKey = Vec<u8>;
+
 /// The possible ways to represent an instruction's argument
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
@@ -37,7 +39,7 @@ pub enum Arg {
     Workspace(
         #[serde(with = "serde_helpers::dynamic_hex")]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        Vec<u8>,
+        WorkspaceKey,
     ),
     /// The argument is a value specified in the transaction
     Literal(

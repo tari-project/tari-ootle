@@ -3,12 +3,17 @@
 
 use tari_common_types::types::PrivateKey;
 use tari_dan_common_types::{Epoch, SubstateRequirement};
-use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, ValidatorFeePoolAddress};
+use tari_engine_types::{
+    confidential::ConfidentialClaim,
+    instruction::Instruction,
+    ComponentCall,
+    ValidatorFeePoolAddress,
+};
 use tari_template_lib::{
     args,
-    args::{Arg, SubstateType},
+    args::{AllocatableAddressType, Arg},
     auth::OwnerRule,
-    models::{Amount, ComponentAddress, ConfidentialWithdrawProof, ResourceAddress},
+    models::{Amount, ConfidentialWithdrawProof, ResourceAddress},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
@@ -60,9 +65,9 @@ impl TransactionBuilder {
     /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
     /// This allows the fee to originate from sources other than the transaction sender's account.
     /// The fee instruction will lock up the "max_fee" amount for the duration of the transaction.
-    pub fn fee_transaction_pay_from_component(self, component_address: ComponentAddress, max_fee: Amount) -> Self {
+    pub fn fee_transaction_pay_from_component<A: Into<ComponentCall>>(self, call: A, max_fee: Amount) -> Self {
         self.add_fee_instruction(Instruction::CallMethod {
-            component_address,
+            call: call.into(),
             method: "pay_fee".to_string(),
             args: args![max_fee],
         })
@@ -71,13 +76,13 @@ impl TransactionBuilder {
     /// Adds a fee instruction that calls the "take_fee_confidential" method on a component.
     /// This method must exist and return a Bucket with containing revealed confidential XTR resource.
     /// This allows the fee to originate from sources other than the transaction sender's account.
-    pub fn fee_transaction_pay_from_component_confidential(
+    pub fn fee_transaction_pay_from_component_confidential<A: Into<ComponentCall>>(
         self,
-        component_address: ComponentAddress,
+        call: A,
         proof: ConfidentialWithdrawProof,
     ) -> Self {
         self.add_fee_instruction(Instruction::CallMethod {
-            component_address,
+            call: call.into(),
             method: "pay_fee_confidential".to_string(),
             args: args![proof],
         })
@@ -127,15 +132,15 @@ impl TransactionBuilder {
         args: Vec<Arg>,
     ) -> Self {
         self.add_instruction(Instruction::CallFunction {
-            template_address,
+            address: template_address,
             function: function.into(),
             args,
         })
     }
 
-    pub fn call_method<T: Into<String>>(self, component_address: ComponentAddress, method: T, args: Vec<Arg>) -> Self {
+    pub fn call_method<A: Into<ComponentCall>, T: Into<String>>(self, call: A, method: T, args: Vec<Arg>) -> Self {
         self.add_instruction(Instruction::CallMethod {
-            component_address,
+            call: call.into(),
             method: method.into(),
             args,
         })
@@ -177,10 +182,10 @@ impl TransactionBuilder {
         self.add_instruction(Instruction::ClaimValidatorFees { address })
     }
 
-    pub fn create_proof(self, account: ComponentAddress, resource_addr: ResourceAddress) -> Self {
+    pub fn create_proof<A: Into<ComponentCall>>(self, account: A, resource_addr: ResourceAddress) -> Self {
         // We may want to make this a native instruction
         self.add_instruction(Instruction::CallMethod {
-            component_address: account,
+            call: account.into(),
             method: "create_proof_for_resource".to_string(),
             args: args![resource_addr],
         })
@@ -195,7 +200,9 @@ impl TransactionBuilder {
 
     pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder) -> TransactionBuilder>(mut self, f: F) -> Self {
         let builder = f(TransactionBuilder::new());
-        *self.unsigned_transaction.fee_instructions_mut() = builder.unsigned_transaction.into_instructions();
+        self.unsigned_transaction
+            .fee_instructions_mut()
+            .extend(builder.unsigned_transaction.into_instructions());
         // Reset the signatures as they are no longer valid
         self.clear_signatures();
         self
@@ -251,10 +258,20 @@ impl TransactionBuilder {
         self
     }
 
-    /// Add address allocation instruction with a custom ID that can be referenced later as a standard argument.
-    pub fn allocate_address<T: Into<String>>(self, substate_type: SubstateType, workspace_id: T) -> Self {
+    /// Pre-allocate a component address. The allocated address is added to the workspace and can be used in subsequent
+    /// instructions.
+    pub fn allocate_component_address<T: Into<String>>(self, workspace_id: T) -> Self {
         self.add_instruction(Instruction::AllocateAddress {
-            substate_type,
+            allocatable_type: AllocatableAddressType::Component,
+            workspace_id: workspace_id.into(),
+        })
+    }
+
+    /// Pre-allocate a resource address. The allocated address is added to the workspace and can be used in subsequent
+    /// instructions.
+    pub fn allocate_resource_address<T: Into<String>>(self, workspace_id: T) -> Self {
+        self.add_instruction(Instruction::AllocateAddress {
+            allocatable_type: AllocatableAddressType::Resource,
             workspace_id: workspace_id.into(),
         })
     }

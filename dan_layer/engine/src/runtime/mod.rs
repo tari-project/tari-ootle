@@ -60,11 +60,13 @@ use tari_engine_types::{
     indexed_value::IndexedValue,
     lock::LockFlag,
     substate::SubstateValue,
+    ComponentCall,
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
     args::{
         AddressAllocationInvokeArg,
+        AllocatableAddressType,
         AllocateAddressResult,
         Arg,
         BucketAction,
@@ -83,7 +85,6 @@ use tari_template_lib::{
         ProofRef,
         ResourceAction,
         ResourceRef,
-        SubstateType,
         VaultAction,
         WorkspaceAction,
     },
@@ -101,9 +102,9 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn emit_log(&self, level: LogLevel, message: String) -> Result<(), RuntimeError>;
 
-    fn load_component(&self, address: &ComponentAddress) -> Result<ComponentHeader, RuntimeError>;
+    fn load_component(&self, call: ComponentCall) -> Result<(ComponentAddress, ComponentHeader), RuntimeError>;
 
-    fn lock_component(&self, address: &ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
+    fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError>;
 
     fn get_substate(&self, lock: &LockedSubstate) -> Result<SubstateValue, RuntimeError>;
     fn component_invoke(
@@ -188,7 +189,7 @@ pub trait RuntimeInterface: Send + Sync {
 
     fn allocate_address(
         &self,
-        substate_type: SubstateType,
+        substate_type: AllocatableAddressType,
         entity_id: EntityId,
         workspace_key: Vec<u8>,
     ) -> Result<AllocateAddressResult, RuntimeError>;

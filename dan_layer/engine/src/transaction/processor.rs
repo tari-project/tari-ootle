@@ -35,16 +35,17 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     lock::LockFlag,
     virtual_substate::VirtualSubstates,
+    ComponentCall,
 };
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     arg,
     args,
-    args::{AllocateAddressResult, Arg, SubstateType, WorkspaceAction},
+    args::{AllocatableAddressType, AllocateAddressResult, Arg, WorkspaceAction},
     auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
-    models::{Bucket, ComponentAddress, NonFungibleAddress},
+    models::{Bucket, NonFungibleAddress},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 use tari_transaction::Transaction;
@@ -308,15 +309,13 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 workspace_bucket,
             ),
             Instruction::CallFunction {
-                template_address,
+                address: template_address,
                 function,
                 args,
             } => Self::call_function(template_provider, runtime, &template_address, &function, args),
-            Instruction::CallMethod {
-                component_address,
-                method,
-                args,
-            } => Self::call_method(template_provider, runtime, &component_address, &method, args),
+            Instruction::CallMethod { call, method, args } => {
+                Self::call_method(template_provider, runtime, call, &method, args)
+            },
             // Basically names an output on the workspace so that you can refer to it as an
             // Arg::Variable
             Instruction::PutLastInstructionOutputOnWorkspace { key } => {
@@ -353,7 +352,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             },
             Instruction::PublishTemplate { binary } => Self::publish_template(config, runtime, binary),
             Instruction::AllocateAddress {
-                substate_type,
+                allocatable_type: substate_type,
                 workspace_id,
             } => Self::allocate_address(runtime, substate_type, workspace_id),
         }
@@ -373,10 +372,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         Ok(())
     }
 
-    /// Allocating a new address for the given [`SubstateType`].
+    /// Allocating a new address for the given [`AllocatableAddressType`].
     pub fn allocate_address<T: Into<Vec<u8>>>(
         runtime: &Runtime,
-        substate_type: SubstateType,
+        substate_type: AllocatableAddressType,
         workspace_id: T,
     ) -> Result<InstructionResult, TransactionError> {
         let entity_id = runtime.interface().next_entity_id()?;
@@ -534,11 +533,11 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     pub fn call_method(
         template_provider: &TTemplateProvider,
         runtime: &Runtime,
-        component_address: &ComponentAddress,
+        call: ComponentCall,
         method: &str,
         args: Vec<Arg>,
     ) -> Result<InstructionResult, TransactionError> {
-        let component = runtime.interface().load_component(component_address)?;
+        let (component_address, component) = runtime.interface().load_component(call)?;
         let template_address = component.template_address;
 
         let template = template_provider
@@ -588,7 +587,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             .check_component_access_rules(method, &component_lock)?;
 
         let mut final_args = Vec::with_capacity(resolved_args.len() + 1);
-        final_args.push(to_value(component_address)?);
+        final_args.push(to_value(&component_address)?);
         final_args.extend(resolved_args);
 
         let result = Self::invoke_template(template, runtime.clone(), function_def, final_args)?;

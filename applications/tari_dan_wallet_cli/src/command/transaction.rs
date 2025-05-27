@@ -214,7 +214,7 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
             function_name,
             args,
         } => Instruction::CallFunction {
-            template_address: template_address.into_inner(),
+            address: template_address.into_inner(),
             function: function_name,
             args: args.into_iter().map(|s| s.into_arg()).collect(),
         },
@@ -223,9 +223,10 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
             method_name,
             args,
         } => Instruction::CallMethod {
-            component_address: component_address
+            call: component_address
                 .as_component_address()
-                .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?,
+                .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?
+                .into(),
             method: method_name,
             args: args.into_iter().map(|s| s.into_arg()).collect(),
         },
@@ -313,16 +314,13 @@ async fn handle_submit_manifest(
 
     let builder = Transaction::builder()
         .for_network(network.byte)
-        .with_fee_instructions(
-            instructions
-                .fee_instructions
-                .into_iter()
-                .chain(vec![Instruction::CallMethod {
-                    component_address: fee_account.address.as_component_address().unwrap(),
-                    method: "pay_fee".to_string(),
-                    args: args![Amount::try_from(common.max_fee.unwrap_or(1000))?],
-                }]),
-        )
+        .with_fee_instructions_builder(|builder| {
+            builder.with_instructions(instructions.fee_instructions).call_method(
+                fee_account.address.as_component_address().unwrap(),
+                "pay_fee",
+                args![common.max_fee.unwrap_or(1000)],
+            )
+        })
         .with_instructions(instructions.instructions)
         .with_inputs(common.inputs)
         .with_min_epoch(common.min_epoch.map(Epoch))

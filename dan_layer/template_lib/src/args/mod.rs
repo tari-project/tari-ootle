@@ -27,10 +27,10 @@ mod types;
 pub use types::*;
 
 mod arg;
-pub use arg::Arg;
+pub use arg::*;
 
 mod result;
-pub use result::InvokeResult;
+pub use result::*;
 
 /// Low-level macro used for counting characters in the encoding of arguments. Not intended for general usage
 #[macro_export]

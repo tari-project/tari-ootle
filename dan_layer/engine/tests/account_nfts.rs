@@ -10,6 +10,7 @@ use tari_template_lib::{
     types::TemplateAddress,
 };
 use tari_template_test_tooling::TemplateTest;
+use tari_transaction::Transaction;
 
 #[test]
 fn basic_nft_mint() {
@@ -31,18 +32,16 @@ fn basic_nft_mint() {
     assert!(result.finalize.result.is_accept());
     let nft_component_address: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
 
-    let result = account_nft_template_test
-        .execute_and_commit(
-            vec![Instruction::CallMethod {
-                component_address: nft_component_address,
-                method: "non_fungible_token_get_resource_address".to_string(),
-                args: args![],
-            }],
+    account_nft_template_test
+        .build_and_execute(
+            Transaction::builder().call_method(
+                nft_component_address,
+                "non_fungible_token_get_resource_address",
+                args![],
+            ),
             vec![],
         )
-        .unwrap();
-
-    assert!(result.finalize.is_accept());
+        .unwrap_success();
 
     // mint a new AccountNft
     let mut metadata = Metadata::new();
@@ -113,7 +112,7 @@ fn create_nft_component(
 ) -> ExecuteResult {
     test.execute_and_commit(
         vec![Instruction::CallFunction {
-            template_address: nft_template,
+            address: nft_template,
             function: "create".to_string(),
             args: args![owner_token],
         }],
@@ -129,28 +128,17 @@ fn mint_account_nft(
     owner_token: NonFungibleAddress,
     metadata: Metadata,
 ) -> ExecuteResult {
-    test.execute_and_commit(
-        vec![
-            Instruction::CallMethod {
-                component_address: nft_component,
-                method: "mint".to_string(),
-                args: args![metadata],
-            },
-            Instruction::PutLastInstructionOutputOnWorkspace {
-                key: b"my_nft".to_vec(),
-            },
-            Instruction::CallFunction {
-                template_address: test.get_template_address("Account"),
-                function: "get_non_fungible_ids_for_bucket".to_string(),
-                args: args![Variable("my_nft")],
-            },
-            Instruction::CallMethod {
-                component_address: account,
-                method: "deposit".to_string(),
-                args: args![Variable("my_nft")],
-            },
-        ],
+    test.build_and_execute(
+        Transaction::builder()
+            .call_method(nft_component, "mint", args![metadata])
+            .put_last_instruction_output_on_workspace(b"my_nft")
+            .call_function(
+                test.get_template_address("Account"),
+                "get_non_fungible_ids_for_bucket",
+                args![Variable("my_nft")],
+            )
+            .call_method(account, "deposit", args![Workspace("my_nft")]),
         vec![owner_token],
     )
-    .unwrap()
+    .unwrap_success()
 }

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use tari_template_lib::{
     args,
     models::{Amount, NonFungibleId, ResourceAddress, VaultId},
+    prelude::ComponentAddress,
 };
 use tari_template_test_tooling::{
     support::confidential::{generate_confidential_proof, generate_withdraw_proof},
@@ -25,11 +26,11 @@ fn it_recalls_all_resource_types() {
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(recall_template, "new", args![initial_supply])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 
-    let recall_component = result.finalize.execution_results[0].get_value("$.0").unwrap().unwrap();
+    let recall_component: ComponentAddress = result.finalize.execution_results[0].get_value("$.0").unwrap().unwrap();
     let fungible_resource: ResourceAddress = result.finalize.execution_results[0].get_value("$.1").unwrap().unwrap();
     let non_fungible_resource: ResourceAddress =
         result.finalize.execution_results[0].get_value("$.2").unwrap().unwrap();
@@ -44,7 +45,7 @@ fn it_recalls_all_resource_types() {
             .call_method(account, "deposit", args![Workspace("buckets.0")])
             .call_method(account, "deposit", args![Workspace("buckets.1")])
             .call_method(account, "deposit", args![Workspace("buckets.2")])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 
@@ -70,7 +71,7 @@ fn it_recalls_all_resource_types() {
             .call_method(account, "balance", args![fungible_resource])
             .call_method(account, "balance", args![non_fungible_resource])
             .call_method(account, "balance", args![confidential_resource])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 

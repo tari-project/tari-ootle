@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use rand::rngs::OsRng;
 use tari_common_types::types::PrivateKey;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
+use tari_dan_common_types::substate_type::SubstateType;
 use tari_engine_types::{
     confidential::{ConfidentialOutput, ElgamalVerifiableBalance, ValueLookupTable},
     resource_container::ResourceError,
@@ -29,7 +30,6 @@ use tari_template_test_tooling::{
         },
         AlwaysMissLookupTable,
     },
-    SubstateType,
     TemplateTest,
 };
 use tari_transaction::Transaction;
@@ -439,7 +439,7 @@ fn mint_and_transfer_revealed() {
             .put_last_instruction_output_on_workspace("b")
             .call_method(user_account, "deposit", args![Workspace("b")])
             .call_method(user_account, "balance", args![faucet_resx])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 
@@ -456,7 +456,7 @@ fn mint_revealed_with_invalid_proof() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(faucet, "mint_revealed_with_range_proof", args![Amount(123)])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
 

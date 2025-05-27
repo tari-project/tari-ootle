@@ -1,13 +1,15 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use tari_dan_common_types::substate_type::SubstateType;
 use tari_engine_types::instruction::Instruction;
 use tari_template_lib::{
     args,
     models::{Amount, ComponentAddress},
     prelude::{NonFungibleAddress, ResourceAddress},
 };
-use tari_template_test_tooling::{SubstateType, TemplateTest};
+use tari_template_test_tooling::TemplateTest;
+use tari_transaction::Transaction;
 
 struct TariSwapTest {
     template_test: TemplateTest,
@@ -68,7 +70,7 @@ fn create_tariswap_component(
     let res = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: tariswap_template,
+                address: tariswap_template,
                 function: "new".to_string(),
                 args: args![a_resource, b_resource, fee],
             }],
@@ -103,136 +105,67 @@ fn fund_account(
     faucet_component: ComponentAddress,
 ) {
     template_test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: faucet_component,
-                    method: "take_free_coins".to_string(),
-                    args: args![],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"free_coins".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: account_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("free_coins")],
-                },
-            ],
+        .build_and_execute(
+            Transaction::builder()
+                .call_method(faucet_component, "take_free_coins", args![])
+                .put_last_instruction_output_on_workspace(b"free_coins")
+                .call_method(account_address, "deposit", args![Workspace("free_coins")]),
+            // no proof needed to withdraw from the faucet
             vec![],
         )
-        .unwrap();
+        .expect_success();
 }
 
 fn swap(test: &mut TariSwapTest, input_resource: &ResourceAddress, output_resource: &ResourceAddress, amount: Amount) {
     test.template_test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: test.account_address,
-                    method: "withdraw".to_string(),
-                    args: args![input_resource, amount],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"input_bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: test.tariswap,
-                    method: "swap".to_string(),
-                    args: args![Variable("input_bucket"), output_resource],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"output_bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: test.account_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("output_bucket"),],
-                },
-            ],
+        .build_and_execute(
+            Transaction::builder()
+                .call_method(test.account_address, "withdraw", args![input_resource, amount])
+                .put_last_instruction_output_on_workspace(b"input_bucket")
+                .call_method(test.tariswap, "swap", args![Workspace("input_bucket"), output_resource])
+                .put_last_instruction_output_on_workspace(b"output_bucket")
+                .call_method(test.account_address, "deposit", args![Workspace("output_bucket")]),
             // proof needed to withdraw
             vec![test.account_proof.clone()],
         )
-        .unwrap();
+        .expect_success();
 }
 
 fn add_liquidity(test: &mut TariSwapTest, a_amount: Amount, b_amount: Amount) {
     test.template_test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: test.account_address,
-                    method: "withdraw".to_string(),
-                    args: args![test.a_resource, a_amount],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"a_bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: test.account_address,
-                    method: "withdraw".to_string(),
-                    args: args![test.b_resource, b_amount],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"b_bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: test.tariswap,
-                    method: "add_liquidity".to_string(),
-                    args: args![Variable("a_bucket"), Variable("b_bucket")],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"lp_bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: test.account_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("lp_bucket")],
-                },
-            ],
+        .build_and_execute(
+            Transaction::builder()
+                .call_method(test.account_address, "withdraw", args![test.a_resource, a_amount])
+                .put_last_instruction_output_on_workspace(b"a_bucket")
+                .call_method(test.account_address, "withdraw", args![test.b_resource, b_amount])
+                .put_last_instruction_output_on_workspace(b"b_bucket")
+                .call_method(test.tariswap, "add_liquidity", args![
+                    Workspace("a_bucket"),
+                    Workspace("b_bucket")
+                ])
+                .put_last_instruction_output_on_workspace(b"lp_bucket")
+                .call_method(test.account_address, "deposit", args![Workspace("lp_bucket")]),
             // proof needed to withdraw (from account) and mint (the lp_resource owned by the test identity)
-            // respectively
             vec![test.account_proof.clone(), test.template_test.get_test_proof()],
         )
-        .unwrap();
+        .expect_success();
 }
 
 fn remove_liquidity(test: &mut TariSwapTest, lp_amount: Amount) {
     test.template_test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: test.account_address,
-                    method: "withdraw".to_string(),
-                    args: args![test.lp_resource, lp_amount],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"lp_bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: test.tariswap,
-                    method: "remove_liquidity".to_string(),
-                    args: args![Variable("lp_bucket")],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"pool_buckets".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: test.account_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("pool_buckets.0"),],
-                },
-                Instruction::CallMethod {
-                    component_address: test.account_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("pool_buckets.1"),],
-                },
-            ],
+        .build_and_execute(
+            Transaction::builder()
+                .call_method(test.account_address, "withdraw", args![test.lp_resource, lp_amount])
+                .put_last_instruction_output_on_workspace(b"lp_bucket")
+                .call_method(test.tariswap, "remove_liquidity", args![Workspace("lp_bucket")])
+                .put_last_instruction_output_on_workspace(b"pool_buckets")
+                .call_method(test.account_address, "deposit", args![Workspace("pool_buckets.0")])
+                .call_method(test.account_address, "deposit", args![Workspace("pool_buckets.1")]),
             // proof needed to withdraw (from account) and burn (the lp_resource owned by the test identity)
             // respectively
             vec![test.account_proof.clone(), test.template_test.get_test_proof()],
         )
-        .unwrap();
+        .expect_success();
 }
 
 fn get_pool_balance(test: &mut TariSwapTest, resource_address: ResourceAddress) -> Amount {

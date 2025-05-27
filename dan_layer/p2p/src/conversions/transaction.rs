@@ -24,12 +24,18 @@ use std::convert::{TryFrom, TryInto};
 
 use anyhow::{anyhow, Context};
 use tari_dan_common_types::{SubstateRequirement, SubstateRequirementRef, VersionedSubstateId};
-use tari_engine_types::{confidential::ConfidentialClaim, instruction::Instruction, substate::SubstateId};
+use tari_engine_types::{
+    confidential::ConfidentialClaim,
+    instruction::Instruction,
+    substate::SubstateId,
+    ComponentCall,
+};
 use tari_template_lib::{
-    args::{Arg, SubstateType},
+    args::{AllocatableAddressType, Arg},
     auth::OwnerRule,
     models::{
         Amount,
+        ComponentAddress,
         ConfidentialOutputStatement,
         ConfidentialStatement,
         ConfidentialWithdrawProof,
@@ -152,52 +158,38 @@ impl From<&Transaction> for proto::transaction::Transaction {
 //     }
 // }
 
-// -------------------------------- Instruction -------------------------------- //
+// -------------------------------- AllocatableAddressType -------------------------------- //
 
-impl TryFrom<proto::transaction::SubstateType> for SubstateType {
+impl TryFrom<proto::transaction::AllocatableAddressType> for AllocatableAddressType {
     type Error = anyhow::Error;
 
-    fn try_from(substate_type: proto::transaction::SubstateType) -> Result<Self, Self::Error> {
+    fn try_from(substate_type: proto::transaction::AllocatableAddressType) -> Result<Self, Self::Error> {
         match substate_type {
-            proto::transaction::SubstateType::Unknown => {
-                anyhow::bail!("Unknown substate type")
+            proto::transaction::AllocatableAddressType::None => {
+                anyhow::bail!("AllocatableAddressType not provided");
             },
-            proto::transaction::SubstateType::Component => Ok(SubstateType::Component),
-            proto::transaction::SubstateType::Resource => Ok(SubstateType::Resource),
-            proto::transaction::SubstateType::Vault => Ok(SubstateType::Vault),
-            proto::transaction::SubstateType::UnclaimedConfidentialOutput => {
-                Ok(SubstateType::UnclaimedConfidentialOutput)
-            },
-            proto::transaction::SubstateType::NonFungible => Ok(SubstateType::NonFungible),
-            proto::transaction::SubstateType::TransactionReceipt => Ok(SubstateType::TransactionReceipt),
-            proto::transaction::SubstateType::NonFungibleIndex => Ok(SubstateType::NonFungibleIndex),
-            proto::transaction::SubstateType::ValidatorFeePool => Ok(SubstateType::ValidatorFeePool),
-            proto::transaction::SubstateType::Template => Ok(SubstateType::Template),
+            proto::transaction::AllocatableAddressType::Component => Ok(AllocatableAddressType::Component),
+            proto::transaction::AllocatableAddressType::Resource => Ok(AllocatableAddressType::Resource),
         }
     }
 }
 
-impl From<SubstateType> for proto::transaction::SubstateType {
-    fn from(substate_type: SubstateType) -> Self {
+impl From<AllocatableAddressType> for proto::transaction::AllocatableAddressType {
+    fn from(substate_type: AllocatableAddressType) -> Self {
         match substate_type {
-            SubstateType::Component => proto::transaction::SubstateType::Component,
-            SubstateType::Resource => proto::transaction::SubstateType::Resource,
-            SubstateType::Vault => proto::transaction::SubstateType::Vault,
-            SubstateType::UnclaimedConfidentialOutput => proto::transaction::SubstateType::UnclaimedConfidentialOutput,
-            SubstateType::NonFungible => proto::transaction::SubstateType::NonFungible,
-            SubstateType::TransactionReceipt => proto::transaction::SubstateType::TransactionReceipt,
-            SubstateType::NonFungibleIndex => proto::transaction::SubstateType::NonFungibleIndex,
-            SubstateType::ValidatorFeePool => proto::transaction::SubstateType::ValidatorFeePool,
-            SubstateType::Template => proto::transaction::SubstateType::Template,
+            AllocatableAddressType::Component => proto::transaction::AllocatableAddressType::Component,
+            AllocatableAddressType::Resource => proto::transaction::AllocatableAddressType::Resource,
         }
     }
 }
+
+// -------------------------------- Instruction -------------------------------- //
 
 impl TryFrom<proto::transaction::Instruction> for Instruction {
     type Error = anyhow::Error;
 
     fn try_from(request: proto::transaction::Instruction) -> Result<Self, Self::Error> {
-        let substate_type = request.substate_type();
+        let substate_type = request.allocatable_address_type();
         let args = request
             .args
             .into_iter()
@@ -217,19 +209,18 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
             InstructionType::Function => {
                 let function = request.function;
                 Instruction::CallFunction {
-                    template_address: request.template_address.try_into()?,
+                    address: request.template_address.try_into()?,
                     function,
                     args,
                 }
             },
             InstructionType::Method => {
                 let method = request.method;
-                let component_address = ObjectKey::try_from(request.component_address)?.into();
-                Instruction::CallMethod {
-                    component_address,
-                    method,
-                    args,
-                }
+                let call = request
+                    .component_call
+                    .ok_or_else(|| anyhow!("component_call not provided"))?
+                    .try_into()?;
+                Instruction::CallMethod { call, method, args }
             },
             InstructionType::PutOutputInWorkspace => {
                 Instruction::PutLastInstructionOutputOnWorkspace { key: request.key }
@@ -279,7 +270,7 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                 binary: request.template_binary,
             },
             InstructionType::AllocateAddress => Instruction::AllocateAddress {
-                substate_type: substate_type.try_into()?,
+                allocatable_type: substate_type.try_into()?,
                 workspace_id: request.workspace_id,
             },
         };
@@ -306,7 +297,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.create_account_workspace_bucket = workspace_bucket.unwrap_or_default();
             },
             Instruction::CallFunction {
-                template_address,
+                address: template_address,
                 function,
                 args,
             } => {
@@ -315,13 +306,9 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.function = function;
                 result.args = args.into_iter().map(|a| a.into()).collect();
             },
-            Instruction::CallMethod {
-                component_address,
-                method,
-                args,
-            } => {
+            Instruction::CallMethod { call, method, args } => {
                 result.instruction_type = InstructionType::Method as i32;
-                result.component_address = component_address.as_bytes().to_vec();
+                result.component_call = Some(call.into());
                 result.method = method;
                 result.args = args.into_iter().map(|a| a.into()).collect();
             },
@@ -364,12 +351,12 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.template_binary = binary;
             },
             Instruction::AllocateAddress {
-                substate_type,
+                allocatable_type,
                 workspace_id,
             } => {
                 result.instruction_type = InstructionType::AllocateAddress as i32;
-                let substate_type: proto::transaction::SubstateType = substate_type.into();
-                result.substate_type = substate_type as i32;
+                let substate_type: proto::transaction::AllocatableAddressType = allocatable_type.into();
+                result.allocatable_address_type = substate_type as i32;
                 result.workspace_id = workspace_id;
             },
         }
@@ -411,6 +398,37 @@ impl From<Arg> for proto::transaction::Arg {
         }
 
         result
+    }
+}
+
+// -------------------------------- ComponentCall -------------------------------- //
+impl TryFrom<proto::transaction::ComponentCall> for ComponentCall {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::transaction::ComponentCall) -> Result<Self, Self::Error> {
+        match value.call {
+            Some(proto::transaction::component_call::Call::Address(address)) => {
+                let address = ComponentAddress::from(ObjectKey::try_from(address)?);
+                Ok(ComponentCall::Address(address))
+            },
+            Some(proto::transaction::component_call::Call::Allocation(key)) => Ok(ComponentCall::FromWorkspace(key)),
+            None => Err(anyhow!("ComponentCall must have a call specified")),
+        }
+    }
+}
+
+impl From<ComponentCall> for proto::transaction::ComponentCall {
+    fn from(call: ComponentCall) -> Self {
+        match call {
+            ComponentCall::Address(address) => proto::transaction::ComponentCall {
+                call: Some(proto::transaction::component_call::Call::Address(
+                    address.as_bytes().to_vec(),
+                )),
+            },
+            ComponentCall::FromWorkspace(id) => proto::transaction::ComponentCall {
+                call: Some(proto::transaction::component_call::Call::Allocation(id)),
+            },
+        }
     }
 }
 

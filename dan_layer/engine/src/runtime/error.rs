@@ -37,7 +37,6 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstateId,
 };
 use tari_template_lib::{
-    args::SubstateType,
     models::{
         AddressAllocationId,
         Amount,
@@ -245,10 +244,10 @@ pub enum RuntimeError {
 
     #[error("Address allocation not found with id {id}")]
     AddressAllocationNotFound { id: u32 },
+    #[error("Address allocation with id {id} was not used")]
+    AddressAllocationNotUsed { id: u32 },
     #[error("Address allocation type mismatch: got {id}, expected: {expected}")]
     AddressAllocationTypeMismatch { id: SubstateId, expected: &'static str },
-    #[error("Unsupported substate type for address allocation: {substate_type:?}")]
-    AddressAllocationUnsupportedSubstateType { substate_type: SubstateType },
     #[error("Allocated address does not have an associated template")]
     AddressAllocationNoTemplate,
 

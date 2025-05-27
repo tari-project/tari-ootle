@@ -47,7 +47,7 @@ impl WorkingStateStore {
             return Err(RuntimeError::SubstateNotFound { id: id.clone() });
         }
         let lock_id = self.locked_substates.try_lock(id, lock_flag)?;
-        self.load(id)?;
+        self.load_and_cache(id)?;
         Ok(lock_id)
     }
 
@@ -146,7 +146,7 @@ impl WorkingStateStore {
         Ok(())
     }
 
-    fn load(&mut self, id: &SubstateId) -> Result<(), RuntimeError> {
+    fn load_and_cache(&mut self, id: &SubstateId) -> Result<(), RuntimeError> {
         if self.new_substates.contains_key(id) {
             return Ok(());
         }
@@ -181,10 +181,10 @@ impl WorkingStateStore {
         &self.state_store
     }
 
-    /// Load and get the component without a lock
-    pub fn load_component(&mut self, address: &ComponentAddress) -> Result<&ComponentHeader, RuntimeError> {
+    /// Loads and caches the component address. No lock is required for this operation.
+    pub fn load_and_cache_component(&mut self, address: &ComponentAddress) -> Result<&ComponentHeader, RuntimeError> {
         let addr = SubstateId::Component(*address);
-        self.load(&addr)?;
+        self.load_and_cache(&addr)?;
         let component = self.get_ref(&addr)?;
         component.component().ok_or_else(|| RuntimeError::InvariantError {
             function: "load_component",

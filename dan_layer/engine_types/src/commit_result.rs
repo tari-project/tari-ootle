@@ -59,6 +59,13 @@ impl ExecuteResult {
         }
     }
 
+    /// Returns the ExecuteResult if successful, or panic if the transaction was not successful.
+    pub fn unwrap_success(self) -> Self {
+        self.expect_success();
+        self
+    }
+
+    /// Returns the SubstateDiff if the transaction was successful, or panic if the transaction was not successful.
     pub fn expect_success(&self) -> &SubstateDiff {
         let diff = self.expect_finalization_success();
 
@@ -69,6 +76,7 @@ impl ExecuteResult {
         diff
     }
 
+    /// Returns the RejectReason if the transaction failed, or panic if the transaction was successful.
     pub fn expect_failure(&self) -> &RejectReason {
         if let Some(reason) = self.finalize.result.any_reject() {
             reason

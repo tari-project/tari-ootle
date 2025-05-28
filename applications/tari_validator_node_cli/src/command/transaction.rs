@@ -42,6 +42,7 @@ use tari_engine_types::{
     instruction_result::InstructionResult,
     parse_template_address,
     substate::{SubstateDiff, SubstateId, SubstateValue},
+    ComponentCall,
 };
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::{
@@ -181,7 +182,7 @@ pub async fn handle_submit(
             function_name,
             args,
         } => Instruction::CallFunction {
-            template_address: template_address.into_inner(),
+            address: template_address.into_inner(),
             function: function_name,
             args: args.into_iter().map(|s| s.into_arg()).collect(),
         },
@@ -190,9 +191,10 @@ pub async fn handle_submit(
             method_name,
             args,
         } => Instruction::CallMethod {
-            component_address: component_address
+            call: component_address
                 .as_component_address()
-                .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?,
+                .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?
+                .into(),
             method: method_name,
             args: args.into_iter().map(|s| s.into_arg()).collect(),
         },
@@ -583,7 +585,11 @@ fn load_inputs(
 ) -> Result<Vec<SubstateRequirement>, anyhow::Error> {
     let mut inputs = Vec::new();
     for instruction in instructions {
-        if let Instruction::CallMethod { component_address, .. } = instruction {
+        if let Instruction::CallMethod {
+            call: ComponentCall::Address(component_address),
+            ..
+        } = instruction
+        {
             let addr = SubstateId::Component(*component_address);
             if inputs.iter().any(|a: &SubstateRequirement| a.substate_id == addr) {
                 continue;

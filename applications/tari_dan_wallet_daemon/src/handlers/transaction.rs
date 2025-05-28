@@ -11,7 +11,7 @@ use tari_common::configuration::Network;
 use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_wallet_sdk::apis::{config::ConfigKey, key_manager};
-use tari_engine_types::{instruction::Instruction, ToByteType};
+use tari_engine_types::ToByteType;
 use tari_template_lib::{args, models::Amount};
 use tari_transaction::Transaction;
 use tari_transaction_manifest::parse_manifest;
@@ -269,21 +269,22 @@ pub async fn handle_submit_manifest(
     let fee_amount = Amount::try_from(req.max_fee)
         .map_err(|_| invalid_params("max_fee", Some("Invalid max_fee value".to_string())))?;
 
-    let fee_instructions = Some(instructions.fee_instructions)
-        .filter(|i| !i.is_empty())
-        .unwrap_or_else(|| {
-            vec![Instruction::CallMethod {
-                component_address: default_account.address.as_component_address().unwrap(),
-                method: "pay_fee".to_string(),
-                args: args![fee_amount],
-            }]
-        });
     let (_, acc_key) = sdk
         .key_manager_api()
         .get_key_or_active(key_manager::TRANSACTION_BRANCH, Some(default_account.key_index))?;
     let builder = Transaction::builder()
         .for_network(network.as_byte())
-        .with_fee_instructions(fee_instructions)
+        .with_fee_instructions_builder(|builder| {
+            if instructions.fee_instructions.is_empty() {
+                builder.call_method(
+                    default_account.address.as_component_address().unwrap(),
+                    "pay_fee",
+                    args![fee_amount],
+                )
+            } else {
+                builder.with_instructions(instructions.fee_instructions)
+            }
+        })
         .with_instructions(instructions.instructions)
         .then(|builder| {
             if signing_key_index == default_account.key_index {

@@ -21,6 +21,8 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 use std::iter;
 
+use serde::{Deserialize, Serialize};
+use tari_dan_common_types::substate_type::SubstateType;
 use tari_dan_engine::{
     template::{TemplateLoaderError, TemplateModuleLoader},
     wasm::{compile::compile_template, WasmExecutionError},
@@ -34,10 +36,10 @@ use tari_engine_types::{
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args,
-    models::{Amount, ComponentAddress, NonFungibleAddress, NonFungibleId, ResourceAddress},
+    models::{Amount, ComponentAddress, NonFungible, NonFungibleAddress, NonFungibleId, ResourceAddress},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
-use tari_template_test_tooling::{support::assert_error::assert_reject_reason, SubstateType, TemplateTest};
+use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
 use tari_transaction::Transaction;
 use tari_transaction_manifest::ManifestValue;
 use tari_utilities::hex::to_hex;
@@ -324,7 +326,7 @@ fn test_errors_on_infinite_loop() {
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_function(test.get_template_address("InfinityLoopTest"), "infinity_loop", args![])
-            .build_and_seal(test.get_test_secret_key()),
+            .build_and_seal(test.secret_key()),
         vec![],
     );
     // Transaction failed: Execution failure: RuntimeError: unreachable\n    at tari_free (<module>[327]:0x2390c)
@@ -342,7 +344,7 @@ mod errors {
             .try_execute_instructions(
                 vec![],
                 vec![Instruction::CallFunction {
-                    template_address: template_test.get_template_address("Errors"),
+                    address: template_test.get_template_address("Errors"),
                     function: "panic".to_string(),
                     args: args![],
                 }],
@@ -369,7 +371,7 @@ mod errors {
             .try_execute_instructions(
                 vec![],
                 vec![Instruction::CallFunction {
-                    template_address: template_test.get_template_address("Errors"),
+                    address: template_test.get_template_address("Errors"),
                     function: "please_pass_invalid_args".to_string(),
                     args: args![text],
                 }],
@@ -409,6 +411,7 @@ mod consensus {
 }
 
 mod fungible {
+
     use super::*;
 
     #[test]
@@ -421,7 +424,7 @@ mod fungible {
         template_test
             .execute_and_commit(
                 vec![Instruction::CallFunction {
-                    template_address: faucet_template,
+                    address: faucet_template,
                     function: "mint".to_string(),
                     args: args![initial_supply],
                 }],
@@ -439,46 +442,26 @@ mod fungible {
         assert_eq!(total_supply, initial_supply);
 
         let owner_proof = template_test.get_test_proof();
-        let result = template_test
-            .execute_and_commit(
-                vec![
-                    Instruction::CallMethod {
-                        component_address: faucet_component,
-                        method: "burn_coins".to_string(),
-                        args: args![Amount(500)],
-                    },
-                    Instruction::CallMethod {
-                        component_address: faucet_component,
-                        method: "total_supply".to_string(),
-                        args: args![],
-                    },
-                ],
-                vec![owner_proof.clone()],
-            )
-            .unwrap();
+        let result = template_test.build_and_execute(
+            Transaction::builder()
+                .call_method(faucet_component, "burn_coins", args![Amount(500)])
+                .call_method(faucet_component, "total_supply", args![]),
+            vec![owner_proof.clone()],
+        );
+        result.expect_success();
 
         assert_eq!(
             result.finalize.execution_results[1].decode::<Amount>().unwrap(),
             initial_supply - Amount(500)
         );
 
-        let result = template_test
-            .execute_and_commit(
-                vec![
-                    Instruction::CallMethod {
-                        component_address: faucet_component,
-                        method: "burn_coins".to_string(),
-                        args: args![initial_supply - Amount(500)],
-                    },
-                    Instruction::CallMethod {
-                        component_address: faucet_component,
-                        method: "total_supply".to_string(),
-                        args: args![],
-                    },
-                ],
-                vec![owner_proof],
-            )
-            .unwrap();
+        let result = template_test.build_and_execute(
+            Transaction::builder()
+                .call_method(faucet_component, "burn_coins", args![initial_supply - Amount(500)])
+                .call_method(faucet_component, "total_supply", args![]),
+            vec![owner_proof],
+        );
+        result.expect_success();
 
         assert_eq!(
             result.finalize.execution_results[1].decode::<Amount>().unwrap(),
@@ -486,22 +469,15 @@ mod fungible {
         );
 
         template_test
-            .execute_and_commit(
-                vec![Instruction::CallMethod {
-                    component_address: faucet_component,
-                    method: "burn_coins".to_string(),
-                    args: args![Amount(1)],
-                }],
+            .build_and_execute(
+                Transaction::builder().call_method(faucet_component, "burn_coins", args![Amount(1)]),
                 vec![],
             )
-            .unwrap_err();
+            .expect_failure();
     }
 }
 
 mod basic_nft {
-    use serde::{Deserialize, Serialize};
-    use tari_template_lib::models::NonFungible;
-
     use super::*;
 
     fn setup() -> (
@@ -906,7 +882,7 @@ mod basic_nft {
 }
 
 mod emoji_id {
-    use serde::{Deserialize, Serialize};
+    use tari_template_lib::constants::XTR;
 
     use super::*;
 
@@ -923,87 +899,47 @@ mod emoji_id {
     pub struct EmojiId(Vec<Emoji>);
 
     fn mint_emoji_id(
-        template_test: &mut TemplateTest,
+        test: &mut TemplateTest,
         account_address: ComponentAddress,
         faucet_resource: ResourceAddress,
         emoji_id_minter: ComponentAddress,
         emoji_id: &EmojiId,
+        price: Amount,
         owner_proof: NonFungibleAddress,
     ) -> Result<FinalizeResult, anyhow::Error> {
-        let result = template_test.execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: account_address,
-                    method: "withdraw".to_string(),
-                    args: args![faucet_resource, Amount(20)],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"payment".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: emoji_id_minter,
-                    method: "mint".to_string(),
-                    args: args![Literal(emoji_id.clone()), Variable("payment")],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"emoji_id".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: account_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("emoji_id")],
-                },
-            ],
-            vec![owner_proof],
-        )?;
+        let transaction = Transaction::builder()
+            .call_method(account_address, "withdraw", args![faucet_resource, price])
+            .put_last_instruction_output_on_workspace("payment")
+            .call_method(emoji_id_minter, "mint", args![emoji_id, Workspace("payment")])
+            .put_last_instruction_output_on_workspace("emoji_id")
+            .call_method(account_address, "deposit", args![Workspace("emoji_id")])
+            .build_and_seal(test.secret_key());
+
+        let result = test.execute_and_commit_on_success(transaction, vec![owner_proof]);
+        if let Some(reason) = result.finalize.result.any_reject() {
+            return Err(anyhow::anyhow!("Minting emoji id failed: {reason}"));
+        }
         Ok(result.finalize)
     }
 
     #[test]
     #[allow(clippy::too_many_lines)]
     fn mint_emoji_ids() {
-        let mut template_test = TemplateTest::new(vec!["tests/templates/nft/emoji_id"]);
+        let mut test = TemplateTest::new(vec!["tests/templates/nft/emoji_id"]);
 
         // create an account
-        let (account_address, owner_proof, _) = template_test.create_funded_account();
-
-        // create a fungible token faucet, we are going to use those tokens as payments
-        // TODO: use Thaums instead when they're implemented
-        let faucet_template = template_test.get_template_address("TestFaucet");
-        let initial_supply = Amount(1_000_000_000_000);
-        let result = template_test
-            .execute_and_commit(
-                vec![Instruction::CallFunction {
-                    template_address: faucet_template,
-                    function: "mint".to_string(),
-                    args: args![initial_supply],
-                }],
-                vec![],
-            )
-            .unwrap();
-        let faucet_component: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
-        let faucet_resource = result
-            .finalize
-            .result
-            .expect("Faucet mint failed")
-            .up_iter()
-            .find_map(|(addr, _)| addr.as_resource_address())
-            .unwrap();
+        let (account_address, owner_proof, _) = test.create_funded_account();
 
         // initialize the emoji id minter
-        let emoji_id_template = template_test.get_template_address("EmojiIdMinter");
+        let emoji_id_template = test.get_template_address("EmojiIdMinter");
         let max_emoji_id_len = 10_u64;
         let price = Amount(20);
-        let result = template_test
-            .execute_and_commit(
-                vec![Instruction::CallFunction {
-                    template_address: emoji_id_template,
-                    function: "new".to_string(),
-                    args: args![faucet_resource, max_emoji_id_len, price],
-                }],
-                vec![],
+        let result = test
+            .build_and_execute(
+                Transaction::builder().call_function(emoji_id_template, "new", args![XTR, max_emoji_id_len, price]),
+                vec![owner_proof.clone()],
             )
-            .unwrap();
+            .unwrap_success();
         let emoji_id_minter: ComponentAddress = result.finalize.execution_results[0].decode().unwrap();
         let emoji_id_resource = result
             .finalize
@@ -1013,59 +949,38 @@ mod emoji_id {
             .find_map(|(addr, _)| addr.as_resource_address())
             .unwrap();
 
-        // at the beggining we don't have any emojis minted
-        let total_supply: Amount = template_test.call_method(emoji_id_minter, "total_supply", args![], vec![]);
+        // At first, we don't have any emojis minted
+        let total_supply: Amount = test.call_method(emoji_id_minter, "total_supply", args![], vec![]);
         assert_eq!(total_supply, Amount(0));
 
-        // get some funds into the account
-        let vars = vec![
-            ("account", account_address.into()),
-            ("faucet", faucet_component.into()),
-            ("emoji_id_minter", emoji_id_minter.into()),
-        ];
-        template_test
-            .execute_and_commit_manifest(
-                r#"
-            let account = var!["account"];
-            let faucet = var!["faucet"];
-
-            let coins = faucet.take_free_coins();
-            account.deposit(coins);
-        "#,
-                vars.clone(),
-                vec![],
-            )
-            .unwrap();
-
         // mint a new emoji_id
-        // TODO: transaction manifests do not support passing a arbitrary type (like Vec<Emoji>)
         let emoji_id = EmojiId(vec![Emoji::Smile, Emoji::Laugh]);
         mint_emoji_id(
-            &mut template_test,
+            &mut test,
             account_address,
-            faucet_resource,
+            XTR,
             emoji_id_minter,
             &emoji_id,
+            price,
             owner_proof.clone(),
         )
         .unwrap();
 
-        // check that the account holds the newly minted nft
-        let nft_balance: Amount =
-            template_test.call_method(account_address, "balance", args![emoji_id_resource], vec![]);
-        assert_eq!(nft_balance, Amount(1));
-
         // the supply of emoji ids should have increased
-        let total_supply: Amount = template_test.call_method(emoji_id_minter, "total_supply", args![], vec![]);
+        let total_supply: Amount = test.call_method(emoji_id_minter, "total_supply", args![], vec![]);
         assert_eq!(total_supply, Amount(1));
+        // check that the account holds the newly minted nft
+        let nft_balance: Amount = test.call_method(account_address, "balance", args![emoji_id_resource], vec![]);
+        assert_eq!(nft_balance, Amount(1));
 
         // emoji id are unique, so minting the same emojis again must fail
         mint_emoji_id(
-            &mut template_test,
+            &mut test,
             account_address,
-            faucet_resource,
+            XTR,
             emoji_id_minter,
             &emoji_id,
+            price,
             owner_proof.clone(),
         )
         .unwrap_err();
@@ -1074,11 +989,12 @@ mod emoji_id {
         let too_long_emoji_id = iter::repeat_n(Emoji::Smile, max_emoji_id_len as usize + 1).collect();
         let emoji_id = EmojiId(too_long_emoji_id);
         mint_emoji_id(
-            &mut template_test,
+            &mut test,
             account_address,
-            faucet_resource,
+            XTR,
             emoji_id_minter,
             &emoji_id,
+            price,
             owner_proof.clone(),
         )
         .unwrap_err();
@@ -1086,11 +1002,12 @@ mod emoji_id {
         // mint another unique emoji id
         let emoji_id = EmojiId(vec![Emoji::Smile, Emoji::Wink]);
         mint_emoji_id(
-            &mut template_test,
+            &mut test,
             account_address,
-            faucet_resource,
+            XTR,
             emoji_id_minter,
             &emoji_id,
+            price,
             owner_proof,
         )
         .unwrap();
@@ -1098,7 +1015,6 @@ mod emoji_id {
 }
 
 mod tickets {
-    use serde::{Deserialize, Serialize};
 
     use super::*;
 

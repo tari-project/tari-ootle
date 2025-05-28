@@ -33,12 +33,14 @@ pub mod entity_id_provider;
 pub mod id_provider;
 
 mod argument_parser;
+mod instruction_call;
 pub mod published_template;
 mod substate_serde;
 mod validator_fee;
 
 pub use argument_parser::parse_arg;
 pub use byte_types::*;
+pub use instruction_call::*;
 pub use validator_fee::*;
 
 pub mod template_lib_models {

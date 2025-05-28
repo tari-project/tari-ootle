@@ -351,7 +351,7 @@ async fn fill_in_target_account_vault(
                 public_key_address: target_account_public_key,
                 owner_rule: None,
                 access_rules: None,
-                workspace_bucket: None,
+                workspace_id: None,
             });
         },
     }
@@ -385,6 +385,7 @@ pub async fn handle_transfer_nft(
     let target_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
 
+    // TODO: this can be simplified
     // collect all instructions
     let non_fungible_api = sdk.non_fungible_api();
     for nft_address in req.nfts {
@@ -416,7 +417,7 @@ pub async fn handle_transfer_nft(
 
         instructions.extend([
             Instruction::CallMethod {
-                component_address: source_account_address,
+                call: source_account_address.into(),
                 method: "withdraw_non_fungible".to_string(),
                 args: args![nft.resource_address, nft_address.id()],
             },
@@ -424,7 +425,7 @@ pub async fn handle_transfer_nft(
                 key: b"bucket".to_vec(),
             },
             Instruction::CallMethod {
-                component_address: target_account_address,
+                call: target_account_address.into(),
                 method: "deposit".to_string(),
                 args: args![Workspace("bucket")],
             },
@@ -442,11 +443,7 @@ pub async fn handle_transfer_nft(
 
     let transaction = transaction_builder(context)
         .with_dry_run(req.dry_run)
-        .with_fee_instructions(vec![Instruction::CallMethod {
-            component_address: fee_payer_account_address,
-            method: "pay_fee".to_string(),
-            args: args![req.max_fee],
-        }])
+        .fee_transaction_pay_from_component(fee_payer_account_address, req.max_fee)
         .with_instructions(instructions)
         .with_inputs(inputs)
         .with_authorized_seal_signer()

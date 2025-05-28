@@ -44,7 +44,7 @@ fn initialize_composability(test: &mut ComposabilityTest) -> ComposabilityCompon
         .template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: test.composability_template,
+                address: test.composability_template,
                 function: "new".to_string(),
                 args: args![test.state_template],
             }],
@@ -80,7 +80,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
     let result = test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: faucet_template,
+                address: faucet_template,
                 function: "mint".to_string(),
                 args: args![initial_supply],
             }],
@@ -98,25 +98,14 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
 
     // take free coins into the account
     let _result = test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: faucet_component,
-                    method: "take_free_coins".to_string(),
-                    args: args![],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"free_coins".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: account,
-                    method: "deposit".to_string(),
-                    args: args![Variable("free_coins")],
-                },
-            ],
+        .build_and_execute(
+            Transaction::builder()
+                .call_method(faucet_component, "take_free_coins", args![])
+                .put_last_instruction_output_on_workspace(b"free_coins")
+                .call_method(account, "deposit", args![Workspace("free_coins")]),
             vec![],
         )
-        .unwrap();
+        .expect_success();
 
     faucet_resource
 }
@@ -153,7 +142,7 @@ fn it_allows_function_to_method_calls() {
         .template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: test.composability_template,
+                address: test.composability_template,
                 function: "new_from_component".to_string(),
                 args: args![composability_component_0],
             }],

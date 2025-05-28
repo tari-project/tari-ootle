@@ -18,7 +18,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     tari_utilities::{hex::Hex, ByteArray},
 };
-use tari_dan_common_types::{crypto::create_key_pair_from_seed, VersionedSubstateId};
+use tari_dan_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType, VersionedSubstateId};
 use tari_dan_engine::{
     fees::{FeeModule, FeeTable},
     runtime::{AuthParams, RuntimeModule},
@@ -41,13 +41,13 @@ use tari_engine_types::{
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args,
-    args::Arg,
+    args::{Arg, WorkspaceKey},
     auth::OwnerRule,
     models::{Amount, ComponentAddress, NonFungibleAddress},
     prelude::{ComponentAccessRules, RistrettoPublicKeyBytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
     types::{EntityId, Hash, ObjectKey, TemplateAddress},
 };
-use tari_transaction::Transaction;
+use tari_transaction::{Transaction, TransactionBuilder};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 
 use crate::{read_only_state_store::ReadOnlyStateStore, track_calls::TrackCallsModule, Package};
@@ -324,7 +324,7 @@ impl TemplateTest {
     pub fn create_account<T>(
         &mut self,
         owner_public_key: RistrettoPublicKeyBytes,
-        workspace_bucket: Option<String>,
+        workspace_id: Option<WorkspaceKey>,
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
@@ -336,7 +336,7 @@ impl TemplateTest {
                     public_key_address: owner_public_key,
                     owner_rule: None,
                     access_rules: None,
-                    workspace_bucket,
+                    workspace_id,
                 }],
                 proofs,
             )
@@ -357,7 +357,7 @@ impl TemplateTest {
         let result = self
             .execute_and_commit(
                 vec![Instruction::CallFunction {
-                    template_address: self.get_template_address(template_name),
+                    address: self.get_template_address(template_name),
                     function: func_name.to_owned(),
                     args,
                 }],
@@ -380,7 +380,7 @@ impl TemplateTest {
         let result = self
             .execute_and_commit(
                 vec![Instruction::CallMethod {
-                    component_address,
+                    call: component_address.into(),
                     method: method_name.to_owned(),
                     args,
                 }],
@@ -393,7 +393,7 @@ impl TemplateTest {
 
     pub fn get_instructions_to_pay_fee_from_faucet(&self) -> Vec<Instruction> {
         vec![Instruction::CallFunction {
-            template_address: self.get_template_address("Faucet2"),
+            address: self.get_template_address("Faucet2"),
             function: "pay_fee_confidential".to_string(),
             args: args![],
         }]
@@ -407,11 +407,11 @@ impl TemplateTest {
         NonFungibleAddress::from_public_key(self.get_test_public_key_bytes())
     }
 
-    pub fn get_test_secret_key(&self) -> &RistrettoSecretKey {
+    pub fn secret_key(&self) -> &RistrettoSecretKey {
         &self.secret_key
     }
 
-    pub fn get_test_public_key(&self) -> &RistrettoPublicKey {
+    pub fn public_key(&self) -> &RistrettoPublicKey {
         &self.public_key
     }
 
@@ -597,6 +597,12 @@ impl TemplateTest {
     }
 
     /// Executes a transaction. Panics if the transaction fails.
+    pub fn build_and_execute(&mut self, builder: TransactionBuilder, proofs: Vec<NonFungibleAddress>) -> ExecuteResult {
+        let transaction = builder.build_and_seal(&self.secret_key);
+        self.execute_expect_commit(transaction, proofs)
+    }
+
+    /// Executes a transaction. Panics if the transaction fails.
     pub fn execute_expect_success(
         &mut self,
         transaction: Transaction,
@@ -676,29 +682,6 @@ impl TemplateTest {
     pub fn print_state(&self) {
         for (k, v) in self.state_store.iter() {
             eprintln!("[{}]: {:?}", k, v.substate_value());
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SubstateType {
-    Component,
-    Resource,
-    Vault,
-    NonFungible,
-    NonFungibleIndex,
-}
-
-impl SubstateType {
-    pub fn matches(&self, addr: &SubstateId) -> bool {
-        #[allow(clippy::match_like_matches_macro)]
-        match (self, addr) {
-            (SubstateType::Component, SubstateId::Component(_)) => true,
-            (SubstateType::Resource, SubstateId::Resource(_)) => true,
-            (SubstateType::Vault, SubstateId::Vault(_)) => true,
-            (SubstateType::NonFungible, SubstateId::NonFungible(_)) => true,
-            (SubstateType::NonFungibleIndex, SubstateId::NonFungibleIndex(_)) => true,
-            _ => false,
         }
     }
 }

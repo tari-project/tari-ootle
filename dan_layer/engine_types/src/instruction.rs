@@ -5,14 +5,14 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib::{
-    args::{Arg, LogLevel, SubstateType},
+    args::{AllocatableAddressType, Arg, LogLevel, WorkspaceKey},
     auth::OwnerRule,
-    models::{ComponentAddress, ResourceAddress},
+    models::ResourceAddress,
     prelude::{AccessRules, Amount},
     types::{crypto::RistrettoPublicKeyBytes, serde_helpers, TemplateAddress},
 };
 
-use crate::{confidential::ConfidentialClaim, ValidatorFeePoolAddress};
+use crate::{confidential::ConfidentialClaim, instruction_call::ComponentCall, ValidatorFeePoolAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(
@@ -27,17 +27,18 @@ pub enum Instruction {
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-        workspace_bucket: Option<String>,
+        #[serde(with = "serde_helpers::dynamic_hex::option")]
+        workspace_id: Option<WorkspaceKey>,
     },
     CallFunction {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        template_address: TemplateAddress,
+        address: TemplateAddress,
         function: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
         args: Vec<Arg>,
     },
     CallMethod {
-        component_address: ComponentAddress,
+        call: ComponentCall,
         method: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
         // Argument parser takes an array of strings as input
@@ -47,7 +48,7 @@ pub enum Instruction {
     PutLastInstructionOutputOnWorkspace {
         #[serde(with = "serde_helpers::dynamic_hex")]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        key: Vec<u8>,
+        key: WorkspaceKey,
     },
     EmitLog {
         level: LogLevel,
@@ -64,7 +65,7 @@ pub enum Instruction {
     AssertBucketContains {
         #[serde(with = "serde_helpers::dynamic_hex")]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        key: Vec<u8>,
+        key: WorkspaceKey,
         resource_address: ResourceAddress,
         min_amount: Amount,
     },
@@ -72,8 +73,7 @@ pub enum Instruction {
         binary: Vec<u8>,
     },
     AllocateAddress {
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
-        substate_type: SubstateType,
+        allocatable_type: AllocatableAddressType,
         workspace_id: String,
     },
 }
@@ -87,7 +87,11 @@ impl Instruction {
     }
 
     pub fn referenced_template(&self) -> Option<&TemplateAddress> {
-        if let Self::CallFunction { template_address, .. } = self {
+        if let Self::CallFunction {
+            address: template_address,
+            ..
+        } = self
+        {
             return Some(template_address);
         }
         None
@@ -101,36 +105,32 @@ impl Display for Instruction {
                 public_key_address,
                 owner_rule,
                 access_rules,
-                workspace_bucket,
+                workspace_id,
             } => {
                 write!(
                     f,
                     "CreateAccount {{ public_key_address: {}, owner_rule: {:?}, access_rules: {:?}, bucket: ",
                     public_key_address, owner_rule, access_rules
                 )?;
-                match workspace_bucket {
-                    Some(bucket) => write!(f, "{}", bucket)?,
+                match workspace_id {
+                    Some(bucket) => write!(f, "{}", String::from_utf8_lossy(bucket))?,
                     None => write!(f, "None")?,
                 }
                 write!(f, " }}")
             },
             Self::CallFunction {
-                template_address,
+                address,
                 function,
                 args,
             } => write!(
                 f,
-                "CallFunction {{ template_address: {}, function: {}, args: {:?} }}",
-                template_address, function, args
+                "CallFunction {{ address: {}, function: {}, args: {:?} }}",
+                address, function, args
             ),
-            Self::CallMethod {
-                component_address,
-                method,
-                args,
-            } => write!(
+            Self::CallMethod { call, method, args } => write!(
                 f,
-                "CallMethod {{ component_address: {}, method: {}, args: {:?} }}",
-                component_address, method, args
+                "CallMethod {{ call: {}, method: {}, args: {:?} }}",
+                call, method, args
             ),
             Self::PutLastInstructionOutputOnWorkspace { key } => {
                 write!(f, "PutLastInstructionOutputOnWorkspace {{ key: {:?} }}", key)
@@ -170,7 +170,7 @@ impl Display for Instruction {
                 write!(f, "PublishTemplate")
             },
             Instruction::AllocateAddress {
-                substate_type,
+                allocatable_type: substate_type,
                 workspace_id,
             } => {
                 write!(
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn decode_encode() {
         let instruction = Instruction::CallFunction {
-            template_address: Default::default(),
+            address: Default::default(),
             function: "test".to_string(),
             args: args![("A", "B"), 123u64, true, vec![1, 2, 3]],
         };

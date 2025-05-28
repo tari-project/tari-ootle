@@ -60,7 +60,7 @@ fn manifest_smoke_test() {
 
     let expected = vec![
         Instruction::CallFunction {
-            template_address: picture_seller_template,
+            address: picture_seller_template,
             function: "new".to_string(),
             args: args![1_000u64],
         },
@@ -68,18 +68,18 @@ fn manifest_smoke_test() {
             key: b"picture_seller".to_vec(),
         },
         Instruction::CallMethod {
-            component_address: test_faucet_component,
+            call: test_faucet_component.into(),
             method: "take_free_coins".to_string(),
             args: args![Amount(1_000)],
         },
         Instruction::PutLastInstructionOutputOnWorkspace { key: b"funds".to_vec() },
         Instruction::CallMethod {
-            component_address: account_component,
+            call: account_component.into(),
             method: "deposit".to_string(),
             args: args![Variable("funds")],
         },
         Instruction::CallMethod {
-            component_address: account_component,
+            call: account_component.into(),
             method: "withdraw".to_string(),
             args: args![xtr_resource, Amount(1_000)],
         },
@@ -87,7 +87,7 @@ fn manifest_smoke_test() {
             key: b"bucket".to_vec(),
         },
         Instruction::CallMethod {
-            component_address: picture_seller_component,
+            call: picture_seller_component.into(),
             method: "buy".to_string(),
             args: args![Variable("bucket")],
         },
@@ -95,7 +95,7 @@ fn manifest_smoke_test() {
             key: b"picture".to_vec(),
         },
         Instruction::CallMethod {
-            component_address: account_component,
+            call: account_component.into(),
             method: "deposit".to_string(),
             args: args![Variable("picture")],
         },

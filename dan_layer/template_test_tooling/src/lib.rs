@@ -8,7 +8,7 @@ mod template_test;
 mod track_calls;
 
 pub use package_builder::Package;
-pub use template_test::{test_faucet_component, SubstateType, TemplateTest};
+pub use template_test::{test_faucet_component, TemplateTest};
 
 pub mod crypto {
     pub use tari_crypto::{keys::*, ristretto::*};

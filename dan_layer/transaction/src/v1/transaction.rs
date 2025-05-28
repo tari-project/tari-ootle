@@ -18,7 +18,7 @@ use tari_dan_common_types::{
 use tari_engine_types::{
     confidential::ConfidentialClaim,
     hashing::{hash_template_code, hasher32, EngineHashDomainLabel},
-    indexed_value::{IndexedValue, IndexedValueError},
+    indexed_value::IndexedValueError,
     instruction::Instruction,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
@@ -221,52 +221,12 @@ impl TransactionV1 {
     }
 
     pub fn as_referenced_components(&self) -> impl Iterator<Item = &ComponentAddress> + '_ {
-        self.instructions()
-            .iter()
-            .chain(self.fee_instructions())
-            .filter_map(|instruction| {
-                if let Instruction::CallMethod { component_address, .. } = instruction {
-                    Some(component_address)
-                } else {
-                    None
-                }
-            })
+        self.body.as_referenced_components()
     }
 
     /// Returns all substates addresses referenced by this transaction
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
-        let all_instructions = self.instructions().iter().chain(self.fee_instructions());
-
-        let mut substates = HashSet::new();
-        for instruction in all_instructions {
-            match instruction {
-                Instruction::CallFunction { args, .. } => {
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
-                        let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
-                    }
-                },
-                Instruction::CallMethod {
-                    component_address,
-                    args,
-                    ..
-                } => {
-                    substates.insert(SubstateId::Component(*component_address));
-                    for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
-                        let value = IndexedValue::from_raw(arg)?;
-                        substates.extend(value.referenced_substates().filter(|id| !id.is_virtual()));
-                    }
-                },
-                Instruction::ClaimBurn { claim } => {
-                    substates.insert(SubstateId::UnclaimedConfidentialOutput(claim.output_address));
-                },
-                Instruction::ClaimValidatorFees { address, .. } => {
-                    substates.insert(SubstateId::ValidatorFeePool(*address));
-                },
-                _ => {},
-            }
-        }
-        Ok(substates)
+        self.body.to_referenced_substates()
     }
 
     pub fn has_inputs_without_version(&self) -> bool {
@@ -294,11 +254,11 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
     match instruction {
         Instruction::CreateAccount {
             access_rules,
-            workspace_bucket,
+            workspace_id,
             ..
         } => {
             access_rules.as_ref().map(|a| a.num_access_rules() as u64).unwrap_or(0) +
-                workspace_bucket.as_ref().map(|_| 1).unwrap_or(0)
+                workspace_id.as_ref().map(|_| 1).unwrap_or(0)
         },
         Instruction::CallFunction { args, .. } => calc_args_weight(args),
         Instruction::CallMethod { args, .. } => calc_args_weight(args),

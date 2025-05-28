@@ -10,6 +10,7 @@ use tari_engine_types::{
     indexed_value::{IndexedValue, IndexedValueError},
     instruction::Instruction,
     substate::SubstateId,
+    ComponentCall,
 };
 use tari_template_lib::models::ComponentAddress;
 
@@ -100,7 +101,11 @@ impl UnsignedTransactionV1 {
             .iter()
             .chain(self.fee_instructions())
             .filter_map(|instruction| {
-                if let Instruction::CallMethod { component_address, .. } = instruction {
+                if let Instruction::CallMethod {
+                    call: ComponentCall::Address(component_address),
+                    ..
+                } = instruction
+                {
                     Some(component_address)
                 } else {
                     None
@@ -122,7 +127,7 @@ impl UnsignedTransactionV1 {
                     }
                 },
                 Instruction::CallMethod {
-                    component_address,
+                    call: ComponentCall::Address(component_address),
                     args,
                     ..
                 } => {
@@ -134,6 +139,9 @@ impl UnsignedTransactionV1 {
                 },
                 Instruction::ClaimBurn { claim } => {
                     substates.insert(SubstateId::UnclaimedConfidentialOutput(claim.output_address));
+                },
+                Instruction::ClaimValidatorFees { address, .. } => {
+                    substates.insert(SubstateId::ValidatorFeePool(*address));
                 },
                 _ => {},
             }

@@ -48,6 +48,7 @@ use tari_engine_types::{
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
     vault::Vault,
+    ComponentCall,
     FromByteType,
     ValidatorFeePoolAddress,
 };
@@ -57,6 +58,7 @@ use tari_template_lib::{
     args,
     args::{
         AddressAllocationInvokeArg,
+        AllocatableAddressType,
         AllocateAddressResult,
         Arg,
         BucketAction,
@@ -85,7 +87,6 @@ use tari_template_lib::{
         ResourceGetNonFungibleArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
-        SubstateType,
         VaultAction,
         VaultCreateProofByFungibleAmountArg,
         VaultCreateProofByNonFungiblesArg,
@@ -279,16 +280,16 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         let caller = auth_caller
             .component()
-            .map(|component| self.load_component(component))
+            .map(|component| self.load_component((*component).into()))
             .transpose()?;
 
-        if let Some(caller) = caller {
+        if let Some((_, caller)) = caller {
             auth_caller.with_component_state(caller.into_component().state);
         }
 
         // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthCaller)
         let ret = self
-            .invoke_component_method(&auth_hook.component_address, &auth_hook.method, args![
+            .invoke_component_method(auth_hook.component_address, &auth_hook.method, args![
                 action,
                 auth_caller
             ])
@@ -310,17 +311,23 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
     fn invoke_component_method(
         &self,
-        component_address: &ComponentAddress,
+        component_address: ComponentAddress,
         method: &str,
         args: Vec<Arg>,
     ) -> Result<InstructionResult, RuntimeError> {
         let call_runtime = Runtime::new(Arc::new(self.clone()));
-        TransactionProcessor::call_method(&*self.template_provider, &call_runtime, component_address, method, args)
-            .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
-                component_address: *component_address,
-                method: method.to_string(),
-                details: e.to_string(),
-            })
+        TransactionProcessor::call_method(
+            &*self.template_provider,
+            &call_runtime,
+            component_address.into(),
+            method,
+            args,
+        )
+        .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
+            component_address,
+            method: method.to_string(),
+            details: e.to_string(),
+        })
     }
 
     fn invoke_template_function(
@@ -449,13 +456,56 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         Ok(())
     }
 
-    fn load_component(&self, address: &ComponentAddress) -> Result<ComponentHeader, RuntimeError> {
+    fn load_component(&self, call: ComponentCall) -> Result<(ComponentAddress, ComponentHeader), RuntimeError> {
         self.invoke_modules_on_runtime_call("load_component")?;
-        self.tracker.write_with(|state| state.load_component(address).cloned())
+        match call {
+            ComponentCall::Address(address) => self.tracker.write_with(|state_mut| {
+                state_mut
+                    .load_and_cache_component(&address)
+                    .cloned()
+                    .map(|c| (address, c))
+            }),
+            ComponentCall::FromWorkspace(key) => self.tracker.write_with(|state_mut| {
+                let value = state_mut
+                    .workspace()
+                    .get(&key)
+                    .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                        key: String::from_utf8_lossy(&key).to_string(),
+                    })?;
+                let allocation_id: ComponentAddressAllocation =
+                    value.decoded().map_err(|e| RuntimeError::InvalidArgument {
+                        argument: "ComponentCall::FromWorkspace",
+                        reason: format!(
+                            "Item on workspace at key '{}' is not a valid ComponentAddressAllocation: {}",
+                            String::from_utf8_lossy(&key),
+                            e,
+                        ),
+                    })?;
+                let substate_id = state_mut.get_used_address(allocation_id.id())?;
+                let address = match substate_id {
+                    SubstateId::Component(addr) => addr,
+                    substate_id => {
+                        let substate_type = tari_dan_common_types::substate_type::SubstateType::from(&substate_id);
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "ComponentCall::Allocation",
+                            reason: format!(
+                                "Invalid attempt to load component with an address allocation ID ({}) with substate \
+                                 type {substate_type}",
+                                allocation_id.id()
+                            ),
+                        });
+                    },
+                };
+                state_mut
+                    .load_and_cache_component(&address)
+                    .cloned()
+                    .map(|c| (address, c))
+            }),
+        }
     }
 
-    fn lock_component(&self, address: &ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
-        self.tracker.lock_substate(&SubstateId::Component(*address), lock_flag)
+    fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
+        self.tracker.lock_substate(&SubstateId::Component(address), lock_flag)
     }
 
     fn caller_context_invoke(
@@ -801,7 +851,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
                     let resource_address = match arg.address_allocation {
                         Some(allocation) => {
-                            let alloc = state_mut.take_allocated_address(allocation.id())?;
+                            let alloc = state_mut.use_allocated_address(allocation.id())?;
                             alloc.substate_id().as_resource_address().ok_or_else(|| {
                                 RuntimeError::AddressAllocationTypeMismatch {
                                     id: alloc.substate_id().clone(),
@@ -2265,7 +2315,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     args,
                 } = args.assert_one_arg()?;
 
-                self.invoke_component_method(&component_address, &method, args)?
+                self.invoke_component_method(component_address, &method, args)?
             },
         };
 
@@ -2494,10 +2544,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         })
     }
 
-    /// Create a new address allocations for the provided substate type and entity id
+    /// Create a new address allocation for the provided substate type and entity id
     fn allocate_address(
         &self,
-        substate_type: SubstateType,
+        substate_type: AllocatableAddressType,
         entity_id: EntityId,
         workspace_key: Vec<u8>,
     ) -> Result<AllocateAddressResult, RuntimeError> {
@@ -2505,7 +2555,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
             let id_provider = state.id_provider_for_entity(entity_id);
 
             match substate_type {
-                SubstateType::Component => {
+                AllocatableAddressType::Component => {
                     let address = id_provider.new_component_address()?;
                     let id = state.new_address_allocation(address)?;
                     let value = IndexedValue::from_type(&ComponentAddressAllocation::new(id))?;
@@ -2514,7 +2564,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         ComponentAddressAllocation::new(id),
                     ))
                 },
-                SubstateType::Resource => {
+                AllocatableAddressType::Resource => {
                     let address = id_provider.new_resource_address()?;
                     let id = state.new_address_allocation(address)?;
                     let value = IndexedValue::from_type(&ResourceAddressAllocation::new(id))?;
@@ -2523,7 +2573,6 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                         id,
                     )))
                 },
-                _ => Err(RuntimeError::AddressAllocationUnsupportedSubstateType { substate_type }),
             }
         })
     }

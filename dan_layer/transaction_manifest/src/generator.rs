@@ -87,7 +87,7 @@ impl ManifestInstructionGenerator {
                     .as_ref()
                     .expect("AST parse should have failed: no template ident for TemplateInvoke statement");
                 let mut instructions = vec![Instruction::CallFunction {
-                    template_address: self.get_imported_template(template_ident)?,
+                    address: self.get_imported_template(template_ident)?,
                     function: function_name.to_string(),
                     args: self.process_args(arguments)?,
                 }];
@@ -121,7 +121,7 @@ impl ManifestInstructionGenerator {
                         ))
                     })?;
                 let mut instructions = vec![Instruction::CallMethod {
-                    component_address,
+                    call: component_address.into(),
                     method: function_name.to_string(),
                     args: self.process_args(arguments)?,
                 }];

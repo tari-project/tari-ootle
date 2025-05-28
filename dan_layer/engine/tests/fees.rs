@@ -3,7 +3,7 @@
 
 use std::iter;
 
-use tari_engine_types::{commit_result::RejectReason, instruction::Instruction};
+use tari_engine_types::commit_result::RejectReason;
 use tari_template_lib::{
     args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
@@ -77,26 +77,14 @@ fn deposit_from_faucet_then_pay() {
     test.enable_fees();
     let result = test.execute_expect_success(
         Transaction::builder()
-            .with_fee_instructions(vec![
-                Instruction::CallMethod {
-                    component_address: test_faucet_component(),
-                    method: "take_free_coins".to_string(),
-                    args: args![],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: account,
-                    method: "deposit".to_string(),
-                    args: args![Workspace("bucket")],
-                },
-                Instruction::CallMethod {
-                    component_address: account,
-                    method: "pay_fee".to_string(),
-                    args: args![Amount(1000)],
-                },
-            ])
+            .with_fee_instructions_builder(|builder| {
+                builder
+                    // Faucet deposits free coins into the account
+                    .call_method(test_faucet_component(), "take_free_coins", args![])
+                    .put_last_instruction_output_on_workspace("bucket")
+                    .call_method(account, "deposit", args![Workspace("bucket")])
+                    .call_method(account, "pay_fee", args![Amount(1000)])
+            })
             .call_function(test.get_template_address("State"), "new", args![])
             .build_and_seal(&private_key),
         vec![owner_token],
@@ -171,11 +159,11 @@ fn failed_fee_transaction() {
     let result = test
         .try_execute(
             Transaction::builder()
-                .with_fee_instructions(vec![Instruction::CallMethod {
-                    component_address: account,
-                    method: "pay_da_fee_plz".to_string(),
-                    args: args![],
-                }])
+                .with_fee_instructions_builder(|builder| {
+                    builder
+                        // This instruction will fail
+                        .call_method(account, "pay_da_fee_plz", args![])
+                })
                 .call_function(test.get_template_address("State"), "new", args![])
                 .build_and_seal(&private_key),
             vec![owner_token],
@@ -245,24 +233,21 @@ fn fail_pay_less_fees_than_fee_transaction() {
     let result = test
         .try_execute(
             Transaction::builder()
-                .with_fee_instructions(
-                    // Run up a bill to push it up over the loan
-                    (0u32..=0).map(|i| {
-                        Instruction::CallMethod {
-                            component_address: state,
-                            method: "set".to_string(),
-                            args: args![i],
-                        }
+                .with_fee_instructions_builder(|builder| {
+                    (0u32..=0).fold(builder, |builder, i| {
+                        builder.call_method(
+                            state,
+                            "set".to_string(),
+                            args![i],
+                        )
                     })
-                    .chain(iter::once(
-                        // Pay too little for the fee transaction
-                 Instruction::CallMethod {
-                            component_address: account,
-                            method: "pay_fee".to_string(),
-                            args: args![Amount(100)],
-                        }
-                    ))
-                )
+                        .call_method(
+                            account,
+                            "pay_fee".to_string(),
+                            args![Amount(100)],
+                        )
+
+                })
                 // These instructions should not be applied
                 .call_method(account2, "withdraw", args![
                     CONFIDENTIAL_TARI_RESOURCE_ADDRESS,

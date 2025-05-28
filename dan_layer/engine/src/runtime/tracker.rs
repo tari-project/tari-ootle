@@ -181,7 +181,7 @@ impl StateTracker {
 
             let component_address = match address_allocation {
                 Some(address_allocation) => {
-                    let alloc = state.take_allocated_address(address_allocation.id())?;
+                    let alloc = state.use_allocated_address(address_allocation.id())?;
                     alloc.substate_id().as_component_address().ok_or_else(|| {
                         RuntimeError::AddressAllocationTypeMismatch {
                             id: alloc.substate_id().clone(),

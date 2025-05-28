@@ -383,26 +383,16 @@ pub async fn handle_reveal_funds(
 
         let mut builder = transaction_builder(&ctx);
         if req.pay_fee_from_reveal {
-            builder = builder.with_fee_instructions(vec![
-                Instruction::CallMethod {
-                    component_address: account_address,
-                    method: "withdraw_confidential".to_string(),
-                    args: args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS, reveal_proof],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"revealed".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: account_address,
-                    method: "deposit".to_string(),
-                    args: args![Workspace("revealed".to_string())],
-                },
-                Instruction::CallMethod {
-                    component_address: account_address,
-                    method: "pay_fee".to_string(),
-                    args: args![max_fee],
-                },
-            ]);
+            builder = builder.with_fee_instructions_builder(|builder| {
+                builder
+                    .call_method(account_address, "withdraw_confidential", args![
+                        CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+                        reveal_proof.clone()
+                    ])
+                    .put_last_instruction_output_on_workspace("revealed")
+                    .call_method(account_address, "deposit", args![Workspace("revealed")])
+                    .call_method(account_address, "pay_fee", args![max_fee])
+            });
         } else {
             builder = builder
                 .fee_transaction_pay_from_component(account_address, max_fee)
@@ -671,7 +661,7 @@ async fn finish_claiming<T: WalletStore>(
         let child_addresses = sdk.substate_api().load_dependent_substates(&[&account_address])?;
         inputs.extend(child_addresses);
         instructions.push(Instruction::CallMethod {
-            component_address: account_component_address,
+            call: account_component_address.into(),
             method: "deposit".to_string(),
             args: args![Workspace("bucket")],
         });
@@ -680,11 +670,11 @@ async fn finish_claiming<T: WalletStore>(
             public_key_address: account_public_key,
             owner_rule: None,
             access_rules: None,
-            workspace_bucket: Some("bucket".to_string()),
+            workspace_id: Some(b"bucket".to_vec()),
         });
     }
     instructions.push(Instruction::CallMethod {
-        component_address: account_component_address,
+        call: account_component_address.into(),
         method: "pay_fee".to_string(),
         args: args![max_fee],
     });
@@ -755,7 +745,7 @@ pub async fn handle_create_free_test_coins(
     let account_public_key = RistrettoPublicKey::from_secret_key(&account_secret_key.key).to_byte_type();
 
     let instructions = vec![Instruction::CallMethod {
-        component_address: XTR_FAUCET_COMPONENT_ADDRESS,
+        call: XTR_FAUCET_COMPONENT_ADDRESS.into(),
         method: "take".to_string(),
         args: args![amount],
     }];
@@ -864,9 +854,6 @@ pub async fn handle_transfer(
     let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
     inputs.insert(resource_substate_address.clone());
 
-    let mut instructions = vec![];
-    let mut fee_instructions = vec![];
-
     let destination_account_address =
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.destination_public_key);
     let existing_dest_account = sdk
@@ -874,6 +861,8 @@ pub async fn handle_transfer(
         .scan_for_substate(&SubstateId::Component(destination_account_address), None)
         .await
         .optional()?;
+
+    let mut builder = transaction_builder(context);
 
     if let Some(ValidatorScanResult { address, substate }) = existing_dest_account {
         inputs.insert(address.into());
@@ -931,61 +920,41 @@ pub async fn handle_transfer(
             inputs.insert(SubstateRequirement::unversioned(found));
         }
     } else {
-        instructions.push(Instruction::CreateAccount {
-            public_key_address: req.destination_public_key,
-            owner_rule: None,
-            access_rules: None,
-            workspace_bucket: None,
-        });
-    }
-
-    if let Some(ref badge) = req.proof_from_badge_resource {
-        instructions.extend([
-            Instruction::CallMethod {
-                component_address: source_account_address,
-                method: "create_proof_for_resource".to_string(),
-                args: args![badge],
-            },
-            Instruction::PutLastInstructionOutputOnWorkspace { key: b"proof".to_vec() },
-        ]);
+        builder = builder.create_account(req.destination_public_key);
     }
 
     // build the transaction
     let max_fee = req.max_fee.unwrap_or(DEFAULT_FEE);
-    instructions.extend([
-        Instruction::CallMethod {
-            component_address: source_account_address,
-            method: "withdraw".to_string(),
-            args: args![req.resource_address, req.amount],
-        },
-        Instruction::PutLastInstructionOutputOnWorkspace {
-            key: b"bucket".to_vec(),
-        },
-        Instruction::CallMethod {
-            component_address: destination_account_address,
-            method: "deposit".to_string(),
-            args: args![Workspace("bucket")],
-        },
-    ]);
-
-    if req.proof_from_badge_resource.is_some() {
-        instructions.push(Instruction::DropAllProofsInWorkspace);
-    }
-
-    fee_instructions.extend([Instruction::CallMethod {
-        component_address: source_account_address,
-        method: "pay_fee".to_string(),
-        args: args![max_fee],
-    }]);
-
     let account_secret_key = sdk
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
 
-    let transaction = transaction_builder(context)
+    let transaction = builder
         .with_dry_run(req.dry_run)
-        .with_fee_instructions(fee_instructions)
-        .with_instructions(instructions)
+        .fee_transaction_pay_from_component(source_account_address, max_fee)
+        .then(|builder| {
+            if let Some(ref badge) = req.proof_from_badge_resource {
+                // If we are creating a proof for a badge resource, we need to create the proof first
+                builder
+                    .call_method(source_account_address, "create_proof_for_resource", args![badge])
+                    .put_last_instruction_output_on_workspace("proof")
+            } else {
+                builder
+            }
+        })
+        .call_method(source_account_address, "withdraw", args![
+            req.resource_address,
+            req.amount
+        ])
+        .put_last_instruction_output_on_workspace("bucket")
+        .call_method(destination_account_address, "deposit", args![Workspace("bucket")])
+        .then(|builder| {
+            if req.proof_from_badge_resource.is_some() {
+                builder.drop_all_proofs_in_workspace()
+            } else {
+                builder
+            }
+        })
         .with_inputs(inputs.into_iter().map(|req| req.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
 

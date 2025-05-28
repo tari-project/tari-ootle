@@ -19,7 +19,7 @@ fn basic_emit_event() {
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: event_emitter_template,
+                address: event_emitter_template,
                 function: "test_function".to_string(),
                 args: args![topic],
             }],
@@ -65,7 +65,7 @@ fn builtin_vault_events() {
     let result = template_test
         .execute_and_commit(
             vec![Instruction::CallFunction {
-                template_address: faucet_template,
+                address: faucet_template,
                 function: "mint".to_string(),
                 args: args![initial_supply],
             }],
@@ -85,51 +85,26 @@ fn builtin_vault_events() {
     let (sender_address, sender_proof, _) = template_test.create_funded_account();
     let (receiver_address, _, _) = template_test.create_funded_account();
     template_test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: faucet_component,
-                    method: "take_free_coins".to_string(),
-                    args: args![],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"free_coins".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: sender_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("free_coins")],
-                },
-            ],
+        .build_and_execute(
+            Transaction::builder()
+                .call_method(faucet_component, "take_free_coins", args![])
+                .put_last_instruction_output_on_workspace(b"free_coins")
+                .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
             vec![template_test.get_test_proof()],
         )
-        .unwrap();
+        .expect_success();
 
     // transfer some tokens between accounts
     let amount = Amount(100);
-    let result = template_test
-        .execute_and_commit(
-            vec![
-                Instruction::CallMethod {
-                    component_address: sender_address,
-                    method: "withdraw".to_string(),
-                    args: args![faucet_resource, amount],
-                },
-                Instruction::PutLastInstructionOutputOnWorkspace {
-                    key: b"foo_bucket".to_vec(),
-                },
-                Instruction::CallMethod {
-                    component_address: receiver_address,
-                    method: "deposit".to_string(),
-                    args: args![Variable("foo_bucket")],
-                },
-            ],
-            // Sender proof needed to withdraw
-            vec![sender_proof],
-        )
-        .unwrap();
-
-    assert!(result.finalize.is_accept());
+    let result = template_test.build_and_execute(
+        Transaction::builder()
+            .call_method(sender_address, "withdraw", args![faucet_resource, amount])
+            .put_last_instruction_output_on_workspace(b"foo_bucket")
+            .call_method(receiver_address, "deposit", args![Variable("foo_bucket")]),
+        // Sender proof needed to withdraw
+        vec![sender_proof],
+    );
+    result.expect_success();
 
     // a standard event for the withdraw must have been emmitted
     let event = result

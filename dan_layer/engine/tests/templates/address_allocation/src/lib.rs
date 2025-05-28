@@ -51,6 +51,10 @@ mod template {
             .create()
         }
 
+        pub fn get_resource_address(&self) -> ResourceAddress {
+            self.resource
+        }
+
         pub fn get_component_allocation_address(comp_alloc: ComponentAddressAllocation) -> String {
             // You can't return the actual address until the component is created
             comp_alloc.get_address().to_string()

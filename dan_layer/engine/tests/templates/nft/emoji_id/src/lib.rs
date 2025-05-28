@@ -70,8 +70,6 @@ mod emoji_id {
     }
 
     impl EmojiIdMinter {
-        // TODO: in this example we need to specify the payment resource, but there should be native support for Thaums
-        // TODO: decoding fails if "max_emoji_id_len" is usize instead of u64, we may need to add support for it
         pub fn new(
             payment_resource_address: ResourceAddress,
             max_emoji_id_len: u64,

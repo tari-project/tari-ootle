@@ -204,7 +204,7 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     .map_err(|e| anyhow!("create_account_public_key: {}", e))?,
                 owner_rule: request.create_account_owner_rule.map(TryInto::try_into).transpose()?,
                 access_rules: request.create_account_access_rules.map(TryInto::try_into).transpose()?,
-                workspace_bucket: Some(request.create_account_workspace_bucket).filter(|s| !s.is_empty()),
+                workspace_id: Some(request.create_account_workspace_id).filter(|s| !s.is_empty()),
             },
             InstructionType::Function => {
                 let function = request.function;
@@ -288,13 +288,13 @@ impl From<Instruction> for proto::transaction::Instruction {
                 public_key_address,
                 owner_rule,
                 access_rules,
-                workspace_bucket,
+                workspace_id,
             } => {
                 result.instruction_type = InstructionType::CreateAccount as i32;
                 result.create_account_public_key = public_key_address.to_vec();
                 result.create_account_owner_rule = owner_rule.map(Into::into);
                 result.create_account_access_rules = access_rules.map(Into::into);
-                result.create_account_workspace_bucket = workspace_bucket.unwrap_or_default();
+                result.create_account_workspace_id = workspace_id.unwrap_or_default();
             },
             Instruction::CallFunction {
                 address: template_address,

@@ -156,6 +156,60 @@ pub mod dynamic_hex {
             ))
         })
     }
+
+    pub mod option {
+        use super::*;
+
+        pub fn serialize<S: Serializer, T: AsRef<[u8]>>(v: &Option<T>, s: S) -> Result<S::Ok, S::Error> {
+            if s.is_human_readable() {
+                match v {
+                    Some(value) => {
+                        let st = bytes_to_hex(value.as_ref());
+                        s.serialize_some(&st)
+                    },
+                    None => s.serialize_none(),
+                }
+            } else {
+                match v {
+                    Some(value) => s.serialize_some(value.as_ref()),
+                    None => s.serialize_none(),
+                }
+            }
+        }
+
+        pub fn deserialize<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+        where
+            D: Deserializer<'de>,
+            for<'a> T: TryFrom<&'a [u8]>,
+        {
+            if d.is_human_readable() {
+                let hex = <Option<Cow<'_, str>> as Deserialize>::deserialize(d)?;
+                match hex {
+                    Some(hex_str) => {
+                        let bytes = bytes_from_hex(&hex_str).map_err(Error::custom)?;
+                        T::try_from(&bytes).map(Some).map_err(|_| {
+                            Error::custom(format!(
+                                "Failed to convert bytes to type: {}",
+                                std::any::type_name::<T>()
+                            ))
+                        })
+                    },
+                    None => Ok(None),
+                }
+            } else {
+                let bytes = <Option<Cow<'_, [u8]>>>::deserialize(d)?;
+                match bytes {
+                    Some(b) => T::try_from(&b).map(Some).map_err(|_| {
+                        Error::custom(format!(
+                            "Failed to convert bytes to type: {}",
+                            std::any::type_name::<T>()
+                        ))
+                    }),
+                    None => Ok(None),
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +224,8 @@ mod tests {
         #[serde(with = "super::dynamic_hex")]
         bytes: Vec<u8>,
         pk: RistrettoPublicKeyBytes,
+        #[serde(with = "super::dynamic_hex::option")]
+        opt_bytes: Option<Vec<u8>>,
     }
 
     #[test]
@@ -177,6 +233,7 @@ mod tests {
         let test_case = TestCase {
             bytes: vec![1, 2, 3, 4, 5],
             pk: RistrettoPublicKeyBytes::from([1; 32]),
+            opt_bytes: Some(vec![1, 2, 3, 4, 5]),
         };
         let json = serde_json::to_string(&test_case).unwrap();
         let decoded: TestCase = serde_json::from_str(&json).unwrap();
@@ -190,6 +247,7 @@ mod tests {
             json["pk"].as_str().expect("string"),
             "0101010101010101010101010101010101010101010101010101010101010101"
         );
+        assert_eq!(json["opt_bytes"].as_str().expect("string"), "0102030405");
 
         let decoded = tari_bor::decode::<TestCase>(&tari_bor::encode(&test_case).unwrap()).unwrap();
         assert_eq!(test_case.bytes, decoded.bytes);
@@ -199,5 +257,13 @@ mod tests {
         let decoded = tari_bor::from_value::<TestCase>(&cbor).unwrap();
         assert_eq!(test_case.bytes, decoded.bytes);
         assert_eq!(test_case.pk, decoded.pk);
+
+        let test_case = TestCase {
+            bytes: vec![1, 2, 3, 4, 5],
+            pk: RistrettoPublicKeyBytes::from([1; 32]),
+            opt_bytes: None,
+        };
+        let json = serde_json::to_value(&test_case).unwrap();
+        assert!(json["opt_bytes"].is_null());
     }
 }

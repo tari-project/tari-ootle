@@ -72,7 +72,7 @@ pub async fn handle_create(
         public_key_address: key.public_key.to_byte_type(),
         owner_rule: None,
         access_rules: None,
-        workspace_bucket: None,
+        workspace_id: None,
     };
 
     let common = CommonSubmitArgs {

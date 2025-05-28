@@ -351,7 +351,7 @@ async fn fill_in_target_account_vault(
                 public_key_address: target_account_public_key,
                 owner_rule: None,
                 access_rules: None,
-                workspace_bucket: None,
+                workspace_id: None,
             });
         },
     }

@@ -41,7 +41,7 @@ use tari_engine_types::{
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
     args,
-    args::Arg,
+    args::{Arg, WorkspaceKey},
     auth::OwnerRule,
     models::{Amount, ComponentAddress, NonFungibleAddress},
     prelude::{ComponentAccessRules, RistrettoPublicKeyBytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
@@ -324,7 +324,7 @@ impl TemplateTest {
     pub fn create_account<T>(
         &mut self,
         owner_public_key: RistrettoPublicKeyBytes,
-        workspace_bucket: Option<String>,
+        workspace_id: Option<WorkspaceKey>,
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
@@ -336,7 +336,7 @@ impl TemplateTest {
                     public_key_address: owner_public_key,
                     owner_rule: None,
                     access_rules: None,
-                    workspace_bucket,
+                    workspace_id,
                 }],
                 proofs,
             )

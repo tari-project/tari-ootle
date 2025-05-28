@@ -42,7 +42,7 @@ use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
     arg,
     args,
-    args::{AllocatableAddressType, AllocateAddressResult, Arg, WorkspaceAction},
+    args::{AllocatableAddressType, AllocateAddressResult, Arg, WorkspaceAction, WorkspaceKey},
     auth::{ComponentAccessRules, OwnerRule},
     invoke_args,
     models::{Bucket, NonFungibleAddress},
@@ -299,14 +299,14 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
                 public_key_address,
                 owner_rule,
                 access_rules,
-                workspace_bucket,
+                workspace_id,
             } => Self::create_account(
                 template_provider,
                 runtime,
                 &public_key_address,
                 owner_rule,
                 access_rules,
-                workspace_bucket,
+                workspace_id,
             ),
             Instruction::CallFunction {
                 address: template_address,
@@ -426,7 +426,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         public_key_address: &RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<ComponentAccessRules>,
-        workspace_bucket: Option<String>,
+        workspace_id: Option<WorkspaceKey>,
     ) -> Result<InstructionResult, TransactionError> {
         let template = template_provider
             .get_template_module(&ACCOUNT_TEMPLATE_ADDRESS)
@@ -448,7 +448,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key_address);
 
-        // the publick key is the first argument of the Account template constructor
+        // the public key is the first argument of the Account template constructor
         let mut args = args![
             NonFungibleAddress::from_public_key(*public_key_address),
             owner_rule,
@@ -456,8 +456,8 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         ];
 
         // add the optional workspace bucket with the initial funds of the account
-        if let Some(workspace_bucket) = workspace_bucket {
-            args.push(arg![Workspace(workspace_bucket)]);
+        if let Some(workspace_id) = workspace_id {
+            args.push(arg![Workspace(workspace_id)]);
         } else {
             let none: Option<Bucket> = None;
             args.push(arg![Literal(none)]);

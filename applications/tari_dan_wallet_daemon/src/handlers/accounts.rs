@@ -670,7 +670,7 @@ async fn finish_claiming<T: WalletStore>(
             public_key_address: account_public_key,
             owner_rule: None,
             access_rules: None,
-            workspace_bucket: Some("bucket".to_string()),
+            workspace_id: Some(b"bucket".to_vec()),
         });
     }
     instructions.push(Instruction::CallMethod {

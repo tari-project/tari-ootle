@@ -5,7 +5,7 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib::{
-    args::{AllocatableAddressType, Arg, LogLevel},
+    args::{AllocatableAddressType, Arg, LogLevel, WorkspaceKey},
     auth::OwnerRule,
     models::ResourceAddress,
     prelude::{AccessRules, Amount},
@@ -27,7 +27,8 @@ pub enum Instruction {
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
         #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-        workspace_bucket: Option<String>,
+        #[serde(with = "serde_helpers::dynamic_hex::option")]
+        workspace_id: Option<WorkspaceKey>,
     },
     CallFunction {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
@@ -47,7 +48,7 @@ pub enum Instruction {
     PutLastInstructionOutputOnWorkspace {
         #[serde(with = "serde_helpers::dynamic_hex")]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        key: Vec<u8>,
+        key: WorkspaceKey,
     },
     EmitLog {
         level: LogLevel,
@@ -64,7 +65,7 @@ pub enum Instruction {
     AssertBucketContains {
         #[serde(with = "serde_helpers::dynamic_hex")]
         #[cfg_attr(feature = "ts", ts(type = "string"))]
-        key: Vec<u8>,
+        key: WorkspaceKey,
         resource_address: ResourceAddress,
         min_amount: Amount,
     },
@@ -104,15 +105,15 @@ impl Display for Instruction {
                 public_key_address,
                 owner_rule,
                 access_rules,
-                workspace_bucket,
+                workspace_id,
             } => {
                 write!(
                     f,
                     "CreateAccount {{ public_key_address: {}, owner_rule: {:?}, access_rules: {:?}, bucket: ",
                     public_key_address, owner_rule, access_rules
                 )?;
-                match workspace_bucket {
-                    Some(bucket) => write!(f, "{}", bucket)?,
+                match workspace_id {
+                    Some(bucket) => write!(f, "{}", String::from_utf8_lossy(bucket))?,
                     None => write!(f, "None")?,
                 }
                 write!(f, " }}")

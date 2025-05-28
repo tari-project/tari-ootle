@@ -254,11 +254,11 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
     match instruction {
         Instruction::CreateAccount {
             access_rules,
-            workspace_bucket,
+            workspace_id,
             ..
         } => {
             access_rules.as_ref().map(|a| a.num_access_rules() as u64).unwrap_or(0) +
-                workspace_bucket.as_ref().map(|_| 1).unwrap_or(0)
+                workspace_id.as_ref().map(|_| 1).unwrap_or(0)
         },
         Instruction::CallFunction { args, .. } => calc_args_weight(args),
         Instruction::CallMethod { args, .. } => calc_args_weight(args),

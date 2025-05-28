@@ -11,7 +11,7 @@ use tari_engine_types::{
 };
 use tari_template_lib::{
     args,
-    args::{AllocatableAddressType, Arg},
+    args::{AllocatableAddressType, Arg, WorkspaceKey},
     auth::OwnerRule,
     models::{Amount, ConfidentialWithdrawProof, ResourceAddress},
     prelude::AccessRules,
@@ -93,35 +93,35 @@ impl TransactionBuilder {
             public_key_address: owner_public_key,
             owner_rule: None,
             access_rules: None,
-            workspace_bucket: None,
+            workspace_id: None,
         })
     }
 
-    pub fn create_account_with_bucket<T: Into<String>>(
+    pub fn create_account_with_bucket<T: Into<WorkspaceKey>>(
         self,
         owner_public_key: RistrettoPublicKeyBytes,
-        workspace_bucket: T,
+        workspace_id: T,
     ) -> Self {
         self.add_instruction(Instruction::CreateAccount {
             public_key_address: owner_public_key,
             owner_rule: None,
             access_rules: None,
-            workspace_bucket: Some(workspace_bucket.into()),
+            workspace_id: Some(workspace_id.into()),
         })
     }
 
-    pub fn create_account_with_custom_rules<T: Into<String>>(
+    pub fn create_account_with_custom_rules<T: Into<WorkspaceKey>>(
         self,
         public_key_address: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
-        workspace_bucket: Option<T>,
+        workspace_id: Option<T>,
     ) -> Self {
         self.add_instruction(Instruction::CreateAccount {
             public_key_address,
             owner_rule,
             access_rules,
-            workspace_bucket: workspace_bucket.map(|b| b.into()),
+            workspace_id: workspace_id.map(|b| b.into()),
         })
     }
 

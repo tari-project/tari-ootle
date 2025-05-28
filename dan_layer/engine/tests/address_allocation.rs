@@ -3,12 +3,9 @@
 
 use tari_dan_engine::runtime::TransactionCommitError;
 use tari_engine_types::indexed_value::IndexedValue;
-use tari_template_lib::{
-    args,
-    models::{ComponentAddress, ResourceAddress},
-};
+use tari_template_lib::models::{ComponentAddress, ResourceAddress};
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::Transaction;
+use tari_transaction::{args, builder::CallFromWorkspace, Transaction};
 
 #[test]
 fn it_allocates_addresses_in_template_code() {
@@ -164,7 +161,7 @@ fn it_allows_calls_to_component_using_the_allocated_address() {
                 Workspace("my_addr"),
                 Workspace("my_res")
             ])
-            .call_method(b"my_addr".to_vec(), "get_resource_address", args![])
+            .call_method(CallFromWorkspace::new("my_addr"), "get_resource_address", args![])
             .build_and_seal(test.secret_key()),
         vec![],
     );

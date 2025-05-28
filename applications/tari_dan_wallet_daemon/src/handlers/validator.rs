@@ -11,7 +11,7 @@ use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{derive_fee_pool_address, optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::apis::key_manager;
 use tari_engine_types::{substate::SubstateId, ToByteType};
-use tari_template_lib::args;
+use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{

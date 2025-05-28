@@ -44,15 +44,14 @@ use tari_engine_types::{
     substate::{SubstateDiff, SubstateId, SubstateValue},
 };
 use tari_template_lib::{
-    arg,
-    args,
-    args::Arg,
+    args::InstructionArg,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    instruction_arg,
     models::{Amount, BucketId, NonFungibleAddress, NonFungibleId},
     prelude::{ResourceAddress, RistrettoPublicKeyBytes},
     types::TemplateAddress,
 };
-use tari_transaction::{Transaction, TransactionId, UnsignedTransaction};
+use tari_transaction::{args, Transaction, TransactionId, UnsignedTransaction};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_wallet_daemon_client::{
     types::{
@@ -813,32 +812,32 @@ impl FromStr for CliArg {
 }
 
 impl CliArg {
-    pub fn into_arg(self) -> Arg {
+    pub fn into_arg(self) -> InstructionArg {
         match self {
-            CliArg::String(s) => arg!(s),
-            CliArg::U64(v) => arg!(v),
-            CliArg::U32(v) => arg!(v),
-            CliArg::U16(v) => arg!(v),
-            CliArg::U8(v) => arg!(v),
-            CliArg::I64(v) => arg!(v),
-            CliArg::I32(v) => arg!(v),
-            CliArg::I16(v) => arg!(v),
-            CliArg::I8(v) => arg!(v),
-            CliArg::Bool(v) => arg!(v),
-            CliArg::Blob(v) => Arg::literal(v).unwrap(),
+            CliArg::String(s) => instruction_arg!(s),
+            CliArg::U64(v) => instruction_arg!(v),
+            CliArg::U32(v) => instruction_arg!(v),
+            CliArg::U16(v) => instruction_arg!(v),
+            CliArg::U8(v) => instruction_arg!(v),
+            CliArg::I64(v) => instruction_arg!(v),
+            CliArg::I32(v) => instruction_arg!(v),
+            CliArg::I16(v) => instruction_arg!(v),
+            CliArg::I8(v) => instruction_arg!(v),
+            CliArg::Bool(v) => instruction_arg!(v),
+            CliArg::Blob(v) => InstructionArg::literal(v).unwrap(),
             CliArg::SubstateId(v) => match v {
-                SubstateId::Component(v) => arg!(v),
-                SubstateId::Resource(v) => arg!(v),
-                SubstateId::Vault(v) => arg!(v),
-                SubstateId::UnclaimedConfidentialOutput(v) => arg!(v),
-                SubstateId::NonFungible(v) => arg!(v),
-                SubstateId::NonFungibleIndex(v) => arg!(v),
-                SubstateId::TransactionReceipt(v) => arg!(v),
-                SubstateId::Template(v) => arg!(v),
-                SubstateId::ValidatorFeePool(v) => arg!(v),
+                SubstateId::Component(v) => instruction_arg!(v),
+                SubstateId::Resource(v) => instruction_arg!(v),
+                SubstateId::Vault(v) => instruction_arg!(v),
+                SubstateId::UnclaimedConfidentialOutput(v) => instruction_arg!(v),
+                SubstateId::NonFungible(v) => instruction_arg!(v),
+                SubstateId::NonFungibleIndex(v) => instruction_arg!(v),
+                SubstateId::TransactionReceipt(v) => instruction_arg!(v),
+                SubstateId::Template(v) => instruction_arg!(v),
+                SubstateId::ValidatorFeePool(v) => instruction_arg!(v),
             },
-            CliArg::TemplateAddress(v) => arg!(v),
-            CliArg::NonFungibleId(v) => arg!(v),
+            CliArg::TemplateAddress(v) => instruction_arg!(v),
+            CliArg::NonFungibleId(v) => instruction_arg!(v),
         }
     }
 }

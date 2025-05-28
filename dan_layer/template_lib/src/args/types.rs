@@ -32,7 +32,7 @@ use tari_template_abi::rust::{
 };
 
 use crate::{
-    args::Arg,
+    args::InstructionArg,
     auth::{AuthHook, OwnerRule, ResourceAccessRules},
     models::{
         AddressAllocationId,
@@ -473,7 +473,6 @@ pub struct BucketBurnArg {
 pub enum WorkspaceAction {
     PutLastInstructionOutput,
     Get,
-    ListBuckets,
     DropAllProofs,
     AssertBucketContains,
 }
@@ -600,7 +599,7 @@ pub enum CallAction {
 pub struct CallFunctionArg {
     pub template_address: TemplateAddress,
     pub function: String,
-    pub args: Vec<Arg>,
+    pub args: Vec<InstructionArg>,
 }
 
 /// A component's method call operation argument
@@ -608,7 +607,7 @@ pub struct CallFunctionArg {
 pub struct CallMethodArg {
     pub component_address: ComponentAddress,
     pub method: String,
-    pub args: Vec<Arg>,
+    pub args: Vec<InstructionArg>,
 }
 
 // -------------------------------- ProofInvoke -------------------------------- //

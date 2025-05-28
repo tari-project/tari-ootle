@@ -3,14 +3,14 @@
 
 use tari_engine_types::{commit_result::ExecuteResult, instruction::Instruction};
 use tari_template_lib::{
-    args,
+    instruction_args,
     models::{ComponentAddress, NonFungibleAddress, NonFungibleId},
     prelude::Metadata,
     resource::TOKEN_SYMBOL,
     types::TemplateAddress,
 };
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 #[test]
 fn basic_nft_mint() {
@@ -114,7 +114,7 @@ fn create_nft_component(
         vec![Instruction::CallFunction {
             address: nft_template,
             function: "create".to_string(),
-            args: args![owner_token],
+            args: instruction_args![owner_token],
         }],
         vec![],
     )
@@ -131,7 +131,7 @@ fn mint_account_nft(
     test.build_and_execute(
         Transaction::builder()
             .call_method(nft_component, "mint", args![metadata])
-            .put_last_instruction_output_on_workspace(b"my_nft")
+            .put_last_instruction_output_on_workspace("my_nft")
             .call_function(
                 test.get_template_address("Account"),
                 "get_non_fungible_ids_for_bucket",

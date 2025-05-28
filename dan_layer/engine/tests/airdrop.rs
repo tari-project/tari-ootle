@@ -4,15 +4,15 @@
 use tari_dan_common_types::substate_type::SubstateType;
 use tari_engine_types::{substate::SubstateId, ToByteType};
 use tari_template_lib::{
-    args,
+    instruction_args,
     models::{Amount, ComponentAddress},
 };
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 fn setup() -> (TemplateTest, ComponentAddress, SubstateId) {
     let mut template_test = TemplateTest::new(vec!["tests/templates/nft/airdrop"]);
-    let airdrop: ComponentAddress = template_test.call_function("Airdrop", "new", args![], vec![]);
+    let airdrop: ComponentAddress = template_test.call_function("Airdrop", "new", instruction_args![], vec![]);
     let airdrop_resx = template_test.get_previous_output_address(SubstateType::Resource);
     (template_test, airdrop, airdrop_resx)
 }
@@ -21,8 +21,9 @@ fn setup() -> (TemplateTest, ComponentAddress, SubstateId) {
 fn airdrop() {
     let (mut template_test, airdrop, airdrop_resx) = setup();
 
-    let total_supply: Amount =
-        template_test.call_method(airdrop, "total_supply", args![], vec![template_test.get_test_proof()]);
+    let total_supply: Amount = template_test.call_method(airdrop, "total_supply", instruction_args![], vec![
+        template_test.get_test_proof(),
+    ]);
     assert_eq!(total_supply, Amount(100));
 
     let builder = Transaction::builder().then(|builder| {
@@ -44,7 +45,9 @@ fn airdrop() {
         .map(|r| r.decode::<ComponentAddress>().unwrap())
         .collect::<Vec<_>>();
 
-    template_test.call_method::<()>(airdrop, "open_airdrop", args![], vec![template_test.get_test_proof()]);
+    template_test.call_method::<()>(airdrop, "open_airdrop", instruction_args![], vec![
+        template_test.get_test_proof()
+    ]);
 
     template_test
         .build_and_execute(
@@ -62,7 +65,7 @@ fn airdrop() {
             addresses.iter().fold(builder, |builder, addr| {
                 builder
                     .call_method(airdrop, "claim_any", args![addr])
-                    .put_last_instruction_output_on_workspace(b"claimed")
+                    .put_last_instruction_output_on_workspace("claimed")
                     .call_method(*addr, "deposit", args![Workspace("claimed")])
                     .call_method(*addr, "balance", args![airdrop_resx.as_resource_address().unwrap()])
             })

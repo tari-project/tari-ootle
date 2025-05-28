@@ -44,14 +44,12 @@ use tari_dan_wallet_sdk::{
 use tari_engine_types::{
     commit_result::{ExecuteResult, FinalizeResult},
     instruction::Instruction,
-    instruction_result::InstructionResult,
     serde_with,
     substate::{SubstateId, SubstateValue},
     ValidatorFeePoolAddress,
 };
 use tari_template_abi::{FunctionDef, TemplateDef};
 use tari_template_lib::{
-    args::Arg,
     auth::ComponentAccessRules,
     models::{Amount, ConfidentialOutputStatement, NonFungibleId, ResourceAddress, VaultId},
     prelude::{ComponentAddress, ConfidentialWithdrawProof, ResourceType, RistrettoPublicKeyBytes},
@@ -458,30 +456,6 @@ pub struct AccountsCreateResponse {
     #[cfg_attr(feature = "ts", ts(type = "string"))]
     pub public_key: RistrettoPublicKeyBytes,
     pub result: FinalizeResult,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
-pub struct AccountsInvokeRequest {
-    #[serde(deserialize_with = "opt_string_or_struct")]
-    pub account: Option<ComponentAddressOrName>,
-    pub method: String,
-    pub args: Vec<Arg>,
-    pub max_fee: Option<Amount>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, export_to = "../../bindings/src/types/wallet-daemon-client/")
-)]
-pub struct AccountsInvokeResponse {
-    pub result: Option<InstructionResult>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

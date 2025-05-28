@@ -55,7 +55,7 @@ message Instruction {
   string method = 6;
 
   // PutLastInstructionOutputOnWorkspace
-  bytes key = 7;
+  uint32 workspace_put_key = 7;
 
   // EmitLog
   string log_level = 8;
@@ -75,34 +75,46 @@ message Instruction {
   bytes create_account_public_key = 16;
   OwnerRule create_account_owner_rule = 17;
   AccessRules create_account_access_rules = 18;
-  bytes create_account_workspace_id = 19;
+  WorkspaceOffsetId create_account_workspace_id = 19;
 
   // AssertBucketContains
-  bytes resource_address = 20;
-  int64 min_amount = 21;
+  WorkspaceOffsetId assert_bucket_workspace_id = 20;
+  bytes resource_address = 21;
+  int64 min_amount = 22;
 
   // PublishTemplate
-  bytes template_binary = 22;
+  bytes template_binary = 23;
 
   // AllocateAddress
-  AllocatableAddressType allocatable_address_type = 23;
-  string workspace_id = 24;
+  AllocatableAddressType allocatable_address_type = 24;
+  uint32 allocate_address_workspace_id = 25;
 }
 
 message ComponentCall {
   oneof call {
     bytes address = 1;
-    bytes allocation = 2;
+    uint32 allocation = 2;
   }
 }
 
 message Arg {
-  enum ArgType {
-    LITERAL = 0;
-    FROM_WORKSPACE = 1;
+  oneof arg_value {
+    bytes literal = 1;
+    WorkspaceOffsetId workspace = 2;
   }
-  ArgType arg_type = 1;
-  bytes data = 2;
+}
+
+message OptionWorkspaceId {
+  uint32 workspace_id = 1;
+}
+
+message WorkspaceOffsetId {
+  uint32 id = 1;
+  OptionOffset offset = 2;
+}
+
+message OptionOffset {
+  uint64 offset = 1;
 }
 
 message SubstateRequirement {

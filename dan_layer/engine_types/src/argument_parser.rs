@@ -7,15 +7,15 @@ use serde::{Deserialize, Deserializer};
 use serde_json as json;
 use tari_bor::{cbor, encode, to_value};
 use tari_template_lib::{
-    arg,
-    args::Arg,
+    args::{InstructionArg, WorkspaceId},
+    instruction_arg,
     models::{Amount, Metadata},
     types::TemplateAddress,
 };
 
 use crate::{substate::SubstateId, template::parse_template_address};
 
-pub fn json_deserialize<'de, D>(d: D) -> Result<Vec<Arg>, D::Error>
+pub fn json_deserialize<'de, D>(d: D) -> Result<Vec<InstructionArg>, D::Error>
 where D: Deserializer<'de> {
     if d.is_human_readable() {
         // human_readable !== json. This is why the function name is json_deserialize
@@ -32,11 +32,11 @@ where D: Deserializer<'de> {
             ))),
         }
     } else {
-        Vec::<Arg>::deserialize(d)
+        Vec::<InstructionArg>::deserialize(d)
     }
 }
 
-fn convert_value_to_arg(arg: json::Value) -> Result<Arg, ArgParseError> {
+fn convert_value_to_arg(arg: json::Value) -> Result<InstructionArg, ArgParseError> {
     if let Some(s) = arg.as_str() {
         // Support for special string literals e.g. "Amount(123)"
         parse_arg(s)
@@ -47,7 +47,7 @@ fn convert_value_to_arg(arg: json::Value) -> Result<Arg, ArgParseError> {
     } else {
         // Support for json objects
         let value = convert_to_cbor(arg);
-        let arg = Arg::literal(value)?;
+        let arg = InstructionArg::literal(value)?;
         Ok(arg)
     }
 }
@@ -58,26 +58,31 @@ fn is_arg_json(arg: &json::Value) -> bool {
         return false;
     };
 
-    if !obj.contains_key("Literal") && !obj.contains_key("Workspace") {
+    if let Some(lit) = obj.get("Literal") {
+        // Support for {"Literal" "deadbeaf"} - common case for wallet -> indexer JSON rpc
+        if let Some(s) = lit.as_str() {
+            return s.chars().all(|c| c.is_ascii_hexdigit());
+        }
+        if let Some(v) = lit.as_array() {
+            // Support for {"Literal": [1, 2, 3]}
+            return v.iter().all(|v| v.is_number());
+        }
         return false;
     }
 
-    let v = obj
-        .get("Literal")
-        .or_else(|| obj.get("Workspace"))
-        .expect("Already checked");
-    // Support for {"Literal" "deadbeaf"} - common case for wallet -> indexer JSON rpc
-    if let Some(s) = v.as_str() {
-        return s.chars().all(|c| c.is_ascii_hexdigit());
+    if let Some(ws) = obj.get("Workspace") {
+        // Support for {"Workspace": {id: 123, offset: null}}
+        return ws.is_object();
     }
-    v.is_array()
+
+    false
 }
 
 /// Parses a custom string syntax that represents common argument types.
 ///
 /// e.g. Amount(123) becomes an Amount type
 /// component_xxxx.. becomes a ComponentAddress type etc
-pub fn parse_arg(s: &str) -> Result<Arg, ArgParseError> {
+pub fn parse_arg(s: &str) -> Result<InstructionArg, ArgParseError> {
     let ty = try_parse_special_string_arg(s)?;
     Ok(ty.into())
 }
@@ -109,7 +114,10 @@ fn try_parse_special_string_arg(s: &str) -> Result<ParsedArg<'_>, ArgParseError>
     }
 
     if let Some(contents) = strip_cast_func(s, "Workspace") {
-        return Ok(ParsedArg::Workspace(contents.as_bytes().to_vec()));
+        let id = WorkspaceId::from_str(contents).map_err(|_| ArgParseError::SyntaxError {
+            details: format!("Expected Workspace(number) but got workspace ID: '{}'", contents),
+        })?;
+        return Ok(ParsedArg::Workspace(id));
     }
 
     if let Some(address) = parse_template_address(s) {
@@ -152,7 +160,7 @@ fn strip_cast_func<'a>(s: &'a str, cast: &str) -> Option<&'a str> {
 pub enum ParsedArg<'a> {
     Amount(Amount),
     String(&'a str),
-    Workspace(Vec<u8>),
+    Workspace(WorkspaceId),
     Bytes(Vec<u8>),
     SubstateId(SubstateId),
     TemplateAddress(TemplateAddress),
@@ -163,31 +171,31 @@ pub enum ParsedArg<'a> {
     Cbor(tari_bor::Value),
 }
 
-impl From<ParsedArg<'_>> for Arg {
+impl From<ParsedArg<'_>> for InstructionArg {
     fn from(value: ParsedArg<'_>) -> Self {
         match value {
-            ParsedArg::Amount(v) => arg!(v),
-            ParsedArg::String(v) => arg!(v),
+            ParsedArg::Amount(v) => instruction_arg!(v),
+            ParsedArg::String(v) => instruction_arg!(v),
             ParsedArg::SubstateId(v) => match v {
-                SubstateId::Component(v) => arg!(v),
-                SubstateId::Resource(v) => arg!(v),
-                SubstateId::Vault(v) => arg!(v),
-                SubstateId::UnclaimedConfidentialOutput(v) => arg!(v),
-                SubstateId::NonFungible(v) => arg!(v),
-                SubstateId::NonFungibleIndex(v) => arg!(v),
-                SubstateId::TransactionReceipt(v) => arg!(v),
-                SubstateId::Template(v) => arg!(v),
-                SubstateId::ValidatorFeePool(v) => arg!(v),
+                SubstateId::Component(v) => instruction_arg!(v),
+                SubstateId::Resource(v) => instruction_arg!(v),
+                SubstateId::Vault(v) => instruction_arg!(v),
+                SubstateId::UnclaimedConfidentialOutput(v) => instruction_arg!(v),
+                SubstateId::NonFungible(v) => instruction_arg!(v),
+                SubstateId::NonFungibleIndex(v) => instruction_arg!(v),
+                SubstateId::TransactionReceipt(v) => instruction_arg!(v),
+                SubstateId::Template(v) => instruction_arg!(v),
+                SubstateId::ValidatorFeePool(v) => instruction_arg!(v),
             },
-            ParsedArg::TemplateAddress(v) => arg!(v),
-            ParsedArg::UnsignedInteger(v) => arg!(v),
-            ParsedArg::SignedInteger(v) => arg!(v),
-            ParsedArg::Bool(v) => arg!(v),
+            ParsedArg::TemplateAddress(v) => instruction_arg!(v),
+            ParsedArg::UnsignedInteger(v) => instruction_arg!(v),
+            ParsedArg::SignedInteger(v) => instruction_arg!(v),
+            ParsedArg::Bool(v) => instruction_arg!(v),
             // Ensure bytes are encoded as Cbor Bytes, not Array<u8>
-            ParsedArg::Bytes(v) => Arg::Literal(encode(&tari_bor::Value::Bytes(v)).unwrap()),
-            ParsedArg::Workspace(s) => arg!(Workspace(s)),
-            ParsedArg::Metadata(m) => arg!(m),
-            ParsedArg::Cbor(cbor) => Arg::from_type(&cbor).unwrap(),
+            ParsedArg::Bytes(v) => InstructionArg::Literal(encode(&tari_bor::Value::Bytes(v)).unwrap()),
+            ParsedArg::Workspace(s) => instruction_arg!(Workspace(s)),
+            ParsedArg::Metadata(m) => instruction_arg!(m),
+            ParsedArg::Cbor(cbor) => InstructionArg::from_type(&cbor).unwrap(),
         }
     }
 }
@@ -241,6 +249,8 @@ fn convert_to_cbor(value: json::Value) -> tari_bor::Value {
 pub enum ArgParseError {
     #[error("Expected an integer, got '{got}'")]
     ExpectedAmount { got: String },
+    #[error("Syntax error: {details}")]
+    SyntaxError { details: String },
     #[error("JSON error: {0}")]
     JsonError(#[from] json::Error),
     #[error("CBOR error: {0}")]
@@ -250,9 +260,11 @@ pub enum ArgParseError {
 #[cfg(test)]
 mod tests {
     use serde::Serialize;
+    use serde_json::json;
     use tari_bor::decode_exact;
     use tari_template_lib::{
-        args,
+        args::WorkspaceOffsetId,
+        instruction_args,
         models::{ComponentAddress, ResourceAddress},
     };
 
@@ -264,11 +276,11 @@ mod tests {
         #[derive(PartialEq, Deserialize, Debug, Serialize)]
         struct SomeArgs {
             #[serde(deserialize_with = "json_deserialize")]
-            args: Vec<Arg>,
+            args: Vec<InstructionArg>,
         }
 
         let args = SomeArgs {
-            args: args!(ResourceAddress::new(Default::default())),
+            args: instruction_args!(ResourceAddress::new(Default::default())),
         };
         // Serialize and deserialize from JSON representation
         let s = json::to_string(&args).unwrap();
@@ -281,8 +293,8 @@ mod tests {
         )
         .unwrap();
         match &some_args.args[0] {
-            Arg::Workspace(_) => panic!(),
-            Arg::Literal(a) => {
+            InstructionArg::Workspace(_) => panic!(),
+            InstructionArg::Literal(a) => {
                 let a: ComponentAddress = decode_exact(a).unwrap();
                 assert_eq!(
                     a.to_string(),
@@ -297,7 +309,7 @@ mod tests {
         #[derive(PartialEq, Deserialize, Debug, Serialize)]
         struct SomeArgs {
             #[serde(deserialize_with = "json_deserialize")]
-            args: Vec<Arg>,
+            args: Vec<InstructionArg>,
         }
 
         #[derive(PartialEq, Deserialize, Debug, Serialize)]
@@ -331,7 +343,7 @@ mod tests {
         };
 
         let args = SomeArgs {
-            args: args!(struct_sample),
+            args: instruction_args!(struct_sample),
         };
         // Serialize and deserialize from JSON representation
         let s = json::to_string(&args).unwrap();
@@ -352,10 +364,10 @@ mod tests {
     #[test]
     fn it_parses_amounts() {
         let a = parse_arg("Amount(123)").unwrap();
-        assert_eq!(a, arg!(Amount(123)));
+        assert_eq!(a, instruction_arg!(Amount(123)));
 
         let a = parse_arg("Amount(-123)").unwrap();
-        assert_eq!(a, arg!(Amount(-123)));
+        assert_eq!(a, instruction_arg!(Amount(-123)));
     }
 
     #[test]
@@ -370,11 +382,11 @@ mod tests {
         let i64_min = i64::MIN.to_string();
 
         let cases = &[
-            ("123", arg!(123u64)),
-            ("-123", arg!(-123i64)),
-            ("0", arg!(0u64)),
-            (u64_max.as_str(), arg!(u64::MAX)),
-            (i64_min.as_str(), arg!(i64::MIN)),
+            ("123", instruction_arg!(123u64)),
+            ("-123", instruction_arg!(-123i64)),
+            ("0", instruction_arg!(0u64)),
+            (u64_max.as_str(), instruction_arg!(u64::MAX)),
+            (i64_min.as_str(), instruction_arg!(i64::MIN)),
         ];
 
         for (case, expected) in cases {
@@ -396,13 +408,13 @@ mod tests {
 
             match SubstateId::from_str(case).unwrap() {
                 SubstateId::Component(c) => {
-                    assert_eq!(a, arg!(c), "Unexpected value for case '{}'", case);
+                    assert_eq!(a, instruction_arg!(c), "Unexpected value for case '{}'", case);
                 },
                 SubstateId::Resource(r) => {
-                    assert_eq!(a, arg!(r), "Unexpected value for case '{}'", case);
+                    assert_eq!(a, instruction_arg!(r), "Unexpected value for case '{}'", case);
                 },
                 SubstateId::Vault(v) => {
-                    assert_eq!(a, arg!(v), "Unexpected value for case '{}'", case);
+                    assert_eq!(a, instruction_arg!(v), "Unexpected value for case '{}'", case);
                 },
                 _ => unreachable!(),
             }
@@ -416,15 +428,16 @@ mod tests {
         let a = parse_arg(valid_template_address).unwrap();
         assert_eq!(
             a,
-            arg!(
-                TemplateAddress::from_str("d7e6f5cd2b717c83c86d3b3abf046a4caa0947e04b4e88de97a94a63ad19e382").unwrap()
+            instruction_arg!(TemplateAddress::from_str(
+                "d7e6f5cd2b717c83c86d3b3abf046a4caa0947e04b4e88de97a94a63ad19e382"
             )
+            .unwrap())
         );
 
         // invalid template addresses are ignored
         let invalid_template_address = "template_xxxxxx";
         let a = parse_arg(invalid_template_address).unwrap();
-        assert_eq!(a, arg!(invalid_template_address));
+        assert_eq!(a, instruction_arg!(invalid_template_address));
     }
 
     #[test]
@@ -433,13 +446,39 @@ mod tests {
 
         for case in cases {
             let a = parse_arg(case).unwrap();
-            assert_eq!(a, arg!(case));
+            assert_eq!(a, instruction_arg!(case));
         }
     }
 
     #[test]
     fn it_parses_workspace_references() {
-        let a = parse_arg("Workspace(abc)").unwrap();
-        assert_eq!(a, arg!(Workspace("abc")));
+        let a = parse_arg("Workspace(123)").unwrap();
+        assert_eq!(a, instruction_arg!(Workspace(123)));
+    }
+
+    mod convert_json_to_arg {
+
+        use super::*;
+
+        #[test]
+        fn it_parses_literal_json() {
+            let json = json!({"Literal": "4e146f73f764ddc21a89c315bd00c939cfaae7d86df082a36e47028dffffffff"});
+            assert!(is_arg_json(&json));
+            let arg = convert_value_to_arg(json).unwrap();
+            assert!(matches!(arg, InstructionArg::Literal(_)));
+        }
+
+        #[test]
+        fn it_parses_workspace_json() {
+            let json = json!({"Workspace": {"id": 123}});
+            assert!(is_arg_json(&json));
+            let json = json!({"Workspace": {"id": 123, "offset": 321}});
+            assert!(is_arg_json(&json));
+            let arg = convert_value_to_arg(json).unwrap();
+            match arg {
+                InstructionArg::Workspace(id) => assert_eq!(id, WorkspaceOffsetId::new(123).with_offset(321)),
+                _ => panic!("Expected Workspace argument"),
+            }
+        }
     }
 }

@@ -5,10 +5,10 @@ use log::info;
 use tari_dan_common_types::SubstateRequirement;
 use tari_dan_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_template_lib::{
-    args,
     constants::XTR,
     models::{Amount, ComponentAddress, ResourceAddress, VaultId},
 };
+use tari_transaction::args;
 
 use crate::runner::Runner;
 

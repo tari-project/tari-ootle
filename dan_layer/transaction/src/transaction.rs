@@ -282,9 +282,10 @@ mod tests {
     };
     use tari_dan_common_types::crypto::create_key_pair;
     use tari_engine_types::ToByteType;
-    use tari_template_lib::{args, types::TemplateAddress};
+    use tari_template_lib::types::TemplateAddress;
 
     use super::*;
+    use crate::args;
 
     fn create_transaction() -> TransactionBuilder {
         Transaction::builder()
@@ -295,7 +296,7 @@ mod tests {
                 2,
                 3,
                 "string",
-                args![1, 2]
+                tari_template_lib::instruction_args![1, 2]
             ])
             .call_function(TemplateAddress::from_array([1; 32]), "function", args![
                 1,

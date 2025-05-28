@@ -4,12 +4,12 @@
 use tari_dan_common_types::substate_type::SubstateType;
 use tari_engine_types::instruction::Instruction;
 use tari_template_lib::{
-    args,
+    instruction_args,
     models::{Amount, ComponentAddress},
     prelude::{NonFungibleAddress, ResourceAddress},
 };
 use tari_template_test_tooling::TemplateTest;
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 struct TariSwapTest {
     template_test: TemplateTest,
@@ -47,8 +47,12 @@ fn setup(fee: u16) -> TariSwapTest {
 
 fn create_faucet_component(template_test: &mut TemplateTest, symbol: String) -> (ComponentAddress, ResourceAddress) {
     let initial_supply = Amount(1_000_000_000_000);
-    let component_address: ComponentAddress =
-        template_test.call_function("TestFaucet", "mint_with_symbol", args![initial_supply, symbol], vec![]);
+    let component_address: ComponentAddress = template_test.call_function(
+        "TestFaucet",
+        "mint_with_symbol",
+        instruction_args![initial_supply, symbol],
+        vec![],
+    );
 
     let resource_address = template_test
         .get_previous_output_address(SubstateType::Resource)
@@ -72,7 +76,7 @@ fn create_tariswap_component(
             vec![Instruction::CallFunction {
                 address: tariswap_template,
                 function: "new".to_string(),
-                args: args![a_resource, b_resource, fee],
+                args: instruction_args![a_resource, b_resource, fee],
             }],
             vec![],
         )
@@ -108,7 +112,7 @@ fn fund_account(
         .build_and_execute(
             Transaction::builder()
                 .call_method(faucet_component, "take_free_coins", args![])
-                .put_last_instruction_output_on_workspace(b"free_coins")
+                .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(account_address, "deposit", args![Workspace("free_coins")]),
             // no proof needed to withdraw from the faucet
             vec![],
@@ -121,9 +125,9 @@ fn swap(test: &mut TariSwapTest, input_resource: &ResourceAddress, output_resour
         .build_and_execute(
             Transaction::builder()
                 .call_method(test.account_address, "withdraw", args![input_resource, amount])
-                .put_last_instruction_output_on_workspace(b"input_bucket")
+                .put_last_instruction_output_on_workspace("input_bucket")
                 .call_method(test.tariswap, "swap", args![Workspace("input_bucket"), output_resource])
-                .put_last_instruction_output_on_workspace(b"output_bucket")
+                .put_last_instruction_output_on_workspace("output_bucket")
                 .call_method(test.account_address, "deposit", args![Workspace("output_bucket")]),
             // proof needed to withdraw
             vec![test.account_proof.clone()],
@@ -136,14 +140,14 @@ fn add_liquidity(test: &mut TariSwapTest, a_amount: Amount, b_amount: Amount) {
         .build_and_execute(
             Transaction::builder()
                 .call_method(test.account_address, "withdraw", args![test.a_resource, a_amount])
-                .put_last_instruction_output_on_workspace(b"a_bucket")
+                .put_last_instruction_output_on_workspace("a_bucket")
                 .call_method(test.account_address, "withdraw", args![test.b_resource, b_amount])
-                .put_last_instruction_output_on_workspace(b"b_bucket")
+                .put_last_instruction_output_on_workspace("b_bucket")
                 .call_method(test.tariswap, "add_liquidity", args![
                     Workspace("a_bucket"),
                     Workspace("b_bucket")
                 ])
-                .put_last_instruction_output_on_workspace(b"lp_bucket")
+                .put_last_instruction_output_on_workspace("lp_bucket")
                 .call_method(test.account_address, "deposit", args![Workspace("lp_bucket")]),
             // proof needed to withdraw (from account) and mint (the lp_resource owned by the test identity)
             vec![test.account_proof.clone(), test.template_test.get_test_proof()],
@@ -156,9 +160,9 @@ fn remove_liquidity(test: &mut TariSwapTest, lp_amount: Amount) {
         .build_and_execute(
             Transaction::builder()
                 .call_method(test.account_address, "withdraw", args![test.lp_resource, lp_amount])
-                .put_last_instruction_output_on_workspace(b"lp_bucket")
+                .put_last_instruction_output_on_workspace("lp_bucket")
                 .call_method(test.tariswap, "remove_liquidity", args![Workspace("lp_bucket")])
-                .put_last_instruction_output_on_workspace(b"pool_buckets")
+                .put_last_instruction_output_on_workspace("pool_buckets")
                 .call_method(test.account_address, "deposit", args![Workspace("pool_buckets.0")])
                 .call_method(test.account_address, "deposit", args![Workspace("pool_buckets.1")]),
             // proof needed to withdraw (from account) and burn (the lp_resource owned by the test identity)
@@ -169,13 +173,21 @@ fn remove_liquidity(test: &mut TariSwapTest, lp_amount: Amount) {
 }
 
 fn get_pool_balance(test: &mut TariSwapTest, resource_address: ResourceAddress) -> Amount {
-    test.template_test
-        .call_method(test.tariswap, "get_pool_balance", args![resource_address], vec![])
+    test.template_test.call_method(
+        test.tariswap,
+        "get_pool_balance",
+        instruction_args![resource_address],
+        vec![],
+    )
 }
 
 fn get_account_balance(test: &mut TariSwapTest, resource_address: ResourceAddress) -> Amount {
-    test.template_test
-        .call_method(test.account_address, "balance", args![resource_address], vec![])
+    test.template_test.call_method(
+        test.account_address,
+        "balance",
+        instruction_args![resource_address],
+        vec![],
+    )
 }
 
 fn assert_swap(

@@ -44,11 +44,11 @@ impl EngineArgs {
         }
     }
 
-    pub fn assert_n_args<T: DeserializeOwned>(&self, n: usize) -> Result<(), RuntimeError> {
+    pub fn assert_n_args(&self, n: usize) -> Result<(), RuntimeError> {
         if self.len() != n {
-            return Err(RuntimeError::InvalidArgument {
-                argument: type_name::<T>(),
-                reason: format!("Expected {} arguments but got {}", n, self.len()),
+            return Err(RuntimeError::InvalidNumberOfArguments {
+                expected: n,
+                len: self.len(),
             });
         }
         Ok(())

@@ -4,14 +4,13 @@
 use tari_dan_engine::runtime::{ActionIdent, NativeAction, RuntimeError};
 use tari_engine_types::{indexed_value::IndexedWellKnownTypes, resource_container::ResourceError};
 use tari_template_lib::{
-    args,
     args::VaultAction,
     constants::XTR,
     models::{Amount, ComponentAddress, ResourceAddress},
     prelude::ResourceType,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 #[test]
 fn it_rejects_dangling_vaults_in_constructor() {

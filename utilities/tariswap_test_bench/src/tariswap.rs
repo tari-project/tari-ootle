@@ -9,10 +9,10 @@ use tari_dan_common_types::{optional::Optional, SubstateRequirement};
 use tari_dan_wallet_sdk::{apis::key_manager::TRANSACTION_BRANCH, models::Account};
 use tari_engine_types::{indexed_value::decode_value_at_path, ToByteType};
 use tari_template_lib::{
-    args,
     models::{Amount, ComponentAddress, VaultId},
     prelude::{ResourceAddress, ResourceType, XTR},
 };
+use tari_transaction::args;
 
 use crate::{faucet::Faucet, runner::Runner, timer::TraceTimer};
 

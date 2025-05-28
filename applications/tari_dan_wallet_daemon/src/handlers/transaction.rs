@@ -12,8 +12,8 @@ use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_dan_common_types::{optional::Optional, Epoch};
 use tari_dan_wallet_sdk::apis::{config::ConfigKey, key_manager};
 use tari_engine_types::ToByteType;
-use tari_template_lib::{args, models::Amount};
-use tari_transaction::Transaction;
+use tari_template_lib::models::Amount;
+use tari_transaction::{args, Transaction};
 use tari_transaction_manifest::parse_manifest;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,

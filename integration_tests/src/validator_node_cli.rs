@@ -11,7 +11,7 @@ use tari_engine_types::{
     ToByteType,
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
-use tari_template_lib::args;
+use tari_template_lib::instruction_args;
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_validator_node_cli::{
     command::transaction::{handle_submit, submit_transaction, CliArg, CliInstruction, CommonSubmitArgs, SubmitArgs},
@@ -63,7 +63,7 @@ pub async fn create_account(world: &mut TariWorld, account_name: String, validat
         // The "account" template is builtin in the validator nodes with a constant address
         address: ACCOUNT_TEMPLATE_ADDRESS,
         function: "create".to_string(),
-        args: args!(owner_token),
+        args: instruction_args!(owner_token),
     };
     let common = CommonSubmitArgs {
         wait_for_result: true,

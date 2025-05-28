@@ -22,25 +22,72 @@
 
 use serde::{Deserialize, Serialize};
 use tari_bor::encode;
+use tari_template_abi::rust::fmt;
 use tari_template_lib_types::serde_helpers;
 
-pub type WorkspaceKey = Vec<u8>;
+pub type WorkspaceId = u16;
 
-/// The possible ways to represent an instruction's argument
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
+pub struct WorkspaceOffsetId {
+    id: WorkspaceId,
+    offset: Option<usize>,
+}
+
+impl WorkspaceOffsetId {
+    pub fn new(id: WorkspaceId) -> Self {
+        Self { id, offset: None }
+    }
+
+    pub fn with_offset(self, offset: usize) -> Self {
+        Self {
+            id: self.id,
+            offset: Some(offset),
+        }
+    }
+
+    pub fn with_offset_opt(self, offset: Option<usize>) -> Self {
+        Self { id: self.id, offset }
+    }
+
+    /// The workspace ID
+    pub fn id(&self) -> WorkspaceId {
+        self.id
+    }
+
+    /// The offset within the workspace, if provided. Offset refers to the index of an array or field/map entry
+    /// within a workspace item.
+    pub fn offset(&self) -> Option<usize> {
+        self.offset
+    }
+}
+
+impl fmt::Display for WorkspaceOffsetId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(offset) = self.offset {
+            write!(f, "{}.{}", self.id, offset)
+        } else {
+            write!(f, "{}", self.id)
+        }
+    }
+}
+
+/// Represents an argument that can be passed to a transaction instruction. Either a literal value or a reference to a
+/// item on the runtime's workspace.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "ts",
     derive(ts_rs::TS),
     ts(export, export_to = "../../bindings/src/types/")
 )]
-pub enum Arg {
+pub enum InstructionArg {
     /// The argument is in the transaction execution's workspace, which means it is the result of a previous
     /// instruction
-    Workspace(
-        #[serde(with = "serde_helpers::dynamic_hex")]
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
-        WorkspaceKey,
-    ),
+    Workspace(#[cfg_attr(feature = "ts", ts(type = "number"))] WorkspaceOffsetId),
     /// The argument is a value specified in the transaction
     Literal(
         #[serde(with = "serde_helpers::dynamic_hex")]
@@ -50,72 +97,29 @@ pub enum Arg {
     // Literal(tari_bor::Value),
 }
 
-impl Arg {
+impl InstructionArg {
     pub fn literal(value: tari_bor::Value) -> Result<Self, tari_bor::BorError> {
         // TODO: Unfortunately, CBOR value does not serialize consistently in JSON so we have to use the byte encoded
         // form for now.
-        Ok(Arg::Literal(encode(&value)?))
+        Ok(Self::Literal(encode(&value)?))
     }
 
     pub fn from_type<T: Serialize>(val: &T) -> Result<Self, tari_bor::BorError> {
-        Ok(Arg::Literal(encode(val)?))
+        Ok(Self::Literal(encode(val)?))
     }
 
-    pub fn workspace<T: Into<Vec<u8>>>(key: T) -> Self {
-        Arg::Workspace(key.into())
+    pub fn workspace(id: WorkspaceId, offset: Option<usize>) -> Self {
+        Self::workspace_offset(WorkspaceOffsetId::new(id).with_offset_opt(offset))
+    }
+
+    pub fn workspace_offset(id: WorkspaceOffsetId) -> Self {
+        Self::Workspace(id)
     }
 
     pub fn as_literal_bytes(&self) -> Option<&[u8]> {
         match self {
-            Arg::Workspace(_) => None,
-            Arg::Literal(bytes) => Some(bytes),
+            Self::Literal(bytes) => Some(bytes),
+            Self::Workspace(_) => None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tari_bor::decode_exact;
-    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
-
-    use super::*;
-    use crate::args;
-
-    #[derive(Serialize, Deserialize, Debug)]
-    struct TestCase {
-        bytes: Vec<u8>,
-        pk: RistrettoPublicKeyBytes,
-    }
-
-    #[test]
-    fn decode_encode() {
-        let test_case = TestCase {
-            bytes: vec![1, 2, 3, 4, 5],
-            pk: RistrettoPublicKeyBytes::from([1; 32]),
-        };
-        let args = args![test_case];
-        let json = serde_json::to_string(&args).unwrap();
-        let decoded: Vec<Arg> = serde_json::from_str(&json).unwrap();
-
-        let decoded: TestCase = decode_exact(decoded[0].as_literal_bytes().unwrap()).unwrap();
-        assert_eq!(test_case.bytes, decoded.bytes);
-        assert_eq!(test_case.pk, decoded.pk);
-
-        let json = serde_json::to_value(&args).unwrap();
-        assert_eq!(
-            json[0]["Literal"].as_str().expect("string"),
-            "a265627974657385010203040562706b58200101010101010101010101010101010101010101010101010101010101010101"
-        );
-
-        let decoded = tari_bor::decode::<Vec<Arg>>(&tari_bor::encode(&args).unwrap()).unwrap();
-        let decoded: TestCase = decode_exact(decoded[0].as_literal_bytes().unwrap()).unwrap();
-        assert_eq!(test_case.bytes, decoded.bytes);
-        assert_eq!(test_case.pk, decoded.pk);
-
-        let cbor = tari_bor::to_value(&args).unwrap();
-        let decoded = tari_bor::from_value::<Vec<Arg>>(&cbor).unwrap();
-        let decoded: TestCase = decode_exact(decoded[0].as_literal_bytes().unwrap()).unwrap();
-        assert_eq!(test_case.bytes, decoded.bytes);
-        assert_eq!(test_case.pk, decoded.pk);
     }
 }

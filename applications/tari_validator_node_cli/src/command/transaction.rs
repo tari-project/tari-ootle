@@ -46,13 +46,12 @@ use tari_engine_types::{
 };
 use tari_sidechain::QuorumDecision;
 use tari_template_lib::{
-    arg,
-    args::Arg,
+    args::InstructionArg,
     models::{Amount, BucketId, NonFungibleAddress, NonFungibleId},
     prelude::ResourceAddress,
     types::TemplateAddress,
 };
-use tari_transaction::{Transaction, TransactionId};
+use tari_transaction::{arg, builder::named_args::NamedArg, Transaction, TransactionId};
 use tari_transaction_manifest::parse_manifest;
 use tari_validator_node_client::{
     types::{
@@ -184,7 +183,15 @@ pub async fn handle_submit(
         } => Instruction::CallFunction {
             address: template_address.into_inner(),
             function: function_name,
-            args: args.into_iter().map(|s| s.into_arg()).collect(),
+            args: args
+                .into_iter()
+                .map(|s| {
+                    s.into_named_arg()
+                        .into_literal_bytes()
+                        .map(InstructionArg::Literal)
+                        .expect("CliArg does not support workspace args")
+                })
+                .collect(),
         },
         CliInstruction::CallMethod {
             component_address,
@@ -196,7 +203,15 @@ pub async fn handle_submit(
                 .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?
                 .into(),
             method: method_name,
-            args: args.into_iter().map(|s| s.into_arg()).collect(),
+            args: args
+                .into_iter()
+                .map(|s| {
+                    s.into_named_arg()
+                        .into_literal_bytes()
+                        .map(InstructionArg::Literal)
+                        .expect("CliArg does not support workspace args")
+                })
+                .collect(),
         },
     };
     submit_transaction(vec![instruction], common, base_dir, client).await
@@ -703,7 +718,7 @@ impl FromStr for CliArg {
 }
 
 impl CliArg {
-    pub fn into_arg(self) -> Arg {
+    pub fn into_named_arg(self) -> NamedArg {
         match self {
             CliArg::String(s) => arg!(s),
             CliArg::U64(v) => arg!(v),

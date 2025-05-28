@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 
 use tari_template_lib::{
-    args,
     models::{Amount, NonFungibleId, ResourceAddress, VaultId},
     prelude::ComponentAddress,
 };
@@ -12,7 +11,7 @@ use tari_template_test_tooling::{
     support::confidential::{generate_confidential_proof, generate_withdraw_proof},
     TemplateTest,
 };
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 #[test]
 fn it_recalls_all_resource_types() {

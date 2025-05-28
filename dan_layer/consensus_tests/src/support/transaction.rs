@@ -18,7 +18,7 @@ use tari_engine_types::{
     ValidatorFeePool,
     ValidatorFeeWithdrawal,
 };
-use tari_template_lib::args;
+use tari_template_lib::instruction_args;
 use tari_transaction::Transaction;
 
 use crate::support::{committee_number_to_shard_group, helpers::random_substate_in_shard_group, TEST_NUM_PRESHARDS};
@@ -165,7 +165,7 @@ pub fn random_substates_ids_for_committee_generator(
 pub fn build_transaction(inputs: Vec<SubstateRequirement>) -> TransactionRecord {
     let k = PrivateKey::default();
     let tx = Transaction::builder()
-        .call_function(Default::default(), "foo", args![])
+        .call_function(Default::default(), "foo", instruction_args![])
         .with_inputs(inputs)
         .build_and_seal(&k);
     TransactionRecord::new(tx)

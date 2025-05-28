@@ -108,11 +108,11 @@ tari_rpc_framework = { path = "networking/rpc_framework" }
 tari_rpc_macros = { path = "networking/rpc_macros" }
 tari_state_tree = { path = "dan_layer/state_tree" }
 tari_swarm = { path = "networking/swarm" }
-tari_template_abi = { version = "0.9.0", path = "dan_layer/template_abi", default-features = false }
+tari_template_abi = { version = "0.10.0", path = "dan_layer/template_abi", default-features = false }
 tari_template_builtin = { path = "dan_layer/template_builtin" }
 tari_template_lib = { path = "dan_layer/template_lib" }
 tari_template_lib_types = { path = "dan_layer/template_lib_types" }
-tari_template_macros = { version = "0.9", path = "dan_layer/template_macros" }
+tari_template_macros = { version = "0.10", path = "dan_layer/template_macros" }
 tari_template_manager = { path = "dan_layer/template_manager" }
 tari_template_test_tooling = { path = "dan_layer/template_test_tooling" }
 tari_transaction = { path = "dan_layer/transaction" }

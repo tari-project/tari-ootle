@@ -23,12 +23,11 @@ use tari_engine_types::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::{Amount, ComponentAddress, ResourceAddress, VaultId},
     prelude::RistrettoPublicKeyBytes,
 };
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 use crate::{
     apis::{

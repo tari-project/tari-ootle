@@ -37,13 +37,12 @@ use tari_dan_wallet_sdk::{
 };
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib::{
-    args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
     models::Amount,
     prelude::{ComponentAddress, ResourceAddress, RistrettoPublicKeyBytes},
     resource::TOKEN_SYMBOL,
 };
-use tari_transaction::UnsignedTransaction;
+use tari_transaction::{args, UnsignedTransaction};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 use tari_validator_node_cli::command::transaction::CliArg;
 use tari_wallet_daemon_client::{
@@ -216,7 +215,7 @@ pub async fn transfer_confidential(
             resource_address,
             withdraw_proof
         ])
-        .put_last_instruction_output_on_workspace(b"bucket")
+        .put_last_instruction_output_on_workspace("bucket")
         .call_method(destination_account, "deposit", args![Variable("bucket")])
         .with_min_epoch(min_epoch)
         .with_max_epoch(max_epoch)
@@ -661,7 +660,10 @@ pub async fn create_component(
             )
         })
         .address;
-    let args = args.iter().map(|a| CliArg::from_str(a).unwrap().into_arg()).collect();
+    let args = args
+        .iter()
+        .map(|a| CliArg::from_str(a).unwrap().into_named_arg())
+        .collect();
     let AccountGetResponse { account, .. } = client
         .accounts_get(ComponentAddressOrName::Name(account_name.clone()))
         .await

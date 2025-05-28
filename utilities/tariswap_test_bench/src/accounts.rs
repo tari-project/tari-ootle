@@ -14,11 +14,11 @@ use tari_engine_types::{
 };
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args,
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::Amount,
     resource::ResourceType,
 };
+use tari_transaction::args;
 
 use crate::{faucet::Faucet, runner::Runner};
 

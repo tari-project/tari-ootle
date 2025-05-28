@@ -24,7 +24,7 @@ use std::fmt::Display;
 
 use anyhow::anyhow;
 use tari_bor::BorError;
-use tari_dan_common_types::optional::IsNotFoundError;
+use tari_dan_common_types::{displayable::Displayable, optional::IsNotFoundError};
 use tari_engine_types::{
     commit_result::RejectReason,
     entity_id_provider::EntityIdProviderError,
@@ -37,6 +37,7 @@ use tari_engine_types::{
     virtual_substate::VirtualSubstateId,
 };
 use tari_template_lib::{
+    args::{WorkspaceId, WorkspaceOffsetId},
     models::{
         AddressAllocationId,
         Amount,
@@ -111,6 +112,8 @@ pub enum RuntimeError {
     },
     #[error("Invalid argument {argument}: {reason}")]
     InvalidArgument { argument: &'static str, reason: String },
+    #[error("Invalid number of arguments: expected {expected}, but got {len}")]
+    InvalidNumberOfArguments { expected: usize, len: usize },
     #[error("Invalid amount '{amount}': {reason}")]
     InvalidAmount { amount: Amount, reason: String },
     #[error("Call frame error: {details}")]
@@ -138,8 +141,11 @@ pub enum RuntimeError {
     ResourceError(#[from] ResourceError),
     #[error("Bucket {bucket_id} was dropped but was not empty")]
     BucketNotEmpty { bucket_id: BucketId },
-    #[error("No workspace item named {key} was found")]
-    ItemNotOnWorkspace { key: String },
+    #[error("Item at id {id} does not exist on the workspace (existing ids: {})", .existing_ids.display())]
+    ItemNotOnWorkspace {
+        id: WorkspaceOffsetId,
+        existing_ids: Vec<WorkspaceId>,
+    },
     #[error("Attempted to take the last output but there was no previous instruction output")]
     NoLastInstructionOutput,
     #[error(transparent)]

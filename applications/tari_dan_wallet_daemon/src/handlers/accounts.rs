@@ -27,12 +27,13 @@ use tari_engine_types::{
 use tari_key_manager::key_manager::DerivedKey;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args,
     constants::{XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
+    instruction_args,
     models::{Amount, UnclaimedConfidentialOutputAddress},
     prelude::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, Scalar32Bytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
     types::crypto::CommitmentSignatureBytes,
 };
+use tari_transaction::args;
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -48,8 +49,6 @@ use tari_wallet_daemon_client::{
         AccountsCreateResponse,
         AccountsGetBalancesRequest,
         AccountsGetBalancesResponse,
-        AccountsInvokeRequest,
-        AccountsInvokeResponse,
         AccountsListRequest,
         AccountsListResponse,
         AccountsTransferRequest,
@@ -194,45 +193,6 @@ pub async fn handle_list(
         .collect::<Result<_, anyhow::Error>>()?;
 
     Ok(AccountsListResponse { accounts, total })
-}
-
-pub async fn handle_invoke(
-    context: &HandlerContext,
-    token: Option<&Bearer>,
-    req: AccountsInvokeRequest,
-) -> Result<AccountsInvokeResponse, anyhow::Error> {
-    context.check_auth(token, &[JrpcPermission::Admin])?;
-    let sdk = context.wallet_sdk();
-
-    let account = get_account_or_default(req.account, &sdk.accounts_api())?;
-
-    let signing_key = sdk
-        .key_manager_api()
-        .derive_key(key_manager::TRANSACTION_BRANCH, account.key_index)?;
-
-    let inputs = sdk.substate_api().load_dependent_substates(&[&account.address])?;
-
-    let account_address = account.address.as_component_address().unwrap();
-    let transaction = transaction_builder(context)
-        .fee_transaction_pay_from_component(account_address, req.max_fee.unwrap_or(DEFAULT_FEE))
-        .call_method(account_address, &req.method, req.args)
-        .with_inputs(inputs)
-        .build_and_seal(&signing_key.key);
-
-    let mut events = context.notifier().subscribe();
-    let tx_id = context
-        .transaction_service()
-        .submit_transaction(transaction, vec![])
-        .await?;
-
-    let mut finalized = wait_for_result(&mut events, tx_id).await?;
-    if let Some(reject) = finalized.finalize.any_reject() {
-        return Err(anyhow!("Transaction rejected: {}", reject));
-    }
-
-    Ok(AccountsInvokeResponse {
-        result: finalized.finalize.execution_results.pop(),
-    })
 }
 
 pub async fn handle_get_balances(
@@ -633,7 +593,7 @@ pub async fn handle_claim_burn(
 }
 
 async fn finish_claiming<T: WalletStore>(
-    mut instructions: Vec<Instruction>,
+    fee_instructions: Vec<Instruction>,
     account_address: SubstateId,
     new_account_name: Option<String>,
     sdk: &DanWalletSdk<SqliteWalletStore, IndexerJsonRpcNetworkInterface>,
@@ -650,9 +610,10 @@ async fn finish_claiming<T: WalletStore>(
     ),
     anyhow::Error,
 > {
-    instructions.push(Instruction::PutLastInstructionOutputOnWorkspace {
-        key: b"bucket".to_vec(),
-    });
+    let mut fee_builder = transaction_builder(context)
+        .with_instructions(fee_instructions)
+        .put_last_instruction_output_on_workspace("bucket");
+
     let account_component_address = account_address
         .as_component_address()
         .ok_or_else(|| anyhow!("Invalid account address"))?;
@@ -660,26 +621,15 @@ async fn finish_claiming<T: WalletStore>(
         // Add all versioned account child addresses as inputs unless the account is new
         let child_addresses = sdk.substate_api().load_dependent_substates(&[&account_address])?;
         inputs.extend(child_addresses);
-        instructions.push(Instruction::CallMethod {
-            call: account_component_address.into(),
-            method: "deposit".to_string(),
-            args: args![Workspace("bucket")],
-        });
+        fee_builder = fee_builder.call_method(account_component_address, "deposit", args![Workspace("bucket")]);
     } else {
-        instructions.push(Instruction::CreateAccount {
-            public_key_address: account_public_key,
-            owner_rule: None,
-            access_rules: None,
-            workspace_id: Some(b"bucket".to_vec()),
-        });
+        fee_builder = fee_builder.create_account_with_bucket(account_public_key, "bucket");
     }
-    instructions.push(Instruction::CallMethod {
-        call: account_component_address.into(),
-        method: "pay_fee".to_string(),
-        args: args![max_fee],
-    });
+
+    fee_builder = fee_builder.call_method(account_component_address, "pay_fee", args![max_fee]);
+
     let transaction = transaction_builder(context)
-        .with_fee_instructions(instructions)
+        .with_fee_instructions(fee_builder.build_unsigned_transaction().into_instructions())
         .with_inputs(inputs.into_iter().map(|input| input.into_unversioned()))
         .build_and_seal(&account_secret_key.key);
     let is_first_account = accounts_api.count()? == 0;
@@ -747,7 +697,7 @@ pub async fn handle_create_free_test_coins(
     let instructions = vec![Instruction::CallMethod {
         call: XTR_FAUCET_COMPONENT_ADDRESS.into(),
         method: "take".to_string(),
-        args: args![amount],
+        args: instruction_args![amount],
     }];
 
     // ------------------------------

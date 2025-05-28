@@ -1,6 +1,13 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+pub mod named_args;
+mod named_component_call;
+#[cfg(test)]
+mod tests;
+mod workspace_ids;
+
+pub use named_component_call::*;
 use tari_common_types::types::PrivateKey;
 use tari_dan_common_types::{Epoch, SubstateRequirement};
 use tari_engine_types::{
@@ -10,20 +17,30 @@ use tari_engine_types::{
     ValidatorFeePoolAddress,
 };
 use tari_template_lib::{
-    args,
-    args::{AllocatableAddressType, Arg, WorkspaceKey},
+    args::{AllocatableAddressType, InstructionArg, WorkspaceOffsetId},
     auth::OwnerRule,
+    instruction_args,
     models::{Amount, ConfidentialWithdrawProof, ResourceAddress},
     prelude::AccessRules,
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 
-use crate::{unsigned_transaction::UnsignedTransaction, Transaction, TransactionSignature, UnsealedTransactionV1};
+use crate::{
+    builder::{
+        named_args::{parse_workspace_key, BuilderWorkspaceKey, NamedArg, ParseWorkspaceKeyError},
+        workspace_ids::WorkspaceIds,
+    },
+    unsigned_transaction::UnsignedTransaction,
+    Transaction,
+    TransactionSignature,
+    UnsealedTransactionV1,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct TransactionBuilder {
     unsigned_transaction: UnsignedTransaction,
     signatures: Vec<TransactionSignature>,
+    workspace_ids: WorkspaceIds,
 }
 
 impl TransactionBuilder {
@@ -31,6 +48,7 @@ impl TransactionBuilder {
         Self {
             unsigned_transaction: UnsignedTransaction::default(),
             signatures: vec![],
+            workspace_ids: WorkspaceIds::new(),
         }
     }
 
@@ -38,6 +56,7 @@ impl TransactionBuilder {
         Self {
             unsigned_transaction: unsigned_transaction.into(),
             signatures: vec![],
+            workspace_ids: WorkspaceIds::new(),
         }
     }
 
@@ -69,7 +88,7 @@ impl TransactionBuilder {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
             method: "pay_fee".to_string(),
-            args: args![max_fee],
+            args: instruction_args![max_fee],
         })
     }
 
@@ -84,7 +103,7 @@ impl TransactionBuilder {
         self.add_fee_instruction(Instruction::CallMethod {
             call: call.into(),
             method: "pay_fee_confidential".to_string(),
-            args: args![proof],
+            args: instruction_args![proof],
         })
     }
 
@@ -97,31 +116,44 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn create_account_with_bucket<T: Into<WorkspaceKey>>(
+    pub fn create_account_with_bucket<T: Into<BuilderWorkspaceKey>>(
         self,
         owner_public_key: RistrettoPublicKeyBytes,
         workspace_id: T,
     ) -> Self {
+        let id_str = workspace_id.into();
+        let parsed = parse_workspace_key(id_str).expect("Invalid workspace key format");
+        let workspace_id = self.workspace_ids.get(&parsed.name).unwrap_or_else(|| {
+            panic!("Workspace key '{}' not found", parsed.name);
+        });
         self.add_instruction(Instruction::CreateAccount {
             public_key_address: owner_public_key,
             owner_rule: None,
             access_rules: None,
-            workspace_id: Some(workspace_id.into()),
+            workspace_id: Some(WorkspaceOffsetId::new(workspace_id).with_offset_opt(parsed.offset)),
         })
     }
 
-    pub fn create_account_with_custom_rules<T: Into<WorkspaceKey>>(
+    pub fn create_account_with_custom_rules<T: Into<BuilderWorkspaceKey>>(
         self,
         public_key_address: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
         workspace_id: Option<T>,
     ) -> Self {
+        let workspace_id = workspace_id.map(|id| {
+            let id_str = id.into();
+            let parsed = parse_workspace_key(id_str).expect("Invalid workspace key format");
+            let id = self.workspace_ids.get(&parsed.name).unwrap_or_else(|| {
+                panic!("Workspace key '{}' not found", parsed.name);
+            });
+            WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset)
+        });
         self.add_instruction(Instruction::CreateAccount {
             public_key_address,
             owner_rule,
             access_rules,
-            workspace_id: workspace_id.map(|b| b.into()),
+            workspace_id,
         })
     }
 
@@ -129,8 +161,9 @@ impl TransactionBuilder {
         self,
         template_address: TemplateAddress,
         function: T,
-        args: Vec<Arg>,
+        args: Vec<NamedArg>,
     ) -> Self {
+        let args = self.resolve_args(args).expect("Invalid named arguments");
         self.add_instruction(Instruction::CallFunction {
             address: template_address,
             function: function.into(),
@@ -138,9 +171,16 @@ impl TransactionBuilder {
         })
     }
 
-    pub fn call_method<A: Into<ComponentCall>, T: Into<String>>(self, call: A, method: T, args: Vec<Arg>) -> Self {
+    pub fn call_method<A: Into<NamedComponentCall>, T: Into<String>>(
+        self,
+        call: A,
+        method: T,
+        args: Vec<NamedArg>,
+    ) -> Self {
+        let call = self.resolve_call(call.into());
+        let args = self.resolve_args(args).expect("Invalid named arguments");
         self.add_instruction(Instruction::CallMethod {
-            call: call.into(),
+            call,
             method: method.into(),
             args,
         })
@@ -150,20 +190,25 @@ impl TransactionBuilder {
         self.add_instruction(Instruction::DropAllProofsInWorkspace)
     }
 
-    pub fn put_last_instruction_output_on_workspace<T: AsRef<[u8]>>(self, label: T) -> Self {
-        self.add_instruction(Instruction::PutLastInstructionOutputOnWorkspace {
-            key: label.as_ref().to_vec(),
-        })
+    pub fn put_last_instruction_output_on_workspace<T: Into<BuilderWorkspaceKey>>(mut self, label: T) -> Self {
+        let key = self.workspace_ids.insert(label.into());
+        self.add_instruction(Instruction::PutLastInstructionOutputOnWorkspace { key })
     }
 
-    pub fn assert_bucket_contains<T: AsRef<[u8]>>(
+    pub fn assert_bucket_contains<T: AsRef<str>>(
         self,
         label: T,
         resource_address: ResourceAddress,
         min_amount: Amount,
     ) -> Self {
+        let parsed = parse_workspace_key(label.as_ref().to_string()).expect("Invalid workspace key format");
+        let id = self
+            .workspace_ids
+            .get(&parsed.name)
+            .unwrap_or_else(|| panic!("Workspace key '{}' not found", label.as_ref()));
+        let key = WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset);
         self.add_instruction(Instruction::AssertBucketContains {
-            key: label.as_ref().to_vec(),
+            key,
             resource_address,
             min_amount,
         })
@@ -187,7 +232,7 @@ impl TransactionBuilder {
         self.add_instruction(Instruction::CallMethod {
             call: account.into(),
             method: "create_proof_for_resource".to_string(),
-            args: args![resource_addr],
+            args: instruction_args![resource_addr],
         })
     }
 
@@ -260,19 +305,25 @@ impl TransactionBuilder {
 
     /// Pre-allocate a component address. The allocated address is added to the workspace and can be used in subsequent
     /// instructions.
-    pub fn allocate_component_address<T: Into<String>>(self, workspace_id: T) -> Self {
+    pub fn allocate_component_address<T: Into<BuilderWorkspaceKey>>(mut self, workspace_id: T) -> Self {
+        // Note: offset syntax does not make sense when adding something to the workspace and is not supported by the
+        // engine
+        let workspace_id = self.workspace_ids.insert(workspace_id.into());
         self.add_instruction(Instruction::AllocateAddress {
             allocatable_type: AllocatableAddressType::Component,
-            workspace_id: workspace_id.into(),
+            workspace_id,
         })
     }
 
     /// Pre-allocate a resource address. The allocated address is added to the workspace and can be used in subsequent
     /// instructions.
-    pub fn allocate_resource_address<T: Into<String>>(self, workspace_id: T) -> Self {
+    pub fn allocate_resource_address<T: Into<String>>(mut self, workspace_id: T) -> Self {
+        // Note: offset syntax does not make sense when adding something to the workspace and is not supported by the
+        // engine
+        let workspace_id = self.workspace_ids.insert(workspace_id.into());
         self.add_instruction(Instruction::AllocateAddress {
             allocatable_type: AllocatableAddressType::Resource,
-            workspace_id: workspace_id.into(),
+            workspace_id,
         })
     }
 
@@ -312,5 +363,35 @@ impl TransactionBuilder {
         })
         .build()
         .seal(secret_key)
+    }
+
+    fn resolve_call(&self, call: NamedComponentCall) -> ComponentCall {
+        match call {
+            NamedComponentCall::Address(call) => call.into(),
+            NamedComponentCall::Workspace(call) => {
+                let id = self.workspace_ids.get(call.name()).unwrap_or_else(|| {
+                    panic!("Workspace key '{}' not found", call.name());
+                });
+                ComponentCall::Workspace(id)
+            },
+        }
+    }
+
+    /// Maps named arguments to the template_lib workspace or literal args.
+    fn resolve_args(&self, args: Vec<NamedArg>) -> Result<Vec<InstructionArg>, ParseWorkspaceKeyError> {
+        args.into_iter()
+            .map(|arg| match arg {
+                NamedArg::Literal(bytes) => Ok(InstructionArg::Literal(bytes)),
+                NamedArg::Workspace(key) => {
+                    let parsed = parse_workspace_key(key)?;
+
+                    let id = self.workspace_ids.get(parsed.name.as_ref()).unwrap_or_else(|| {
+                        panic!("Workspace key '{}' not found", parsed.name);
+                    });
+                    let id = WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset);
+                    Ok(InstructionArg::Workspace(id))
+                },
+            })
+            .collect()
     }
 }

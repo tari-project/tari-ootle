@@ -245,8 +245,8 @@ toml = "0.8"
 ts-rs = { version = "7.1", features = ["chrono-impl", "no-serde-warnings", "indexmap-impl"] }
 url = "2.4.1"
 urlencoding = "2.1.3"
-wasmer = "4.4.0"
-wasmer-middlewares = "4.4.0"
+wasmer = "6.0.1"
+wasmer-middlewares = "6.0.1"
 webrtc = "0.9.0"
 zeroize = "1"
 webauthn-rs = { version = "0.5.1", features = ["default"] }

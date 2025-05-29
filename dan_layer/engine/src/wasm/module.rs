@@ -25,19 +25,14 @@ use std::{fmt, fmt::Formatter, sync::Arc};
 use tari_template_abi::{FunctionDef, TemplateDef, ABI_TEMPLATE_DEF_GLOBAL_NAME};
 use wasmer::{
     imports,
-    sys::BaseTunables,
+    sys::{BaseTunables, CompilerConfig, Cranelift, CraneliftOptLevel, NativeEngineExt, Target},
     AsStoreMut,
-    CompilerConfig,
-    Cranelift,
-    CraneliftOptLevel,
     Engine,
     ExportError,
     Function,
     Instance,
-    NativeEngineExt,
     Pages,
     Store,
-    Target,
     TypedFunction,
     WasmPtr,
 };

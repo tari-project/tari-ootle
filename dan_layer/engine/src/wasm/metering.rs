@@ -20,7 +20,7 @@
 //   WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use wasmer::{wasmparser::Operator, ModuleMiddleware};
+use wasmer::{sys::ModuleMiddleware, wasmparser::Operator};
 use wasmer_middlewares::Metering;
 
 pub fn middleware(limit: u64) -> impl ModuleMiddleware {

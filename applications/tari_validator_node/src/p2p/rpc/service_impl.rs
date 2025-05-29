@@ -102,7 +102,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .try_into()
             .map_err(|e| RpcStatus::bad_request(format!("Malformed transaction: {}", e)))?;
 
-        let transaction_id = *transaction.id();
+        let transaction_id = transaction.calculate_id();
         info!(target: LOG_TARGET, "🌐 Received transaction {transaction_id} from peer");
 
         self.mempool

@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useTransactionDetails } from "../../api/hooks/useTransactions";
 import { Accordion, AccordionDetails, AccordionSummary } from "../../Components/Accordion";
 import { Grid, Table, TableContainer, TableBody, TableRow, TableCell, Button, Fade, Alert } from "@mui/material";
@@ -41,8 +41,6 @@ import Loading from "../../Components/Loading";
 import Error from "../../Components/Error";
 import {
   FinalizeResult,
-  Substate,
-  SubstateId,
   substateIdToString,
   SubstateRequirement,
   TransactionResult,
@@ -52,8 +50,9 @@ import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tar
 
 export default function TransactionDetails() {
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
-  const location = useLocation();
-  const { data, isLoading, isError, error } = useTransactionDetails(location.pathname.split("/")[2]);
+  const params = useParams();
+  const transactionId = params.id!;
+  const { data, isLoading, isError, error } = useTransactionDetails(transactionId);
 
   const handleChange = (panel: string) => (event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedPanels((prevExpandedPanels) => {
@@ -101,7 +100,7 @@ export default function TransactionDetails() {
     const handleDownload = () => {
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: "application/json" });
-      const filename = `tx-${data?.transaction?.V1?.id}.json` || "tx-unknown_id.json";
+      const filename = `tx-${transactionId}.json` || "tx-unknown_id.json";
       saveAs(blob, filename);
     };
 
@@ -122,7 +121,6 @@ export default function TransactionDetails() {
       }
     };
 
-    const transaction_id = data.transaction.V1?.id;
     const seal_signature = data.transaction.V1?.seal_signature;
     const transaction_body = data.transaction.V1?.body;
     const transaction = transaction_body?.transaction;
@@ -135,7 +133,7 @@ export default function TransactionDetails() {
               <TableBody>
                 <TableRow>
                   <TableCell>Transaction Hash</TableCell>
-                  <DataTableCell>{transaction_id}</DataTableCell>
+                  <DataTableCell>{transactionId}</DataTableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell>Timestamp</TableCell>
@@ -175,7 +173,7 @@ export default function TransactionDetails() {
                 <TableBody>
                   <TableRow>
                     <TableCell>Transaction Hash</TableCell>
-                    <DataTableCell>{transaction_id}</DataTableCell>
+                    <DataTableCell>{transactionId}</DataTableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>Timestamp</TableCell>

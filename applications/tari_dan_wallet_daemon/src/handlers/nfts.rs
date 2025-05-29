@@ -425,11 +425,11 @@ pub async fn handle_transfer_nft(
 
     // if dry run, we can return the result immediately
     if req.dry_run {
-        let transaction_id = *transaction.id();
         let execute_result = context
             .transaction_service()
             .submit_dry_run_transaction(transaction, vec![])
             .await?;
+        let transaction_id = execute_result.finalize.transaction_hash.into();
         let finalize = execute_result.finalize;
         return Ok(TransferNftResponse {
             transaction_id,

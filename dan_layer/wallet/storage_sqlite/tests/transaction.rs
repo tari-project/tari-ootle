@@ -22,12 +22,12 @@ fn get_and_insert_transaction() {
     let transaction = tx.transactions_get(TransactionId::default()).optional().unwrap();
     assert!(transaction.is_none());
     let transaction = build_transaction();
-    let hash = *transaction.id();
+    let hash = transaction.calculate_id();
     tx.transactions_insert(&transaction, &[], None, false).unwrap();
     tx.commit().unwrap();
 
     let mut tx = db.create_read_tx().unwrap();
     let returned = tx.transactions_get(hash).unwrap();
-    assert_eq!(transaction.id(), returned.transaction.id());
+    assert_eq!(transaction.calculate_id(), returned.id);
     assert_eq!(returned.status, TransactionStatus::default());
 }

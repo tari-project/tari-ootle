@@ -182,7 +182,7 @@ pub async fn handle_claim_validator_fees(
             .submit_dry_run_transaction(transaction, vec![])
             .await?;
         return Ok(ClaimValidatorFeesResponse {
-            transaction_id: *transaction.transaction.id(),
+            transaction_id: transaction.id,
             fee: transaction
                 .finalize
                 .as_ref()

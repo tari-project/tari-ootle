@@ -77,7 +77,7 @@ where
         current_epoch: Epoch,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
-        let id = *transaction.id();
+        let id = transaction.calculate_id();
 
         info!(target: LOG_TARGET, "Transaction {} executing. {} input(s)", id, resolved_inputs.len());
 

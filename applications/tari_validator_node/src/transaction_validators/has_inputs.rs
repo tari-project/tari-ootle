@@ -27,7 +27,7 @@ impl Validator<Transaction> for HasInputs {
         if transaction.all_inputs_iter().next().is_none() {
             warn!(target: LOG_TARGET, "HasInputs - FAIL: No input shards");
             return Err(TransactionValidationError::NoInputs {
-                transaction_id: *transaction.id(),
+                transaction_id: transaction.calculate_id(),
             });
         }
 

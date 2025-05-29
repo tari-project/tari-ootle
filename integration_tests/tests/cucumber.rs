@@ -724,19 +724,12 @@ async fn successful_transaction(world: &mut TariWorld) {
         let recent_transactions = recent_transactions_res.transactions;
         // check that all transactions have succeeded
         for tx in &recent_transactions {
-            let get_transaction_req = GetTransactionResultRequest {
-                transaction_id: *tx.id(),
-            };
+            let tx_id = tx.calculate_id();
+            let get_transaction_req = GetTransactionResultRequest { transaction_id: tx_id };
             let get_transaction_res = client
                 .get_transaction_result(get_transaction_req)
                 .await
-                .unwrap_or_else(|_| {
-                    panic!(
-                        "Failed to get transaction with hash {} for vn = {}",
-                        tx.id(),
-                        vn_ps.name
-                    )
-                });
+                .unwrap_or_else(|_| panic!("Failed to get transaction with hash {} for vn = {}", tx_id, vn_ps.name));
             let finalized_tx = get_transaction_res.transaction_execution.result;
             finalized_tx.expect_success();
         }

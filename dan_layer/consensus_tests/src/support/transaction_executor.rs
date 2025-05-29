@@ -59,7 +59,7 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
         current_epoch: Epoch,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
-        let id = *transaction.id();
+        let id = transaction.calculate_id();
 
         log::info!("Transaction {} executing. {} input(s)", id, resolved_inputs.len());
 
@@ -76,7 +76,7 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
         let spec = self
             .store
             .get(&id)
-            .unwrap_or_else(|| panic!("Missing execution spec for transaction {}", transaction.id()));
+            .unwrap_or_else(|| panic!("Missing execution spec for transaction {}", transaction.calculate_id()));
 
         let resolved_inputs = spec
             .input_locks
@@ -106,7 +106,7 @@ impl<TStateStore: StateStore> BlockTransactionExecutor<TStateStore> for TestBloc
                     .map(|input| input.versioned_substate_id().to_next_version()),
             )
             .chain(iter::once(VersionedSubstateId::new(
-                SubstateId::TransactionReceipt(TransactionReceiptAddress::from(*transaction.id())),
+                SubstateId::TransactionReceipt(TransactionReceiptAddress::from(transaction.calculate_id())),
                 0,
             )))
             .map(VersionedSubstateIdLockIntent::output)

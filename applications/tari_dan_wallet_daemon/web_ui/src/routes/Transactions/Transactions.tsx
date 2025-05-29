@@ -71,12 +71,7 @@ export default function Transactions({ account }: { account: Account }) {
               {data?.transactions
                 ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                 .map((transaction: WalletTransaction) => {
-                  const {
-                    transaction: { V1: tx },
-                    finalize: result,
-                    status,
-                  } = transaction;
-                  const hash = tx.id;
+                  const { transaction: _, finalize: result, status, id: hash } = transaction;
                   return (
                     <TableRow key={hash}>
                       <DataTableCell>

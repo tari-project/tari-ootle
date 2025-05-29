@@ -42,7 +42,7 @@ where
             return Err(NetworkClientError::NoInputsProvided);
         }
 
-        let tx_id = *transaction.id();
+        let tx_id = transaction.calculate_id();
 
         info!(
             target: LOG_TARGET,

@@ -26,7 +26,10 @@ impl TestExecutionSpecStore {
     }
 
     pub fn insert(&self, spec: ExecuteSpec) -> &Self {
-        self.transactions.write().unwrap().insert(*spec.transaction.id(), spec);
+        self.transactions
+            .write()
+            .unwrap()
+            .insert(spec.transaction.calculate_id(), spec);
         self
     }
 

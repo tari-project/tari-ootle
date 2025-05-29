@@ -21,7 +21,7 @@ impl DanMessage {
 
     pub fn get_message_tag(&self) -> String {
         match self {
-            Self::NewTransaction(msg) => format!("tx_{}", msg.transaction.id()),
+            Self::NewTransaction(msg) => format!("tx_{}", msg.transaction.calculate_id()),
         }
     }
 }
@@ -35,7 +35,7 @@ impl From<NewTransactionMessage> for DanMessage {
 impl Display for DanMessage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NewTransaction(msg) => write!(f, "NewTransaction({})", msg.transaction.id()),
+            Self::NewTransaction(msg) => write!(f, "NewTransaction({})", msg.transaction.calculate_id()),
         }
     }
 }

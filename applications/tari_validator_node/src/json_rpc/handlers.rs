@@ -188,22 +188,11 @@ impl JsonRpcHandlers {
         debug!(
             target: LOG_TARGET,
             "Transaction {} has {} involved shards",
-            transaction.hash(),
+            transaction.calculate_id(),
             transaction.num_unique_inputs()
         );
 
-        if !transaction.check_id() {
-            return Err(JsonRpcResponse::error(
-                answer_id,
-                JsonRpcError::new(
-                    JsonRpcErrorReason::InvalidParams,
-                    "Transaction ID is invalid".to_string(),
-                    json!(null),
-                ),
-            ));
-        }
-
-        let tx_id = *transaction.id();
+        let tx_id = transaction.calculate_id();
 
         if is_dry_run {
             let result = self

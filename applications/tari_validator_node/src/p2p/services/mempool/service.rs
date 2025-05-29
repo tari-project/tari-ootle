@@ -153,7 +153,7 @@ where
     }
 
     async fn handle_new_transaction_from_local(&mut self, transaction: Transaction) -> Result<(), MempoolError> {
-        if self.transaction_exists(transaction.id())? {
+        if self.transaction_exists(&transaction.calculate_id())? {
             return Ok(());
         }
         info!(
@@ -179,17 +179,17 @@ where
         } = result?;
         let DanMessage::NewTransaction(msg) = msg;
         let NewTransactionMessage { transaction } = *msg;
+        let transaction_id = transaction.calculate_id();
 
         if !self.consensus_handle.is_running() {
             info!(
                 target: LOG_TARGET,
-                "🎱 Transaction {} received while not in running state. Ignoring",
-                transaction.id()
+                "🎱 Transaction {transaction_id} received while not in running state. Ignoring",
             );
             return Ok(());
         }
 
-        if self.transaction_exists(transaction.id())? {
+        if self.transaction_exists(&transaction_id)? {
             return Ok(());
         }
         debug!(
@@ -197,7 +197,7 @@ where
             "Received NEW transaction from {}: (size={}) {} {:?}",
             from,
             message_size,
-            transaction.id(),
+            transaction_id,
             transaction
         );
 
@@ -227,25 +227,24 @@ where
     ) -> Result<(), MempoolError> {
         #[cfg(feature = "metrics")]
         self.metrics.on_transaction_received(&transaction);
+        let tx_id = transaction.calculate_id();
 
         if let Err(e) = self.before_execute_validator.validate(&(), &transaction) {
             // Throw the transaction away
             #[cfg(feature = "metrics")]
-            self.metrics.on_transaction_validation_error(transaction.id(), &e);
+            self.metrics.on_transaction_validation_error(&tx_id, &e);
             return Err(e.into());
         }
 
         if transaction.num_unique_inputs() == 0 {
-            warn!(target: LOG_TARGET, "⚠ No involved shards for transaction {}", transaction.id());
+            warn!(target: LOG_TARGET, "⚠ No involved shards for transaction {tx_id}");
             return Err(MempoolError::TransactionValidationError(
-                TransactionValidationError::NoInvolvedShards {
-                    transaction_id: *transaction.id(),
-                },
+                TransactionValidationError::NoInvolvedShards { transaction_id: tx_id },
             ));
         }
 
         let current_epoch = self.consensus_handle.current_view().get_epoch();
-        let tx_substate_address = transaction.id().to_substate_address();
+        let tx_substate_address = tx_id.to_substate_address();
 
         let local_committee_shard = self.epoch_manager.get_local_committee_info(current_epoch).await?;
         let is_input_shard = transaction.is_involved_inputs(&local_committee_shard);
@@ -257,8 +256,8 @@ where
             );
 
         if is_input_shard || is_output_shard {
-            debug!(target: LOG_TARGET, "🎱 New transaction {} in mempool", transaction.id());
-            self.transactions.insert(*transaction.id());
+            debug!(target: LOG_TARGET, "🎱 New transaction {tx_id} in mempool");
+            self.transactions.insert(tx_id);
             self.consensus_handle
                 .notify_new_transaction(transaction.clone(), num_pending)
                 .await
@@ -289,15 +288,14 @@ where
         } else {
             debug!(
                 target: LOG_TARGET,
-                "🙇 Not in committee for transaction {}",
-                transaction.id(),
+                "🙇 Not in committee for transaction {tx_id}",
             );
         }
 
         debug!(
             target: LOG_TARGET,
             "🎱 Propagating transaction {} ({} input(s))",
-            transaction.id(),
+            tx_id,
             transaction.num_unique_inputs(),
         );
         if let Err(e) = self

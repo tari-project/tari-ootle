@@ -55,7 +55,7 @@ where
         new_account_info: Option<NewAccountInfo>,
         is_dry_run: bool,
     ) -> Result<TransactionId, TransactionApiError> {
-        let tx_id = *transaction.id();
+        let tx_id = transaction.calculate_id();
         self.store.with_write_tx(|tx| {
             tx.transactions_insert(&transaction, &required_substates, new_account_info.as_ref(), is_dry_run)
         })?;
@@ -101,7 +101,7 @@ where
         self.store
             .with_write_tx(|tx| tx.transactions_insert(&transaction, &required_substates, None, true))?;
 
-        let tx_id = *transaction.id();
+        let tx_id = transaction.calculate_id();
         let result = self
             .network_interface
             .submit_dry_run_transaction(transaction, required_substates)

@@ -253,7 +253,7 @@ impl TestNetworkWorker {
                 transaction_store
                     .write()
                     .await
-                    .insert(*tx_record.transaction().id(), tx_record.clone());
+                    .insert(*tx_record.id(), tx_record.clone());
 
                 for (addr, (shard_group, num_committees, tx_new_transaction_to_consensus, _)) in &tx_new_transactions {
                     if dest.is_for(addr, *shard_group, *num_committees) {

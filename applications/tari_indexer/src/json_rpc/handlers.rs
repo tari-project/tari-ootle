@@ -442,7 +442,7 @@ impl JsonRpcHandlers {
         let request: SubmitTransactionRequest = value.parse_params()?;
 
         if request.is_dry_run {
-            let transaction_id = *request.transaction.id();
+            let transaction_id = request.transaction.calculate_id();
             let exec_result = self
                 .dry_run_transaction_processor
                 .process_transaction(request.transaction, request.required_substates)

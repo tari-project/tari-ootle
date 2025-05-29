@@ -23,7 +23,7 @@ use tari_engine_types::{
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_template_lib::{args::Arg, models::ComponentAddress, types::Hash};
+use tari_template_lib::{args::InstructionArg, models::ComponentAddress, types::Hash};
 
 use crate::{
     v1::signature::TransactionSignature,
@@ -273,7 +273,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
     }
 }
 
-fn calc_args_weight(args: &[Arg]) -> u64 {
+fn calc_args_weight(args: &[InstructionArg]) -> u64 {
     args.iter()
         .map(|a| a.as_literal_bytes().map_or(0, |b| b.len() as u64))
         .sum()

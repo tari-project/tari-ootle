@@ -7,12 +7,12 @@ use tari_engine_types::{
     instruction::Instruction,
 };
 use tari_template_lib::{
-    args,
+    instruction_args,
     models::{Amount, ComponentAddress, ResourceAddress},
     types::TemplateAddress,
 };
 use tari_template_test_tooling::{support::assert_error::assert_access_denied_for_action, TemplateTest};
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 struct ComposabilityTest {
     template_test: TemplateTest,
@@ -46,7 +46,7 @@ fn initialize_composability(test: &mut ComposabilityTest) -> ComposabilityCompon
             vec![Instruction::CallFunction {
                 address: test.composability_template,
                 function: "new".to_string(),
-                args: args![test.state_template],
+                args: instruction_args![test.state_template],
             }],
             vec![],
         )
@@ -82,7 +82,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
             vec![Instruction::CallFunction {
                 address: faucet_template,
                 function: "mint".to_string(),
-                args: args![initial_supply],
+                args: instruction_args![initial_supply],
             }],
             vec![],
         )
@@ -101,7 +101,7 @@ fn create_resource_and_fund_account(test: &mut TemplateTest, account: ComponentA
         .build_and_execute(
             Transaction::builder()
                 .call_method(faucet_component, "take_free_coins", args![])
-                .put_last_instruction_output_on_workspace(b"free_coins")
+                .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(account, "deposit", args![Workspace("free_coins")]),
             vec![],
         )
@@ -144,7 +144,7 @@ fn it_allows_function_to_method_calls() {
             vec![Instruction::CallFunction {
                 address: test.composability_template,
                 function: "new_from_component".to_string(),
-                args: args![composability_component_0],
+                args: instruction_args![composability_component_0],
             }],
             vec![],
         )
@@ -209,7 +209,7 @@ fn it_allows_method_to_function_calls() {
     test.template_test.call_method::<()>(
         components.composability_component,
         "replace_state_component",
-        args![test.state_template],
+        instruction_args![test.state_template],
         vec![],
     );
 
@@ -304,7 +304,7 @@ fn it_allows_multiple_recursion_levels() {
     test.template_test.call_method::<()>(
         composability_1,
         "set_nested_composability",
-        args![composability_0],
+        instruction_args![composability_0],
         vec![],
     );
 
@@ -331,7 +331,7 @@ fn it_fails_when_surpassing_recursion_limit() {
         test.template_test.call_method::<()>(
             components.composability_component,
             "set_nested_composability",
-            args![last_composability_component],
+            instruction_args![last_composability_component],
             vec![],
         );
         last_composability_component = components.composability_component;

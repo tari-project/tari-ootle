@@ -40,14 +40,13 @@ use tari_engine_types::{
 };
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
-    args,
-    args::{Arg, WorkspaceKey},
+    args::InstructionArg,
     auth::OwnerRule,
     models::{Amount, ComponentAddress, NonFungibleAddress},
     prelude::{ComponentAccessRules, RistrettoPublicKeyBytes, CONFIDENTIAL_TARI_RESOURCE_ADDRESS},
     types::{EntityId, Hash, ObjectKey, TemplateAddress},
 };
-use tari_transaction::{Transaction, TransactionBuilder};
+use tari_transaction::{args, builder::named_args::BuilderWorkspaceKey, Transaction, TransactionBuilder};
 use tari_transaction_manifest::{parse_manifest, ManifestValue};
 
 use crate::{read_only_state_store::ReadOnlyStateStore, track_calls::TrackCallsModule, Package};
@@ -324,23 +323,18 @@ impl TemplateTest {
     pub fn create_account<T>(
         &mut self,
         owner_public_key: RistrettoPublicKeyBytes,
-        workspace_id: Option<WorkspaceKey>,
+        workspace_id: Option<BuilderWorkspaceKey>,
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
         T: DeserializeOwned,
     {
         let result = self
-            .execute_and_commit(
-                vec![Instruction::CreateAccount {
-                    public_key_address: owner_public_key,
-                    owner_rule: None,
-                    access_rules: None,
-                    workspace_id,
-                }],
+            .build_and_execute(
+                Transaction::builder().create_account_with_custom_rules(owner_public_key, None, None, workspace_id),
                 proofs,
             )
-            .unwrap();
+            .unwrap_success();
         result.finalize.execution_results[0].decode().unwrap()
     }
 
@@ -348,7 +342,7 @@ impl TemplateTest {
         &mut self,
         template_name: &str,
         func_name: &str,
-        args: Vec<Arg>,
+        args: Vec<InstructionArg>,
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
@@ -371,7 +365,7 @@ impl TemplateTest {
         &mut self,
         component_address: ComponentAddress,
         method_name: &str,
-        args: Vec<Arg>,
+        args: Vec<InstructionArg>,
         proofs: Vec<NonFungibleAddress>,
     ) -> T
     where
@@ -389,14 +383,6 @@ impl TemplateTest {
             .unwrap();
 
         result.finalize.execution_results[0].decode().unwrap()
-    }
-
-    pub fn get_instructions_to_pay_fee_from_faucet(&self) -> Vec<Instruction> {
-        vec![Instruction::CallFunction {
-            address: self.get_template_address("Faucet2"),
-            function: "pay_fee_confidential".to_string(),
-            args: args![],
-        }]
     }
 
     pub fn get_test_proof_and_secret_key(&self) -> (NonFungibleAddress, RistrettoSecretKey) {

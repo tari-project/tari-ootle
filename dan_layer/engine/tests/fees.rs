@@ -5,19 +5,24 @@ use std::iter;
 
 use tari_engine_types::commit_result::RejectReason;
 use tari_template_lib::{
-    args,
     constants::CONFIDENTIAL_TARI_RESOURCE_ADDRESS,
+    instruction_args,
     models::{Amount, ComponentAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, test_faucet_component, TemplateTest};
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 #[test]
 fn deducts_fees_from_payments_and_refunds_the_rest() {
     let mut test = TemplateTest::new(["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
 
     test.enable_fees();
 
@@ -33,7 +38,12 @@ fn deducts_fees_from_payments_and_refunds_the_rest() {
 
     // Check difference was refunded
     let payment = result.finalize.fee_receipt;
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert_eq!(new_balance, orig_balance - payment.total_fees_charged());
     assert_eq!(payment.total_refunded(), Amount(1000) - payment.total_fees_charged());
     assert!(payment.is_paid_in_full());
@@ -44,7 +54,12 @@ fn deducts_fees_when_transaction_fails() {
     let mut test = TemplateTest::new(["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
 
     test.enable_fees();
 
@@ -63,7 +78,12 @@ fn deducts_fees_when_transaction_fails() {
 
     // Check the fee was still paid
     let payment = result.finalize.fee_receipt;
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert!(!payment.total_fees_paid().is_zero());
     assert_eq!(orig_balance - new_balance, payment.total_fees_paid());
 }
@@ -93,7 +113,12 @@ fn deposit_from_faucet_then_pay() {
     test.disable_fees();
 
     let payment = result.finalize.fee_receipt;
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert_eq!(
         new_balance,
         payment.total_allocated_fee_payments() - payment.total_fees_charged()
@@ -109,7 +134,7 @@ fn another_account_pays_partially_for_fees() {
     let orig_balance: Amount = test.call_method(
         account_fee,
         "balance",
-        args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
 
@@ -135,7 +160,7 @@ fn another_account_pays_partially_for_fees() {
     let new_balance: Amount = test.call_method(
         account_fee,
         "balance",
-        args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
         vec![],
     );
     assert_eq!(new_balance, orig_balance + Amount(200) - payment.total_fees_charged());
@@ -143,7 +168,12 @@ fn another_account_pays_partially_for_fees() {
     assert!(payment.total_fees_charged() > Amount(200));
 
     // Check the rest of the transaction was committed
-    let balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert_eq!(balance, Amount(1000));
 }
 
@@ -152,8 +182,12 @@ fn failed_fee_transaction() {
     let mut test = TemplateTest::new(["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let initial_balance: Amount =
-        test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let initial_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
 
     test.enable_fees();
     let result = test
@@ -176,7 +210,12 @@ fn failed_fee_transaction() {
     assert!(matches!(reason, RejectReason::ExecutionFailure(_)));
     test.disable_fees();
 
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert_eq!(new_balance, initial_balance);
 }
 
@@ -186,7 +225,12 @@ fn fail_partial_paid_fees() {
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     test.enable_fees();
 
     let result = test.execute_expect_commit(
@@ -215,7 +259,12 @@ fn fail_partial_paid_fees() {
     // Check that the fee paid was deducted
     let payment = result.finalize.fee_receipt;
     assert!(!payment.is_paid_in_full());
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert_eq!(new_balance, orig_balance - Amount(50));
 }
 
@@ -225,7 +274,12 @@ fn fail_pay_less_fees_than_fee_transaction() {
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     let state: ComponentAddress = test.call_function("State", "new", args![], vec![]);
 
     test.enable_fees();
@@ -269,7 +323,12 @@ fn fail_pay_less_fees_than_fee_transaction() {
     assert_eq!(s.substate_value().as_vault().unwrap().balance(), orig_balance - 100);
 
     // Fee was not deducted
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert_eq!(new_balance, orig_balance);
 
     // State was not updated
@@ -283,7 +342,12 @@ fn fail_pay_too_little_no_fee_instruction() {
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
 
     test.enable_fees();
 
@@ -312,7 +376,12 @@ fn fail_pay_too_little_no_fee_instruction() {
     );
 
     // Fee was not deducted
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert_eq!(new_balance, orig_balance);
 }
 
@@ -322,7 +391,12 @@ fn success_pay_fee_in_main_instructions() {
 
     let (account, owner_token, private_key) = test.create_funded_account();
     let (account2, owner_token2, _) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
 
     test.enable_fees();
 
@@ -347,7 +421,12 @@ fn success_pay_fee_in_main_instructions() {
     let fees = result.expect_fees_paid_in_full();
 
     // Fee was deducted
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert_eq!(new_balance, orig_balance + Amount(500) - fees.total_fees_charged());
 }
 
@@ -356,7 +435,12 @@ fn dangling_bucket_pay_fees() {
     let mut test = TemplateTest::new(["tests/templates/state"]);
 
     let (account, owner_token, private_key) = test.create_funded_account();
-    let orig_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let orig_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
 
     test.enable_fees();
 
@@ -384,7 +468,12 @@ fn dangling_bucket_pay_fees() {
 
     // Check the fee was still paid
     let payment = result.finalize.fee_receipt;
-    let new_balance: Amount = test.call_method(account, "balance", args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS], vec![]);
+    let new_balance: Amount = test.call_method(
+        account,
+        "balance",
+        instruction_args![CONFIDENTIAL_TARI_RESOURCE_ADDRESS],
+        vec![],
+    );
     assert!(!payment.total_fees_paid().is_zero());
     assert_eq!(orig_balance - new_balance, payment.total_fees_paid());
 }

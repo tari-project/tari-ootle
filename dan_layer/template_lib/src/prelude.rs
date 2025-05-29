@@ -39,7 +39,6 @@ pub use tari_template_macros::template;
 pub use tari_template_macros::template_non_wasm as template;
 
 pub use crate::{
-    args,
     auth::{ComponentAccessRules as AccessRules, RestrictedAccessRule::*, *},
     caller_context::CallerContext,
     component::{Component, ComponentManager},
@@ -49,6 +48,7 @@ pub use crate::{
     error,
     events::emit_event,
     info,
+    instruction_args as args,
     invoke_args,
     log,
     models::{

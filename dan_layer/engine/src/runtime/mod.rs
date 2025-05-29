@@ -45,6 +45,7 @@ mod locking;
 pub mod scope;
 pub use locking::{LockError, LockState};
 mod address_allocation;
+mod limits;
 mod state_store;
 mod tracker_auth;
 mod working_state;
@@ -68,7 +69,6 @@ use tari_template_lib::{
         AddressAllocationInvokeArg,
         AllocatableAddressType,
         AllocateAddressResult,
-        Arg,
         BucketAction,
         BucketRef,
         BuiltinTemplateAction,
@@ -78,6 +78,7 @@ use tari_template_lib::{
         ComponentRef,
         ConsensusAction,
         GenerateRandomAction,
+        InstructionArg,
         InvokeResult,
         LogLevel,
         NonFungibleAction,
@@ -87,6 +88,7 @@ use tari_template_lib::{
         ResourceRef,
         VaultAction,
         WorkspaceAction,
+        WorkspaceId,
     },
     invoke_args,
     models::{ComponentAddress, Metadata, NonFungibleAddress, VaultRef},
@@ -191,7 +193,7 @@ pub trait RuntimeInterface: Send + Sync {
         &self,
         substate_type: AllocatableAddressType,
         entity_id: EntityId,
-        workspace_key: Vec<u8>,
+        workspace_id: WorkspaceId,
     ) -> Result<AllocateAddressResult, RuntimeError>;
 }
 
@@ -201,24 +203,23 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub(crate) fn resolve_args(&self, args: &[Arg]) -> Result<Vec<tari_bor::Value>, RuntimeError> {
-        const MAX_PERMITTED_ARGS: usize = 100;
-        if args.len() > MAX_PERMITTED_ARGS {
+    pub(crate) fn resolve_args(&self, args: &[InstructionArg]) -> Result<Vec<tari_bor::Value>, RuntimeError> {
+        if args.len() > limits::ENGINE_LIMITS.max_instruction_args {
             return Err(RuntimeError::TooManyArguments {
                 got: args.len(),
-                max: MAX_PERMITTED_ARGS,
+                max: limits::ENGINE_LIMITS.max_instruction_args,
             });
         }
         let mut resolved = Vec::with_capacity(args.len());
         for arg in args {
             match arg {
-                Arg::Workspace(key) => {
+                InstructionArg::Workspace(key) => {
                     let value = self
                         .interface
                         .workspace_invoke(WorkspaceAction::Get, invoke_args![key].into())?;
                     resolved.push(value.into_value()?);
                 },
-                Arg::Literal(v) => resolved.push(decode_exact(v)?),
+                InstructionArg::Literal(v) => resolved.push(decode_exact(v)?),
             }
         }
         Ok(resolved)

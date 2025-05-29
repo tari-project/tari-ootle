@@ -6,12 +6,13 @@ use std::vec;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_dan_engine::runtime::{AssertError, RuntimeError};
 use tari_template_lib::{
-    args,
+    args::WorkspaceOffsetId,
+    instruction_args,
     models::{Amount, ComponentAddress, NonFungibleAddress, ResourceAddress},
     prelude::XTR,
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::{Instruction, Transaction};
+use tari_transaction::{args, Instruction, Transaction};
 
 const FAUCET_WITHDRAWAL_AMOUNT: Amount = Amount::new(1000);
 
@@ -35,7 +36,7 @@ fn setup() -> AssertTest {
             vec![Instruction::CallFunction {
                 address: faucet_template,
                 function: "mint".to_string(),
-                args: args![initial_supply],
+                args: instruction_args![initial_supply],
             }],
             vec![template_test.get_test_proof()],
         )
@@ -142,12 +143,12 @@ fn it_fails_with_invalid_bucket() {
             .call_method(test.account, "get_balances", args![])
             .put_last_instruction_output_on_workspace("invalid_bucket")
             .assert_bucket_contains("invalid_bucket", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
-            .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
+            .call_method(test.account, "deposit", args![Workspace("invalid_bucket")])
             .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
     );
 
-    assert_reject_reason(reason, RuntimeError::AssertError(AssertError::InvalidBucket {}));
+    assert_reject_reason(reason, RuntimeError::AssertError(AssertError::InvalidBucket));
 }
 
 #[test]
@@ -159,13 +160,19 @@ fn it_fails_with_invalid_workspace_key() {
             .call_method(test.faucet_component, "take_free_coins", args![])
             .put_last_instruction_output_on_workspace("faucet_bucket")
             // we are going to assert a key that does not exist in the workspace
-            .assert_bucket_contains("invalid_key", test.faucet_resource, FAUCET_WITHDRAWAL_AMOUNT)
+            // assert_bucket_contains would panic if called with a non-existing key
+            .add_instruction(Instruction::AssertBucketContains {
+                key: WorkspaceOffsetId::new(999),
+                resource_address: test.faucet_resource,
+                min_amount: FAUCET_WITHDRAWAL_AMOUNT
+            })
             .call_method(test.account, "deposit", args![Workspace("faucet_bucket")])
             .build_and_seal(&test.account_key),
         vec![test.account_proof.clone()],
     );
 
     assert_reject_reason(reason, RuntimeError::ItemNotOnWorkspace {
-        key: "invalid_key".to_string(),
+        id: WorkspaceOffsetId::new(999),
+        existing_ids: vec![0],
     });
 }

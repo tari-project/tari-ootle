@@ -4,7 +4,7 @@
 use std::fmt::{Display, Formatter};
 
 use tari_bor::{Deserialize, Serialize};
-use tari_template_lib::{args::WorkspaceKey, models::ComponentAddress, types::serde_helpers};
+use tari_template_lib::{args::WorkspaceId, models::ComponentAddress};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[cfg_attr(
@@ -14,11 +14,7 @@ use tari_template_lib::{args::WorkspaceKey, models::ComponentAddress, types::ser
 )]
 pub enum ComponentCall {
     Address(ComponentAddress),
-    FromWorkspace(
-        #[serde(with = "serde_helpers::dynamic_hex")]
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
-        WorkspaceKey,
-    ),
+    Workspace(WorkspaceId),
 }
 
 impl From<ComponentAddress> for ComponentCall {
@@ -27,9 +23,9 @@ impl From<ComponentAddress> for ComponentCall {
     }
 }
 
-impl From<WorkspaceKey> for ComponentCall {
-    fn from(workspace_key: WorkspaceKey) -> Self {
-        Self::FromWorkspace(workspace_key)
+impl From<WorkspaceId> for ComponentCall {
+    fn from(workspace_id: WorkspaceId) -> Self {
+        Self::Workspace(workspace_id)
     }
 }
 
@@ -37,8 +33,8 @@ impl Display for ComponentCall {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             ComponentCall::Address(address) => write!(f, "Address({})", address),
-            ComponentCall::FromWorkspace(workspace_key) => {
-                write!(f, "FromWorkspace({})", String::from_utf8_lossy(workspace_key))
+            ComponentCall::Workspace(workspace_id) => {
+                write!(f, "FromWorkspace({workspace_id})")
             },
         }
     }

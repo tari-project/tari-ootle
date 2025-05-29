@@ -39,7 +39,7 @@ use tari_engine_types::{
     entity_id_provider::EntityIdProvider,
     events::Event,
     hashing::hash_template_code,
-    indexed_value::IndexedValue,
+    indexed_value::{IndexedValue, IndexedWellKnownTypes},
     instruction_result::InstructionResult,
     lock::LockFlag,
     logs::LogEntry,
@@ -55,12 +55,10 @@ use tari_engine_types::{
 use tari_template_abi::{TemplateDef, Type};
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
-    args,
     args::{
         AddressAllocationInvokeArg,
         AllocatableAddressType,
         AllocateAddressResult,
-        Arg,
         BucketAction,
         BucketRef,
         BuiltinTemplateAction,
@@ -75,6 +73,7 @@ use tari_template_lib::{
         CreateComponentArg,
         CreateResourceArg,
         GenerateRandomAction,
+        InstructionArg,
         InvokeResult,
         LogLevel,
         MintResourceArg,
@@ -92,9 +91,12 @@ use tari_template_lib::{
         VaultCreateProofByNonFungiblesArg,
         VaultWithdrawArg,
         WorkspaceAction,
+        WorkspaceId,
+        WorkspaceOffsetId,
     },
     auth::{AuthHook, AuthHookCaller, ComponentAccessRules, OwnerRule, ResourceAccessRules, ResourceAuthAction},
     constants::{CONFIDENTIAL_TARI_RESOURCE_ADDRESS, XTR},
+    instruction_args,
     models::{
         Amount,
         BucketId,
@@ -289,7 +291,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
 
         // The signature of a call back is (action: ResourceAuthAction, auth_caller: AuthCaller)
         let ret = self
-            .invoke_component_method(auth_hook.component_address, &auth_hook.method, args![
+            .invoke_component_method(auth_hook.component_address, &auth_hook.method, instruction_args![
                 action,
                 auth_caller
             ])
@@ -313,7 +315,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         component_address: ComponentAddress,
         method: &str,
-        args: Vec<Arg>,
+        args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, RuntimeError> {
         let call_runtime = Runtime::new(Arc::new(self.clone()));
         TransactionProcessor::call_method(
@@ -334,7 +336,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         template_address: &TemplateAddress,
         function: &str,
-        args: Vec<Arg>,
+        args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, RuntimeError> {
         // we are initializing a new runtime for the nested call
         let call_runtime = Runtime::new(Arc::new(self.clone()));
@@ -465,20 +467,20 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     .cloned()
                     .map(|c| (address, c))
             }),
-            ComponentCall::FromWorkspace(key) => self.tracker.write_with(|state_mut| {
+            ComponentCall::Workspace(id) => self.tracker.write_with(|state_mut| {
+                let id = WorkspaceOffsetId::new(id);
                 let value = state_mut
                     .workspace()
-                    .get(&key)
+                    .get(id)?
                     .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
-                        key: String::from_utf8_lossy(&key).to_string(),
+                        id,
+                        existing_ids: state_mut.workspace().all_ids_iter().collect(),
                     })?;
                 let allocation_id: ComponentAddressAllocation =
-                    value.decoded().map_err(|e| RuntimeError::InvalidArgument {
+                    tari_bor::from_value(value).map_err(|e| RuntimeError::InvalidArgument {
                         argument: "ComponentCall::FromWorkspace",
                         reason: format!(
-                            "Item on workspace at key '{}' is not a valid ComponentAddressAllocation: {}",
-                            String::from_utf8_lossy(&key),
-                            e,
+                            "Item on workspace at key '{id}' is not a valid ComponentAddressAllocation: {e}",
                         ),
                     })?;
                 let substate_id = state_mut.get_used_address(allocation_id.id())?;
@@ -2139,14 +2141,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         debug!(target: LOG_TARGET, "Workspace invoke: {:?}", action,);
 
         match action {
-            WorkspaceAction::ListBuckets => {
-                let bucket_ids = self.tracker.list_buckets();
-                Ok(InvokeResult::encode(&bucket_ids)?)
-            },
             // Basically names an output on the workspace so that you can refer to it as an
             // Arg::Variable
             WorkspaceAction::PutLastInstructionOutput => {
-                let key = args.get(0)?;
+                let key = args.assert_one_arg()?;
                 let last_output = self
                     .tracker
                     .take_last_instruction_output()
@@ -2159,12 +2157,23 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 Ok(InvokeResult::unit())
             },
             WorkspaceAction::Get => {
-                let key: Vec<u8> = args.get(0)?;
-                let value = self.tracker.get_from_workspace(&key)?;
-                Ok(InvokeResult::from_value(value.into_value()))
+                let id: WorkspaceOffsetId = args.assert_one_arg()?;
+                self.tracker.read_with(|state| {
+                    let value =
+                        state
+                            .workspace()
+                            .get(id)?
+                            .cloned()
+                            .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                                id,
+                                existing_ids: state.workspace().all_ids_iter().collect(),
+                            })?;
+                    Ok(InvokeResult::from_value(value))
+                })
             },
 
             WorkspaceAction::DropAllProofs => {
+                args.assert_no_args("WorkspaceAction::DropAllProofs")?;
                 let proofs = self
                     .tracker
                     .with_workspace_mut(|workspace| workspace.drain_all_proofs());
@@ -2177,18 +2186,26 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                 })
             },
             WorkspaceAction::AssertBucketContains => {
-                let key: Vec<u8> = args.get(0)?;
+                args.assert_n_args(3)?;
+                let key: WorkspaceOffsetId = args.get(0)?;
                 let resource_address: ResourceAddress = args.get(1)?;
                 let min_amount: Amount = args.get(2)?;
 
                 // get the bucket from the workspace
-                let value = self.tracker.get_from_workspace(&key)?;
-                let bucket_id = value
-                    .bucket_ids()
-                    .first()
-                    .ok_or_else(|| RuntimeError::AssertError(AssertError::InvalidBucket))?;
-
                 self.tracker.read_with(|state| {
+                    let value = state
+                        .workspace()
+                        .get(key)?
+                        .ok_or_else(|| RuntimeError::ItemNotOnWorkspace {
+                            id: key,
+                            existing_ids: state.workspace().all_ids_iter().collect(),
+                        })?;
+                    let indexed = IndexedWellKnownTypes::from_value(value)?;
+                    let bucket_id = indexed
+                        .bucket_ids()
+                        .first()
+                        .ok_or_else(|| RuntimeError::AssertError(AssertError::InvalidBucket))?;
+
                     let bucket = state.get_bucket(*bucket_id)?;
 
                     // validate the bucket resource
@@ -2549,7 +2566,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
         &self,
         substate_type: AllocatableAddressType,
         entity_id: EntityId,
-        workspace_key: Vec<u8>,
+        workspace_id: WorkspaceId,
     ) -> Result<AllocateAddressResult, RuntimeError> {
         self.tracker.write_with(|state| {
             let id_provider = state.id_provider_for_entity(entity_id);
@@ -2559,7 +2576,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let address = id_provider.new_component_address()?;
                     let id = state.new_address_allocation(address)?;
                     let value = IndexedValue::from_type(&ComponentAddressAllocation::new(id))?;
-                    state.workspace_mut().insert(workspace_key, value)?;
+                    state.workspace_mut().insert(workspace_id, value)?;
                     Ok(AllocateAddressResult::ComponentAddress(
                         ComponentAddressAllocation::new(id),
                     ))
@@ -2568,7 +2585,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate>> RuntimeInte
                     let address = id_provider.new_resource_address()?;
                     let id = state.new_address_allocation(address)?;
                     let value = IndexedValue::from_type(&ResourceAddressAllocation::new(id))?;
-                    state.workspace_mut().insert(workspace_key, value)?;
+                    state.workspace_mut().insert(workspace_id, value)?;
                     Ok(AllocateAddressResult::ResourceAddress(ResourceAddressAllocation::new(
                         id,
                     )))

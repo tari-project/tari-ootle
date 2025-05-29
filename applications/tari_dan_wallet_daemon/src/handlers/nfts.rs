@@ -19,19 +19,13 @@ use tari_dan_wallet_sdk::{
     apis::{key_manager, substate::ValidatorScanResult},
     models::Account,
 };
-use tari_engine_types::{
-    component::new_component_address_from_public_key,
-    instruction::Instruction,
-    substate::SubstateId,
-    ToByteType,
-};
+use tari_engine_types::{component::new_component_address_from_public_key, substate::SubstateId, ToByteType};
 use tari_template_builtin::{ACCOUNT_NFT_TEMPLATE_ADDRESS, ACCOUNT_TEMPLATE_ADDRESS};
 use tari_template_lib::{
-    args,
     models::{Amount, ComponentAddress, Metadata, NonFungibleAddress, NonFungibleId, ResourceAddress},
     types::crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction::TransactionId;
+use tari_transaction::{args, TransactionId};
 use tari_wallet_daemon_client::{
     permissions::JrpcPermission,
     types::{
@@ -207,7 +201,7 @@ async fn mint_account_nft(
     let transaction = transaction_builder(context)
         .fee_transaction_pay_from_component(account.address.as_component_address().unwrap(), fee)
         .call_method(component_address, "mint", args![metadata])
-        .put_last_instruction_output_on_workspace(b"bucket".to_vec())
+        .put_last_instruction_output_on_workspace("bucket")
         .call_method(account.address.as_component_address().unwrap(), "deposit", args![
             Workspace("bucket")
         ])
@@ -275,88 +269,77 @@ async fn create_account_nft(
     Ok(event)
 }
 
-async fn fill_in_target_account_vault(
+async fn try_find_target_account(
     context: &HandlerContext,
     inputs: &mut HashSet<SubstateRequirement>,
-    instructions: &mut Vec<Instruction>,
     target_account_address: ComponentAddress,
-    target_account_public_key: RistrettoPublicKeyBytes,
     target_resource_address: ResourceAddress,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let sdk = context.wallet_sdk();
-    let existing_target_account = sdk
+    let existing_account = sdk
         .substate_api()
         .scan_for_substate(&SubstateId::Component(target_account_address), None)
         .await
         .optional()?;
 
-    match existing_target_account {
-        Some(ValidatorScanResult { address, substate }) => {
-            inputs.insert(address.into());
+    let Some(ValidatorScanResult { address, substate }) = existing_account else {
+        return Ok(false);
+    };
+    inputs.insert(address.into());
 
-            // Figure out which vault to add as an input
-            let Some(component) = substate.component() else {
-                return Err(anyhow::anyhow!(
-                    "The target account {} is not a component. This is unexpected.",
-                    target_account_address
-                ));
-            };
-            let indexed = component.body.to_indexed_well_known_types()?;
-            let mut found_dest_vault = None;
-            for vault_id in indexed.vault_ids() {
-                // Local vault?
-                match sdk.accounts_api().get_vault(vault_id).optional()? {
-                    Some(vault) => {
-                        if vault.resource_address != target_resource_address {
-                            // Continue searching for a vault for the resource address
-                            continue;
-                        }
-                        // Found it - we're sending to our own vault
-                        found_dest_vault = Some(*vault_id);
-                        break;
-                    },
-                    None => {
-                        // TODO(perf): slow with lots of vaults
-                        let vault = sdk
-                            .substate_api()
-                            .scan_for_substate(&SubstateId::Vault(*vault_id), None)
-                            .await
-                            .optional()?;
-
-                        let Some(vault) = vault.and_then(|scan| scan.substate.into_vault()) else {
-                            warn!(
-                                target: LOG_TARGET,
-                                "❓️ The target account {target_account_address} contains a vault {vault_id} that was not found. This is unexpected.",
-                            );
-                            continue;
-                        };
-
-                        if *vault.resource_address() != target_resource_address {
-                            // Continue searching for a vault for the resource address
-                            continue;
-                        }
-
-                        // Found it
-                        found_dest_vault = Some(*vault_id);
-                    },
+    // Figure out which vault to add as an input
+    let Some(component) = substate.component() else {
+        return Err(anyhow::anyhow!(
+            "The target account {} is not a component. This is unexpected.",
+            target_account_address
+        ));
+    };
+    let indexed = component.body.to_indexed_well_known_types()?;
+    let mut found_dest_vault = None;
+    for vault_id in indexed.vault_ids() {
+        // Local vault?
+        match sdk.accounts_api().get_vault(vault_id).optional()? {
+            Some(vault) => {
+                if vault.resource_address != target_resource_address {
+                    // Continue searching for a vault for the resource address
+                    continue;
                 }
-            }
+                // Found it - we're sending to our own vault
+                found_dest_vault = Some(*vault_id);
+                break;
+            },
+            None => {
+                // TODO(perf): slow with lots of vaults
+                let vault = sdk
+                    .substate_api()
+                    .scan_for_substate(&SubstateId::Vault(*vault_id), None)
+                    .await
+                    .optional()?;
 
-            if let Some(found) = found_dest_vault {
-                inputs.insert(SubstateRequirement::unversioned(found));
-            }
-        },
-        None => {
-            instructions.push(Instruction::CreateAccount {
-                public_key_address: target_account_public_key,
-                owner_rule: None,
-                access_rules: None,
-                workspace_id: None,
-            });
-        },
+                let Some(vault) = vault.and_then(|scan| scan.substate.into_vault()) else {
+                    warn!(
+                        target: LOG_TARGET,
+                        "❓️ The target account {target_account_address} contains a vault {vault_id} that was not found. This is unexpected.",
+                    );
+                    continue;
+                };
+
+                if *vault.resource_address() != target_resource_address {
+                    // Continue searching for a vault for the resource address
+                    continue;
+                }
+
+                // Found it
+                found_dest_vault = Some(*vault_id);
+            },
+        }
     }
 
-    Ok(())
+    if let Some(found) = found_dest_vault {
+        inputs.insert(SubstateRequirement::unversioned(found));
+    }
+
+    Ok(true)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -369,7 +352,6 @@ pub async fn handle_transfer_nft(
     context.check_auth(token, &[JrpcPermission::Admin])?;
 
     // fetch accounts and its inputs
-    let mut instructions = vec![];
     let (fee_payer_account, fee_payer_account_inputs) = get_account_with_inputs(Some(req.fee_payer_account), sdk)?;
     let fee_payer_account_address = fee_payer_account
         .address
@@ -386,6 +368,7 @@ pub async fn handle_transfer_nft(
         new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &req.target_account_public_key);
 
     // TODO: this can be simplified
+    let mut builder = transaction_builder(context);
     // collect all instructions
     let non_fungible_api = sdk.non_fungible_api();
     for nft_address in req.nfts {
@@ -405,31 +388,18 @@ pub async fn handle_transfer_nft(
         let resource_substate_address = SubstateRequirement::unversioned(src_vault.resource_address);
         inputs.insert(resource_substate_address.clone());
 
-        fill_in_target_account_vault(
-            context,
-            &mut inputs,
-            &mut instructions,
-            target_account_address,
-            req.target_account_public_key,
-            nft.resource_address,
-        )
-        .await?;
+        if !try_find_target_account(context, &mut inputs, target_account_address, nft.resource_address).await? {
+            // We need to create the target account
+            builder = builder.create_account(req.target_account_public_key)
+        }
 
-        instructions.extend([
-            Instruction::CallMethod {
-                call: source_account_address.into(),
-                method: "withdraw_non_fungible".to_string(),
-                args: args![nft.resource_address, nft_address.id()],
-            },
-            Instruction::PutLastInstructionOutputOnWorkspace {
-                key: b"bucket".to_vec(),
-            },
-            Instruction::CallMethod {
-                call: target_account_address.into(),
-                method: "deposit".to_string(),
-                args: args![Workspace("bucket")],
-            },
-        ])
+        builder = builder
+            .call_method(source_account_address, "withdraw_non_fungible", args![
+                nft.resource_address,
+                nft_address.id()
+            ])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(target_account_address, "deposit", args![Workspace("bucket")]);
     }
 
     let fee_payer_account_secret_key = sdk
@@ -441,11 +411,11 @@ pub async fn handle_transfer_nft(
         .key_manager_api()
         .derive_key(key_manager::TRANSACTION_BRANCH, source_account.key_index)?;
 
-    let transaction = transaction_builder(context)
+    let transaction = builder
         .with_dry_run(req.dry_run)
         .fee_transaction_pay_from_component(fee_payer_account_address, req.max_fee)
-        .with_instructions(instructions)
         .with_inputs(inputs)
+        // Seal signer is the fee payer account
         .with_authorized_seal_signer()
         .add_signature(
             &fee_payer_account_public_key.to_byte_type(),

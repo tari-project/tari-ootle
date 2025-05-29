@@ -40,10 +40,17 @@ use tari_engine_types::{
 use tari_template_abi::{FunctionDef, Type};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    arg,
-    args,
-    args::{AllocatableAddressType, AllocateAddressResult, Arg, WorkspaceAction, WorkspaceKey},
+    args::{
+        AllocatableAddressType,
+        AllocateAddressResult,
+        InstructionArg,
+        WorkspaceAction,
+        WorkspaceId,
+        WorkspaceOffsetId,
+    },
     auth::{ComponentAccessRules, OwnerRule},
+    instruction_arg,
+    instruction_args,
     invoke_args,
     models::{Bucket, NonFungibleAddress},
     types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
@@ -358,7 +365,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         }
     }
 
-    pub fn put_output_on_workspace_with_name(runtime: &Runtime, key: Vec<u8>) -> Result<(), TransactionError> {
+    pub fn put_output_on_workspace_with_name(runtime: &Runtime, key: WorkspaceId) -> Result<(), TransactionError> {
         runtime
             .interface()
             .workspace_invoke(WorkspaceAction::PutLastInstructionOutput, invoke_args![key].into())?;
@@ -373,15 +380,15 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
     }
 
     /// Allocating a new address for the given [`AllocatableAddressType`].
-    pub fn allocate_address<T: Into<Vec<u8>>>(
+    pub fn allocate_address(
         runtime: &Runtime,
         substate_type: AllocatableAddressType,
-        workspace_id: T,
+        workspace_id: WorkspaceId,
     ) -> Result<InstructionResult, TransactionError> {
         let entity_id = runtime.interface().next_entity_id()?;
         let result = runtime
             .interface()
-            .allocate_address(substate_type, entity_id, workspace_id.into())?;
+            .allocate_address(substate_type, entity_id, workspace_id)?;
 
         match result {
             AllocateAddressResult::ComponentAddress(alloc) => Ok(InstructionResult {
@@ -426,7 +433,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         public_key_address: &RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<ComponentAccessRules>,
-        workspace_id: Option<WorkspaceKey>,
+        workspace_id: Option<WorkspaceOffsetId>,
     ) -> Result<InstructionResult, TransactionError> {
         let template = template_provider
             .get_template_module(&ACCOUNT_TEMPLATE_ADDRESS)
@@ -449,7 +456,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         let account_address = new_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, public_key_address);
 
         // the public key is the first argument of the Account template constructor
-        let mut args = args![
+        let mut args = instruction_args![
             NonFungibleAddress::from_public_key(*public_key_address),
             owner_rule,
             access_rules
@@ -457,10 +464,10 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
         // add the optional workspace bucket with the initial funds of the account
         if let Some(workspace_id) = workspace_id {
-            args.push(arg![Workspace(workspace_id)]);
+            args.push(instruction_arg![WorkspaceOffset(workspace_id)]);
         } else {
             let none: Option<Bucket> = None;
-            args.push(arg![Literal(none)]);
+            args.push(instruction_arg![Literal(none)]);
         }
 
         let resolved_args = runtime.resolve_args(&args)?;
@@ -490,7 +497,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         runtime: &Runtime,
         template_address: &TemplateAddress,
         function: &str,
-        args: Vec<Arg>,
+        args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionError> {
         let template = template_provider
             .get_template_module(template_address)
@@ -535,7 +542,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         runtime: &Runtime,
         call: ComponentCall,
         method: &str,
-        args: Vec<Arg>,
+        args: Vec<InstructionArg>,
     ) -> Result<InstructionResult, TransactionError> {
         let (component_address, component) = runtime.interface().load_component(call)?;
         let template_address = component.template_address;

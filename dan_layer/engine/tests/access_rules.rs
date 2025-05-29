@@ -2,9 +2,8 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 use std::collections::{BTreeMap, HashMap};
 
-use tari_dan_engine::runtime::{ActionIdent, RuntimeError};
+use tari_dan_engine::runtime::{ActionIdent, LockError, RuntimeError};
 use tari_template_lib::{
-    args,
     args::ComponentAction,
     auth::{
         AccessRule,
@@ -14,9 +13,10 @@ use tari_template_lib::{
         ResourceAccessRules,
         ResourceAuthAction,
         RestrictedAccessRule,
-        RuleRequirement,
     },
+    instruction_args,
     models::{Amount, ComponentAddress, Metadata, NonFungibleId, ResourceAddress, VaultId},
+    rule,
 };
 use tari_template_test_tooling::{
     support::assert_error::{
@@ -26,11 +26,9 @@ use tari_template_test_tooling::{
     },
     TemplateTest,
 };
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 mod component_access_rules {
-    use tari_template_lib::rule;
-
     use super::*;
 
     #[test]
@@ -215,8 +213,6 @@ mod component_access_rules {
 }
 
 mod resource_access_rules {
-    use tari_dan_engine::runtime::LockError;
-    use tari_template_lib::rule;
 
     use super::*;
 
@@ -670,7 +666,7 @@ mod resource_access_rules {
                 .call_function(cross_call_template, "call_component_with_args", args![
                     component_address,
                     "take_tokens",
-                    args![Amount(10)],
+                    instruction_args![Amount(10)],
                 ])
                 .put_last_instruction_output_on_workspace("tokens")
                 .call_method(owner_account, "deposit", args![Workspace("tokens")])
@@ -702,7 +698,8 @@ mod resource_access_rules {
                         component_address,
                         "take_tokens_using_proof",
                         Workspace("proof"),
-                        args![Workspace("proof"), Amount(10)],
+                        // "proof" == 1 - transaction builder does not recursively resolve the args
+                        instruction_args![Workspace(1), Amount(10)],
                     ],
                 )
                 .put_last_instruction_output_on_workspace("tokens")

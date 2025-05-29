@@ -27,13 +27,13 @@ use tari_template_lib_types::TemplateAddress;
 
 use crate::{
     args::{
-        Arg,
         CallAction,
         CallInvokeArg,
         CallMethodArg,
         ComponentAction,
         ComponentInvokeArg,
         ComponentRef,
+        InstructionArg,
         InvokeResult,
     },
     auth::ComponentAccessRules,
@@ -66,7 +66,7 @@ impl ComponentManager {
     /// Calls a method of another component and returns the result.
     /// This is used to call external component methods and can be used in a component method or template function
     /// context.
-    pub fn call<T: Into<String>, R: DeserializeOwned>(&self, method: T, args: Vec<Arg>) -> R {
+    pub fn call<T: Into<String>, R: DeserializeOwned>(&self, method: T, args: Vec<InstructionArg>) -> R {
         self.call_internal(CallMethodArg {
             component_address: self.address,
             method: method.into(),
@@ -87,7 +87,7 @@ impl ComponentManager {
 
     /// Calls a method of another component. The called method must return a unit type.
     /// Equivalent to [`call::<_, ()>(method, args)`](ComponentManager::call).
-    pub fn invoke<T: Into<String>>(&self, method: T, args: Vec<Arg>) {
+    pub fn invoke<T: Into<String>>(&self, method: T, args: Vec<InstructionArg>) {
         self.call(method, args)
     }
 

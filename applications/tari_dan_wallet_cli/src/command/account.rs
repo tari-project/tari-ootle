@@ -38,7 +38,6 @@ use tari_wallet_daemon_client::{
         AccountsCreateFreeTestCoinsRequest,
         AccountsCreateRequest,
         AccountsGetBalancesRequest,
-        AccountsInvokeRequest,
         ClaimBurnRequest,
         RevealFundsRequest,
     },
@@ -46,11 +45,7 @@ use tari_wallet_daemon_client::{
     WalletDaemonClient,
 };
 
-use crate::{
-    command::transaction::{print_execution_results, summarize_finalize_result, CliArg},
-    table::Table,
-    table_row,
-};
+use crate::{command::transaction::summarize_finalize_result, table::Table, table_row};
 
 #[derive(Debug, Subcommand, Clone)]
 pub enum AccountsSubcommand {
@@ -59,14 +54,7 @@ pub enum AccountsSubcommand {
     #[clap(alias = "get-balance", alias = "balance")]
     GetBalances(GetBalancesArgs),
     List,
-    Invoke {
-        #[clap(long, alias = "name", short = 'n')]
-        account: Option<ComponentAddressOrName>,
-        method: String,
-        #[clap(long, short = 'a')]
-        args: Vec<CliArg>,
-        max_fee: Option<u32>,
-    },
+
     Get(GetArgs),
     ClaimBurn(ClaimBurnArgs),
     #[clap(alias = "reveal")]
@@ -157,12 +145,6 @@ impl AccountsSubcommand {
             AccountsSubcommand::List => {
                 handle_list(&mut client).await?;
             },
-            AccountsSubcommand::Invoke {
-                account,
-                method,
-                args,
-                max_fee,
-            } => handle_invoke(account, method, args, max_fee, &mut client).await?,
             AccountsSubcommand::Get(args) => handle_get(args, &mut client).await?,
             AccountsSubcommand::ClaimBurn(args) => handle_claim_burn(args, &mut client).await?,
             AccountsSubcommand::RevealFunds(args) => handle_reveal_funds(args, &mut client).await?,
@@ -196,35 +178,6 @@ async fn handle_create(args: CreateArgs, client: &mut WalletDaemonClient) -> Res
 async fn handle_set_default(args: SetDefaultArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
     let _resp = client.accounts_set_default(args.account_name).await?;
     println!("✅ Default account set");
-    Ok(())
-}
-
-async fn handle_invoke(
-    account: Option<ComponentAddressOrName>,
-    method: String,
-    args: Vec<CliArg>,
-    max_fee: Option<u32>,
-    client: &mut WalletDaemonClient,
-) -> Result<(), anyhow::Error> {
-    println!("Submitted invoke transaction for account...",);
-    let resp = client
-        .invoke_account_method(AccountsInvokeRequest {
-            account,
-            method,
-            args: args.into_iter().map(|a| a.into_arg()).collect(),
-            max_fee: max_fee.map(|u| Amount::new(u.into())),
-        })
-        .await?;
-
-    println!();
-    println!("✅ Account invoked succeeded");
-    println!();
-    match resp.result {
-        Some(result) => print_execution_results(&[result]),
-        None => {
-            println!("No result returned");
-        },
-    }
     Ok(())
 }
 

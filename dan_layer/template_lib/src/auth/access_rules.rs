@@ -4,14 +4,16 @@
 use serde::{Deserialize, Serialize};
 use tari_template_abi::rust::collections::BTreeMap;
 use tari_template_lib_types::TemplateAddress;
-#[cfg(feature = "ts")]
-use ts_rs::TS;
 
 use crate::models::{ComponentAddress, NonFungibleAddress, ResourceAddress};
 
 /// Represents the types of possible access control rules over a component method or resource
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum AccessRule {
     AllowAll,
     DenyAll,
@@ -42,7 +44,11 @@ impl AccessRule {
 
 /// An enum that represents the possible ways to restrict access to components or resources
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum RestrictedAccessRule {
     Require(RequireRule),
     AnyOf(Vec<RestrictedAccessRule>),
@@ -61,7 +67,11 @@ impl RestrictedAccessRule {
 
 /// Specifies a requirement for a [RequireRule].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum RuleRequirement {
     /// Requires ownership of a specific resource
     Resource(ResourceAddress),
@@ -99,7 +109,11 @@ impl From<TemplateAddress> for RuleRequirement {
 
 /// An enum that represents the possible ways to require access to components or resources
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub enum RequireRule {
     Require(RuleRequirement),
     AnyOf(Vec<RuleRequirement>),
@@ -108,7 +122,11 @@ pub enum RequireRule {
 
 /// Information needed to specify access rules to methods of a component
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ComponentAccessRules {
     #[cfg_attr(feature = "ts", ts(type = "Record<string, AccessRule>"))]
     method_access: BTreeMap<String, AccessRule>,
@@ -188,7 +206,11 @@ impl ResourceAuthAction {
 
 /// Information needed to specify access rules to a resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(TS), ts(export, export_to = "../../bindings/src/types/"))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../bindings/src/types/")
+)]
 pub struct ResourceAccessRules {
     mintable: AccessRule,
     burnable: AccessRule,
@@ -290,55 +312,55 @@ impl Default for ResourceAccessRules {
 #[macro_export]
 macro_rules! rule {
     (allow_all) => {
-        AccessRule::AllowAll
+        $crate::auth::AccessRule::AllowAll
     };
     (deny_all) => {
-        AccessRule::DenyAll
+        $crate::auth::AccessRule::DenyAll
     };
     ($($tail:tt)*) => {
-        AccessRule::Restricted($crate::__restricted_access_rule!($($tail)*))
+        $crate::auth::AccessRule::Restricted($crate::__restricted_access_rule!($($tail)*))
     };
 }
 
 #[macro_export]
 macro_rules! __restricted_access_rule {
     (any_of($($tail:tt)*)) => {
-        RestrictedAccessRule::AnyOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*))
+        $crate::auth::RestrictedAccessRule::AnyOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*))
     };
     (all_of($($tail:tt)*)) => {
-        RestrictedAccessRule::AllOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*))
+        $crate::auth::RestrictedAccessRule::AllOf($crate::__build_vec!(@ {__restricted_access_rule} $($tail)*))
     };
     ($a:ident($b:expr)) => {
-        RestrictedAccessRule::Require($crate::__require_rule!($a($b)))
+        $crate::auth::RestrictedAccessRule::Require($crate::__require_rule!($a($b)))
     };
 }
 
 #[macro_export]
 macro_rules! __require_rule {
     (any_of($($tail:tt)*)) => {
-        RequireRule::AnyOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*))
+        $crate::auth::RequireRule::AnyOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*))
     };
     (all_of($($tail:tt)*)) => {
-        RequireRule::AllOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*))
+        $crate::auth::RequireRule::AllOf($crate::__build_vec!(@ {__rule_requirement} $($tail)*))
     };
     ($a:ident($b:expr)) => {
-        RequireRule::Require($crate::__rule_requirement!($a($b)))
+        $crate::auth::RequireRule::Require($crate::__rule_requirement!($a($b)))
     };
 }
 
 #[macro_export]
 macro_rules! __rule_requirement {
     (resource($x: expr)) => {
-        RuleRequirement::Resource($x)
+        $crate::auth::RuleRequirement::Resource($x)
     };
     (non_fungible($x: expr)) => {
-        RuleRequirement::NonFungibleAddress($x)
+        $crate::auth::RuleRequirement::NonFungibleAddress($x)
     };
     (component($x: expr)) => {
-        RuleRequirement::ScopedToComponent($x)
+        $crate::auth::RuleRequirement::ScopedToComponent($x)
     };
     (template($x: expr)) => {
-        RuleRequirement::ScopedToTemplate($x)
+        $crate::auth::RuleRequirement::ScopedToTemplate($x)
     };
 }
 

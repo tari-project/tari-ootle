@@ -78,8 +78,6 @@ use crate::{
         AccountsCreateResponse,
         AccountsGetBalancesRequest,
         AccountsGetBalancesResponse,
-        AccountsInvokeRequest,
-        AccountsInvokeResponse,
         AccountsListRequest,
         AccountsListResponse,
         AuthGetAllJwtRequest,
@@ -235,13 +233,6 @@ impl WalletDaemonClient {
         request: T,
     ) -> Result<AccountsCreateResponse, WalletDaemonClientError> {
         self.send_request("accounts.create", request.borrow()).await
-    }
-
-    pub async fn invoke_account_method<T: Borrow<AccountsInvokeRequest>>(
-        &mut self,
-        req: T,
-    ) -> Result<AccountsInvokeResponse, WalletDaemonClientError> {
-        self.send_request("accounts.invoke", req.borrow()).await
     }
 
     pub async fn get_account_balances<T: Borrow<AccountsGetBalancesRequest>>(

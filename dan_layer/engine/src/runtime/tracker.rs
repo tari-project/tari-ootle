@@ -42,14 +42,7 @@ use tari_engine_types::{
 };
 use tari_template_lib::{
     auth::{ComponentAccessRules, OwnerRule},
-    models::{
-        Amount,
-        BucketId,
-        ComponentAddress,
-        ComponentAddressAllocation,
-        Metadata,
-        UnclaimedConfidentialOutputAddress,
-    },
+    models::{Amount, ComponentAddress, ComponentAddressAllocation, Metadata, UnclaimedConfidentialOutputAddress},
     prelude::{RistrettoPublicKeyBytes, TemplateAddress},
     types::Hash,
 };
@@ -138,10 +131,6 @@ impl StateTracker {
 
     pub fn get_template_module_name(&self) -> Result<String, RuntimeError> {
         self.read_with(|state| state.current_template().map(|(_, name)| name.to_string()))
-    }
-
-    pub fn list_buckets(&self) -> Vec<BucketId> {
-        self.read_with(|state| state.buckets().keys().copied().collect())
     }
 
     pub fn take_unclaimed_confidential_output(
@@ -262,18 +251,6 @@ impl StateTracker {
 
     pub fn take_last_instruction_output(&self) -> Option<IndexedValue> {
         self.write_with(|state| state.take_last_instruction_output())
-    }
-
-    pub fn get_from_workspace(&self, key: &[u8]) -> Result<IndexedValue, RuntimeError> {
-        self.read_with(|state| {
-            state
-                .workspace()
-                .get(key)
-                .cloned()
-                .ok_or(RuntimeError::ItemNotOnWorkspace {
-                    key: String::from_utf8_lossy(key).to_string(),
-                })
-        })
     }
 
     pub fn with_workspace<F: FnOnce(&Workspace) -> R, R>(&self, f: F) -> R {

@@ -42,20 +42,26 @@ macro_rules! __expr_counter {
 
 /// Utility macro for building a single instruction argument
 #[macro_export]
-macro_rules! arg {
+macro_rules! instruction_arg {
     // Deprecated
-    (Variable($arg:expr)) => {
-        $crate::args::Arg::workspace($arg)
+    (Variable($id:expr)) => {
+        $crate::args::InstructionArg::workspace($id, None)
     };
-    (Workspace($arg:expr)) => {
-        $crate::args::Arg::workspace($arg)
+    (Workspace($id:expr, $offset:expr)) => {
+        $crate::args::InstructionArg::workspace($id, $offset)
+    };
+    (WorkspaceOffset($offset_id:expr)) => {
+        $crate::args::InstructionArg::workspace_offset($offset_id)
+    };
+    (Workspace($id:expr)) => {
+        $crate::args::InstructionArg::workspace($id, None)
     };
     (Literal($arg:expr)) => {
-        $crate::args::Arg::from_type(&$arg).unwrap()
+        $crate::args::InstructionArg::from_type(&$arg).unwrap()
     };
 
     ($arg:expr) => {
-        $crate::arg!(Literal($arg))
+        $crate::instruction_arg!(Literal($arg))
     };
 }
 
@@ -64,7 +70,7 @@ macro_rules! arg {
 #[macro_export]
 macro_rules! __args_inner {
     (@ { $this:ident } Variable($e:expr), $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate::arg!(Workspace($e)));
+        $crate::args::__push(&mut $this, $crate:instruction_arg!(Workspace($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
     };
 
@@ -73,7 +79,7 @@ macro_rules! __args_inner {
     };
 
     (@ { $this:ident } Workspace($e:expr), $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate::arg!(Workspace($e)));
+        $crate::args::__push(&mut $this, $crate::instruction_arg!(Workspace($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
     };
 
@@ -82,7 +88,7 @@ macro_rules! __args_inner {
     };
 
     (@ { $this:ident } Literal($e:expr), $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate::arg!(Literal($e)));
+        $crate::args::__push(&mut $this, $crate::instruction_arg!(Literal($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
     };
 
@@ -91,12 +97,12 @@ macro_rules! __args_inner {
     };
 
     (@ { $this:ident } $e:expr, $($tail:tt)*) => {
-        $crate::args::__push(&mut $this, $crate::arg!(Literal($e)));
+        $crate::args::__push(&mut $this, $crate::instruction_arg!(Literal($e)));
         $crate::__args_inner!(@ { $this } $($tail)*);
     };
 
     (@ { $this:ident } $e:expr $(,)*) => {
-        $crate::args::__push(&mut $this, $crate::arg!(Literal($e)));
+        $crate::args::__push(&mut $this, $crate::instruction_arg!(Literal($e)));
     };
 
     (@ { $this:ident } $(,)?) => { };
@@ -118,7 +124,7 @@ macro_rules! invoke_args {
 
 /// Utility macro for building multiple instruction arguments
 #[macro_export]
-macro_rules! args {
+macro_rules! instruction_args {
     () => (Vec::new());
 
     ($token:ident($args:expr), $($tail:tt)*) => {{
@@ -161,29 +167,32 @@ mod tests {
 
     #[test]
     fn args_macro() {
-        let args = args![Variable("foo")];
-        assert_eq!(args[0], Arg::workspace("foo"));
+        let args = instruction_args![Workspace(1)];
+        assert_eq!(args[0], InstructionArg::workspace(1, None));
 
-        let args = args!["foo".to_string()];
-        assert!(matches!(args[0], Arg::Literal(_)));
+        let args = instruction_args!["foo".to_string()];
+        assert!(matches!(args[0], InstructionArg::Literal(_)));
 
-        let args = args!["foo".to_string(), "bar".to_string(),];
-        assert!(matches!(args[0], Arg::Literal(_)));
-        assert!(matches!(args[1], Arg::Literal(_)));
+        let args = instruction_args!["foo".to_string(), "bar".to_string(),];
+        assert!(matches!(args[0], InstructionArg::Literal(_)));
+        assert!(matches!(args[1], InstructionArg::Literal(_)));
 
-        let args = args![Variable("foo"), "bar".to_string()];
-        assert_eq!(args[0], Arg::workspace("foo"));
+        let args = instruction_args![Workspace(2), "bar".to_string()];
+        assert_eq!(args[0], InstructionArg::workspace(2, None));
         assert_eq!(
             args[1],
-            Arg::literal(tari_bor::to_value(&"bar".to_string()).unwrap()).unwrap()
+            InstructionArg::literal(tari_bor::to_value(&"bar".to_string()).unwrap()).unwrap()
         );
 
-        let args = args!["foo".to_string(), Variable("bar"), 123u64];
+        let args = instruction_args!["foo".to_string(), Workspace(3), 123u64];
         assert_eq!(
             args[0],
-            Arg::literal(tari_bor::to_value(&"foo".to_string()).unwrap()).unwrap()
+            InstructionArg::literal(tari_bor::to_value(&"foo".to_string()).unwrap()).unwrap()
         );
-        assert_eq!(args[1], Arg::workspace("bar"));
-        assert_eq!(args[2], Arg::literal(tari_bor::to_value(&123u64).unwrap()).unwrap());
+        assert_eq!(args[1], InstructionArg::workspace(3, None));
+        assert_eq!(
+            args[2],
+            InstructionArg::literal(tari_bor::to_value(&123u64).unwrap()).unwrap()
+        );
     }
 }

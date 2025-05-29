@@ -5,11 +5,11 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 use tari_template_lib::{
-    args::{AllocatableAddressType, Arg, LogLevel, WorkspaceKey},
+    args::{AllocatableAddressType, InstructionArg, LogLevel, WorkspaceId, WorkspaceOffsetId},
     auth::OwnerRule,
     models::ResourceAddress,
     prelude::{AccessRules, Amount},
-    types::{crypto::RistrettoPublicKeyBytes, serde_helpers, TemplateAddress},
+    types::{crypto::RistrettoPublicKeyBytes, TemplateAddress},
 };
 
 use crate::{confidential::ConfidentialClaim, instruction_call::ComponentCall, ValidatorFeePoolAddress};
@@ -26,29 +26,26 @@ pub enum Instruction {
         public_key_address: RistrettoPublicKeyBytes,
         owner_rule: Option<OwnerRule>,
         access_rules: Option<AccessRules>,
-        #[cfg_attr(feature = "ts", ts(type = "string | null"))]
-        #[serde(with = "serde_helpers::dynamic_hex::option")]
-        workspace_id: Option<WorkspaceKey>,
+        workspace_id: Option<WorkspaceOffsetId>,
     },
     CallFunction {
         #[cfg_attr(feature = "ts", ts(type = "string"))]
         address: TemplateAddress,
         function: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
-        args: Vec<Arg>,
+        #[cfg_attr(feature = "ts", ts(type = "Array<string | object>"))]
+        args: Vec<InstructionArg>,
     },
     CallMethod {
         call: ComponentCall,
         method: String,
         #[serde(deserialize_with = "crate::argument_parser::json_deserialize")]
         // Argument parser takes an array of strings as input
-        #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
-        args: Vec<Arg>,
+        #[cfg_attr(feature = "ts", ts(type = "Array<string | object>"))]
+        args: Vec<InstructionArg>,
     },
     PutLastInstructionOutputOnWorkspace {
-        #[serde(with = "serde_helpers::dynamic_hex")]
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
-        key: WorkspaceKey,
+        key: WorkspaceId,
     },
     EmitLog {
         level: LogLevel,
@@ -63,9 +60,7 @@ pub enum Instruction {
     },
     DropAllProofsInWorkspace,
     AssertBucketContains {
-        #[serde(with = "serde_helpers::dynamic_hex")]
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
-        key: WorkspaceKey,
+        key: WorkspaceOffsetId,
         resource_address: ResourceAddress,
         min_amount: Amount,
     },
@@ -74,7 +69,7 @@ pub enum Instruction {
     },
     AllocateAddress {
         allocatable_type: AllocatableAddressType,
-        workspace_id: String,
+        workspace_id: WorkspaceId,
     },
 }
 
@@ -113,7 +108,7 @@ impl Display for Instruction {
                     public_key_address, owner_rule, access_rules
                 )?;
                 match workspace_id {
-                    Some(bucket) => write!(f, "{}", String::from_utf8_lossy(bucket))?,
+                    Some(id) => write!(f, "Some({})", id)?,
                     None => write!(f, "None")?,
                 }
                 write!(f, " }}")
@@ -184,7 +179,7 @@ impl Display for Instruction {
 
 #[cfg(test)]
 mod tests {
-    use tari_template_lib::args;
+    use tari_template_lib::instruction_args;
 
     use super::*;
 
@@ -193,7 +188,7 @@ mod tests {
         let instruction = Instruction::CallFunction {
             address: Default::default(),
             function: "test".to_string(),
-            args: args![("A", "B"), 123u64, true, vec![1, 2, 3]],
+            args: instruction_args![("A", "B"), 123u64, true, vec![1, 2, 3]],
         };
         let json = serde_json::to_string(&instruction).unwrap();
         let decoded: Instruction = serde_json::from_str(&json).unwrap();

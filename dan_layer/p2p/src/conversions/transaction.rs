@@ -20,7 +20,10 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::convert::{TryFrom, TryInto};
+use std::{
+    convert::{TryFrom, TryInto},
+    num::TryFromIntError,
+};
 
 use anyhow::{anyhow, Context};
 use tari_dan_common_types::{SubstateRequirement, SubstateRequirementRef, VersionedSubstateId};
@@ -31,7 +34,7 @@ use tari_engine_types::{
     ComponentCall,
 };
 use tari_template_lib::{
-    args::{AllocatableAddressType, Arg},
+    args::{AllocatableAddressType, InstructionArg, WorkspaceId, WorkspaceOffsetId},
     auth::OwnerRule,
     models::{
         Amount,
@@ -204,7 +207,15 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     .map_err(|e| anyhow!("create_account_public_key: {}", e))?,
                 owner_rule: request.create_account_owner_rule.map(TryInto::try_into).transpose()?,
                 access_rules: request.create_account_access_rules.map(TryInto::try_into).transpose()?,
-                workspace_id: Some(request.create_account_workspace_id).filter(|s| !s.is_empty()),
+                workspace_id: request
+                    .create_account_workspace_id
+                    .map(|offset_id| {
+                        let offset = offset_id.offset.map(|o| usize::try_from(o.offset)).transpose()?;
+                        let id = WorkspaceId::try_from(offset_id.id)?;
+                        Ok::<_, TryFromIntError>(WorkspaceOffsetId::new(id).with_offset_opt(offset))
+                    })
+                    .transpose()
+                    .context("create_account_workspace_id overflowed")?,
             },
             InstructionType::Function => {
                 let function = request.function;
@@ -222,8 +233,8 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
                     .try_into()?;
                 Instruction::CallMethod { call, method, args }
             },
-            InstructionType::PutOutputInWorkspace => {
-                Instruction::PutLastInstructionOutputOnWorkspace { key: request.key }
+            InstructionType::PutOutputInWorkspace => Instruction::PutLastInstructionOutputOnWorkspace {
+                key: u16::try_from(request.workspace_put_key).context("workspace_put_key overflowed")?,
             },
             InstructionType::EmitLog => Instruction::EmitLog {
                 level: request.log_level.parse()?,
@@ -261,7 +272,10 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
             InstructionType::AssertBucketContains => {
                 let resource_address = ObjectKey::try_from(request.resource_address)?.into();
                 Instruction::AssertBucketContains {
-                    key: request.key,
+                    key: request
+                        .assert_bucket_workspace_id
+                        .ok_or_else(|| anyhow!("assert_bucket_workspace_id not provided"))?
+                        .try_into()?,
                     resource_address,
                     min_amount: Amount::new(request.min_amount),
                 }
@@ -271,7 +285,8 @@ impl TryFrom<proto::transaction::Instruction> for Instruction {
             },
             InstructionType::AllocateAddress => Instruction::AllocateAddress {
                 allocatable_type: substate_type.try_into()?,
-                workspace_id: request.workspace_id,
+                workspace_id: WorkspaceId::try_from(request.allocate_address_workspace_id)
+                    .context("allocate_address_workspace_id overflowed")?,
             },
         };
 
@@ -294,7 +309,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.create_account_public_key = public_key_address.to_vec();
                 result.create_account_owner_rule = owner_rule.map(Into::into);
                 result.create_account_access_rules = access_rules.map(Into::into);
-                result.create_account_workspace_id = workspace_id.unwrap_or_default();
+                result.create_account_workspace_id = workspace_id.map(Into::into);
             },
             Instruction::CallFunction {
                 address: template_address,
@@ -314,7 +329,7 @@ impl From<Instruction> for proto::transaction::Instruction {
             },
             Instruction::PutLastInstructionOutputOnWorkspace { key } => {
                 result.instruction_type = InstructionType::PutOutputInWorkspace as i32;
-                result.key = key;
+                result.workspace_put_key = u32::from(key);
             },
             Instruction::EmitLog { level, message } => {
                 result.instruction_type = InstructionType::EmitLog as i32;
@@ -342,7 +357,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 min_amount,
             } => {
                 result.instruction_type = InstructionType::AssertBucketContains as i32;
-                result.key = key;
+                result.assert_bucket_workspace_id = Some(key.into());
                 result.resource_address = resource_address.as_bytes().to_vec();
                 result.min_amount = min_amount.0
             },
@@ -357,7 +372,7 @@ impl From<Instruction> for proto::transaction::Instruction {
                 result.instruction_type = InstructionType::AllocateAddress as i32;
                 let substate_type: proto::transaction::AllocatableAddressType = allocatable_type.into();
                 result.allocatable_address_type = substate_type as i32;
-                result.workspace_id = workspace_id;
+                result.allocate_address_workspace_id = u32::from(workspace_id);
             },
         }
         result
@@ -366,38 +381,40 @@ impl From<Instruction> for proto::transaction::Instruction {
 
 // -------------------------------- Arg -------------------------------- //
 
-impl TryFrom<proto::transaction::Arg> for Arg {
+impl TryFrom<proto::transaction::Arg> for InstructionArg {
     type Error = anyhow::Error;
 
     fn try_from(request: proto::transaction::Arg) -> Result<Self, Self::Error> {
-        let data = request.data;
-        let arg = match request.arg_type {
-            0 => Arg::Literal(decode_from_slice(&data)?),
-            1 => Arg::Workspace(data),
-            _ => return Err(anyhow!("invalid arg_type")),
-        };
-
-        Ok(arg)
+        let arg_value = request.arg_value.ok_or_else(|| anyhow!("arg_value not provided"))?;
+        match arg_value {
+            proto::transaction::arg::ArgValue::Literal(data) => Ok(InstructionArg::Literal(data)),
+            proto::transaction::arg::ArgValue::Workspace(offset_id) => {
+                let id = u16::try_from(offset_id.id).context("WorkspaceOffsetId id overflowed")?;
+                Ok(InstructionArg::Workspace(
+                    WorkspaceOffsetId::new(id).with_offset_opt(offset_id.offset.map(|o| o.offset as usize)),
+                ))
+            },
+        }
     }
 }
 
-impl From<Arg> for proto::transaction::Arg {
-    fn from(arg: Arg) -> Self {
-        let mut result = proto::transaction::Arg::default();
-
+impl From<InstructionArg> for proto::transaction::Arg {
+    fn from(arg: InstructionArg) -> Self {
         match arg {
-            Arg::Literal(data) => {
-                result.arg_type = 0;
-                // TODO: no panic
-                result.data = encode_to_vec(&data).unwrap();
+            InstructionArg::Literal(data) => proto::transaction::Arg {
+                arg_value: Some(proto::transaction::arg::ArgValue::Literal(data)),
             },
-            Arg::Workspace(data) => {
-                result.arg_type = 1;
-                result.data = data;
+            InstructionArg::Workspace(offset_id) => proto::transaction::Arg {
+                arg_value: Some(proto::transaction::arg::ArgValue::Workspace(
+                    proto::transaction::WorkspaceOffsetId {
+                        id: u32::from(offset_id.id()),
+                        offset: offset_id
+                            .offset()
+                            .map(|o| proto::transaction::OptionOffset { offset: o as u64 }),
+                    },
+                )),
             },
         }
-
-        result
     }
 }
 
@@ -411,7 +428,9 @@ impl TryFrom<proto::transaction::ComponentCall> for ComponentCall {
                 let address = ComponentAddress::from(ObjectKey::try_from(address)?);
                 Ok(ComponentCall::Address(address))
             },
-            Some(proto::transaction::component_call::Call::Allocation(key)) => Ok(ComponentCall::FromWorkspace(key)),
+            Some(proto::transaction::component_call::Call::Allocation(key)) => Ok(ComponentCall::Workspace(
+                key.try_into().context("ComponentCall::Allocation key overflowed")?,
+            )),
             None => Err(anyhow!("ComponentCall must have a call specified")),
         }
     }
@@ -425,8 +444,8 @@ impl From<ComponentCall> for proto::transaction::ComponentCall {
                     address.as_bytes().to_vec(),
                 )),
             },
-            ComponentCall::FromWorkspace(id) => proto::transaction::ComponentCall {
-                call: Some(proto::transaction::component_call::Call::Allocation(id)),
+            ComponentCall::Workspace(id) => proto::transaction::ComponentCall {
+                call: Some(proto::transaction::component_call::Call::Allocation(u32::from(id))),
             },
         }
     }
@@ -700,5 +719,31 @@ impl TryFrom<proto::transaction::AccessRules> for AccessRules {
 
     fn try_from(value: proto::transaction::AccessRules) -> Result<Self, Self::Error> {
         decode_from_slice(&value.encoded_access_rules)
+    }
+}
+
+// -------------------------------- WorkspaceOffsetId -------------------------------- //
+
+impl TryFrom<proto::transaction::WorkspaceOffsetId> for WorkspaceOffsetId {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::transaction::WorkspaceOffsetId) -> Result<Self, Self::Error> {
+        let id = WorkspaceId::try_from(value.id).context("WorkspaceOffsetId id overflowed")?;
+        let offset = value
+            .offset
+            .map(|o| usize::try_from(o.offset).context("WorkspaceOffsetId offset overflowed"))
+            .transpose()?;
+        Ok(Self::new(id).with_offset_opt(offset))
+    }
+}
+
+impl From<WorkspaceOffsetId> for proto::transaction::WorkspaceOffsetId {
+    fn from(value: WorkspaceOffsetId) -> Self {
+        Self {
+            id: u32::from(value.id()),
+            offset: value.offset().map(|o| proto::transaction::OptionOffset {
+                offset: u64::try_from(o).expect("WorkspaceOffsetId offset overflowed"),
+            }),
+        }
     }
 }

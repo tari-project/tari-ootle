@@ -25,7 +25,7 @@ mod no_std {
     extern crate alloc;
 
     pub use alloc::{boxed, format, str, string, vec};
-    pub use core::{any, borrow, cmp, fmt, iter, mem, num, ops, ptr, slice, write, writeln};
+    pub use core::{any, borrow, cmp, fmt, iter, marker, mem, num, ops, ptr, slice, write, writeln};
 
     pub mod collections {
         extern crate alloc;
@@ -50,6 +50,7 @@ mod rust_std {
         format,
         io,
         iter,
+        marker,
         mem,
         num,
         ops,

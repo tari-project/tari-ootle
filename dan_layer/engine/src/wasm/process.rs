@@ -62,7 +62,10 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::dan::engine::wasm::process";
 
-const MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION: &str = "0.9.0";
+// To update this version, update the cargo version here, in `tari_template_lib`, `tari_template_abi` and
+// `tari_template_macros` crates, and in the workspace root.
+/// The minimum supported version of the template_lib crate in the WASM.
+const MINIMUM_SUPPORTED_TEMPLATE_LIB_VERSION: &str = "0.10.0";
 
 pub struct WasmProcess {
     module: LoadedWasmTemplate,
@@ -348,7 +351,6 @@ fn on_panic_handler<T: Send + 'static>(
     match state.read_from_memory(&mut store, msg_ptr, msg_len as u32) {
         Ok(msg) => {
             let msg = String::from_utf8_lossy(&msg);
-            eprintln!("📣 PANIC: ({}:{}) {}", line, col, msg);
             log::error!(target: WASM_DEBUG_LOG_TARGET, "📣 PANIC: ({}:{}) {}", line, col, msg);
             state.set_last_panic(msg.to_string());
         },

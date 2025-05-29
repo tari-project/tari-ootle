@@ -5,11 +5,11 @@ use tari_dan_engine::runtime::RuntimeError;
 use tari_engine_types::instruction::Instruction;
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args,
+    instruction_args,
     models::{Amount, ComponentAddress},
 };
 use tari_template_test_tooling::{support::assert_error::assert_reject_reason, TemplateTest};
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 #[test]
 fn basic_emit_event() {
@@ -21,7 +21,7 @@ fn basic_emit_event() {
             vec![Instruction::CallFunction {
                 address: event_emitter_template,
                 function: "test_function".to_string(),
-                args: args![topic],
+                args: instruction_args![topic],
             }],
             vec![],
         )
@@ -67,7 +67,7 @@ fn builtin_vault_events() {
             vec![Instruction::CallFunction {
                 address: faucet_template,
                 function: "mint".to_string(),
-                args: args![initial_supply],
+                args: instruction_args![initial_supply],
             }],
             vec![template_test.get_test_proof()],
         )
@@ -88,7 +88,7 @@ fn builtin_vault_events() {
         .build_and_execute(
             Transaction::builder()
                 .call_method(faucet_component, "take_free_coins", args![])
-                .put_last_instruction_output_on_workspace(b"free_coins")
+                .put_last_instruction_output_on_workspace("free_coins")
                 .call_method(sender_address, "deposit", args![Workspace("free_coins")]),
             vec![template_test.get_test_proof()],
         )
@@ -99,7 +99,7 @@ fn builtin_vault_events() {
     let result = template_test.build_and_execute(
         Transaction::builder()
             .call_method(sender_address, "withdraw", args![faucet_resource, amount])
-            .put_last_instruction_output_on_workspace(b"foo_bucket")
+            .put_last_instruction_output_on_workspace("foo_bucket")
             .call_method(receiver_address, "deposit", args![Variable("foo_bucket")]),
         // Sender proof needed to withdraw
         vec![sender_proof],

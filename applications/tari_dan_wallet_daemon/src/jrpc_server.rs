@@ -131,7 +131,6 @@ async fn handler(
             "create" => call_handler(context, value, token, accounts::handle_create).await,
             "list" => call_handler(context, value, token, accounts::handle_list).await,
             "get_balances" => call_handler(context, value, token, accounts::handle_get_balances).await,
-            "invoke" => call_handler(context, value, token, accounts::handle_invoke).await,
             "get" => call_handler(context, value, token, accounts::handle_get).await,
             "get_default" => call_handler(context, value, token, accounts::handle_get_default).await,
             "transfer" => call_handler(context, value, token, accounts::handle_transfer).await,

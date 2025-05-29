@@ -8,11 +8,10 @@ use tari_dan_common_types::SubstateRequirement;
 use tari_engine_types::{component::new_component_address_from_public_key, ToByteType};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::{
-    args,
     constants::{XTR, XTR_FAUCET_COMPONENT_ADDRESS, XTR_FAUCET_VAULT_ADDRESS},
     models::Amount,
 };
-use tari_transaction::Transaction;
+use tari_transaction::{args, Transaction};
 
 pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
     move |_: u64| -> Transaction {
@@ -26,7 +25,7 @@ pub fn builder(network: Network) -> impl Fn(u64) -> Transaction {
             .with_fee_instructions_builder(|builder| {
                 builder
                     .call_method(XTR_FAUCET_COMPONENT_ADDRESS, "take", args![Amount(5000)])
-                    .put_last_instruction_output_on_workspace(b"free_coins")
+                    .put_last_instruction_output_on_workspace("free_coins")
                     .create_account_with_bucket(signer_public_key, "free_coins")
                     .call_method(account_address, "pay_fee", args![Amount(1000)])
             })

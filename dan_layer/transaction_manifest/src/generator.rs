@@ -1,14 +1,14 @@
 //   Copyright 2022 The Tari Project
 //   SPDX-License-Identifier: BSD-3-clause
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use proc_macro2::Ident;
 use syn::Lit;
 use tari_engine_types::{instruction::Instruction, substate::SubstateId};
 use tari_template_lib::{
-    arg,
-    args::Arg,
+    args::{InstructionArg, WorkspaceId, WorkspaceOffsetId},
+    instruction_arg,
     models::{Amount, NonFungibleId},
     types::TemplateAddress,
 };
@@ -25,7 +25,8 @@ pub struct ManifestInstructionGenerator {
     imported_templates: HashMap<Ident, TemplateAddress>,
     global_aliases: HashMap<String, ManifestValue>,
     globals: HashMap<String, ManifestValue>,
-    variables: HashSet<String>,
+    current_workspace_id: WorkspaceId,
+    workspace_ids: HashMap<String, WorkspaceId>,
     templates: HashMap<String, TemplateAddress>,
 }
 
@@ -35,7 +36,8 @@ impl ManifestInstructionGenerator {
             imported_templates: HashMap::new(),
             global_aliases: HashMap::new(),
             globals,
-            variables: HashSet::new(),
+            current_workspace_id: WorkspaceId::default(),
+            workspace_ids: HashMap::new(),
             templates,
         }
     }
@@ -92,10 +94,8 @@ impl ManifestInstructionGenerator {
                     args: self.process_args(arguments)?,
                 }];
                 if let Some(var_name) = output_variable {
-                    self.variables.insert(var_name.to_string());
-                    instructions.push(Instruction::PutLastInstructionOutputOnWorkspace {
-                        key: var_name.to_string().into_bytes(),
-                    });
+                    let key = self.next_workspace_id(var_name.to_string());
+                    instructions.push(Instruction::PutLastInstructionOutputOnWorkspace { key });
                 }
                 Ok(instructions)
             },
@@ -126,10 +126,8 @@ impl ManifestInstructionGenerator {
                     args: self.process_args(arguments)?,
                 }];
                 if let Some(var_name) = output_variable {
-                    self.variables.insert(var_name.to_string());
-                    instructions.push(Instruction::PutLastInstructionOutputOnWorkspace {
-                        key: var_name.to_string().into_bytes(),
-                    });
+                    let key = self.next_workspace_id(var_name.to_string());
+                    instructions.push(Instruction::PutLastInstructionOutputOnWorkspace { key });
                 }
                 Ok(instructions)
             },
@@ -147,7 +145,14 @@ impl ManifestInstructionGenerator {
         }
     }
 
-    fn process_args(&self, args: Vec<ManifestLiteral>) -> Result<Vec<Arg>, ManifestError> {
+    fn next_workspace_id(&mut self, name: String) -> WorkspaceId {
+        let id = self.current_workspace_id;
+        self.workspace_ids.insert(name, id);
+        self.current_workspace_id += 1;
+        id
+    }
+
+    fn process_args(&self, args: Vec<ManifestLiteral>) -> Result<Vec<InstructionArg>, ManifestError> {
         args.into_iter()
             .map(|arg| match arg {
                 ManifestLiteral::Lit(lit) => lit_to_arg(&lit),
@@ -158,28 +163,27 @@ impl ManifestInstructionGenerator {
                         .or_else(|| self.global_aliases.get(&ident.to_string()))
                         .map(|v| match v {
                             ManifestValue::SubstateId(addr) => match addr {
-                                SubstateId::Component(addr) => Ok(arg!(*addr)),
-                                SubstateId::Resource(addr) => Ok(arg!(*addr)),
+                                SubstateId::Component(addr) => Ok(instruction_arg!(*addr)),
+                                SubstateId::Resource(addr) => Ok(instruction_arg!(*addr)),
                                 // TODO: should tx receipt addresses be allowed to be reference ?
-                                SubstateId::TransactionReceipt(addr) => Ok(arg!(*addr)),
-                                SubstateId::Vault(addr) => Ok(arg!(*addr)),
-                                SubstateId::NonFungible(addr) => Ok(arg!(addr)),
-                                SubstateId::UnclaimedConfidentialOutput(addr) => Ok(arg!(*addr)),
-                                SubstateId::NonFungibleIndex(addr) => Ok(arg!(addr)),
-                                SubstateId::Template(addr) => Ok(arg!(*addr)),
-                                SubstateId::ValidatorFeePool(addr) => Ok(arg!(*addr)),
+                                SubstateId::TransactionReceipt(addr) => Ok(instruction_arg!(*addr)),
+                                SubstateId::Vault(addr) => Ok(instruction_arg!(*addr)),
+                                SubstateId::NonFungible(addr) => Ok(instruction_arg!(addr)),
+                                SubstateId::UnclaimedConfidentialOutput(addr) => Ok(instruction_arg!(*addr)),
+                                SubstateId::NonFungibleIndex(addr) => Ok(instruction_arg!(addr)),
+                                SubstateId::Template(addr) => Ok(instruction_arg!(*addr)),
+                                SubstateId::ValidatorFeePool(addr) => Ok(instruction_arg!(*addr)),
                             },
                             ManifestValue::Literal(lit) => lit_to_arg(lit),
-                            ManifestValue::NonFungibleId(id) => Ok(arg!(id.clone())),
-                            ManifestValue::Value(blob) => Ok(Arg::literal(blob.clone()).unwrap()),
+                            ManifestValue::NonFungibleId(id) => Ok(instruction_arg!(id.clone())),
+                            ManifestValue::Value(blob) => Ok(InstructionArg::literal(blob.clone()).unwrap()),
                         })
                         .or_else(|| {
                             // Or is it a variable on the worktop?
-                            if self.variables.contains(&ident.to_string()) {
-                                Some(Ok(Arg::Workspace(ident.to_string().into_bytes())))
-                            } else {
-                                None
-                            }
+                            self.workspace_ids
+                                .get(&ident.to_string())
+                                // TODO: support offsets
+                                .map(|id| Ok(InstructionArg::Workspace(WorkspaceOffsetId::new(*id))))
                         })
                         .ok_or_else(|| {
                             // Or undefined
@@ -188,10 +192,10 @@ impl ManifestInstructionGenerator {
                             }
                         })?
                 },
-                ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(arg!(Amount(amount))),
+                ManifestLiteral::Special(SpecialLiteral::Amount(amount)) => Ok(instruction_arg!(Amount(amount))),
                 ManifestLiteral::Special(SpecialLiteral::NonFungibleId(lit)) => {
                     let id = lit_to_nonfungible_id(&lit)?;
-                    Ok(arg!(id))
+                    Ok(instruction_arg!(id))
                 },
             })
             .collect()
@@ -217,29 +221,29 @@ impl ManifestInstructionGenerator {
     }
 }
 
-fn lit_to_arg(lit: &Lit) -> Result<Arg, ManifestError> {
+fn lit_to_arg(lit: &Lit) -> Result<InstructionArg, ManifestError> {
     match lit {
-        Lit::Str(s) => Ok(arg!(s.value())),
+        Lit::Str(s) => Ok(instruction_arg!(s.value())),
         Lit::Int(i) => match i.suffix() {
-            "u8" => Ok(arg!(i.base10_parse::<u8>()?)),
-            "u16" => Ok(arg!(i.base10_parse::<u16>()?)),
-            "u32" => Ok(arg!(i.base10_parse::<u32>()?)),
-            "u64" => Ok(arg!(i.base10_parse::<u64>()?)),
-            "u128" => Ok(arg!(i.base10_parse::<u128>()?)),
-            "i8" => Ok(arg!(i.base10_parse::<i8>()?)),
-            "i16" => Ok(arg!(i.base10_parse::<i16>()?)),
-            "" | "i32" => Ok(arg!(i.base10_parse::<i32>()?)),
-            "i64" => Ok(arg!(i.base10_parse::<i64>()?)),
-            "i128" => Ok(arg!(i.base10_parse::<i128>()?)),
+            "u8" => Ok(instruction_arg!(i.base10_parse::<u8>()?)),
+            "u16" => Ok(instruction_arg!(i.base10_parse::<u16>()?)),
+            "u32" => Ok(instruction_arg!(i.base10_parse::<u32>()?)),
+            "u64" => Ok(instruction_arg!(i.base10_parse::<u64>()?)),
+            "u128" => Ok(instruction_arg!(i.base10_parse::<u128>()?)),
+            "i8" => Ok(instruction_arg!(i.base10_parse::<i8>()?)),
+            "i16" => Ok(instruction_arg!(i.base10_parse::<i16>()?)),
+            "" | "i32" => Ok(instruction_arg!(i.base10_parse::<i32>()?)),
+            "i64" => Ok(instruction_arg!(i.base10_parse::<i64>()?)),
+            "i128" => Ok(instruction_arg!(i.base10_parse::<i128>()?)),
             _ => Err(ManifestError::UnsupportedExpr(format!(
                 r#"Unsupported integer suffix "{}""#,
                 i.suffix()
             ))),
         },
-        Lit::Bool(b) => Ok(arg!(b.value())),
-        Lit::ByteStr(v) => Ok(arg!(v.value())),
-        Lit::Byte(v) => Ok(arg!(v.value())),
-        Lit::Char(v) => Ok(arg!(v.value().to_string())),
+        Lit::Bool(b) => Ok(instruction_arg!(b.value())),
+        Lit::ByteStr(v) => Ok(instruction_arg!(v.value())),
+        Lit::Byte(v) => Ok(instruction_arg!(v.value())),
+        Lit::Char(v) => Ok(instruction_arg!(v.value().to_string())),
         Lit::Float(v) => Err(ManifestError::UnsupportedExpr(format!(
             "Float literals not supported ({})",
             v

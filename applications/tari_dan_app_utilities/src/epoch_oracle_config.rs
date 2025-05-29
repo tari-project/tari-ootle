@@ -32,6 +32,7 @@ pub enum EpochOracleType {
     #[default]
     BaseLayer,
     Configured,
+    Hybrid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

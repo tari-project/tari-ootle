@@ -18,8 +18,8 @@ export type Instruction =
         workspace_id: WorkspaceOffsetId | null;
       };
     }
-  | { CallFunction: { address: string; function: string; args: Array<string> } }
-  | { CallMethod: { call: ComponentCall; method: string; args: Array<string> } }
+  | { CallFunction: { address: string; function: string; args: Array<string | object> } }
+  | { CallMethod: { call: ComponentCall; method: string; args: Array<string | object> } }
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
   | { EmitLog: { level: LogLevel; message: string } }
   | { ClaimBurn: { claim: ConfidentialClaim } }

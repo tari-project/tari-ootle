@@ -121,16 +121,12 @@ impl TransactionBuilder {
         owner_public_key: RistrettoPublicKeyBytes,
         workspace_id: T,
     ) -> Self {
-        let id_str = workspace_id.into();
-        let parsed = parse_workspace_key(id_str).expect("Invalid workspace key format");
-        let workspace_id = self.workspace_ids.get(&parsed.name).unwrap_or_else(|| {
-            panic!("Workspace key '{}' not found", parsed.name);
-        });
+        let workspace_id = self.get_workspace_offset_id_from_named_arg(workspace_id);
         self.add_instruction(Instruction::CreateAccount {
             public_key_address: owner_public_key,
             owner_rule: None,
             access_rules: None,
-            workspace_id: Some(WorkspaceOffsetId::new(workspace_id).with_offset_opt(parsed.offset)),
+            workspace_id: Some(workspace_id),
         })
     }
 
@@ -141,14 +137,7 @@ impl TransactionBuilder {
         access_rules: Option<AccessRules>,
         workspace_id: Option<T>,
     ) -> Self {
-        let workspace_id = workspace_id.map(|id| {
-            let id_str = id.into();
-            let parsed = parse_workspace_key(id_str).expect("Invalid workspace key format");
-            let id = self.workspace_ids.get(&parsed.name).unwrap_or_else(|| {
-                panic!("Workspace key '{}' not found", parsed.name);
-            });
-            WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset)
-        });
+        let workspace_id = workspace_id.map(|id| self.get_workspace_offset_id_from_named_arg(id));
         self.add_instruction(Instruction::CreateAccount {
             public_key_address,
             owner_rule,
@@ -201,12 +190,7 @@ impl TransactionBuilder {
         resource_address: ResourceAddress,
         min_amount: Amount,
     ) -> Self {
-        let parsed = parse_workspace_key(label.as_ref().to_string()).expect("Invalid workspace key format");
-        let id = self
-            .workspace_ids
-            .get(&parsed.name)
-            .unwrap_or_else(|| panic!("Workspace key '{}' not found", label.as_ref()));
-        let key = WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset);
+        let key = self.get_workspace_offset_id_from_named_arg(label.as_ref());
         self.add_instruction(Instruction::AssertBucketContains {
             key,
             resource_address,
@@ -393,5 +377,13 @@ impl TransactionBuilder {
                 },
             })
             .collect()
+    }
+
+    pub fn get_workspace_offset_id_from_named_arg<T: Into<String>>(&self, id: T) -> WorkspaceOffsetId {
+        let parsed = parse_workspace_key(id.into()).expect("Invalid workspace key format");
+        let Some(id) = self.workspace_ids.get(&parsed.name) else {
+            panic!("Workspace key '{}' not found", parsed.name);
+        };
+        WorkspaceOffsetId::new(id).with_offset_opt(parsed.offset)
     }
 }

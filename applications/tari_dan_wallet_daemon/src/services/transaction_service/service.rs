@@ -124,7 +124,7 @@ where
                 required_substates,
                 reply,
             } => {
-                let transaction_id = *transaction.id();
+                let transaction_id = transaction.calculate_id();
                 let transaction_api = self.wallet_sdk.transaction_api();
                 match transaction_api
                     .submit_dry_run_transaction(transaction, required_substates)
@@ -224,9 +224,9 @@ where
             info!(
                 target: LOG_TARGET,
                 "Resubmitting transaction {}",
-                transaction.transaction.id()
+                transaction.id,
             );
-            let transaction_id = *transaction.transaction.id();
+            let transaction_id = transaction.id;
             transaction_api.submit_transaction(transaction_id).await?;
             notify.notify(TransactionSubmittedEvent {
                 transaction_id,
@@ -254,34 +254,32 @@ where
             pending_transactions.len()
         );
         for transaction in pending_transactions {
+            let tx_id = transaction.id;
             info!(
                 target: LOG_TARGET,
-                "Requesting result for transaction {}",
-                transaction.transaction.id()
+                "Requesting result for transaction {tx_id}",
             );
-            let maybe_finalized_transaction = transaction_api
-                .check_and_store_finalized_transaction(*transaction.transaction.id())
-                .await?;
+            let maybe_finalized_transaction = transaction_api.check_and_store_finalized_transaction(tx_id).await?;
 
             match maybe_finalized_transaction {
                 Some(transaction) => {
                     debug!(
                         target: LOG_TARGET,
                         "Transaction {} has been finalized: {}",
-                        transaction.transaction.id(),
+                        transaction.id,
                         transaction.status,
                     );
                     match transaction.finalize {
                         Some(finalize) => {
                             notify.notify(TransactionFinalizedEvent {
-                                transaction_id: *transaction.transaction.id(),
+                                transaction_id: tx_id,
                                 finalize,
                                 final_fee: transaction.final_fee.unwrap_or_default(),
                                 status: transaction.status,
                             });
                         },
                         None => notify.notify(TransactionInvalidEvent {
-                            transaction_id: *transaction.transaction.id(),
+                            transaction_id: tx_id,
                             status: transaction.status,
                             finalize: transaction.finalize,
                             final_fee: transaction.final_fee,
@@ -291,8 +289,7 @@ where
                 None => {
                     debug!(
                         target: LOG_TARGET,
-                        "Transaction {} is still pending",
-                        transaction.transaction.hash()
+                        "Transaction {tx_id} is still pending",
                     );
                 },
             }

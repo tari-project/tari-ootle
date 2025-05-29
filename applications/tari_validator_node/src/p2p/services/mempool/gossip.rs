@@ -160,7 +160,7 @@ impl MempoolGossip<PeerAddress> {
                 })
                 .chain(iter::once(
                     msg.transaction
-                        .id()
+                        .calculate_id()
                         .to_substate_address()
                         .to_shard_group(committee_info.num_preshards(), n),
                 ))

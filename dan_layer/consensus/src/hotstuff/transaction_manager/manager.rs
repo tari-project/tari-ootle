@@ -165,10 +165,10 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         }
         if resolved_substates.is_empty() && non_local_inputs.is_empty() {
             // Mempool/missing transaction validations should have not sent the transaction to consensus
-            warn!(target: LOG_TARGET, "⚠️ PREPARE: NEVER HAPPEN transaction {} has no inputs.", transaction.id());
+            warn!(target: LOG_TARGET, "⚠️ PREPARE: NEVER HAPPEN transaction {} has no inputs.", transaction.calculate_id());
             return Err(BlockTransactionExecutorError::InvariantError(format!(
                 "Transaction {} has no inputs",
-                transaction.id()
+                transaction.calculate_id()
             )));
         }
         Ok((resolved_substates, non_local_inputs))
@@ -206,7 +206,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
     pub fn execute_or_fetch(
         &self,
         store: &mut PendingSubstateStore<TStateStore>,
-        transaction: &Transaction,
+        transaction: &TransactionRecord,
         resolved_inputs: &HashMap<SubstateRequirement, Substate>,
         block: &LeafBlock,
     ) -> Result<TransactionExecution, BlockTransactionExecutorError> {
@@ -225,7 +225,9 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
             "👨‍🔧 PREPARE: Executing transaction {}",
             transaction.id(),
         );
-        let execution = self.executor.execute(transaction, block.epoch(), resolved_inputs)?;
+        let execution = self
+            .executor
+            .execute(transaction.transaction(), block.epoch(), resolved_inputs)?;
         Ok(execution)
     }
 
@@ -300,7 +302,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
         //       Outputs may or may not be local
 
         let local_inputs = store.get_many(local_versions.iter().map(|(req, v)| (req.to_owned(), *v)))?;
-        let execution = self.execute_or_fetch(store, transaction.transaction(), &local_inputs, &block)?;
+        let execution = self.execute_or_fetch(store, transaction, &local_inputs, &block)?;
 
         let is_outputs_local_only = local_committee_info.is_all_local(execution.resulting_outputs());
         if is_outputs_local_only {
@@ -483,7 +485,7 @@ impl<TStateStore: StateStore, TExecutor: BlockTransactionExecutor<TStateStore>>
                 })
             .collect();
 
-        let execution = self.execute_or_fetch(store, transaction.transaction(), &resolved_inputs, &block)?;
+        let execution = self.execute_or_fetch(store, transaction, &resolved_inputs, &block)?;
         info!(
             target: LOG_TARGET,
             "👨‍🔧 PREPARE: Output-Only Executed transaction {} with {} decision",

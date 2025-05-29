@@ -38,16 +38,20 @@ const LOG_TARGET: &str = "tari::dan::storage::consensus_models::transaction";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionRecord {
+    pub id: TransactionId,
     pub transaction: Transaction,
 }
 
 impl TransactionRecord {
     pub fn new(transaction: Transaction) -> Self {
-        Self { transaction }
+        Self {
+            id: transaction.calculate_id(),
+            transaction,
+        }
     }
 
     pub fn id(&self) -> &TransactionId {
-        self.transaction.id()
+        &self.id
     }
 
     pub fn transaction(&self) -> &Transaction {
@@ -76,7 +80,7 @@ impl TransactionRecord {
 
     pub fn to_initial_evidence(&self, num_preshards: NumPreshards, num_committees: u32) -> Evidence {
         let inputs = self.transaction.all_inputs_iter();
-        let receipt = self.transaction.id().into_receipt_address();
+        let receipt = self.transaction.calculate_id().into_receipt_address();
         Evidence::from_inputs_and_outputs(num_preshards, num_committees, inputs, [VersionedSubstateId::new(
             receipt, 0,
         )])
@@ -93,7 +97,7 @@ impl TransactionRecord {
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
     {
-        if !Self::exists(&**tx, self.transaction.id())? {
+        if !Self::exists(&**tx, self.id())? {
             self.insert(tx)?;
         }
         Ok(())
@@ -130,7 +134,7 @@ impl TransactionRecord {
         }
         let recs = tx.transactions_get_any(tx_ids.iter())?;
         for rec in &recs {
-            tx_ids.remove(rec.transaction.id());
+            tx_ids.remove(rec.id());
         }
 
         Ok((recs, tx_ids))
@@ -143,11 +147,11 @@ impl TransactionRecord {
         let mut tx_ids = transactions
             .clone()
             .into_iter()
-            .map(|t| (*t.id(), t))
+            .map(|t| (t.calculate_id(), t))
             .collect::<HashMap<_, _>>();
         let mut recs = tx.transactions_get_any(tx_ids.keys())?;
         for rec in &recs {
-            tx_ids.remove(rec.transaction.id());
+            tx_ids.remove(rec.id());
         }
         recs.extend(tx_ids.into_values().map(Self::new));
 

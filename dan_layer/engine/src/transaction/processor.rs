@@ -150,8 +150,9 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
 
     #[allow(clippy::too_many_lines)]
     pub fn execute(self, transaction: Transaction) -> Result<ExecuteResult, TransactionError> {
+        let id = transaction.calculate_id();
         let timer = Instant::now();
-        let entity_id_provider = EntityIdProvider::new(transaction.hash(), 1000);
+        let entity_id_provider = EntityIdProvider::new(id.as_hash(), 1000);
         let Self {
             config,
             template_provider,
@@ -178,7 +179,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
             state_db,
             virtual_substates,
             initial_call_scope,
-            transaction.hash(),
+            id.as_hash(),
             transaction_weight,
         );
 
@@ -205,7 +206,7 @@ impl<TTemplateProvider: TemplateProvider<Template = LoadedTemplate> + 'static> T
         )?;
 
         let runtime = Runtime::new(Arc::new(runtime_interface));
-        let transaction_hash = transaction.hash();
+        let transaction_hash = id.as_hash();
 
         let (fee_instructions, instructions) = transaction.into_instructions();
 

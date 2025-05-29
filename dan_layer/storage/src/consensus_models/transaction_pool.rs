@@ -346,7 +346,7 @@ pub struct TransactionPoolRecord {
 impl TransactionPoolRecord {
     pub fn new_from_transaction(transaction: &Transaction, initial_evidence: Evidence) -> Self {
         Self {
-            transaction_id: *transaction.id(),
+            transaction_id: transaction.calculate_id(),
             evidence: initial_evidence,
             is_global: transaction.is_global(),
             transaction_fee: 0,

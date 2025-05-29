@@ -92,7 +92,7 @@ where TSubstateCache: SubstateCache + 'static
             return Err(DryRunTransactionProcessorError::NonDryRunTransaction);
         }
 
-        info!(target: LOG_TARGET, "process_transaction: {}", transaction.hash());
+        info!(target: LOG_TARGET, "process_transaction: {}", transaction.calculate_id());
 
         // automatically scan the inputs and add all related involved objects
         // note that this operation does not alter the transaction hash

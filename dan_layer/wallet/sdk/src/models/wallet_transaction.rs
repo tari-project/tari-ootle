@@ -9,7 +9,7 @@ use tari_consensus_types::ProposalCertificate;
 use tari_dan_common_types::SubstateRequirement;
 use tari_engine_types::commit_result::FinalizeResult;
 use tari_template_lib::models::Amount;
-use tari_transaction::Transaction;
+use tari_transaction::{Transaction, TransactionId};
 use time::PrimitiveDateTime;
 
 use crate::models::NewAccountInfo;
@@ -21,6 +21,8 @@ use crate::models::NewAccountInfo;
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct WalletTransaction {
+    #[cfg_attr(feature = "ts", ts(type = "string"))]
+    pub id: TransactionId,
     pub transaction: Transaction,
     pub status: TransactionStatus,
     pub finalize: Option<FinalizeResult>,

@@ -17,18 +17,17 @@ use tari_dan_common_types::{
 };
 use tari_engine_types::{
     confidential::ConfidentialClaim,
-    hashing::{hash_template_code, hasher32, EngineHashDomainLabel},
+    hashing::hash_template_code,
     indexed_value::IndexedValueError,
     instruction::Instruction,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_template_lib::{args::InstructionArg, models::ComponentAddress, types::Hash};
+use tari_template_lib::{args::InstructionArg, models::ComponentAddress};
 
 use crate::{
     v1::signature::TransactionSignature,
     weight::TransactionWeight,
-    TransactionId,
     TransactionSealSignature,
     UnsealedTransactionV1,
 };
@@ -42,8 +41,6 @@ const LOG_TARGET: &str = "tari::dan::transaction::transaction";
     ts(export, export_to = "../../bindings/src/types/")
 )]
 pub struct TransactionV1 {
-    #[cfg_attr(feature = "ts", ts(type = "string"))]
-    id: TransactionId,
     body: UnsealedTransactionV1,
     seal_signature: TransactionSealSignature,
     /// Inputs filled by some authority. These are not part of the transaction hash nor the signature
@@ -52,14 +49,11 @@ pub struct TransactionV1 {
 
 impl TransactionV1 {
     pub fn new(transaction: UnsealedTransactionV1, seal_signature: TransactionSealSignature) -> Self {
-        let mut tx = Self {
-            id: TransactionId::default(),
+        Self {
             body: transaction,
             seal_signature,
             filled_inputs: IndexSet::new(),
-        };
-        tx.id = tx.calculate_hash();
-        tx
+        }
     }
 
     pub const fn schema_version(&self) -> u64 {
@@ -70,30 +64,8 @@ impl TransactionV1 {
         Self { filled_inputs, ..self }
     }
 
-    fn calculate_hash(&self) -> TransactionId {
-        hasher32(EngineHashDomainLabel::Transaction)
-            .chain(&self.seal_signature)
-            .chain(&self.body)
-            .result()
-            .into_array()
-            .into()
-    }
-
     pub fn is_dry_run(&self) -> bool {
         self.body.is_dry_run()
-    }
-
-    pub fn id(&self) -> &TransactionId {
-        &self.id
-    }
-
-    pub fn check_id(&self) -> bool {
-        let id = self.calculate_hash();
-        id == self.id
-    }
-
-    pub fn hash(&self) -> Hash {
-        self.id.into_array().into()
     }
 
     pub fn network(&self) -> u8 {
@@ -238,8 +210,7 @@ impl Display for TransactionV1 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TransactionV1[{}, Inputs: {}, Fee Instructions: {}, Instructions: {}, Signatures: {}, Filled Inputs: {}]",
-            self.id,
+            "TransactionV1[Inputs: {}, Fee Instructions: {}, Instructions: {}, Signatures: {}, Filled Inputs: {}]",
             self.body.inputs().len(),
             self.body.fee_instructions().len(),
             self.body.instructions().len(),

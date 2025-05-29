@@ -12,7 +12,10 @@ use tari_dan_wallet_sdk::{
 use tari_transaction::{UnsealedTransactionV1, UnsignedTransactionV1};
 use time::PrimitiveDateTime;
 
-use crate::{schema::transactions, serialization::deserialize_json};
+use crate::{
+    schema::transactions,
+    serialization::{deserialize_hex_try_from, deserialize_json},
+};
 
 const LOG_TARGET: &str = "tari::dan::wallet::storage_sqlite::models::transaction";
 
@@ -50,6 +53,7 @@ impl Transaction {
         let seal_signature = deserialize_json(&self.seal_signature)?;
 
         Ok(WalletTransaction {
+            id: deserialize_hex_try_from(&self.hash)?,
             transaction: tari_transaction::Transaction::new(
                 UnsealedTransactionV1::new(
                     UnsignedTransactionV1 {

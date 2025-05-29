@@ -8,6 +8,7 @@ import type { Transaction } from "./Transaction";
 import type { TransactionStatus } from "./TransactionStatus";
 
 export interface WalletTransaction {
+  id: string;
   transaction: Transaction;
   status: TransactionStatus;
   finalize: FinalizeResult | null;

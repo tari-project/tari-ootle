@@ -104,9 +104,9 @@ pub fn create_execution_result_for_transaction(
         }
         // We MUST create the transaction receipt
         diff.up(
-            SubstateId::TransactionReceipt(TransactionReceiptAddress::from(*transaction.id())),
+            SubstateId::TransactionReceipt(TransactionReceiptAddress::from(transaction.calculate_id())),
             Substate::new(0, TransactionReceipt {
-                transaction_hash: transaction.id().into_array().into(),
+                transaction_hash: transaction.calculate_id().into_array().into(),
                 events: vec![],
                 logs: vec![],
                 fee_receipt: FeeReceipt {
@@ -126,9 +126,9 @@ pub fn create_execution_result_for_transaction(
         ))
     };
 
-    let result = ExecuteResult {
+    ExecuteResult {
         finalize: FinalizeResult::new(
-            transaction.id().into_array().into(),
+            transaction.calculate_id().into_array().into(),
             vec![],
             vec![],
             result,
@@ -139,9 +139,7 @@ pub fn create_execution_result_for_transaction(
             },
         ),
         execution_time: Duration::from_secs(0),
-    };
-
-    result
+    }
 }
 
 pub fn build_substate_id_for_committee(committee_no: u32, num_committees: u32) -> SubstateId {

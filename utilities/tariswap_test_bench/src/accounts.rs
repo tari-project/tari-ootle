@@ -178,7 +178,7 @@ impl Runner {
 
             log::debug!(
                 "Submitted transaction {} to fund {} accounts",
-                transaction.id(),
+                transaction.calculate_id(),
                 accounts.len()
             );
             let result = self.submit_transaction_and_wait(transaction).await?;

@@ -301,7 +301,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
 
         diesel::insert_into(transactions::table)
             .values((
-                transactions::hash.eq(transaction.id().to_string()),
+                transactions::hash.eq(transaction.calculate_id().to_string()),
                 transactions::network.eq(i32::from(transaction.network())),
                 transactions::fee_instructions.eq(serialize_json(transaction.fee_instructions())?),
                 transactions::instructions.eq(serialize_json(transaction.instructions())?),

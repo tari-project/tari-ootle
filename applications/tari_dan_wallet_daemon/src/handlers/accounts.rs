@@ -375,7 +375,7 @@ pub async fn handle_reveal_funds(
         let transaction = builder.with_inputs(inputs).build_and_seal(&account_key.key);
 
         sdk.confidential_outputs_api()
-            .proofs_set_transaction_hash(proof_id, *transaction.id())?;
+            .proofs_set_transaction_hash(proof_id, transaction.calculate_id())?;
 
         let mut events = notifier.subscribe();
         let tx_id = transaction_service.submit_transaction(transaction, vec![]).await?;
@@ -910,7 +910,7 @@ pub async fn handle_transfer(
 
     // If dry run we can return the result immediately
     if req.dry_run {
-        let transaction_id = *transaction.id();
+        let transaction_id = transaction.calculate_id();
         let execute_result = context
             .transaction_service()
             .submit_dry_run_transaction(transaction, vec![])
@@ -992,7 +992,7 @@ pub async fn handle_confidential_transfer(
             .await?;
 
         if req.dry_run {
-            let transaction_id = *transfer.transaction.id();
+            let transaction_id = transfer.transaction.calculate_id();
             let exec_result = transaction_service
                 .submit_dry_run_transaction(transfer.transaction, transfer.autofill_inputs)
                 .await?;

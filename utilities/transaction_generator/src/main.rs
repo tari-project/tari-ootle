@@ -71,7 +71,7 @@ fn main() -> anyhow::Result<()> {
             let receiver = read_transactions(file, 0)?;
 
             while let Ok(transaction) = receiver.recv() {
-                println!("Read transaction: {}", transaction.id());
+                println!("Read transaction: {}", transaction.calculate_id());
             }
         },
     }

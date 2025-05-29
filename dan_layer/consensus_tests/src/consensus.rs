@@ -952,7 +952,7 @@ async fn single_shard_input_conflict() {
 
     let tx1_decision = test
         .get_validator(&TestAddress::new("1"))
-        .get_transaction_execution(tx1.transaction().id())
+        .get_transaction_execution(tx1.id())
         .decision();
     info!("tx1 = {}", tx1.id());
     info!("tx2 = {}", tx2.id());

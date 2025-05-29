@@ -521,10 +521,11 @@ where
             .with_inputs(inputs)
             .build_and_seal(&account_secret.key);
 
+        let tx_id = transaction.calculate_id();
         self.outputs_api
-            .proofs_set_transaction_hash(inputs_to_spend.proof_id, *transaction.id())?;
+            .proofs_set_transaction_hash(inputs_to_spend.proof_id, tx_id)?;
         self.outputs_api
-            .proofs_set_transaction_hash(fee_inputs_to_spend.proof_id, *transaction.id())?;
+            .proofs_set_transaction_hash(fee_inputs_to_spend.proof_id, tx_id)?;
 
         Ok(TransferOutput {
             transaction,

@@ -531,7 +531,7 @@ impl TemplateTest {
             );
         }
 
-        let tx_id = *transaction.id();
+        let tx_id = transaction.calculate_id();
         eprintln!("START Transaction id = \"{}\"", tx_id);
 
         let result = processor.execute(transaction)?;

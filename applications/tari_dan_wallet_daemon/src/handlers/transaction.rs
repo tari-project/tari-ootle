@@ -151,16 +151,17 @@ pub async fn handle_submit(
         }
     }
 
+    let tx_id = transaction.calculate_id();
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
         sdk.confidential_outputs_api()
-            .proofs_set_transaction_hash(proof_id, *transaction.id())?;
+            .proofs_set_transaction_hash(proof_id, tx_id)?;
     }
 
     info!(
         target: LOG_TARGET,
         "Submitted transaction with hash {}",
-        transaction.hash()
+        transaction.calculate_id()
     );
 
     let transaction_id = context
@@ -213,13 +214,13 @@ pub async fn handle_submit_dry_run(
     for proof_id in req.proof_ids {
         // update the proofs table with the corresponding transaction hash
         sdk.confidential_outputs_api()
-            .proofs_set_transaction_hash(proof_id, *transaction.id())?;
+            .proofs_set_transaction_hash(proof_id, transaction.calculate_id())?;
     }
 
     info!(
         target: LOG_TARGET,
         "Submitted transaction with hash {}",
-        transaction.hash()
+        transaction.calculate_id()
     );
     let exec_result = context
         .transaction_service()

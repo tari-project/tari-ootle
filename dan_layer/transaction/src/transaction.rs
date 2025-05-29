@@ -13,12 +13,13 @@ use tari_dan_common_types::{
     VersionedSubstateId,
 };
 use tari_engine_types::{
+    hashing::{hasher32, EngineHashDomainLabel},
     indexed_value::IndexedValueError,
     instruction::Instruction,
     published_template::PublishedTemplateAddress,
     substate::SubstateId,
 };
-use tari_template_lib::{models::ComponentAddress, types::Hash};
+use tari_template_lib::models::ComponentAddress;
 
 use crate::{
     builder::TransactionBuilder,
@@ -55,16 +56,12 @@ impl Transaction {
         }
     }
 
-    pub fn id(&self) -> &TransactionId {
-        match self {
-            Self::V1(tx) => tx.id(),
-        }
-    }
-
-    pub fn check_id(&self) -> bool {
-        match self {
-            Self::V1(tx) => tx.check_id(),
-        }
+    pub fn calculate_id(&self) -> TransactionId {
+        hasher32(EngineHashDomainLabel::Transaction)
+            .chain(&self)
+            .result()
+            .into_array()
+            .into()
     }
 
     pub fn calculate_transaction_weight(&self) -> TransactionWeight {
@@ -82,12 +79,6 @@ impl Transaction {
     pub fn unsealed_transaction(&self) -> &UnsealedTransactionV1 {
         match self {
             Self::V1(tx) => tx.unsealed_transaction(),
-        }
-    }
-
-    pub fn hash(&self) -> Hash {
-        match self {
-            Self::V1(tx) => tx.hash(),
         }
     }
 

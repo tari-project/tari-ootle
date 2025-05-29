@@ -9,8 +9,8 @@ use tari_template_abi::rust::{
 
 use crate::{
     crypto::{InvalidByteLengthError, RistrettoPublicKeyBytes},
+    hex::fixed_bytes_from_hex,
     serde_helpers,
-    serde_helpers::fixed_bytes_from_hex,
     Hash,
     HashParseError,
 };

@@ -28,7 +28,7 @@ use tari_template_abi::rust::{
     str::FromStr,
 };
 
-use crate::{serde_helpers, serde_helpers::fixed_bytes_from_hex};
+use crate::{hex::fixed_bytes_from_hex, serde_helpers};
 
 /// Representation of a 32-byte hash value
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]

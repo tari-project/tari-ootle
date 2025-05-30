@@ -59,7 +59,13 @@ use tari_epoch_manager::{
     service::{EpochManagerConfig, EpochManagerHandle},
     EpochManagerReader,
 };
-use tari_epoch_oracles::{base_layer::BaseLayerOracle, configured::ConfiguredEpochOracle, EpochOracle};
+use tari_epoch_oracles::{
+    base_layer::BaseLayerOracle,
+    configured::ConfiguredEpochOracle,
+    hybrid::HybridEpochOracle,
+    store::EpochOracleStore,
+    EpochOracle,
+};
 use tari_indexer_lib::substate_scanner::SubstateScanner;
 use tari_networking::{MessagingMode, NetworkingHandle, RelayCircuitLimits, RelayReservationLimits, SwarmConfig};
 use tari_rpc_framework::RpcServer;
@@ -206,38 +212,7 @@ pub async fn spawn_services(
     };
 
     // Epoch event scanner
-    let epoch_event_oracle = match config.epoch_oracle.oracle_type {
-        EpochOracleType::BaseLayer => {
-            let mut base_node_client =
-                create_base_layer_client(config.network, &config.epoch_oracle.base_layer).await?;
-            verify_correct_network(&mut base_node_client, config.network).await?;
-            EpochOracle::BaseLayer(BaseLayerOracle::new(
-                global_db.clone(),
-                base_node_client,
-                consensus_constants.base_layer_confirmations,
-                config.epoch_oracle.base_layer.scanning_interval,
-                config
-                    .validator_node
-                    .validator_node_sidechain_id
-                    .as_ref()
-                    .map(|pk| pk.to_byte_type()),
-                config
-                    .validator_node
-                    .burnt_utxo_sidechain_id
-                    .as_ref()
-                    .map(|pk| pk.to_byte_type()),
-                config
-                    .validator_node
-                    .template_sidechain_id
-                    .as_ref()
-                    .map(|pk| pk.to_byte_type()),
-            ))
-        },
-        EpochOracleType::Configured => EpochOracle::Configured(ConfiguredEpochOracle::new(
-            config.epoch_oracle.configured.load().await?,
-            global_db.clone(),
-        )),
-    };
+    let epoch_event_oracle = create_epoch_oracle(&config, global_db.clone(), &consensus_constants).await?;
 
     let (template_queue_sender, template_queue_receiver) = TemplateDownloadQueue::create();
 
@@ -540,4 +515,67 @@ async fn create_base_layer_client(
         })?;
 
     Ok(base_node_client)
+}
+
+async fn create_epoch_oracle<TStore: EpochOracleStore + Send + Clone + 'static>(
+    config: &ApplicationConfig,
+    store: TStore,
+    consensus_constants: &ConsensusConstants,
+) -> Result<EpochOracle<TStore>, ExitError> {
+    match config.epoch_oracle.oracle_type {
+        EpochOracleType::BaseLayer => {
+            let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants).await?;
+            Ok(EpochOracle::BaseLayer(oracle))
+        },
+        EpochOracleType::Configured => {
+            let oracle = create_configured_epoch_oracle(config, store).await?;
+            Ok(EpochOracle::Configured(oracle))
+        },
+        EpochOracleType::Hybrid => {
+            let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
+            let configured_oracle = create_configured_epoch_oracle(config, store).await?;
+            Ok(EpochOracle::Hybrid(HybridEpochOracle::new(
+                configured_oracle,
+                base_layer_oracle,
+            )))
+        },
+    }
+}
+
+async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + 'static>(
+    config: &ApplicationConfig,
+    store: TStore,
+    consensus_constants: &ConsensusConstants,
+) -> Result<BaseLayerOracle<TStore>, ExitError> {
+    let mut base_node_client = create_base_layer_client(config.network, &config.epoch_oracle.base_layer).await?;
+    verify_correct_network(&mut base_node_client, config.network).await?;
+    Ok(BaseLayerOracle::new(
+        store,
+        base_node_client,
+        consensus_constants.base_layer_confirmations,
+        config.epoch_oracle.base_layer.scanning_interval,
+        config
+            .validator_node
+            .validator_node_sidechain_id
+            .as_ref()
+            .map(|p| p.to_byte_type()),
+        config
+            .validator_node
+            .burnt_utxo_sidechain_id
+            .as_ref()
+            .map(|p| p.to_byte_type()),
+        config
+            .validator_node
+            .template_sidechain_id
+            .as_ref()
+            .map(|p| p.to_byte_type()),
+    ))
+}
+
+async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
+    config: &ApplicationConfig,
+    store: TStore,
+) -> Result<ConfiguredEpochOracle<TStore>, ExitError> {
+    let oracle_config = config.epoch_oracle.configured.load().await?;
+    Ok(ConfiguredEpochOracle::new(oracle_config, store))
 }

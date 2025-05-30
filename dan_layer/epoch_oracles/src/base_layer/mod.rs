@@ -104,7 +104,7 @@ impl<TStore: EpochOracleStore + 'static> BaseLayerOracle<TStore> {
 }
 
 impl<TStore: EpochOracleStore> BaseLayerOracleInner<TStore> {
-    pub fn load_initial_state(&mut self) -> Result<(), BaseLayerOracleError> {
+    fn load_initial_state(&mut self) -> Result<(), BaseLayerOracleError> {
         self.last_scanned_tip = self
             .store
             .get(StoreKey::BaseLayerLastScannedTip.as_key_bytes())

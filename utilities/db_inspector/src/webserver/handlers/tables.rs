@@ -59,12 +59,21 @@ where
                 let skip = req.page.unwrap_or(0) * page_size;
 
                 let mut total_bytes = 0usize;
+                let mut largest_row_size = 0usize;
+                let mut smallest_row_size = usize::MAX;
                 for result in iter.skip(skip).take(page_size) {
                     let (key, value) = result?;
                     let bytes = cf
                         .get_raw_pinned(&key, OPERATION)
                         .map_err(|e| anyhow!("Failed to get_raw_pinned: {}", e))?;
-                    total_bytes += bytes.map(|b| b.len()).unwrap_or(0);
+                    let size = bytes.map(|b| b.len()).unwrap_or(0);
+                    total_bytes += size;
+                    if size > largest_row_size {
+                        largest_row_size = size;
+                    }
+                    if size < smallest_row_size {
+                        smallest_row_size = size;
+                    }
 
                     let mut value =
                         serde_json::to_value(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;
@@ -81,8 +90,11 @@ where
                     table.add_row(value);
                 }
                 let total = cf.count(OPERATION)?;
-                table.set_total_entries(total);
-                table.set_total_bytes(total_bytes);
+                table
+                    .set_total_entries(total)
+                    .set_total_bytes(total_bytes)
+                    .set_largest_row_size(largest_row_size)
+                    .set_smallest_row_size(smallest_row_size);
 
                 Ok::<_, WebError>(Json(table))
             }

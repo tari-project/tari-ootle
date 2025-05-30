@@ -36,6 +36,8 @@ pub struct TableResponse {
     rows: Vec<json::Value>,
     total_entries: Option<usize>,
     total_bytes: usize,
+    largest_row_size: usize,
+    smallest_row_size: usize,
 }
 
 impl TableResponse {
@@ -45,6 +47,8 @@ impl TableResponse {
             rows: vec![],
             total_entries: None,
             total_bytes: 0,
+            largest_row_size: 0,
+            smallest_row_size: 0,
         }
     }
 
@@ -54,6 +58,8 @@ impl TableResponse {
             rows: vec![],
             total_entries: None,
             total_bytes: 0,
+            largest_row_size: 0,
+            smallest_row_size: usize::MAX,
         }
     }
 
@@ -74,6 +80,16 @@ impl TableResponse {
 
     pub fn set_total_bytes(&mut self, count: usize) -> &mut Self {
         self.total_bytes = count;
+        self
+    }
+
+    pub fn set_largest_row_size(&mut self, size: usize) -> &mut Self {
+        self.largest_row_size = size;
+        self
+    }
+
+    pub fn set_smallest_row_size(&mut self, size: usize) -> &mut Self {
+        self.smallest_row_size = size;
         self
     }
 }

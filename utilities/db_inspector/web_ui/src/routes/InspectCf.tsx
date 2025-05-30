@@ -24,6 +24,8 @@ interface ColumnFamilyData {
   rows: Row[];
   total_entries: number;
   total_bytes: number;
+  largest_row_size: number;
+  smallest_row_size: number;
 }
 
 interface PaginationModel extends GridPaginationModel {
@@ -197,6 +199,24 @@ export default function InspectCf() {
             <Typography variant="h6">
               Total value
               bytes: {prettyBytes(data.total_bytes)} (avg: {prettyBytes(data.total_bytes / data.rows.length)})
+            </Typography>
+          </Grid>
+        </Grid>
+      ) : null}
+      {data?.rows.length && data?.largest_row_size ? (
+        <Grid container spacing={12}>
+          <Grid size={12}>
+            <Typography variant="h6">
+              Largest row size: {prettyBytes(data.largest_row_size)}
+            </Typography>
+          </Grid>
+        </Grid>
+      ) : null}
+      {data?.rows.length && data?.smallest_row_size ? (
+        <Grid container spacing={12}>
+          <Grid size={12}>
+            <Typography variant="h6">
+              Smallest row size: {prettyBytes(data.smallest_row_size)}
             </Typography>
           </Grid>
         </Grid>
